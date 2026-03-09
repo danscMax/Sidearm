@@ -1,0 +1,846 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:naga-workflow-studio:schema:config:v2",
+  "title": "Naga Workflow Studio Config v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "settings",
+    "profiles",
+    "physicalControls",
+    "encoderMappings",
+    "appMappings",
+    "bindings",
+    "actions",
+    "snippetLibrary"
+  ],
+  "properties": {
+    "version": {
+      "type": "integer",
+      "const": 2
+    },
+    "settings": {
+      "$ref": "#/$defs/settings"
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "physicalControls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/physicalControl"
+      }
+    },
+    "encoderMappings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/encoderMapping"
+      }
+    },
+    "appMappings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/appMapping"
+      }
+    },
+    "bindings": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/binding"
+      }
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      }
+    },
+    "snippetLibrary": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/snippetLibraryItem"
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "idToken": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "uiToken": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$"
+    },
+    "exeName": {
+      "type": "string",
+      "pattern": "^[^\\\\/]+\\.[Ee][Xx][Ee]$"
+    },
+    "layer": {
+      "type": "string",
+      "enum": [
+        "standard",
+        "hypershift"
+      ]
+    },
+    "controlFamily": {
+      "type": "string",
+      "enum": [
+        "thumbGrid",
+        "topPanel",
+        "wheel",
+        "system"
+      ]
+    },
+    "capabilityStatus": {
+      "type": "string",
+      "enum": [
+        "verified",
+        "needsValidation",
+        "reserved",
+        "partiallyRemappable"
+      ]
+    },
+    "mappingSource": {
+      "type": "string",
+      "enum": [
+        "synapse",
+        "reserved",
+        "detected"
+      ]
+    },
+    "actionType": {
+      "type": "string",
+      "enum": [
+        "shortcut",
+        "textSnippet",
+        "sequence",
+        "launch",
+        "menu",
+        "disabled"
+      ]
+    },
+    "pasteMode": {
+      "type": "string",
+      "enum": [
+        "clipboardPaste",
+        "sendText"
+      ]
+    },
+    "controlId": {
+      "type": "string",
+      "enum": [
+        "thumb_01",
+        "thumb_02",
+        "thumb_03",
+        "thumb_04",
+        "thumb_05",
+        "thumb_06",
+        "thumb_07",
+        "thumb_08",
+        "thumb_09",
+        "thumb_10",
+        "thumb_11",
+        "thumb_12",
+        "mouse_left",
+        "mouse_right",
+        "top_aux_01",
+        "top_aux_02",
+        "mouse_4",
+        "mouse_5",
+        "wheel_up",
+        "wheel_down",
+        "wheel_click",
+        "wheel_left",
+        "wheel_right",
+        "hypershift_button",
+        "top_special_01",
+        "top_special_02",
+        "top_special_03"
+      ]
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fallbackProfileId",
+        "theme",
+        "startWithWindows",
+        "minimizeToTray",
+        "debugLogging"
+      ],
+      "properties": {
+        "fallbackProfileId": {
+          "$ref": "#/$defs/idToken"
+        },
+        "theme": {
+          "$ref": "#/$defs/uiToken",
+          "default": "synapse-light"
+        },
+        "startWithWindows": {
+          "type": "boolean",
+          "default": true
+        },
+        "minimizeToTray": {
+          "type": "boolean",
+          "default": true
+        },
+        "debugLogging": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "enabled",
+        "priority"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "description": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "priority": {
+          "type": "integer"
+        }
+      }
+    },
+    "physicalControl": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "family",
+        "defaultName",
+        "remappable",
+        "capabilityStatus"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/controlId"
+        },
+        "family": {
+          "$ref": "#/$defs/controlFamily"
+        },
+        "defaultName": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "synapseName": {
+          "type": "string"
+        },
+        "remappable": {
+          "type": "boolean"
+        },
+        "capabilityStatus": {
+          "$ref": "#/$defs/capabilityStatus"
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "encoderMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "controlId",
+        "layer",
+        "encodedKey",
+        "source",
+        "verified"
+      ],
+      "properties": {
+        "controlId": {
+          "$ref": "#/$defs/controlId"
+        },
+        "layer": {
+          "$ref": "#/$defs/layer"
+        },
+        "encodedKey": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "source": {
+          "$ref": "#/$defs/mappingSource"
+        },
+        "verified": {
+          "type": "boolean"
+        }
+      }
+    },
+    "appMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "exe",
+        "profileId",
+        "enabled",
+        "priority"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "exe": {
+          "$ref": "#/$defs/exeName"
+        },
+        "titleIncludes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "uniqueItems": true
+        },
+        "profileId": {
+          "$ref": "#/$defs/idToken"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "priority": {
+          "type": "integer",
+          "default": 0
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "profileId",
+        "layer",
+        "controlId",
+        "label",
+        "actionRef",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "profileId": {
+          "$ref": "#/$defs/idToken"
+        },
+        "layer": {
+          "$ref": "#/$defs/layer"
+        },
+        "controlId": {
+          "$ref": "#/$defs/controlId"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "actionRef": {
+          "$ref": "#/$defs/idToken"
+        },
+        "colorTag": {
+          "$ref": "#/$defs/uiToken"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "payload",
+        "pretty"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "type": {
+          "$ref": "#/$defs/actionType"
+        },
+        "payload": {
+          "type": "object"
+        },
+        "pretty": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "notes": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "shortcut"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/shortcutActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "textSnippet"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/textSnippetActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sequence"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/sequenceActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "launch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/launchActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "menu"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/menuActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "disabled"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/disabledActionPayload"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "snippetLibraryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name",
+        "text",
+        "pasteMode",
+        "tags"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "text": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "pasteMode": {
+          "$ref": "#/$defs/pasteMode"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "uniqueItems": true
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "shortcutActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "ctrl",
+        "shift",
+        "alt",
+        "win"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "ctrl": {
+          "type": "boolean",
+          "default": false
+        },
+        "shift": {
+          "type": "boolean",
+          "default": false
+        },
+        "alt": {
+          "type": "boolean",
+          "default": false
+        },
+        "win": {
+          "type": "boolean",
+          "default": false
+        },
+        "raw": {
+          "type": "string"
+        }
+      }
+    },
+    "textSnippetActionPayload": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/inlineTextSnippetPayload"
+        },
+        {
+          "$ref": "#/$defs/libraryTextSnippetPayload"
+        }
+      ]
+    },
+    "inlineTextSnippetPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "text",
+        "pasteMode",
+        "tags"
+      ],
+      "properties": {
+        "source": {
+          "const": "inline"
+        },
+        "text": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "pasteMode": {
+          "$ref": "#/$defs/pasteMode"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "libraryTextSnippetPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "snippetId"
+      ],
+      "properties": {
+        "source": {
+          "const": "libraryRef"
+        },
+        "snippetId": {
+          "$ref": "#/$defs/idToken"
+        }
+      }
+    },
+    "sequenceActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "steps"
+      ],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sequenceStep"
+          }
+        }
+      }
+    },
+    "sequenceStep": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/sendSequenceStep"
+        },
+        {
+          "$ref": "#/$defs/textSequenceStep"
+        },
+        {
+          "$ref": "#/$defs/sleepSequenceStep"
+        },
+        {
+          "$ref": "#/$defs/launchSequenceStep"
+        }
+      ]
+    },
+    "sendSequenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "send"
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "textSequenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "text"
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "sleepSequenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "delayMs"
+      ],
+      "properties": {
+        "type": {
+          "const": "sleep"
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "launchSequenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "value"
+      ],
+      "properties": {
+        "type": {
+          "const": "launch"
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workingDir": {
+          "type": "string"
+        },
+        "delayMs": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "launchActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "workingDir": {
+          "type": "string"
+        }
+      }
+    },
+    "menuActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "items"
+      ],
+      "properties": {
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/menuItem"
+          }
+        }
+      }
+    },
+    "menuItem": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/actionMenuItem"
+        },
+        {
+          "$ref": "#/$defs/submenuItem"
+        }
+      ]
+    },
+    "actionMenuItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "actionRef",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "kind": {
+          "const": "action"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "actionRef": {
+          "$ref": "#/$defs/idToken"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "submenuItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "items",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "kind": {
+          "const": "submenu"
+        },
+        "label": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/menuItem"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "disabledActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "maxProperties": 0
+    }
+  }
+}

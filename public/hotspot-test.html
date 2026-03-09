@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hotspot Calibration Tool</title>
+<style>
+  * { box-sizing: border-box; margin: 0; }
+  body { background: #0d1611; color: #e0ead9; font-family: "Segoe UI", sans-serif; overflow: hidden; height: 100vh; }
+
+  /* Toolbar */
+  .toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 16px; background: rgba(10,14,12,0.95);
+    border-bottom: 1px solid rgba(159,202,105,0.2);
+    font-size: 13px;
+  }
+  .toolbar button {
+    padding: 5px 14px; border-radius: 6px; border: 1px solid rgba(159,202,105,0.3);
+    background: rgba(22,30,26,0.9); color: #c0daa0; cursor: pointer; font-size: 12px; font-weight: 600;
+  }
+  .toolbar button:hover { background: rgba(159,202,105,0.15); }
+  .toolbar button.active { background: rgba(159,202,105,0.25); border-color: #9fca69; }
+  .toolbar .sep { width: 1px; height: 20px; background: rgba(159,202,105,0.15); }
+  .toolbar .info { color: rgba(200,220,180,0.6); font-size: 11px; }
+  .zoom-label { color: #9fca69; font-weight: 700; min-width: 50px; text-align: center; }
+
+  /* Viewport */
+  .viewport {
+    position: absolute; top: 44px; bottom: 0; left: 0; right: 0;
+    overflow: auto; cursor: grab;
+  }
+  .viewport.dragging-view { cursor: grabbing; }
+  .viewport.dragging-dot { cursor: default; }
+
+  /* Canvas that holds both zones */
+  .canvas { transform-origin: 0 0; padding: 40px; display: flex; flex-direction: column; gap: 30px; min-width: fit-content; }
+
+  /* Zone */
+  .zone { position: relative; border-radius: 18px; overflow: visible; background: #161e1a; flex-shrink: 0; }
+  .zone img { display: block; width: 100%; height: auto; opacity: 0.95; pointer-events: none; user-select: none; }
+  .overlay { position: absolute; inset: 0; }
+  .zone-label {
+    position: absolute; top: -28px; left: 0;
+    font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+    color: #9fca69; letter-spacing: 0.08em;
+  }
+
+  /* Hotspot dot */
+  .hotspot {
+    position: absolute; display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%;
+    border: 2px solid rgba(159,202,105,0.6); background: rgba(12,20,14,0.8);
+    color: rgba(220,240,200,0.95); font-size: 0.65rem; font-weight: 800;
+    transform: translate(-50%,-50%); z-index: 10;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    cursor: grab; user-select: none; transition: box-shadow 0.15s;
+  }
+  .hotspot:hover { box-shadow: 0 0 0 3px rgba(159,202,105,0.3), 0 2px 8px rgba(0,0,0,0.5); }
+  .hotspot.dragging {
+    cursor: grabbing; z-index: 50;
+    border-color: #9fca69; box-shadow: 0 0 0 4px rgba(159,202,105,0.4), 0 4px 16px rgba(0,0,0,0.6);
+  }
+  .hotspot.sm { width: 24px; height: 24px; font-size: 0.55rem; }
+
+  /* Tooltip on hover */
+  .hotspot::after {
+    content: attr(data-id) " (" attr(data-left) "%, " attr(data-top) "%)";
+    position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+    padding: 3px 8px; border-radius: 5px; font-size: 10px; font-weight: 500;
+    white-space: nowrap; background: rgba(0,0,0,0.85); color: #c0daa0;
+    opacity: 0; pointer-events: none; transition: opacity 0.15s;
+  }
+  .hotspot:hover::after, .hotspot.dragging::after { opacity: 1; }
+
+  /* Export panel */
+  .export-panel {
+    position: fixed; bottom: 0; left: 0; right: 0; z-index: 200;
+    max-height: 40vh; overflow-y: auto;
+    background: rgba(8,12,10,0.97); border-top: 1px solid rgba(159,202,105,0.2);
+    padding: 12px 16px; font-family: "Cascadia Code", "Fira Code", monospace; font-size: 12px;
+    display: none;
+  }
+  .export-panel.visible { display: block; }
+  .export-panel pre { white-space: pre-wrap; color: #b0d888; line-height: 1.5; }
+  .export-panel .copy-btn {
+    position: sticky; top: 0; float: right;
+    padding: 4px 12px; border-radius: 5px; border: 1px solid rgba(159,202,105,0.3);
+    background: rgba(22,30,26,0.9); color: #9fca69; cursor: pointer; font-size: 11px;
+  }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+  <button id="btnZoomIn" title="Zoom In">＋</button>
+  <span class="zoom-label" id="zoomLabel">100%</span>
+  <button id="btnZoomOut" title="Zoom Out">−</button>
+  <button id="btnFit" title="Fit to screen">Fit</button>
+  <span class="sep"></span>
+  <button id="btnTop" class="active">Top</button>
+  <button id="btnSide" class="active">Side</button>
+  <span class="sep"></span>
+  <button id="btnExport">📋 Export</button>
+  <button id="btnReset">↺ Reset</button>
+  <span class="sep"></span>
+  <span class="info" id="statusInfo">Drag dots to reposition • Scroll to zoom • Hold Space + drag to pan</span>
+</div>
+
+<div class="viewport" id="viewport">
+  <div class="canvas" id="canvas">
+    <div class="zone" id="topZone" style="width:500px;">
+      <span class="zone-label">Верхняя панель (Top View)</span>
+      <img src="/assets/naga-top.png" alt="Top view" />
+      <div class="overlay" id="topOverlay"></div>
+    </div>
+    <div class="zone" id="sideZone" style="width:700px;">
+      <span class="zone-label">Боковая клавиатура (Side View)</span>
+      <img src="/assets/naga-side.png" alt="Side view" />
+      <div class="overlay" id="sideOverlay"></div>
+    </div>
+  </div>
+</div>
+
+<div class="export-panel" id="exportPanel">
+  <button class="copy-btn" id="btnCopy">Copy</button>
+  <pre id="exportCode"></pre>
+</div>
+
+<script>
+// ── Hotspot data ──
+const topHotspots = {
+  mouse_left:  { left: 34, top: 13, label: 'L' },
+  wheel_up:    { left: 48.5, top: 16.5, label: '▲', sm: true },
+  wheel_click: { left: 48.5, top: 22, label: '●', sm: true },
+  wheel_down:  { left: 48.5, top: 28, label: '▼', sm: true },
+  hypershift_button: { left: 47.5, top: 42, label: 'HS', sm: true },
+  top_aux_01: { left: 16, top: 19, label: 'DPI+', sm: true },
+  top_aux_02: { left: 16, top: 30, label: 'DPI−', sm: true },
+  mouse_4:    { left: 87, top: 26, label: 'M4', sm: true },
+  mouse_5:    { left: 87, top: 35, label: 'M5', sm: true },
+};
+
+const sideHotspots = {
+  thumb_01: { left: 20, top: 83, label: '1' },
+  thumb_02: { left: 20, top: 57, label: '2' },
+  thumb_03: { left: 21, top: 32, label: '3' },
+  thumb_04: { left: 30, top: 82, label: '4' },
+  thumb_05: { left: 30, top: 57, label: '5' },
+  thumb_06: { left: 30, top: 32, label: '6' },
+  thumb_07: { left: 40, top: 80, label: '7' },
+  thumb_08: { left: 40, top: 56, label: '8' },
+  thumb_09: { left: 40, top: 31, label: '9' },
+  thumb_10: { left: 49, top: 79, label: '10' },
+  thumb_11: { left: 49, top: 55, label: '11' },
+  thumb_12: { left: 50, top: 30, label: '12' },
+};
+
+// ── State ──
+let zoom = 1;
+const viewport = document.getElementById('viewport');
+const canvas = document.getElementById('canvas');
+
+// ── Render hotspots (draggable) ──
+function renderHotspots(overlay, hotspots, zoneName) {
+  overlay.innerHTML = '';
+  for (const [id, h] of Object.entries(hotspots)) {
+    const el = document.createElement('div');
+    el.className = 'hotspot' + (h.sm ? ' sm' : '');
+    el.style.left = h.left + '%';
+    el.style.top = h.top + '%';
+    el.textContent = h.label;
+    el.dataset.id = id;
+    el.dataset.zone = zoneName;
+    el.dataset.left = h.left;
+    el.dataset.top = h.top;
+    el.title = id;
+    overlay.appendChild(el);
+    makeDraggable(el, h, overlay);
+  }
+}
+
+// ── Drag logic ──
+let activeDrag = null;
+
+function makeDraggable(el, hotspot, overlay) {
+  el.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.add('dragging');
+    viewport.classList.add('dragging-dot');
+    el.setPointerCapture(e.pointerId);
+
+    activeDrag = { el, hotspot, overlay, pointerId: e.pointerId };
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (!activeDrag || activeDrag.el !== el) return;
+    e.preventDefault();
+    const rect = activeDrag.overlay.getBoundingClientRect();
+    let left = ((e.clientX - rect.left) / rect.width * 100);
+    let top = ((e.clientY - rect.top) / rect.height * 100);
+    left = Math.round(left * 2) / 2; // snap to 0.5%
+    top = Math.round(top * 2) / 2;
+    left = Math.max(0, Math.min(100, left));
+    top = Math.max(0, Math.min(100, top));
+
+    activeDrag.hotspot.left = left;
+    activeDrag.hotspot.top = top;
+    el.style.left = left + '%';
+    el.style.top = top + '%';
+    el.dataset.left = left;
+    el.dataset.top = top;
+    document.getElementById('statusInfo').textContent = `${el.dataset.id}: left=${left}%, top=${top}%`;
+  });
+
+  el.addEventListener('pointerup', (e) => {
+    if (!activeDrag || activeDrag.el !== el) return;
+    el.classList.remove('dragging');
+    viewport.classList.remove('dragging-dot');
+    activeDrag = null;
+  });
+}
+
+// ── Zoom ──
+function setZoom(z) {
+  zoom = Math.max(0.25, Math.min(5, z));
+  canvas.style.transform = `scale(${zoom})`;
+  document.getElementById('zoomLabel').textContent = Math.round(zoom * 100) + '%';
+}
+
+document.getElementById('btnZoomIn').addEventListener('click', () => setZoom(zoom * 1.25));
+document.getElementById('btnZoomOut').addEventListener('click', () => setZoom(zoom / 1.25));
+document.getElementById('btnFit').addEventListener('click', () => {
+  const vw = viewport.clientWidth - 80;
+  const cw = 700; // widest zone
+  setZoom(Math.min(vw / cw, 2));
+});
+
+// Scroll-wheel zoom
+viewport.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const delta = e.deltaY > 0 ? 0.9 : 1.1;
+  setZoom(zoom * delta);
+}, { passive: false });
+
+// ── Pan (space + drag, or middle-click) ──
+let panning = false, panStart = { x: 0, y: 0, scrollX: 0, scrollY: 0 };
+let spaceDown = false;
+
+document.addEventListener('keydown', (e) => { if (e.code === 'Space') { spaceDown = true; viewport.style.cursor = 'grab'; } });
+document.addEventListener('keyup', (e) => { if (e.code === 'Space') { spaceDown = false; if (!panning) viewport.style.cursor = ''; } });
+
+viewport.addEventListener('pointerdown', (e) => {
+  if (activeDrag) return;
+  if (spaceDown || e.button === 1) {
+    panning = true;
+    panStart = { x: e.clientX, y: e.clientY, scrollX: viewport.scrollLeft, scrollY: viewport.scrollTop };
+    viewport.classList.add('dragging-view');
+    viewport.style.cursor = 'grabbing';
+    e.preventDefault();
+  }
+});
+
+window.addEventListener('pointermove', (e) => {
+  if (!panning) return;
+  viewport.scrollLeft = panStart.scrollX - (e.clientX - panStart.x);
+  viewport.scrollTop = panStart.scrollY - (e.clientY - panStart.y);
+});
+
+window.addEventListener('pointerup', () => {
+  if (panning) {
+    panning = false;
+    viewport.classList.remove('dragging-view');
+    viewport.style.cursor = spaceDown ? 'grab' : '';
+  }
+});
+
+// ── Toggle zones ──
+const btnTop = document.getElementById('btnTop');
+const btnSide = document.getElementById('btnSide');
+btnTop.addEventListener('click', () => {
+  const z = document.getElementById('topZone');
+  const vis = z.style.display !== 'none';
+  z.style.display = vis ? 'none' : '';
+  btnTop.classList.toggle('active', !vis);
+});
+btnSide.addEventListener('click', () => {
+  const z = document.getElementById('sideZone');
+  const vis = z.style.display !== 'none';
+  z.style.display = vis ? 'none' : '';
+  btnSide.classList.toggle('active', !vis);
+});
+
+// ── Export ──
+function generateExport() {
+  let code = '// ── topViewHotspots ──\n';
+  code += 'const topViewHotspots = {\n';
+  for (const [id, h] of Object.entries(topHotspots)) {
+    const sizeStr = h.sm ? ', size: "sm"' : '';
+    code += `  ${id}: { left: ${h.left}, top: ${h.top}, label: "${h.label}"${sizeStr} },\n`;
+  }
+  code += '};\n\n';
+
+  code += '// ── sideViewHotspots ──\n';
+  code += 'const sideViewHotspots = {\n';
+  for (const [id, h] of Object.entries(sideHotspots)) {
+    const sizeStr = h.sm ? ', size: "sm"' : '';
+    code += `  ${id}: { left: ${h.left}, top: ${h.top}, label: "${h.label}"${sizeStr} },\n`;
+  }
+  code += '};\n';
+  return code;
+}
+
+document.getElementById('btnExport').addEventListener('click', () => {
+  const panel = document.getElementById('exportPanel');
+  const codeEl = document.getElementById('exportCode');
+  codeEl.textContent = generateExport();
+  panel.classList.toggle('visible');
+});
+
+document.getElementById('btnCopy').addEventListener('click', () => {
+  navigator.clipboard.writeText(generateExport()).then(() => {
+    document.getElementById('btnCopy').textContent = '✓ Copied!';
+    setTimeout(() => document.getElementById('btnCopy').textContent = 'Copy', 1500);
+  });
+});
+
+// ── Reset ──
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (confirm('Reset all positions to defaults?')) location.reload();
+});
+
+// ── Init ──
+renderHotspots(document.getElementById('topOverlay'), topHotspots, 'top');
+renderHotspots(document.getElementById('sideOverlay'), sideHotspots, 'side');
+
+// Auto-fit on load
+window.addEventListener('load', () => {
+  const vw = viewport.clientWidth - 80;
+  setZoom(Math.min(vw / 700, 1.5));
+});
+</script>
+</body>
+</html>

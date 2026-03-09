@@ -529,7 +529,7 @@ It should be:
 
 - Title: Decide whether to initialize git in this folder
 - Priority: `P2`
-- Status: `todo`
+- Status: `done`
 - Why it exists: long-term project tracking is weaker without a repo
 - Dependencies: none
 - Target files:
@@ -540,13 +540,12 @@ It should be:
 
 ## Active Focus
 
-Completed: `UX-001` through `UX-008`, `VIS-001`, `VIS-002`, `VIS-004`, `PACK-001`, `PACK-002`.
+Completed: `UX-001` through `UX-008`, `VIS-001`, `VIS-002`, `VIS-004`, `PACK-001`, `PACK-002`, `PACK-003`.
 
 Remaining items:
 
-1. `PACK-003` (P2) — decide on git init
-2. `VERIFY-001` through `VERIFY-005` — hardware validation (requires physical mouse)
-3. `WIN-001` through `WIN-003` — Windows platform hardening
+1. `VERIFY-001` through `VERIFY-005` — hardware validation (requires physical mouse)
+2. `WIN-001` through `WIN-003` — Windows platform hardening
 
 ## Immediate Blockers
 

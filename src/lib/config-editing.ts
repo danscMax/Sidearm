@@ -488,12 +488,21 @@ export function expectedEncodedKeyForControl(
       : `Ctrl+Alt+Shift+F${baseFunction}`;
   }
 
-  const plannedIndex = plannedValidationIndex(controlId);
-  if (plannedIndex !== null) {
-    const baseFunction = 13 + plannedIndex;
-    return layer === "standard"
-      ? `Ctrl+F${baseFunction}`
-      : `Ctrl+Shift+F${baseFunction}`;
+  // Top panel controls – direct mapping to match Synapse layout
+  const topPanelMap: Record<string, { standard: string | null; hypershift: string | null }> = {
+    top_aux_01: { standard: "Ctrl+Shift+F23", hypershift: "Ctrl+Alt+F23" },
+    top_aux_02: { standard: "Ctrl+Shift+F24", hypershift: "Ctrl+Alt+F24" },
+    mouse_4: { standard: "Ctrl+Shift+F13", hypershift: "Ctrl+Alt+F13" },
+    mouse_5: { standard: "Ctrl+Shift+F14", hypershift: "Ctrl+Alt+F14" },
+    wheel_click: { standard: "Ctrl+Shift+F15", hypershift: "Ctrl+Alt+F15" },
+    wheel_up: { standard: null, hypershift: "Ctrl+Alt+F16" },
+    wheel_down: { standard: null, hypershift: "Ctrl+Alt+F17" },
+  };
+
+  const entry = topPanelMap[controlId];
+  if (entry) {
+    const key = layer === "standard" ? entry.standard : entry.hypershift;
+    return key ?? null;
   }
 
   return null;
@@ -648,22 +657,3 @@ function thumbGridIndex(controlId: ControlId): number | null {
   return index >= 0 && index < 12 ? index : null;
 }
 
-function plannedValidationIndex(controlId: ControlId): number | null {
-  const orderedControls: ControlId[] = [
-    "top_aux_01",
-    "top_aux_02",
-    "mouse_4",
-    "mouse_5",
-    "wheel_up",
-    "wheel_down",
-    "wheel_click",
-    "wheel_left",
-    "wheel_right",
-    "top_special_01",
-    "top_special_02",
-    "top_special_03",
-  ];
-
-  const index = orderedControls.indexOf(controlId);
-  return index === -1 ? null : index;
-}

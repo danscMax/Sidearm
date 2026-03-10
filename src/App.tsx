@@ -103,7 +103,7 @@ import { idleRuntimeStateSummary } from "./lib/runtime";
 type ViewState = "idle" | "loading" | "ready" | "saving" | "error";
 type WorkspaceMode = "buttons" | "profiles" | "verification" | "advanced";
 
-const controlFamilyOrder: ControlFamily[] = ["thumbGrid", "topPanel", "wheel", "system"];
+const controlFamilyOrder: ControlFamily[] = ["thumbGrid", "topPanel", "system"];
 const workspaceModeCopy: Array<{
   value: WorkspaceMode;
   label: string;
@@ -162,15 +162,15 @@ const verificationScopeCopy: Array<{
 /** Hotspot positions for the TOP-DOWN photo (naga-top.jpg).
  *  Measured via hotspot-test.html click calibration. */
 const topViewHotspots: Record<string, { left: number; top: number; label: string; size?: "sm" | "lg" }> = {
-  mouse_left:        { left: 26, top: 10, label: "L" },
+  mouse_left:        { left: 26, top: 10, label: "ЛКМ" },
   wheel_up:          { left: 45.5, top: 13.5, label: "▲", size: "sm" },
   wheel_click:       { left: 45.5, top: 22.5, label: "●", size: "sm" },
   wheel_down:        { left: 45.5, top: 31.5, label: "▼", size: "sm" },
   hypershift_button: { left: 66, top: 10, label: "HS", size: "sm" },
-  top_aux_01:        { left: 10, top: 11, label: "DPI+", size: "sm" },
-  top_aux_02:        { left: 10, top: 21, label: "DPI−", size: "sm" },
-  mouse_4:           { left: 32, top: 22.5, label: "M4", size: "sm" },
-  mouse_5:           { left: 59.5, top: 23, label: "M5", size: "sm" },
+  top_aux_01:        { left: 10, top: 11, label: "DPI↑", size: "sm" },
+  top_aux_02:        { left: 10, top: 21, label: "DPI↓", size: "sm" },
+  mouse_4:           { left: 32, top: 22.5, label: "→", size: "sm" },
+  mouse_5:           { left: 59.5, top: 23, label: "←", size: "sm" },
 };
 
 /** Hotspot positions for the SIDE photo (naga-side.png).
@@ -518,7 +518,12 @@ function App() {
       return;
     }
 
-    updateDraft((config) => upsertAction(config, updateAction(selectedAction)));
+    const actionId = selectedAction.id;
+    updateDraft((config) => {
+      const freshAction = config.actions.find((a) => a.id === actionId);
+      if (!freshAction) return config;
+      return upsertAction(config, updateAction(freshAction));
+    });
   }
 
   async function handleStartRuntime() {
@@ -640,9 +645,12 @@ function App() {
       return;
     }
 
-    updateDraft((config) =>
-      upsertSnippetLibraryItem(config, updateSnippet(selectedSnippet)),
-    );
+    const snippetId = selectedSnippet.id;
+    updateDraft((config) => {
+      const freshSnippet = config.snippetLibrary.find((s) => s.id === snippetId);
+      if (!freshSnippet) return config;
+      return upsertSnippetLibraryItem(config, updateSnippet(freshSnippet));
+    });
   }
 
   const profiles = activeConfig
@@ -1024,17 +1032,17 @@ function App() {
         : null;
 
     startTransition(() => {
-      setVerificationSession((currentSession) =>
-        currentSession
-          ? finalizeVerificationStep(
-              currentSession,
-              result,
-              captureForStep,
-              previewForStep,
-              currentVerificationStep?.notes,
-            )
-          : currentSession,
-      );
+      setVerificationSession((currentSession) => {
+        if (!currentSession) return currentSession;
+        const freshStep = activeVerificationStep(currentSession);
+        return finalizeVerificationStep(
+          currentSession,
+          result,
+          captureForStep,
+          previewForStep,
+          freshStep?.notes,
+        );
+      });
     });
   }
 
@@ -1063,6 +1071,10 @@ function App() {
   }
 
   function handleResetVerificationSession() {
+    const hasResults = verificationSession?.steps.some((s) => s.result !== "pending") ?? false;
+    if (hasResults && !window.confirm("Сбросить сессию? Все результаты проверки будут потеряны.")) {
+      return;
+    }
     startTransition(() => {
       setVerificationSession(null);
       setLastVerificationExportPath(null);
@@ -1166,7 +1178,7 @@ function App() {
   const showProfileRouting = isProfilesMode;
   const showPersistencePanel = isExpertMode;
   const workspaceClass =
-    isAssignmentsMode || isProfilesMode ? "workspace workspace--1col" : "workspace workspace--2col";
+    isProfilesMode ? "workspace workspace--1col" : "workspace workspace--2col";
 
   function surfacePrimaryLabel(binding: Binding | null, action: Action | null): string {
     if (!binding) {
@@ -1295,6 +1307,7 @@ function App() {
             <select
               className="sidebar__select"
               value={effectiveProfileId ?? ""}
+              disabled={Boolean(verificationSession && !verificationSession.completedAt)}
               onChange={(event) => {
                 startTransition(() => {
                   setSelectedProfileId(event.target.value);
@@ -1328,7 +1341,7 @@ function App() {
                   key={layer.value}
                   type="button"
                   className={`layer-toggle__btn${selectedLayer === layer.value ? " layer-toggle__btn--active" : ""}`}
-                  disabled={Boolean(verificationSession)}
+                  disabled={Boolean(verificationSession && !verificationSession.completedAt)}
                   onClick={() => {
                     startTransition(() => {
                       setSelectedLayer(layer.value);
@@ -1395,28 +1408,6 @@ function App() {
                     familySections.flatMap((section) => section.entries),
                   )}
                 </section>
-              ) : null}
-
-              {showControlStrip ? (
-                selectedControl ? (
-                  <div className="control-strip">
-                    <span className="control-strip__name">{selectedControl.defaultName}</span>
-                    <span className="control-strip__action">
-                      {selectedBinding
-                        ? `${selectedBinding.label} · ${describeActionSummary(selectedAction, snippetById)}`
-                        : "Назначение не создано"}
-                    </span>
-                    <span className="control-strip__status">
-                      <span className={`badge ${badgeClassForCapability(selectedControl.capabilityStatus)}`}>
-                        {labelForCapability(selectedControl.capabilityStatus)}
-                      </span>
-                    </span>
-                  </div>
-                ) : (
-                  <div className="control-strip control-strip--empty">
-                    Выберите кнопку на схеме мыши
-                  </div>
-                )
               ) : null}
 
               {showProfileEditor ? (
@@ -2381,6 +2372,28 @@ function App() {
             </div>
 
             <div className="workspace__right">
+              {showControlStrip ? (
+                selectedControl ? (
+                  <div className="control-strip">
+                    <span className="control-strip__name">{selectedControl.defaultName}</span>
+                    <span className="control-strip__action">
+                      {selectedBinding
+                        ? `${selectedBinding.label} · ${describeActionSummary(selectedAction, snippetById)}`
+                        : "Назначение не создано"}
+                    </span>
+                    <span className="control-strip__status">
+                      <span className={`badge ${badgeClassForCapability(selectedControl.capabilityStatus)}`}>
+                        {labelForCapability(selectedControl.capabilityStatus)}
+                      </span>
+                    </span>
+                  </div>
+                ) : (
+                  <div className="control-strip control-strip--empty">
+                    Выберите кнопку на схеме мыши
+                  </div>
+                )
+              ) : null}
+
               {showControlProperties ? (
                 <section className="panel panel--accent">
                   <p className="panel__eyebrow">
@@ -2709,28 +2722,33 @@ function App() {
                               }
                             </p>
 
-                            {isDirty ? (
-                              <div className="notice notice--warning">
-                                <strong>Сначала сохраните черновик</strong>
-                                <p>
-                                  Сессия должна опираться на сохранённую конфигурацию.
-                                </p>
-                              </div>
-                            ) : null}
-
                             <div className="editor-actions">
-                              <button
-                                type="button"
-                                className="action-button"
-                                onClick={() => {
-                                  void handleStartVerificationSession();
-                                }}
-                                disabled={isDirty}
-                              >
-                                {runtimeSummary.status !== "running"
-                                  ? "Запустить перехват и начать"
-                                  : "Начать сессию"}
-                              </button>
+                              {isDirty ? (
+                                <button
+                                  type="button"
+                                  className="action-button"
+                                  onClick={async () => {
+                                    if (activeConfig) {
+                                      await persistConfig(activeConfig);
+                                    }
+                                    void handleStartVerificationSession();
+                                  }}
+                                >
+                                  Сохранить и начать сессию
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="action-button"
+                                  onClick={() => {
+                                    void handleStartVerificationSession();
+                                  }}
+                                >
+                                  {runtimeSummary.status !== "running"
+                                    ? "Запустить перехват и начать"
+                                    : "Начать сессию"}
+                                </button>
+                              )}
                             </div>
                           </>
                         ) : null}

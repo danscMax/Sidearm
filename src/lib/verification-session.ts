@@ -80,19 +80,27 @@ export function createVerificationSession(
     return null;
   }
 
-  const controls = config.physicalControls.filter((control) =>
-    scope === "all" ? true : control.family === selectedControl?.family,
-  );
-
-  if (controls.length === 0) {
-    return null;
-  }
-
   const encoderByControlId = new Map(
     config.encoderMappings
       .filter((mapping) => mapping.layer === layer)
       .map((mapping) => [mapping.controlId, mapping.encodedKey]),
   );
+
+  const controls = config.physicalControls.filter((control) => {
+    if (scope === "currentFamily" && control.family !== selectedControl?.family) {
+      return false;
+    }
+    if (control.capabilityStatus === "reserved") {
+      return false;
+    }
+    const hasExpected = expectedEncodedKeyForControl(control.id, layer) !== null;
+    const hasConfigured = encoderByControlId.has(control.id);
+    return hasExpected || hasConfigured;
+  });
+
+  if (controls.length === 0) {
+    return null;
+  }
 
   const startedAt = Date.now();
   const steps = controls.map((control, index) => ({

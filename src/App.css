@@ -143,6 +143,12 @@ button, input, textarea, select {
   font-size: 0.85rem;
 }
 
+/* Fix native dropdown option rendering in dark theme */
+select option {
+  background: #1a2520;
+  color: #f3f7ef;
+}
+
 .layer-toggle {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -248,7 +254,7 @@ button, input, textarea, select {
 }
 
 .workspace--2col {
-  grid-template-columns: minmax(280px, 0.92fr) minmax(0, 1.8fr);
+  grid-template-columns: minmax(240px, 380px) minmax(0, 1fr);
 }
 
 .workspace--3col {
@@ -580,6 +586,17 @@ button, input, textarea, select {
   transform: translateY(-1px);
 }
 
+/* ── Verification session scope dropdown ── */
+.verification-session__scope {
+  min-width: 180px;
+  max-width: 240px;
+}
+
+.verification-session__scope select {
+  padding: 7px 10px;
+  font-size: 0.85rem;
+}
+
 /* ── Verification progress bar ── */
 .verification-progress {
   display: flex;
@@ -748,7 +765,7 @@ button, input, textarea, select {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 10px;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .compound-card__meta {
@@ -823,8 +840,8 @@ button, input, textarea, select {
 /* ── Mouse visualization ── */
 .mouse-visual-stack {
   display: flex;
-  align-items: start;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   gap: 12px;
 }
 
@@ -837,15 +854,13 @@ button, input, textarea, select {
 
 .mouse-visual--top {
   aspect-ratio: 804 / 1280;
-  width: 200px;
-  flex-shrink: 0;
+  width: clamp(140px, 100%, 220px);
 }
 
 .mouse-visual--side {
   aspect-ratio: 1280 / 466;
-  flex: 1;
-  min-width: 0;
-  max-width: 520px;
+  width: 100%;
+  max-width: 480px;
 }
 
 .mouse-visual__img {
@@ -943,7 +958,6 @@ button, input, textarea, select {
 }
 
 .mouse-visual__label {
-  grid-column: 1 / -1;
   margin-top: 4px;
   text-align: center;
   font-size: 0.78rem;
@@ -1104,7 +1118,7 @@ code {
 
 /* ── Responsive ── */
 @media (min-width: 1100px) {
-  .mouse-visual--top { width: 240px; }
+  .mouse-visual--top { width: clamp(180px, 100%, 260px); }
 }
 
 @media (max-width: 1100px) {

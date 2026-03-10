@@ -648,7 +648,7 @@ function App() {
   const profiles = activeConfig
     ? [...activeConfig.profiles].sort(
         (left, right) =>
-          right.priority - left.priority || left.name.localeCompare(right.name),
+          right.priority - left.priority || (left.name ?? left.id).localeCompare(right.name ?? right.id),
       )
     : [];
   const effectiveProfileId =

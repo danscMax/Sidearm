@@ -54,6 +54,8 @@ import {
   createVerificationSession,
   createVerificationSessionExport,
   finalizeVerificationStep,
+  navigateToVerificationStep,
+  reopenVerificationStep,
   restartVerificationStep,
   summarizeVerificationSession,
   type VerificationSession,
@@ -962,9 +964,24 @@ function App() {
     );
   }
 
-  function handleStartVerificationSession() {
+  async function handleStartVerificationSession() {
     if (!activeConfig) {
       return;
+    }
+
+    if (runtimeSummary.status !== "running") {
+      try {
+        const summary = await startRuntime();
+        startTransition(() => {
+          setRuntimeSummary(summary);
+        });
+        await refreshDebugLog();
+      } catch (unknownError) {
+        startTransition(() => {
+          setError(normalizeCommandError(unknownError));
+        });
+        return;
+      }
     }
 
     const nextSession = createVerificationSession(
@@ -1025,6 +1042,22 @@ function App() {
     startTransition(() => {
       setVerificationSession((currentSession) =>
         currentSession ? updateVerificationStepNotes(currentSession, notes) : currentSession,
+      );
+    });
+  }
+
+  function handleNavigateVerificationStep(stepIndex: number) {
+    startTransition(() => {
+      setVerificationSession((currentSession) =>
+        currentSession ? navigateToVerificationStep(currentSession, stepIndex) : currentSession,
+      );
+    });
+  }
+
+  function handleReopenVerificationStep(stepIndex: number) {
+    startTransition(() => {
+      setVerificationSession((currentSession) =>
+        currentSession ? reopenVerificationStep(currentSession, stepIndex) : currentSession,
       );
     });
   }
@@ -2639,250 +2672,330 @@ function App() {
                   {selectedControl ? (
                     <div className="editor-grid">
                       <div className="compound-card">
-                        <div className="compound-card__header">
-                          <div>
-                            <strong>Сессия проверки</strong>
-                            <span className="compound-card__meta">
-                              Пошаговая проверка с фиксацией результата по каждой кнопке.
-                            </span>
-                          </div>
-                          <label className="field verification-session__scope">
-                            <span className="field__label">Объём сессии</span>
-                            <select
-                              value={verificationScope}
-                              onChange={(event) => {
-                                setVerificationScope(
-                                  event.target.value as VerificationSessionScope,
-                                );
-                              }}
-                              disabled={Boolean(verificationSession)}
-                            >
-                              {verificationScopeCopy.map((scope) => (
-                                <option key={scope.value} value={scope.value}>
-                                  {scope.label}
-                                </option>
-                              ))}
-                            </select>
-                          </label>
-                        </div>
-
-                        <p className="panel__muted">
-                          {
-                            verificationScopeCopy.find((scope) => scope.value === verificationScope)
-                              ?.body
-                          }
-                        </p>
-
-                        <div className="fact-grid">
-                          <Fact
-                            label="Слой"
-                            value={verificationSession?.layer ?? labelForLayer(selectedLayer)}
-                          />
-                          <Fact
-                            label="Шаг"
-                            value={
-                              verificationSession
-                                ? `${Math.min(
-                                    verificationSession.activeStepIndex + 1,
-                                    verificationSession.steps.length,
-                                  )} / ${verificationSession.steps.length}`
-                                : "—"
-                            }
-                          />
-                          <Fact label="Совпало" value={String(sessionSummary.matched)} />
-                          <Fact
-                            label="Осталось"
-                            value={String(sessionSummary.pending)}
-                          />
-                        </div>
-
-                        {isDirty ? (
-                          <div className="notice notice--warning">
-                            <strong>Сначала сохраните черновик</strong>
-                            <p>
-                              Сессия проверки должна опираться на сохранённую конфигурацию,
-                              иначе перехват и редактор будут смотреть на разные данные.
-                            </p>
-                          </div>
-                        ) : null}
-
-                        {runtimeSummary.status !== "running" ? (
-                          <div className="notice notice--warning">
-                            <strong>Фоновый перехват ещё не запущен</strong>
-                            <p>
-                              Для живой проверки сначала запустите перехват, потом начинайте
-                              шаги сессии.
-                            </p>
-                          </div>
-                        ) : null}
-
-                        {currentVerificationStep ? (
-                          <div className="editor-grid">
-                            <p className="panel__muted">
-                              Сейчас: {currentVerificationStep.controlLabel} (
-                              {currentVerificationStep.controlId}).
-                              Шаг начат: {formatTimestamp(currentVerificationStep.startedAt)}
-                            </p>
-
-                            <div className="fact-grid">
-                              <Fact
-                                label="Ожидалось"
-                                value={currentVerificationStep.expectedEncodedKey ?? "н/д"}
-                              />
-                              <Fact
-                                label="Настроено"
-                                value={currentVerificationStep.configuredEncodedKey ?? "не назначено"}
-                              />
-                              <Fact
-                                label="Наблюдалось"
-                                value={currentVerificationStep.observedEncodedKey ?? "ничего"}
-                              />
-                              <Fact
-                                label="Результат"
-                                value={labelForVerificationResult(
-                                  currentVerificationStep.result,
-                                )}
-                              />
+                        {/* Session header: scope selector + start/reset */}
+                        {!verificationSession ? (
+                          <>
+                            <div className="compound-card__header">
+                              <div>
+                                <strong>Сессия проверки</strong>
+                                <span className="compound-card__meta">
+                                  Пошаговая проверка каждой кнопки на реальном устройстве.
+                                </span>
+                              </div>
+                              <label className="field verification-session__scope">
+                                <span className="field__label">Объём</span>
+                                <select
+                                  value={verificationScope}
+                                  onChange={(event) => {
+                                    setVerificationScope(
+                                      event.target.value as VerificationSessionScope,
+                                    );
+                                  }}
+                                >
+                                  {verificationScopeCopy.map((scope) => (
+                                    <option key={scope.value} value={scope.value}>
+                                      {scope.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
                             </div>
 
-                            {suggestedSessionResult ? (
-                              <div
-                                className={`notice ${
-                                  suggestedSessionResult === "matched"
-                                    ? "notice--ok"
-                                    : suggestedSessionResult === "noSignal"
-                                      ? "notice--warning"
-                                      : "notice--info"
-                                }`}
-                              >
-                                <strong>
-                                  Подсказка:{" "}
-                                  {labelForVerificationResult(suggestedSessionResult)}
-                                </strong>
+                            <p className="panel__muted">
+                              {
+                                verificationScopeCopy.find(
+                                  (scope) => scope.value === verificationScope,
+                                )?.body
+                              }
+                            </p>
+
+                            {isDirty ? (
+                              <div className="notice notice--warning">
+                                <strong>Сначала сохраните черновик</strong>
                                 <p>
-                                  {describeVerificationSessionSuggestion(
-                                    suggestedSessionResult,
-                                    currentVerificationStep,
-                                  )}
+                                  Сессия должна опираться на сохранённую конфигурацию.
                                 </p>
                               </div>
                             ) : null}
 
-                            <label className="field">
-                              <span className="field__label">Заметка по шагу</span>
-                              <textarea
-                                rows={3}
-                                value={currentVerificationStep.notes}
-                                placeholder="Например: сработало только после повторного нажатия."
-                                onChange={(event) => {
-                                  handleVerificationNotesChange(event.target.value);
+                            <div className="editor-actions">
+                              <button
+                                type="button"
+                                className="action-button"
+                                onClick={() => {
+                                  void handleStartVerificationSession();
                                 }}
-                              />
-                            </label>
+                                disabled={isDirty}
+                              >
+                                {runtimeSummary.status !== "running"
+                                  ? "Запустить перехват и начать"
+                                  : "Начать сессию"}
+                              </button>
+                            </div>
+                          </>
+                        ) : null}
+
+                        {/* Step progress bar */}
+                        {verificationSession ? (
+                          <>
+                            <div className="verification-progress">
+                              <div className="verification-progress__header">
+                                <strong>
+                                  Шаг {Math.min(verificationSession.activeStepIndex + 1, verificationSession.steps.length)}
+                                  {" / "}
+                                  {verificationSession.steps.length}
+                                </strong>
+                                <span className="verification-progress__stats">
+                                  {sessionSummary.matched > 0 ? `${sessionSummary.matched} ✓` : null}
+                                  {sessionSummary.mismatched > 0 ? ` ${sessionSummary.mismatched} ✗` : null}
+                                  {sessionSummary.skipped > 0 ? ` ${sessionSummary.skipped} ⊘` : null}
+                                </span>
+                              </div>
+                              <div className="verification-progress__bar">
+                                {verificationSession.steps.map((step, index) => (
+                                  <button
+                                    key={step.controlId}
+                                    type="button"
+                                    className={`verification-progress__dot${
+                                      index === verificationSession.activeStepIndex
+                                        ? " verification-progress__dot--active"
+                                        : ""
+                                    }`}
+                                    style={{
+                                      backgroundColor:
+                                        index === verificationSession.activeStepIndex
+                                          ? undefined
+                                          : verificationResultColor(step.result),
+                                    }}
+                                    title={`${step.controlLabel}: ${labelForVerificationResult(step.result)}`}
+                                    onClick={() => {
+                                      handleNavigateVerificationStep(index);
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Current step instruction */}
+                            {currentVerificationStep ? (
+                              <div className="editor-grid">
+                                <div className="verification-instruction">
+                                  <h3 className="verification-instruction__title">
+                                    Нажмите: {currentVerificationStep.controlLabel}
+                                  </h3>
+                                  <p className="verification-instruction__hint">
+                                    {controlPhysicalHint[currentVerificationStep.controlId] ??
+                                      "Расположение этой кнопки пока не описано."}
+                                  </p>
+                                </div>
+
+                                {currentVerificationStep.result !== "pending" ? (
+                                  <div className="notice notice--info">
+                                    <strong>
+                                      Этот шаг уже завершён: {labelForVerificationResult(currentVerificationStep.result)}
+                                    </strong>
+                                    <p>
+                                      Вы можете перепроверить его или перейти к другому шагу.
+                                    </p>
+                                    <div className="editor-actions" style={{ marginTop: 8 }}>
+                                      <button
+                                        type="button"
+                                        className="action-button action-button--small"
+                                        onClick={() => {
+                                          handleReopenVerificationStep(verificationSession.activeStepIndex);
+                                        }}
+                                      >
+                                        Перепроверить
+                                      </button>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="fact-grid">
+                                      <Fact
+                                        label="Ожидалось"
+                                        value={currentVerificationStep.expectedEncodedKey ?? "н/д"}
+                                      />
+                                      <Fact
+                                        label="Настроено"
+                                        value={currentVerificationStep.configuredEncodedKey ?? "не назначено"}
+                                      />
+                                      <Fact
+                                        label="Наблюдалось"
+                                        value={currentVerificationStep.observedEncodedKey ?? "ожидание сигнала…"}
+                                      />
+                                    </div>
+
+                                    {suggestedSessionResult ? (
+                                      <div
+                                        className={`notice ${
+                                          suggestedSessionResult === "matched"
+                                            ? "notice--ok"
+                                            : suggestedSessionResult === "noSignal"
+                                              ? "notice--warning"
+                                              : "notice--info"
+                                        }`}
+                                      >
+                                        <strong>
+                                          Подсказка:{" "}
+                                          {labelForVerificationResult(suggestedSessionResult)}
+                                        </strong>
+                                        <p>
+                                          {describeVerificationSessionSuggestion(
+                                            suggestedSessionResult,
+                                            currentVerificationStep,
+                                          )}
+                                        </p>
+                                      </div>
+                                    ) : null}
+
+                                    <label className="field">
+                                      <span className="field__label">Заметка по шагу</span>
+                                      <textarea
+                                        rows={2}
+                                        value={currentVerificationStep.notes}
+                                        placeholder="Например: сработало только после повторного нажатия."
+                                        onChange={(event) => {
+                                          handleVerificationNotesChange(event.target.value);
+                                        }}
+                                      />
+                                    </label>
+
+                                    {/* Primary action: Совпало */}
+                                    <button
+                                      type="button"
+                                      className="action-button verification-action--primary"
+                                      onClick={() => {
+                                        handleVerificationResult("matched");
+                                      }}
+                                      disabled={!currentVerificationStep.observedEncodedKey}
+                                    >
+                                      ✓ Совпало
+                                    </button>
+
+                                    {/* Secondary actions row */}
+                                    <div className="verification-actions-secondary">
+                                      <button
+                                        type="button"
+                                        className="action-button action-button--secondary action-button--small"
+                                        onClick={() => {
+                                          handleVerificationResult("mismatched");
+                                        }}
+                                        disabled={!currentVerificationStep.observedEncodedKey}
+                                      >
+                                        Не совпало
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="action-button action-button--secondary action-button--small"
+                                        onClick={() => {
+                                          handleVerificationResult("noSignal");
+                                        }}
+                                      >
+                                        Нет сигнала
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="action-button action-button--secondary action-button--small"
+                                        onClick={() => {
+                                          handleVerificationResult("skipped");
+                                        }}
+                                      >
+                                        Пропустить
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="action-button action-button--ghost action-button--small"
+                                        onClick={() => {
+                                          handleRestartVerificationStep();
+                                        }}
+                                        disabled={runtimeSummary.status !== "running" || isDirty}
+                                      >
+                                        Перезапустить
+                                      </button>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            ) : null}
+
+                            {/* Session complete: summary table */}
+                            {verificationSession.activeStepIndex >= verificationSession.steps.length ? (
+                              <div className="editor-grid">
+                                <div className="notice notice--ok">
+                                  <strong>Сессия завершена</strong>
+                                  <p>
+                                    Совпало: {sessionSummary.matched} · Не совпало: {sessionSummary.mismatched}
+                                    {" · "}Нет сигнала: {sessionSummary.noSignal} · Пропущено: {sessionSummary.skipped}
+                                  </p>
+                                </div>
+
+                                <table className="verification-summary-table">
+                                  <thead>
+                                    <tr>
+                                      <th>Кнопка</th>
+                                      <th>Ожидалось</th>
+                                      <th>Наблюдалось</th>
+                                      <th>Результат</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {verificationSession.steps.map((step, index) => (
+                                      <tr
+                                        key={step.controlId}
+                                        className="verification-summary-table__row"
+                                        onClick={() => {
+                                          handleNavigateVerificationStep(index);
+                                        }}
+                                      >
+                                        <td>{step.controlLabel}</td>
+                                        <td><code>{step.expectedEncodedKey ?? "—"}</code></td>
+                                        <td><code>{step.observedEncodedKey ?? "—"}</code></td>
+                                        <td>
+                                          <span
+                                            className="verification-result-badge"
+                                            style={{ color: verificationResultColor(step.result) }}
+                                          >
+                                            {labelForVerificationResult(step.result)}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : null}
+
+                            {lastVerificationExportPath ? (
+                              <div className="notice notice--ok">
+                                <strong>Отчёт сохранён</strong>
+                                <p className="panel__path">{lastVerificationExportPath}</p>
+                              </div>
+                            ) : null}
 
                             <div className="editor-actions">
                               <button
                                 type="button"
-                                className="action-button action-button--secondary action-button--small"
+                                className="action-button action-button--secondary"
                                 onClick={() => {
-                                  handleRestartVerificationStep();
+                                  void handleExportVerificationSession();
                                 }}
-                                disabled={runtimeSummary.status !== "running" || isDirty}
+                                disabled={!hasVerificationResults}
                               >
-                                Перезапустить шаг
+                                Экспорт JSON
                               </button>
                               <button
                                 type="button"
-                                className="action-button action-button--small"
+                                className="action-button action-button--ghost"
                                 onClick={() => {
-                                  handleVerificationResult("matched");
-                                }}
-                                disabled={!currentVerificationStep.observedEncodedKey}
-                              >
-                                Совпало
-                              </button>
-                              <button
-                                type="button"
-                                className="action-button action-button--secondary action-button--small"
-                                onClick={() => {
-                                  handleVerificationResult("mismatched");
-                                }}
-                                disabled={!currentVerificationStep.observedEncodedKey}
-                              >
-                                Не совпало
-                              </button>
-                              <button
-                                type="button"
-                                className="action-button action-button--secondary action-button--small"
-                                onClick={() => {
-                                  handleVerificationResult("noSignal");
+                                  handleResetVerificationSession();
                                 }}
                               >
-                                Нет сигнала
-                              </button>
-                              <button
-                                type="button"
-                                className="action-button action-button--secondary action-button--small"
-                                onClick={() => {
-                                  handleVerificationResult("skipped");
-                                }}
-                              >
-                                Пропустить
+                                Сбросить сессию
                               </button>
                             </div>
-                          </div>
-                        ) : verificationSession ? (
-                          <div className="notice notice--ok">
-                            <strong>Сессия завершена</strong>
-                            <p>
-                              Все шаги пройдены. Проверьте итоговую сводку и при желании
-                              экспортируйте JSON-отчёт.
-                            </p>
-                          </div>
+                          </>
                         ) : null}
-
-                        {lastVerificationExportPath ? (
-                          <div className="notice notice--ok">
-                            <strong>Отчёт сохранён</strong>
-                            <p className="panel__path">{lastVerificationExportPath}</p>
-                          </div>
-                        ) : null}
-
-                        <div className="editor-actions">
-                          {verificationSession ? (
-                            <button
-                              type="button"
-                              className="action-button action-button--secondary"
-                              onClick={() => {
-                                handleResetVerificationSession();
-                              }}
-                            >
-                              Сбросить сессию
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              className="action-button"
-                              onClick={() => {
-                                handleStartVerificationSession();
-                              }}
-                              disabled={isDirty || runtimeSummary.status !== "running"}
-                            >
-                              Начать сессию
-                            </button>
-                          )}
-
-                          <button
-                            type="button"
-                            className="action-button action-button--secondary"
-                            onClick={() => {
-                              void handleExportVerificationSession();
-                            }}
-                            disabled={!hasVerificationResults}
-                          >
-                            Экспорт JSON
-                          </button>
-                        </div>
                       </div>
 
                       {!verificationSession ? (
@@ -4155,6 +4268,48 @@ function labelForVerificationResult(result: VerificationStepResult): string {
       return "Нет сигнала";
     case "skipped":
       return "Пропущено";
+  }
+}
+
+const controlPhysicalHint: Record<string, string> = {
+  thumb_01: "Нижний левый на боковой клавиатуре (ряд 1, столбец 1)",
+  thumb_02: "Второй снизу, левый столбец (ряд 2, столбец 1)",
+  thumb_03: "Верхний левый на боковой клавиатуре (ряд 3, столбец 1)",
+  thumb_04: "Нижний во втором столбце (ряд 1, столбец 2)",
+  thumb_05: "Средний во втором столбце (ряд 2, столбец 2)",
+  thumb_06: "Верхний во втором столбце (ряд 3, столбец 2)",
+  thumb_07: "Нижний в третьем столбце (ряд 1, столбец 3)",
+  thumb_08: "Средний в третьем столбце (ряд 2, столбец 3)",
+  thumb_09: "Верхний в третьем столбце (ряд 3, столбец 3)",
+  thumb_10: "Нижний правый на боковой клавиатуре (ряд 1, столбец 4)",
+  thumb_11: "Второй снизу, правый столбец (ряд 2, столбец 4)",
+  thumb_12: "Верхний правый на боковой клавиатуре (ряд 3, столбец 4)",
+  mouse_left: "Левая кнопка мыши (основной клик)",
+  mouse_right: "Правая кнопка мыши",
+  mouse_4: "Боковая кнопка «Назад» (ближняя к большому пальцу сверху)",
+  mouse_5: "Боковая кнопка «Вперёд» (дальняя от большого пальца сверху)",
+  top_aux_01: "Кнопка рядом с колесом (предположительно DPI+)",
+  top_aux_02: "Вторая кнопка рядом с колесом (предположительно DPI−)",
+  wheel_up: "Прокрутка колеса вверх",
+  wheel_down: "Прокрутка колеса вниз",
+  wheel_click: "Нажатие на колесо (средний клик)",
+  wheel_left: "Наклон колеса влево",
+  wheel_right: "Наклон колеса вправо",
+  hypershift_button: "Кнопка Hypershift (нижняя на корпусе, под большим пальцем)",
+};
+
+function verificationResultColor(result: VerificationStepResult): string {
+  switch (result) {
+    case "matched":
+      return "var(--c-ok)";
+    case "mismatched":
+      return "var(--c-danger)";
+    case "noSignal":
+      return "var(--c-warning)";
+    case "skipped":
+      return "var(--c-text-muted)";
+    case "pending":
+      return "var(--c-border)";
   }
 }
 

@@ -261,6 +261,62 @@ export function suggestedVerificationStepResult(
   return "mismatched";
 }
 
+export function navigateToVerificationStep(
+  session: VerificationSession,
+  stepIndex: number,
+): VerificationSession {
+  if (stepIndex < 0 || stepIndex >= session.steps.length) {
+    return session;
+  }
+
+  const step = session.steps[stepIndex];
+  const needsStart = step.result === "pending" && !step.startedAt;
+
+  const navigated = {
+    ...session,
+    activeStepIndex: stepIndex,
+    completedAt: null,
+  };
+
+  if (needsStart) {
+    return updateStep(navigated, stepIndex, (s) => ({
+      ...s,
+      startedAt: Date.now(),
+    }));
+  }
+
+  return navigated;
+}
+
+export function reopenVerificationStep(
+  session: VerificationSession,
+  stepIndex: number,
+): VerificationSession {
+  if (stepIndex < 0 || stepIndex >= session.steps.length) {
+    return session;
+  }
+
+  const navigated = {
+    ...session,
+    activeStepIndex: stepIndex,
+    completedAt: null,
+  };
+
+  return updateStep(navigated, stepIndex, (step) => ({
+    ...step,
+    startedAt: Date.now(),
+    observedEncodedKey: null,
+    observedAt: null,
+    observedBackend: null,
+    activeExe: null,
+    activeWindowTitle: null,
+    resolutionStatus: null,
+    resolvedControlId: null,
+    resolvedLayer: null,
+    result: "pending",
+  }));
+}
+
 export function createVerificationSessionExport(
   session: VerificationSession,
 ): VerificationSessionExport {

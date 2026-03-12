@@ -1,3 +1,5 @@
+import type { ActionType, ControlId, Layer, MappingSource } from "./config";
+
 export type RuntimeStatus = "idle" | "running";
 
 export type DebugLogLevel = "info" | "warn";
@@ -67,27 +69,27 @@ export interface ResolvedInputPreview {
   usedFallbackProfile: boolean;
   candidateAppMappingIds: string[];
   candidateControlIds: string[];
-  controlId?: string;
-  layer?: string;
+  controlId?: ControlId;
+  layer?: Layer;
   bindingId?: string;
   bindingLabel?: string;
   actionId?: string;
-  actionType?: string;
+  actionType?: ActionType;
   actionPretty?: string;
   mappingVerified?: boolean;
-  mappingSource?: string;
+  mappingSource?: MappingSource;
 }
 
 export interface ActionExecutionEvent {
   encodedKey: string;
   actionId: string;
-  actionType: string;
+  actionType: ActionType;
   actionPretty: string;
   resolvedProfileId?: string;
   resolvedProfileName?: string;
   matchedAppMappingId?: string;
-  controlId?: string;
-  layer?: string;
+  controlId?: ControlId;
+  layer?: Layer;
   bindingId?: string;
   mode: ExecutionMode;
   outcome: ExecutionOutcome;

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::config::{ActionType, AppConfig, AppMapping, EncoderMapping, Profile};
+use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile};
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -108,7 +108,9 @@ pub fn resolve_input_preview(
     let matching_mappings: Vec<&EncoderMapping> = config
         .encoder_mappings
         .iter()
-        .filter(|mapping| normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&normalized_key))
+        .filter(|mapping| {
+            normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&normalized_key)
+        })
         .collect();
 
     if matching_mappings.is_empty() {
@@ -219,14 +221,18 @@ pub fn resolve_input_preview(
         binding_id: binding.map(|binding| binding.id.clone()),
         binding_label: binding.map(|binding| binding.label.clone()),
         action_id: action.map(|action| action.id.clone()),
-        action_type: action.map(|action| action_type_name(action.action_type).to_owned()),
+        action_type: action.map(|action| action.action_type.as_str().to_owned()),
         action_pretty: action.map(|action| action.pretty.clone()),
         mapping_verified: Some(mapping.verified),
         mapping_source: Some(mapping_source_name(mapping).to_owned()),
     }
 }
 
-fn matching_app_mappings<'a>(config: &'a AppConfig, exe: &str, title: &str) -> Vec<&'a AppMapping> {
+pub(crate) fn matching_app_mappings<'a>(
+    config: &'a AppConfig,
+    exe: &str,
+    title: &str,
+) -> Vec<&'a AppMapping> {
     let normalized_exe = exe.to_ascii_lowercase();
     let normalized_title = title.to_ascii_lowercase();
     let mut matches: Vec<&AppMapping> = config
@@ -259,22 +265,11 @@ fn matching_app_mappings<'a>(config: &'a AppConfig, exe: &str, title: &str) -> V
     matches
 }
 
-fn find_profile<'a>(config: &'a AppConfig, profile_id: &str) -> Option<&'a Profile> {
+pub(crate) fn find_profile<'a>(config: &'a AppConfig, profile_id: &str) -> Option<&'a Profile> {
     config
         .profiles
         .iter()
         .find(|profile| profile.id == profile_id && profile.enabled)
-}
-
-fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::Shortcut => "shortcut",
-        ActionType::TextSnippet => "textSnippet",
-        ActionType::Sequence => "sequence",
-        ActionType::Launch => "launch",
-        ActionType::Menu => "menu",
-        ActionType::Disabled => "disabled",
-    }
 }
 
 fn mapping_source_name(mapping: &EncoderMapping) -> &'static str {
@@ -293,8 +288,8 @@ fn normalized_encoded_key(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{
-        Action, ActionPayload, Binding, CapabilityStatus, ControlFamily, ControlId, Layer,
-        MappingSource, PhysicalControl, Settings, SnippetLibraryItem,
+        Action, ActionPayload, ActionType, Binding, CapabilityStatus, ControlFamily, ControlId,
+        Layer, MappingSource, PhysicalControl, Settings, SnippetLibraryItem,
     };
 
     #[test]
@@ -380,6 +375,7 @@ mod tests {
                 label: "Example".into(),
                 action_ref: "action-default-standard-thumb-01".into(),
                 color_tag: None,
+                trigger_mode: None,
                 enabled: true,
             }],
             actions: vec![Action {

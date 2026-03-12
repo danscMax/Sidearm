@@ -1,5 +1,5 @@
-mod clipboard;
 mod capture_backend;
+mod clipboard;
 mod command_error;
 mod config;
 mod executor;
@@ -15,6 +15,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub use capture_backend::capture_helper_main;
 use capture_backend::RuntimeController;
 use command_error::CommandError;
 use config::{
@@ -24,10 +25,12 @@ use config::{
 use executor::{ActionExecutionEvent, RuntimeErrorEvent};
 use resolver::ResolvedInputPreview;
 use runtime::{
-    DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED,
-    EVENT_CONFIG_RELOADED, EVENT_CONTROL_RESOLVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-    EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
+    DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
+    EVENT_CONTROL_RESOLVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR, EVENT_RUNTIME_STARTED,
+    EVENT_RUNTIME_STOPPED,
 };
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use window_capture::WindowCaptureResult;
 
@@ -41,46 +44,63 @@ fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
 
 #[tauri::command]
 async fn export_verification_session(
-    path: String,
+    app: AppHandle,
+    filename: String,
     contents: String,
 ) -> Result<String, CommandError> {
-    let export_path = PathBuf::from(path.trim());
-    if export_path.as_os_str().is_empty() {
+    let filename = filename.trim().to_owned();
+
+    // Validate filename: must not be empty, must end with .json, must not contain path separators or traversal
+    if filename.is_empty() {
         return Err(CommandError::new(
             "invalid_request",
-            "Export path must not be empty.",
+            "Export filename must not be empty.",
+            None,
+        ));
+    }
+    if !filename.ends_with(".json") {
+        return Err(CommandError::new(
+            "invalid_request",
+            "Export filename must end with .json.",
+            None,
+        ));
+    }
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return Err(CommandError::new(
+            "invalid_request",
+            "Export filename must not contain path separators or '..' segments.",
             None,
         ));
     }
 
-    let exported_path = export_path.clone();
+    // Construct the export path under app_data_dir/exports/
+    let data_dir = app.path().app_data_dir().map_err(|error| {
+        CommandError::internal(format!("Failed to resolve app data directory: {error}"))
+    })?;
+    let export_dir = data_dir.join("exports");
+    let export_path = export_dir.join(&filename);
+
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(parent) = export_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                fs::create_dir_all(parent).map_err(|error| {
-                    CommandError::internal(format!(
-                        "Failed to create export directory `{}`: {error}",
-                        parent.display()
-                    ))
-                })?;
-            }
-        }
+        fs::create_dir_all(&export_dir).map_err(|error| {
+            CommandError::internal(format!(
+                "Failed to create export directory `{}`: {error}",
+                export_dir.display()
+            ))
+        })?;
 
         fs::write(&export_path, contents).map_err(|error| {
             CommandError::internal(format!(
                 "Failed to write verification export `{}`: {error}",
                 export_path.display()
             ))
-        })
+        })?;
+
+        Ok(export_path.display().to_string())
     })
     .await
     .map_err(|error| {
-        CommandError::internal(format!(
-            "export_verification_session task failed: {error}"
-        ))
-    })??;
-
-    Ok(exported_path.display().to_string())
+        CommandError::internal(format!("export_verification_session task failed: {error}"))
+    })?
 }
 
 #[tauri::command]
@@ -92,6 +112,13 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
         .map_err(CommandError::from)
 }
 
+/// Save the config to disk and, if the runtime is active, restart the capture
+/// backend so it picks up the new config.
+///
+/// CONCURRENCY NOTE: The `runtime_controller` lock serializes concurrent
+/// `save_config` calls through the restart path. The `runtime_store` lock is
+/// re-acquired immediately after restart to update the version. No async yield
+/// points exist between `controller.restart()` and `store.reload()`.
 #[tauri::command]
 async fn save_config(
     app: AppHandle,
@@ -118,13 +145,12 @@ async fn save_config(
             let mut controller = runtime_controller
                 .lock()
                 .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-            controller
-                .restart(
-                    app.clone(),
-                    runtime_store.inner().clone(),
-                    result.config.clone(),
-                    app.package_info().name.clone(),
-                )
+            controller.restart(
+                app.clone(),
+                runtime_store.inner().clone(),
+                result.config.clone(),
+                app.package_info().name.clone(),
+            )
         };
         if let Err(message) = restart_result {
             let stopped_summary = {
@@ -243,13 +269,12 @@ async fn reload_runtime(
         let mut controller = runtime_controller
             .lock()
             .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-        controller
-            .restart(
-                app.clone(),
-                runtime_store.inner().clone(),
-                load_response.config.clone(),
-                app.package_info().name.clone(),
-            )
+        controller.restart(
+            app.clone(),
+            runtime_store.inner().clone(),
+            load_response.config.clone(),
+            app.package_info().name.clone(),
+        )
     };
     if let Err(message) = restart_result {
         let stopped_summary = {
@@ -599,10 +624,9 @@ fn emit_runtime_error(
         );
     }
 
-    app.emit(EVENT_RUNTIME_ERROR, event)
-        .map_err(|error| {
-            CommandError::internal(format!("Failed to emit runtime_error event: {error}"))
-        })?;
+    app.emit(EVENT_RUNTIME_ERROR, event).map_err(|error| {
+        CommandError::internal(format!("Failed to emit runtime_error event: {error}"))
+    })?;
 
     Ok(())
 }
@@ -627,6 +651,50 @@ fn runtime_error_context(event: &RuntimeErrorEvent) -> String {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .setup(|app| {
+            let tray_menu = Menu::with_items(
+                app,
+                &[
+                    &MenuItem::with_id(app, "show", "Показать окно", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
+                ],
+            )?;
+
+            TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
+
+            Ok(())
+        })
         .manage(Arc::new(Mutex::new(RuntimeStore::default())))
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .invoke_handler(tauri::generate_handler![

@@ -45,7 +45,12 @@ export type ActionType =
   | "sequence"
   | "launch"
   | "menu"
+  | "mouseAction"
+  | "mediaKey"
+  | "profileSwitch"
   | "disabled";
+
+export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold";
 
 export type PasteMode = "clipboardPaste" | "sendText";
 
@@ -110,6 +115,7 @@ export interface Binding {
   actionRef: string;
   colorTag?: string;
   enabled: boolean;
+  triggerMode?: TriggerMode;
 }
 
 export interface ShortcutActionPayload {
@@ -175,6 +181,39 @@ export interface MenuActionPayload {
   items: MenuItem[];
 }
 
+export type MouseActionKind =
+  | "leftClick"
+  | "rightClick"
+  | "middleClick"
+  | "doubleClick"
+  | "scrollUp"
+  | "scrollDown"
+  | "scrollLeft"
+  | "scrollRight"
+  | "mouseBack"
+  | "mouseForward";
+
+export interface MouseActionPayload {
+  action: MouseActionKind;
+}
+
+export type MediaKeyKind =
+  | "playPause"
+  | "nextTrack"
+  | "prevTrack"
+  | "stop"
+  | "volumeUp"
+  | "volumeDown"
+  | "mute";
+
+export interface MediaKeyPayload {
+  key: MediaKeyKind;
+}
+
+export interface ProfileSwitchPayload {
+  targetProfileId: string;
+}
+
 export type DisabledActionPayload = Record<string, never>;
 
 export type ActionPayload =
@@ -183,15 +222,29 @@ export type ActionPayload =
   | SequenceActionPayload
   | LaunchActionPayload
   | MenuActionPayload
+  | MouseActionPayload
+  | MediaKeyPayload
+  | ProfileSwitchPayload
   | DisabledActionPayload;
 
-export interface Action {
+interface ActionBase {
   id: string;
-  type: ActionType;
-  payload: ActionPayload;
   pretty: string;
   notes?: string;
 }
+
+export type Action = ActionBase &
+  (
+    | { type: "shortcut"; payload: ShortcutActionPayload }
+    | { type: "textSnippet"; payload: TextSnippetPayload }
+    | { type: "sequence"; payload: SequenceActionPayload }
+    | { type: "launch"; payload: LaunchActionPayload }
+    | { type: "menu"; payload: MenuActionPayload }
+    | { type: "mouseAction"; payload: MouseActionPayload }
+    | { type: "mediaKey"; payload: MediaKeyPayload }
+    | { type: "profileSwitch"; payload: ProfileSwitchPayload }
+    | { type: "disabled"; payload: DisabledActionPayload }
+  );
 
 export interface SnippetLibraryItem {
   id: string;

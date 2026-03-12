@@ -31,8 +31,8 @@ export interface VerificationSessionStep {
   activeExe: string | null;
   activeWindowTitle: string | null;
   resolutionStatus: ResolvedInputPreview["status"] | null;
-  resolvedControlId: string | null;
-  resolvedLayer: string | null;
+  resolvedControlId: ControlId | null;
+  resolvedLayer: Layer | null;
   result: VerificationStepResult;
   notes: string;
 }
@@ -182,6 +182,23 @@ export function captureVerificationObservation(
   }));
 }
 
+export function captureVerificationResolution(
+  session: VerificationSession,
+  preview: ResolvedInputPreview,
+): VerificationSession {
+  const step = activeVerificationStep(session);
+  if (!step?.startedAt || step.result !== "pending") {
+    return session;
+  }
+
+  return updateStep(session, session.activeStepIndex, (currentStep) => ({
+    ...currentStep,
+    resolutionStatus: preview.status,
+    resolvedControlId: preview.controlId ?? null,
+    resolvedLayer: preview.layer ?? null,
+  }));
+}
+
 export function finalizeVerificationStep(
   session: VerificationSession,
   result: Exclude<VerificationStepResult, "pending">,
@@ -234,20 +251,31 @@ export function summarizeVerificationSession(
   session: VerificationSession | null,
 ): VerificationSessionSummary {
   const steps = session?.steps ?? [];
-  return {
+  const summary: VerificationSessionSummary = {
     total: steps.length,
-    matched: steps.filter((step) => step.result === "matched").length,
-    mismatched: steps.filter((step) => step.result === "mismatched").length,
-    noSignal: steps.filter((step) => step.result === "noSignal").length,
-    skipped: steps.filter((step) => step.result === "skipped").length,
-    pending: steps.filter((step) => step.result === "pending").length,
+    matched: 0,
+    mismatched: 0,
+    noSignal: 0,
+    skipped: 0,
+    pending: 0,
   };
+  for (const step of steps) {
+    switch (step.result) {
+      case "matched": summary.matched++; break;
+      case "mismatched": summary.mismatched++; break;
+      case "noSignal": summary.noSignal++; break;
+      case "skipped": summary.skipped++; break;
+      case "pending": summary.pending++; break;
+    }
+  }
+  return summary;
 }
 
 export function suggestedVerificationStepResult(
   step: VerificationSessionStep | null,
   selectedControlId: ControlId | null,
   selectedLayer: Layer,
+  livePreview?: ResolvedInputPreview | null,
 ): Exclude<VerificationStepResult, "pending"> | null {
   if (!step) {
     return null;
@@ -257,11 +285,15 @@ export function suggestedVerificationStepResult(
     return "noSignal";
   }
 
+  // Use live resolution preview if available, otherwise fall back to step's stored values
+  const resolvedControlId = livePreview?.controlId ?? step.resolvedControlId ?? null;
+  const resolvedLayer = livePreview?.layer ?? step.resolvedLayer ?? null;
+
   if (
     step.configuredEncodedKey &&
     step.observedEncodedKey === step.configuredEncodedKey &&
-    step.resolvedControlId === selectedControlId &&
-    step.resolvedLayer === selectedLayer
+    resolvedControlId === selectedControlId &&
+    resolvedLayer === selectedLayer
   ) {
     return "matched";
   }
@@ -341,10 +373,7 @@ function updateStep(
   index: number,
   updateStepValue: (step: VerificationSessionStep) => VerificationSessionStep,
 ): VerificationSession {
-  return {
-    ...session,
-    steps: session.steps.map((step, stepIndex) =>
-      stepIndex === index ? updateStepValue(step) : step,
-    ),
-  };
+  const steps = session.steps.slice();
+  steps[index] = updateStepValue(steps[index]);
+  return { ...session, steps };
 }

@@ -4,8 +4,11 @@ use std::{
     process::Command,
     thread,
     time::Duration,
-    time::{SystemTime, UNIX_EPOCH},
 };
+
+/// Maximum delay (in milliseconds) allowed for a single sequence step sleep.
+/// Prevents unbounded thread blocking from malformed or malicious configs.
+const MAX_STEP_DELAY_MS: u64 = 30_000;
 
 use crate::{
     clipboard,
@@ -14,7 +17,8 @@ use crate::{
         TextSnippetPayload,
     },
     input_synthesis,
-    resolver::{ResolvedInputPreview, ResolutionStatus},
+    resolver::{ResolutionStatus, ResolvedInputPreview},
+    runtime::timestamp_millis,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -133,7 +137,7 @@ pub fn execute_preview_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -213,7 +217,7 @@ pub fn run_preview_action(
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok(ActionExecutionEvent {
             encoded_key: preview.encoded_key.clone(),
             action_id: action.id.clone(),
-            action_type: action_type_name(action.action_type).into(),
+            action_type: action.action_type.as_str().into(),
             action_pretty: action.pretty.clone(),
             resolved_profile_id: preview.resolved_profile_id.clone(),
             resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -294,6 +298,21 @@ fn summarize_action(
             ),
             Vec::new(),
         )),
+        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => Ok((
+            ExecutionOutcome::Simulated,
+            format!("Would simulate mouse action `{}`.", payload.action),
+            Vec::new(),
+        )),
+        (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => Ok((
+            ExecutionOutcome::Simulated,
+            format!("Would send media key `{}`.", payload.key),
+            Vec::new(),
+        )),
+        (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => Ok((
+            ExecutionOutcome::Simulated,
+            format!("Would switch to profile `{}`.", payload.target_profile_id),
+            Vec::new(),
+        )),
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok((
             ExecutionOutcome::Noop,
             "Disabled action results in a no-op.".into(),
@@ -323,7 +342,7 @@ fn run_live_launch_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -340,6 +359,15 @@ fn run_live_launch_action(
     })
 }
 
+/// Executes a sequence of steps (send, text, sleep, launch) synchronously on the
+/// worker thread.
+///
+/// **Limitation:** Launch steps within a sequence spawn detached processes (see
+/// [`spawn_launch_target`] doc comment). If a later step in the sequence fails, any
+/// processes spawned by earlier launch steps will remain running -- there is no
+/// automatic rollback. Additionally, the studio only surfaces the PID of the *last*
+/// launched process in the returned event; earlier PIDs are recorded in warnings but
+/// not tracked for lifecycle management.
 fn run_live_sequence_action(
     action: &Action,
     preview: &ResolvedInputPreview,
@@ -361,7 +389,9 @@ fn run_live_sequence_action(
     for step in &payload.steps {
         match step {
             SequenceStep::Sleep { delay_ms } => {
-                thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                thread::sleep(Duration::from_millis(
+                    u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                ));
             }
             SequenceStep::Launch {
                 value,
@@ -380,7 +410,9 @@ fn run_live_sequence_action(
                 )?;
                 launched_processes.push(process_id);
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                    thread::sleep(Duration::from_millis(
+                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                    ));
                 }
             }
             SequenceStep::Text { value, delay_ms } => {
@@ -395,7 +427,9 @@ fn run_live_sequence_action(
                 })?;
                 injected_input_steps += 1;
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                    thread::sleep(Duration::from_millis(
+                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                    ));
                 }
             }
             SequenceStep::Send { value, delay_ms } => {
@@ -410,7 +444,9 @@ fn run_live_sequence_action(
                 })?;
                 injected_input_steps += 1;
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                    thread::sleep(Duration::from_millis(
+                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                    ));
                 }
             }
         }
@@ -435,7 +471,7 @@ fn run_live_sequence_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -456,9 +492,7 @@ fn run_live_sequence_action(
     })
 }
 
-fn validate_live_sequence(
-    payload: &crate::config::SequenceActionPayload,
-) -> Result<(), String> {
+fn validate_live_sequence(payload: &crate::config::SequenceActionPayload) -> Result<(), String> {
     for step in &payload.steps {
         match step {
             SequenceStep::Sleep { .. } => {}
@@ -484,7 +518,9 @@ fn validate_live_sequence(
             }
             SequenceStep::Send { value, .. } => {
                 crate::hotkeys::parse_hotkey(value).map_err(|message| {
-                    format!("Live sequence send step `{value}` is not a supported hotkey: {message}")
+                    format!(
+                        "Live sequence send step `{value}` is not a supported hotkey: {message}"
+                    )
                 })?;
             }
         }
@@ -512,7 +548,7 @@ fn run_live_shortcut_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -576,7 +612,7 @@ fn run_live_text_snippet_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -593,6 +629,20 @@ fn run_live_text_snippet_action(
     })
 }
 
+/// Spawns a launch target and returns its OS process ID.
+///
+/// **Design note:** The `Child` handle returned by `Command::spawn()` is intentionally
+/// dropped immediately after extracting the PID. Launched programs are meant to run
+/// independently of the studio process -- we do not wait on them, send signals, or
+/// manage their lifecycle. Dropping the `Child` detaches the process on Windows (the
+/// child continues running), which is the desired behaviour for "launch application"
+/// actions.
+///
+/// A consequence is that we have no way to terminate these processes later. For
+/// standalone launch actions this is fine, but for sequence steps it means the studio
+/// cannot roll back a partially-executed sequence by killing processes spawned in
+/// earlier steps. True child-process tracking would require storing `Child` handles
+/// in `RuntimeStore`, which is a larger refactor tracked separately.
 fn spawn_launch_target(
     payload: &crate::config::LaunchActionPayload,
     preview: &ResolvedInputPreview,
@@ -614,18 +664,15 @@ fn spawn_launch_target(
         command.current_dir(working_dir);
     }
 
-    command
-        .spawn()
-        .map(|child| child.id())
-        .map_err(|error| {
-            execution_error(
-                "execution_failed",
-                "execution",
-                &format!("Failed to launch `{}`: {error}", payload.target),
-                Some(preview.encoded_key.clone()),
-                action_id,
-            )
-        })
+    command.spawn().map(|child| child.id()).map_err(|error| {
+        execution_error(
+            "execution_failed",
+            "execution",
+            &format!("Failed to launch `{}`: {error}", payload.target),
+            Some(preview.encoded_key.clone()),
+            action_id,
+        )
+    })
 }
 
 fn validate_launch_request(
@@ -636,10 +683,16 @@ fn validate_launch_request(
         return Err("Launch target must be an absolute path for live execution.".into());
     }
     if !target.exists() {
-        return Err(format!("Launch target `{}` does not exist.", payload.target));
+        return Err(format!(
+            "Launch target `{}` does not exist.",
+            payload.target
+        ));
     }
     if target.is_dir() {
-        return Err(format!("Launch target `{}` points to a directory.", payload.target));
+        return Err(format!(
+            "Launch target `{}` points to a directory.",
+            payload.target
+        ));
     }
 
     let working_dir = payload
@@ -666,7 +719,10 @@ fn validate_launch_request(
         }
     }
 
-    Ok(LaunchRequest { target, working_dir })
+    Ok(LaunchRequest {
+        target,
+        working_dir,
+    })
 }
 
 fn summarize_text_snippet(
@@ -749,7 +805,8 @@ fn snippet_tag_warnings(tags: &[String]) -> Vec<String> {
 }
 
 fn count_enabled_menu_items(items: &[MenuItem]) -> usize {
-    items.iter()
+    items
+        .iter()
         .map(|item| match item {
             MenuItem::Action { enabled, .. } => usize::from(*enabled),
             MenuItem::Submenu { enabled, items, .. } => {
@@ -782,19 +839,10 @@ fn format_shortcut(payload: &crate::config::ShortcutActionPayload) -> String {
     if payload.win {
         parts.push("Win");
     }
-    parts.push(payload.key.as_str());
-    parts.join(" + ")
-}
-
-fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::Shortcut => "shortcut",
-        ActionType::TextSnippet => "textSnippet",
-        ActionType::Sequence => "sequence",
-        ActionType::Launch => "launch",
-        ActionType::Menu => "menu",
-        ActionType::Disabled => "disabled",
+    if !payload.key.trim().is_empty() {
+        parts.push(payload.key.as_str());
     }
+    parts.join(" + ")
 }
 
 fn paste_mode_name(paste_mode: PasteMode) -> &'static str {
@@ -821,13 +869,6 @@ fn execution_error(
             created_at: timestamp_millis(),
         },
     }
-}
-
-fn timestamp_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }
 
 #[cfg(test)]

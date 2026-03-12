@@ -1,5 +1,8 @@
 use crate::config::ShortcutActionPayload;
 
+#[cfg(target_os = "windows")]
+pub(crate) const INTERNAL_SENDINPUT_EXTRA_INFO: usize = 0x4E41_4741_5354_5544usize;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShortcutDispatchReport {
     pub warnings: Vec<String>,
@@ -42,8 +45,17 @@ enum KeyboardInputSpec {
 
 pub fn send_shortcut(payload: &ShortcutActionPayload) -> Result<ShortcutDispatchReport, String> {
     let snapshot = current_modifier_snapshot()?;
-    let (plan, reused_modifiers) = plan_shortcut_inputs(payload, snapshot)?;
-    send_keyboard_inputs(&plan)?;
+    let (plan, reused_modifiers) = plan_shortcut_inputs(payload, &snapshot)?;
+
+    if let Err(send_error) = send_keyboard_inputs(&plan) {
+        // Best-effort cleanup: release any modifiers we pressed to prevent stuck keys.
+        let pressed = extract_pressed_modifiers(payload, &snapshot);
+        if !pressed.is_empty() {
+            let cleanup = build_modifier_release_inputs(&pressed);
+            let _ = send_keyboard_inputs(&cleanup);
+        }
+        return Err(send_error);
+    }
 
     let warnings = if reused_modifiers.is_empty() {
         Vec::new()
@@ -59,6 +71,38 @@ pub fn send_shortcut(payload: &ShortcutActionPayload) -> Result<ShortcutDispatch
     };
 
     Ok(ShortcutDispatchReport { warnings })
+}
+
+/// Determine which modifiers the shortcut would have pressed down (i.e., desired
+/// but not already active according to the snapshot).
+fn extract_pressed_modifiers(
+    payload: &ShortcutActionPayload,
+    snapshot: &ModifierSnapshot,
+) -> Vec<ModifierKey> {
+    [
+        (ModifierKey::Win, payload.win),
+        (ModifierKey::Ctrl, payload.ctrl),
+        (ModifierKey::Alt, payload.alt),
+        (ModifierKey::Shift, payload.shift),
+    ]
+    .iter()
+    .filter(|(modifier, desired)| *desired && !snapshot.is_active(*modifier))
+    .map(|(modifier, _)| *modifier)
+    .collect()
+}
+
+/// Build key-up events for the given modifiers, in reverse order (mirror the
+/// press-down sequence so that the last-pressed modifier is released first).
+fn build_modifier_release_inputs(modifiers: &[ModifierKey]) -> Vec<KeyboardInputSpec> {
+    modifiers
+        .iter()
+        .rev()
+        .map(|modifier| KeyboardInputSpec::VirtualKey {
+            code: modifier.virtual_key().code,
+            extended: modifier.virtual_key().extended,
+            key_up: true,
+        })
+        .collect()
 }
 
 pub fn send_hotkey_string(raw: &str) -> Result<ShortcutDispatchReport, String> {
@@ -86,14 +130,25 @@ pub fn send_text(text: &str) -> Result<(), String> {
 
 fn plan_shortcut_inputs(
     payload: &ShortcutActionPayload,
-    snapshot: ModifierSnapshot,
+    snapshot: &ModifierSnapshot,
 ) -> Result<(Vec<KeyboardInputSpec>, Vec<ModifierKey>), String> {
-    let primary_key = parse_primary_key(&payload.key)?;
-    if is_modifier_virtual_key(primary_key.code) {
-        return Err(
-            "Shortcut primary key must not be a modifier key. Use ctrl/shift/alt/win flags plus a non-modifier key."
-                .into(),
-        );
+    let has_primary_key = !payload.key.trim().is_empty();
+    let primary_key = if has_primary_key {
+        let pk = parse_primary_key(&payload.key)?;
+        if is_modifier_virtual_key(pk.code) {
+            return Err(
+                "Shortcut primary key must not be a modifier key. Use ctrl/shift/alt/win flags plus a non-modifier key."
+                    .into(),
+            );
+        }
+        Some(pk)
+    } else {
+        None
+    };
+
+    let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
+    if primary_key.is_none() && !has_modifier {
+        return Err("Shortcut must have a key or at least one modifier.".into());
     }
 
     let desired_modifiers = [
@@ -127,8 +182,10 @@ fn plan_shortcut_inputs(
         }
     }
 
-    push_virtual_key_down(&mut inputs, primary_key);
-    push_virtual_key_up(&mut inputs, primary_key);
+    if let Some(pk) = primary_key {
+        push_virtual_key_down(&mut inputs, pk);
+        push_virtual_key_up(&mut inputs, pk);
+    }
 
     for modifier in pressed_modifiers.into_iter().rev() {
         push_virtual_key_up(&mut inputs, modifier.virtual_key());
@@ -449,8 +506,8 @@ fn current_modifier_snapshot() -> Result<ModifierSnapshot, String> {
 fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-        KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
+        MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC,
     };
 
     if inputs.is_empty() {
@@ -478,7 +535,7 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
                             wScan: scan_code,
                             dwFlags: flags,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: INTERNAL_SENDINPUT_EXTRA_INFO,
                         },
                     },
                 }
@@ -496,7 +553,7 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
                             wScan: *code_unit,
                             dwFlags: flags,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: INTERNAL_SENDINPUT_EXTRA_INFO,
                         },
                     },
                 }
@@ -516,9 +573,9 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
     } else {
         let last_error = std::io::Error::last_os_error();
         let suffix = match last_error.raw_os_error() {
-            Some(code) => format!(
-                " Win32 error {code}: {last_error}. SendInput may also be blocked by UIPI."
-            ),
+            Some(code) => {
+                format!(" Win32 error {code}: {last_error}. SendInput may also be blocked by UIPI.")
+            }
             None => " SendInput may have been blocked by another thread or by UIPI.".into(),
         };
         Err(format!(
@@ -918,10 +975,7 @@ mod tests {
             "=",
             "8",
         ] {
-            assert!(
-                parse_primary_key(key).is_ok(),
-                "expected `{key}` to parse"
-            );
+            assert!(parse_primary_key(key).is_ok(), "expected `{key}` to parse");
         }
     }
 
@@ -944,7 +998,7 @@ mod tests {
 
         let (plan, reused) = plan_shortcut_inputs(
             &payload,
-            ModifierSnapshot {
+            &ModifierSnapshot {
                 ctrl: true,
                 shift: false,
                 alt: false,
@@ -972,6 +1026,48 @@ mod tests {
     }
 
     #[test]
+    fn plans_modifier_only_shortcut_as_press_and_release() {
+        let payload = ShortcutActionPayload {
+            key: String::new(),
+            ctrl: true,
+            shift: false,
+            alt: true,
+            win: false,
+            raw: Some("Ctrl+Alt".into()),
+        };
+
+        let (plan, reused) = plan_shortcut_inputs(&payload, &ModifierSnapshot::default())
+            .expect("expected modifier-only shortcut to plan");
+
+        assert!(reused.is_empty());
+        assert_eq!(
+            plan,
+            vec![
+                KeyboardInputSpec::VirtualKey {
+                    code: vk_lcontrol(),
+                    extended: false,
+                    key_up: false,
+                },
+                KeyboardInputSpec::VirtualKey {
+                    code: vk_lmenu(),
+                    extended: false,
+                    key_up: false,
+                },
+                KeyboardInputSpec::VirtualKey {
+                    code: vk_lmenu(),
+                    extended: false,
+                    key_up: true,
+                },
+                KeyboardInputSpec::VirtualKey {
+                    code: vk_lcontrol(),
+                    extended: false,
+                    key_up: true,
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn blocks_unexpected_external_modifiers() {
         let payload = ShortcutActionPayload {
             key: "C".into(),
@@ -984,7 +1080,7 @@ mod tests {
 
         let error = plan_shortcut_inputs(
             &payload,
-            ModifierSnapshot {
+            &ModifierSnapshot {
                 ctrl: true,
                 shift: false,
                 alt: false,

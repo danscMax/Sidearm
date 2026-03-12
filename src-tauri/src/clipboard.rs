@@ -48,8 +48,7 @@ impl ClipboardSnapshot {
         #[cfg(target_os = "windows")]
         unsafe {
             use windows_sys::Win32::System::{
-                DataExchange::CountClipboardFormats,
-                Ole::OleGetClipboard,
+                DataExchange::CountClipboardFormats, Ole::OleGetClipboard,
             };
 
             let format_count = CountClipboardFormats();
@@ -134,13 +133,24 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
         open_clipboard_with_retry()?;
         let close_guard = ClipboardOpenGuard;
 
+        // NOTE: The Windows clipboard API requires EmptyClipboard() to be called
+        // before SetClipboardData(). This means if GlobalAlloc fails below, the
+        // clipboard will have already been emptied and the prior contents are lost.
+        // This is an inherent limitation of the Win32 clipboard API -- there is no
+        // way to atomically replace clipboard contents. The caller (paste_text)
+        // mitigates this by capturing a snapshot via OleGetClipboard before we get
+        // here, but the snapshot restore is best-effort and may not recover all
+        // original clipboard formats.
         if EmptyClipboard() == 0 {
             return Err("EmptyClipboard failed while staging snippet text.".into());
         }
 
         let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
         if handle.is_null() {
-            return Err("GlobalAlloc failed while staging snippet text.".into());
+            return Err(
+                "GlobalAlloc failed after EmptyClipboard; prior clipboard contents are lost."
+                    .into(),
+            );
         }
 
         let locked = GlobalLock(handle);
@@ -149,11 +159,7 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
             return Err("GlobalLock failed while staging snippet text.".into());
         }
 
-        ptr::copy_nonoverlapping(
-            encoded.as_ptr() as *const u8,
-            locked as *mut u8,
-            byte_len,
-        );
+        ptr::copy_nonoverlapping(encoded.as_ptr() as *const u8, locked as *mut u8, byte_len);
         let _ = GlobalUnlock(handle);
 
         let clipboard_handle = SetClipboardData(u32::from(CF_UNICODETEXT), handle);
@@ -183,7 +189,7 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
 fn clear_clipboard() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard};
+        use windows_sys::Win32::System::DataExchange::EmptyClipboard;
 
         open_clipboard_with_retry()?;
         let close_guard = ClipboardOpenGuard;
@@ -191,7 +197,6 @@ fn clear_clipboard() -> Result<(), String> {
             return Err("EmptyClipboard failed while restoring an empty clipboard.".into());
         }
         drop(close_guard);
-        let _ = CloseClipboard;
         Ok(())
     }
 
@@ -250,8 +255,7 @@ fn open_clipboard_with_retry() -> Result<(), String> {
         let owner = GetOpenClipboardWindow();
         Err(format!(
             "OpenClipboard failed after {} attempts. OpenClipboard owner: 0x{:X}.",
-            CLIPBOARD_OPEN_RETRIES,
-            owner as usize
+            CLIPBOARD_OPEN_RETRIES, owner as usize
         ))
     }
 

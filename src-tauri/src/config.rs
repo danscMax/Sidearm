@@ -310,6 +310,15 @@ pub struct AppMapping {
     pub priority: i32,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum TriggerMode {
+    Press,
+    DoublePress,
+    TriplePress,
+    Hold,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Binding {
@@ -321,6 +330,8 @@ pub struct Binding {
     pub action_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_mode: Option<TriggerMode>,
     pub enabled: bool,
 }
 
@@ -332,7 +343,26 @@ pub enum ActionType {
     Sequence,
     Launch,
     Menu,
+    MouseAction,
+    MediaKey,
+    ProfileSwitch,
     Disabled,
+}
+
+impl ActionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ActionType::Shortcut => "shortcut",
+            ActionType::TextSnippet => "textSnippet",
+            ActionType::Sequence => "sequence",
+            ActionType::Launch => "launch",
+            ActionType::Menu => "menu",
+            ActionType::MouseAction => "mouseAction",
+            ActionType::MediaKey => "mediaKey",
+            ActionType::ProfileSwitch => "profileSwitch",
+            ActionType::Disabled => "disabled",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -355,6 +385,9 @@ pub enum ActionPayload {
     Sequence(SequenceActionPayload),
     Launch(LaunchActionPayload),
     Menu(MenuActionPayload),
+    MouseAction(MouseActionPayload),
+    MediaKey(MediaKeyPayload),
+    ProfileSwitch(ProfileSwitchPayload),
     Disabled(DisabledActionPayload),
 }
 
@@ -380,6 +413,7 @@ pub enum PasteMode {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum TextSnippetPayload {
+    #[serde(rename_all = "camelCase")]
     Inline {
         text: String,
         paste_mode: PasteMode,
@@ -400,19 +434,21 @@ pub struct SequenceActionPayload {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SequenceStep {
+    #[serde(rename_all = "camelCase")]
     Send {
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
     },
+    #[serde(rename_all = "camelCase")]
     Text {
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
     },
-    Sleep {
-        delay_ms: u32,
-    },
+    #[serde(rename_all = "camelCase")]
+    Sleep { delay_ms: u32 },
+    #[serde(rename_all = "camelCase")]
     Launch {
         value: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -443,18 +479,38 @@ pub struct MenuActionPayload {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MenuItem {
+    #[serde(rename_all = "camelCase")]
     Action {
         id: String,
         label: String,
         action_ref: String,
         enabled: bool,
     },
+    #[serde(rename_all = "camelCase")]
     Submenu {
         id: String,
         label: String,
         items: Vec<MenuItem>,
         enabled: bool,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MouseActionPayload {
+    pub action: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MediaKeyPayload {
+    pub key: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProfileSwitchPayload {
+    pub target_profile_id: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -840,9 +896,10 @@ fn validate_action<'a>(
 ) {
     match (&action.action_type, &action.payload) {
         (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => {
-            if payload.key.trim().is_empty() {
+            let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
+            if payload.key.trim().is_empty() && !has_modifier {
                 errors.push(format!(
-                    "action `{}` shortcut key must not be empty.",
+                    "action `{}` shortcut must have a key or at least one modifier.",
                     action.id
                 ));
             }
@@ -896,11 +953,35 @@ fn validate_action<'a>(
                 errors,
             );
         }
+        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
+            if payload.action.trim().is_empty() {
+                errors.push(format!(
+                    "action `{}` mouseAction must specify an action.",
+                    action.id
+                ));
+            }
+        }
+        (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => {
+            if payload.key.trim().is_empty() {
+                errors.push(format!(
+                    "action `{}` mediaKey must specify a key.",
+                    action.id
+                ));
+            }
+        }
+        (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => {
+            if payload.target_profile_id.trim().is_empty() {
+                errors.push(format!(
+                    "action `{}` profileSwitch must specify a targetProfileId.",
+                    action.id
+                ));
+            }
+        }
         (ActionType::Disabled, ActionPayload::Disabled(_)) => {}
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
-            action_type_name(action.action_type)
+            action.action_type.as_str()
         )),
     }
 }
@@ -1051,17 +1132,6 @@ fn io_error(path: Option<&Path>, error: std::io::Error) -> ConfigStoreError {
             Some(path) => format!("I/O error at {}: {error}", path_string(path)),
             None => format!("I/O error: {error}"),
         },
-    }
-}
-
-fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::Shortcut => "shortcut",
-        ActionType::TextSnippet => "textSnippet",
-        ActionType::Sequence => "sequence",
-        ActionType::Launch => "launch",
-        ActionType::Menu => "menu",
-        ActionType::Disabled => "disabled",
     }
 }
 
@@ -1253,7 +1323,9 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Right Click"),
             false,
             CapabilityStatus::Reserved,
-            Some("Remapped to Hypershift in Synapse. Actual right-click = Hypershift + Left Click."),
+            Some(
+                "Remapped to Hypershift in Synapse. Actual right-click = Hypershift + Left Click.",
+            ),
         ),
         physical_control(
             ControlId::TopAux01,
@@ -2364,6 +2436,7 @@ fn binding(
         label: label.into(),
         action_ref,
         color_tag: None,
+        trigger_mode: None,
         enabled: true,
     }
 }
@@ -2482,7 +2555,9 @@ mod tests {
         match result {
             Err(ConfigStoreError::InvalidConfig { errors }) => {
                 assert!(
-                    errors.iter().any(|error| error.contains("Ctrl+Alt+Shift+F13")),
+                    errors
+                        .iter()
+                        .any(|error| error.contains("Ctrl+Alt+Shift+F13")),
                     "expected canonical duplicate encodedKey validation error, got {errors:?}"
                 );
             }

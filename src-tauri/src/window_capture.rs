@@ -1,11 +1,9 @@
 use serde::Serialize;
-use std::{
-    path::Path,
-    thread,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{path::Path, thread, time::Duration};
 
-use crate::config::{AppConfig, AppMapping, Profile};
+use crate::config::AppConfig;
+use crate::resolver::{find_profile, matching_app_mappings};
+use crate::runtime::timestamp_millis;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -113,46 +111,6 @@ fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> W
     }
 }
 
-fn matching_app_mappings<'a>(config: &'a AppConfig, exe: &str, title: &str) -> Vec<&'a AppMapping> {
-    let normalized_exe = exe.to_ascii_lowercase();
-    let normalized_title = title.to_ascii_lowercase();
-    let mut matches: Vec<&AppMapping> = config
-        .app_mappings
-        .iter()
-        .filter(|mapping| mapping.enabled)
-        .filter(|mapping| mapping.exe.eq_ignore_ascii_case(&normalized_exe))
-        .filter(|mapping| {
-            mapping.title_includes.is_empty()
-                || mapping
-                    .title_includes
-                    .iter()
-                    .all(|needle| normalized_title.contains(&needle.to_ascii_lowercase()))
-        })
-        .collect();
-
-    matches.sort_by(|left, right| {
-        right
-            .priority
-            .cmp(&left.priority)
-            .then_with(|| {
-                left.title_includes
-                    .is_empty()
-                    .cmp(&right.title_includes.is_empty())
-            })
-            .then_with(|| right.title_includes.len().cmp(&left.title_includes.len()))
-            .then_with(|| left.id.cmp(&right.id))
-    });
-
-    matches
-}
-
-fn find_profile<'a>(config: &'a AppConfig, profile_id: &str) -> Option<&'a Profile> {
-    config
-        .profiles
-        .iter()
-        .find(|profile| profile.id == profile_id && profile.enabled)
-}
-
 fn should_ignore_window(exe: &str, process_path: &str, app_name: &str) -> bool {
     let normalized_exe = exe.to_ascii_lowercase();
     let normalized_path = process_path.to_ascii_lowercase();
@@ -173,7 +131,9 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
         System::Threading::{
             OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
         },
-        UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId},
+        UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
+        },
     };
 
     unsafe {
@@ -188,10 +148,10 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
             return Err("Failed to resolve the foreground window process id.".into());
         }
 
-        let mut title_buffer = vec![0u16; 2048];
-        let title_length =
-            GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
-        let title = String::from_utf16_lossy(&title_buffer[..title_length.max(0) as usize]);
+        let title_len = GetWindowTextLengthW(hwnd);
+        let mut title_buffer = vec![0u16; (title_len as usize).max(1) + 1];
+        let actual_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
+        let title = String::from_utf16_lossy(&title_buffer[..actual_len.max(0) as usize]);
 
         let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if process_handle.is_null() {
@@ -239,20 +199,13 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
     Err("Foreground window capture is only implemented for Windows.".into())
 }
 
-fn timestamp_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::config::{
-        Action, ActionPayload, ActionType, AppConfig, Binding, CapabilityStatus, ControlFamily,
-        ControlId, EncoderMapping, Layer, MappingSource, PhysicalControl, Profile, Settings,
-        SnippetLibraryItem,
+        Action, ActionPayload, ActionType, AppConfig, AppMapping, Binding, CapabilityStatus,
+        ControlFamily, ControlId, EncoderMapping, Layer, MappingSource, PhysicalControl, Profile,
+        Settings, SnippetLibraryItem,
     };
 
     #[test]
@@ -377,6 +330,7 @@ mod tests {
                 label: "Example".into(),
                 action_ref: "action-default-standard-thumb-01".into(),
                 color_tag: None,
+                trigger_mode: None,
                 enabled: true,
             }],
             actions: vec![Action {

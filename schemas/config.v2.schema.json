@@ -124,6 +124,9 @@
         "sequence",
         "launch",
         "menu",
+        "mouseAction",
+        "mediaKey",
+        "profileSwitch",
         "disabled"
       ]
     },
@@ -474,6 +477,54 @@
           "if": {
             "properties": {
               "type": {
+                "const": "mouseAction"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/mouseActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "mediaKey"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/mediaKeyPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "profileSwitch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/profileSwitchPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "disabled"
               }
             }
@@ -535,7 +586,7 @@
       ],
       "properties": {
         "key": {
-          "$ref": "#/$defs/nonEmptyString"
+          "type": "string"
         },
         "ctrl": {
           "type": "boolean",
@@ -834,6 +885,42 @@
         },
         "enabled": {
           "type": "boolean"
+        }
+      }
+    },
+    "mouseActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "mediaKeyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "profileSwitchPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetProfileId"
+      ],
+      "properties": {
+        "targetProfileId": {
+          "$ref": "#/$defs/idToken"
         }
       }
     },

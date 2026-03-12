@@ -1,0 +1,344 @@
+import {
+  startTransition,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
+
+import {
+  captureActiveWindow,
+  executePreviewAction,
+  getDebugLog,
+  listenActionExecutionEvent,
+  listenControlResolutionEvent,
+  listenEncodedKeyEvent,
+  listenRuntimeErrorEvent,
+  listenRuntimeEvent,
+  listenWindowResolutionEvent,
+  normalizeCommandError,
+  previewResolution,
+  reloadRuntime,
+  runPreviewAction,
+  startRuntime,
+  stopRuntime,
+} from "../lib/backend";
+import type { CommandError } from "../lib/config";
+import type {
+  ActionExecutionEvent,
+  DebugLogEntry,
+  EncodedKeyEvent,
+  ResolvedInputPreview,
+  RuntimeErrorEvent,
+  RuntimeStateSummary,
+  WindowCaptureResult,
+} from "../lib/runtime";
+import { idleRuntimeStateSummary } from "../lib/runtime";
+
+export interface RuntimeControl {
+  // State
+  runtimeSummary: RuntimeStateSummary;
+  setRuntimeSummary: React.Dispatch<React.SetStateAction<RuntimeStateSummary>>;
+  debugLog: DebugLogEntry[];
+  captureDelayMs: number;
+  setCaptureDelayMs: React.Dispatch<React.SetStateAction<number>>;
+  lastCapture: WindowCaptureResult | null;
+  setLastCapture: React.Dispatch<React.SetStateAction<WindowCaptureResult | null>>;
+  resolutionKeyInput: string;
+  setResolutionKeyInput: React.Dispatch<React.SetStateAction<string>>;
+  lastResolutionPreview: ResolvedInputPreview | null;
+  setLastResolutionPreview: React.Dispatch<React.SetStateAction<ResolvedInputPreview | null>>;
+  lastExecution: ActionExecutionEvent | null;
+  setLastExecution: React.Dispatch<React.SetStateAction<ActionExecutionEvent | null>>;
+  lastRuntimeError: RuntimeErrorEvent | null;
+  setLastRuntimeError: React.Dispatch<React.SetStateAction<RuntimeErrorEvent | null>>;
+  lastEncodedKey: EncodedKeyEvent | null;
+  setLastEncodedKey: React.Dispatch<React.SetStateAction<EncodedKeyEvent | null>>;
+
+  // Actions
+  refreshDebugLog: () => Promise<void>;
+  handleStartRuntime: () => Promise<void>;
+  handleReloadRuntime: () => Promise<void>;
+  handleStopRuntime: () => Promise<void>;
+  handleCaptureActiveWindow: () => Promise<void>;
+  handlePreviewResolution: () => Promise<void>;
+  handleExecutePreviewAction: () => Promise<void>;
+  handleRunPreviewAction: () => Promise<void>;
+}
+
+export function useRuntime(deps: {
+  setError: React.Dispatch<React.SetStateAction<CommandError | null>>;
+  onEncodedKeyEvent?: (event: EncodedKeyEvent) => void;
+  onControlResolutionEvent?: (preview: ResolvedInputPreview) => void;
+}): RuntimeControl {
+  const { setError } = deps;
+
+  const [runtimeSummary, setRuntimeSummary] = useState<RuntimeStateSummary>(
+    idleRuntimeStateSummary,
+  );
+  const [debugLog, setDebugLog] = useState<DebugLogEntry[]>([]);
+  const [captureDelayMs, setCaptureDelayMs] = useState(1500);
+  const [lastCapture, setLastCapture] = useState<WindowCaptureResult | null>(null);
+  const [resolutionKeyInput, setResolutionKeyInput] = useState("F13");
+  const [lastResolutionPreview, setLastResolutionPreview] =
+    useState<ResolvedInputPreview | null>(null);
+  const [lastExecution, setLastExecution] = useState<ActionExecutionEvent | null>(null);
+  const [lastRuntimeError, setLastRuntimeError] = useState<RuntimeErrorEvent | null>(null);
+  const [lastEncodedKey, setLastEncodedKey] = useState<EncodedKeyEvent | null>(null);
+
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // --- useEffectEvent handlers for Tauri listeners ---
+
+  const handleRuntimeEvent = useEffectEvent((summary: RuntimeStateSummary) => {
+    startTransition(() => {
+      setRuntimeSummary(summary);
+    });
+    void refreshDebugLog();
+  });
+
+  const handleWindowResolutionEvent = useEffectEvent((result: WindowCaptureResult) => {
+    startTransition(() => {
+      setLastCapture(result);
+    });
+    void refreshDebugLog();
+  });
+
+  const handleEncodedKeyEvent = useEffectEvent((event: EncodedKeyEvent) => {
+    startTransition(() => {
+      setLastEncodedKey(event);
+    });
+    deps.onEncodedKeyEvent?.(event);
+    void refreshDebugLog();
+  });
+
+  const handleControlResolutionEvent = useEffectEvent((result: ResolvedInputPreview) => {
+    startTransition(() => {
+      setLastResolutionPreview(result);
+    });
+    deps.onControlResolutionEvent?.(result);
+    void refreshDebugLog();
+  });
+
+  const handleActionExecutionEvent = useEffectEvent((event: ActionExecutionEvent) => {
+    startTransition(() => {
+      setLastExecution(event);
+      setLastRuntimeError(null);
+    });
+    void refreshDebugLog();
+  });
+
+  const handleRuntimeErrorEvent = useEffectEvent((event: RuntimeErrorEvent) => {
+    startTransition(() => {
+      setLastRuntimeError(event);
+    });
+    void refreshDebugLog();
+  });
+
+  // --- Tauri event listeners ---
+
+  useEffect(() => {
+    void refreshDebugLog();
+
+    let disposed = false;
+    let unlistenFns: Array<() => void> = [];
+
+    async function attachRuntimeListeners() {
+      const listeners = await Promise.all([
+        listenRuntimeEvent("runtime_started", handleRuntimeEvent),
+        listenRuntimeEvent("runtime_stopped", handleRuntimeEvent),
+        listenRuntimeEvent("config_reloaded", handleRuntimeEvent),
+        listenEncodedKeyEvent("encoded_key_received", handleEncodedKeyEvent),
+        listenWindowResolutionEvent("profile_resolved", handleWindowResolutionEvent),
+        listenControlResolutionEvent("control_resolved", handleControlResolutionEvent),
+        listenActionExecutionEvent("action_executed", handleActionExecutionEvent),
+        listenRuntimeErrorEvent("runtime_error", handleRuntimeErrorEvent),
+      ]);
+
+      if (disposed) {
+        listeners.forEach((unlisten) => {
+          void unlisten();
+        });
+        return;
+      }
+
+      unlistenFns = listeners;
+    }
+
+    void attachRuntimeListeners().catch((error) => {
+      console.error("Failed to attach runtime listeners:", error);
+    });
+
+    return () => {
+      disposed = true;
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      unlistenFns.forEach((unlisten) => {
+        void unlisten();
+      });
+    };
+  }, []);
+
+  // --- Action functions ---
+
+  async function refreshDebugLog() {
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+    refreshTimerRef.current = setTimeout(async () => {
+      refreshTimerRef.current = null;
+      try {
+        const entries = await getDebugLog();
+        startTransition(() => {
+          setDebugLog(entries);
+        });
+      } catch (unknownError) {
+        startTransition(() => {
+          setError(normalizeCommandError(unknownError));
+        });
+      }
+    }, 50); // 50ms debounce - groups rapid successive events
+  }
+
+  async function handleStartRuntime() {
+    try {
+      const summary = await startRuntime();
+      startTransition(() => {
+        setRuntimeSummary(summary);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  async function handleReloadRuntime() {
+    try {
+      const summary = await reloadRuntime();
+      startTransition(() => {
+        setRuntimeSummary(summary);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  async function handleStopRuntime() {
+    try {
+      const summary = await stopRuntime();
+      startTransition(() => {
+        setRuntimeSummary(summary);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  async function handleCaptureActiveWindow() {
+    try {
+      const result = await captureActiveWindow(captureDelayMs);
+      startTransition(() => {
+        setLastCapture(result);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  async function handlePreviewResolution() {
+    try {
+      const result = await previewResolution(
+        resolutionKeyInput,
+        lastCapture && !lastCapture.ignored ? lastCapture.exe : undefined,
+        lastCapture && !lastCapture.ignored ? lastCapture.title : undefined,
+      );
+      startTransition(() => {
+        setLastResolutionPreview(result);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  async function handleExecutePreviewAction() {
+    try {
+      const result = await executePreviewAction(
+        resolutionKeyInput,
+        lastCapture && !lastCapture.ignored ? lastCapture.exe : undefined,
+        lastCapture && !lastCapture.ignored ? lastCapture.title : undefined,
+      );
+      startTransition(() => {
+        setLastExecution(result);
+        setLastRuntimeError(null);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  async function handleRunPreviewAction() {
+    try {
+      const result = await runPreviewAction(
+        resolutionKeyInput,
+        lastCapture && !lastCapture.ignored ? lastCapture.exe : undefined,
+        lastCapture && !lastCapture.ignored ? lastCapture.title : undefined,
+      );
+      startTransition(() => {
+        setLastExecution(result);
+        setLastRuntimeError(null);
+      });
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
+  return {
+    runtimeSummary,
+    setRuntimeSummary,
+    debugLog,
+    captureDelayMs,
+    setCaptureDelayMs,
+    lastCapture,
+    setLastCapture,
+    resolutionKeyInput,
+    setResolutionKeyInput,
+    lastResolutionPreview,
+    setLastResolutionPreview,
+    lastExecution,
+    setLastExecution,
+    lastRuntimeError,
+    setLastRuntimeError,
+    lastEncodedKey,
+    setLastEncodedKey,
+    refreshDebugLog,
+    handleStartRuntime,
+    handleReloadRuntime,
+    handleStopRuntime,
+    handleCaptureActiveWindow,
+    handlePreviewResolution,
+    handleExecutePreviewAction,
+    handleRunPreviewAction,
+  };
+}

@@ -29,9 +29,11 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
     if trimmed.chars().count() == 1 {
         let ch = trimmed.chars().next().expect("single-character branch");
         return match ch {
-            'a'..='z' | 'A'..='Z' => Ok(simple_key(ch.to_ascii_uppercase() as u16, false, &ch
-                .to_ascii_uppercase()
-                .to_string())),
+            'a'..='z' | 'A'..='Z' => Ok(simple_key(
+                ch.to_ascii_uppercase() as u16,
+                false,
+                &ch.to_ascii_uppercase().to_string(),
+            )),
             '0'..='9' => Ok(simple_key(ch as u16, false, &ch.to_string())),
             '-' => Ok(simple_key(VK_OEM_MINUS, false, "-")),
             '=' => Ok(simple_key(VK_OEM_PLUS, false, "=")),
@@ -44,12 +46,8 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
             ']' => Ok(simple_key(VK_OEM_6, false, "]")),
             '\\' => Ok(simple_key(VK_OEM_5, false, "\\")),
             '`' => Ok(simple_key(VK_OEM_3, false, "`")),
-            '+' => Err(
-                "Hotkey primary key `+` is ambiguous. Use `=` with Shift instead.".into()
-            ),
-            '_' => Err(
-                "Hotkey primary key `_` is ambiguous. Use `-` with Shift instead.".into()
-            ),
+            '+' => Err("Hotkey primary key `+` is ambiguous. Use `=` with Shift instead.".into()),
+            '_' => Err("Hotkey primary key `_` is ambiguous. Use `-` with Shift instead.".into()),
             other => Err(format!("Unsupported hotkey primary key `{other}`.")),
         };
     }
@@ -79,9 +77,7 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
         "DOWN" | "DOWNARROW" => Ok(simple_key(VK_DOWN, true, "Down")),
         "CAPSLOCK" => Ok(simple_key(VK_CAPITAL, false, "CapsLock")),
         "NUMLOCK" => Ok(simple_key(VK_NUMLOCK, true, "NumLock")),
-        "PRINTSCREEN" | "PRTSC" | "PRTSCN" => {
-            Ok(simple_key(VK_SNAPSHOT, true, "PrintScreen"))
-        }
+        "PRINTSCREEN" | "PRTSC" | "PRTSCN" => Ok(simple_key(VK_SNAPSHOT, true, "PrintScreen")),
         "SCROLLLOCK" => Ok(simple_key(VK_SCROLL, false, "ScrollLock")),
         "PAUSE" => Ok(simple_key(VK_PAUSE, false, "Pause")),
         "APPS" | "APPLICATION" | "MENU" => Ok(simple_key(VK_APPS, false, "Apps")),
@@ -109,7 +105,11 @@ pub fn parse_hotkey(raw: &str) -> Result<HotkeySpec, String> {
     let mut modifiers = HotkeyModifiers::default();
     let mut primary_key: Option<HotkeyKey> = None;
 
-    for token in trimmed.split('+').map(str::trim).filter(|token| !token.is_empty()) {
+    for token in trimmed
+        .split('+')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
         match normalize_modifier_token(token) {
             Some(ModifierToken::Ctrl) => {
                 if modifiers.ctrl {
@@ -144,9 +144,8 @@ pub fn parse_hotkey(raw: &str) -> Result<HotkeySpec, String> {
         }
     }
 
-    let primary_key = primary_key.ok_or_else(|| {
-        "encodedKey must contain one non-modifier primary key.".to_owned()
-    })?;
+    let primary_key = primary_key
+        .ok_or_else(|| "encodedKey must contain one non-modifier primary key.".to_owned())?;
 
     let mut parts = Vec::new();
     if modifiers.ctrl {

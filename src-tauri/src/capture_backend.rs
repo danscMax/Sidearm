@@ -350,6 +350,19 @@ fn is_win_vk(vk: u32) -> bool {
     matches!(vk, VK_LWIN | VK_RWIN)
 }
 
+/// dwExtraInfo marker for hook health probe events.  Distinct from
+/// `INTERNAL_SENDINPUT_EXTRA_INFO` so the hook callback can tell them apart.
+#[cfg(target_os = "windows")]
+const HOOK_PROBE_EXTRA_INFO: usize = 0x4E41_4741_5052_4F42usize;
+
+/// VK used for probe injection (same unassigned key as the mask key).
+#[cfg(target_os = "windows")]
+const VK_PROBE_KEY: u16 = 0xE8;
+
+/// How often the health monitor checks (milliseconds).
+#[cfg(target_os = "windows")]
+const HOOK_HEALTH_CHECK_INTERVAL_MS: u32 = 5000;
+
 // Thread-local state for the capture helper's LL keyboard hook callback.
 #[cfg(target_os = "windows")]
 thread_local! {
@@ -362,6 +375,16 @@ thread_local! {
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
         std::cell::RefCell::new(Vec::new());
     static HELPER_THREAD_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
+    /// Deferred mask-key flag — set by the hook callback, consumed by the
+    /// message pump.  We MUST NOT call SendInput inside the LL hook callback
+    /// because each injected event re-enters the full hook chain (Synapse,
+    /// PowerToys, etc.), which can push the callback beyond Windows'
+    /// LowLevelHooksTimeout (~200-300 ms), causing Windows to silently
+    /// remove our hook.
+    static HELPER_PENDING_MASK: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    /// Set to `true` by the hook callback when it receives a probe event
+    /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
+    static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = std::cell::Cell::new(false);
 }
 
 #[cfg(target_os = "windows")]
@@ -456,6 +479,40 @@ unsafe fn inject_mask_key() {
     );
 }
 
+/// Inject a VK 0xE8 probe event via SendInput to test hook health.
+/// The event carries `HOOK_PROBE_EXTRA_INFO` so the hook callback can
+/// recognize it and set the `HELPER_PROBE_RECEIVED` flag without treating
+/// it as a real key event.
+#[cfg(target_os = "windows")]
+unsafe fn inject_hook_probe() {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    };
+
+    let make_input = |key_up: bool| -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_PROBE_KEY,
+                    wScan: 0,
+                    dwFlags: if key_up { KEYEVENTF_KEYUP } else { 0 },
+                    time: 0,
+                    dwExtraInfo: HOOK_PROBE_EXTRA_INFO,
+                },
+            },
+        }
+    };
+
+    let inputs = [make_input(false), make_input(true)];
+    SendInput(
+        inputs.len() as u32,
+        inputs.as_ptr(),
+        size_of::<INPUT>() as i32,
+    );
+}
+
 /// LL keyboard hook callback for the capture helper process.
 /// Matches modifier+F-key combos and buffers the encoded key in HELPER_MATCHES.
 #[cfg(target_os = "windows")]
@@ -472,6 +529,12 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         let kb = &*(l_param as *const KBDLLHOOKSTRUCT);
         let msg = w_param as u32;
         let vk = kb.vkCode;
+        // Probe event from the health monitor — acknowledge and pass through.
+        if kb.dwExtraInfo == HOOK_PROBE_EXTRA_INFO {
+            HELPER_PROBE_RECEIVED.with(|cell| cell.set(true));
+            return CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param);
+        }
+
         let internal_injection =
             kb.dwExtraInfo == crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO;
 
@@ -502,12 +565,12 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             })
         });
 
-        // AHK-style "Menu Mask Key": inject a dummy keystroke (VK 0xE8) to
-        // prevent Windows from interpreting bare Alt-up or Win-up as a menu /
-        // Start-menu activation.  The injected events carry our internal
-        // dwExtraInfo marker so our own hook passes them straight through.
+        // Defer mask-key injection to the message pump — calling SendInput
+        // inside the LL hook callback adds re-entrant hook-chain traversals
+        // that can exceed the LowLevelHooksTimeout, causing Windows to
+        // silently remove our hook.
         if inject_mask {
-            inject_mask_key();
+            HELPER_PENDING_MASK.with(|cell| cell.set(true));
         }
 
         // Post a wake-up message so GetMessageW returns and drain_helper_matches
@@ -541,10 +604,12 @@ pub fn capture_helper_main() {
     use std::io::BufRead;
     use std::mem::MaybeUninit;
     use windows_sys::Win32::{
+        Foundation::{WAIT_FAILED, WAIT_TIMEOUT},
         System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
         UI::WindowsAndMessaging::{
-            DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW, TranslateMessage,
-            UnhookWindowsHookEx, MSG, WH_KEYBOARD_LL, WM_QUIT,
+            DispatchMessageW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostThreadMessageW,
+            SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, MSG, MWMO_INPUTAVAILABLE,
+            PM_REMOVE, QS_ALLINPUT, WH_KEYBOARD_LL, WM_QUIT,
         },
     };
 
@@ -580,6 +645,18 @@ pub fn capture_helper_main() {
     HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
     HELPER_MATCHES.with(|cell| cell.borrow_mut().clear());
 
+    // 2b. Elevate thread priority — LL hook callbacks must return within the
+    //     LowLevelHooksTimeout (~200-300ms) or Windows silently removes the
+    //     hook.  TIME_CRITICAL (priority 15) ensures our thread gets CPU time
+    //     even under heavy load.  Pattern from AutoHotkey v2 (hook.cpp:4004).
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+        };
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    }
+    eprintln!("[capture-helper] Thread priority set to TIME_CRITICAL.");
+
     // 3. Install WH_KEYBOARD_LL hook
     let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
     let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0) };
@@ -606,34 +683,135 @@ pub fn capture_helper_main() {
         }
     });
 
-    // 5. Message pump — drives the LL hook callbacks
+    // 5. Message pump — drives the LL hook callbacks.
+    //    Uses MsgWaitForMultipleObjectsEx instead of GetMessageW so we get a
+    //    periodic timeout for hook health monitoring.  Windows silently removes
+    //    WH_KEYBOARD_LL hooks when the callback exceeds LowLevelHooksTimeout
+    //    (~200-300 ms) and provides NO notification, so we must self-test.
     let stdout_handle = std::io::stdout();
     let mut stdout = stdout_handle.lock();
     let mut msg = MaybeUninit::<MSG>::zeroed();
+    let mut hook = hook; // make mutable for reinstallation
+    let mut probe_sent = false;
+    let mut hook_reinstall_count: u32 = 0;
+
     loop {
-        let status = unsafe { GetMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0) };
-        if status <= 0 {
-            break;
+        // Wait for messages OR timeout (health check interval).
+        let wait_result = unsafe {
+            MsgWaitForMultipleObjectsEx(
+                0,
+                std::ptr::null(),
+                HOOK_HEALTH_CHECK_INTERVAL_MS,
+                QS_ALLINPUT,
+                MWMO_INPUTAVAILABLE,
+            )
+        };
+
+        if wait_result == WAIT_FAILED {
+            eprintln!(
+                "[capture-helper] WARNING: MsgWaitForMultipleObjectsEx failed: {}",
+                std::io::Error::last_os_error()
+            );
+            // Continue the loop — next iteration will retry.
+            continue;
         }
 
-        // Drain matches buffered by the hook callback during GetMessageW
-        drain_helper_matches(&mut stdout);
-
-        let m = unsafe { msg.assume_init() };
-        unsafe {
-            TranslateMessage(&m);
-            DispatchMessageW(&m);
+        if wait_result == WAIT_TIMEOUT {
+            // No messages arrived within the interval — run health check.
+            if probe_sent {
+                // We sent a probe last cycle.  Check if the hook saw it.
+                let received = HELPER_PROBE_RECEIVED.with(|cell| cell.replace(false));
+                if received {
+                    // Hook is alive.
+                    probe_sent = false;
+                } else {
+                    // Hook is dead — reinstall it.
+                    eprintln!(
+                        "[capture-helper] WARNING: Hook health probe not received — \
+                         hook appears dead.  Reinstalling WH_KEYBOARD_LL..."
+                    );
+                    unsafe { UnhookWindowsHookEx(hook); }
+                    let new_hook = unsafe {
+                        SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
+                    };
+                    if new_hook.is_null() {
+                        eprintln!(
+                            "[capture-helper] FATAL: Failed to reinstall hook: {}. Exiting.",
+                            std::io::Error::last_os_error()
+                        );
+                        break;
+                    }
+                    hook = new_hook;
+                    hook_reinstall_count += 1;
+                    eprintln!(
+                        "[capture-helper] Hook reinstalled successfully \
+                         (total reinstalls: {hook_reinstall_count})."
+                    );
+                    probe_sent = false;
+                }
+            } else {
+                // Send a probe to test whether the hook is alive.
+                unsafe { inject_hook_probe(); }
+                probe_sent = true;
+                HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
+            }
+            // Fall through to pump any messages that may have arrived.
         }
 
-        // Also drain after dispatch (hooks may fire during DispatchMessageW)
-        drain_helper_matches(&mut stdout);
+        // Pump all pending messages (PeekMessageW is non-blocking).
+        loop {
+            let found = unsafe {
+                PeekMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0, PM_REMOVE)
+            };
+            if found == 0 {
+                break;
+            }
+
+            let m = unsafe { msg.assume_init() };
+            if m.message == WM_QUIT {
+                // Drain any remaining matches before exiting.
+                drain_helper_matches(&mut stdout);
+                // Jump to cleanup.
+                unsafe { UnhookWindowsHookEx(hook); }
+                eprintln!("[capture-helper] Hook uninstalled, exiting.");
+                return;
+            }
+
+            // Drain matches buffered by the hook callback.
+            drain_helper_matches(&mut stdout);
+
+            // Inject the mask key OUTSIDE the hook callback — safe from timeout.
+            // The mask key must arrive before the modifier key-up (which only
+            // happens when the user releases the physical button, typically
+            // 50-2000 ms after the key-down), so the slight delay from the
+            // message pump is perfectly fine.
+            let need_mask = HELPER_PENDING_MASK.with(|cell| cell.replace(false));
+            if need_mask {
+                unsafe { inject_mask_key(); }
+            }
+
+            unsafe {
+                TranslateMessage(&m);
+                DispatchMessageW(&m);
+            }
+
+            // Also drain after dispatch (hooks may fire during DispatchMessageW).
+            drain_helper_matches(&mut stdout);
+        }
+
+        // If the probe was just received inline (during message pumping after
+        // we injected it), acknowledge it immediately so we don't have to wait
+        // another full interval.
+        if probe_sent {
+            let received = HELPER_PROBE_RECEIVED.with(|cell| cell.replace(false));
+            if received {
+                probe_sent = false;
+            }
+        }
     }
 
-    // 6. Cleanup
-    unsafe {
-        UnhookWindowsHookEx(hook);
-    }
-    eprintln!("[capture-helper] Hook uninstalled, exiting.");
+    // 6. Cleanup (reached only on reinstall failure)
+    eprintln!("[capture-helper] Exiting message pump.");
 }
 
 #[cfg(target_os = "windows")]
@@ -787,6 +965,15 @@ fn run_hotkey_message_loop(
             DispatchMessageW, GetMessageW, TranslateMessage, MSG, WM_HOTKEY,
         },
     };
+
+    // Elevate thread priority (AHK pattern) — RegisterHotKey thread also
+    // benefits from responsive message processing.
+    unsafe {
+        use windows_sys::Win32::System::Threading::{
+            GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_TIME_CRITICAL,
+        };
+        SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+    }
 
     // --- 1. Register all hotkeys via RegisterHotKey ---
     let mut registered_ids = Vec::new();
@@ -990,8 +1177,23 @@ fn process_encoded_key_event(
         return;
     }
 
-    let is_hold_shortcut = preview.trigger_mode == Some(crate::config::TriggerMode::Hold)
-        && preview.action_type.as_deref() == Some("shortcut");
+    // Modifier-only shortcuts (Ctrl+Alt, Ctrl+Shift, etc.) are forced to hold
+    // mode regardless of configured trigger mode — in tap mode they press and
+    // immediately release modifiers, which is useless.
+    let is_modifier_only_shortcut = preview.action_type.as_deref() == Some("shortcut")
+        && config
+            .actions
+            .iter()
+            .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
+            .and_then(|a| match &a.payload {
+                crate::config::ActionPayload::Shortcut(p) => Some(p.key.trim().is_empty()),
+                _ => None,
+            })
+            .unwrap_or(false);
+
+    let is_hold_shortcut = preview.action_type.as_deref() == Some("shortcut")
+        && (preview.trigger_mode == Some(crate::config::TriggerMode::Hold)
+            || is_modifier_only_shortcut);
 
     if is_hold_shortcut {
         let action = config
@@ -1219,7 +1421,7 @@ mod helper_key_event_tests {
         // Simulate Ctrl down, Shift down, F24 down
         modifiers.apply_vk_event(VK_LCONTROL, true);
         modifiers.apply_vk_event(VK_LSHIFT, true);
-        let (suppress, wake) = process_helper_key_event(
+        let (suppress, wake, _inject_mask) = process_helper_key_event(
             &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
         );
         assert!(suppress);
@@ -1228,7 +1430,7 @@ mod helper_key_event_tests {
         matches.clear();
 
         // Simulate F24 up — should emit UP: event
-        let (suppress, wake) = process_helper_key_event(
+        let (suppress, wake, _inject_mask) = process_helper_key_event(
             &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
         );
         assert!(suppress);
@@ -1244,7 +1446,7 @@ mod helper_key_event_tests {
         let mut matches = Vec::new();
 
         // F24 up without prior down — should not emit
-        let (suppress, wake) = process_helper_key_event(
+        let (suppress, wake, _inject_mask) = process_helper_key_event(
             &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
         );
         assert!(!suppress);

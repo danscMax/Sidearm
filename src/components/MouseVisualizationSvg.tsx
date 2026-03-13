@@ -12,6 +12,7 @@ interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
+  profileTabs?: React.ReactNode;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -275,6 +276,7 @@ export function MouseVisualizationSvg({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  profileTabs,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
@@ -545,6 +547,7 @@ export function MouseVisualizationSvg({
   return (
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
+        {profileTabs}
         {layerToggle}
         <div className="view-tabs">
           <button
@@ -599,9 +602,6 @@ export function MouseVisualizationSvg({
             {renderLabelColumn(COMBINED_RIGHT_BUTTONS, "right")}
           </div>
         )}
-      </div>
-      <div className="mouse-visual-tabs__footer">
-        {layerToggle}
       </div>
     </div>
   );

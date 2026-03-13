@@ -1191,7 +1191,8 @@ select::checkmark {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 24px;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 
 .view-tabs {
@@ -1211,6 +1212,16 @@ select::checkmark {
   font-size: var(--fs-body-sm);
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
+}
+
+.view-mode-toggle--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: var(--radius-sm);
 }
 
 .view-mode-toggle:hover {
@@ -1240,10 +1251,6 @@ select::checkmark {
   background: rgba(255, 255, 255, 0.1);
 }
 
-.mouse-visual-tabs__footer {
-  display: flex;
-  justify-content: center;
-}
 
 /* Tab content crossfade */
 .mouse-visual-tabs__content {
@@ -2206,6 +2213,11 @@ code {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.profile-selector--compact .profile-selector__pill {
+  padding: 5px 12px;
+  font-size: var(--fs-caption);
 }
 
 .profile-selector__pill:hover {

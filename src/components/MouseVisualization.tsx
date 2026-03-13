@@ -15,6 +15,7 @@ interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
+  profileTabs?: React.ReactNode;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -72,6 +73,7 @@ export function MouseVisualization({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  profileTabs,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
@@ -81,13 +83,15 @@ export function MouseVisualization({
     return (
       <div className="mouse-visual-tabs">
         <div className="mouse-visual-tabs__nav">
+          {profileTabs}
           <button
             type="button"
-            className="view-mode-toggle"
+            className="view-mode-toggle view-mode-toggle--icon"
             onClick={() => setVisualMode("photo")}
             title="Переключить на фото"
+            aria-label="Переключить на фото"
           >
-            Схема
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5"/><circle cx="10.5" cy="6.5" r="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M1 11l3.5-3.5L7 10l3-4 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
           </button>
         </div>
         <MouseVisualizationSvg
@@ -98,6 +102,7 @@ export function MouseVisualization({
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          profileTabs={profileTabs}
         />
       </div>
     );
@@ -255,15 +260,8 @@ export function MouseVisualization({
   return (
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
+        {profileTabs}
         {layerToggle}
-        <button
-          type="button"
-          className="view-mode-toggle"
-          onClick={() => setVisualMode("schematic")}
-          title="Переключить на схему"
-        >
-          Фото
-        </button>
         <div className="view-tabs">
           <button
             type="button"
@@ -287,6 +285,15 @@ export function MouseVisualization({
             Боковая клавиатура
           </button>
         </div>
+        <button
+          type="button"
+          className="view-mode-toggle view-mode-toggle--icon"
+          onClick={() => setVisualMode("schematic")}
+          title="Переключить на схему"
+          aria-label="Переключить на схему"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
+        </button>
       </div>
 
       <div className="mouse-visual-tabs__content">
@@ -343,9 +350,6 @@ export function MouseVisualization({
             {renderLabelColumn(COMBINED_RIGHT_BUTTONS, combinedViewHotspots, "right")}
           </div>
         )}
-      </div>
-      <div className="mouse-visual-tabs__footer">
-        {layerToggle}
       </div>
     </div>
   );

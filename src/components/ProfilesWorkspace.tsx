@@ -546,50 +546,49 @@ export function ProfilesWorkspace({
     setActionPickerOpen(true);
   }
 
+  const profileTabsSlot = useToggleSelector ? (
+    <div className="profile-selector profile-selector--compact">
+      <div
+        className="profile-selector__track"
+        style={{ "--pill-count": profiles.length } as React.CSSProperties}
+      >
+        {selectedIndex >= 0 ? (
+          <div
+            className="profile-selector__indicator"
+            style={{ transform: `translateX(${selectedIndex * 100}%)` }}
+          />
+        ) : null}
+        {profiles.map((p) => (
+          <button
+            key={p.id}
+            type="button"
+            className={`profile-selector__pill${p.id === effectiveProfileId ? " profile-selector__pill--active" : ""}`}
+            onClick={() => {
+              startTransition(() => setSelectedProfileId(p.id));
+            }}
+          >
+            {p.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : (
+    <select
+      className="profile-selector__dropdown"
+      value={effectiveProfileId ?? ""}
+      onChange={(e) => {
+        startTransition(() => setSelectedProfileId(e.target.value));
+      }}
+    >
+      {profiles.map((p) => (
+        <option key={p.id} value={p.id}>{p.name}</option>
+      ))}
+    </select>
+  );
+
   return (
     <div className="profiles-workspace">
-      {/* ── Profile selector ── */}
-      {useToggleSelector ? (
-        <div className="profile-selector">
-          <div
-            className="profile-selector__track"
-            style={{ "--pill-count": profiles.length } as React.CSSProperties}
-          >
-            {selectedIndex >= 0 ? (
-              <div
-                className="profile-selector__indicator"
-                style={{ transform: `translateX(${selectedIndex * 100}%)` }}
-              />
-            ) : null}
-            {profiles.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`profile-selector__pill${p.id === effectiveProfileId ? " profile-selector__pill--active" : ""}`}
-                onClick={() => {
-                  startTransition(() => setSelectedProfileId(p.id));
-                }}
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <select
-          className="profile-selector__dropdown"
-          value={effectiveProfileId ?? ""}
-          onChange={(e) => {
-            startTransition(() => setSelectedProfileId(e.target.value));
-          }}
-        >
-          {profiles.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </select>
-      )}
-
-      {/* ── Mouse visualization ── */}
+      {/* ── Mouse visualization (profile tabs embedded in nav) ── */}
       <div className="profiles__mouse-viz">
         <MouseVisualization
           entries={familySections.flatMap((section) => section.entries)}
@@ -611,6 +610,7 @@ export function ProfilesWorkspace({
           }}
           onOpenActionPicker={handleOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          profileTabs={profileTabsSlot}
         />
       </div>
 

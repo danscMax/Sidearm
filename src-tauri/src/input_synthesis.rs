@@ -9,9 +9,17 @@ pub struct ShortcutDispatchReport {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct VirtualKeySpec {
-    code: u16,
-    extended: bool,
+pub(crate) struct VirtualKeySpec {
+    pub(crate) code: u16,
+    pub(crate) extended: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct HeldShortcutState {
+    /// VK codes of modifiers we pressed down (in press order, for LIFO release).
+    pub pressed_modifier_vks: Vec<VirtualKeySpec>,
+    /// Primary key we pressed down (if any).
+    pub primary_key: Option<VirtualKeySpec>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
@@ -44,6 +52,7 @@ enum KeyboardInputSpec {
 }
 
 pub fn send_shortcut(payload: &ShortcutActionPayload) -> Result<ShortcutDispatchReport, String> {
+    clear_external_modifiers()?;
     let snapshot = current_modifier_snapshot()?;
     let (plan, reused_modifiers) = plan_shortcut_inputs(payload, &snapshot)?;
 
@@ -120,12 +129,53 @@ pub fn send_hotkey_string(raw: &str) -> Result<ShortcutDispatchReport, String> {
 }
 
 pub fn send_text(text: &str) -> Result<(), String> {
+    clear_external_modifiers()?;
     let plan = build_text_inputs(text)?;
     if plan.is_empty() {
         return Ok(());
     }
 
     send_keyboard_inputs(&plan)
+}
+
+pub fn send_shortcut_hold_down(
+    payload: &ShortcutActionPayload,
+) -> Result<HeldShortcutState, String> {
+    clear_external_modifiers()?;
+    let snapshot = current_modifier_snapshot()?;
+    let (plan, held) = plan_shortcut_hold_down_inputs(payload, &snapshot)?;
+
+    if let Err(send_error) = send_keyboard_inputs(&plan) {
+        // Best-effort cleanup: release what we pressed
+        let cleanup = plan_shortcut_hold_up_inputs(&held);
+        let _ = send_keyboard_inputs(&cleanup);
+        return Err(send_error);
+    }
+
+    Ok(held)
+}
+
+pub fn send_shortcut_hold_up(held: &HeldShortcutState) -> Result<(), String> {
+    let plan = plan_shortcut_hold_up_inputs(held);
+    if plan.is_empty() {
+        return Ok(());
+    }
+    send_keyboard_inputs(&plan)
+}
+
+/// Emergency release: blast key-up for all standard modifiers.
+/// Used by panic hooks when exact held state is unknown.
+pub fn release_all_modifiers() {
+    #[cfg(target_os = "windows")]
+    {
+        let inputs = vec![
+            KeyboardInputSpec::VirtualKey { code: vk_lcontrol(), extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: vk_lshift(), extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: vk_lmenu(), extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: vk_lwin(), extended: false, key_up: true },
+        ];
+        let _ = send_keyboard_inputs(&inputs);
+    }
 }
 
 fn plan_shortcut_inputs(
@@ -192,6 +242,66 @@ fn plan_shortcut_inputs(
     }
 
     Ok((inputs, reused_modifiers))
+}
+
+fn plan_shortcut_hold_down_inputs(
+    payload: &ShortcutActionPayload,
+    snapshot: &ModifierSnapshot,
+) -> Result<(Vec<KeyboardInputSpec>, HeldShortcutState), String> {
+    let primary_key = if !payload.key.trim().is_empty() {
+        let pk = parse_primary_key(&payload.key)?;
+        if is_modifier_virtual_key(pk.code) {
+            return Err("Hold-mode primary key must not be a modifier.".into());
+        }
+        Some(pk)
+    } else {
+        None
+    };
+
+    let desired_modifiers = [
+        (ModifierKey::Win, payload.win),
+        (ModifierKey::Ctrl, payload.ctrl),
+        (ModifierKey::Alt, payload.alt),
+        (ModifierKey::Shift, payload.shift),
+    ];
+
+    let mut inputs = Vec::with_capacity(5);
+    let mut pressed_modifier_vks = Vec::new();
+
+    for (modifier, desired) in desired_modifiers {
+        if desired && !snapshot.is_active(modifier) {
+            let key = modifier.virtual_key();
+            push_virtual_key_down(&mut inputs, key);
+            pressed_modifier_vks.push(key);
+        }
+    }
+
+    if let Some(pk) = primary_key {
+        push_virtual_key_down(&mut inputs, pk);
+    }
+
+    Ok((
+        inputs,
+        HeldShortcutState {
+            pressed_modifier_vks,
+            primary_key,
+        },
+    ))
+}
+
+fn plan_shortcut_hold_up_inputs(held: &HeldShortcutState) -> Vec<KeyboardInputSpec> {
+    let mut inputs = Vec::with_capacity(5);
+
+    if let Some(pk) = held.primary_key {
+        push_virtual_key_up(&mut inputs, pk);
+    }
+
+    // Release modifiers in reverse press order (LIFO)
+    for key in held.pressed_modifier_vks.iter().rev() {
+        push_virtual_key_up(&mut inputs, *key);
+    }
+
+    inputs
 }
 
 fn build_text_inputs(text: &str) -> Result<Vec<KeyboardInputSpec>, String> {
@@ -295,7 +405,10 @@ fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
                 "Shortcut key `_` is ambiguous for live execution. Use `-` with shift=true instead."
                     .into(),
             ),
-            other => Err(format!("Unsupported shortcut key `{other}` for live execution.")),
+            other => match resolve_char_to_vk(other) {
+                Some(spec) => Ok(spec),
+                None => Err(format!("Unsupported shortcut key `{other}` for live execution.")),
+            },
         };
     }
 
@@ -421,6 +534,32 @@ fn parse_function_key(compact: &str) -> Option<VirtualKeySpec> {
     })
 }
 
+/// Resolves a non-ASCII character (e.g. Cyrillic 'Г') to a virtual key code
+/// using the current keyboard layout via `VkKeyScanW`. Returns `None` if the
+/// character cannot be mapped or maps to a modifier key.
+#[cfg(target_os = "windows")]
+fn resolve_char_to_vk(ch: char) -> Option<VirtualKeySpec> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::VkKeyScanW;
+
+    let result = unsafe { VkKeyScanW(ch as u16) };
+    if result == -1i16 {
+        return None;
+    }
+    let vk = (result as u16) & 0xFF;
+    if vk == 0 || is_modifier_virtual_key(vk) {
+        return None;
+    }
+    Some(VirtualKeySpec {
+        code: vk,
+        extended: false,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resolve_char_to_vk(_ch: char) -> Option<VirtualKeySpec> {
+    None
+}
+
 fn is_modifier_virtual_key(code: u16) -> bool {
     matches!(
         code,
@@ -476,6 +615,70 @@ impl ModifierKey {
             },
         }
     }
+}
+
+/// Clears any externally held modifier keys by injecting key-up events.
+///
+/// Modifier-combo hotkeys (e.g. Ctrl+Shift+F23 from Razer Synapse top-panel
+/// buttons) leave the modifier keys held while the mouse button is pressed. The
+/// LL keyboard hook only suppresses the primary key (F-key), so modifiers leak
+/// through to the OS. Without clearing them, action execution fails with
+/// "external modifier already pressed" or produces corrupted text injection.
+///
+/// The injected key-ups carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our own LL hook
+/// ignores them. When the user eventually releases the mouse button, the Razer
+/// driver sends redundant key-ups which are harmless no-ops.
+#[cfg(target_os = "windows")]
+fn clear_external_modifiers() -> Result<(), String> {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    };
+
+    let mut release_inputs = Vec::new();
+
+    unsafe {
+        if key_is_down(GetAsyncKeyState(VK_CONTROL as i32)) {
+            release_inputs.push(KeyboardInputSpec::VirtualKey {
+                code: vk_lcontrol(),
+                extended: false,
+                key_up: true,
+            });
+        }
+        if key_is_down(GetAsyncKeyState(VK_SHIFT as i32)) {
+            release_inputs.push(KeyboardInputSpec::VirtualKey {
+                code: vk_lshift(),
+                extended: false,
+                key_up: true,
+            });
+        }
+        if key_is_down(GetAsyncKeyState(VK_MENU as i32)) {
+            release_inputs.push(KeyboardInputSpec::VirtualKey {
+                code: vk_lmenu(),
+                extended: false,
+                key_up: true,
+            });
+        }
+        if key_is_down(GetAsyncKeyState(VK_LWIN as i32))
+            || key_is_down(GetAsyncKeyState(VK_RWIN as i32))
+        {
+            release_inputs.push(KeyboardInputSpec::VirtualKey {
+                code: vk_lwin(),
+                extended: false,
+                key_up: true,
+            });
+        }
+    }
+
+    if !release_inputs.is_empty() {
+        send_keyboard_inputs(&release_inputs)?;
+    }
+
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn clear_external_modifiers() -> Result<(), String> {
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -1127,5 +1330,50 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn hold_down_presses_without_releasing() {
+        let payload = ShortcutActionPayload {
+            key: "A".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+            raw: None,
+        };
+        let snapshot = ModifierSnapshot::default();
+
+        let (inputs, held) = plan_shortcut_hold_down_inputs(&payload, &snapshot).unwrap();
+
+        // Should have: Ctrl-down, A-down — NO key-ups
+        assert!(inputs.iter().all(|input| match input {
+            KeyboardInputSpec::VirtualKey { key_up, .. } => !key_up,
+            KeyboardInputSpec::Unicode { key_up, .. } => !key_up,
+        }));
+        assert_eq!(inputs.len(), 2); // Ctrl-down + A-down
+        assert!(held.primary_key.is_some());
+        assert_eq!(held.pressed_modifier_vks.len(), 1);
+    }
+
+    #[test]
+    fn hold_up_releases_in_reverse_order() {
+        let ctrl_vk = ModifierKey::Ctrl.virtual_key();
+        let alt_vk = ModifierKey::Alt.virtual_key();
+        let primary = parse_primary_key("A").unwrap();
+
+        let held = HeldShortcutState {
+            pressed_modifier_vks: vec![ctrl_vk, alt_vk],
+            primary_key: Some(primary),
+        };
+
+        let inputs = plan_shortcut_hold_up_inputs(&held);
+
+        // Should have: A-up, Alt-up, Ctrl-up (primary first, then modifiers in reverse)
+        assert!(inputs.iter().all(|input| match input {
+            KeyboardInputSpec::VirtualKey { key_up, .. } => *key_up,
+            _ => false,
+        }));
+        assert_eq!(inputs.len(), 3);
     }
 }

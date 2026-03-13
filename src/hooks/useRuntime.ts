@@ -18,6 +18,7 @@ import {
   listenWindowResolutionEvent,
   normalizeCommandError,
   previewResolution,
+  rehookCapture,
   reloadRuntime,
   runPreviewAction,
   startRuntime,
@@ -60,6 +61,7 @@ export interface RuntimeControl {
   handleStartRuntime: () => Promise<void>;
   handleReloadRuntime: () => Promise<void>;
   handleStopRuntime: () => Promise<void>;
+  handleRehookCapture: () => Promise<void>;
   handleCaptureActiveWindow: () => Promise<void>;
   handlePreviewResolution: () => Promise<void>;
   handleExecutePreviewAction: () => Promise<void>;
@@ -244,6 +246,16 @@ export function useRuntime(deps: {
     }
   }
 
+  async function handleRehookCapture() {
+    try {
+      await rehookCapture();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+    }
+  }
+
   async function handleCaptureActiveWindow() {
     try {
       const result = await captureActiveWindow(captureDelayMs);
@@ -336,6 +348,7 @@ export function useRuntime(deps: {
     handleStartRuntime,
     handleReloadRuntime,
     handleStopRuntime,
+    handleRehookCapture,
     handleCaptureActiveWindow,
     handlePreviewResolution,
     handleExecutePreviewAction,

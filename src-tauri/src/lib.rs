@@ -303,6 +303,18 @@ async fn reload_runtime(
 }
 
 #[tauri::command]
+async fn rehook_capture(
+    runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
+) -> Result<(), CommandError> {
+    let mut controller = runtime_controller
+        .lock()
+        .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
+    controller
+        .rehook()
+        .map_err(|message| CommandError::new("rehook_failed", message, None))
+}
+
+#[tauri::command]
 async fn get_debug_log(
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
 ) -> Result<Vec<DebugLogEntry>, CommandError> {
@@ -783,6 +795,7 @@ pub fn run() {
             start_runtime,
             stop_runtime,
             reload_runtime,
+            rehook_capture,
             get_debug_log,
             capture_active_window,
             preview_resolution,

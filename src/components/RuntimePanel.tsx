@@ -9,6 +9,7 @@ export interface RuntimePanelProps {
   handleStartRuntime: () => Promise<void>;
   handleReloadRuntime: () => Promise<void>;
   handleStopRuntime: () => Promise<void>;
+  handleRehookCapture: () => Promise<void>;
 }
 
 export function RuntimePanel({
@@ -17,6 +18,7 @@ export function RuntimePanel({
   handleStartRuntime,
   handleReloadRuntime,
   handleStopRuntime,
+  handleRehookCapture,
 }: RuntimePanelProps) {
   return (
     <section className="panel">
@@ -63,6 +65,21 @@ export function RuntimePanel({
           }
         >
           Остановить
+        </button>
+        <button
+          type="button"
+          className="action-button action-button--secondary"
+          onClick={() => {
+            void handleRehookCapture();
+          }}
+          disabled={
+            viewState === "loading" ||
+            viewState === "saving" ||
+            runtimeSummary.status !== "running"
+          }
+          title="Переустановить WH_KEYBOARD_LL хук без перезапуска рантайма"
+        >
+          Переустановить хук
         </button>
       </div>
 

@@ -54,6 +54,7 @@ export interface ExpertWorkspaceProps {
   handleStartRuntime: () => Promise<void>;
   handleReloadRuntime: () => Promise<void>;
   handleStopRuntime: () => Promise<void>;
+  handleRehookCapture: () => Promise<void>;
   handleCaptureActiveWindow: () => Promise<void>;
   handlePreviewResolution: () => Promise<void>;
   handleExecutePreviewAction: () => Promise<void>;
@@ -92,6 +93,7 @@ export function ExpertWorkspace(props: ExpertWorkspaceProps) {
     handleStartRuntime,
     handleReloadRuntime,
     handleStopRuntime,
+    handleRehookCapture,
     handleCaptureActiveWindow,
     handlePreviewResolution,
     handleExecutePreviewAction,
@@ -148,6 +150,7 @@ export function ExpertWorkspace(props: ExpertWorkspaceProps) {
           handleStartRuntime={handleStartRuntime}
           handleReloadRuntime={handleReloadRuntime}
           handleStopRuntime={handleStopRuntime}
+          handleRehookCapture={handleRehookCapture}
         />
 
         <ServiceToolsPanel

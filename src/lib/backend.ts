@@ -43,6 +43,10 @@ export async function reloadRuntime(): Promise<RuntimeStateSummary> {
   return invoke<RuntimeStateSummary>("reload_runtime");
 }
 
+export async function rehookCapture(): Promise<void> {
+  return invoke<void>("rehook_capture");
+}
+
 export async function getDebugLog(): Promise<DebugLogEntry[]> {
   return invoke<DebugLogEntry[]>("get_debug_log");
 }

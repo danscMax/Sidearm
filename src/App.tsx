@@ -86,7 +86,7 @@ function App() {
     lastCapture, lastEncodedKey,
     resolutionKeyInput, setResolutionKeyInput,
     lastResolutionPreview, lastExecution, lastRuntimeError,
-    handleStartRuntime, handleReloadRuntime, handleStopRuntime,
+    handleStartRuntime, handleReloadRuntime, handleStopRuntime, handleRehookCapture,
     handleCaptureActiveWindow, handlePreviewResolution,
     handleExecutePreviewAction, handleRunPreviewAction,
   } = runtime;
@@ -484,6 +484,7 @@ function App() {
                 handleStartRuntime={handleStartRuntime}
                 handleReloadRuntime={handleReloadRuntime}
                 handleStopRuntime={handleStopRuntime}
+                handleRehookCapture={handleRehookCapture}
                 handleCaptureActiveWindow={handleCaptureActiveWindow}
                 handlePreviewResolution={handlePreviewResolution}
                 handleExecutePreviewAction={handleExecutePreviewAction}

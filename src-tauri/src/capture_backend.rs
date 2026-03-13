@@ -104,6 +104,15 @@ impl RuntimeController {
         }
         Ok(())
     }
+
+    /// Send a REHOOK command to the capture helper, causing it to reinstall
+    /// its WH_KEYBOARD_LL hook without restarting the entire runtime.
+    pub fn rehook(&mut self) -> Result<(), String> {
+        match &mut self.backend {
+            Some(backend) => backend.rehook(),
+            None => Err("Runtime is not running.".to_owned()),
+        }
+    }
 }
 
 struct CaptureBackendHandle {
@@ -237,6 +246,23 @@ impl CaptureBackendHandle {
             .join()
             .map_err(|_| "Capture worker thread panicked.".to_owned())?;
         Ok(())
+    }
+
+    fn rehook(&mut self) -> Result<(), String> {
+        if let Some(ref mut helper) = self.helper {
+            helper.send_command("REHOOK")
+        } else {
+            Err("No capture helper process is running.".to_owned())
+        }
+    }
+}
+
+impl HelperHandle {
+    fn send_command(&mut self, cmd: &str) -> Result<(), String> {
+        use std::io::Write;
+        writeln!(self.stdin_pipe, "{cmd}")
+            .and_then(|()| self.stdin_pipe.flush())
+            .map_err(|e| format!("Failed to send command to helper: {e}"))
     }
 }
 
@@ -669,17 +695,33 @@ pub fn capture_helper_main() {
     }
     eprintln!("[capture-helper] LL keyboard hook installed successfully.");
 
-    // 4. Spawn stdin watcher — when parent closes stdin, signal this thread to exit
+    // 4. Spawn stdin watcher — reads commands from parent.
+    //    "REHOOK" → reinstall LL hook (WM_APP + 1)
+    //    stdin close → exit (WM_QUIT)
+    const WM_REHOOK: u32 = 0x8000 + 1; // WM_APP + 1
     let hook_tid = unsafe { GetCurrentThreadId() };
     HELPER_THREAD_ID.with(|cell| cell.set(hook_tid));
     thread::spawn(move || {
         let stdin = std::io::stdin();
         let mut buf = String::new();
-        // Blocks until stdin is closed (parent died or closed the pipe)
-        let _ = stdin.lock().read_line(&mut buf);
-        eprintln!("[capture-helper] stdin closed, posting WM_QUIT.");
-        unsafe {
-            PostThreadMessageW(hook_tid, WM_QUIT, 0, 0);
+        loop {
+            buf.clear();
+            match stdin.lock().read_line(&mut buf) {
+                Ok(0) | Err(_) => {
+                    eprintln!("[capture-helper] stdin closed, posting WM_QUIT.");
+                    unsafe { PostThreadMessageW(hook_tid, WM_QUIT, 0, 0); }
+                    break;
+                }
+                Ok(_) => {
+                    let cmd = buf.trim();
+                    if cmd == "REHOOK" {
+                        eprintln!("[capture-helper] REHOOK command received.");
+                        unsafe { PostThreadMessageW(hook_tid, WM_REHOOK, 0, 0); }
+                    } else {
+                        eprintln!("[capture-helper] Unknown command: {cmd:?}");
+                    }
+                }
+            }
         }
     });
 
@@ -771,10 +813,31 @@ pub fn capture_helper_main() {
             if m.message == WM_QUIT {
                 // Drain any remaining matches before exiting.
                 drain_helper_matches(&mut stdout);
-                // Jump to cleanup.
                 unsafe { UnhookWindowsHookEx(hook); }
                 eprintln!("[capture-helper] Hook uninstalled, exiting.");
                 return;
+            }
+            if m.message == WM_REHOOK {
+                eprintln!("[capture-helper] REHOOK: reinstalling WH_KEYBOARD_LL...");
+                unsafe { UnhookWindowsHookEx(hook); }
+                let new_hook = unsafe {
+                    SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
+                };
+                if new_hook.is_null() {
+                    eprintln!(
+                        "[capture-helper] FATAL: Failed to reinstall hook on REHOOK: {}. Exiting.",
+                        std::io::Error::last_os_error()
+                    );
+                    break;
+                }
+                hook = new_hook;
+                hook_reinstall_count += 1;
+                probe_sent = false;
+                eprintln!(
+                    "[capture-helper] Hook reinstalled via REHOOK \
+                     (total reinstalls: {hook_reinstall_count})."
+                );
+                continue;
             }
 
             // Drain matches buffered by the hook callback.

@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile};
+use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile, TriggerMode};
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -57,6 +57,8 @@ pub struct ResolvedInputPreview {
     pub mapping_verified: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mapping_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_mode: Option<TriggerMode>,
 }
 
 pub fn resolve_profile_for_app_context(
@@ -133,6 +135,7 @@ pub fn resolve_input_preview(
             action_pretty: None,
             mapping_verified: None,
             mapping_source: None,
+            trigger_mode: None,
         };
     }
 
@@ -161,6 +164,7 @@ pub fn resolve_input_preview(
             action_pretty: None,
             mapping_verified: None,
             mapping_source: None,
+            trigger_mode: None,
         };
     }
 
@@ -225,6 +229,7 @@ pub fn resolve_input_preview(
         action_pretty: action.map(|action| action.pretty.clone()),
         mapping_verified: Some(mapping.verified),
         mapping_source: Some(mapping_source_name(mapping).to_owned()),
+        trigger_mode: binding.and_then(|b| b.trigger_mode),
     }
 }
 
@@ -289,7 +294,7 @@ mod tests {
     use super::*;
     use crate::config::{
         Action, ActionPayload, ActionType, Binding, CapabilityStatus, ControlFamily, ControlId,
-        Layer, MappingSource, PhysicalControl, Settings, SnippetLibraryItem,
+        Layer, MappingSource, PhysicalControl, Settings, SnippetLibraryItem, TriggerMode,
     };
 
     #[test]
@@ -404,6 +409,16 @@ mod tests {
             enabled: true,
             priority,
         }
+    }
+
+    #[test]
+    fn resolve_input_preview_includes_trigger_mode_from_binding() {
+        let mut config = test_config(vec![]);
+        config.bindings[0].trigger_mode = Some(TriggerMode::Hold);
+
+        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs");
+
+        assert_eq!(result.trigger_mode, Some(TriggerMode::Hold));
     }
 
     fn app_mapping(

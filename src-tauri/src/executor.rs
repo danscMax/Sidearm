@@ -941,6 +941,7 @@ mod tests {
             action_pretty: Some("Ask Me".into()),
             mapping_verified: Some(true),
             mapping_source: Some("detected".into()),
+            trigger_mode: None,
         };
 
         let error = execute_preview_action(&config, &preview).expect_err("expected failure");

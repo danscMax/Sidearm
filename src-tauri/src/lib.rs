@@ -649,6 +649,15 @@ fn runtime_error_context(event: &RuntimeErrorEvent) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Safety net: release all modifier keys if we panic while holding keys.
+    // NOTE: This only works with panic="unwind" (the default). If Cargo.toml
+    // sets panic="abort" for release, this hook won't run in release builds.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        input_synthesis::release_all_modifiers();
+        default_hook(info);
+    }));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())

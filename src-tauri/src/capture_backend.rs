@@ -58,6 +58,7 @@ pub struct EncodedKeyEvent {
     pub backend: String,
     pub received_at: u64,
     pub is_repeat: bool,
+    pub is_key_up: bool,
 }
 
 #[derive(Default)]
@@ -663,15 +664,21 @@ fn spawn_capture_helper(
 
         let reader = std::io::BufReader::new(stdout_pipe);
         for line in reader.lines().map_while(Result::ok) {
-            let encoded_key = line.trim().to_owned();
-            if encoded_key.is_empty() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
                 continue;
             }
+            let (is_key_up, encoded_key) = if let Some(rest) = trimmed.strip_prefix("UP:") {
+                (true, rest.to_owned())
+            } else {
+                (false, trimmed.to_owned())
+            };
             let _ = event_tx.send(EncodedKeyEvent {
                 encoded_key,
                 backend: BACKEND_LL_HOOK.into(),
                 received_at: runtime::timestamp_millis(),
                 is_repeat: false,
+                is_key_up,
             });
         }
     });
@@ -759,6 +766,7 @@ fn run_hotkey_message_loop(
                     backend: CAPTURE_BACKEND_NAME.into(),
                     received_at: runtime::timestamp_millis(),
                     is_repeat: false,
+                    is_key_up: false,
                 });
             } else {
                 eprintln!("[capture] WARNING: received WM_HOTKEY with unrecognized id {hotkey_id}");

@@ -51,6 +51,14 @@ const VK_LWIN: u32 = 0x5B;
 #[cfg(target_os = "windows")]
 const VK_RWIN: u32 = 0x5C;
 
+/// "Menu Mask Key" — an unassigned VK used to prevent Windows from activating
+/// menus/ribbon (SC_KEYMENU) or the Start menu when Alt or Win is released
+/// after a hotkey combo.  Injecting this between modifier-down and modifier-up
+/// makes DefWindowProc think a non-modifier key was pressed, suppressing the
+/// system activation.  Pattern borrowed from AutoHotkey v2.
+#[cfg(target_os = "windows")]
+const VK_MASK_KEY: u16 = 0xE8;
+
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EncodedKeyEvent {
@@ -357,6 +365,12 @@ thread_local! {
 }
 
 #[cfg(target_os = "windows")]
+/// Returns `(suppress_key, new_match_added, inject_mask_key)`.
+///
+/// `inject_mask_key` is `true` when a combo matched while Alt or Win was active.
+/// The caller must inject VK 0xE8 (down+up) via SendInput before returning from
+/// the LL hook callback — this prevents Windows from generating SC_KEYMENU (Alt)
+/// or activating the Start menu (Win).
 fn process_helper_key_event(
     regs: &[HelperRegistration],
     modifiers: &mut HelperModifierState,
@@ -364,7 +378,7 @@ fn process_helper_key_event(
     matches: &mut Vec<String>,
     vk: u32,
     msg: u32,
-) -> (bool, bool) {
+) -> (bool, bool, bool) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP,
     };
@@ -372,7 +386,7 @@ fn process_helper_key_event(
     match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             if modifiers.apply_vk_event(vk, true) {
-                return (false, false);
+                return (false, false, false);
             }
 
             for reg in regs.iter() {
@@ -384,24 +398,62 @@ fn process_helper_key_event(
                     if !is_repeat {
                         matches.push(reg.encoded_key.clone());
                     }
-                    return (true, !is_repeat);
+                    // Inject mask key if Alt or Win is active — prevents
+                    // SC_KEYMENU (ribbon/menu activation) and Start menu.
+                    let need_mask = !is_repeat && (modifiers.alt || modifiers.win);
+                    return (true, !is_repeat, need_mask);
                 }
             }
 
-            (false, false)
+            (false, false, false)
         }
         WM_KEYUP | WM_SYSKEYUP => {
             if modifiers.apply_vk_event(vk, false) {
-                (false, false)
+                (false, false, false)
             } else if let Some(encoded_key) = suppressions.remove(&vk) {
                 matches.push(format!("UP:{encoded_key}"));
-                (true, true)
+                (true, true, false)
             } else {
-                (false, false)
+                (false, false, false)
             }
         }
-        _ => (false, false),
+        _ => (false, false, false),
     }
+}
+
+/// Inject VK 0xE8 (down + up) via SendInput.  This "Menu Mask Key" prevents
+/// Windows from generating SC_KEYMENU or activating the Start menu when the
+/// only keys between a modifier-down and modifier-up were suppressed by our
+/// hook.  The events carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our LL hook
+/// passes them through without processing.
+#[cfg(target_os = "windows")]
+unsafe fn inject_mask_key() {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    };
+
+    let make_input = |key_up: bool| -> INPUT {
+        INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VK_MASK_KEY,
+                    wScan: 0,
+                    dwFlags: if key_up { KEYEVENTF_KEYUP } else { 0 },
+                    time: 0,
+                    dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+                },
+            },
+        }
+    };
+
+    let inputs = [make_input(false), make_input(true)];
+    SendInput(
+        inputs.len() as u32,
+        inputs.as_ptr(),
+        size_of::<INPUT>() as i32,
+    );
 }
 
 /// LL keyboard hook callback for the capture helper process.
@@ -427,8 +479,8 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             return CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param);
         }
 
-        // Returns (suppress_key, new_match_added)
-        let (suppress, wake) = HELPER_MODIFIERS.with(|mods_cell| {
+        // Returns (suppress_key, new_match_added, inject_mask_key)
+        let (suppress, wake, inject_mask) = HELPER_MODIFIERS.with(|mods_cell| {
             HELPER_SUPPRESSIONS.with(|sup_cell| {
                 HELPER_REGISTRATIONS.with(|reg_cell| {
                     HELPER_MATCHES.with(|match_cell| {
@@ -449,6 +501,14 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 })
             })
         });
+
+        // AHK-style "Menu Mask Key": inject a dummy keystroke (VK 0xE8) to
+        // prevent Windows from interpreting bare Alt-up or Win-up as a menu /
+        // Start-menu activation.  The injected events carry our internal
+        // dwExtraInfo marker so our own hook passes them straight through.
+        if inject_mask {
+            inject_mask_key();
+        }
 
         // Post a wake-up message so GetMessageW returns and drain_helper_matches
         // can flush the buffered match to stdout. LL hook callbacks are dispatched

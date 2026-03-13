@@ -239,10 +239,12 @@ const COMBINED_RIGHT_BUTTONS: ControlId[] = [
   "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
 ];
 
-const SIDE_LEGEND_GRID: ControlId[][] = [
-  ["thumb_03", "thumb_06", "thumb_09", "thumb_12"],
-  ["thumb_02", "thumb_05", "thumb_08", "thumb_11"],
-  ["thumb_01", "thumb_04", "thumb_07", "thumb_10"],
+const SIDE_LEFT_BUTTONS: ControlId[] = [
+  "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06",
+];
+
+const SIDE_RIGHT_BUTTONS: ControlId[] = [
+  "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
 ];
 
 /** Short badge labels used inside hotspot labels in the legend. */
@@ -521,47 +523,6 @@ export function MouseVisualizationSvg({
     );
   }
 
-  function renderSideLegendGrid() {
-    return (
-      <div className="btn-legend">
-        {SIDE_LEGEND_GRID.map((row, rowIdx) => (
-          <div
-            key={rowIdx}
-            className="btn-legend__row"
-            style={{ gridTemplateColumns: `repeat(${row.length}, 1fr)` }}
-          >
-            {row.map((controlId) => {
-              const entry = entryMap.get(controlId);
-              if (!entry) return null;
-              const badge = HOTSPOT_LABELS[controlId] ?? controlId;
-              const isSelected = entry.isSelected || multiSelectedControlIds.has(controlId);
-              const isHovered = hoveredId === controlId;
-              return (
-                <button
-                  type="button"
-                  key={controlId}
-                  className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}`}
-                  data-action-type={entry.action?.type ?? ""}
-                  onClick={(e) => handleClick(controlId, e)}
-                  onDoubleClick={(e) => handleDblClick(controlId, e)}
-                  onMouseEnter={() => setHoveredId(controlId)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  title={`${displayNameForControl(entry.control)} \u00B7 ${surfacePrimaryLabel(
-                    entry.binding,
-                    entry.action,
-                  )}`}
-                >
-                  <span className="btn-legend__badge">{badge}</span>
-                  <span className="btn-legend__label">{actionLabel(entry)}</span>
-                </button>
-              );
-            })}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   /* ── Layer toggle ── */
 
   const layerToggle = (
@@ -621,11 +582,12 @@ export function MouseVisualizationSvg({
           </div>
         )}
         {activeTab === "side" && (
-          <div className="mouse-view-panel">
+          <div className="mouse-top-layout">
+            {renderLabelColumn(SIDE_LEFT_BUTTONS, "left")}
             <div className="mouse-visual mouse-visual--svg-side">
               {renderMouseSvg(false, true, `${THUMB_GRID_ORIGIN_X - 18} ${THUMB_GRID_ORIGIN_Y - 20} ${3 * (THUMB_CELL_W + THUMB_GAP) - THUMB_GAP + 36} ${4 * (THUMB_CELL_H + THUMB_GAP) - THUMB_GAP + 40}`)}
             </div>
-            {renderSideLegendGrid()}
+            {renderLabelColumn(SIDE_RIGHT_BUTTONS, "right")}
           </div>
         )}
         {activeTab === "combined" && (

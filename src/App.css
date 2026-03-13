@@ -1283,6 +1283,11 @@ select::checkmark {
   aspect-ratio: 1 / 1;
 }
 
+/* SVG schematic view variants */
+.mouse-visual--svg-side {
+  aspect-ratio: 1 / 1;
+}
+
 .mouse-visual__img {
   position: absolute;
   inset: 0;

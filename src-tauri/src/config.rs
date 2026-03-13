@@ -2564,4 +2564,18 @@ mod tests {
             other => panic!("expected invalid config, got {other:?}"),
         }
     }
+
+    #[test]
+    fn save_and_load_preserves_trigger_mode() {
+        let temp_dir = tempdir().expect("temp dir");
+        let mut config = default_seed_config();
+        config.bindings[0].trigger_mode = Some(TriggerMode::Hold);
+
+        save_config(temp_dir.path(), config.clone()).expect("save should succeed");
+
+        let loaded = load_or_initialize_config(temp_dir.path()).expect("load should succeed");
+        assert_eq!(loaded.config.bindings[0].trigger_mode, Some(TriggerMode::Hold));
+        // Other bindings remain None
+        assert_eq!(loaded.config.bindings[1].trigger_mode, None);
+    }
 }

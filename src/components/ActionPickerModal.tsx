@@ -8,6 +8,7 @@ import type {
   PasteMode,
   SequenceStep,
   ShortcutActionPayload,
+  TriggerMode,
 } from "../lib/config";
 import {
   ACTION_CATEGORIES,
@@ -305,6 +306,9 @@ export function ActionPickerModal({
   const [nameDraft, setNameDraft] = useState(() =>
     existingAction?.pretty ?? "",
   );
+  const [triggerModeDraft, setTriggerModeDraft] = useState<TriggerMode>(
+    () => binding?.triggerMode ?? "press",
+  );
 
   function handleKeyCapture(event: React.KeyboardEvent) {
     if (!isCapturing) return;
@@ -409,6 +413,7 @@ export function ActionPickerModal({
         actionRef: nextAction.id,
         label: nextAction.pretty,
         enabled: true,
+        triggerMode: triggerModeDraft === "press" ? undefined : triggerModeDraft,
       });
     }
 
@@ -617,6 +622,19 @@ export function ActionPickerModal({
                 placeholder={autoName(ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.actionType ?? "disabled")}
               />
             </label>
+
+            {effectiveCategory === "shortcut" ? (
+              <label className="field mt-12">
+                <span className="field__label">Режим срабатывания</span>
+                <select
+                  value={triggerModeDraft}
+                  onChange={(e) => setTriggerModeDraft(e.target.value as TriggerMode)}
+                >
+                  <option value="press">Нажатие</option>
+                  <option value="hold">Удержание</option>
+                </select>
+              </label>
+            ) : null}
           </div>
         </div>
 

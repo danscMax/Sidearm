@@ -361,6 +361,10 @@
         "colorTag": {
           "$ref": "#/$defs/uiToken"
         },
+        "triggerMode": {
+          "type": "string",
+          "enum": ["press", "doublePress", "triplePress", "hold"]
+        },
         "enabled": {
           "type": "boolean"
         }

@@ -33,7 +33,10 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
 
     thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
 
-    let warnings = snapshot.restore_if_unchanged(write_result.sequence_number)?;
+    let warnings = match snapshot.restore_if_unchanged(write_result.sequence_number) {
+        Ok(w) => w,
+        Err(restore_error) => vec![restore_error],
+    };
     Ok(ClipboardPasteReport { warnings })
 }
 

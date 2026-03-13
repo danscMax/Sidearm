@@ -328,12 +328,12 @@ export function MouseVisualizationSvg({
           stroke="rgba(200,210,195,0.12)"
           strokeWidth="1"
         />
-        {/* Thumb grid panel outline — left side */}
+        {/* Thumb grid panel outline — 3 cols × 4 rows */}
         <rect
           x={THUMB_GRID_ORIGIN_X - 8}
           y={THUMB_GRID_ORIGIN_Y - 10}
-          width={4 * THUMB_CELL_W + 3 * THUMB_GAP + 16}
-          height={3 * THUMB_CELL_H + 2 * THUMB_GAP + 20}
+          width={3 * THUMB_CELL_W + 2 * THUMB_GAP + 16}
+          height={4 * THUMB_CELL_H + 3 * THUMB_GAP + 20}
           rx="8"
           fill="rgba(8,14,10,0.3)"
           stroke="rgba(200,210,195,0.08)"
@@ -441,10 +441,10 @@ export function MouseVisualizationSvg({
 
   /* ── SVG: Full illustration ── */
 
-  function renderMouseSvg(showTop: boolean, showThumb: boolean) {
+  function renderMouseSvg(showTop: boolean, showThumb: boolean, viewBox?: string) {
     return (
       <svg
-        viewBox={`0 0 ${VB_W} ${VB_H}`}
+        viewBox={viewBox ?? `0 0 ${VB_W} ${VB_H}`}
         xmlns="http://www.w3.org/2000/svg"
         style={{ width: "100%", height: "100%", display: "block" }}
         role="img"
@@ -623,7 +623,7 @@ export function MouseVisualizationSvg({
         {activeTab === "side" && (
           <div className="mouse-view-panel">
             <div className="mouse-visual mouse-visual--svg-side">
-              {renderMouseSvg(false, true)}
+              {renderMouseSvg(false, true, `${THUMB_GRID_ORIGIN_X - 18} ${THUMB_GRID_ORIGIN_Y - 20} ${3 * (THUMB_CELL_W + THUMB_GAP) - THUMB_GAP + 36} ${4 * (THUMB_CELL_H + THUMB_GAP) - THUMB_GAP + 40}`)}
             </div>
             {renderSideLegendGrid()}
           </div>

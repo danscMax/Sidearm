@@ -130,6 +130,9 @@ impl CaptureBackendHandle {
             let worker_config = config.clone();
             let worker_app_name = app_name.clone();
             let worker_thread = thread::spawn(move || {
+                let mut held_actions: std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState> =
+                    std::collections::HashMap::new();
+
                 while let Ok(event) = event_rx.recv() {
                     process_encoded_key_event(
                         &worker_app,
@@ -137,7 +140,15 @@ impl CaptureBackendHandle {
                         &worker_config,
                         &worker_app_name,
                         event,
+                        &mut held_actions,
                     );
+                }
+
+                // Channel closed (graceful shutdown) — release all held keys
+                for (encoded_key, held) in held_actions.drain() {
+                    if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
+                        eprintln!("[capture] WARNING: Failed to release held shortcut `{encoded_key}` on shutdown: {e}");
+                    }
                 }
             });
 
@@ -804,6 +815,7 @@ fn process_encoded_key_event(
     config: &AppConfig,
     app_name: &str,
     event: EncodedKeyEvent,
+    held_actions: &mut std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState>,
 ) {
     // Accumulate log entries locally and flush in a single lock at the end to
     // avoid acquiring the runtime_store mutex multiple times per keypress.
@@ -819,6 +831,36 @@ fn process_encoded_key_event(
     ));
 
     let _ = app.emit(EVENT_ENCODED_KEY_RECEIVED, &event);
+
+    // --- Key-up path: release any held shortcut ---
+    if event.is_key_up {
+        if let Some(held) = held_actions.remove(&event.encoded_key) {
+            match crate::input_synthesis::send_shortcut_hold_up(&held) {
+                Ok(()) => {
+                    log_entries.push((
+                        "execution",
+                        format!("Released held shortcut for `{}`.", event.encoded_key),
+                        false,
+                    ));
+                }
+                Err(e) => {
+                    log_entries.push((
+                        "execution",
+                        format!("Failed to release held shortcut for `{}`: {e}", event.encoded_key),
+                        true,
+                    ));
+                }
+            }
+        } else {
+            log_entries.push((
+                "capture",
+                format!("Received key-up for `{}` with no active hold.", event.encoded_key),
+                false,
+            ));
+        }
+        flush_log_entries(runtime_store, log_entries);
+        return;
+    }
 
     let capture_result =
         match window_capture::capture_active_window_with_resolution(config, app_name, None) {
@@ -888,7 +930,93 @@ fn process_encoded_key_event(
         return;
     }
 
-    match executor::run_preview_action(config, &preview) {
+    let is_hold_shortcut = preview.trigger_mode == Some(crate::config::TriggerMode::Hold)
+        && preview.action_type.as_deref() == Some("shortcut");
+
+    if is_hold_shortcut {
+        let action = config
+            .actions
+            .iter()
+            .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
+
+        if let Some(crate::config::Action {
+            payload: crate::config::ActionPayload::Shortcut(payload),
+            ..
+        }) = action
+        {
+            match crate::input_synthesis::send_shortcut_hold_down(payload) {
+                Ok(held) => {
+                    log_entries.push((
+                        "execution",
+                        format!(
+                            "Holding shortcut `{}` for `{}`.",
+                            preview.action_pretty.as_deref().unwrap_or("?"),
+                            preview.encoded_key
+                        ),
+                        false,
+                    ));
+                    flush_log_entries(runtime_store, log_entries);
+                    held_actions.insert(event.encoded_key.clone(), held);
+                    let _ = app.emit(
+                        EVENT_ACTION_EXECUTED,
+                        &executor::ActionExecutionEvent {
+                            encoded_key: preview.encoded_key.clone(),
+                            action_id: preview.action_id.clone().unwrap_or_default(),
+                            action_type: "shortcut".into(),
+                            action_pretty: preview.action_pretty.clone().unwrap_or_default(),
+                            resolved_profile_id: preview.resolved_profile_id.clone(),
+                            resolved_profile_name: preview.resolved_profile_name.clone(),
+                            matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+                            control_id: preview.control_id.clone(),
+                            layer: preview.layer.clone(),
+                            binding_id: preview.binding_id.clone(),
+                            mode: executor::ExecutionMode::Live,
+                            outcome: executor::ExecutionOutcome::Injected,
+                            process_id: None,
+                            summary: format!(
+                                "Holding shortcut `{}`.",
+                                preview.action_pretty.as_deref().unwrap_or("?")
+                            ),
+                            warnings: Vec::new(),
+                            executed_at: runtime::timestamp_millis(),
+                        },
+                    );
+                }
+                Err(e) => {
+                    let error_event = executor::RuntimeErrorEvent {
+                        category: "execution".into(),
+                        message: e,
+                        encoded_key: Some(event.encoded_key.clone()),
+                        action_id: preview.action_id.clone(),
+                        created_at: runtime::timestamp_millis(),
+                    };
+                    flush_log_entries(runtime_store, log_entries);
+                    emit_runtime_error(app, runtime_store, &error_event);
+                }
+            }
+        } else {
+            // Hold requested but action is not a shortcut — fall back to press
+            log_entries.push((
+                "execution",
+                "Hold requested but action is not a shortcut; falling back to press.".into(),
+                true,
+            ));
+            run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries);
+        }
+    } else {
+        run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries);
+    }
+}
+
+fn run_fire_and_forget(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    config: &AppConfig,
+    preview: &resolver::ResolvedInputPreview,
+    _event: &EncodedKeyEvent,
+    mut log_entries: Vec<(&str, String, bool)>,
+) {
+    match executor::run_preview_action(config, preview) {
         Ok(execution) => {
             log_entries.push((
                 "execution",

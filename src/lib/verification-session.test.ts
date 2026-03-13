@@ -217,6 +217,7 @@ function createWindowCapture(
     usedFallbackProfile: false,
     candidateAppMappingIds: [],
     resolutionReason: "fallback",
+    isElevated: false,
     ...overrides,
   };
 }

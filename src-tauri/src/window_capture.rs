@@ -25,6 +25,9 @@ pub struct WindowCaptureResult {
     pub used_fallback_profile: bool,
     pub candidate_app_mapping_ids: Vec<String>,
     pub resolution_reason: String,
+    /// Whether the foreground process is running elevated (admin).
+    /// When `true`, `SendInput` will fail silently due to UIPI.
+    pub is_elevated: bool,
 }
 
 pub fn capture_active_window_with_resolution(
@@ -53,6 +56,7 @@ pub fn capture_active_window_with_resolution(
             used_fallback_profile: false,
             candidate_app_mapping_ids: Vec::new(),
             resolution_reason: "Ignored studio-owned window.".into(),
+            is_elevated: raw_window.is_elevated,
         }
     } else {
         resolve_capture_result(config, raw_window)
@@ -68,6 +72,7 @@ struct RawWindowCapture {
     process_path: String,
     title: String,
     captured_at: u64,
+    is_elevated: bool,
 }
 
 fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> WindowCaptureResult {
@@ -108,6 +113,7 @@ fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> W
             .map(|mapping| mapping.id.clone())
             .collect(),
         resolution_reason,
+        is_elevated: raw_window.is_elevated,
     }
 }
 
@@ -167,16 +173,15 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
                 path_buffer.as_mut_ptr(),
                 &mut path_length,
             );
-            let process_path = if success == 0 {
+            if success == 0 {
                 CloseHandle(process_handle);
                 return Err("Failed to resolve the foreground process path.".into());
-            } else {
-                String::from_utf16_lossy(&path_buffer[..path_length as usize])
-            };
-
-            CloseHandle(process_handle);
-            process_path
+            }
+            String::from_utf16_lossy(&path_buffer[..path_length as usize])
         };
+
+        let is_elevated = is_process_elevated(process_handle);
+        CloseHandle(process_handle);
 
         let exe = Path::new(&process_path)
             .file_name()
@@ -190,8 +195,37 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
             process_path,
             title,
             captured_at: timestamp_millis(),
+            is_elevated,
         })
     }
+}
+
+/// Check whether a process is running with elevated privileges (admin token).
+/// Returns `false` on any failure — we prefer silent fallback over hard errors.
+#[cfg(target_os = "windows")]
+unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+        System::Threading::OpenProcessToken,
+    };
+
+    let mut token_handle = std::ptr::null_mut();
+    if OpenProcessToken(process_handle, TOKEN_QUERY, &mut token_handle) == 0 {
+        return false;
+    }
+
+    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+    let mut return_length = 0u32;
+    let ok = GetTokenInformation(
+        token_handle,
+        TokenElevation,
+        &mut elevation as *mut _ as *mut _,
+        std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+        &mut return_length,
+    );
+    CloseHandle(token_handle);
+    ok != 0 && elevation.TokenIsElevated != 0
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -229,6 +263,7 @@ mod tests {
                 process_path: "C:\\Apps\\code.exe".into(),
                 title: "Pull Request Review".into(),
                 captured_at: 1,
+                is_elevated: false,
             },
         );
 
@@ -257,6 +292,7 @@ mod tests {
                 process_path: "C:\\Apps\\chrome.exe".into(),
                 title: "Docs".into(),
                 captured_at: 1,
+                is_elevated: false,
             },
         );
 
@@ -283,6 +319,7 @@ mod tests {
                 process_path: "C:\\Apps\\code.exe".into(),
                 title: "Pull Request".into(),
                 captured_at: 1,
+                is_elevated: false,
             },
         );
 

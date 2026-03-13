@@ -554,6 +554,16 @@ select::checkmark {
   color: var(--c-text-muted);
 }
 
+.panel__warning {
+  margin: 0;
+  padding: var(--space-xs) var(--space-sm);
+  border-radius: var(--radius-sm);
+  background: hsl(40 80% 20% / 0.5);
+  color: hsl(40 90% 70%);
+  font-size: var(--fs-body-sm);
+  grid-column: 1 / -1;
+}
+
 .panel__path {
   margin: 0;
   font-family: var(--font-mono);

@@ -57,6 +57,7 @@ export interface WindowCaptureResult {
   usedFallbackProfile: boolean;
   candidateAppMappingIds: string[];
   resolutionReason: string;
+  isElevated: boolean;
 }
 
 export interface ResolvedInputPreview {

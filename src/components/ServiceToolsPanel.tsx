@@ -134,6 +134,12 @@ export function ServiceToolsPanel({
               />
               <Fact label="Заголовок" value={lastCapture.title || "(пусто)"} />
               <Fact label="Причина" value={lastCapture.resolutionReason} />
+              {lastCapture.isElevated && (
+                <p className="panel__warning">
+                  Процесс запущен от имени администратора. SendInput будет
+                  заблокирован UIPI — действия не дойдут до этого окна.
+                </p>
+              )}
             </div>
           ) : (
             <p className="panel__muted">

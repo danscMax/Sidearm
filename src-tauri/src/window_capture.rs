@@ -414,4 +414,49 @@ mod tests {
             priority,
         }
     }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn is_process_elevated_returns_false_for_current_non_admin_process() {
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+
+        let elevated = unsafe {
+            let handle = GetCurrentProcess();
+            // GetCurrentProcess returns a pseudo-handle (-1) that does not need closing.
+            super::is_process_elevated(handle)
+        };
+
+        assert!(
+            !elevated,
+            "Test process should not be elevated (running without admin)"
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn is_process_elevated_returns_false_for_inaccessible_system_process() {
+        use windows_sys::Win32::{
+            Foundation::CloseHandle,
+            System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
+        };
+
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, 4);
+            if handle.is_null() {
+                // Cannot open System process — the function should never be called
+                // with a null handle in production, but we verify the precondition.
+                return;
+            }
+
+            let elevated = super::is_process_elevated(handle);
+            CloseHandle(handle);
+
+            // Even if we can open PID 4, OpenProcessToken will fail for the
+            // System process from a non-admin caller, so the function returns false.
+            assert!(
+                !elevated,
+                "is_process_elevated should return false when token access is denied"
+            );
+        }
+    }
 }

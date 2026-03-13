@@ -571,7 +571,7 @@ export function MouseVisualizationSvg({
         </div>
       </div>
 
-      <div className="mouse-visual-tabs__content" key={activeTab}>
+      <div className="mouse-visual-tabs__content">
         {activeTab === "top" && (
           <div className="mouse-top-layout">
             {renderLabelColumn(TOP_LEFT_BUTTONS, "left")}

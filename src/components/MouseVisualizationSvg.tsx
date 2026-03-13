@@ -3,7 +3,6 @@ import type { Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy } from "../lib/constants";
 import { displayNameForControl, surfacePrimaryLabel } from "../lib/helpers";
-import { ActionLegend } from "./shared";
 
 interface MouseVisualizationProps {
   entries: ControlSurfaceEntry[];
@@ -602,7 +601,6 @@ export function MouseVisualizationSvg({
         )}
       </div>
       <div className="mouse-visual-tabs__footer">
-        <ActionLegend />
         {layerToggle}
       </div>
     </div>

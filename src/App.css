@@ -1071,7 +1071,6 @@ select::checkmark {
 }
 
 .btn-legend__cell {
-  --action-rgb: 140, 145, 135;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1101,16 +1100,6 @@ select::checkmark {
   opacity: 1;
 }
 
-/* Action type colors → badge tint */
-.btn-legend__cell[data-action-type="shortcut"]      { --action-rgb: 143, 211, 232; }
-.btn-legend__cell[data-action-type="mouseAction"]    { --action-rgb: 183, 226, 107; }
-.btn-legend__cell[data-action-type="textSnippet"]    { --action-rgb: 231, 196, 111; }
-.btn-legend__cell[data-action-type="sequence"]       { --action-rgb: 196, 153, 255; }
-.btn-legend__cell[data-action-type="launch"]         { --action-rgb: 255, 153, 102; }
-.btn-legend__cell[data-action-type="mediaKey"]       { --action-rgb: 255, 153, 204; }
-.btn-legend__cell[data-action-type="profileSwitch"]  { --action-rgb: 153, 204, 255; }
-.btn-legend__cell[data-action-type="menu"]           { --action-rgb: 204, 204, 153; }
-
 .btn-legend__cell:hover,
 .btn-legend__cell--hovered {
   background: rgba(var(--layer-rgb, 159, 202, 105), 0.1);
@@ -1132,8 +1121,8 @@ select::checkmark {
   height: 20px;
   padding: 0 4px;
   border-radius: 10px;
-  background: rgba(var(--action-rgb), 0.18);
-  color: rgb(var(--action-rgb));
+  background: rgba(var(--layer-rgb, 159, 202, 105), 0.15);
+  color: var(--layer-accent, var(--c-accent));
   font-size: var(--fs-micro);
   font-weight: 800;
   line-height: 1;
@@ -1253,42 +1242,8 @@ select::checkmark {
 
 .mouse-visual-tabs__footer {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-
-/* ── Action type color legend ── */
-.action-legend {
-  display: flex;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: 4px 12px;
-  font-size: var(--fs-micro);
-  color: var(--c-text-muted);
 }
-
-.action-legend__item {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.action-legend__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: rgb(var(--action-rgb, 140, 145, 135));
-}
-
-.action-legend__item[data-action-type="shortcut"]      { --action-rgb: 143, 211, 232; }
-.action-legend__item[data-action-type="mouseAction"]    { --action-rgb: 183, 226, 107; }
-.action-legend__item[data-action-type="textSnippet"]    { --action-rgb: 231, 196, 111; }
-.action-legend__item[data-action-type="sequence"]       { --action-rgb: 196, 153, 255; }
-.action-legend__item[data-action-type="launch"]         { --action-rgb: 255, 153, 102; }
-.action-legend__item[data-action-type="mediaKey"]       { --action-rgb: 255, 153, 204; }
-.action-legend__item[data-action-type="profileSwitch"]  { --action-rgb: 153, 204, 255; }
-.action-legend__item[data-action-type="menu"]           { --action-rgb: 204, 204, 153; }
 
 /* Tab content crossfade */
 .mouse-visual-tabs__content {

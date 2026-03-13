@@ -1940,6 +1940,7 @@ dependencies = [
  "base64 0.22.1",
  "jsonschema",
  "png",
+ "regex",
  "serde",
  "serde_json",
  "tauri",

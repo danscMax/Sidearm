@@ -29,6 +29,7 @@ tempfile = "3"
 thiserror = "2"
 png = "0.17"
 base64 = "0.22"
+regex = "1"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

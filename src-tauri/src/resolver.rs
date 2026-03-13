@@ -1,6 +1,9 @@
+use regex::Regex;
 use serde::Serialize;
 
 use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile, TriggerMode};
+
+const REGEX_PREFIX: &str = "regex:";
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -247,10 +250,15 @@ pub(crate) fn matching_app_mappings<'a>(
         .filter(|mapping| mapping.exe.eq_ignore_ascii_case(&normalized_exe))
         .filter(|mapping| {
             mapping.title_includes.is_empty()
-                || mapping
-                    .title_includes
-                    .iter()
-                    .all(|needle| normalized_title.contains(&needle.to_ascii_lowercase()))
+                || mapping.title_includes.iter().all(|needle| {
+                    if let Some(pattern) = needle.strip_prefix(REGEX_PREFIX) {
+                        Regex::new(&format!("(?i){pattern}"))
+                            .map(|re| re.is_match(&normalized_title))
+                            .unwrap_or(false)
+                    } else {
+                        normalized_title.contains(&needle.to_ascii_lowercase())
+                    }
+                })
         })
         .collect();
 

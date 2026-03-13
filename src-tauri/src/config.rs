@@ -1334,7 +1334,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("DPI Stage Up"),
             true,
             CapabilityStatus::Verified,
-            Some("Verified: Ctrl+Shift+F23 standard layer confirmed via hardware test."),
+            Some("Verified: Alt+F23 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::TopAux02,
@@ -1343,7 +1343,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("DPI Stage Down"),
             true,
             CapabilityStatus::Verified,
-            Some("Verified: Ctrl+Shift+F24 standard layer confirmed via hardware test."),
+            Some("Verified: Alt+F24 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::Mouse4,
@@ -1352,7 +1352,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Forward"),
             true,
             CapabilityStatus::Verified,
-            Some("Verified: Ctrl+Shift+F13 standard layer confirmed via hardware test."),
+            Some("Verified: Alt+F13 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::Mouse5,
@@ -1361,7 +1361,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Back"),
             true,
             CapabilityStatus::Verified,
-            Some("Verified: Ctrl+Shift+F14 standard layer confirmed via hardware test."),
+            Some("Verified: Alt+F14 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::WheelUp,
@@ -1388,7 +1388,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Middle Click"),
             true,
             CapabilityStatus::Verified,
-            Some("Verified: Ctrl+Shift+F15 standard layer confirmed via hardware test."),
+            Some("Verified: Alt+F15 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::WheelLeft,
@@ -1473,12 +1473,12 @@ fn seed_encoder_mappings() -> Vec<EncoderMapping> {
         encoder_mapping(ControlId::Thumb10, Layer::Hypershift, "Ctrl+Alt+Shift+F22"),
         encoder_mapping(ControlId::Thumb11, Layer::Hypershift, "Ctrl+Alt+Shift+F23"),
         encoder_mapping(ControlId::Thumb12, Layer::Hypershift, "Ctrl+Alt+Shift+F24"),
-        // Top panel – standard layer
-        encoder_mapping(ControlId::TopAux01, Layer::Standard, "Ctrl+Shift+F23"),
-        encoder_mapping(ControlId::TopAux02, Layer::Standard, "Ctrl+Shift+F24"),
-        encoder_mapping(ControlId::Mouse4, Layer::Standard, "Ctrl+Shift+F13"),
-        encoder_mapping(ControlId::Mouse5, Layer::Standard, "Ctrl+Shift+F14"),
-        encoder_mapping(ControlId::WheelClick, Layer::Standard, "Ctrl+Shift+F15"),
+        // Top panel – standard layer (Alt+F-key avoids Win+F-key system conflicts)
+        encoder_mapping(ControlId::TopAux01, Layer::Standard, "Alt+F23"),
+        encoder_mapping(ControlId::TopAux02, Layer::Standard, "Alt+F24"),
+        encoder_mapping(ControlId::Mouse4, Layer::Standard, "Alt+F13"),
+        encoder_mapping(ControlId::Mouse5, Layer::Standard, "Alt+F14"),
+        encoder_mapping(ControlId::WheelClick, Layer::Standard, "Alt+F15"),
         // Top panel – hypershift layer
         encoder_mapping(ControlId::TopAux01, Layer::Hypershift, "Ctrl+Alt+F23"),
         encoder_mapping(ControlId::TopAux02, Layer::Hypershift, "Ctrl+Alt+F24"),

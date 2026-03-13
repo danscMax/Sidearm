@@ -1,4 +1,5 @@
 use crate::config::ShortcutActionPayload;
+use crate::hotkeys::HotkeyModifiers;
 
 #[cfg(target_os = "windows")]
 pub(crate) const INTERNAL_SENDINPUT_EXTRA_INFO: usize = 0x4E41_4741_5354_5544usize;
@@ -51,8 +52,11 @@ enum KeyboardInputSpec {
     },
 }
 
-pub fn send_shortcut(payload: &ShortcutActionPayload) -> Result<ShortcutDispatchReport, String> {
-    clear_external_modifiers()?;
+pub fn send_shortcut(
+    payload: &ShortcutActionPayload,
+    encoding_mods: &HotkeyModifiers,
+) -> Result<ShortcutDispatchReport, String> {
+    clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
     let (plan, reused_modifiers) = plan_shortcut_inputs(payload, &snapshot)?;
 
@@ -114,7 +118,10 @@ fn build_modifier_release_inputs(modifiers: &[ModifierKey]) -> Vec<KeyboardInput
         .collect()
 }
 
-pub fn send_hotkey_string(raw: &str) -> Result<ShortcutDispatchReport, String> {
+pub fn send_hotkey_string(
+    raw: &str,
+    encoding_mods: &HotkeyModifiers,
+) -> Result<ShortcutDispatchReport, String> {
     let hotkey = crate::hotkeys::parse_hotkey(raw)?;
     let payload = ShortcutActionPayload {
         key: hotkey.key.display_name,
@@ -125,11 +132,20 @@ pub fn send_hotkey_string(raw: &str) -> Result<ShortcutDispatchReport, String> {
         raw: Some(hotkey.canonical),
     };
 
-    send_shortcut(&payload)
+    send_shortcut(&payload, encoding_mods)
 }
 
+/// All modifiers must be cleared for text injection — held Ctrl/Alt corrupts
+/// Unicode/VK_PACKET output.
+const ALL_MODIFIERS: HotkeyModifiers = HotkeyModifiers {
+    ctrl: true,
+    shift: true,
+    alt: true,
+    win: true,
+};
+
 pub fn send_text(text: &str) -> Result<(), String> {
-    clear_external_modifiers()?;
+    clear_modifiers(&ALL_MODIFIERS)?;
     let plan = build_text_inputs(text)?;
     if plan.is_empty() {
         return Ok(());
@@ -140,8 +156,9 @@ pub fn send_text(text: &str) -> Result<(), String> {
 
 pub fn send_shortcut_hold_down(
     payload: &ShortcutActionPayload,
+    encoding_mods: &HotkeyModifiers,
 ) -> Result<HeldShortcutState, String> {
-    clear_external_modifiers()?;
+    clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
     let (plan, held) = plan_shortcut_hold_down_inputs(payload, &snapshot)?;
 
@@ -214,13 +231,10 @@ fn plan_shortcut_inputs(
 
     for (modifier, desired) in desired_modifiers {
         let active = snapshot.is_active(modifier);
-        if active && !desired {
-            return Err(format!(
-                "Cannot inject shortcut while external modifier `{}` is already pressed. Release it and try again.",
-                modifier.label()
-            ));
-        }
-
+        // User's physical keyboard modifiers that are not part of the action
+        // are allowed to pass through — the OS will combine them with the
+        // injected shortcut (e.g. user holds Ctrl + side button sends
+        // Backspace → OS sees Ctrl+Backspace).
         if desired {
             if active {
                 reused_modifiers.push(modifier);
@@ -617,19 +631,21 @@ impl ModifierKey {
     }
 }
 
-/// Clears any externally held modifier keys by injecting key-up events.
+/// Selectively clears held modifier keys by injecting key-up events.
 ///
-/// Modifier-combo hotkeys (e.g. Ctrl+Shift+F23 from Razer Synapse top-panel
-/// buttons) leave the modifier keys held while the mouse button is pressed. The
-/// LL keyboard hook only suppresses the primary key (F-key), so modifiers leak
-/// through to the OS. Without clearing them, action execution fails with
-/// "external modifier already pressed" or produces corrupted text injection.
+/// Only modifiers whose flag is `true` in `mask` are cleared. This allows
+/// Synapse encoding modifiers (e.g. Ctrl+Alt from "Ctrl+Alt+F13") to be
+/// released while the user's physical keyboard modifiers (e.g. Shift held on
+/// keyboard for Shift+Backspace) pass through untouched.
+///
+/// For text injection, pass `ALL_MODIFIERS` to clear everything — held
+/// Ctrl/Alt corrupts Unicode/VK_PACKET output.
 ///
 /// The injected key-ups carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our own LL hook
 /// ignores them. When the user eventually releases the mouse button, the Razer
 /// driver sends redundant key-ups which are harmless no-ops.
 #[cfg(target_os = "windows")]
-fn clear_external_modifiers() -> Result<(), String> {
+fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
@@ -637,29 +653,30 @@ fn clear_external_modifiers() -> Result<(), String> {
     let mut release_inputs = Vec::new();
 
     unsafe {
-        if key_is_down(GetAsyncKeyState(VK_CONTROL as i32)) {
+        if mask.ctrl && key_is_down(GetAsyncKeyState(VK_CONTROL as i32)) {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
                 code: vk_lcontrol(),
                 extended: false,
                 key_up: true,
             });
         }
-        if key_is_down(GetAsyncKeyState(VK_SHIFT as i32)) {
+        if mask.shift && key_is_down(GetAsyncKeyState(VK_SHIFT as i32)) {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
                 code: vk_lshift(),
                 extended: false,
                 key_up: true,
             });
         }
-        if key_is_down(GetAsyncKeyState(VK_MENU as i32)) {
+        if mask.alt && key_is_down(GetAsyncKeyState(VK_MENU as i32)) {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
                 code: vk_lmenu(),
                 extended: false,
                 key_up: true,
             });
         }
-        if key_is_down(GetAsyncKeyState(VK_LWIN as i32))
-            || key_is_down(GetAsyncKeyState(VK_RWIN as i32))
+        if mask.win
+            && (key_is_down(GetAsyncKeyState(VK_LWIN as i32))
+                || key_is_down(GetAsyncKeyState(VK_RWIN as i32)))
         {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
                 code: vk_lwin(),
@@ -677,7 +694,7 @@ fn clear_external_modifiers() -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn clear_external_modifiers() -> Result<(), String> {
+fn clear_modifiers(_mask: &HotkeyModifiers) -> Result<(), String> {
     Ok(())
 }
 
@@ -1271,7 +1288,7 @@ mod tests {
     }
 
     #[test]
-    fn blocks_unexpected_external_modifiers() {
+    fn allows_user_held_modifiers_to_pass_through() {
         let payload = ShortcutActionPayload {
             key: "C".into(),
             ctrl: false,
@@ -1281,7 +1298,9 @@ mod tests {
             raw: None,
         };
 
-        let error = plan_shortcut_inputs(
+        // User holds Ctrl on keyboard — it should pass through to the OS,
+        // combining with the injected keypress (Ctrl+C at OS level).
+        let (plan, reused) = plan_shortcut_inputs(
             &payload,
             &ModifierSnapshot {
                 ctrl: true,
@@ -1290,9 +1309,24 @@ mod tests {
                 win: false,
             },
         )
-        .expect_err("expected modifier conflict");
+        .expect("user modifiers should pass through");
 
-        assert!(error.contains("external modifier `Ctrl`"));
+        assert!(reused.is_empty());
+        assert_eq!(
+            plan,
+            vec![
+                KeyboardInputSpec::VirtualKey {
+                    code: b'C' as u16,
+                    extended: false,
+                    key_up: false,
+                },
+                KeyboardInputSpec::VirtualKey {
+                    code: b'C' as u16,
+                    extended: false,
+                    key_up: true,
+                },
+            ]
+        );
     }
 
     #[test]

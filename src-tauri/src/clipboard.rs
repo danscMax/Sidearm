@@ -20,7 +20,15 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
     let snapshot = ClipboardSnapshot::capture()?;
     let write_result = set_clipboard_text(text)?;
 
-    if let Err(error) = input_synthesis::send_hotkey_string("Ctrl+V") {
+    // Full clearing: clipboard paste is always an internal operation, not a
+    // user-triggered shortcut that should inherit physical keyboard modifiers.
+    let all_mods = crate::hotkeys::HotkeyModifiers {
+        ctrl: true,
+        shift: true,
+        alt: true,
+        win: true,
+    };
+    if let Err(error) = input_synthesis::send_hotkey_string("Ctrl+V", &all_mods) {
         let restore_message = snapshot
             .restore_force()
             .err()

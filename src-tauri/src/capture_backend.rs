@@ -944,7 +944,8 @@ fn process_encoded_key_event(
             ..
         }) = action
         {
-            match crate::input_synthesis::send_shortcut_hold_down(payload) {
+            let encoding_mods = hotkeys::extract_encoding_modifiers(&event.encoded_key);
+            match crate::input_synthesis::send_shortcut_hold_down(payload, &encoding_mods) {
                 Ok(held) => {
                     log_entries.push((
                         "execution",

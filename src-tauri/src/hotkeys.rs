@@ -173,6 +173,20 @@ pub fn normalize_hotkey(raw: &str) -> Result<String, String> {
     parse_hotkey(raw).map(|hotkey| hotkey.canonical)
 }
 
+/// Extract which modifiers are part of the Synapse encoding for a given
+/// `encodedKey` string (e.g. `"Ctrl+Alt+F13"` → ctrl=true, alt=true).
+///
+/// These modifiers are injected by the Razer driver when the mouse button is
+/// pressed and must be cleared before action execution. Any modifier NOT in
+/// this mask is presumed to be a user's physical keyboard modifier and should
+/// pass through to the action.
+pub fn extract_encoding_modifiers(encoded_key: &str) -> HotkeyModifiers {
+    match parse_hotkey(encoded_key) {
+        Ok(spec) => spec.modifiers,
+        Err(_) => HotkeyModifiers::default(),
+    }
+}
+
 impl HotkeyModifiers {
     pub fn register_hotkey_mask(self) -> u32 {
         let mut mask = MOD_NOREPEAT;
@@ -295,5 +309,29 @@ mod tests {
         let parsed = parse_hotkey("Shift+Enter").expect("expected enter hotkey");
         assert_eq!(parsed.canonical, "Shift+Enter");
         assert_eq!(parsed.key.code, VK_RETURN);
+    }
+
+    #[test]
+    fn extracts_encoding_modifiers_from_combo_key() {
+        let mods = extract_encoding_modifiers("Ctrl+Alt+F13");
+        assert!(mods.ctrl);
+        assert!(mods.alt);
+        assert!(!mods.shift);
+        assert!(!mods.win);
+    }
+
+    #[test]
+    fn extracts_no_encoding_modifiers_from_bare_key() {
+        let mods = extract_encoding_modifiers("F13");
+        assert!(!mods.ctrl);
+        assert!(!mods.alt);
+        assert!(!mods.shift);
+        assert!(!mods.win);
+    }
+
+    #[test]
+    fn extracts_encoding_modifiers_returns_default_for_invalid() {
+        let mods = extract_encoding_modifiers("+++garbage");
+        assert_eq!(mods, HotkeyModifiers::default());
     }
 }

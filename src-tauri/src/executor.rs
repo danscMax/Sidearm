@@ -384,6 +384,7 @@ fn run_live_sequence_action(
         )
     })?;
 
+    let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
     let mut launched_processes = Vec::new();
     let mut injected_input_steps = 0usize;
     for step in &payload.steps {
@@ -433,7 +434,7 @@ fn run_live_sequence_action(
                 }
             }
             SequenceStep::Send { value, delay_ms } => {
-                input_synthesis::send_hotkey_string(value).map_err(|message| {
+                input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(|message| {
                     execution_error(
                         "execution_failed",
                         "execution",
@@ -535,7 +536,8 @@ fn run_live_shortcut_action(
     payload: &crate::config::ShortcutActionPayload,
     action_id: Option<String>,
 ) -> Result<ActionExecutionEvent, ExecutorError> {
-    let dispatch = input_synthesis::send_shortcut(payload).map_err(|message| {
+    let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
+    let dispatch = input_synthesis::send_shortcut(payload, &encoding_mods).map_err(|message| {
         execution_error(
             "execution_failed",
             "execution",

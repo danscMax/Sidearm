@@ -4,6 +4,7 @@ import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy, topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
 import { displayNameForControl, surfacePrimaryLabel } from "../lib/helpers";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
+import { ActionLegend } from "./shared";
 
 type VisualMode = "photo" | "schematic";
 
@@ -345,6 +346,7 @@ export function MouseVisualization({
         )}
       </div>
       <div className="mouse-visual-tabs__footer">
+        <ActionLegend />
         {layerToggle}
       </div>
     </div>

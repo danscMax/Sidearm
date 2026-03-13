@@ -1,4 +1,4 @@
-import type { ValidationWarning, CommandError } from "../lib/config";
+import type { ActionType, ValidationWarning, CommandError } from "../lib/config";
 
 export function PanelGroup({
   title,
@@ -56,6 +56,30 @@ export function ErrorPanel({ error }: { error: CommandError }) {
           ))}
         </ul>
       ) : null}
+    </div>
+  );
+}
+
+const ACTION_TYPE_LEGEND: Array<{ type: ActionType; label: string }> = [
+  { type: "shortcut", label: "Клавиатура" },
+  { type: "mouseAction", label: "Мышь" },
+  { type: "textSnippet", label: "Текст" },
+  { type: "sequence", label: "Макрос" },
+  { type: "launch", label: "Запуск" },
+  { type: "mediaKey", label: "Медиа" },
+  { type: "profileSwitch", label: "Профиль" },
+  { type: "menu", label: "Меню" },
+];
+
+export function ActionLegend() {
+  return (
+    <div className="action-legend">
+      {ACTION_TYPE_LEGEND.map((item) => (
+        <span key={item.type} className="action-legend__item" data-action-type={item.type}>
+          <span className="action-legend__dot" />
+          {item.label}
+        </span>
+      ))}
     </div>
   );
 }

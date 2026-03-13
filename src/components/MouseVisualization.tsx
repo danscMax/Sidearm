@@ -3,6 +3,9 @@ import type { Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy, topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
 import { displayNameForControl, surfacePrimaryLabel } from "../lib/helpers";
+import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
+
+type VisualMode = "photo" | "schematic";
 
 interface MouseVisualizationProps {
   entries: ControlSurfaceEntry[];
@@ -72,6 +75,33 @@ export function MouseVisualization({
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
+  const [visualMode, setVisualMode] = useState<VisualMode>("photo");
+
+  if (visualMode === "schematic") {
+    return (
+      <div className="mouse-visual-tabs">
+        <div className="mouse-visual-tabs__nav">
+          <button
+            type="button"
+            className="view-mode-toggle"
+            onClick={() => setVisualMode("photo")}
+            title="Переключить на фото"
+          >
+            Схема
+          </button>
+        </div>
+        <MouseVisualizationSvg
+          entries={entries}
+          selectedLayer={selectedLayer}
+          multiSelectedControlIds={multiSelectedControlIds}
+          onSelectControl={onSelectControl}
+          onToggleMultiSelect={onToggleMultiSelect}
+          onOpenActionPicker={onOpenActionPicker}
+          onSelectLayer={onSelectLayer}
+        />
+      </div>
+    );
+  }
 
   const entryMap = new Map(entries.map((e) => [e.control.id, e]));
 
@@ -226,6 +256,14 @@ export function MouseVisualization({
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
         {layerToggle}
+        <button
+          type="button"
+          className="view-mode-toggle"
+          onClick={() => setVisualMode("schematic")}
+          title="Переключить на схему"
+        >
+          Фото
+        </button>
         <div className="view-tabs">
           <button
             type="button"

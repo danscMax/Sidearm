@@ -13,7 +13,12 @@ import type {
 import type { VerificationSessionScope } from "./verification-session";
 
 export type ViewState = "idle" | "loading" | "ready" | "saving" | "error";
-export type WorkspaceMode = "buttons" | "profiles" | "verification" | "advanced";
+export type WorkspaceMode = "profiles" | "verification" | "advanced";
+
+export type FamilySection = {
+  family: string;
+  entries: ControlSurfaceEntry[];
+};
 
 export type ControlSurfaceEntry = {
   control: PhysicalControl;
@@ -38,16 +43,9 @@ export const workspaceModeCopy: Array<{
   meta: string;
 }> = [
   {
-    value: "buttons",
-    label: "Назначения",
-    heading: "Назначения кнопок",
-    body: "Главный рабочий экран: выберите кнопку мыши и быстро поменяйте её действие.",
-    meta: "Быстрое назначение",
-  },
-  {
     value: "profiles",
     label: "Профили",
-    heading: "Профили и автопереключение",
+    heading: "Профили и назначения",
     body: "Настройка профилей, приоритетов и правил для конкретных приложений и окон.",
     meta: "Маршрутизация профилей",
   },

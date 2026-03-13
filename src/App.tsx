@@ -13,7 +13,6 @@ import "./App.css";
 import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmModal } from "./components/ConfirmModal";
-import { AssignmentsWorkspace } from "./components/AssignmentsWorkspace";
 import { ExpertWorkspace } from "./components/ExpertWorkspace";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
 import { VerificationWorkspace } from "./components/VerificationWorkspace";
@@ -93,7 +92,7 @@ function App() {
   } = runtime;
   handleReloadRuntimeRef.current = handleReloadRuntime;
 
-  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("buttons");
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");
   const [actionPickerOpen, setActionPickerOpen] = useState(false);
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
@@ -353,7 +352,6 @@ function App() {
     [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId],
   );
 
-  const isAssignmentsMode = workspaceMode === "buttons";
   const isProfilesMode = workspaceMode === "profiles";
   const isVerificationMode = workspaceMode === "verification";
   const activeModeCopy = workspaceModeCopy.find((mode) => mode.value === workspaceMode)!;
@@ -398,24 +396,7 @@ function App() {
 
         {activeConfig ? (
           <section className={workspaceClass}>
-            {isAssignmentsMode ? (
-              <AssignmentsWorkspace
-                effectiveProfileId={effectiveProfileId}
-                selectedLayer={selectedLayer}
-                selectedControl={selectedControl}
-                selectedBinding={selectedBinding}
-                selectedAction={selectedAction}
-                multiSelectedControlIds={multiSelectedControlIds}
-                familySections={familySections}
-                activeProfileName={activeProfile?.name ?? null}
-                updateDraft={updateDraft}
-                onSelectLayer={(layer) => setSelectedLayer(layer)}
-                setSelectedControlId={setSelectedControlId}
-                setMultiSelectedControlIds={setMultiSelectedControlIds}
-                setActionPickerBindingId={setActionPickerBindingId}
-                setActionPickerOpen={setActionPickerOpen}
-              />
-            ) : isProfilesMode ? (
+            {isProfilesMode ? (
               <ProfilesWorkspace
                 activeConfig={activeConfig}
                 activeProfile={activeProfile}
@@ -429,6 +410,14 @@ function App() {
                 setSelectedProfileId={setSelectedProfileId}
                 setConfirmModal={setConfirmModal}
                 handleCaptureActiveWindow={handleCaptureActiveWindow}
+                familySections={familySections}
+                selectedLayer={selectedLayer}
+                multiSelectedControlIds={multiSelectedControlIds}
+                onSelectLayer={(layer) => setSelectedLayer(layer)}
+                setSelectedControlId={setSelectedControlId}
+                setMultiSelectedControlIds={setMultiSelectedControlIds}
+                setActionPickerBindingId={setActionPickerBindingId}
+                setActionPickerOpen={setActionPickerOpen}
               />
             ) : isVerificationMode ? (
               <VerificationWorkspace
@@ -564,9 +553,6 @@ function App() {
                 break;
               case "reload":
                 void refreshConfig();
-                break;
-              case "tab-buttons":
-                switchWorkspaceMode("buttons");
                 break;
               case "tab-profiles":
                 switchWorkspaceMode("profiles");

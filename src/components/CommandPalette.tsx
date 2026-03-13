@@ -8,10 +8,9 @@ export const PALETTE_COMMANDS = [
   { id: "undo", label: "Отменить", shortcut: "Ctrl+Z" },
   { id: "redo", label: "Повторить", shortcut: "Ctrl+Y" },
   { id: "reload", label: "Загрузить с диска", shortcut: "" },
-  { id: "tab-buttons", label: "Перейти: Назначения", shortcut: "1" },
-  { id: "tab-profiles", label: "Перейти: Профили", shortcut: "2" },
-  { id: "tab-verification", label: "Перейти: Проверка", shortcut: "3" },
-  { id: "tab-expert", label: "Перейти: Эксперт", shortcut: "4" },
+  { id: "tab-profiles", label: "Перейти: Профили", shortcut: "1" },
+  { id: "tab-verification", label: "Перейти: Проверка", shortcut: "2" },
+  { id: "tab-expert", label: "Перейти: Эксперт", shortcut: "3" },
   { id: "layer-standard", label: "Слой: Стандартный", shortcut: "" },
   { id: "layer-hypershift", label: "Слой: Hypershift", shortcut: "" },
 ];

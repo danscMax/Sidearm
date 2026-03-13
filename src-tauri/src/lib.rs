@@ -2,6 +2,7 @@ mod capture_backend;
 mod clipboard;
 mod command_error;
 mod config;
+mod exe_icon;
 mod executor;
 mod hotkeys;
 mod input_synthesis;
@@ -647,6 +648,75 @@ fn runtime_error_context(event: &RuntimeErrorEvent) -> String {
     }
 }
 
+#[tauri::command]
+async fn get_exe_icon(exe_name: String) -> Result<Option<String>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // Try common install locations for the exe
+        let candidates = exe_icon_search_paths(&exe_name);
+        for path in &candidates {
+            if let Some(b64) = exe_icon::extract_icon_base64(path) {
+                return Ok(Some(b64));
+            }
+        }
+        Ok(None)
+    })
+    .await
+    .map_err(|error| CommandError::internal(format!("get_exe_icon task failed: {error}")))?
+}
+
+/// Build a list of candidate full paths for a given exe name.
+/// Tries PATH lookup first, then common directories.
+fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+
+    // 1. Try to find via PATH environment variable
+    if let Ok(path_env) = std::env::var("PATH") {
+        for dir in path_env.split(';') {
+            let candidate = std::path::Path::new(dir).join(exe_name);
+            if candidate.exists() {
+                if let Some(s) = candidate.to_str() {
+                    paths.push(s.to_owned());
+                }
+            }
+        }
+    }
+
+    // 2. Common install directories
+    let program_dirs: Vec<String> = [
+        std::env::var("ProgramFiles").ok(),
+        std::env::var("ProgramFiles(x86)").ok(),
+        std::env::var("LocalAppData").ok(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+
+    let stem = exe_name.strip_suffix(".exe").unwrap_or(exe_name);
+
+    for base in &program_dirs {
+        // e.g. C:\Program Files\Code\code.exe
+        let candidate = std::path::Path::new(base).join(stem).join(exe_name);
+        if candidate.exists() {
+            if let Some(s) = candidate.to_str() {
+                paths.push(s.to_owned());
+            }
+        }
+        // e.g. C:\Program Files\Microsoft VS Code\code.exe (search subdirectories)
+        if let Ok(entries) = std::fs::read_dir(base) {
+            for entry in entries.flatten() {
+                let candidate = entry.path().join(exe_name);
+                if candidate.exists() {
+                    if let Some(s) = candidate.to_str() {
+                        paths.push(s.to_owned());
+                    }
+                }
+            }
+        }
+    }
+
+    paths
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Safety net: release all modifier keys if we panic while holding keys.
@@ -717,7 +787,8 @@ pub fn run() {
             capture_active_window,
             preview_resolution,
             execute_preview_action,
-            run_preview_action
+            run_preview_action,
+            get_exe_icon
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

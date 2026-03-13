@@ -553,6 +553,68 @@ export function expectedEncodedKeyForControl(
   return null;
 }
 
+export function duplicateProfile(
+  config: AppConfig,
+  sourceProfileId: string,
+): { config: AppConfig; newProfileId: string } {
+  const source = config.profiles.find((p) => p.id === sourceProfileId);
+  if (!source) return { config, newProfileId: "" };
+
+  const newName = `${source.name} (копия)`;
+  const newId = nextUniqueId(
+    config.profiles.map((p) => p.id),
+    makeProfileId(newName),
+  );
+
+  const newProfile: Profile = { ...source, id: newId, name: newName };
+
+  // Clone all appMappings for this profile
+  const sourceAppMappings = config.appMappings.filter(
+    (m) => m.profileId === sourceProfileId,
+  );
+  const newAppMappings = sourceAppMappings.map((m) => ({
+    ...m,
+    id: crypto.randomUUID(),
+    profileId: newId,
+  }));
+
+  // Clone bindings + actions
+  const sourceBindings = config.bindings.filter(
+    (b) => b.profileId === sourceProfileId,
+  );
+  const actionIdMap = new Map<string, string>();
+  const newActions: typeof config.actions = [];
+
+  for (const binding of sourceBindings) {
+    if (!actionIdMap.has(binding.actionRef)) {
+      const sourceAction = config.actions.find((a) => a.id === binding.actionRef);
+      if (sourceAction) {
+        const newActionId = crypto.randomUUID();
+        actionIdMap.set(binding.actionRef, newActionId);
+        newActions.push({ ...structuredClone(sourceAction), id: newActionId });
+      }
+    }
+  }
+
+  const newBindings = sourceBindings.map((b) => ({
+    ...b,
+    id: crypto.randomUUID(),
+    profileId: newId,
+    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+  }));
+
+  return {
+    config: {
+      ...config,
+      profiles: [...config.profiles, newProfile],
+      appMappings: [...config.appMappings, ...newAppMappings],
+      bindings: [...config.bindings, ...newBindings],
+      actions: [...config.actions, ...newActions],
+    },
+    newProfileId: newId,
+  };
+}
+
 export function createProfile(config: AppConfig, preferredName: string): AppConfig {
   const name = preferredName.trim() || "New Profile";
   const id = nextUniqueId(config.profiles.map((profile) => profile.id), makeProfileId(name));

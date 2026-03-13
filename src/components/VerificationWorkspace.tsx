@@ -44,7 +44,7 @@ import {
 } from "../lib/helpers";
 import { MouseVisualization } from "./MouseVisualization";
 import { Fact } from "./shared";
-import type { FamilySection } from "./AssignmentsWorkspace";
+import type { FamilySection } from "../lib/constants";
 
 export interface VerificationWorkspaceProps {
 

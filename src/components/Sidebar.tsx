@@ -51,27 +51,12 @@ export function Sidebar({
       ))}
       <div className="sidebar__sep" />
       <div className="sidebar__section">
-        <span className="sidebar__section-label">Профиль</span>
-        <div className="sidebar__profile-row">
-          <select
-            className="sidebar__profile-select"
-            value={effectiveProfileId ?? ""}
-            onChange={(event) => {
-              startTransition(() => {
-                onSelectProfile(event.target.value);
-              });
-            }}
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+        <div className="sidebar__section-header">
+          <span className="sidebar__section-label">Профиль</span>
           {isProfilesMode ? (
             <button
               type="button"
-              className="nav-item"
+              className="sidebar__add-profile-btn"
               onClick={onCreateProfile}
               title="Добавить профиль"
             >
@@ -79,6 +64,21 @@ export function Sidebar({
             </button>
           ) : null}
         </div>
+        <select
+          className="sidebar__profile-select"
+          value={effectiveProfileId ?? ""}
+          onChange={(event) => {
+            startTransition(() => {
+              onSelectProfile(event.target.value);
+            });
+          }}
+        >
+          {profiles.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
         {runtimeStatus === "running" && runtimeResolvedProfileName ? (
           <div className="sidebar__runtime-profile" title="Последний профиль, выбранный перехватчиком по активному окну">
             Активный: {runtimeResolvedProfileName}

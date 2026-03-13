@@ -1040,11 +1040,11 @@ select::checkmark {
 }
 
 .mouse-top-labels--left {
-  align-items: flex-end;
+  align-items: stretch;
 }
 
 .mouse-top-labels--right {
-  align-items: flex-start;
+  align-items: stretch;
 }
 
 /* ── Side view panel ── */
@@ -1071,6 +1071,7 @@ select::checkmark {
 }
 
 .btn-legend__cell {
+  --action-rgb: 140, 145, 135;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1086,8 +1087,17 @@ select::checkmark {
   min-width: 0;
   max-width: 100%;
   transition: background 120ms ease, border-color 120ms ease;
-  min-width: 0;
 }
+
+/* Action type colors → badge tint */
+.btn-legend__cell[data-action-type="shortcut"]      { --action-rgb: 143, 211, 232; }
+.btn-legend__cell[data-action-type="mouseAction"]    { --action-rgb: 183, 226, 107; }
+.btn-legend__cell[data-action-type="textSnippet"]    { --action-rgb: 231, 196, 111; }
+.btn-legend__cell[data-action-type="sequence"]       { --action-rgb: 196, 153, 255; }
+.btn-legend__cell[data-action-type="launch"]         { --action-rgb: 255, 153, 102; }
+.btn-legend__cell[data-action-type="mediaKey"]       { --action-rgb: 255, 153, 204; }
+.btn-legend__cell[data-action-type="profileSwitch"]  { --action-rgb: 153, 204, 255; }
+.btn-legend__cell[data-action-type="menu"]           { --action-rgb: 204, 204, 153; }
 
 .btn-legend__cell:hover,
 .btn-legend__cell--hovered {
@@ -1110,8 +1120,8 @@ select::checkmark {
   height: 20px;
   padding: 0 4px;
   border-radius: 10px;
-  background: rgba(var(--layer-rgb, 159, 202, 105), 0.15);
-  color: var(--layer-accent, var(--c-accent));
+  background: rgba(var(--action-rgb), 0.18);
+  color: rgb(var(--action-rgb));
   font-size: var(--fs-micro);
   font-weight: 800;
   line-height: 1;
@@ -1148,16 +1158,6 @@ select::checkmark {
   animation: tab-fade-in 120ms ease-out;
 }
 
-/* ── Action type color stripe on legend cells ── */
-.btn-legend__cell[data-action-type="shortcut"] { border-left: 3px solid rgba(143, 211, 232, 0.7); }
-.btn-legend__cell[data-action-type="mouseAction"] { border-left: 3px solid rgba(183, 226, 107, 0.7); }
-.btn-legend__cell[data-action-type="textSnippet"] { border-left: 3px solid rgba(231, 196, 111, 0.7); }
-.btn-legend__cell[data-action-type="sequence"] { border-left: 3px solid rgba(196, 153, 255, 0.7); }
-.btn-legend__cell[data-action-type="launch"] { border-left: 3px solid rgba(255, 153, 102, 0.7); }
-.btn-legend__cell[data-action-type="mediaKey"] { border-left: 3px solid rgba(255, 153, 204, 0.7); }
-.btn-legend__cell[data-action-type="profileSwitch"] { border-left: 3px solid rgba(153, 204, 255, 0.7); }
-.btn-legend__cell[data-action-type="menu"] { border-left: 3px solid rgba(204, 204, 153, 0.7); }
-.btn-legend__cell[data-action-type="disabled"] { border-left: 3px solid rgba(160, 160, 160, 0.4); }
 
 /* Center workspace column */
 .workspace__center {

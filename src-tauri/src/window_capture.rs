@@ -201,18 +201,25 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
 }
 
 /// Check whether a process is running with elevated privileges (admin token).
-/// Returns `false` on any failure — we prefer silent fallback over hard errors.
+///
+/// When our app runs non-elevated, `OpenProcessToken` fails with
+/// `ERROR_ACCESS_DENIED` for elevated targets (UIPI blocks token access).
+/// We treat access-denied as "elevated" — in all such cases `SendInput`
+/// would also be blocked, so the warning is correct regardless.
 #[cfg(target_os = "windows")]
 unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
     use windows_sys::Win32::{
-        Foundation::CloseHandle,
+        Foundation::{CloseHandle, ERROR_ACCESS_DENIED},
         Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
         System::Threading::OpenProcessToken,
     };
 
     let mut token_handle = std::ptr::null_mut();
     if OpenProcessToken(process_handle, TOKEN_QUERY, &mut token_handle) == 0 {
-        return false;
+        // Access denied → target is likely elevated (or protected).
+        // Either way, SendInput won't reach it.
+        let err = std::io::Error::last_os_error();
+        return err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32);
     }
 
     let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
@@ -434,7 +441,7 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn is_process_elevated_returns_false_for_inaccessible_system_process() {
+    fn is_process_elevated_returns_true_for_system_process() {
         use windows_sys::Win32::{
             Foundation::CloseHandle,
             System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
@@ -443,19 +450,18 @@ mod tests {
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, 4);
             if handle.is_null() {
-                // Cannot open System process — the function should never be called
-                // with a null handle in production, but we verify the precondition.
+                // Cannot open System process — skip test.
                 return;
             }
 
             let elevated = super::is_process_elevated(handle);
             CloseHandle(handle);
 
-            // Even if we can open PID 4, OpenProcessToken will fail for the
-            // System process from a non-admin caller, so the function returns false.
+            // OpenProcessToken fails with ERROR_ACCESS_DENIED for PID 4,
+            // which we now treat as "elevated" (SendInput would also fail).
             assert!(
-                !elevated,
-                "is_process_elevated should return false when token access is denied"
+                elevated,
+                "is_process_elevated should return true when token access is denied"
             );
         }
     }

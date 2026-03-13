@@ -238,14 +238,6 @@ select option {
   color: var(--c-text-muted);
 }
 
-.sidebar__status--dirty {
-  color: var(--c-warning-light);
-  background: rgba(231, 196, 111, 0.08);
-  border: 1px solid rgba(231, 196, 111, 0.18);
-  border-radius: var(--radius-xs);
-  padding: 8px 12px;
-}
-
 .sidebar__status--error {
   color: var(--c-danger);
   background: rgba(220, 80, 80, 0.1);
@@ -286,15 +278,11 @@ select option {
   font-family: var(--font-mono);
 }
 
-/* ── Dirty-state Save button ── */
-.toolbar__btn--primary--dirty {
-  animation: save-pulse 1.8s ease-in-out infinite;
-  box-shadow: 0 0 8px rgba(159, 202, 105, 0.4);
-}
-
-@keyframes save-pulse {
-  0%, 100% { box-shadow: 0 0 8px rgba(159, 202, 105, 0.4); }
-  50% { box-shadow: 0 0 16px rgba(159, 202, 105, 0.7); }
+/* ── Toolbar auto-save status ── */
+.toolbar__status {
+  font-size: var(--fs-small);
+  color: var(--c-text-muted);
+  white-space: nowrap;
 }
 
 /* ── Utility spacing ── */
@@ -346,11 +334,6 @@ select option {
 .toolbar__btn:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-}
-
-.toolbar__btn--primary {
-  background: var(--gradient-primary);
-  color: var(--c-text-on-accent);
 }
 
 .toolbar__btn--secondary {

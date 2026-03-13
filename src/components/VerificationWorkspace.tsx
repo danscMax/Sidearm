@@ -47,7 +47,7 @@ import { Fact } from "./shared";
 import type { FamilySection } from "./AssignmentsWorkspace";
 
 export interface VerificationWorkspaceProps {
-  activeConfig: AppConfig;
+
   effectiveProfileId: string | null;
   selectedLayer: Layer;
   selectedControl: PhysicalControl | null;
@@ -84,7 +84,6 @@ export interface VerificationWorkspaceProps {
 
   // Runtime state
   runtimeSummary: RuntimeStateSummary;
-  isDirty: boolean;
   viewState: ViewState;
 
   // Runtime handlers
@@ -98,11 +97,9 @@ export interface VerificationWorkspaceProps {
 
   // Draft update
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
-  persistConfigAndReloadRuntime: (config: AppConfig) => Promise<void>;
 }
 
 export function VerificationWorkspace({
-  activeConfig,
   selectedLayer,
   selectedControl,
   selectedBinding,
@@ -131,7 +128,6 @@ export function VerificationWorkspace({
   handleResetVerificationSession,
   handleExportVerificationSession,
   runtimeSummary,
-  isDirty,
   viewState,
   handleStartRuntime,
   handleReloadRuntime,
@@ -139,7 +135,6 @@ export function VerificationWorkspace({
   lastEncodedKey,
   lastResolutionPreview,
   updateDraft,
-  persistConfigAndReloadRuntime,
 }: VerificationWorkspaceProps) {
   // --- Derived values (moved from App.tsx) ---
   const expectedEncodedKey = selectedControl
@@ -295,18 +290,6 @@ export function VerificationWorkspace({
                     </p>
 
                     <div className="editor-actions">
-                      {isDirty ? (
-                        <button
-                          type="button"
-                          className="action-button"
-                          onClick={async () => {
-                            await persistConfigAndReloadRuntime(activeConfig);
-                            void handleStartVerificationSession();
-                          }}
-                        >
-                          Сохранить и начать сессию
-                        </button>
-                      ) : (
                         <button
                           type="button"
                           className="action-button"
@@ -318,7 +301,6 @@ export function VerificationWorkspace({
                             ? "Запустить перехват и начать"
                             : "Начать сессию"}
                         </button>
-                      )}
                     </div>
                   </>
                 ) : null}
@@ -499,7 +481,7 @@ export function VerificationWorkspace({
                                 onClick={() => {
                                   handleRestartVerificationStep();
                                 }}
-                                disabled={runtimeSummary.status !== "running" || isDirty}
+                                disabled={runtimeSummary.status !== "running"}
                               >
                                 Перезапустить
                               </button>
@@ -717,7 +699,6 @@ export function VerificationWorkspace({
                 void handleStartRuntime();
               }}
               disabled={
-                isDirty ||
                 viewState === "loading" ||
                 viewState === "saving" ||
                 runtimeSummary.status === "running"
@@ -732,7 +713,6 @@ export function VerificationWorkspace({
                 void handleReloadRuntime();
               }}
               disabled={
-                isDirty ||
                 viewState === "loading" ||
                 viewState === "saving" ||
                 runtimeSummary.status !== "running"
@@ -777,15 +757,6 @@ export function VerificationWorkspace({
             />
           </div>
 
-          {isDirty ? (
-            <div className="notice notice--warning">
-              <strong>Сначала сохраните изменения</strong>
-              <p>
-                Фоновый перехват использует сохранённую конфигурацию, а не
-                текущий черновик в памяти.
-              </p>
-            </div>
-          ) : null}
         </section>
       </div>
     </>

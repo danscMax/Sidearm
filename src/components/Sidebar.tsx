@@ -19,7 +19,6 @@ export function Sidebar({
   onCreateProfile,
   onToggleRuntime,
   runtimeStatus,
-  isDirty,
   viewState,
 }: {
   workspaceMode: WorkspaceMode;
@@ -32,7 +31,6 @@ export function Sidebar({
   onCreateProfile: () => void;
   onToggleRuntime: () => void;
   runtimeStatus: "running" | "stopped" | string;
-  isDirty: boolean;
   viewState: ViewState;
 }) {
   return (
@@ -100,12 +98,10 @@ export function Sidebar({
           {runtimeStatus === "running" ? "Стоп" : "Старт"}
         </span>
       </button>
-      <div className={`sidebar__status${viewState === "error" ? " sidebar__status--error" : isDirty ? " sidebar__status--dirty" : ""}`} aria-live="polite">
+      <div className={`sidebar__status${viewState === "error" ? " sidebar__status--error" : ""}`} aria-live="polite">
         {viewState === "error"
           ? "Ошибка сохранения"
-          : isDirty
-            ? "Есть несохранённые изменения"
-            : stateLabel(viewState)}
+          : stateLabel(viewState)}
       </div>
     </aside>
   );

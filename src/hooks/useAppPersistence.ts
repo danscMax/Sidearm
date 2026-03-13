@@ -1,4 +1,4 @@
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 
 import { loadConfig, normalizeCommandError, saveConfig } from "../lib/backend";
 import type {
@@ -10,13 +10,7 @@ import type {
 import type { ViewState } from "../lib/constants";
 
 const MAX_UNDO = 15;
-
-export type ConfirmModalOptions = {
-  title: string;
-  message: string;
-  confirmLabel?: string;
-  onConfirm: () => void;
-};
+const AUTO_SAVE_DELAY_MS = 500;
 
 export interface AppPersistence {
   // State (read-only for consumers)
@@ -29,7 +23,6 @@ export interface AppPersistence {
   setLastSave: React.Dispatch<React.SetStateAction<SaveConfigResponse | null>>;
   error: CommandError | null;
   setError: React.Dispatch<React.SetStateAction<CommandError | null>>;
-  isDirty: boolean;
   undoStack: readonly AppConfig[];
   redoStack: readonly AppConfig[];
 
@@ -40,28 +33,83 @@ export interface AppPersistence {
 
   // Functions
   refreshConfig: () => Promise<boolean>;
-  persistConfig: (config: AppConfig) => Promise<void>;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
-  resetDraft: (showConfirmModal: (opts: ConfirmModalOptions) => void) => void;
   handleUndo: () => void;
   handleRedo: () => void;
 }
 
-export function useAppPersistence(): AppPersistence {
+export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
   const [viewState, setViewState] = useState<ViewState>("idle");
   const [snapshot, setSnapshot] = useState<LoadConfigResponse | null>(null);
   const [workingConfig, setWorkingConfig] = useState<AppConfig | null>(null);
   const [lastSave, setLastSave] = useState<SaveConfigResponse | null>(null);
   const [error, setError] = useState<CommandError | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
   const [undoStack, setUndoStack] = useState<AppConfig[]>([]);
   const [redoStack, setRedoStack] = useState<AppConfig[]>([]);
+
+  // Auto-save refs
+  const saveQueueRef = useRef<AppConfig | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isSavingRef = useRef(false);
+  const onAutoSavedRef = useRef(onAutoSaved);
+  onAutoSavedRef.current = onAutoSaved;
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
   const activePath = lastSave?.path ?? snapshot?.path ?? "Пока не загружен";
 
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(saveTimerRef.current);
+  }, []);
+
+  function scheduleSave(config: AppConfig) {
+    saveQueueRef.current = config;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushSave, AUTO_SAVE_DELAY_MS);
+  }
+
+  async function flushSave() {
+    const config = saveQueueRef.current;
+    if (!config || isSavingRef.current) return;
+
+    saveQueueRef.current = null;
+    isSavingRef.current = true;
+    setViewState("saving");
+
+    try {
+      const result = await saveConfig(config);
+      startTransition(() => {
+        setSnapshot({
+          config: result.config,
+          warnings: result.warnings,
+          path: result.path,
+          createdDefault: false,
+        });
+        setLastSave(result);
+        setError(null);
+        setViewState("ready");
+      });
+      onAutoSavedRef.current?.();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+        setViewState("error");
+      });
+    } finally {
+      isSavingRef.current = false;
+      // If new changes queued during save, save again promptly
+      if (saveQueueRef.current) {
+        saveTimerRef.current = setTimeout(flushSave, 100);
+      }
+    }
+  }
+
   async function refreshConfig(): Promise<boolean> {
+    // Cancel any pending auto-save
+    clearTimeout(saveTimerRef.current);
+    saveQueueRef.current = null;
+
     setViewState("loading");
     setError(null);
 
@@ -72,7 +120,6 @@ export function useAppPersistence(): AppPersistence {
         setWorkingConfig(result.config);
         setLastSave(null);
         setError(null);
-        setIsDirty(false);
         setViewState("ready");
       });
       return true;
@@ -85,74 +132,17 @@ export function useAppPersistence(): AppPersistence {
     }
   }
 
-  async function persistConfig(config: AppConfig): Promise<void> {
-    setViewState("saving");
-    setError(null);
-
-    try {
-      const result = await saveConfig(config);
-      startTransition(() => {
-        setSnapshot({
-          config: result.config,
-          warnings: result.warnings,
-          path: result.path,
-          createdDefault: false,
-        });
-        setWorkingConfig(result.config);
-        setLastSave(result);
-        setError(null);
-        setIsDirty(false);
-        setViewState("ready");
-      });
-      // NOTE: Runtime reload removed from here.
-      // Caller should chain runtime.reload() after awaiting persistConfig if needed.
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-        setViewState("error");
-      });
-    }
-  }
-
   function updateDraft(updateConfig: (config: AppConfig) => AppConfig) {
     setWorkingConfig((current) => {
       if (!current) return current;
-      // Push current state to undo stack (max MAX_UNDO)
       setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), current]);
       setRedoStack([]);
       setError(null);
-      setIsDirty(true);
       setViewState("ready");
-      return updateConfig(current);
+      const next = updateConfig(current);
+      scheduleSave(next);
+      return next;
     });
-  }
-
-  function resetDraft(showConfirmModal: (opts: ConfirmModalOptions) => void) {
-    if (!snapshot) {
-      return;
-    }
-
-    if (isDirty) {
-      showConfirmModal({
-        title: "Отменить изменения?",
-        message: "Все несохранённые изменения будут потеряны.",
-        confirmLabel: "Отменить изменения",
-        onConfirm: () => {
-          setWorkingConfig(snapshot.config);
-          setError(null);
-          setIsDirty(false);
-          setUndoStack([]);
-          setRedoStack([]);
-          setViewState("ready");
-        },
-      });
-      return;
-    }
-
-    setWorkingConfig(snapshot.config);
-    setError(null);
-    setIsDirty(false);
-    setViewState("ready");
   }
 
   function handleUndo() {
@@ -166,8 +156,7 @@ export function useAppPersistence(): AppPersistence {
         }
         return previous;
       });
-      // Reference equality is intentional: snapshot.config preserves identity through save cycle
-      setIsDirty(remaining.length > 0 || previous !== snapshot?.config);
+      scheduleSave(previous);
       return remaining;
     });
   }
@@ -183,7 +172,7 @@ export function useAppPersistence(): AppPersistence {
         }
         return next;
       });
-      setIsDirty(remaining.length > 0 || next !== snapshot?.config);
+      scheduleSave(next);
       return remaining;
     });
   }
@@ -198,16 +187,13 @@ export function useAppPersistence(): AppPersistence {
     setLastSave,
     error,
     setError,
-    isDirty,
     undoStack,
     redoStack,
     activeConfig,
     activeWarnings,
     activePath,
     refreshConfig,
-    persistConfig,
     updateDraft,
-    resetDraft,
     handleUndo,
     handleRedo,
   };

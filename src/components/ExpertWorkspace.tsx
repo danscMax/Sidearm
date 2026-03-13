@@ -59,7 +59,6 @@ export interface ExpertWorkspaceProps {
   handleExecutePreviewAction: () => Promise<void>;
   handleRunPreviewAction: () => Promise<void>;
   // Persistence state
-  isDirty: boolean;
   viewState: ViewState;
   activePath: string;
   activeWarnings: ValidationWarning[];
@@ -97,7 +96,6 @@ export function ExpertWorkspace(props: ExpertWorkspaceProps) {
     handlePreviewResolution,
     handleExecutePreviewAction,
     handleRunPreviewAction,
-    isDirty,
     viewState,
     activePath,
     activeWarnings,
@@ -146,7 +144,6 @@ export function ExpertWorkspace(props: ExpertWorkspaceProps) {
 
         <RuntimePanel
           runtimeSummary={runtimeSummary}
-          isDirty={isDirty}
           viewState={viewState}
           handleStartRuntime={handleStartRuntime}
           handleReloadRuntime={handleReloadRuntime}
@@ -156,7 +153,6 @@ export function ExpertWorkspace(props: ExpertWorkspaceProps) {
         <ServiceToolsPanel
           activeConfig={activeConfig}
           profiles={profiles}
-          isDirty={isDirty}
           viewState={viewState}
           activePath={activePath}
           activeWarnings={activeWarnings}

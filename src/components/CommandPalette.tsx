@@ -5,10 +5,8 @@ import { useEffect, useState } from "react";
    ───────────────────────────────────────────────────────── */
 
 export const PALETTE_COMMANDS = [
-  { id: "save", label: "Сохранить конфигурацию", shortcut: "Ctrl+S" },
   { id: "undo", label: "Отменить", shortcut: "Ctrl+Z" },
   { id: "redo", label: "Повторить", shortcut: "Ctrl+Y" },
-  { id: "reset", label: "Отменить изменения", shortcut: "" },
   { id: "reload", label: "Загрузить с диска", shortcut: "" },
   { id: "tab-buttons", label: "Перейти: Назначения", shortcut: "1" },
   { id: "tab-profiles", label: "Перейти: Профили", shortcut: "2" },

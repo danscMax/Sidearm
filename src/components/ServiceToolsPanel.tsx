@@ -30,7 +30,7 @@ import { Fact, PanelGroup, WarningsPanel, ErrorPanel } from "./shared";
 export interface ServiceToolsPanelProps {
   activeConfig: AppConfig;
   profiles: Profile[];
-  isDirty: boolean;
+
   viewState: ViewState;
   activePath: string;
   activeWarnings: ValidationWarning[];
@@ -57,7 +57,6 @@ export interface ServiceToolsPanelProps {
 export function ServiceToolsPanel({
   activeConfig,
   profiles,
-  isDirty,
   viewState,
   activePath,
   activeWarnings,
@@ -87,7 +86,6 @@ export function ServiceToolsPanel({
       ? isActionLiveRunnable(activeConfig, lastResolutionPreview.actionId)
       : false;
   const canRunLiveAction =
-    !isDirty &&
     lastResolutionPreview?.status === "resolved" &&
     resolvedLiveRunnable;
 
@@ -314,20 +312,10 @@ export function ServiceToolsPanel({
           </p>
         ) : null}
         {error ? <ErrorPanel error={error} /> : null}
-        {!error && isDirty ? (
-          <div className="notice notice--info">
-            <strong>Есть несохранённые изменения</strong>
-            <p>
-              Текущее состояние редактора живёт только в памяти. Пока вы
-              не сохраните изменения, предупреждения ниже могут быть
-              устаревшими.
-            </p>
-          </div>
-        ) : null}
-        {!error && !isDirty && activeWarnings.length > 0 ? (
+        {!error && activeWarnings.length > 0 ? (
           <WarningsPanel warnings={activeWarnings} />
         ) : null}
-        {!error && !isDirty && activeWarnings.length === 0 ? (
+        {!error && activeWarnings.length === 0 ? (
           <div className="notice notice--ok">
             <strong>Предупреждений нет</strong>
             <p>

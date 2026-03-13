@@ -5,7 +5,6 @@ import { Fact } from "./shared";
 
 export interface RuntimePanelProps {
   runtimeSummary: RuntimeStateSummary;
-  isDirty: boolean;
   viewState: ViewState;
   handleStartRuntime: () => Promise<void>;
   handleReloadRuntime: () => Promise<void>;
@@ -14,7 +13,6 @@ export interface RuntimePanelProps {
 
 export function RuntimePanel({
   runtimeSummary,
-  isDirty,
   viewState,
   handleStartRuntime,
   handleReloadRuntime,
@@ -31,7 +29,6 @@ export function RuntimePanel({
             void handleStartRuntime();
           }}
           disabled={
-            isDirty ||
             viewState === "loading" ||
             viewState === "saving" ||
             runtimeSummary.status === "running"
@@ -46,7 +43,6 @@ export function RuntimePanel({
             void handleReloadRuntime();
           }}
           disabled={
-            isDirty ||
             viewState === "loading" ||
             viewState === "saving" ||
             runtimeSummary.status !== "running"
@@ -90,16 +86,6 @@ export function RuntimePanel({
           value={formatTimestamp(runtimeSummary.lastReloadAt)}
         />
       </div>
-
-      {isDirty ? (
-        <div className="notice notice--warning">
-          <strong>Сначала сохраните изменения</strong>
-          <p>
-            Фоновый перехват использует сохранённую конфигурацию, а не
-            текущий черновик в памяти.
-          </p>
-        </div>
-      ) : null}
     </section>
   );
 }

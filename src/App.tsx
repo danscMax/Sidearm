@@ -25,7 +25,6 @@ import {
 } from "./lib/config-editing";
 import type {
   Action,
-  AppConfig,
   Binding,
   ControlId,
   EncoderMapping,
@@ -50,17 +49,20 @@ import {
 const ALL_HOTSPOT_IDS = [...Object.keys(sideViewHotspots), ...Object.keys(topViewHotspots)];
 
 function App() {
-  const persistence = useAppPersistence();
+  const handleReloadRuntimeRef = useRef<(() => Promise<void>) | null>(null);
+  const persistence = useAppPersistence(() => {
+    // Auto-save callback: reload runtime so saved changes take effect
+    void handleReloadRuntimeRef.current?.();
+  });
   const {
     viewState,
     workingConfig,
     lastSave,
     error, setError,
-    isDirty,
     undoStack,
     redoStack,
     activeConfig, activeWarnings, activePath,
-    refreshConfig, persistConfig, updateDraft, resetDraft, handleUndo, handleRedo,
+    refreshConfig, updateDraft, handleUndo, handleRedo,
   } = persistence;
 
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
@@ -89,6 +91,7 @@ function App() {
     handleCaptureActiveWindow, handlePreviewResolution,
     handleExecutePreviewAction, handleRunPreviewAction,
   } = runtime;
+  handleReloadRuntimeRef.current = handleReloadRuntime;
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("buttons");
   const [actionPickerOpen, setActionPickerOpen] = useState(false);
@@ -114,16 +117,6 @@ function App() {
     }
     void initApp();
   }, []);
-
-  // C1: Unsaved changes protection — prevent accidental window close
-  useEffect(() => {
-    if (!isDirty) return;
-    function handleBeforeUnload(e: BeforeUnloadEvent) {
-      e.preventDefault();
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload);
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
-  }, [isDirty]);
 
   useEffect(() => {
     if (!activeConfig) {
@@ -168,10 +161,7 @@ function App() {
       return;
     }
 
-    if (e.ctrlKey && e.key === "s") {
-      e.preventDefault();
-      if (activeConfig && isDirty) void persistConfigAndReloadRuntime(activeConfig);
-    } else if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
+    if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
       e.preventDefault();
       handleUndo();
     } else if (e.ctrlKey && (e.key === "y" || (e.shiftKey && e.key === "Z"))) {
@@ -217,31 +207,8 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Wrap persistConfig to also reload runtime after save
-  async function persistConfigAndReloadRuntime(config: AppConfig) {
-    await persistConfig(config);
-    // Auto-reload runtime so saved changes take effect immediately
-    try {
-      await handleReloadRuntime();
-    } catch {
-      // Runtime reload failed silently — runtime may not be running
-    }
-  }
-
   function switchWorkspaceMode(nextMode: WorkspaceMode) {
-    if (isDirty && nextMode !== workspaceMode) {
-      setConfirmModal({
-        title: "Переключить режим?",
-        message: "У вас есть несохранённые изменения. Они сохранятся в черновике, но убедитесь, что не забыли сохранить.",
-        confirmLabel: "Переключить",
-        onConfirm: () => {
-          startTransition(() => { setWorkspaceMode(nextMode); });
-          setConfirmModal(null);
-        },
-      });
-    } else {
-      startTransition(() => { setWorkspaceMode(nextMode); });
-    }
+    startTransition(() => { setWorkspaceMode(nextMode); });
   }
 
   function handleCreateProfile() {
@@ -408,7 +375,6 @@ function App() {
           else void handleStartRuntime();
         }}
         runtimeStatus={runtimeSummary.status}
-        isDirty={isDirty}
         viewState={viewState}
       />
 
@@ -417,20 +383,10 @@ function App() {
           heading={activeModeCopy.heading}
           undoCount={undoStack.length}
           redoCount={redoStack.length}
-          isDirty={isDirty}
           viewState={viewState}
           onLoad={() => { void refreshConfig(); }}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          onDiscard={() => resetDraft((opts) => setConfirmModal({
-            ...opts,
-            onConfirm: () => { opts.onConfirm(); setConfirmModal(null); },
-          }))}
-          onSave={() => {
-            if (activeConfig) {
-              void persistConfigAndReloadRuntime(activeConfig);
-            }
-          }}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
@@ -467,7 +423,6 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 lastCapture={lastCapture}
                 captureDelayMs={captureDelayMs}
-                isDirty={isDirty}
                 viewState={viewState}
                 updateDraft={updateDraft}
                 setCaptureDelayMs={setCaptureDelayMs}
@@ -477,7 +432,6 @@ function App() {
               />
             ) : isVerificationMode ? (
               <VerificationWorkspace
-                activeConfig={activeConfig}
                 effectiveProfileId={effectiveProfileId}
                 selectedLayer={selectedLayer}
                 selectedControl={selectedControl}
@@ -507,7 +461,6 @@ function App() {
                 handleResetVerificationSession={handleResetVerificationSession}
                 handleExportVerificationSession={handleExportVerificationSession}
                 runtimeSummary={runtimeSummary}
-                isDirty={isDirty}
                 viewState={viewState}
                 handleStartRuntime={handleStartRuntime}
                 handleReloadRuntime={handleReloadRuntime}
@@ -515,7 +468,6 @@ function App() {
                 lastEncodedKey={lastEncodedKey}
                 lastResolutionPreview={lastResolutionPreview}
                 updateDraft={updateDraft}
-                persistConfigAndReloadRuntime={persistConfigAndReloadRuntime}
               />
             ) : (
               <ExpertWorkspace
@@ -547,7 +499,6 @@ function App() {
                 handlePreviewResolution={handlePreviewResolution}
                 handleExecutePreviewAction={handleExecutePreviewAction}
                 handleRunPreviewAction={handleRunPreviewAction}
-                isDirty={isDirty}
                 viewState={viewState}
                 activePath={activePath}
                 activeWarnings={activeWarnings}
@@ -605,20 +556,11 @@ function App() {
           onExecute={(commandId) => {
             setCommandPaletteOpen(false);
             switch (commandId) {
-              case "save":
-                if (activeConfig && isDirty) void persistConfigAndReloadRuntime(activeConfig);
-                break;
               case "undo":
                 handleUndo();
                 break;
               case "redo":
                 handleRedo();
-                break;
-              case "reset":
-                resetDraft((opts) => setConfirmModal({
-                  ...opts,
-                  onConfirm: () => { opts.onConfirm(); setConfirmModal(null); },
-                }));
                 break;
               case "reload":
                 void refreshConfig();

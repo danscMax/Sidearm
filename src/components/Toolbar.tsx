@@ -5,25 +5,19 @@ export function Toolbar({
   heading,
   undoCount,
   redoCount,
-  isDirty,
   viewState,
   onLoad,
   onUndo,
   onRedo,
-  onDiscard,
-  onSave,
   onOpenCommandPalette,
 }: {
   heading: string;
   undoCount: number;
   redoCount: number;
-  isDirty: boolean;
   viewState: ViewState;
   onLoad: () => void;
   onUndo: () => void;
   onRedo: () => void;
-  onDiscard: () => void;
-  onSave: () => void;
   onOpenCommandPalette?: () => void;
 }) {
   const isBusy = viewState === "loading" || viewState === "saving";
@@ -82,14 +76,9 @@ export function Toolbar({
             ↪
           </button>
         </div>
-        <button
-          type="button"
-          className={`toolbar__btn toolbar__btn--primary${isDirty ? " toolbar__btn--primary--dirty" : ""}`}
-          onClick={onSave}
-          disabled={!isDirty || isBusy}
-        >
-          Сохранить
-        </button>
+        {viewState === "saving" && (
+          <span className="toolbar__status">Сохранение…</span>
+        )}
         <div className="toolbar__overflow" ref={overflowRef}>
           <button
             type="button"
@@ -111,17 +100,6 @@ export function Toolbar({
                 disabled={isBusy}
               >
                 Загрузить с диска
-              </button>
-              <button
-                type="button"
-                className="toolbar__overflow-item"
-                onClick={() => {
-                  onDiscard();
-                  setOverflowOpen(false);
-                }}
-                disabled={!isDirty || isBusy}
-              >
-                Отменить изменения
               </button>
             </div>
           )}

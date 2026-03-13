@@ -20,7 +20,6 @@ export interface ProfilesWorkspaceProps {
   effectiveProfileId: string | null;
   lastCapture: WindowCaptureResult | null;
   captureDelayMs: number;
-  isDirty: boolean;
   viewState: ViewState;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   setCaptureDelayMs: (ms: number) => void;

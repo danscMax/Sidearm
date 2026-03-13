@@ -381,8 +381,11 @@ fn process_helper_key_event(
         WM_KEYUP | WM_SYSKEYUP => {
             if modifiers.apply_vk_event(vk, false) {
                 (false, false)
+            } else if let Some(encoded_key) = suppressions.remove(&vk) {
+                matches.push(format!("UP:{encoded_key}"));
+                (true, true)
             } else {
-                (suppressions.remove(&vk).is_some(), false)
+                (false, false)
             }
         }
         _ => (false, false),
@@ -990,6 +993,66 @@ mod helper_modifier_state_tests {
         assert!(state.matches_mask(MOD_CONTROL | MOD_SHIFT));
         assert!(!state.matches_mask(MOD_CONTROL));
         assert!(!state.matches_mask(MOD_CONTROL | MOD_SHIFT | MOD_ALT));
+    }
+}
+
+#[cfg(test)]
+#[cfg(target_os = "windows")]
+mod helper_key_event_tests {
+    use super::*;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP};
+
+    const VK_F24: u32 = 0x87;
+
+    fn reg(encoded_key: &str, modifiers_mask: u32, primary_vk: u32) -> HelperRegistration {
+        HelperRegistration {
+            encoded_key: encoded_key.into(),
+            modifiers_mask,
+            primary_vk,
+        }
+    }
+
+    #[test]
+    fn key_up_emits_release_event() {
+        let regs = vec![reg("Ctrl+Shift+F24", MOD_CONTROL | MOD_SHIFT, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        // Simulate Ctrl down, Shift down, F24 down
+        modifiers.apply_vk_event(VK_LCONTROL, true);
+        modifiers.apply_vk_event(VK_LSHIFT, true);
+        let (suppress, wake) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress);
+        assert!(wake);
+        assert_eq!(matches, vec!["Ctrl+Shift+F24"]);
+        matches.clear();
+
+        // Simulate F24 up — should emit UP: event
+        let (suppress, wake) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+        );
+        assert!(suppress);
+        assert!(wake, "key-up of suppressed key should wake for drain");
+        assert_eq!(matches, vec!["UP:Ctrl+Shift+F24"]);
+    }
+
+    #[test]
+    fn key_up_of_unsuppressed_key_does_not_emit() {
+        let regs = vec![reg("Ctrl+Shift+F24", MOD_CONTROL | MOD_SHIFT, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        // F24 up without prior down — should not emit
+        let (suppress, wake) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+        );
+        assert!(!suppress);
+        assert!(!wake);
+        assert!(matches.is_empty());
     }
 }
 

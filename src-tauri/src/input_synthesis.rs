@@ -144,14 +144,67 @@ const ALL_MODIFIERS: HotkeyModifiers = HotkeyModifiers {
     win: true,
 };
 
-pub fn send_text(text: &str) -> Result<(), String> {
+/// Text length threshold (in characters): above this, `send_text_with_delay`
+/// uses clipboard-paste (Ctrl+V) instead of per-character `KEYEVENTF_UNICODE`
+/// injection, because `SendInput` is slow and unreliable for long strings.
+/// If the clipboard-paste attempt fails, the function falls back to the
+/// per-character path transparently.
+const CLIPBOARD_PASTE_THRESHOLD: usize = 100;
+
+/// Send text with an optional inter-character delay (milliseconds).
+/// When `inter_key_delay_ms` is 0, all characters are batched into a single
+/// `SendInput` call.  A non-zero delay sends each character pair (down+up)
+/// individually with a sleep in between — useful for apps that drop rapid
+/// Unicode input bursts.  Pattern from AHK's `SetKeyDelay` / Kanata's
+/// `rapid-event-delay`.
+///
+/// For text longer than [`CLIPBOARD_PASTE_THRESHOLD`] characters, the function
+/// first attempts a clipboard-paste (save clipboard, set text, Ctrl+V, restore).
+/// This is significantly faster and more reliable for large snippets.  If the
+/// clipboard path fails for any reason, it silently falls back to per-character
+/// `KEYEVENTF_UNICODE` injection.
+pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    // For long text, attempt clipboard-paste first (much faster than per-char SendInput).
+    if text.chars().count() > CLIPBOARD_PASTE_THRESHOLD {
+        match crate::clipboard::paste_text(text) {
+            Ok(_report) => return Ok(()),
+            Err(clipboard_error) => {
+                // Clipboard-paste failed — fall through to per-character injection.
+                eprintln!(
+                    "Clipboard-paste fallback failed for long text ({} chars), \
+                     falling back to KEYEVENTF_UNICODE: {clipboard_error}",
+                    text.chars().count()
+                );
+            }
+        }
+    }
+
     clear_modifiers(&ALL_MODIFIERS)?;
     let plan = build_text_inputs(text)?;
     if plan.is_empty() {
         return Ok(());
     }
 
-    send_keyboard_inputs(&plan)
+    if inter_key_delay_ms == 0 {
+        return send_keyboard_inputs(&plan);
+    }
+
+    // Send character-by-character: each char = 2 events (down + up)
+    for chunk in plan.chunks(2) {
+        send_keyboard_inputs(chunk)?;
+        if chunk.len() == 2 {
+            std::thread::sleep(std::time::Duration::from_millis(u64::from(inter_key_delay_ms)));
+        }
+    }
+    Ok(())
+}
+
+pub fn send_text(text: &str) -> Result<(), String> {
+    send_text_with_delay(text, 0)
 }
 
 pub fn send_shortcut_hold_down(

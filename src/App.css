@@ -1027,6 +1027,16 @@ select::checkmark {
   width: auto;
 }
 
+.mouse-top-layout .mouse-visual--svg-top,
+.mouse-top-layout .mouse-visual--svg-combined {
+  height: min(500px, 65vh);
+  width: auto;
+}
+
+.mouse-visual--svg-side {
+  max-width: 340px;
+}
+
 .mouse-top-labels {
   display: flex;
   flex-direction: column;
@@ -1265,6 +1275,19 @@ select::checkmark {
 
 .mouse-visual--combined {
   aspect-ratio: 1 / 1;
+}
+
+/* SVG-based mouse schematic variants */
+.mouse-visual--svg-top {
+  aspect-ratio: 340 / 520;
+}
+
+.mouse-visual--svg-side {
+  aspect-ratio: 340 / 520;
+}
+
+.mouse-visual--svg-combined {
+  aspect-ratio: 340 / 520;
 }
 
 .mouse-visual__img {

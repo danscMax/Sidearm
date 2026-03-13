@@ -337,8 +337,8 @@ thread_local! {
         std::cell::RefCell::new(Vec::new());
     static HELPER_MODIFIERS: std::cell::RefCell<HelperModifierState> =
         std::cell::RefCell::new(HelperModifierState::default());
-    static HELPER_SUPPRESSIONS: std::cell::RefCell<std::collections::HashSet<u32>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    static HELPER_SUPPRESSIONS: std::cell::RefCell<std::collections::HashMap<u32, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
         std::cell::RefCell::new(Vec::new());
     static HELPER_THREAD_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
@@ -348,7 +348,7 @@ thread_local! {
 fn process_helper_key_event(
     regs: &[HelperRegistration],
     modifiers: &mut HelperModifierState,
-    suppressions: &mut std::collections::HashSet<u32>,
+    suppressions: &mut std::collections::HashMap<u32, String>,
     matches: &mut Vec<String>,
     vk: u32,
     msg: u32,
@@ -365,7 +365,10 @@ fn process_helper_key_event(
 
             for reg in regs.iter() {
                 if reg.primary_vk == vk && modifiers.matches_mask(reg.modifiers_mask) {
-                    let is_repeat = !suppressions.insert(vk);
+                    let is_repeat = suppressions.contains_key(&vk);
+                    if !is_repeat {
+                        suppressions.insert(vk, reg.encoded_key.clone());
+                    }
                     if !is_repeat {
                         matches.push(reg.encoded_key.clone());
                     }
@@ -379,7 +382,7 @@ fn process_helper_key_event(
             if modifiers.apply_vk_event(vk, false) {
                 (false, false)
             } else {
-                (suppressions.remove(&vk), false)
+                (suppressions.remove(&vk).is_some(), false)
             }
         }
         _ => (false, false),

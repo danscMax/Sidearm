@@ -133,42 +133,40 @@ const TOP_BUTTONS: SvgButtonDef[] = [
 ];
 
 /**
- * Thumb grid: 4 columns x 3 rows.
- * Physical layout (user perspective looking at bottom of mouse):
- *   Col 1  Col 2  Col 3  Col 4     (front to back)
- *   btn 3  btn 6  btn 9  btn 12    row 3 (top)
- *   btn 2  btn 5  btn 8  btn 11    row 2 (middle)
- *   btn 1  btn 4  btn 7  btn 10    row 1 (bottom)
+ * Thumb grid: 3 columns x 4 rows (top-down view, rotated 90° from side view).
  *
- * In SVG the grid sits on the left-side panel area.
+ *   Col 0  Col 1  Col 2
+ *    1      2      3     row 0 (top)
+ *    4      5      6     row 1
+ *    7      8      9     row 2
+ *   10     11     12     row 3 (bottom)
+ *
+ * Button 1 = top-left, button 3 = top-right.
  */
-const THUMB_GRID_ORIGIN_X = 42;
-const THUMB_GRID_ORIGIN_Y = 272;
-const THUMB_CELL_W = 54;
+const THUMB_GRID_ORIGIN_X = 70;
+const THUMB_GRID_ORIGIN_Y = 265;
+const THUMB_CELL_W = 56;
 const THUMB_CELL_H = 42;
 const THUMB_GAP = 6;
 
-/** Grid position [col, row] where col 0..3 = front..back, row 0..2 = bottom..top */
 const THUMB_POSITIONS: Array<{ id: ControlId; col: number; row: number; num: number }> = [
   { id: "thumb_01", col: 0, row: 0, num: 1 },
-  { id: "thumb_02", col: 0, row: 1, num: 2 },
-  { id: "thumb_03", col: 0, row: 2, num: 3 },
-  { id: "thumb_04", col: 1, row: 0, num: 4 },
+  { id: "thumb_02", col: 1, row: 0, num: 2 },
+  { id: "thumb_03", col: 2, row: 0, num: 3 },
+  { id: "thumb_04", col: 0, row: 1, num: 4 },
   { id: "thumb_05", col: 1, row: 1, num: 5 },
-  { id: "thumb_06", col: 1, row: 2, num: 6 },
-  { id: "thumb_07", col: 2, row: 0, num: 7 },
-  { id: "thumb_08", col: 2, row: 1, num: 8 },
+  { id: "thumb_06", col: 2, row: 1, num: 6 },
+  { id: "thumb_07", col: 0, row: 2, num: 7 },
+  { id: "thumb_08", col: 1, row: 2, num: 8 },
   { id: "thumb_09", col: 2, row: 2, num: 9 },
-  { id: "thumb_10", col: 3, row: 0, num: 10 },
-  { id: "thumb_11", col: 3, row: 1, num: 11 },
-  { id: "thumb_12", col: 3, row: 2, num: 12 },
+  { id: "thumb_10", col: 0, row: 3, num: 10 },
+  { id: "thumb_11", col: 1, row: 3, num: 11 },
+  { id: "thumb_12", col: 2, row: 3, num: 12 },
 ];
 
 function thumbRect(col: number, row: number) {
-  // Row 0 = bottom, row 2 = top => invert Y for SVG
-  const invertedRow = 2 - row;
   const x = THUMB_GRID_ORIGIN_X + col * (THUMB_CELL_W + THUMB_GAP);
-  const y = THUMB_GRID_ORIGIN_Y + invertedRow * (THUMB_CELL_H + THUMB_GAP);
+  const y = THUMB_GRID_ORIGIN_Y + row * (THUMB_CELL_H + THUMB_GAP);
   return { x, y, w: THUMB_CELL_W, h: THUMB_CELL_H };
 }
 

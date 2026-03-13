@@ -1019,12 +1019,7 @@ select::checkmark {
 
 .mouse-top-layout .mouse-visual {
   width: auto;
-  height: min(420px, 50vh);
-}
-
-.mouse-top-layout .mouse-visual--combined {
-  height: min(500px, 65vh);
-  width: auto;
+  height: min(480px, 58vh);
 }
 
 .mouse-top-labels {

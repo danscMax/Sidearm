@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import type {
   Action,
+  ActionCondition,
   ActionType,
   AppConfig,
   ControlId,
@@ -52,6 +53,17 @@ const KEY_NAME_MAP: Record<string, string> = {
 function normalizeKeyName(key: string): string {
   return KEY_NAME_MAP[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 }
+
+/* ─────────────────────────────────────────────────────────
+   Condition Types
+   ───────────────────────────────────────────────────────── */
+
+const CONDITION_TYPES: Array<{ value: ActionCondition["type"]; label: string }> = [
+  { value: "windowTitleContains", label: "Заголовок окна содержит" },
+  { value: "windowTitleNotContains", label: "Заголовок окна НЕ содержит" },
+  { value: "exeEquals", label: "Процесс равен" },
+  { value: "exeNotEquals", label: "Процесс НЕ равен" },
+];
 
 /* ─────────────────────────────────────────────────────────
    Sequence Step Editor (reusable)
@@ -418,6 +430,9 @@ export function ActionPickerModal({
   const [chordPartnerDraft, setChordPartnerDraft] = useState<string>(
     () => binding?.chordPartner ?? "",
   );
+  const [conditionsDraft, setConditionsDraft] = useState<ActionCondition[]>(
+    () => existingAction?.conditions ?? [],
+  );
 
   function handleKeyCapture(event: React.KeyboardEvent) {
     if (!isCapturing) return;
@@ -472,39 +487,44 @@ export function ActionPickerModal({
     const actionType = category.actionType;
     const actionId = existingAction?.id ?? `action-picker-${Date.now()}`;
     const pretty = nameDraft.trim() || autoName(actionType);
+    const validConditions = conditionsDraft.filter((c) => c.value.trim());
 
-    switch (actionType) {
-      case "shortcut":
-        return { id: actionId, type: "shortcut", payload: shortcutDraft, pretty };
-      case "mouseAction":
-        return { id: actionId, type: "mouseAction", payload: { action: mouseDraft }, pretty };
-      case "textSnippet":
-        return {
-          id: actionId,
-          type: "textSnippet",
-          payload: { source: "inline", text: textDraft.text, pasteMode: textDraft.pasteMode, tags: [] },
-          pretty,
-        };
-      case "sequence":
-        return { id: actionId, type: "sequence", payload: { steps: sequenceDraft }, pretty };
-      case "launch":
-        return {
-          id: actionId,
-          type: "launch",
-          payload: { target: launchDraft.target, args: launchDraft.args.trim() ? launchDraft.args.trim().split(/\s+/) : undefined },
-          pretty,
-        };
-      case "mediaKey":
-        return { id: actionId, type: "mediaKey", payload: { key: mediaDraft }, pretty };
-      case "profileSwitch":
-        return { id: actionId, type: "profileSwitch", payload: { targetProfileId: profileDraft }, pretty };
-      case "menu":
-        return { id: actionId, type: "menu", payload: { items: [] }, pretty: pretty || "Меню" };
-      case "disabled":
-        return { id: actionId, type: "disabled", payload: {} as Record<string, never>, pretty: pretty || "Отключено" };
-      default:
-        return { id: actionId, type: "disabled", payload: {} as Record<string, never>, pretty: "Отключено" };
-    }
+    const base: Action = (() => {
+      switch (actionType) {
+        case "shortcut":
+          return { id: actionId, type: "shortcut" as const, payload: shortcutDraft, pretty };
+        case "mouseAction":
+          return { id: actionId, type: "mouseAction" as const, payload: { action: mouseDraft }, pretty };
+        case "textSnippet":
+          return {
+            id: actionId,
+            type: "textSnippet" as const,
+            payload: { source: "inline" as const, text: textDraft.text, pasteMode: textDraft.pasteMode, tags: [] },
+            pretty,
+          };
+        case "sequence":
+          return { id: actionId, type: "sequence" as const, payload: { steps: sequenceDraft }, pretty };
+        case "launch":
+          return {
+            id: actionId,
+            type: "launch" as const,
+            payload: { target: launchDraft.target, args: launchDraft.args.trim() ? launchDraft.args.trim().split(/\s+/) : undefined },
+            pretty,
+          };
+        case "mediaKey":
+          return { id: actionId, type: "mediaKey" as const, payload: { key: mediaDraft }, pretty };
+        case "profileSwitch":
+          return { id: actionId, type: "profileSwitch" as const, payload: { targetProfileId: profileDraft }, pretty };
+        case "menu":
+          return { id: actionId, type: "menu" as const, payload: { items: [] }, pretty: pretty || "Меню" };
+        case "disabled":
+          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || "Отключено" };
+        default:
+          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: "Отключено" };
+      }
+    })();
+
+    return validConditions.length > 0 ? { ...base, conditions: validConditions } : base;
   }
 
   function autoName(actionType: ActionType): string {
@@ -818,6 +838,93 @@ export function ActionPickerModal({
                 placeholder={autoName(ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.actionType ?? "disabled")}
               />
             </label>
+
+            <div className="editor-grid mt-12">
+              <div className="field__header">
+                <span className="field__label">Условия выполнения</span>
+                <button
+                  type="button"
+                  className="action-button action-button--secondary action-button--small"
+                  onClick={() =>
+                    setConditionsDraft([
+                      ...conditionsDraft,
+                      { type: "windowTitleContains", value: "" },
+                    ])
+                  }
+                >
+                  + Добавить
+                </button>
+              </div>
+
+              {conditionsDraft.length === 0 ? (
+                <p className="panel__muted">
+                  Без условий — действие выполняется всегда.
+                </p>
+              ) : (
+                <div className="stack-list">
+                  {conditionsDraft.map((condition, index) => (
+                    <div className="compound-card" key={index}>
+                      <div className="compound-card__header">
+                        <strong>Условие {index + 1}</strong>
+                        <button
+                          type="button"
+                          className="action-button action-button--secondary action-button--small"
+                          onClick={() =>
+                            setConditionsDraft(conditionsDraft.filter((_, i) => i !== index))
+                          }
+                        >
+                          Удалить
+                        </button>
+                      </div>
+                      <div className="editor-grid">
+                        <label className="field">
+                          <span className="field__label">Тип</span>
+                          <select
+                            value={condition.type}
+                            onChange={(e) => {
+                              const nextType = e.target.value as ActionCondition["type"];
+                              setConditionsDraft(
+                                conditionsDraft.map((c, i) =>
+                                  i === index ? { type: nextType, value: c.value } : c,
+                                ),
+                              );
+                            }}
+                          >
+                            {CONDITION_TYPES.map((ct) => (
+                              <option key={ct.value} value={ct.value}>
+                                {ct.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span className="field__label">Значение</span>
+                          <input
+                            type="text"
+                            value={condition.value}
+                            placeholder={
+                              condition.type.startsWith("exe")
+                                ? "chrome.exe"
+                                : "часть заголовка"
+                            }
+                            onChange={(e) =>
+                              setConditionsDraft(
+                                conditionsDraft.map((c, i) =>
+                                  i === index ? { ...c, value: e.target.value } : c,
+                                ),
+                              )
+                            }
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  ))}
+                  <p className="panel__muted">
+                    Все условия должны выполняться одновременно (логика «И»).
+                  </p>
+                </div>
+              )}
+            </div>
 
             <label className="field mt-12">
               <span className="field__label">Режим срабатывания</span>

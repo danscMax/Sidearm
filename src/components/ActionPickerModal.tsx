@@ -50,6 +50,22 @@ const KEY_NAME_MAP: Record<string, string> = {
   Escape: "Esc",
 };
 
+/** Resolve the human-readable key name from a KeyboardEvent.
+ *  Chromium returns key="Unidentified" and code="" for F13-F24 (sent via SendInput).
+ *  In that case, fall back to the deprecated keyCode (124=F13 … 135=F24). */
+function resolveKeyName(event: KeyboardEvent | React.KeyboardEvent): string {
+  // 1. Try event.key
+  if (event.key && event.key !== "Unidentified") return event.key;
+  // 2. Try event.code (e.g. "F13")
+  if (event.code && event.code !== "") return event.code;
+  // 3. Fall back to keyCode → F13-F24 mapping
+  const kc = event.keyCode;
+  if (kc >= 124 && kc <= 135) return `F${kc - 111}`;
+  // 4. Other high VK codes
+  if (kc > 0) return `VK_${kc}`;
+  return "Unknown";
+}
+
 function normalizeKeyName(key: string): string {
   return KEY_NAME_MAP[key] ?? (key.length === 1 ? key.toUpperCase() : key);
 }
@@ -88,7 +104,7 @@ export function SequenceStepEditor({
       e.preventDefault();
       e.stopPropagation();
 
-      const rawKey = e.key === "Unidentified" ? e.code : e.key;
+      const rawKey = resolveKeyName(e);
       const parts: string[] = [];
       if (e.ctrlKey) parts.push("Ctrl");
       if (e.altKey) parts.push("Alt");
@@ -440,7 +456,7 @@ export function ActionPickerModal({
     event.preventDefault();
     event.stopPropagation();
 
-    const key = event.key === "Unidentified" ? event.code : event.key;
+    const key = resolveKeyName(event);
     if (["Control", "Shift", "Alt", "Meta"].includes(key)) return;
 
     setShortcutDraft({
@@ -458,8 +474,7 @@ export function ActionPickerModal({
     if (event.ctrlKey) parts.push("Ctrl");
     if (event.altKey) parts.push("Alt");
     if (event.shiftKey) parts.push("Shift");
-    // event.key is "Unidentified" for F13-F24 in Chromium — fall back to event.code
-    const rawKey = event.key === "Unidentified" ? event.code : event.key;
+    const rawKey = resolveKeyName(event);
     const key = normalizeKeyName(rawKey);
     if (!["Control", "Shift", "Alt", "Meta"].includes(rawKey)) {
       parts.push(key);

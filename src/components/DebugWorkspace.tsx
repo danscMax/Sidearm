@@ -26,20 +26,22 @@ import type {
   VerificationStepResult,
 } from "../lib/verification-session";
 import { verificationScopeCopy } from "../lib/constants";
+import { controlName } from "../lib/helpers";
 import {
-  controlName,
-  controlPhysicalHint,
-  describeVerificationSessionSuggestion,
-  dotLabel,
   formatTimestamp,
-  isActionLiveRunnable,
   labelForExecutionMode,
   labelForExecutionOutcome,
   labelForPreviewStatus,
   labelForVerificationResult,
   logLevelBadgeClass,
+} from "../lib/labels";
+import {
+  controlPhysicalHint,
+  describeVerificationSessionSuggestion,
+  dotLabel,
   verificationResultColor,
-} from "../lib/helpers";
+} from "../lib/verification-helpers";
+import { isActionLiveRunnable } from "../lib/action-helpers";
 
 import { ControlPropertiesPanel } from "./ControlPropertiesPanel";
 import { Fact } from "./shared";

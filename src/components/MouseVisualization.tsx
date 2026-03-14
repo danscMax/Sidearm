@@ -2,7 +2,7 @@ import { useState } from "react";
 import type { Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy, topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
-import { displayNameForControl, surfacePrimaryLabel } from "../lib/helpers";
+import { displayNameForControl, surfacePrimaryLabel } from "../lib/labels";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
 
 type VisualMode = "photo" | "schematic";

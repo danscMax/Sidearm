@@ -15,12 +15,12 @@ import {
   MEDIA_KEY_OPTIONS,
   MOUSE_ACTION_OPTIONS,
 } from "../lib/constants";
+import { labelForSequenceStep } from "../lib/labels";
 import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
-  labelForSequenceStep,
   setSequenceStepDelay,
-} from "../lib/helpers";
+} from "../lib/action-helpers";
 import { upsertAction, upsertBinding } from "../lib/config-editing";
 
 /* ─────────────────────────────────────────────────────────

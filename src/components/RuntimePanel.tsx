@@ -1,6 +1,6 @@
 import type { RuntimeStateSummary } from "../lib/runtime";
 import type { ViewState } from "../lib/constants";
-import { formatTimestamp, labelForRuntimeStatus } from "../lib/helpers";
+import { formatTimestamp, labelForRuntimeStatus } from "../lib/labels";
 import { Fact } from "./shared";
 
 export interface RuntimePanelProps {

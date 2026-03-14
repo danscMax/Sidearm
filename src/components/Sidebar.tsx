@@ -1,7 +1,7 @@
 import { startTransition, useState } from "react";
 import type { WorkspaceMode, ViewState } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
-import { stateLabel } from "../lib/helpers";
+import { stateLabel } from "../lib/labels";
 import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile, upsertProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";

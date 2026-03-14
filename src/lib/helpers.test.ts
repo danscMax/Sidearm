@@ -20,9 +20,28 @@ import {
   parseCommaSeparatedUniqueValues,
   parseCommaSeparatedList,
   parseOptionalNumber,
+} from "./helpers";
+import {
+  formatTimestamp,
+  logLevelBadgeClass,
+  labelForControlFamily,
+  labelForEncoderSource,
+  labelForRuntimeStatus,
+  labelForPreviewStatus,
+  labelForExecutionOutcome,
+  labelForExecutionMode,
+  labelForPasteMode,
+  labelForSequenceStep,
+  badgeClassForCapability,
+  labelForCapability,
+  labelForLayer,
+  labelForVerificationResult,
+  actionCategoryIcon,
+  stateLabel,
+  surfacePrimaryLabel,
+} from "./labels";
+import {
   describeActionSummary,
-  describeVerificationAlignment,
-  describeVerificationSessionSuggestion,
   isActionLiveRunnable,
   withShortcutPayload,
   withTextSnippetPayload,
@@ -32,30 +51,19 @@ import {
   createDefaultSequenceStep,
   coerceSequenceStepType,
   setSequenceStepDelay,
+} from "./action-helpers";
+import {
   collectMenuItemIds,
   appendMenuItem,
   updateMenuItem,
   removeMenuItem,
-  formatTimestamp,
-  logLevelBadgeClass,
+} from "./menu-helpers";
+import {
+  describeVerificationAlignment,
+  describeVerificationSessionSuggestion,
   dotLabel,
   verificationResultColor,
-  stateLabel,
-  surfacePrimaryLabel,
-  labelForControlFamily,
-  labelForEncoderSource,
-  labelForRuntimeStatus,
-  labelForPreviewStatus,
-  labelForExecutionOutcome,
-  labelForExecutionMode,
-  labelForPasteMode,
-  labelForSequenceStep,
-  labelForCapability,
-  labelForLayer,
-  labelForVerificationResult,
-  badgeClassForCapability,
-  actionCategoryIcon,
-} from "./helpers";
+} from "./verification-helpers";
 
 // ---------------------------------------------------------------------------
 // Helpers to build minimal fixtures

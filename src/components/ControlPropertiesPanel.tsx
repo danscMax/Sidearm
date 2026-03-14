@@ -19,12 +19,12 @@ import {
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import {
-  describeActionSummary,
-  describeVerificationAlignment,
   formatTimestamp,
   labelForCapability,
   labelForControlFamily,
-} from "../lib/helpers";
+} from "../lib/labels";
+import { describeActionSummary } from "../lib/action-helpers";
+import { describeVerificationAlignment } from "../lib/verification-helpers";
 
 export interface ControlPropertiesPanelProps {
   selectedControl: PhysicalControl | null;

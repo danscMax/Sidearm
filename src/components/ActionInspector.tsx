@@ -15,24 +15,28 @@ import {
 } from "../lib/config-editing";
 import { editableActionTypes } from "../lib/constants";
 import {
-  appendMenuItem,
-  coerceSequenceStepType,
-  collectMenuItemIds,
-  createDefaultSequenceStep,
-  describeActionSummary,
-  labelForSequenceStep,
   parseCommaSeparatedList,
   parseCommaSeparatedUniqueValues,
   parseOptionalNumber,
-  removeMenuItem,
+} from "../lib/helpers";
+import { labelForSequenceStep } from "../lib/labels";
+import {
+  coerceSequenceStepType,
+  createDefaultSequenceStep,
+  describeActionSummary,
   setSequenceStepDelay,
-  updateMenuItem,
   withLaunchPayload,
   withMenuPayload,
   withSequencePayload,
   withShortcutPayload,
   withTextSnippetPayload,
-} from "../lib/helpers";
+} from "../lib/action-helpers";
+import {
+  appendMenuItem,
+  collectMenuItemIds,
+  removeMenuItem,
+  updateMenuItem,
+} from "../lib/menu-helpers";
 
 export interface ActionInspectorProps {
   activeConfig: AppConfig;

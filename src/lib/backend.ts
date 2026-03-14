@@ -6,6 +6,7 @@ import type {
   CommandError,
   LoadConfigResponse,
   SaveConfigResponse,
+  SequenceStep,
 } from "./config";
 import type {
   ActionExecutionEvent,
@@ -175,6 +176,28 @@ export async function listenRuntimeErrorEvent(
   return listen<RuntimeErrorEvent>(eventName, (event) => {
     onPayload(event.payload);
   });
+}
+
+/* ─────────────────────────────────────────────────────────
+   Macro Recording IPC
+   ───────────────────────────────────────────────────────── */
+
+export async function startMacroRecording(): Promise<void> {
+  return invoke<void>("start_macro_recording");
+}
+
+export async function recordKeystroke(key: string): Promise<void> {
+  return invoke<void>("record_keystroke", { key });
+}
+
+export interface MacroRecording {
+  steps: SequenceStep[];
+  startedAt: number;
+  stoppedAt: number | null;
+}
+
+export async function stopMacroRecording(): Promise<MacroRecording> {
+  return invoke<MacroRecording>("stop_macro_recording");
 }
 
 export function normalizeCommandError(error: unknown): CommandError {

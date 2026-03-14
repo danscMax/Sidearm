@@ -24,6 +24,11 @@ import {
   setSequenceStepDelay,
 } from "../lib/action-helpers";
 import {
+  startMacroRecording,
+  recordKeystroke,
+  stopMacroRecording,
+} from "../lib/backend";
+import {
   expectedEncodedKeyForControl,
   upsertAction,
   upsertBinding,
@@ -59,6 +64,54 @@ export function SequenceStepEditor({
   steps: SequenceStep[];
   onUpdate: (steps: SequenceStep[]) => void;
 }) {
+  const [isRecording, setIsRecording] = useState(false);
+
+  // Capture keystrokes during recording and forward to Rust
+  useEffect(() => {
+    if (!isRecording) return;
+
+    function handleRecordKey(e: KeyboardEvent) {
+      // Ignore bare modifiers
+      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const parts: string[] = [];
+      if (e.ctrlKey) parts.push("Ctrl");
+      if (e.altKey) parts.push("Alt");
+      if (e.shiftKey) parts.push("Shift");
+      const keyName = normalizeKeyName(e.key);
+      parts.push(keyName);
+      const formatted = parts.join("+");
+
+      void recordKeystroke(formatted);
+    }
+
+    window.addEventListener("keydown", handleRecordKey, true);
+    return () => window.removeEventListener("keydown", handleRecordKey, true);
+  }, [isRecording]);
+
+  async function handleStartRecording() {
+    try {
+      await startMacroRecording();
+      setIsRecording(true);
+    } catch {
+      // Silently ignore — recorder might already be in use
+    }
+  }
+
+  async function handleStopRecording() {
+    try {
+      const recording = await stopMacroRecording();
+      setIsRecording(false);
+      if (recording.steps.length > 0) {
+        onUpdate(recording.steps);
+      }
+    } catch {
+      setIsRecording(false);
+    }
+  }
+
   function addStep(type: SequenceStep["type"]) {
     onUpdate([...steps, createDefaultSequenceStep(type)]);
   }
@@ -77,25 +130,51 @@ export function SequenceStepEditor({
       <div className="field__header">
         <span className="field__label">Шаги последовательности</span>
         <div className="editor-actions">
-          {(
-            [
-              ["send", "Отправка"],
-              ["text", "Текст"],
-              ["sleep", "Пауза"],
-              ["launch", "Запуск"],
-            ] as const
-          ).map(([stepType, label]) => (
+          {isRecording ? (
             <button
               type="button"
-              key={stepType}
-              className="action-button action-button--secondary action-button--small"
-              onClick={() => addStep(stepType)}
+              className="action-button action-button--accent action-button--small"
+              onClick={() => { void handleStopRecording(); }}
             >
-              + {label}
+              ⏹ Остановить запись
             </button>
-          ))}
+          ) : (
+            <>
+              <button
+                type="button"
+                className="action-button action-button--small"
+                onClick={() => { void handleStartRecording(); }}
+              >
+                ⏺ Записать
+              </button>
+              {(
+                [
+                  ["send", "Отправка"],
+                  ["text", "Текст"],
+                  ["sleep", "Пауза"],
+                  ["launch", "Запуск"],
+                ] as const
+              ).map(([stepType, label]) => (
+                <button
+                  type="button"
+                  key={stepType}
+                  className="action-button action-button--secondary action-button--small"
+                  onClick={() => addStep(stepType)}
+                >
+                  + {label}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       </div>
+
+      {isRecording ? (
+        <div className="notice notice--warning" style={{ marginBottom: 8 }}>
+          <strong>⏺ Запись макроса...</strong>
+          <p>Нажимайте клавиши. Каждое нажатие будет записано как шаг последовательности.</p>
+        </div>
+      ) : null}
 
       <div className="stack-list">
         {steps.map((step, index) => (

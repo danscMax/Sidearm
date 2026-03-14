@@ -1,4 +1,5 @@
 mod capture_backend;
+mod chord;
 mod clipboard;
 mod command_error;
 mod config;

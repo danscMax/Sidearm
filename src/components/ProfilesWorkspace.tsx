@@ -11,6 +11,7 @@ import {
   ensurePlaceholderBinding,
   findDuplicateAppMapping,
   makeBindingId,
+  collectMenuActionRefs,
   upsertAppMapping,
   upsertProfile,
 } from "../lib/config-editing";
@@ -998,18 +999,4 @@ export function ProfilesWorkspace({
       })() : null}
     </div>
   );
-}
-
-/** Recursively collect action refs from menu items (used for export). */
-function collectMenuActionRefs(
-  items: { kind: string; actionRef?: string; items?: typeof items }[],
-  refs: Set<string>,
-): void {
-  for (const item of items) {
-    if (item.kind === "action" && item.actionRef) {
-      refs.add(item.actionRef);
-    } else if (item.kind === "submenu" && item.items) {
-      collectMenuActionRefs(item.items, refs);
-    }
-  }
 }

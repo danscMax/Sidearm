@@ -802,7 +802,7 @@ export function createDefaultSubmenuItem(
   };
 }
 
-function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): void {
+export function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): void {
   for (const item of items) {
     if (item.kind === "action") {
       refs.add(item.actionRef);

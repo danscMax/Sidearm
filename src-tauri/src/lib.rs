@@ -33,7 +33,7 @@ use runtime::{
     EVENT_CONTROL_RESOLVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR, EVENT_RUNTIME_STARTED,
     EVENT_RUNTIME_STOPPED,
 };
-use tauri::menu::{Menu, MenuItem};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -818,8 +818,9 @@ pub fn run() {
             let tray_menu = Menu::with_items(
                 app,
                 &[
-                    &MenuItem::with_id(app, "show", "Показать окно", true, None::<&str>)?,
-                    &MenuItem::with_id(app, "toggle_runtime", "Переключить перехват", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?,
+                    &PredefinedMenuItem::separator(app)?,
+                    &MenuItem::with_id(app, "show", "Открыть студию", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
                 ],
             )?;
@@ -911,8 +912,12 @@ pub fn run() {
                     } = event
                     {
                         if let Some(window) = tray.app_handle().get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                            } else {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
                         }
                     }
                 })

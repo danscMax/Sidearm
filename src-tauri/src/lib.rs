@@ -759,6 +759,7 @@ pub fn run() {
                 app,
                 &[
                     &MenuItem::with_id(app, "show", "Показать окно", true, None::<&str>)?,
+                    &MenuItem::with_id(app, "toggle_runtime", "Переключить перехват", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
                 ],
             )?;
@@ -772,6 +773,72 @@ pub fn run() {
                             let _ = window.show();
                             let _ = window.set_focus();
                         }
+                    }
+                    "toggle_runtime" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let runtime_store: tauri::State<'_, Arc<Mutex<RuntimeStore>>> =
+                                app.state();
+                            let runtime_controller: tauri::State<
+                                '_,
+                                Arc<Mutex<RuntimeController>>,
+                            > = app.state();
+
+                            let is_running = {
+                                let store = runtime_store.lock().unwrap();
+                                store.is_running()
+                            };
+
+                            if is_running {
+                                let stop_result = {
+                                    let mut controller = runtime_controller.lock().unwrap();
+                                    controller.stop()
+                                };
+                                if stop_result.is_ok() {
+                                    let summary = {
+                                        let mut store = runtime_store.lock().unwrap();
+                                        store.stop()
+                                    };
+                                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
+                                }
+                            } else {
+                                let config_dir = match app.path().app_config_dir() {
+                                    Ok(dir) => dir,
+                                    Err(_) => return,
+                                };
+                                let load_result =
+                                    tauri::async_runtime::spawn_blocking(move || {
+                                        load_or_initialize_config(&config_dir)
+                                    })
+                                    .await;
+
+                                let load_response = match load_result {
+                                    Ok(Ok(response)) => response,
+                                    _ => return,
+                                };
+
+                                let start_result = {
+                                    let mut controller = runtime_controller.lock().unwrap();
+                                    controller.start(
+                                        app.clone(),
+                                        runtime_store.inner().clone(),
+                                        load_response.config.clone(),
+                                        app.package_info().name.clone(),
+                                    )
+                                };
+
+                                if start_result.is_ok() {
+                                    let summary = {
+                                        let mut store = runtime_store.lock().unwrap();
+                                        store.start(
+                                            load_response.config.version,
+                                            load_response.warnings.len(),
+                                        )
+                                    };
+                                    let _ = app.emit(EVENT_RUNTIME_STARTED, &summary);
+                                }
+                            }
+                        });
                     }
                     "quit" => app.exit(0),
                     _ => {}

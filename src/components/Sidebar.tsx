@@ -1,7 +1,6 @@
 import { startTransition, useState } from "react";
-import type { WorkspaceMode, ViewState } from "../lib/constants";
+import type { WorkspaceMode } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
-import { stateLabel } from "../lib/labels";
 import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile, upsertProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
@@ -17,7 +16,6 @@ export function Sidebar({
   onCreateProfile,
   onToggleRuntime,
   runtimeStatus,
-  viewState,
   updateDraft,
   setSelectedProfileId,
   setConfirmModal,
@@ -32,7 +30,6 @@ export function Sidebar({
   onCreateProfile: () => void;
   onToggleRuntime: () => void;
   runtimeStatus: "running" | "stopped" | string;
-  viewState: ViewState;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: {
@@ -61,9 +58,9 @@ export function Sidebar({
       ))}
       <div className="sidebar__sep" />
       <div className="sidebar__section">
-        <div className="sidebar__section-header">
-          <span className="sidebar__section-label">Профиль</span>
-          {isProfilesMode ? (
+        {isProfilesMode ? (
+          <div className="sidebar__section-header">
+            <span className="sidebar__section-label" />
             <button
               type="button"
               className="sidebar__add-profile-btn"
@@ -72,8 +69,8 @@ export function Sidebar({
             >
               +
             </button>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
         {profiles.length <= 3 ? (
           <div
             className="pill-track pill-track--sidebar"
@@ -132,8 +129,10 @@ export function Sidebar({
             ))}
           </select>
         )}
-        {runtimeStatus === "running" && runtimeResolvedProfileName ? (
-          <div className="sidebar__runtime-profile" title="Последний профиль, выбранный перехватчиком по активному окну">
+        {runtimeStatus === "running" &&
+          runtimeResolvedProfileName &&
+          runtimeResolvedProfileName !== profiles.find((p) => p.id === effectiveProfileId)?.name ? (
+          <div className="sidebar__runtime-profile" title="Перехватчик использует другой профиль (по активному окну)">
             Активный: {runtimeResolvedProfileName}
           </div>
         ) : null}
@@ -151,11 +150,6 @@ export function Sidebar({
           {runtimeStatus === "running" ? "Стоп" : "Старт"}
         </span>
       </button>
-      <div className={`sidebar__status${viewState === "error" ? " sidebar__status--error" : ""}`} aria-live="polite">
-        {viewState === "error"
-          ? "Ошибка сохранения"
-          : stateLabel(viewState)}
-      </div>
       {ctxMenu ? (
         <ContextMenu
           x={ctxMenu.x}

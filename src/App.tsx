@@ -372,7 +372,6 @@ function App() {
           else void handleStartRuntime();
         }}
         runtimeStatus={runtimeSummary.status}
-        viewState={viewState}
         updateDraft={updateDraft}
         setSelectedProfileId={setSelectedProfileId}
         setConfirmModal={setConfirmModal}

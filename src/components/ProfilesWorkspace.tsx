@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, AppMapping, Binding, ControlId, Layer, Profile } from "../lib/config";
+import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
 import {
@@ -8,13 +8,12 @@ import {
   deleteAppMapping,
   deleteProfile,
   duplicateProfile,
-  ensurePlaceholderBinding,
   findDuplicateAppMapping,
-  makeBindingId,
   collectMenuActionRefs,
   upsertAppMapping,
   upsertProfile,
 } from "../lib/config-editing";
+import { useActionPicker } from "../hooks/useActionPicker";
 import { getExeIcon } from "../lib/backend";
 import { parseCommaSeparatedUniqueValues, sortAppMappings } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
@@ -399,6 +398,14 @@ export function ProfilesWorkspace({
   setActionPickerBindingId,
   setActionPickerOpen,
 }: ProfilesWorkspaceProps) {
+  const handleOpenActionPicker = useActionPicker({
+    effectiveProfileId,
+    selectedLayer,
+    updateDraft,
+    setActionPickerBindingId,
+    setActionPickerOpen,
+  });
+
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [captureCountdown, setCaptureCountdown] = useState<number | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -597,23 +604,6 @@ export function ProfilesWorkspace({
     URL.revokeObjectURL(url);
   }
 
-
-  function handleOpenActionPicker(controlId: ControlId, binding: Binding | null) {
-    if (!effectiveProfileId) return;
-    if (binding) {
-      setActionPickerBindingId(binding.id);
-      setActionPickerOpen(true);
-      return;
-    }
-    updateDraft((config) => {
-      const control = config.physicalControls.find((c) => c.id === controlId);
-      if (!control) return config;
-      return ensurePlaceholderBinding(config, effectiveProfileId, selectedLayer, control);
-    });
-    const bindingId = makeBindingId(effectiveProfileId, selectedLayer, controlId);
-    setActionPickerBindingId(bindingId);
-    setActionPickerOpen(true);
-  }
 
   return (
     <div className="profiles-workspace">

@@ -8,10 +8,7 @@ import type {
   PhysicalControl,
 } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
-import {
-  ensurePlaceholderBinding,
-  makeBindingId,
-} from "../lib/config-editing";
+import { useActionPicker } from "../hooks/useActionPicker";
 import { MouseVisualization } from "./MouseVisualization";
 
 export interface FamilySection {
@@ -52,28 +49,13 @@ export function AssignmentsWorkspace({
   setActionPickerBindingId,
   setActionPickerOpen,
 }: AssignmentsWorkspaceProps) {
-  function handleOpenActionPicker(controlId: ControlId, binding: Binding | null) {
-    if (!effectiveProfileId) return;
-
-    // Binding passed directly from MouseVisualization's fresh entry data
-    if (binding) {
-      setActionPickerBindingId(binding.id);
-      setActionPickerOpen(true);
-      return;
-    }
-
-    // No binding — create placeholder using the latest config from state
-    updateDraft((config) => {
-      const control = config.physicalControls.find((c) => c.id === controlId);
-      if (!control) return config;
-      return ensurePlaceholderBinding(config, effectiveProfileId, selectedLayer, control);
-    });
-
-    // Binding ID is deterministic — open the picker outside the state updater
-    const bindingId = makeBindingId(effectiveProfileId, selectedLayer, controlId);
-    setActionPickerBindingId(bindingId);
-    setActionPickerOpen(true);
-  }
+  const handleOpenActionPicker = useActionPicker({
+    effectiveProfileId,
+    selectedLayer,
+    updateDraft,
+    setActionPickerBindingId,
+    setActionPickerOpen,
+  });
 
   return (
     <div className="workspace__center" data-layer={selectedLayer}>

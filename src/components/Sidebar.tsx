@@ -2,14 +2,9 @@ import { startTransition, useState } from "react";
 import type { WorkspaceMode, ViewState } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
 import { stateLabel } from "../lib/helpers";
-import type { AppConfig } from "../lib/config";
+import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile, upsertProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
-
-interface Profile {
-  id: string;
-  name: string;
-}
 
 export function Sidebar({
   workspaceMode,

@@ -2,9 +2,8 @@ import { startTransition, useState } from "react";
 import type { WorkspaceMode } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
-import { deleteProfile, duplicateProfile, upsertProfile } from "../lib/config-editing";
+import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
-import { Toggle } from "./shared";
 
 export function Sidebar({
   workspaceMode,
@@ -39,10 +38,6 @@ export function Sidebar({
   } | null) => void;
 }) {
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
-  const [settingsProfileId, setSettingsProfileId] = useState<string | null>(null);
-  const settingsProfile = settingsProfileId
-    ? profiles.find((p) => p.id === settingsProfileId) ?? null
-    : null;
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -63,14 +58,24 @@ export function Sidebar({
       <div className="sidebar__section">
         <div className="sidebar__section-header">
           <span className="sidebar__section-label">ПРОФИЛЬ</span>
-          <button
-            type="button"
-            className="sidebar__add-profile-btn"
-            onClick={onCreateProfile}
-            title="Добавить профиль"
-          >
-            +
-          </button>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button
+              type="button"
+              className="sidebar__add-profile-btn"
+              onClick={() => onSwitchMode("settings")}
+              title="Настройки профилей"
+            >
+              ⚙
+            </button>
+            <button
+              type="button"
+              className="sidebar__add-profile-btn"
+              onClick={onCreateProfile}
+              title="Добавить профиль"
+            >
+              +
+            </button>
+          </div>
         </div>
         {profiles.length <= 3 ? (
           <div
@@ -97,7 +102,7 @@ export function Sidebar({
                 }}
                 onDoubleClick={(e) => {
                   e.preventDefault();
-                  setSettingsProfileId(p.id);
+                  onSwitchMode("settings");
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
@@ -112,37 +117,27 @@ export function Sidebar({
             ))}
           </div>
         ) : (
-          <div className="sidebar__profile-select-row">
-            <select
-              className="sidebar__profile-select"
-              value={effectiveProfileId ?? ""}
-              onChange={(event) => {
-                startTransition(() => {
-                  onSelectProfile(event.target.value);
-                });
-              }}
-              onContextMenu={(e) => {
-                if (effectiveProfileId) {
-                  e.preventDefault();
-                  setCtxMenu({ x: e.clientX, y: e.clientY, profileId: effectiveProfileId });
-                }
-              }}
-            >
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="sidebar__profile-settings-btn"
-              onClick={() => { if (effectiveProfileId) setSettingsProfileId(effectiveProfileId); }}
-              title="Настройки профиля"
-            >
-              ⚙
-            </button>
-          </div>
+          <select
+            className="sidebar__profile-select"
+            value={effectiveProfileId ?? ""}
+            onChange={(event) => {
+              startTransition(() => {
+                onSelectProfile(event.target.value);
+              });
+            }}
+            onContextMenu={(e) => {
+              if (effectiveProfileId) {
+                e.preventDefault();
+                setCtxMenu({ x: e.clientX, y: e.clientY, profileId: effectiveProfileId });
+              }
+            }}
+          >
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
         )}
       </div>
       <button
@@ -170,7 +165,7 @@ export function Sidebar({
               {
                 label: "Настройки",
                 onClick: () => {
-                  setSettingsProfileId(targetProfile.id);
+                  onSwitchMode("settings");
                 },
               },
               {
@@ -209,95 +204,6 @@ export function Sidebar({
             ];
           })()}
         />
-      ) : null}
-      {settingsProfile ? (
-        <div className="modal-backdrop" onClick={() => setSettingsProfileId(null)}>
-          <div
-            className="rule-modal rule-modal--compact"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.key === "Escape") setSettingsProfileId(null); }}
-          >
-            <div className="rule-modal__header">
-              <span className="rule-modal__title">Настройки профиля</span>
-              <button
-                type="button"
-                className="rule-modal__close"
-                onClick={() => setSettingsProfileId(null)}
-                aria-label="Закрыть"
-              >
-                &times;
-              </button>
-            </div>
-            <div className="rule-modal__body">
-              <label className="field">
-                <span className="field__label">Имя</span>
-                <input
-                  type="text"
-                  value={settingsProfile.name}
-                  onChange={(e) =>
-                    updateDraft((c) =>
-                      upsertProfile(c, { ...settingsProfile, name: e.target.value }),
-                    )
-                  }
-                  onBlur={(e) => {
-                    if (!e.target.value.trim())
-                      updateDraft((c) =>
-                        upsertProfile(c, { ...settingsProfile, name: "Безымянный профиль" }),
-                      );
-                  }}
-                />
-              </label>
-              <label className="field">
-                <span className="field__label">
-                  Приоритет
-                  <span className="field__hint" title="Чем выше число, тем выше приоритет. При совпадении нескольких правил побеждает профиль с наибольшим приоритетом.">?</span>
-                </span>
-                <input
-                  type="number"
-                  min={0}
-                  max={9999}
-                  value={settingsProfile.priority}
-                  onChange={(e) => {
-                    const v = Number(e.target.value);
-                    const clamped = Number.isFinite(v)
-                      ? Math.max(0, Math.min(9999, Math.round(v)))
-                      : 0;
-                    updateDraft((c) =>
-                      upsertProfile(c, { ...settingsProfile, priority: clamped }),
-                    );
-                  }}
-                />
-              </label>
-              <label className="field field--inline">
-                <span className="field__label">Включён</span>
-                <Toggle
-                  checked={settingsProfile.enabled}
-                  onChange={(checked) =>
-                    updateDraft((c) =>
-                      upsertProfile(c, { ...settingsProfile, enabled: checked }),
-                    )
-                  }
-                />
-              </label>
-              <label className="field">
-                <span className="field__label">Описание</span>
-                <textarea
-                  rows={2}
-                  value={settingsProfile.description ?? ""}
-                  placeholder="Необязательное описание профиля"
-                  onChange={(e) =>
-                    updateDraft((c) =>
-                      upsertProfile(c, { ...settingsProfile, description: e.target.value || undefined }),
-                    )
-                  }
-                />
-              </label>
-            </div>
-            <div className="rule-modal__footer">
-              <span className="rule-modal__autosave">Изменения сохраняются автоматически</span>
-            </div>
-          </div>
-        </div>
       ) : null}
     </aside>
   );

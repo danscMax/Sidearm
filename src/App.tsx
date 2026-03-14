@@ -15,6 +15,7 @@ import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
+import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
@@ -417,6 +418,15 @@ function App() {
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
               />
+            ) : workspaceMode === "settings" ? (
+              <SettingsWorkspace
+                activeConfig={activeConfig}
+                activeProfile={activeProfile}
+                effectiveProfileId={effectiveProfileId}
+                updateDraft={updateDraft}
+                setSelectedProfileId={setSelectedProfileId}
+                setConfirmModal={setConfirmModal}
+              />
             ) : (
               <DebugWorkspace
                 activeConfig={activeConfig}
@@ -526,6 +536,9 @@ function App() {
                 break;
               case "tab-debug":
                 switchWorkspaceMode("debug");
+                break;
+              case "tab-settings":
+                switchWorkspaceMode("settings");
                 break;
               case "layer-standard":
                 setSelectedLayer("standard");

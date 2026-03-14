@@ -10,6 +10,7 @@ export const PALETTE_COMMANDS = [
   { id: "reload", label: "Загрузить с диска", shortcut: "" },
   { id: "tab-profiles", label: "Перейти: Профили", shortcut: "1" },
   { id: "tab-debug", label: "Перейти: Отладка", shortcut: "2" },
+  { id: "tab-settings", label: "Перейти: Настройки", shortcut: "3" },
   { id: "layer-standard", label: "Слой: Стандартный", shortcut: "" },
   { id: "layer-hypershift", label: "Слой: Hypershift", shortcut: "" },
 ];

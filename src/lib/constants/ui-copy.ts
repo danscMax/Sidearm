@@ -30,6 +30,13 @@ export const workspaceModeCopy: Array<{
     body: "Сигналы, проверка кнопок, журнал событий.",
     meta: "Диагностика и проверка",
   },
+  {
+    value: "settings",
+    label: "Настройки",
+    heading: "Настройки",
+    body: "Профили, приоритеты и общие параметры приложения.",
+    meta: "Настройки профилей",
+  },
 ];
 
 export const verificationScopeCopy: Array<{

@@ -7,7 +7,7 @@ import type {
 } from "../config";
 
 export type ViewState = "idle" | "loading" | "ready" | "saving" | "error";
-export type WorkspaceMode = "profiles" | "debug";
+export type WorkspaceMode = "profiles" | "debug" | "settings";
 
 export type FamilySection = {
   family: string;

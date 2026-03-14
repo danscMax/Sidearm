@@ -28,7 +28,7 @@ import {
   startMacroRecording,
   recordKeystroke,
   stopMacroRecording,
-  captureNextKeystroke,
+  listenEncodedKeyEvent,
 } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
@@ -470,17 +470,23 @@ export function ActionPickerModal({
     setIsCapturing(false);
   }
 
-  async function handleCaptureSignal() {
-    setIsCapturingSignal(true);
-    try {
-      const signal = await captureNextKeystroke();
-      setSignalDraft(signal);
-    } catch {
-      // Timeout or error — silently ignore
-    } finally {
+  // Signal capture: listen to runtime's encoded_key_received event
+  useEffect(() => {
+    if (!isCapturingSignal) return;
+
+    let cancelled = false;
+
+    const unlistenPromise = listenEncodedKeyEvent("encoded_key_received", (event) => {
+      if (cancelled) return;
+      setSignalDraft(event.encodedKey);
       setIsCapturingSignal(false);
-    }
-  }
+    });
+
+    return () => {
+      cancelled = true;
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
+  }, [isCapturingSignal]);
 
   function buildAction(): Action {
     const category = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory) ?? ACTION_CATEGORIES[0];
@@ -808,12 +814,14 @@ export function ActionPickerModal({
                     <button
                       type="button"
                       className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
-                      onClick={() => { if (!isCapturingSignal) void handleCaptureSignal(); }}
-                      disabled={isCapturingSignal}
+                      onClick={() => setIsCapturingSignal(!isCapturingSignal)}
                     >
-                      {isCapturingSignal ? "Ожидание..." : "Записать"}
+                      {isCapturingSignal ? "Отмена" : "Записать"}
                     </button>
                   </div>
+                  {isCapturingSignal ? (
+                    <p className="panel__muted">Нажмите кнопку на мыши. Перехват должен быть запущен.</p>
+                  ) : null}
                 </label>
                 {expectedSignal && signalDraft !== expectedSignal ? (
                   <p className="panel__muted">

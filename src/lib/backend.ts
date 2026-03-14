@@ -214,6 +214,10 @@ export async function stopMacroRecording(): Promise<MacroRecording> {
   return invoke<MacroRecording>("stop_macro_recording");
 }
 
+export async function diagnoseKeystroke(): Promise<string[]> {
+  return invoke<string[]>("diagnose_keystroke");
+}
+
 export function normalizeCommandError(error: unknown): CommandError {
   if (
     typeof error === "object" &&

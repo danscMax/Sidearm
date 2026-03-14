@@ -99,7 +99,6 @@ function ExeIcon({ exe, className }: { exe: string; className: string }) {
 interface AppMappingModalProps {
   mapping: AppMapping;
   profileName: string;
-  lastCapture: WindowCaptureResult | null;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   onClose: () => void;
 }
@@ -107,13 +106,11 @@ interface AppMappingModalProps {
 function AppMappingModal({
   mapping,
   profileName,
-  lastCapture,
   updateDraft,
   onClose,
 }: AppMappingModalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const hasCapture = lastCapture && !lastCapture.ignored;
 
   // Escape key closes the modal
   useEffect(() => {
@@ -168,6 +165,17 @@ function AppMappingModal({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
+        <button
+          type="button"
+          className="rule-modal__close"
+          onClick={onClose}
+          aria-label="Закрыть"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M1 1l12 12M13 1L1 13" />
+          </svg>
+        </button>
+
         {/* Header */}
         <div className="rule-modal__header">
           <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
@@ -175,45 +183,10 @@ function AppMappingModal({
             <span className="rule-modal__title">{mapping.exe}</span>
             <span className="rule-modal__profile-name">Профиль: {profileName}</span>
           </div>
-          <button
-            type="button"
-            className="rule-modal__close"
-            onClick={onClose}
-            aria-label="Закрыть"
-          >
-            &times;
-          </button>
         </div>
 
         {/* Body */}
         <div className="rule-modal__body">
-          {/* Capture suggestion banner */}
-          {hasCapture ? (
-            <div className="rule-modal__capture-banner">
-              <div className="rule-modal__capture-info">
-                <span className="profiles__capture-exe">{lastCapture.exe}</span>
-                <span className="profiles__capture-title">
-                  {lastCapture.title || "(без заголовка)"}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="action-button action-button--small action-button--accent"
-                onClick={() =>
-                  updateDraft((c) =>
-                    upsertAppMapping(c, {
-                      ...mapping,
-                      exe: lastCapture.exe,
-                      titleIncludes: lastCapture.title ? [lastCapture.title] : undefined,
-                    }),
-                  )
-                }
-              >
-                Подставить
-              </button>
-            </div>
-          ) : null}
-
           {/* Exe input + Browse */}
           <div className="field">
             <span className="field__label">Исполняемый файл</span>
@@ -278,7 +251,7 @@ function AppMappingModal({
 
           {/* Toggle + Priority row */}
           <div className="rule-modal__inline-row">
-            <label className="field field--inline profiles__field-no-margin">
+            <label className="rule-modal__inline-field">
               <span className="field__label">Включено</span>
               <input
                 className="profiles__toggle"
@@ -292,7 +265,7 @@ function AppMappingModal({
               />
             </label>
 
-            <label className="field field--inline profiles__field-no-margin">
+            <label className="rule-modal__inline-field">
               <span className="field__label">
                 Приоритет
                 <span
@@ -575,8 +548,10 @@ export function ProfilesWorkspace({
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
               }}
             >
+              <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
+              <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
               <input
-                className="profiles__app-card-toggle profiles__toggle"
+                className="profiles__toggle"
                 type="checkbox"
                 checked={mapping.enabled}
                 title={mapping.enabled ? "Отключить" : "Включить"}
@@ -587,18 +562,6 @@ export function ProfilesWorkspace({
                   )
                 }
               />
-              <div className="profiles__app-card-top">
-                <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
-                <span className="profiles__app-card-name">{mapping.exe}</span>
-              </div>
-              <div className="profiles__app-card-meta">
-                <span className="profiles__app-card-priority">P: {mapping.priority}</span>
-                {mapping.titleIncludes && mapping.titleIncludes.length > 0 ? (
-                  <span className="profiles__app-card-filter">
-                    {mapping.titleIncludes.join(", ")}
-                  </span>
-                ) : null}
-              </div>
             </button>
           );
         })}
@@ -636,7 +599,9 @@ export function ProfilesWorkspace({
                 onClick={() => setNewRuleOpen(false)}
                 aria-label="Закрыть"
               >
-                &times;
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="M1 1l12 12M13 1L1 13" />
+                </svg>
               </button>
             </div>
             <div
@@ -756,7 +721,6 @@ export function ProfilesWorkspace({
         <AppMappingModal
           mapping={editingMapping}
           profileName={activeProfile?.name ?? ""}
-          lastCapture={lastCapture}
           updateDraft={updateDraft}
           onClose={() => setEditingMappingId(null)}
         />

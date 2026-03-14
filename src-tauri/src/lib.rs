@@ -405,6 +405,26 @@ async fn capture_active_window(
         CommandError::internal(format!("Failed to emit profile_resolved event: {error}"))
     })?;
 
+    // Send OSD notification if active profile changed
+    if !result.ignored {
+        let should_notify = {
+            let mut store = runtime_store
+                .lock()
+                .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            store.notify_profile_change(result.resolved_profile_id.as_deref())
+        };
+        if should_notify {
+            use tauri_plugin_notification::NotificationExt;
+            let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
+            let _ = app
+                .notification()
+                .builder()
+                .title("Naga Studio")
+                .body(format!("Профиль: {profile_name}"))
+                .show();
+        }
+    }
+
     Ok(result)
 }
 
@@ -755,6 +775,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let tray_menu = Menu::with_items(

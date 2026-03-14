@@ -1173,6 +1173,31 @@ fn process_encoded_key_event(
         };
 
     let _ = app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
+
+    // Send OSD notification if active profile changed
+    if !capture_result.ignored {
+        let should_notify = runtime_store
+            .lock()
+            .ok()
+            .map(|mut store| {
+                store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
+            })
+            .unwrap_or(false);
+        if should_notify {
+            use tauri_plugin_notification::NotificationExt;
+            let profile_name = capture_result
+                .resolved_profile_name
+                .as_deref()
+                .unwrap_or("Default");
+            let _ = app
+                .notification()
+                .builder()
+                .title("Naga Studio")
+                .body(format!("Профиль: {profile_name}"))
+                .show();
+        }
+    }
+
     if capture_result.ignored {
         log_entries.push((
             "перехват",

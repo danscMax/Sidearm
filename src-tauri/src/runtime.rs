@@ -58,6 +58,7 @@ pub struct RuntimeStore {
     last_reload_at: Option<u64>,
     active_config_version: Option<i32>,
     warning_count: usize,
+    last_notified_profile_id: Option<String>,
     logs: VecDeque<DebugLogEntry>,
     next_log_id: u64,
 }
@@ -70,6 +71,7 @@ impl Default for RuntimeStore {
             last_reload_at: None,
             active_config_version: None,
             warning_count: 0,
+            last_notified_profile_id: None,
             logs: VecDeque::new(),
             next_log_id: 1,
         }
@@ -120,8 +122,19 @@ impl RuntimeStore {
 
     pub fn stop(&mut self) -> RuntimeStateSummary {
         self.status = RuntimeStatus::Idle;
+        self.last_notified_profile_id = None;
         self.push_log(DebugLogLevel::Info, "рантайм", "Перехват остановлен.");
         self.summary()
+    }
+
+    /// Returns true if the profile changed (caller should send notification).
+    pub fn notify_profile_change(&mut self, profile_id: Option<&str>) -> bool {
+        let changed = profile_id.is_some()
+            && self.last_notified_profile_id.as_deref() != profile_id;
+        if changed {
+            self.last_notified_profile_id = profile_id.map(|s| s.to_owned());
+        }
+        changed
     }
 
     pub fn reload(&mut self, config_version: i32, warning_count: usize) -> RuntimeStateSummary {
@@ -212,6 +225,22 @@ mod tests {
         let stopped = store.stop();
         assert_eq!(stopped.status, RuntimeStatus::Idle);
         assert_eq!(stopped.active_config_version, Some(2));
+    }
+
+    #[test]
+    fn notify_profile_change_detects_transitions() {
+        let mut store = RuntimeStore::default();
+        // First profile — should notify
+        assert!(store.notify_profile_change(Some("p1")));
+        // Same profile — should not notify
+        assert!(!store.notify_profile_change(Some("p1")));
+        // Different profile — should notify
+        assert!(store.notify_profile_change(Some("p2")));
+        // None — should not notify
+        assert!(!store.notify_profile_change(None));
+        // After stop, should notify again for any profile
+        store.stop();
+        assert!(store.notify_profile_change(Some("p1")));
     }
 
     #[test]

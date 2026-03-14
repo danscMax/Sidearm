@@ -33,6 +33,7 @@ use runtime::{
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use window_capture::WindowCaptureResult;
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
@@ -754,6 +755,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let tray_menu = Menu::with_items(
                 app,
@@ -857,6 +859,22 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+
+            let shortcut: Shortcut = "ctrl+alt+n".parse()
+                .expect("Failed to parse global shortcut Ctrl+Alt+N");
+
+            app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    if let Some(window) = app.get_webview_window("main") {
+                        if window.is_visible().unwrap_or(false) {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                }
+            })?;
 
             Ok(())
         })

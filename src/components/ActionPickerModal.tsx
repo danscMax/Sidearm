@@ -681,6 +681,49 @@ export function ActionPickerModal({
               </div>
             ) : null}
 
+            {controlId && selectedLayer ? (
+              <div className="editor-grid mt-12">
+                <label className="field">
+                  <span className="field__label">
+                    Сигнал кнопки
+                    {expectedSignal ? (
+                      <span className="field__hint" title={`Рекомендуемый сигнал: ${expectedSignal}`}>
+                        ?
+                      </span>
+                    ) : null}
+                  </span>
+                  <div className="capture-row">
+                    <input
+                      type="text"
+                      readOnly
+                      value={signalDraft ?? ""}
+                      placeholder={isCapturingSignal ? "Нажмите кнопку на мыши..." : "Не задан"}
+                      className={isCapturingSignal ? "capture-active" : ""}
+                    />
+                    <button
+                      type="button"
+                      className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
+                      onClick={() => setIsCapturingSignal(!isCapturingSignal)}
+                    >
+                      {isCapturingSignal ? "Отмена" : "Записать"}
+                    </button>
+                  </div>
+                </label>
+                {expectedSignal && signalDraft !== expectedSignal ? (
+                  <p className="panel__muted">
+                    Рекомендуемый: <code>{expectedSignal}</code>{" "}
+                    <button
+                      type="button"
+                      className="action-button action-button--small action-button--ghost"
+                      onClick={() => setSignalDraft(expectedSignal)}
+                    >
+                      Применить
+                    </button>
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             <label className="field mt-12">
               <span className="field__label">Название</span>
               <input
@@ -705,47 +748,6 @@ export function ActionPickerModal({
             ) : null}
           </div>
         </div>
-
-        {controlId && selectedLayer ? (
-          <div className="action-picker__signal">
-            <div className="action-picker__signal-header">
-              <span className="field__label">Сигнал кнопки</span>
-              {expectedSignal ? (
-                <span className="action-picker__signal-hint">
-                  Рекомендуемый: <code>{expectedSignal}</code>
-                  {signalDraft !== expectedSignal ? (
-                    <button
-                      type="button"
-                      className="action-button action-button--small action-button--ghost"
-                      onClick={() => setSignalDraft(expectedSignal)}
-                    >
-                      Применить
-                    </button>
-                  ) : null}
-                </span>
-              ) : null}
-            </div>
-            <div className="capture-row">
-              <input
-                type="text"
-                readOnly
-                value={signalDraft ?? ""}
-                placeholder={isCapturingSignal ? "Нажмите кнопку на мыши..." : "Не задан"}
-                className={isCapturingSignal ? "capture-active" : ""}
-              />
-              <button
-                type="button"
-                className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
-                onClick={() => setIsCapturingSignal(!isCapturingSignal)}
-              >
-                {isCapturingSignal ? "Отмена" : "Записать"}
-              </button>
-            </div>
-            <p className="panel__muted">
-              Нажмите кнопку на мыши или клавиатуре, чтобы перехватить сигнал, назначенный в Synapse или другом ПО.
-            </p>
-          </div>
-        ) : null}
 
         <div className="action-picker__footer">
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>

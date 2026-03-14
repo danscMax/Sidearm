@@ -3767,16 +3767,15 @@ img.profiles__app-card-monogram {
   gap: 6px;
 }
 
-/* Delete in active profile editor — muted, red on hover */
+/* Delete in active profile editor — red outline, red fill on hover */
 .settings-profile-actions .settings-delete-btn {
-  color: var(--c-text-muted);
-  border-color: var(--c-border);
+  color: var(--c-danger, #e55);
+  border-color: var(--c-danger, #e55);
+  background: transparent;
 }
 
 .settings-profile-actions .settings-delete-btn:hover {
-  color: var(--c-danger, #e55);
-  background: rgba(238, 85, 85, 0.08);
-  border-color: var(--c-danger, #e55);
+  background: rgba(238, 85, 85, 0.12);
 }
 
 /* Delete in profile list — always red */

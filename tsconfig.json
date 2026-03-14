@@ -20,7 +20,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "verbatimModuleSyntax": true,
-    "moduleDetection": "force"
+    "moduleDetection": "force",
+    "erasableSyntaxOnly": true
   },
   "include": ["src"],
   "references": [{ "path": "./tsconfig.node.json" }]

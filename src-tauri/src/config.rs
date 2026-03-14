@@ -317,6 +317,7 @@ pub enum TriggerMode {
     DoublePress,
     TriplePress,
     Hold,
+    Chord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -332,6 +333,8 @@ pub struct Binding {
     pub color_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_mode: Option<TriggerMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chord_partner: Option<ControlId>,
     pub enabled: bool,
 }
 
@@ -2437,6 +2440,7 @@ fn binding(
         action_ref,
         color_tag: None,
         trigger_mode: None,
+        chord_partner: None,
         enabled: true,
     }
 }

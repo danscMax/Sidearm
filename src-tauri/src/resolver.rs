@@ -389,6 +389,7 @@ mod tests {
                 action_ref: "action-default-standard-thumb-01".into(),
                 color_tag: None,
                 trigger_mode: None,
+                chord_partner: None,
                 enabled: true,
             }],
             actions: vec![Action {

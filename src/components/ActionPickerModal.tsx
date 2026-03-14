@@ -415,6 +415,9 @@ export function ActionPickerModal({
   const [triggerModeDraft, setTriggerModeDraft] = useState<TriggerMode>(
     () => binding?.triggerMode ?? "press",
   );
+  const [chordPartnerDraft, setChordPartnerDraft] = useState<string>(
+    () => binding?.chordPartner ?? "",
+  );
 
   function handleKeyCapture(event: React.KeyboardEvent) {
     if (!isCapturing) return;
@@ -550,6 +553,9 @@ export function ActionPickerModal({
         label: nextAction.pretty,
         enabled: true,
         triggerMode: triggerModeDraft === "press" ? undefined : triggerModeDraft,
+        chordPartner: triggerModeDraft === "chord" && chordPartnerDraft
+          ? chordPartnerDraft as ControlId
+          : undefined,
       });
     }
 
@@ -813,15 +819,33 @@ export function ActionPickerModal({
               />
             </label>
 
-            {effectiveCategory === "shortcut" ? (
-              <label className="field mt-12">
-                <span className="field__label">Режим срабатывания</span>
+            <label className="field mt-12">
+              <span className="field__label">Режим срабатывания</span>
+              <select
+                value={triggerModeDraft}
+                onChange={(e) => setTriggerModeDraft(e.target.value as TriggerMode)}
+              >
+                <option value="press">Нажатие</option>
+                <option value="hold">Удержание</option>
+                <option value="chord">Аккорд (две кнопки)</option>
+              </select>
+            </label>
+
+            {triggerModeDraft === "chord" && controlId ? (
+              <label className="field">
+                <span className="field__label">Вторая кнопка аккорда</span>
                 <select
-                  value={triggerModeDraft}
-                  onChange={(e) => setTriggerModeDraft(e.target.value as TriggerMode)}
+                  value={chordPartnerDraft}
+                  onChange={(e) => setChordPartnerDraft(e.target.value as ControlId)}
                 >
-                  <option value="press">Нажатие</option>
-                  <option value="hold">Удержание</option>
+                  <option value="">Выберите кнопку...</option>
+                  {config.physicalControls
+                    .filter((c) => c.id !== controlId && c.remappable)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.defaultName}
+                      </option>
+                    ))}
                 </select>
               </label>
             ) : null}

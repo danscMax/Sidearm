@@ -363,7 +363,10 @@
         },
         "triggerMode": {
           "type": "string",
-          "enum": ["press", "doublePress", "triplePress", "hold"]
+          "enum": ["press", "doublePress", "triplePress", "hold", "chord"]
+        },
+        "chordPartner": {
+          "$ref": "#/$defs/controlId"
         },
         "enabled": {
           "type": "boolean"

@@ -50,7 +50,7 @@ export type ActionType =
   | "profileSwitch"
   | "disabled";
 
-export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold";
+export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord";
 
 export type PasteMode = "clipboardPaste" | "sendText";
 
@@ -116,6 +116,7 @@ export interface Binding {
   colorTag?: string;
   enabled: boolean;
   triggerMode?: TriggerMode;
+  chordPartner?: ControlId;
 }
 
 export interface ShortcutActionPayload {

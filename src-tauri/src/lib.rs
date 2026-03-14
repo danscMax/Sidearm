@@ -741,12 +741,76 @@ async fn get_exe_icon(exe_name: String) -> Result<Option<String>, CommandError> 
     .map_err(|error| CommandError::internal(format!("get_exe_icon task failed: {error}")))?
 }
 
+/// Look up the exe path in the Windows App Paths registry.
+///
+/// Most installed applications register their full path under:
+///   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\<exe>`
+///
+/// The default value of this key contains the full path to the executable.
+/// This is an O(1) lookup and the canonical way Windows resolves exe locations.
+fn lookup_app_paths_registry(exe_name: &str) -> Option<String> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+        KEY_QUERY_VALUE, REG_EXPAND_SZ, REG_SZ,
+    };
+
+    let subkey = format!(
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}"
+    );
+    let wide_subkey: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+
+    for &hive in &[HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
+        let mut hkey = std::ptr::null_mut();
+        let status = unsafe {
+            RegOpenKeyExW(hive, wide_subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey)
+        };
+        if status != 0 || hkey.is_null() {
+            continue;
+        }
+
+        // Read the default value (empty string name)
+        let mut buf = vec![0u16; 1024];
+        let mut buf_size = (buf.len() * 2) as u32;
+        let mut value_type: u32 = 0;
+        let result = unsafe {
+            RegQueryValueExW(
+                hkey,
+                [0u16].as_ptr(), // default value
+                std::ptr::null(),
+                &mut value_type,
+                buf.as_mut_ptr().cast(),
+                &mut buf_size,
+            )
+        };
+        unsafe { RegCloseKey(hkey) };
+
+        if result != 0 || (value_type != REG_SZ && value_type != REG_EXPAND_SZ) {
+            continue;
+        }
+
+        // Convert wide string to Rust String, strip NUL and quotes
+        let len = (buf_size as usize) / 2;
+        let s = String::from_utf16_lossy(&buf[..len]);
+        let trimmed = s.trim_end_matches('\0').trim_matches('"').to_owned();
+
+        if !trimmed.is_empty() && std::path::Path::new(&trimmed).exists() {
+            return Some(trimmed);
+        }
+    }
+    None
+}
+
 /// Build a list of candidate full paths for a given exe name.
-/// Tries PATH lookup first, then common directories.
+/// Tries App Paths registry first, then PATH, then common directories.
 fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
     let mut paths = Vec::new();
 
-    // 1. Try to find via PATH environment variable
+    // 1. Windows Registry App Paths — canonical install location (O(1) lookup)
+    if let Some(path) = lookup_app_paths_registry(exe_name) {
+        paths.push(path);
+    }
+
+    // 2. Try to find via PATH environment variable
     if let Ok(path_env) = std::env::var("PATH") {
         for dir in path_env.split(';') {
             let candidate = std::path::Path::new(dir).join(exe_name);

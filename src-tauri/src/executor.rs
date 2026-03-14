@@ -13,8 +13,8 @@ const MAX_STEP_DELAY_MS: u64 = 30_000;
 use crate::{
     clipboard,
     config::{
-        Action, ActionPayload, ActionType, AppConfig, MenuItem, PasteMode, SequenceStep,
-        TextSnippetPayload,
+        Action, ActionCondition, ActionPayload, ActionType, AppConfig, MenuItem, PasteMode,
+        SequenceStep, TextSnippetPayload,
     },
     input_synthesis,
     resolver::{ResolutionStatus, ResolvedInputPreview},
@@ -854,6 +854,26 @@ fn paste_mode_name(paste_mode: PasteMode) -> &'static str {
     }
 }
 
+/// Evaluate whether all conditions on an action are satisfied.
+/// `exe` and `title` are the active window context at time of execution.
+pub fn evaluate_conditions(conditions: &[ActionCondition], exe: &str, title: &str) -> bool {
+    // Empty conditions = always pass
+    if conditions.is_empty() {
+        return true;
+    }
+
+    conditions.iter().all(|condition| match condition {
+        ActionCondition::WindowTitleContains { value } => {
+            title.to_lowercase().contains(&value.to_lowercase())
+        }
+        ActionCondition::WindowTitleNotContains { value } => {
+            !title.to_lowercase().contains(&value.to_lowercase())
+        }
+        ActionCondition::ExeEquals { value } => exe.eq_ignore_ascii_case(value),
+        ActionCondition::ExeNotEquals { value } => !exe.eq_ignore_ascii_case(value),
+    })
+}
+
 fn execution_error(
     code: &'static str,
     category: &str,
@@ -877,7 +897,7 @@ fn execution_error(
 mod tests {
     use super::*;
     use crate::{
-        config::default_seed_config,
+        config::{default_seed_config, ActionCondition},
         resolver::{resolve_input_preview, ResolutionStatus},
     };
 
@@ -1076,5 +1096,116 @@ mod tests {
         };
 
         validate_live_sequence(&payload).expect("expected live sequence support");
+    }
+
+    #[test]
+    fn evaluate_conditions_empty_always_passes() {
+        assert!(evaluate_conditions(&[], "code.exe", "main.rs - VSCode"));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_contains_match() {
+        let conditions = vec![ActionCondition::WindowTitleContains {
+            value: "VSCode".into(),
+        }];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_contains_case_insensitive() {
+        let conditions = vec![ActionCondition::WindowTitleContains {
+            value: "vscode".into(),
+        }];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_contains_no_match() {
+        let conditions = vec![ActionCondition::WindowTitleContains {
+            value: "Notepad".into(),
+        }];
+        assert!(!evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_not_contains() {
+        let conditions = vec![ActionCondition::WindowTitleNotContains {
+            value: "Notepad".into(),
+        }];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_exe_equals() {
+        let conditions = vec![ActionCondition::ExeEquals {
+            value: "code.exe".into(),
+        }];
+        assert!(evaluate_conditions(&conditions, "code.exe", "anything"));
+    }
+
+    #[test]
+    fn evaluate_conditions_exe_equals_case_insensitive() {
+        let conditions = vec![ActionCondition::ExeEquals {
+            value: "Code.EXE".into(),
+        }];
+        assert!(evaluate_conditions(&conditions, "code.exe", "anything"));
+    }
+
+    #[test]
+    fn evaluate_conditions_exe_not_equals() {
+        let conditions = vec![ActionCondition::ExeNotEquals {
+            value: "explorer.exe".into(),
+        }];
+        assert!(evaluate_conditions(&conditions, "code.exe", "anything"));
+    }
+
+    #[test]
+    fn evaluate_conditions_multiple_all_must_pass() {
+        let conditions = vec![
+            ActionCondition::WindowTitleContains {
+                value: "VSCode".into(),
+            },
+            ActionCondition::ExeEquals {
+                value: "code.exe".into(),
+            },
+        ];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_multiple_one_fails() {
+        let conditions = vec![
+            ActionCondition::WindowTitleContains {
+                value: "VSCode".into(),
+            },
+            ActionCondition::ExeEquals {
+                value: "notepad.exe".into(),
+            },
+        ];
+        assert!(!evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
     }
 }

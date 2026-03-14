@@ -228,10 +228,17 @@ export type ActionPayload =
   | ProfileSwitchPayload
   | DisabledActionPayload;
 
+export type ActionCondition =
+  | { type: "windowTitleContains"; value: string }
+  | { type: "windowTitleNotContains"; value: string }
+  | { type: "exeEquals"; value: string }
+  | { type: "exeNotEquals"; value: string };
+
 interface ActionBase {
   id: string;
   pretty: string;
   notes?: string;
+  conditions?: ActionCondition[];
 }
 
 export type Action = ActionBase &

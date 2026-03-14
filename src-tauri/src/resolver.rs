@@ -398,6 +398,7 @@ mod tests {
                 payload: ActionPayload::Disabled(Default::default()),
                 pretty: "Disabled".into(),
                 notes: None,
+                conditions: Vec::new(),
             }],
             snippet_library: vec![SnippetLibraryItem {
                 id: "snippet-example".into(),

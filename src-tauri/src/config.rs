@@ -369,6 +369,19 @@ impl ActionType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ActionCondition {
+    #[serde(rename_all = "camelCase")]
+    WindowTitleContains { value: String },
+    #[serde(rename_all = "camelCase")]
+    WindowTitleNotContains { value: String },
+    #[serde(rename_all = "camelCase")]
+    ExeEquals { value: String },
+    #[serde(rename_all = "camelCase")]
+    ExeNotEquals { value: String },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Action {
     pub id: String,
@@ -378,6 +391,8 @@ pub struct Action {
     pub pretty: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<ActionCondition>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -2398,6 +2413,7 @@ fn shortcut_action(
         }),
         pretty: pretty.into(),
         notes: None,
+        conditions: Vec::new(),
     }
 }
 
@@ -2410,6 +2426,7 @@ fn text_snippet_library_action(id: String, pretty: &str, snippet_id: &str) -> Ac
         }),
         pretty: pretty.into(),
         notes: None,
+        conditions: Vec::new(),
     }
 }
 
@@ -2420,6 +2437,7 @@ fn disabled_placeholder_action(id: String, pretty: &str, notes: &str) -> Action 
         payload: ActionPayload::Disabled(DisabledActionPayload::default()),
         pretty: pretty.into(),
         notes: Some(notes.into()),
+        conditions: Vec::new(),
     }
 }
 

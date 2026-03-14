@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type {
   Action,
+  ActionCondition,
   AppConfig,
   AppMapping,
   Binding,
@@ -1690,5 +1691,42 @@ describe("immutability guarantees", () => {
     const config = { ...createMinimalConfig(), profiles: [p] };
     const result = deleteProfile(config, "p");
     expect(result).not.toBe(config);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ActionCondition
+// ---------------------------------------------------------------------------
+
+describe("ActionCondition", () => {
+  it("action with conditions preserves them through upsert", () => {
+    const config = createMinimalConfig();
+    const conditions: ActionCondition[] = [
+      { type: "windowTitleContains", value: "Visual Studio" },
+      { type: "exeNotEquals", value: "explorer.exe" },
+    ];
+    const action: Action = {
+      id: "cond-test",
+      type: "shortcut",
+      payload: { key: "C", ctrl: true, shift: false, alt: false, win: false },
+      pretty: "Ctrl+C",
+      conditions,
+    };
+    const updated = upsertAction(config, action);
+    const found = updated.actions.find((a) => a.id === "cond-test");
+    expect(found?.conditions).toEqual(conditions);
+  });
+
+  it("action without conditions has undefined/empty conditions", () => {
+    const config = createMinimalConfig();
+    const action: Action = {
+      id: "no-cond",
+      type: "disabled",
+      payload: {} as Record<string, never>,
+      pretty: "Disabled",
+    };
+    const updated = upsertAction(config, action);
+    const found = updated.actions.find((a) => a.id === "no-cond");
+    expect(found?.conditions ?? []).toEqual([]);
   });
 });

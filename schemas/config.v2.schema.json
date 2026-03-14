@@ -373,6 +373,28 @@
         }
       }
     },
+    "actionCondition": {
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "windowTitleContains",
+            "windowTitleNotContains",
+            "exeEquals",
+            "exeNotEquals"
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
     "action": {
       "type": "object",
       "additionalProperties": false,
@@ -397,6 +419,12 @@
         },
         "notes": {
           "type": "string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/actionCondition"
+          }
         }
       },
       "allOf": [

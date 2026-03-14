@@ -235,6 +235,22 @@ unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HA
     ok != 0 && elevation.TokenIsElevated != 0
 }
 
+/// Check whether the current process itself is running elevated (admin).
+///
+/// Used at startup to log the privilege level — helps diagnose UIPI issues
+/// where `RegisterHotKey` or `SendInput` silently fail against elevated targets.
+pub fn is_current_process_elevated() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::System::Threading::GetCurrentProcess;
+        // Safety: GetCurrentProcess returns a pseudo-handle (-1) that is always valid
+        // and does not need to be closed.
+        unsafe { is_process_elevated(GetCurrentProcess()) }
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
+}
+
 #[cfg(not(target_os = "windows"))]
 fn capture_foreground_window() -> Result<RawWindowCapture, String> {
     Err("Foreground window capture is only implemented for Windows.".into())

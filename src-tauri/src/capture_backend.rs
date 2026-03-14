@@ -1040,9 +1040,17 @@ fn run_hotkey_message_loop(
                 }
             }
             let last_error = std::io::Error::last_os_error();
+            let hint = if last_error.raw_os_error() == Some(5) {
+                // ERROR_ACCESS_DENIED (5) — another process (likely elevated)
+                // already owns this hotkey and UIPI blocks our registration.
+                " Hotkey may be owned by an elevated process. \
+                 Try running as administrator."
+            } else {
+                ""
+            };
             let _ = ready_tx.send(Err(format!(
-                "RegisterHotKey failed for `{}`. {}",
-                reg.encoded_key, last_error
+                "RegisterHotKey failed for `{}`. {last_error}{hint}",
+                reg.encoded_key
             )));
             return;
         }

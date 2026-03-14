@@ -879,6 +879,15 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            // Log whether the process is running with elevated (admin) privileges.
+            // This is informational — helps diagnose UIPI issues where hotkey
+            // registration or SendInput fails against elevated target windows.
+            if window_capture::is_current_process_elevated() {
+                eprintln!("[startup] Running as administrator (elevated).");
+            } else {
+                eprintln!("[startup] Running as standard user (non-elevated).");
+            }
+
             let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?;
             let tray_menu = Menu::with_items(
                 app,

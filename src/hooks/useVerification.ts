@@ -6,7 +6,6 @@ import {
 import {
   exportVerificationSession,
   normalizeCommandError,
-  startRuntime,
 } from "../lib/backend";
 import type {
   AppConfig,
@@ -17,7 +16,6 @@ import type {
 import type {
   EncodedKeyEvent,
   ResolvedInputPreview,
-  RuntimeStateSummary,
   WindowCaptureResult,
 } from "../lib/runtime";
 import {
@@ -78,10 +76,9 @@ export function useVerification(deps: {
   selectedControlId: ControlId | null;
   setSelectedLayer: React.Dispatch<React.SetStateAction<Layer>>;
   setSelectedControlId: React.Dispatch<React.SetStateAction<ControlId | null>>;
-  runtimeSummary: RuntimeStateSummary;
-  setRuntimeSummary: React.Dispatch<React.SetStateAction<RuntimeStateSummary>>;
-  refreshDebugLog: () => Promise<void>;
-  setLastRuntimeError: React.Dispatch<React.SetStateAction<import("../lib/runtime").RuntimeErrorEvent | null>>;
+  runtimeStatus: import("../lib/runtime").RuntimeStatus;
+  ensureRuntimeStarted: () => Promise<void>;
+  clearRuntimeError: () => void;
   lastEncodedKey: EncodedKeyEvent | null;
   lastCapture: WindowCaptureResult | null;
   lastResolutionPreview: ResolvedInputPreview | null;
@@ -94,10 +91,9 @@ export function useVerification(deps: {
     selectedControlId,
     setSelectedLayer,
     setSelectedControlId,
-    runtimeSummary,
-    setRuntimeSummary,
-    refreshDebugLog,
-    setLastRuntimeError,
+    runtimeStatus,
+    ensureRuntimeStarted,
+    clearRuntimeError,
     lastEncodedKey,
     lastCapture,
     lastResolutionPreview,
@@ -173,13 +169,9 @@ export function useVerification(deps: {
       return;
     }
 
-    if (runtimeSummary.status !== "running") {
+    if (runtimeStatus !== "running") {
       try {
-        const summary = await startRuntime();
-        startTransition(() => {
-          setRuntimeSummary(summary);
-        });
-        await refreshDebugLog();
+        await ensureRuntimeStarted();
       } catch (unknownError) {
         startTransition(() => {
           setError(normalizeCommandError(unknownError));
@@ -202,7 +194,7 @@ export function useVerification(deps: {
 
     startTransition(() => {
       setVerificationSession(nextSession);
-      setLastRuntimeError(null);
+      clearRuntimeError();
       setLastVerificationExportPath(null);
     });
   }
@@ -312,7 +304,7 @@ export function useVerification(deps: {
 
       startTransition(() => {
         setError(null);
-        setLastRuntimeError(null);
+        clearRuntimeError();
         setLastVerificationExportPath(writtenPath);
       });
     } catch (unknownError) {

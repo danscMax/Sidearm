@@ -39,24 +39,20 @@ import { idleRuntimeStateSummary } from "../lib/runtime";
 export interface RuntimeControl {
   // State
   runtimeSummary: RuntimeStateSummary;
-  setRuntimeSummary: React.Dispatch<React.SetStateAction<RuntimeStateSummary>>;
   debugLog: DebugLogEntry[];
   captureDelayMs: number;
   setCaptureDelayMs: React.Dispatch<React.SetStateAction<number>>;
   lastCapture: WindowCaptureResult | null;
-  setLastCapture: React.Dispatch<React.SetStateAction<WindowCaptureResult | null>>;
   resolutionKeyInput: string;
   setResolutionKeyInput: React.Dispatch<React.SetStateAction<string>>;
   lastResolutionPreview: ResolvedInputPreview | null;
-  setLastResolutionPreview: React.Dispatch<React.SetStateAction<ResolvedInputPreview | null>>;
   lastExecution: ActionExecutionEvent | null;
-  setLastExecution: React.Dispatch<React.SetStateAction<ActionExecutionEvent | null>>;
   lastRuntimeError: RuntimeErrorEvent | null;
-  setLastRuntimeError: React.Dispatch<React.SetStateAction<RuntimeErrorEvent | null>>;
   lastEncodedKey: EncodedKeyEvent | null;
-  setLastEncodedKey: React.Dispatch<React.SetStateAction<EncodedKeyEvent | null>>;
 
   // Actions
+  ensureRuntimeStarted: () => Promise<void>;
+  clearRuntimeError: () => void;
   refreshDebugLog: () => Promise<void>;
   handleStartRuntime: () => Promise<void>;
   handleReloadRuntime: () => Promise<void>;
@@ -219,6 +215,16 @@ export function useRuntime(deps: {
     }
   }
 
+  async function ensureRuntimeStarted(): Promise<void> {
+    const summary = await startRuntime();
+    startTransition(() => setRuntimeSummary(summary));
+    await refreshDebugLog();
+  }
+
+  function clearRuntimeError() {
+    startTransition(() => setLastRuntimeError(null));
+  }
+
   async function handleStartRuntime() {
     await runtimeCommand(() => startRuntime(), (summary) => setRuntimeSummary(summary));
   }
@@ -283,22 +289,18 @@ export function useRuntime(deps: {
 
   return {
     runtimeSummary,
-    setRuntimeSummary,
     debugLog,
     captureDelayMs,
     setCaptureDelayMs,
     lastCapture,
-    setLastCapture,
     resolutionKeyInput,
     setResolutionKeyInput,
     lastResolutionPreview,
-    setLastResolutionPreview,
     lastExecution,
-    setLastExecution,
     lastRuntimeError,
-    setLastRuntimeError,
     lastEncodedKey,
-    setLastEncodedKey,
+    ensureRuntimeStarted,
+    clearRuntimeError,
     refreshDebugLog,
     handleStartRuntime,
     handleReloadRuntime,

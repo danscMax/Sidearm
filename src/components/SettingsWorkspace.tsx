@@ -183,7 +183,8 @@ export function SettingsWorkspace({
         </div>
         <button
           type="button"
-          className="profiles__add-card"
+          className="action-button action-button--secondary"
+          style={{ alignSelf: "flex-start", marginTop: 8 }}
           onClick={handleCreateProfile}
         >
           + Новый профиль

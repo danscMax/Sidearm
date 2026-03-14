@@ -92,7 +92,14 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
         "RBRACKET" | "RIGHTBRACKET" => Ok(simple_key(VK_OEM_6, false, "]")),
         "BACKSLASH" => Ok(simple_key(VK_OEM_5, false, "\\")),
         "GRAVE" | "BACKTICK" => Ok(simple_key(VK_OEM_3, false, "`")),
-        _ => Err(format!("Unsupported hotkey primary key `{trimmed}`.")),
+        _ => {
+            // Support raw VK codes: "VK_232" or "VK232" → VK code 232
+            if let Some(code) = parse_vk_code(&compact) {
+                Ok(simple_key(code, false, &format!("VK_{code}")))
+            } else {
+                Err(format!("Unsupported hotkey primary key `{trimmed}`."))
+            }
+        }
     }
 }
 
@@ -284,6 +291,16 @@ const VK_OEM_5: u16 = 0xDC;
 const VK_OEM_6: u16 = 0xDD;
 const VK_OEM_7: u16 = 0xDE;
 
+/// Parse raw VK code from format "VK232" or "VK_232" (after normalization removes underscores).
+fn parse_vk_code(compact: &str) -> Option<u16> {
+    let digits = compact.strip_prefix("VK")?;
+    let code: u16 = digits.parse().ok()?;
+    if code == 0 {
+        return None;
+    }
+    Some(code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -333,5 +350,21 @@ mod tests {
     fn extracts_encoding_modifiers_returns_default_for_invalid() {
         let mods = extract_encoding_modifiers("+++garbage");
         assert_eq!(mods, HotkeyModifiers::default());
+    }
+
+    #[test]
+    fn parses_raw_vk_code() {
+        let parsed = parse_hotkey("Ctrl+Alt+VK_232").expect("expected hotkey with VK code");
+        assert_eq!(parsed.canonical, "Ctrl+Alt+VK_232");
+        assert!(parsed.modifiers.ctrl);
+        assert!(parsed.modifiers.alt);
+        assert_eq!(parsed.key.code, 232);
+    }
+
+    #[test]
+    fn parses_raw_vk_code_bare() {
+        let parsed = parse_hotkey("VK_128").expect("expected bare VK code");
+        assert_eq!(parsed.canonical, "VK_128");
+        assert_eq!(parsed.key.code, 128);
     }
 }

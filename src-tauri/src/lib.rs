@@ -815,8 +815,8 @@ fn capture_one_keystroke_ll() -> Result<String, CommandError> {
         UI::{
             Input::KeyboardAndMouse::GetKeyState,
             WindowsAndMessaging::{
-                DispatchMessageW, PeekMessageW, SetWindowsHookExW, TranslateMessage,
-                UnhookWindowsHookEx, PM_REMOVE, WH_KEYBOARD_LL, WM_QUIT,
+                DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
+                UnhookWindowsHookEx, WH_KEYBOARD_LL,
             },
         },
     };
@@ -884,31 +884,18 @@ fn capture_one_keystroke_ll() -> Result<String, CommandError> {
         )));
     }
 
-    // Pump messages until WM_QUIT (max 30 seconds timeout)
-    let start = std::time::Instant::now();
+    // Pump messages until WM_QUIT — GetMessageW blocks efficiently (no polling)
     loop {
-        if start.elapsed() > std::time::Duration::from_secs(30) {
-            unsafe { UnhookWindowsHookEx(hook) };
-            return Err(CommandError::new(
-                "capture_timeout",
-                "Время ожидания нажатия истекло (30 сек).",
-                None,
-            ));
-        }
-
         let mut msg = MaybeUninit::uninit();
-        let ret = unsafe { PeekMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0, PM_REMOVE) };
-        if ret != 0 {
-            let m = unsafe { msg.assume_init() };
-            if m.message == WM_QUIT {
-                break;
-            }
-            unsafe {
-                TranslateMessage(&m);
-                DispatchMessageW(&m);
-            }
-        } else {
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        let ret = unsafe { GetMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0) };
+        if ret <= 0 {
+            // 0 = WM_QUIT, -1 = error — both mean stop
+            break;
+        }
+        let m = unsafe { msg.assume_init() };
+        unsafe {
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
         }
     }
 

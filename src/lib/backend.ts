@@ -179,20 +179,6 @@ export async function listenRuntimeErrorEvent(
 }
 
 /* ─────────────────────────────────────────────────────────
-   One-Shot Keystroke Capture (OS-level LL hook)
-   ───────────────────────────────────────────────────────── */
-
-/**
- * Install a temporary WH_KEYBOARD_LL hook, wait for the first non-modifier
- * key press, and return it as a formatted string (e.g. "Ctrl+Alt+F17").
- * Bypasses Chromium's inability to see F13-F24 from Razer Synapse SendInput.
- * Times out after 30 seconds.
- */
-export async function captureNextKeystroke(): Promise<string> {
-  return invoke<string>("capture_next_keystroke");
-}
-
-/* ─────────────────────────────────────────────────────────
    Macro Recording IPC
    ───────────────────────────────────────────────────────── */
 
@@ -212,10 +198,6 @@ export interface MacroRecording {
 
 export async function stopMacroRecording(): Promise<MacroRecording> {
   return invoke<MacroRecording>("stop_macro_recording");
-}
-
-export async function diagnoseKeystroke(): Promise<string[]> {
-  return invoke<string[]>("diagnose_keystroke");
 }
 
 export function normalizeCommandError(error: unknown): CommandError {

@@ -12,7 +12,6 @@ export function Sidebar({
   effectiveProfileId,
   runtimeResolvedProfileName,
   onSelectProfile,
-  isProfilesMode,
   onCreateProfile,
   onToggleRuntime,
   runtimeStatus,
@@ -26,7 +25,6 @@ export function Sidebar({
   effectiveProfileId: string | null;
   runtimeResolvedProfileName: string | null;
   onSelectProfile: (id: string) => void;
-  isProfilesMode: boolean;
   onCreateProfile: () => void;
   onToggleRuntime: () => void;
   runtimeStatus: "running" | "stopped" | string;
@@ -58,19 +56,17 @@ export function Sidebar({
       ))}
       <div className="sidebar__sep" />
       <div className="sidebar__section">
-        {isProfilesMode ? (
-          <div className="sidebar__section-header">
-            <span className="sidebar__section-label" />
-            <button
-              type="button"
-              className="sidebar__add-profile-btn"
-              onClick={onCreateProfile}
-              title="Добавить профиль"
-            >
-              +
-            </button>
-          </div>
-        ) : null}
+        <div className="sidebar__section-header">
+          <span className="sidebar__section-label">ПРОФИЛЬ</span>
+          <button
+            type="button"
+            className="sidebar__add-profile-btn"
+            onClick={onCreateProfile}
+            title="Добавить профиль"
+          >
+            +
+          </button>
+        </div>
         {profiles.length <= 3 ? (
           <div
             className="pill-track pill-track--sidebar"
@@ -129,13 +125,6 @@ export function Sidebar({
             ))}
           </select>
         )}
-        {runtimeStatus === "running" &&
-          runtimeResolvedProfileName &&
-          runtimeResolvedProfileName !== profiles.find((p) => p.id === effectiveProfileId)?.name ? (
-          <div className="sidebar__runtime-profile" title="Перехватчик использует другой профиль (по активному окну)">
-            Активный: {runtimeResolvedProfileName}
-          </div>
-        ) : null}
       </div>
       <button
         className={`sidebar__runtime sidebar__runtime--${runtimeStatus === "running" ? "running" : "stopped"}`}

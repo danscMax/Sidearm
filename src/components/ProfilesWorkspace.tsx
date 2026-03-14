@@ -6,12 +6,8 @@ import type { WindowCaptureResult } from "../lib/runtime";
 import {
   createAppMappingFromCapture,
   deleteAppMapping,
-  deleteProfile,
-  duplicateProfile,
   findDuplicateAppMapping,
-  collectMenuActionRefs,
   upsertAppMapping,
-  upsertProfile,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { getExeIcon } from "../lib/backend";
@@ -28,14 +24,12 @@ const exeIconPending = new Map<string, Promise<string | null>>();
 export interface ProfilesWorkspaceProps {
   activeConfig: AppConfig;
   activeProfile: Profile | null;
-  profiles: Profile[];
   effectiveProfileId: string | null;
   lastCapture: WindowCaptureResult | null;
   captureDelayMs: number;
   viewState: ViewState;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   setCaptureDelayMs: (ms: number) => void;
-  setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: {
     title: string;
     message: string;
@@ -57,11 +51,6 @@ export interface ProfilesWorkspaceProps {
 function exeMonogram(exe: string): string {
   const base = exe.replace(/\.exe$/i, "");
   return base.slice(0, 2).toUpperCase();
-}
-
-/** First letter of profile name for avatar monogram. */
-function profileMonogram(name: string): string {
-  return name.trim().slice(0, 1).toUpperCase() || "?";
 }
 
 /** Renders an exe icon (fetched from backend) with monogram fallback. */
@@ -379,14 +368,12 @@ function AppMappingModal({
 export function ProfilesWorkspace({
   activeConfig,
   activeProfile,
-  profiles,
   effectiveProfileId,
   lastCapture,
   captureDelayMs,
   viewState,
   updateDraft,
   setCaptureDelayMs,
-  setSelectedProfileId,
   setConfirmModal,
   handleCaptureActiveWindow,
   familySections,
@@ -414,8 +401,6 @@ export function ProfilesWorkspace({
   const [newRuleCapturedTitle, setNewRuleCapturedTitle] = useState("");
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
   const prevCaptureRef = useRef(lastCapture);
-  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
-  const profileMenuRef = useRef<HTMLDivElement>(null);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
 
   const selectedAppMappings = useMemo(
@@ -445,18 +430,6 @@ export function ProfilesWorkspace({
       if (countdownRef.current) clearInterval(countdownRef.current);
     };
   }, []);
-
-  // Close profile menu on outside click
-  useEffect(() => {
-    if (!profileMenuOpen) return;
-    function handleClick(e: MouseEvent) {
-      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
-        setProfileMenuOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [profileMenuOpen]);
 
   // Fill new-rule dialog fields after capture completes
   useEffect(() => {
@@ -552,58 +525,6 @@ export function ProfilesWorkspace({
     }
   }
 
-  function handleDuplicateProfile() {
-    if (!activeProfile) return;
-    let newProfileId: string | null = null;
-    updateDraft((config) => {
-      const result = duplicateProfile(config, activeProfile.id);
-      newProfileId = result.newProfileId;
-      return result.config;
-    });
-    if (newProfileId) {
-      startTransition(() => setSelectedProfileId(newProfileId));
-    }
-  }
-
-  function handleExportProfile() {
-    if (!activeProfile) return;
-
-    // Collect profile data
-    const profileAppMappings = activeConfig.appMappings.filter(
-      (m) => m.profileId === activeProfile.id,
-    );
-    const profileBindings = activeConfig.bindings.filter(
-      (b) => b.profileId === activeProfile.id,
-    );
-    const referencedActionIds = new Set(profileBindings.map((b) => b.actionRef));
-    // Include nested menu action refs
-    for (const actionId of referencedActionIds) {
-      const action = activeConfig.actions.find((a) => a.id === actionId);
-      if (action?.type === "menu") {
-        collectMenuActionRefs(action.payload.items, referencedActionIds);
-      }
-    }
-    const profileActions = activeConfig.actions.filter((a) => referencedActionIds.has(a.id));
-
-    const exportData = {
-      profile: activeProfile,
-      appMappings: profileAppMappings,
-      bindings: profileBindings,
-      actions: profileActions,
-      exportedAt: new Date().toISOString(),
-    };
-
-    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${activeProfile.name.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, "_")}.profile.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }
-
 
   return (
     <div className="profiles-workspace">
@@ -631,96 +552,6 @@ export function ProfilesWorkspace({
           onSelectLayer={onSelectLayer}
         />
       </div>
-
-      {/* ── Profile pill ── */}
-      {activeProfile ? (
-        <div className="profile-pill-row">
-          <div className="profile-pill">
-            <span className="profile-pill__avatar">{profileMonogram(activeProfile.name)}</span>
-            <input
-              type="text"
-              className="profile-pill__name"
-              value={activeProfile.name}
-              onChange={(e) =>
-                updateDraft((c) => upsertProfile(c, { ...activeProfile, name: e.target.value }))
-              }
-              onBlur={(e) => {
-                if (!e.target.value.trim())
-                  updateDraft((c) =>
-                    upsertProfile(c, { ...activeProfile, name: "Безымянный профиль" }),
-                  );
-              }}
-            />
-            <label className="profile-pill__toggle">
-              <input
-                className="profiles__toggle"
-                type="checkbox"
-                checked={activeProfile.enabled}
-                onChange={(e) =>
-                  updateDraft((c) =>
-                    upsertProfile(c, { ...activeProfile, enabled: e.target.checked }),
-                  )
-                }
-              />
-            </label>
-            {!activeProfile.enabled && (
-              <span className="profile-pill__status">Отключён</span>
-            )}
-          </div>
-          <div className="profile-pill__menu-wrap" ref={profileMenuRef}>
-            <button
-              type="button"
-              className="profile-pill__menu-btn"
-              onClick={() => setProfileMenuOpen((v) => !v)}
-              aria-label="Действия с профилем"
-            >
-              ⋯
-            </button>
-            {profileMenuOpen && (
-              <div className="profile-pill__dropdown">
-                <button
-                  type="button"
-                  className="profile-pill__dropdown-item"
-                  onClick={() => { handleDuplicateProfile(); setProfileMenuOpen(false); }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
-                  Копировать
-                </button>
-                <button
-                  type="button"
-                  className="profile-pill__dropdown-item"
-                  onClick={() => { handleExportProfile(); setProfileMenuOpen(false); }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                  Экспорт
-                </button>
-                {profiles.length > 1 && (
-                  <button
-                    type="button"
-                    className="profile-pill__dropdown-item profile-pill__dropdown-item--danger"
-                    onClick={() => {
-                      setProfileMenuOpen(false);
-                      setConfirmModal({
-                        title: "Удалить профиль?",
-                        message: `Профиль «${activeProfile.name}» будет удалён вместе со всеми назначениями и правилами.`,
-                        confirmLabel: "Удалить",
-                        onConfirm: () => {
-                          updateDraft((c) => deleteProfile(c, activeProfile.id));
-                          setSelectedProfileId(null);
-                          setConfirmModal(null);
-                        },
-                      });
-                    }}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                    Удалить
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      ) : null}
 
       {/* ── Section header ── */}
       <div className="profiles__section-header">

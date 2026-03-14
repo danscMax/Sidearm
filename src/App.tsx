@@ -365,7 +365,6 @@ function App() {
         effectiveProfileId={effectiveProfileId}
         runtimeResolvedProfileName={lastCapture?.resolvedProfileName ?? null}
         onSelectProfile={(id) => setSelectedProfileId(id)}
-        isProfilesMode={isProfilesMode}
         onCreateProfile={handleCreateProfile}
         onToggleRuntime={() => {
           if (runtimeSummary.status === "running") void handleStopRuntime();
@@ -401,14 +400,12 @@ function App() {
               <ProfilesWorkspace
                 activeConfig={activeConfig}
                 activeProfile={activeProfile}
-                profiles={profiles}
                 effectiveProfileId={effectiveProfileId}
                 lastCapture={lastCapture}
                 captureDelayMs={captureDelayMs}
                 viewState={viewState}
                 updateDraft={updateDraft}
                 setCaptureDelayMs={setCaptureDelayMs}
-                setSelectedProfileId={setSelectedProfileId}
                 setConfirmModal={setConfirmModal}
                 handleCaptureActiveWindow={handleCaptureActiveWindow}
                 familySections={familySections}

@@ -1,3 +1,4 @@
+import type React from "react";
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
@@ -104,7 +105,7 @@ const resolutionPreview: ResolvedInputPreview = {
 const executionEvent: ActionExecutionEvent = {
   encodedKey: "F13",
   actionId: "act-1",
-  actionType: "keystroke",
+  actionType: "shortcut",
   actionPretty: "Ctrl+C",
   mode: "dryRun",
   outcome: "simulated",
@@ -129,7 +130,7 @@ async function flushDebounce() {
 // ---------------------------------------------------------------------------
 
 describe("useRuntime", () => {
-  const setError = vi.fn<[CommandError | null], void>();
+  const setError = vi.fn() as unknown as React.Dispatch<React.SetStateAction<CommandError | null>>;
 
   beforeEach(() => {
     vi.useFakeTimers();

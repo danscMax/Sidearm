@@ -1,3 +1,4 @@
+import type React from "react";
 import { renderHook, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -84,19 +85,6 @@ const encodedKeyEvent: EncodedKeyEvent = {
   isRepeat: false,
 };
 
-const captureResult: WindowCaptureResult = {
-  hwnd: "0x12345",
-  exe: "notepad.exe",
-  processPath: "C:\\Windows\\notepad.exe",
-  title: "Untitled - Notepad",
-  capturedAt: Date.now(),
-  ignored: false,
-  usedFallbackProfile: false,
-  candidateAppMappingIds: [],
-  resolutionReason: "matched",
-  isElevated: false,
-};
-
 const resolutionPreview: ResolvedInputPreview = {
   status: "resolved",
   encodedKey: "F13",
@@ -126,7 +114,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
     lastEncodedKey: null as EncodedKeyEvent | null,
     lastCapture: null as WindowCaptureResult | null,
     lastResolutionPreview: null as ResolvedInputPreview | null,
-    setError: vi.fn<[CommandError | null], void>(),
+    setError: vi.fn() as unknown as React.Dispatch<React.SetStateAction<CommandError | null>>,
     ...overrides,
   };
 }

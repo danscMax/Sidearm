@@ -33,6 +33,7 @@ import {
   deleteProfile,
   duplicateBinding,
   copyBindingFromLayer,
+  removeBinding,
   expectedEncodedKeyForControl,
   makeBindingId,
   makeActionId,
@@ -1728,5 +1729,58 @@ describe("ActionCondition", () => {
     const updated = upsertAction(config, action);
     const found = updated.actions.find((a) => a.id === "no-cond");
     expect(found?.conditions ?? []).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removeBinding
+// ---------------------------------------------------------------------------
+
+describe("removeBinding", () => {
+  it("removes a binding and its orphaned action", () => {
+    const action = makeAction({ id: "action-orphan" });
+    const binding = makeBinding({ id: "binding-rm", actionRef: "action-orphan" });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      bindings: [binding],
+      actions: [action],
+    };
+
+    const result = removeBinding(config, "binding-rm");
+
+    expect(result.bindings).toHaveLength(0);
+    expect(result.actions).toHaveLength(0);
+  });
+
+  it("keeps action if referenced by another binding", () => {
+    const action = makeAction({ id: "action-shared" });
+    const binding1 = makeBinding({ id: "binding-1", actionRef: "action-shared" });
+    const binding2 = makeBinding({ id: "binding-2", actionRef: "action-shared", controlId: "thumb_02" as ControlId });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      bindings: [binding1, binding2],
+      actions: [action],
+    };
+
+    const result = removeBinding(config, "binding-1");
+
+    expect(result.bindings).toHaveLength(1);
+    expect(result.bindings[0]?.id).toBe("binding-2");
+    expect(result.actions).toHaveLength(1);
+    expect(result.actions[0]?.id).toBe("action-shared");
+  });
+
+  it("returns config unchanged if bindingId not found", () => {
+    const action = makeAction();
+    const binding = makeBinding();
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      bindings: [binding],
+      actions: [action],
+    };
+
+    const result = removeBinding(config, "nonexistent-binding");
+
+    expect(result).toBe(config);
   });
 });

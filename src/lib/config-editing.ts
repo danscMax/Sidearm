@@ -43,6 +43,17 @@ export function findBinding(
   );
 }
 
+export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
+  const binding = config.bindings.find((b) => b.id === bindingId);
+  if (!binding) return config;
+  const nextBindings = config.bindings.filter((b) => b.id !== bindingId);
+  const actionStillReferenced = nextBindings.some((b) => b.actionRef === binding.actionRef);
+  const nextActions = actionStillReferenced
+    ? config.actions
+    : config.actions.filter((a) => a.id !== binding.actionRef);
+  return { ...config, bindings: nextBindings, actions: nextActions };
+}
+
 export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfig {
   const bindingIndex = config.bindings.findIndex(
     (binding) => binding.id === nextBinding.id,

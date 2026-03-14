@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Binding, ControlId, Layer } from "../lib/config";
+import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy, topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
 import { displayNameForControl, surfacePrimaryLabel } from "../lib/labels";
@@ -15,6 +15,7 @@ interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
+  onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -72,6 +73,7 @@ export function MouseVisualization({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  onContextMenu,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
@@ -99,6 +101,7 @@ export function MouseVisualization({
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          onContextMenu={onContextMenu}
         />
       </div>
     );
@@ -117,6 +120,12 @@ export function MouseVisualization({
   function handleDblClick(id: ControlId, e: React.MouseEvent) {
     e.preventDefault();
     onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
+  }
+
+  function handleRightClick(id: ControlId, e: React.MouseEvent) {
+    e.preventDefault();
+    const entry = entryMap.get(id);
+    onContextMenu?.(id, entry?.binding ?? null, entry?.action ?? null, e.clientX, e.clientY);
   }
 
   function renderHotspotButtons(
@@ -146,6 +155,7 @@ export function MouseVisualization({
           style={{ left: `${pos.left}%`, top: `${pos.top}%` }}
           onClick={(e) => handleClick(entry.control.id, e)}
           onDoubleClick={(e) => handleDblClick(entry.control.id, e)}
+          onContextMenu={(e) => handleRightClick(entry.control.id, e)}
           onMouseEnter={() => setHoveredId(entry.control.id)}
           onMouseLeave={() => setHoveredId(null)}
           title={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
@@ -182,6 +192,7 @@ export function MouseVisualization({
               data-tooltip={tooltipText(entry)}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
+              onContextMenu={(e) => handleRightClick(controlId, e)}
               onMouseEnter={() => setHoveredId(controlId)}
               onMouseLeave={() => setHoveredId(null)}
             >

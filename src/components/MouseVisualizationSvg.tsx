@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { Binding, ControlId, Layer } from "../lib/config";
+import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy } from "../lib/constants";
 import { displayNameForControl, surfacePrimaryLabel } from "../lib/labels";
@@ -12,6 +12,7 @@ interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
+  onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -275,6 +276,7 @@ export function MouseVisualizationSvg({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  onContextMenu,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
@@ -292,6 +294,12 @@ export function MouseVisualizationSvg({
   function handleDblClick(id: ControlId, e: React.MouseEvent) {
     e.preventDefault();
     onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
+  }
+
+  function handleRightClick(id: ControlId, e: React.MouseEvent) {
+    e.preventDefault();
+    const entry = entryMap.get(id);
+    onContextMenu?.(id, entry?.binding ?? null, entry?.action ?? null, e.clientX, e.clientY);
   }
 
   /* ── SVG: Mouse body outline ── */
@@ -373,6 +381,7 @@ export function MouseVisualizationSvg({
         style={{ cursor: "pointer" }}
         onClick={(e) => handleClick(id, e)}
         onDoubleClick={(e) => handleDblClick(id, e)}
+        onContextMenu={(e) => handleRightClick(id, e)}
         onMouseEnter={() => setHoveredId(id)}
         onMouseLeave={() => setHoveredId(null)}
       >
@@ -511,6 +520,7 @@ export function MouseVisualizationSvg({
               data-tooltip={tooltipText(entry)}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
+              onContextMenu={(e) => handleRightClick(controlId, e)}
               onMouseEnter={() => setHoveredId(controlId)}
               onMouseLeave={() => setHoveredId(null)}
             >

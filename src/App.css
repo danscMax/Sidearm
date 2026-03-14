@@ -1139,6 +1139,15 @@ select::checkmark {
   background: rgba(224, 85, 85, 0.12);
 }
 
+.context-menu__item--disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.context-menu__item--disabled:hover {
+  background: transparent;
+}
+
 .context-menu__sep {
   height: 1px;
   margin: 4px 0;
@@ -3405,10 +3414,9 @@ code {
 .profiles__app-card {
   position: relative;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 14px 16px;
-  padding-right: 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
   background: var(--c-card-bg);
   border: 1px solid var(--c-card-border);
   border-radius: var(--radius-md);
@@ -3416,7 +3424,7 @@ code {
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
   text-align: left;
   color: inherit;
-  min-height: 88px;
+  overflow: visible;
 }
 
 .profiles__app-card:hover {
@@ -3434,16 +3442,8 @@ code {
   opacity: 0.45;
 }
 
-.profiles__app-card-toggle {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-}
-
-.profiles__app-card-top {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.profiles__app-card > .profiles__toggle {
+  margin-left: auto;
 }
 
 /* Monogram span (text fallback) */
@@ -3477,39 +3477,10 @@ img.profiles__app-card-monogram {
   font-weight: 700;
   color: var(--c-text-bright);
   font-size: var(--fs-body-sm);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  word-break: break-all;
   min-width: 0;
 }
 
-.profiles__app-card-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.profiles__app-card-priority {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 7px;
-  border-radius: var(--radius-pill);
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--c-text-muted);
-}
-
-.profiles__app-card-filter {
-  font-size: var(--fs-micro);
-  color: var(--c-text-muted);
-  opacity: 0.7;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 120px;
-}
 
 .profiles__add-card {
   display: flex;
@@ -3534,6 +3505,7 @@ img.profiles__app-card-monogram {
 /* --- F. Rule modal --- */
 
 .rule-modal {
+  position: relative;
   background: var(--c-bg);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-modal);
@@ -3568,7 +3540,9 @@ img.profiles__app-card-monogram {
 }
 
 .rule-modal__close {
-  flex-shrink: 0;
+  position: absolute;
+  top: 12px;
+  right: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -3578,13 +3552,15 @@ img.profiles__app-card-monogram {
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--c-text-muted);
-  font-size: 1.25rem;
+  font-size: 1.1rem;
+  line-height: 1;
   cursor: pointer;
   transition: background 100ms ease, color 100ms ease;
+  z-index: 1;
 }
 
 .rule-modal__close:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   color: var(--c-text-bright);
 }
 
@@ -3594,29 +3570,19 @@ img.profiles__app-card-monogram {
   padding: 20px;
 }
 
-.rule-modal__capture-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: var(--radius-sm);
-  background: rgba(159, 202, 105, 0.06);
-  border: 1px solid rgba(159, 202, 105, 0.18);
-}
-
-.rule-modal__capture-info {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
 
 .rule-modal__inline-row {
   display: flex;
   align-items: center;
   gap: 16px;
   flex-wrap: wrap;
+}
+
+.rule-modal__inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
 }
 
 .rule-modal__footer {
@@ -3679,9 +3645,6 @@ img.profiles__app-card-monogram {
   font-weight: 600;
 }
 
-.profiles__field-no-margin {
-  margin: 0;
-}
 
 .profiles__empty-hint {
   text-align: center;

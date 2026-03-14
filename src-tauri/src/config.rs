@@ -517,6 +517,14 @@ pub enum MenuItem {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MouseActionPayload {
     pub action: String,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub win: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

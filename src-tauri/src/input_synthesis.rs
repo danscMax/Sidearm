@@ -1,4 +1,4 @@
-use crate::config::ShortcutActionPayload;
+use crate::config::{MouseActionPayload, ShortcutActionPayload};
 use crate::hotkeys::HotkeyModifiers;
 
 #[cfg(target_os = "windows")]
@@ -1226,6 +1226,161 @@ const fn vk_oem_7() -> u16 {
 #[cfg(not(target_os = "windows"))]
 const fn vk_oem_7() -> u16 {
     0xDE
+}
+
+// ---------------------------------------------------------------------------
+// Mouse action injection
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct MouseDispatchReport {
+    pub warnings: Vec<String>,
+}
+
+/// Send a mouse action (click, scroll, etc.) with optional keyboard modifiers.
+///
+/// Flow mirrors `send_shortcut`:
+/// 1. Clear encoding modifiers injected by the Razer driver.
+/// 2. Press desired modifiers (Ctrl, Shift, etc.).
+/// 3. Inject the mouse event via `SendInput`.
+/// 4. Release modifiers we pressed.
+pub fn send_mouse_action(
+    payload: &MouseActionPayload,
+    encoding_mods: &HotkeyModifiers,
+) -> Result<MouseDispatchReport, String> {
+    clear_modifiers(encoding_mods)?;
+
+    let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
+    let pressed_modifiers = if has_modifier {
+        let snapshot = current_modifier_snapshot()?;
+        let mods_to_press: Vec<ModifierKey> = [
+            (ModifierKey::Win, payload.win),
+            (ModifierKey::Ctrl, payload.ctrl),
+            (ModifierKey::Alt, payload.alt),
+            (ModifierKey::Shift, payload.shift),
+        ]
+        .iter()
+        .filter(|(_, desired)| *desired)
+        .filter(|(modifier, _)| !snapshot.is_active(*modifier))
+        .map(|(modifier, _)| *modifier)
+        .collect();
+
+        // Press modifiers down
+        let press_inputs: Vec<KeyboardInputSpec> = mods_to_press
+            .iter()
+            .map(|m| KeyboardInputSpec::VirtualKey {
+                code: m.virtual_key().code,
+                extended: m.virtual_key().extended,
+                key_up: false,
+            })
+            .collect();
+        if !press_inputs.is_empty() {
+            send_keyboard_inputs(&press_inputs)?;
+        }
+        mods_to_press
+    } else {
+        Vec::new()
+    };
+
+    // Inject the mouse event
+    let result = send_mouse_event(&payload.action);
+
+    // Release modifiers in reverse order (LIFO)
+    if !pressed_modifiers.is_empty() {
+        let release = build_modifier_release_inputs(&pressed_modifiers);
+        let _ = send_keyboard_inputs(&release);
+    }
+
+    result?;
+    Ok(MouseDispatchReport {
+        warnings: Vec::new(),
+    })
+}
+
+/// Wheel scroll amount — one notch (standard WHEEL_DELTA = 120).
+const WHEEL_DELTA: i32 = 120;
+
+#[cfg(target_os = "windows")]
+fn send_mouse_event(action: &str) -> Result<(), String> {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
+        MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
+        MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
+        MOUSEEVENTF_XUP, MOUSEINPUT,
+    };
+
+    let make_mouse = |flags: u32, mouse_data: i32| -> INPUT {
+        INPUT {
+            r#type: INPUT_MOUSE,
+            Anonymous: INPUT_0 {
+                mi: MOUSEINPUT {
+                    dx: 0,
+                    dy: 0,
+                    mouseData: mouse_data as u32,
+                    dwFlags: flags,
+                    time: 0,
+                    dwExtraInfo: INTERNAL_SENDINPUT_EXTRA_INFO,
+                },
+            },
+        }
+    };
+
+    let inputs: Vec<INPUT> = match action {
+        "leftClick" => vec![
+            make_mouse(MOUSEEVENTF_LEFTDOWN, 0),
+            make_mouse(MOUSEEVENTF_LEFTUP, 0),
+        ],
+        "rightClick" => vec![
+            make_mouse(MOUSEEVENTF_RIGHTDOWN, 0),
+            make_mouse(MOUSEEVENTF_RIGHTUP, 0),
+        ],
+        "middleClick" => vec![
+            make_mouse(MOUSEEVENTF_MIDDLEDOWN, 0),
+            make_mouse(MOUSEEVENTF_MIDDLEUP, 0),
+        ],
+        "doubleClick" => vec![
+            make_mouse(MOUSEEVENTF_LEFTDOWN, 0),
+            make_mouse(MOUSEEVENTF_LEFTUP, 0),
+            make_mouse(MOUSEEVENTF_LEFTDOWN, 0),
+            make_mouse(MOUSEEVENTF_LEFTUP, 0),
+        ],
+        "scrollUp" => vec![make_mouse(MOUSEEVENTF_WHEEL, WHEEL_DELTA)],
+        "scrollDown" => vec![make_mouse(MOUSEEVENTF_WHEEL, -WHEEL_DELTA)],
+        "scrollLeft" => vec![make_mouse(MOUSEEVENTF_HWHEEL, -WHEEL_DELTA)],
+        "scrollRight" => vec![make_mouse(MOUSEEVENTF_HWHEEL, WHEEL_DELTA)],
+        "mouseBack" => vec![
+            make_mouse(MOUSEEVENTF_XDOWN, 0x0001),
+            make_mouse(MOUSEEVENTF_XUP, 0x0001),
+        ],
+        "mouseForward" => vec![
+            make_mouse(MOUSEEVENTF_XDOWN, 0x0002),
+            make_mouse(MOUSEEVENTF_XUP, 0x0002),
+        ],
+        other => return Err(format!("Неизвестное действие мыши: `{other}`.")),
+    };
+
+    let sent = unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            size_of::<INPUT>() as i32,
+        )
+    };
+    if sent == inputs.len() as u32 {
+        Ok(())
+    } else {
+        let err = std::io::Error::last_os_error();
+        Err(format!(
+            "SendInput (mouse) injected {sent}/{} events: {err}",
+            inputs.len()
+        ))
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn send_mouse_event(_action: &str) -> Result<(), String> {
+    Err("Live mouse action injection is only implemented for Windows.".into())
 }
 
 #[cfg(test)]

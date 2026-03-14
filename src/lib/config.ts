@@ -196,6 +196,10 @@ export type MouseActionKind =
 
 export interface MouseActionPayload {
   action: MouseActionKind;
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  win?: boolean;
 }
 
 export type MediaKeyKind =

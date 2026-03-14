@@ -409,10 +409,22 @@ export function ActionPickerModal({
       ? existingAction.payload
       : { key: "", ctrl: false, shift: false, alt: false, win: false },
   );
-  const [mouseDraft, setMouseDraft] = useState<MouseActionKind>(() =>
+  const [mouseDraft, setMouseDraft] = useState<{
+    action: MouseActionKind;
+    ctrl: boolean;
+    shift: boolean;
+    alt: boolean;
+    win: boolean;
+  }>(() =>
     existingAction?.type === "mouseAction"
-      ? existingAction.payload.action
-      : "leftClick",
+      ? {
+          action: existingAction.payload.action,
+          ctrl: existingAction.payload.ctrl ?? false,
+          shift: existingAction.payload.shift ?? false,
+          alt: existingAction.payload.alt ?? false,
+          win: existingAction.payload.win ?? false,
+        }
+      : { action: "leftClick", ctrl: false, shift: false, alt: false, win: false },
   );
   const [textDraft, setTextDraft] = useState<{ text: string; pasteMode: PasteMode }>(() =>
     existingAction?.type === "textSnippet" && existingAction.payload.source === "inline"
@@ -500,7 +512,18 @@ export function ActionPickerModal({
         case "shortcut":
           return { id: actionId, type: "shortcut" as const, payload: shortcutDraft, pretty };
         case "mouseAction":
-          return { id: actionId, type: "mouseAction" as const, payload: { action: mouseDraft }, pretty };
+          return {
+            id: actionId,
+            type: "mouseAction" as const,
+            payload: {
+              action: mouseDraft.action,
+              ...(mouseDraft.ctrl && { ctrl: true }),
+              ...(mouseDraft.shift && { shift: true }),
+              ...(mouseDraft.alt && { alt: true }),
+              ...(mouseDraft.win && { win: true }),
+            },
+            pretty,
+          };
         case "textSnippet":
           return {
             id: actionId,
@@ -545,8 +568,16 @@ export function ActionPickerModal({
         ].filter(Boolean);
         return parts.length > 0 ? parts.join(" + ") : "Шорткат";
       }
-      case "mouseAction":
-        return MOUSE_ACTION_OPTIONS.find((o) => o.value === mouseDraft)?.label ?? "Мышь";
+      case "mouseAction": {
+        const mods = [
+          mouseDraft.ctrl ? "Ctrl" : null,
+          mouseDraft.shift ? "Shift" : null,
+          mouseDraft.alt ? "Alt" : null,
+          mouseDraft.win ? "Win" : null,
+        ].filter(Boolean);
+        const actionLabel = MOUSE_ACTION_OPTIONS.find((o) => o.value === mouseDraft.action)?.label ?? "Мышь";
+        return mods.length > 0 ? `${mods.join(" + ")} + ${actionLabel}` : actionLabel;
+      }
       case "textSnippet":
         return textDraft.text.slice(0, 30) || "Текст";
       case "sequence":
@@ -687,13 +718,28 @@ export function ActionPickerModal({
                     <button
                       key={opt.value}
                       type="button"
-                      className={`picker-grid__btn${mouseDraft === opt.value ? " picker-grid__btn--active" : ""}`}
-                      onClick={() => setMouseDraft(opt.value)}
+                      className={`picker-grid__btn${mouseDraft.action === opt.value ? " picker-grid__btn--active" : ""}`}
+                      onClick={() => setMouseDraft({ ...mouseDraft, action: opt.value })}
                     >
                       {opt.label}
                     </button>
                   ))}
                 </div>
+                <div className="modifier-row">
+                  {(["ctrl", "shift", "alt", "win"] as const).map((mod) => (
+                    <label key={mod} className="field field--inline">
+                      <Toggle
+                        checked={mouseDraft[mod]}
+                        onChange={(checked) => setMouseDraft({ ...mouseDraft, [mod]: checked })}
+                        ariaLabel={mod.charAt(0).toUpperCase() + mod.slice(1)}
+                      />
+                      <span className="field__label">{mod.charAt(0).toUpperCase() + mod.slice(1)}</span>
+                    </label>
+                  ))}
+                </div>
+                <p className="panel__muted">
+                  Модификаторы зажимаются на время действия. Например, Ctrl + Скролл вверх = зум.
+                </p>
               </div>
             ) : null}
 

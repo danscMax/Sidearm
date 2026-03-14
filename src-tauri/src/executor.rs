@@ -13,8 +13,8 @@ const MAX_STEP_DELAY_MS: u64 = 30_000;
 use crate::{
     clipboard,
     config::{
-        Action, ActionCondition, ActionPayload, ActionType, AppConfig, MenuItem, PasteMode,
-        SequenceStep, TextSnippetPayload,
+        Action, ActionCondition, ActionPayload, ActionType, AppConfig, MenuItem,
+        MouseActionPayload, PasteMode, SequenceStep, TextSnippetPayload,
     },
     input_synthesis,
     resolver::{ResolutionStatus, ResolvedInputPreview},
@@ -214,6 +214,9 @@ pub fn run_preview_action(
         (ActionType::Sequence, ActionPayload::Sequence(payload)) => {
             run_live_sequence_action(action, preview, payload, Some(action_id))
         }
+        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
+            run_live_mouse_action(action, preview, payload, Some(action_id))
+        }
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok(ActionExecutionEvent {
             encoded_key: preview.encoded_key.clone(),
             action_id: action.id.clone(),
@@ -235,7 +238,7 @@ pub fn run_preview_action(
         _ => Err(execution_error(
             "unsupported_live_execution",
             "выполнение",
-            "Выполнение вживую поддерживается для шорткатов, текстовых вставок, запуска программ, отключённых действий и последовательностей из поддерживаемых шагов.",
+            "Выполнение вживую поддерживается для шорткатов, действий мыши, текстовых вставок, запуска программ, отключённых действий и последовательностей из поддерживаемых шагов.",
             Some(preview.encoded_key.clone()),
             Some(action_id),
         )),
@@ -300,7 +303,7 @@ fn summarize_action(
         )),
         (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => Ok((
             ExecutionOutcome::Simulated,
-            format!("Симулирует действие мыши `{}`.", payload.action),
+            format_mouse_summary(payload),
             Vec::new(),
         )),
         (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => Ok((
@@ -565,6 +568,67 @@ fn run_live_shortcut_action(
         warnings: dispatch.warnings,
         executed_at: timestamp_millis(),
     })
+}
+
+fn run_live_mouse_action(
+    action: &Action,
+    preview: &ResolvedInputPreview,
+    payload: &MouseActionPayload,
+    action_id: Option<String>,
+) -> Result<ActionExecutionEvent, ExecutorError> {
+    let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
+    let dispatch =
+        input_synthesis::send_mouse_action(payload, &encoding_mods).map_err(|message| {
+            execution_error(
+                "execution_failed",
+                "выполнение",
+                &message,
+                Some(preview.encoded_key.clone()),
+                action_id.clone(),
+            )
+        })?;
+
+    Ok(ActionExecutionEvent {
+        encoded_key: preview.encoded_key.clone(),
+        action_id: action.id.clone(),
+        action_type: action.action_type.as_str().into(),
+        action_pretty: action.pretty.clone(),
+        resolved_profile_id: preview.resolved_profile_id.clone(),
+        resolved_profile_name: preview.resolved_profile_name.clone(),
+        matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+        control_id: preview.control_id.clone(),
+        layer: preview.layer.clone(),
+        binding_id: preview.binding_id.clone(),
+        mode: ExecutionMode::Live,
+        outcome: ExecutionOutcome::Injected,
+        process_id: None,
+        summary: format_mouse_summary(payload),
+        warnings: dispatch.warnings,
+        executed_at: timestamp_millis(),
+    })
+}
+
+fn format_mouse_summary(payload: &MouseActionPayload) -> String {
+    let modifiers: Vec<&str> = [
+        (payload.ctrl, "Ctrl"),
+        (payload.shift, "Shift"),
+        (payload.alt, "Alt"),
+        (payload.win, "Win"),
+    ]
+    .iter()
+    .filter(|(active, _)| *active)
+    .map(|(_, label)| *label)
+    .collect();
+
+    if modifiers.is_empty() {
+        format!("Выполнено действие мыши `{}`.", payload.action)
+    } else {
+        format!(
+            "Выполнено действие мыши `{}` + `{}`.",
+            modifiers.join(" + "),
+            payload.action
+        )
+    }
 }
 
 fn run_live_text_snippet_action(
@@ -856,6 +920,7 @@ fn paste_mode_name(paste_mode: PasteMode) -> &'static str {
 
 /// Evaluate whether all conditions on an action are satisfied.
 /// `exe` and `title` are the active window context at time of execution.
+#[allow(dead_code)]
 pub fn evaluate_conditions(conditions: &[ActionCondition], exe: &str, title: &str) -> bool {
     // Empty conditions = always pass
     if conditions.is_empty() {

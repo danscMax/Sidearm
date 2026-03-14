@@ -33,8 +33,16 @@ export function describeActionSummary(
   }
 
   if (action.type === "mouseAction") {
-    const label = MOUSE_ACTION_OPTIONS.find((o) => o.value === action.payload.action)?.label;
-    return `Мышь: ${label ?? action.payload.action}`;
+    const { payload } = action;
+    const mods = [
+      payload.ctrl ? "Ctrl" : null,
+      payload.shift ? "Shift" : null,
+      payload.alt ? "Alt" : null,
+      payload.win ? "Win" : null,
+    ].filter(Boolean);
+    const actionLabel = MOUSE_ACTION_OPTIONS.find((o) => o.value === payload.action)?.label ?? payload.action;
+    const prefix = mods.length > 0 ? `${mods.join(" + ")} + ` : "";
+    return `Мышь: ${prefix}${actionLabel}`;
   }
 
   if (action.type === "mediaKey") {

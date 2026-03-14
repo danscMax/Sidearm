@@ -932,6 +932,18 @@
       "properties": {
         "action": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "ctrl": {
+          "type": "boolean"
+        },
+        "shift": {
+          "type": "boolean"
+        },
+        "alt": {
+          "type": "boolean"
+        },
+        "win": {
+          "type": "boolean"
         }
       }
     },

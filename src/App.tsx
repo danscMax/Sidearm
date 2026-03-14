@@ -431,35 +431,39 @@ function App() {
                 selectedAction={selectedAction}
                 selectedEncoder={selectedEncoder}
                 snippetById={snippetById}
-                debugLog={debugLog}
-                resolutionKeyInput={resolutionKeyInput}
-                setResolutionKeyInput={setResolutionKeyInput}
-                lastResolutionPreview={lastResolutionPreview}
-                lastExecution={lastExecution}
-                lastRuntimeError={lastRuntimeError}
-                handlePreviewResolution={handlePreviewResolution}
-                handleExecutePreviewAction={handleExecutePreviewAction}
-                handleRunPreviewAction={handleRunPreviewAction}
                 selectedLayer={selectedLayer}
-                lastEncodedKey={lastEncodedKey}
                 updateDraft={updateDraft}
-                verificationSession={verificationSession}
-                verificationScope={verificationScope}
-                setVerificationScope={setVerificationScope}
-                lastVerificationExportPath={lastVerificationExportPath}
-                sessionSummary={sessionSummary}
-                currentVerificationStep={currentVerificationStep}
-                suggestedSessionResult={suggestedSessionResult}
-                hasVerificationResults={hasVerificationResults}
-                runtimeSummary={runtimeSummary}
-                handleStartVerificationSession={handleStartVerificationSession}
-                handleRestartVerificationStep={handleRestartVerificationStep}
-                handleVerificationResult={handleVerificationResult}
-                handleVerificationNotesChange={handleVerificationNotesChange}
-                handleNavigateVerificationStep={handleNavigateVerificationStep}
-                handleReopenVerificationStep={handleReopenVerificationStep}
-                handleResetVerificationSession={handleResetVerificationSession}
-                handleExportVerificationSession={handleExportVerificationSession}
+                runtime={{
+                  debugLog,
+                  resolutionKeyInput,
+                  setResolutionKeyInput,
+                  lastResolutionPreview,
+                  lastExecution,
+                  lastRuntimeError,
+                  lastEncodedKey,
+                  runtimeSummary,
+                  handlePreviewResolution,
+                  handleExecutePreviewAction,
+                  handleRunPreviewAction,
+                }}
+                verification={{
+                  session: verificationSession,
+                  scope: verificationScope,
+                  setScope: setVerificationScope,
+                  lastExportPath: lastVerificationExportPath,
+                  sessionSummary,
+                  currentStep: currentVerificationStep,
+                  suggestedResult: suggestedSessionResult,
+                  hasResults: hasVerificationResults,
+                  handleStart: handleStartVerificationSession,
+                  handleRestartStep: handleRestartVerificationStep,
+                  handleResult: handleVerificationResult,
+                  handleNotesChange: handleVerificationNotesChange,
+                  handleNavigateStep: handleNavigateVerificationStep,
+                  handleReopenStep: handleReopenVerificationStep,
+                  handleReset: handleResetVerificationSession,
+                  handleExport: handleExportVerificationSession,
+                }}
               />
             )}
           </section>

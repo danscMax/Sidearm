@@ -46,6 +46,39 @@ import { isActionLiveRunnable } from "../lib/action-helpers";
 import { ControlPropertiesPanel } from "./ControlPropertiesPanel";
 import { Fact } from "./shared";
 
+export interface DebugRuntimeProps {
+  debugLog: DebugLogEntry[];
+  resolutionKeyInput: string;
+  setResolutionKeyInput: (value: string) => void;
+  lastResolutionPreview: ResolvedInputPreview | null;
+  lastExecution: ActionExecutionEvent | null;
+  lastRuntimeError: RuntimeErrorEvent | null;
+  lastEncodedKey: EncodedKeyEvent | null;
+  runtimeSummary: RuntimeStateSummary;
+  handlePreviewResolution: () => Promise<void>;
+  handleExecutePreviewAction: () => Promise<void>;
+  handleRunPreviewAction: () => Promise<void>;
+}
+
+export interface DebugVerificationProps {
+  session: VerificationSession | null;
+  scope: VerificationSessionScope;
+  setScope: (scope: VerificationSessionScope) => void;
+  lastExportPath: string | null;
+  sessionSummary: VerificationSessionSummary;
+  currentStep: VerificationSessionStep | null;
+  suggestedResult: Exclude<VerificationStepResult, "pending"> | null;
+  hasResults: boolean;
+  handleStart: () => Promise<void>;
+  handleRestartStep: () => void;
+  handleResult: (result: Exclude<VerificationStepResult, "pending">) => void;
+  handleNotesChange: (notes: string) => void;
+  handleNavigateStep: (index: number) => void;
+  handleReopenStep: (index: number) => void;
+  handleReset: () => void;
+  handleExport: () => Promise<void>;
+}
+
 export interface DebugWorkspaceProps {
   activeConfig: AppConfig;
   profiles: Profile[];
@@ -54,36 +87,10 @@ export interface DebugWorkspaceProps {
   selectedAction: Action | null;
   selectedEncoder: EncoderMapping | null;
   snippetById: Map<string, SnippetLibraryItem>;
-  debugLog: DebugLogEntry[];
-  resolutionKeyInput: string;
-  setResolutionKeyInput: (value: string) => void;
-  lastResolutionPreview: ResolvedInputPreview | null;
-  lastExecution: ActionExecutionEvent | null;
-  lastRuntimeError: RuntimeErrorEvent | null;
-  handlePreviewResolution: () => Promise<void>;
-  handleExecutePreviewAction: () => Promise<void>;
-  handleRunPreviewAction: () => Promise<void>;
-  // Verification props
   selectedLayer: Layer;
-  lastEncodedKey: EncodedKeyEvent | null;
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
-  verificationSession: VerificationSession | null;
-  verificationScope: VerificationSessionScope;
-  setVerificationScope: (scope: VerificationSessionScope) => void;
-  lastVerificationExportPath: string | null;
-  sessionSummary: VerificationSessionSummary;
-  currentVerificationStep: VerificationSessionStep | null;
-  suggestedSessionResult: Exclude<VerificationStepResult, "pending"> | null;
-  hasVerificationResults: boolean;
-  runtimeSummary: RuntimeStateSummary;
-  handleStartVerificationSession: () => Promise<void>;
-  handleRestartVerificationStep: () => void;
-  handleVerificationResult: (result: Exclude<VerificationStepResult, "pending">) => void;
-  handleVerificationNotesChange: (notes: string) => void;
-  handleNavigateVerificationStep: (index: number) => void;
-  handleReopenVerificationStep: (index: number) => void;
-  handleResetVerificationSession: () => void;
-  handleExportVerificationSession: () => Promise<void>;
+  runtime: DebugRuntimeProps;
+  verification: DebugVerificationProps;
 }
 
 export function DebugWorkspace(props: DebugWorkspaceProps) {
@@ -95,36 +102,44 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
     selectedAction,
     selectedEncoder,
     snippetById,
+    selectedLayer,
+    updateDraft,
+    runtime,
+    verification,
+  } = props;
+
+  const {
     debugLog,
     resolutionKeyInput,
     setResolutionKeyInput,
     lastResolutionPreview,
     lastExecution,
     lastRuntimeError,
+    lastEncodedKey,
+    runtimeSummary,
     handlePreviewResolution,
     handleExecutePreviewAction,
     handleRunPreviewAction,
-    selectedLayer,
-    lastEncodedKey,
-    updateDraft,
-    verificationSession,
-    verificationScope,
-    setVerificationScope,
-    lastVerificationExportPath,
+  } = runtime;
+
+  const {
+    session: verificationSession,
+    scope: verificationScope,
+    setScope: setVerificationScope,
+    lastExportPath: lastVerificationExportPath,
     sessionSummary,
-    currentVerificationStep,
-    suggestedSessionResult,
-    hasVerificationResults,
-    runtimeSummary,
-    handleStartVerificationSession,
-    handleRestartVerificationStep,
-    handleVerificationResult,
-    handleVerificationNotesChange,
-    handleNavigateVerificationStep,
-    handleReopenVerificationStep,
-    handleResetVerificationSession,
-    handleExportVerificationSession,
-  } = props;
+    currentStep: currentVerificationStep,
+    suggestedResult: suggestedSessionResult,
+    hasResults: hasVerificationResults,
+    handleStart: handleStartVerificationSession,
+    handleRestartStep: handleRestartVerificationStep,
+    handleResult: handleVerificationResult,
+    handleNotesChange: handleVerificationNotesChange,
+    handleNavigateStep: handleNavigateVerificationStep,
+    handleReopenStep: handleReopenVerificationStep,
+    handleReset: handleResetVerificationSession,
+    handleExport: handleExportVerificationSession,
+  } = verification;
 
   const reversedLog = useMemo(() => [...debugLog].reverse(), [debugLog]);
 

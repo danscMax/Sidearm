@@ -146,6 +146,20 @@ function App() {
     }
   }, [activeConfig, selectedControlId]);
 
+  // Sync UI profile with runtime's resolved profile (auto-switch on window focus change)
+  useEffect(() => {
+    if (
+      lastCapture &&
+      !lastCapture.ignored &&
+      lastCapture.resolvedProfileId &&
+      lastCapture.resolvedProfileId !== selectedProfileId
+    ) {
+      startTransition(() => {
+        setSelectedProfileId(lastCapture.resolvedProfileId!);
+      });
+    }
+  }, [lastCapture]);
+
   // H1: Global keyboard shortcuts (useEffectEvent avoids re-registering on every render)
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
     // Don't intercept when typing in inputs

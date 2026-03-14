@@ -479,13 +479,24 @@ async fn preview_resolution(
     Ok(preview)
 }
 
-#[tauri::command]
-async fn execute_preview_action(
-    app: AppHandle,
-    runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
+/// Distinguishes dry-run preview from live execution for logging purposes.
+enum ActionRunMode {
+    DryRun,
+    Live,
+}
+
+/// Shared logic for execute_preview_action and run_preview_action.
+async fn resolve_and_execute_action(
+    app: &AppHandle,
+    runtime_store: &State<'_, Arc<Mutex<RuntimeStore>>>,
     encoded_key: String,
     exe: Option<String>,
     title: Option<String>,
+    executor_fn: fn(
+        &AppConfig,
+        &ResolvedInputPreview,
+    ) -> Result<ActionExecutionEvent, executor::ExecutorError>,
+    mode: ActionRunMode,
 ) -> Result<ActionExecutionEvent, CommandError> {
     let normalized_key = encoded_key.trim().to_owned();
     if normalized_key.is_empty() {
@@ -496,20 +507,18 @@ async fn execute_preview_action(
         ));
     }
 
-    let config_dir = resolve_config_dir(&app)?;
+    let config_dir = resolve_config_dir(app)?;
     let exe = exe.unwrap_or_default();
     let title = title.unwrap_or_default();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let load_response = load_or_initialize_config(&config_dir)?;
         let preview =
             resolver::resolve_input_preview(&load_response.config, &normalized_key, &exe, &title);
-        let execution = executor::execute_preview_action(&load_response.config, &preview);
+        let execution = executor_fn(&load_response.config, &preview);
         Ok::<_, ConfigStoreError>((preview, execution))
     })
     .await
-    .map_err(|error| {
-        CommandError::internal(format!("execute_preview_action task failed: {error}"))
-    })?
+    .map_err(|error| CommandError::internal(format!("action execution task failed: {error}")))?
     .map_err(CommandError::from)?;
 
     let (preview, execution) = result;
@@ -525,26 +534,33 @@ async fn execute_preview_action(
                 let mut store = runtime_store
                     .lock()
                     .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-                let message = format!(
-                    "Пробное выполнение `{}` для `{}`.",
-                    event.action_pretty, event.encoded_key
-                );
-                match event.outcome {
-                    executor::ExecutionOutcome::Spawned => {
-                        store.record_info("выполнение", message);
+                match mode {
+                    ActionRunMode::DryRun => {
+                        let message = format!(
+                            "Пробное выполнение `{}` для `{}`.",
+                            event.action_pretty, event.encoded_key
+                        );
+                        match event.outcome {
+                            executor::ExecutionOutcome::Noop => {
+                                store.record_warn("выполнение", message);
+                            }
+                            _ => {
+                                store.record_info("выполнение", message);
+                            }
+                        }
+                        for warning in &event.warnings {
+                            store.record_warn("выполнение", warning.clone());
+                        }
                     }
-                    executor::ExecutionOutcome::Injected => {
-                        store.record_info("выполнение", message);
+                    ActionRunMode::Live => {
+                        store.record_info(
+                            "выполнение",
+                            format!(
+                                "Выполнено вживую `{}` для `{}`.",
+                                event.action_pretty, event.encoded_key
+                            ),
+                        );
                     }
-                    executor::ExecutionOutcome::Simulated => {
-                        store.record_info("выполнение", message);
-                    }
-                    executor::ExecutionOutcome::Noop => {
-                        store.record_warn("выполнение", message);
-                    }
-                }
-                for warning in &event.warnings {
-                    store.record_warn("выполнение", warning.clone());
                 }
             }
 
@@ -555,7 +571,7 @@ async fn execute_preview_action(
             Ok(event)
         }
         Err(error) => {
-            emit_runtime_error(&app, &runtime_store, &error.event)?;
+            emit_runtime_error(app, runtime_store, &error.event)?;
             Err(CommandError::new(
                 error.code,
                 error.event.message.clone(),
@@ -574,6 +590,26 @@ async fn execute_preview_action(
 }
 
 #[tauri::command]
+async fn execute_preview_action(
+    app: AppHandle,
+    runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
+    encoded_key: String,
+    exe: Option<String>,
+    title: Option<String>,
+) -> Result<ActionExecutionEvent, CommandError> {
+    resolve_and_execute_action(
+        &app,
+        &runtime_store,
+        encoded_key,
+        exe,
+        title,
+        executor::execute_preview_action,
+        ActionRunMode::DryRun,
+    )
+    .await
+}
+
+#[tauri::command]
 async fn run_preview_action(
     app: AppHandle,
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
@@ -581,74 +617,16 @@ async fn run_preview_action(
     exe: Option<String>,
     title: Option<String>,
 ) -> Result<ActionExecutionEvent, CommandError> {
-    let normalized_key = encoded_key.trim().to_owned();
-    if normalized_key.is_empty() {
-        return Err(CommandError::new(
-            "invalid_request",
-            "encodedKey must not be empty.",
-            None,
-        ));
-    }
-
-    let config_dir = resolve_config_dir(&app)?;
-    let exe = exe.unwrap_or_default();
-    let title = title.unwrap_or_default();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let load_response = load_or_initialize_config(&config_dir)?;
-        let preview =
-            resolver::resolve_input_preview(&load_response.config, &normalized_key, &exe, &title);
-        let execution = executor::run_preview_action(&load_response.config, &preview);
-        Ok::<_, ConfigStoreError>((preview, execution))
-    })
+    resolve_and_execute_action(
+        &app,
+        &runtime_store,
+        encoded_key,
+        exe,
+        title,
+        executor::run_preview_action,
+        ActionRunMode::Live,
+    )
     .await
-    .map_err(|error| CommandError::internal(format!("run_preview_action task failed: {error}")))?
-    .map_err(CommandError::from)?;
-
-    let (preview, execution) = result;
-
-    app.emit(EVENT_CONTROL_RESOLVED, &preview)
-        .map_err(|error| {
-            CommandError::internal(format!("Failed to emit control_resolved event: {error}"))
-        })?;
-
-    match execution {
-        Ok(event) => {
-            {
-                let mut store = runtime_store
-                    .lock()
-                    .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-                store.record_info(
-                    "выполнение",
-                    format!(
-                        "Выполнено вживую `{}` для `{}`.",
-                        event.action_pretty, event.encoded_key
-                    ),
-                );
-            }
-
-            app.emit(EVENT_ACTION_EXECUTED, &event).map_err(|error| {
-                CommandError::internal(format!("Failed to emit action_executed event: {error}"))
-            })?;
-
-            Ok(event)
-        }
-        Err(error) => {
-            emit_runtime_error(&app, &runtime_store, &error.event)?;
-            Err(CommandError::new(
-                error.code,
-                error.event.message.clone(),
-                Some(
-                    [
-                        error.event.encoded_key.clone(),
-                        error.event.action_id.clone(),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect(),
-                ),
-            ))
-        }
-    }
 }
 
 fn emit_runtime_error(

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Result of evaluating the chord detector state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChordResult {

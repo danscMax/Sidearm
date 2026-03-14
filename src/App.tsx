@@ -486,6 +486,8 @@ function App() {
           bindingId={actionPickerBindingId}
           controlLabel={selectedControl?.defaultName}
           layerLabel={selectedLayer === "hypershift" ? "Hypershift" : "Стандартный"}
+          controlId={selectedControlId ?? undefined}
+          selectedLayer={selectedLayer}
           onSave={(nextConfig) => {
             updateDraft(() => nextConfig);
             startTransition(() => {

@@ -2017,6 +2017,35 @@ code {
   border-top: 1px solid var(--c-border);
 }
 
+.action-picker__signal {
+  padding: 12px 20px;
+  border-top: 1px solid var(--c-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-picker__signal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.action-picker__signal-hint {
+  font-size: 0.8rem;
+  color: var(--c-text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.action-picker__signal-hint code {
+  color: var(--c-accent);
+  font-family: var(--font-mono, monospace);
+}
+
 .capture-row {
   display: flex;
   gap: 8px;
@@ -2026,7 +2055,8 @@ code {
   flex: 1;
 }
 
-.field input.capture-active {
+.field input.capture-active,
+.action-picker__signal input.capture-active {
   border-color: var(--c-accent);
   box-shadow: 0 0 0 2px rgba(159, 202, 105, 0.3);
   animation: capture-pulse 1s ease-in-out infinite;

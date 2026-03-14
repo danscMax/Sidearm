@@ -3,6 +3,8 @@ import type {
   Action,
   ActionType,
   AppConfig,
+  ControlId,
+  Layer,
   MediaKeyKind,
   MouseActionKind,
   PasteMode,
@@ -21,7 +23,13 @@ import {
   createDefaultSequenceStep,
   setSequenceStepDelay,
 } from "../lib/action-helpers";
-import { upsertAction, upsertBinding } from "../lib/config-editing";
+import {
+  expectedEncodedKeyForControl,
+  upsertAction,
+  upsertBinding,
+  upsertEncoderMapping,
+} from "../lib/config-editing";
+import { Toggle } from "./shared";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -169,6 +177,8 @@ export function ActionPickerModal({
   bindingId,
   controlLabel,
   layerLabel,
+  controlId,
+  selectedLayer,
   onSave,
   onCancel,
 }: {
@@ -176,6 +186,8 @@ export function ActionPickerModal({
   bindingId: string | null;
   controlLabel?: string;
   layerLabel?: string;
+  controlId?: ControlId;
+  selectedLayer?: Layer;
   onSave: (config: AppConfig) => void;
   onCancel: () => void;
 }) {
@@ -232,6 +244,21 @@ export function ActionPickerModal({
     ? config.actions.find((a) => a.id === binding.actionRef) ?? null
     : null;
 
+  // Encoder signal state
+  const currentEncoderMapping = controlId && selectedLayer
+    ? config.encoderMappings.find(
+        (m) => m.controlId === controlId && m.layer === selectedLayer,
+      ) ?? null
+    : null;
+  const expectedSignal = controlId && selectedLayer
+    ? expectedEncodedKeyForControl(controlId, selectedLayer)
+    : null;
+
+  const [signalDraft, setSignalDraft] = useState<string | null>(
+    () => currentEncoderMapping?.encodedKey ?? null,
+  );
+  const [isCapturingSignal, setIsCapturingSignal] = useState(false);
+
   const [activeCategory, setActiveCategory] = useState(() => {
     if (existingAction) {
       return ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut";
@@ -261,11 +288,11 @@ export function ActionPickerModal({
 
   useEffect(() => {
     function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape" && !isCapturing) onCancel();
+      if (e.key === "Escape" && !isCapturing && !isCapturingSignal) onCancel();
     }
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
-  }, [onCancel, isCapturing]);
+  }, [onCancel, isCapturing, isCapturingSignal]);
 
   // Draft action state per category
   const [shortcutDraft, setShortcutDraft] = useState<ShortcutActionPayload>(() =>
@@ -327,6 +354,36 @@ export function ActionPickerModal({
     });
     setIsCapturing(false);
   }
+
+  function formatEncoderKey(event: KeyboardEvent): string {
+    const parts: string[] = [];
+    if (event.ctrlKey) parts.push("Ctrl");
+    if (event.altKey) parts.push("Alt");
+    if (event.shiftKey) parts.push("Shift");
+    const key = normalizeKeyName(event.key);
+    if (!["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+      parts.push(key);
+    }
+    return parts.join("+") || key;
+  }
+
+  useEffect(() => {
+    if (!isCapturingSignal) return;
+
+    function handleSignalCapture(e: KeyboardEvent) {
+      // Ignore bare modifier presses — wait for a "real" key
+      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const signal = formatEncoderKey(e);
+      setSignalDraft(signal);
+      setIsCapturingSignal(false);
+    }
+
+    window.addEventListener("keydown", handleSignalCapture, true);
+    return () => window.removeEventListener("keydown", handleSignalCapture, true);
+  }, [isCapturingSignal]);
 
   function buildAction(): Action {
     const category = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory) ?? ACTION_CATEGORIES[0];
@@ -417,6 +474,17 @@ export function ActionPickerModal({
       });
     }
 
+    // Save encoder mapping if signal was set/changed
+    if (controlId && selectedLayer && signalDraft && signalDraft !== currentEncoderMapping?.encodedKey) {
+      nextConfig = upsertEncoderMapping(nextConfig, {
+        controlId,
+        layer: selectedLayer,
+        encodedKey: signalDraft,
+        source: "detected",
+        verified: false,
+      });
+    }
+
     onSave(nextConfig);
   }
 
@@ -486,10 +554,10 @@ export function ActionPickerModal({
                 <div className="modifier-row">
                   {(["ctrl", "shift", "alt", "win"] as const).map((mod) => (
                     <label key={mod} className="field field--inline">
-                      <input
-                        type="checkbox"
+                      <Toggle
                         checked={shortcutDraft[mod]}
-                        onChange={(e) => setShortcutDraft({ ...shortcutDraft, [mod]: e.target.checked })}
+                        onChange={(checked) => setShortcutDraft({ ...shortcutDraft, [mod]: checked })}
+                        ariaLabel={mod.charAt(0).toUpperCase() + mod.slice(1)}
                       />
                       <span className="field__label">{mod.charAt(0).toUpperCase() + mod.slice(1)}</span>
                     </label>
@@ -637,6 +705,47 @@ export function ActionPickerModal({
             ) : null}
           </div>
         </div>
+
+        {controlId && selectedLayer ? (
+          <div className="action-picker__signal">
+            <div className="action-picker__signal-header">
+              <span className="field__label">Сигнал кнопки</span>
+              {expectedSignal ? (
+                <span className="action-picker__signal-hint">
+                  Рекомендуемый: <code>{expectedSignal}</code>
+                  {signalDraft !== expectedSignal ? (
+                    <button
+                      type="button"
+                      className="action-button action-button--small action-button--ghost"
+                      onClick={() => setSignalDraft(expectedSignal)}
+                    >
+                      Применить
+                    </button>
+                  ) : null}
+                </span>
+              ) : null}
+            </div>
+            <div className="capture-row">
+              <input
+                type="text"
+                readOnly
+                value={signalDraft ?? ""}
+                placeholder={isCapturingSignal ? "Нажмите кнопку на мыши..." : "Не задан"}
+                className={isCapturingSignal ? "capture-active" : ""}
+              />
+              <button
+                type="button"
+                className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
+                onClick={() => setIsCapturingSignal(!isCapturingSignal)}
+              >
+                {isCapturingSignal ? "Отмена" : "Записать"}
+              </button>
+            </div>
+            <p className="panel__muted">
+              Нажмите кнопку на мыши или клавиатуре, чтобы перехватить сигнал, назначенный в Synapse или другом ПО.
+            </p>
+          </div>
+        ) : null}
 
         <div className="action-picker__footer">
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>

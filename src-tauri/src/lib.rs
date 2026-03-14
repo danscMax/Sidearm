@@ -43,6 +43,35 @@ fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     })
 }
 
+/// Write arbitrary text to a user-chosen file path (for profile export).
+#[tauri::command]
+async fn write_text_file(path: String, contents: String) -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                CommandError::internal(format!("Failed to create directory: {e}"))
+            })?;
+        }
+        fs::write(&path, contents).map_err(|e| {
+            CommandError::internal(format!("Failed to write file: {e}"))
+        })
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("write_text_file task failed: {e}")))?
+}
+
+/// Read text from a user-chosen file path (for profile import).
+#[tauri::command]
+async fn read_text_file(path: String) -> Result<String, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        fs::read_to_string(&path).map_err(|e| {
+            CommandError::internal(format!("Failed to read file: {e}"))
+        })
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("read_text_file task failed: {e}")))?
+}
+
 #[tauri::command]
 async fn export_verification_session(
     app: AppHandle,
@@ -353,19 +382,19 @@ async fn capture_active_window(
             .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
         if result.ignored {
             store.record_warn(
-                "window-capture",
+                "захват окна",
                 result
                     .ignore_reason
                     .clone()
-                    .unwrap_or_else(|| "Ignored active window.".into()),
+                    .unwrap_or_else(|| "Окно игнорируется.".into()),
             );
         } else {
             store.record_info(
-                "window-capture",
+                "захват окна",
                 format!(
-                    "Captured `{}` and resolved profile `{}`.",
+                    "Захвачено `{}`, профиль `{}`.",
                     result.exe,
-                    result.resolved_profile_id.as_deref().unwrap_or("n/a")
+                    result.resolved_profile_id.as_deref().unwrap_or("н/д")
                 ),
             );
         }
@@ -417,25 +446,25 @@ async fn preview_resolution(
             .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
         match preview.status {
             resolver::ResolutionStatus::Resolved => store.record_info(
-                "resolver",
+                "разрешение",
                 format!(
-                    "Resolved `{}` to control `{}` for profile `{}`.",
+                    "Разрешено `{}` в кнопку `{}` для профиля `{}`.",
                     preview.encoded_key,
-                    preview.control_id.as_deref().unwrap_or("n/a"),
-                    preview.resolved_profile_id.as_deref().unwrap_or("n/a")
+                    preview.control_id.as_deref().unwrap_or("н/д"),
+                    preview.resolved_profile_id.as_deref().unwrap_or("н/д")
                 ),
             ),
             resolver::ResolutionStatus::Unresolved => store.record_warn(
-                "resolver",
+                "разрешение",
                 format!(
-                    "Unresolved preview for `{}`: {}",
+                    "Не разрешено `{}`: {}",
                     preview.encoded_key, preview.reason
                 ),
             ),
             resolver::ResolutionStatus::Ambiguous => store.record_warn(
-                "resolver",
+                "разрешение",
                 format!(
-                    "Ambiguous preview for `{}`: {}",
+                    "Неоднозначный результат `{}`: {}",
                     preview.encoded_key, preview.reason
                 ),
             ),
@@ -497,25 +526,25 @@ async fn execute_preview_action(
                     .lock()
                     .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
                 let message = format!(
-                    "Dry-run executed `{}` for `{}`.",
+                    "Пробное выполнение `{}` для `{}`.",
                     event.action_pretty, event.encoded_key
                 );
                 match event.outcome {
                     executor::ExecutionOutcome::Spawned => {
-                        store.record_info("execution", message);
+                        store.record_info("выполнение", message);
                     }
                     executor::ExecutionOutcome::Injected => {
-                        store.record_info("execution", message);
+                        store.record_info("выполнение", message);
                     }
                     executor::ExecutionOutcome::Simulated => {
-                        store.record_info("execution", message);
+                        store.record_info("выполнение", message);
                     }
                     executor::ExecutionOutcome::Noop => {
-                        store.record_warn("execution", message);
+                        store.record_warn("выполнение", message);
                     }
                 }
                 for warning in &event.warnings {
-                    store.record_warn("execution", warning.clone());
+                    store.record_warn("выполнение", warning.clone());
                 }
             }
 
@@ -589,9 +618,9 @@ async fn run_preview_action(
                     .lock()
                     .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
                 store.record_info(
-                    "execution",
+                    "выполнение",
                     format!(
-                        "Live execution launched `{}` for `{}`.",
+                        "Выполнено вживую `{}` для `{}`.",
                         event.action_pretty, event.encoded_key
                     ),
                 );
@@ -786,6 +815,26 @@ pub fn run() {
 
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let app = window.app_handle();
+                let should_minimize = app
+                    .path()
+                    .app_config_dir()
+                    .ok()
+                    .and_then(|dir| fs::read_to_string(dir.join("config.json")).ok())
+                    .and_then(|json| {
+                        serde_json::from_str::<serde_json::Value>(&json).ok()
+                    })
+                    .and_then(|v| v["settings"]["minimizeToTray"].as_bool())
+                    .unwrap_or(false);
+
+                if should_minimize {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .manage(Arc::new(Mutex::new(RuntimeStore::default())))
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .invoke_handler(tauri::generate_handler![
@@ -801,7 +850,9 @@ pub fn run() {
             preview_resolution,
             execute_preview_action,
             run_preview_action,
-            get_exe_icon
+            get_exe_icon,
+            write_text_file,
+            read_text_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -299,20 +299,6 @@ export function ActionInspector({
             </select>
           </label>
 
-          <label className="field">
-            <span className="field__label">Заметки</span>
-            <textarea
-              rows={3}
-              value={selectedAction.notes ?? ""}
-              onChange={(event) => {
-                updateSelectedActionDraft((action) => ({
-                  ...action,
-                  notes: event.target.value || undefined,
-                }));
-              }}
-            />
-          </label>
-
           {selectedAction.type === "shortcut" ? (
             <>
               <label className="field">

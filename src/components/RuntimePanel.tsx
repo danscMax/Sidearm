@@ -85,10 +85,11 @@ export function RuntimePanel({
 
       <div className="fact-grid">
         <Fact label="Состояние" value={labelForRuntimeStatus(runtimeSummary.status)} />
-        <Fact label="Бэкенд" value={runtimeSummary.captureBackend} />
+        <Fact label="Бэкенд" value={runtimeSummary.captureBackend} mono />
         <Fact
           label="Версия конфигурации"
           value={String(runtimeSummary.activeConfigVersion ?? "н/д")}
+          mono
         />
         <Fact
           label="Предупреждений"

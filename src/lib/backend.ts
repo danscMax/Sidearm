@@ -108,6 +108,14 @@ export async function getExeIcon(exeName: string): Promise<string | null> {
   return invoke<string | null>("get_exe_icon", { exeName });
 }
 
+export async function writeTextFile(path: string, contents: string): Promise<void> {
+  return invoke<void>("write_text_file", { path, contents });
+}
+
+export async function readTextFile(path: string): Promise<string> {
+  return invoke<string>("read_text_file", { path });
+}
+
 export async function exportVerificationSession(
   filename: string,
   contents: string,

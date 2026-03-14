@@ -848,6 +848,85 @@ function nextUniqueId(existingIds: string[] | Set<string>, baseId: string): stri
   return `${baseId}-${index}`;
 }
 
+/** Extract a single profile and all its related data for export. */
+export function extractProfileForExport(
+  config: AppConfig,
+  profileId: string,
+): {
+  profile: Profile;
+  appMappings: AppMapping[];
+  bindings: Binding[];
+  actions: Action[];
+  encoderMappings: EncoderMapping[];
+} | null {
+  const profile = config.profiles.find((p) => p.id === profileId);
+  if (!profile) return null;
+
+  const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
+  const bindings = config.bindings.filter((b) => b.profileId === profileId);
+  const actionRefs = new Set(bindings.map((b) => b.actionRef));
+  const actions = config.actions.filter((a) => actionRefs.has(a.id));
+  const encoderMappings = config.encoderMappings.filter(
+    (e) => bindings.some((b) => b.controlId === e.controlId && b.layer === e.layer),
+  );
+
+  return { profile, appMappings, bindings, actions, encoderMappings };
+}
+
+/** Import a profile from exported data, assigning new IDs to avoid conflicts. */
+export function importProfile(
+  config: AppConfig,
+  data: {
+    profile: Profile;
+    appMappings: AppMapping[];
+    bindings: Binding[];
+    actions: Action[];
+    encoderMappings: EncoderMapping[];
+  },
+): AppConfig {
+  const existingIds = config.profiles.map((p) => p.id);
+  const newId = nextUniqueId(existingIds, makeProfileId(data.profile.name));
+  const newName = existingIds.includes(data.profile.id)
+    ? `${data.profile.name} (импорт)`
+    : data.profile.name;
+
+  const actionIdMap = new Map<string, string>();
+  const newActions: Action[] = data.actions.map((a) => {
+    const id = crypto.randomUUID();
+    actionIdMap.set(a.id, id);
+    return { ...structuredClone(a), id };
+  });
+
+  const newBindings: Binding[] = data.bindings.map((b) => ({
+    ...b,
+    id: crypto.randomUUID(),
+    profileId: newId,
+    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+  }));
+
+  const newAppMappings: AppMapping[] = data.appMappings.map((m) => ({
+    ...m,
+    id: crypto.randomUUID(),
+    profileId: newId,
+  }));
+
+  return {
+    ...config,
+    profiles: [...config.profiles, { ...data.profile, id: newId, name: newName }],
+    appMappings: [...config.appMappings, ...newAppMappings],
+    bindings: [...config.bindings, ...newBindings],
+    actions: [...config.actions, ...newActions],
+    encoderMappings: [
+      ...config.encoderMappings,
+      ...data.encoderMappings.filter(
+        (e) => !config.encoderMappings.some(
+          (existing) => existing.controlId === e.controlId && existing.layer === e.layer,
+        ),
+      ),
+    ],
+  };
+}
+
 function thumbGridIndex(controlId: ControlId): number | null {
   const match = /^thumb_(\d{2})$/.exec(controlId);
   if (!match) {

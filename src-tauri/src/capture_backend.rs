@@ -401,13 +401,6 @@ thread_local! {
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
         std::cell::RefCell::new(Vec::new());
     static HELPER_THREAD_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
-    /// Deferred mask-key flag — set by the hook callback, consumed by the
-    /// message pump.  We MUST NOT call SendInput inside the LL hook callback
-    /// because each injected event re-enters the full hook chain (Synapse,
-    /// PowerToys, etc.), which can push the callback beyond Windows'
-    /// LowLevelHooksTimeout (~200-300 ms), causing Windows to silently
-    /// remove our hook.
-    static HELPER_PENDING_MASK: std::cell::Cell<bool> = std::cell::Cell::new(false);
     /// Set to `true` by the hook callback when it receives a probe event
     /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
     static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = std::cell::Cell::new(false);
@@ -591,12 +584,13 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             })
         });
 
-        // Defer mask-key injection to the message pump — calling SendInput
-        // inside the LL hook callback adds re-entrant hook-chain traversals
-        // that can exceed the LowLevelHooksTimeout, causing Windows to
-        // silently remove our hook.
+        // AHK-style "Menu Mask Key": inject VK 0xE8 (down+up) to prevent
+        // Windows from interpreting bare Alt-up or Win-up as menu / Start
+        // activation.  The injected events carry INTERNAL_SENDINPUT_EXTRA_INFO
+        // so our own hook passes them straight through — the 2 re-entrant
+        // hook calls cost microseconds, well within LowLevelHooksTimeout.
         if inject_mask {
-            HELPER_PENDING_MASK.with(|cell| cell.set(true));
+            inject_mask_key();
         }
 
         // Post a wake-up message so GetMessageW returns and drain_helper_matches
@@ -842,16 +836,6 @@ pub fn capture_helper_main() {
 
             // Drain matches buffered by the hook callback.
             drain_helper_matches(&mut stdout);
-
-            // Inject the mask key OUTSIDE the hook callback — safe from timeout.
-            // The mask key must arrive before the modifier key-up (which only
-            // happens when the user releases the physical button, typically
-            // 50-2000 ms after the key-down), so the slight delay from the
-            // message pump is perfectly fine.
-            let need_mask = HELPER_PENDING_MASK.with(|cell| cell.replace(false));
-            if need_mask {
-                unsafe { inject_mask_key(); }
-            }
 
             unsafe {
                 TranslateMessage(&m);
@@ -1132,9 +1116,9 @@ fn process_encoded_key_event(
     let mut log_entries: Vec<(&str, String, bool)> = Vec::new(); // (source, message, is_warn)
 
     log_entries.push((
-        "capture",
+        "перехват",
         format!(
-            "Received encoded key `{}` from runtime backend.",
+            "Получен сигнал `{}` от бэкенда перехвата.",
             event.encoded_key
         ),
         false,
@@ -1148,23 +1132,23 @@ fn process_encoded_key_event(
             match crate::input_synthesis::send_shortcut_hold_up(&held) {
                 Ok(()) => {
                     log_entries.push((
-                        "execution",
-                        format!("Released held shortcut for `{}`.", event.encoded_key),
+                        "выполнение",
+                        format!("Отпущен удерживаемый шорткат для `{}`.", event.encoded_key),
                         false,
                     ));
                 }
                 Err(e) => {
                     log_entries.push((
-                        "execution",
-                        format!("Failed to release held shortcut for `{}`: {e}", event.encoded_key),
+                        "выполнение",
+                        format!("Не удалось отпустить шорткат для `{}`: {e}", event.encoded_key),
                         true,
                     ));
                 }
             }
         } else {
             log_entries.push((
-                "capture",
-                format!("Received key-up for `{}` with no active hold.", event.encoded_key),
+                "перехват",
+                format!("Отпускание `{}` без активного удержания.", event.encoded_key),
                 false,
             ));
         }
@@ -1177,7 +1161,7 @@ fn process_encoded_key_event(
             Ok(result) => result,
             Err(message) => {
                 let error = RuntimeErrorEvent {
-                    category: "window-capture".into(),
+                    category: "захват окна".into(),
                     message,
                     encoded_key: Some(event.encoded_key.clone()),
                     action_id: None,
@@ -1191,11 +1175,11 @@ fn process_encoded_key_event(
     let _ = app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
     if capture_result.ignored {
         log_entries.push((
-            "capture",
+            "перехват",
             capture_result
                 .ignore_reason
                 .clone()
-                .unwrap_or_else(|| "Ignored studio-owned foreground window.".into()),
+                .unwrap_or_else(|| "Окно студии на переднем плане — игнорируется.".into()),
             true,
         ));
         flush_log_entries(runtime_store, log_entries);
@@ -1212,21 +1196,21 @@ fn process_encoded_key_event(
     match preview.status {
         resolver::ResolutionStatus::Resolved => {
             log_entries.push((
-                "resolver",
+                "разрешение",
                 format!(
-                    "Resolved runtime input `{}` to `{}` / `{}`.",
+                    "Сигнал `{}` разрешён в `{}` / `{}`.",
                     preview.encoded_key,
-                    preview.control_id.as_deref().unwrap_or("n/a"),
-                    preview.layer.as_deref().unwrap_or("n/a")
+                    preview.control_id.as_deref().unwrap_or("н/д"),
+                    preview.layer.as_deref().unwrap_or("н/д")
                 ),
                 false,
             ));
         }
         resolver::ResolutionStatus::Unresolved | resolver::ResolutionStatus::Ambiguous => {
             log_entries.push((
-                "resolver",
+                "разрешение",
                 format!(
-                    "Runtime preview for `{}` did not resolve cleanly: {}",
+                    "Сигнал `{}` не удалось разрешить: {}",
                     preview.encoded_key, preview.reason
                 ),
                 true,
@@ -1273,9 +1257,9 @@ fn process_encoded_key_event(
             match crate::input_synthesis::send_shortcut_hold_down(payload, &encoding_mods) {
                 Ok(held) => {
                     log_entries.push((
-                        "execution",
+                        "выполнение",
                         format!(
-                            "Holding shortcut `{}` for `{}`.",
+                            "Удержание шортката `{}` для `{}`.",
                             preview.action_pretty.as_deref().unwrap_or("?"),
                             preview.encoded_key
                         ),
@@ -1300,7 +1284,7 @@ fn process_encoded_key_event(
                             outcome: executor::ExecutionOutcome::Injected,
                             process_id: None,
                             summary: format!(
-                                "Holding shortcut `{}`.",
+                                "Удержание шортката `{}`.",
                                 preview.action_pretty.as_deref().unwrap_or("?")
                             ),
                             warnings: Vec::new(),
@@ -1310,7 +1294,7 @@ fn process_encoded_key_event(
                 }
                 Err(e) => {
                     let error_event = executor::RuntimeErrorEvent {
-                        category: "execution".into(),
+                        category: "выполнение".into(),
                         message: e,
                         encoded_key: Some(event.encoded_key.clone()),
                         action_id: preview.action_id.clone(),
@@ -1323,8 +1307,8 @@ fn process_encoded_key_event(
         } else {
             // Hold requested but action is not a shortcut — fall back to press
             log_entries.push((
-                "execution",
-                "Hold requested but action is not a shortcut; falling back to press.".into(),
+                "выполнение",
+                "Запрошено удержание, но действие не шорткат; переключение на нажатие.".into(),
                 true,
             ));
             run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries);
@@ -1345,15 +1329,15 @@ fn run_fire_and_forget(
     match executor::run_preview_action(config, preview) {
         Ok(execution) => {
             log_entries.push((
-                "execution",
+                "выполнение",
                 format!(
-                    "Runtime executed `{}` for `{}`.",
+                    "Выполнено `{}` для `{}`.",
                     execution.action_pretty, execution.encoded_key
                 ),
                 false,
             ));
             for warning in &execution.warnings {
-                log_entries.push(("execution", warning.clone(), true));
+                log_entries.push(("выполнение", warning.clone(), true));
             }
             flush_log_entries(runtime_store, log_entries);
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);

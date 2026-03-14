@@ -104,14 +104,14 @@ impl RuntimeStore {
 
         self.push_log(
             DebugLogLevel::Info,
-            "runtime",
-            format!("Runtime started with config version {config_version}."),
+            "рантайм",
+            format!("Перехват запущен, версия конфигурации {config_version}."),
         );
         if warning_count > 0 {
             self.push_log(
                 DebugLogLevel::Warn,
-                "runtime",
-                format!("Runtime started with {warning_count} validation warning(s)."),
+                "рантайм",
+                format!("При запуске обнаружено предупреждений: {warning_count}."),
             );
         }
 
@@ -120,7 +120,7 @@ impl RuntimeStore {
 
     pub fn stop(&mut self) -> RuntimeStateSummary {
         self.status = RuntimeStatus::Idle;
-        self.push_log(DebugLogLevel::Info, "runtime", "Runtime stopped.");
+        self.push_log(DebugLogLevel::Info, "рантайм", "Перехват остановлен.");
         self.summary()
     }
 
@@ -136,14 +136,14 @@ impl RuntimeStore {
 
         self.push_log(
             DebugLogLevel::Info,
-            "runtime",
-            format!("Runtime reloaded config version {config_version}."),
+            "рантайм",
+            format!("Конфигурация перезагружена, версия {config_version}."),
         );
         if warning_count > 0 {
             self.push_log(
                 DebugLogLevel::Warn,
-                "runtime",
-                format!("Reloaded config carries {warning_count} validation warning(s)."),
+                "рантайм",
+                format!("После перезагрузки обнаружено предупреждений: {warning_count}."),
             );
         }
 

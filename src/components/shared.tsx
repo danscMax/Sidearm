@@ -17,12 +17,47 @@ export function PanelGroup({
   );
 }
 
-export function Fact({ label, value }: { label: string; value: string }) {
+export function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="fact">
+    <div className={`fact${mono ? " fact--mono" : ""}`}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+export function Toggle({
+  checked,
+  onChange,
+  ariaLabel,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  ariaLabel?: string;
+}) {
+  return (
+    <label className="toggle-switch">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-label={ariaLabel}
+      />
+      <span className="toggle-switch__track">
+        <span className="toggle-switch__knob">
+          <svg className="toggle-switch__icon" viewBox="0 0 12 12" aria-hidden="true">
+            {checked ? (
+              <polyline points="2.5 6 5 8.5 9.5 3.5" />
+            ) : (
+              <>
+                <line x1="3" y1="3" x2="9" y2="9" />
+                <line x1="9" y1="3" x2="3" y2="9" />
+              </>
+            )}
+          </svg>
+        </span>
+      </span>
+    </label>
   );
 }
 

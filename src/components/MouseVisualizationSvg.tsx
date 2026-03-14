@@ -12,7 +12,6 @@ interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
-  profileTabs?: React.ReactNode;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -276,7 +275,6 @@ export function MouseVisualizationSvg({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
-  profileTabs,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
@@ -525,52 +523,38 @@ export function MouseVisualizationSvg({
     );
   }
 
-  /* ── Layer toggle ── */
+  /* ── Shared toggle data ── */
 
-  const layerToggle = (
-    <div className="layer-toggle">
-      {layerCopy.map((layer) => (
-        <button
-          key={layer.value}
-          type="button"
-          className={`layer-toggle__btn layer-toggle__btn--${layer.value}${selectedLayer === layer.value ? " layer-toggle__btn--active" : ""}`}
-          onClick={() => onSelectLayer(layer.value)}
-        >
-          {layer.label}
-        </button>
-      ))}
-    </div>
-  );
+  const layerIdx = layerCopy.findIndex((l) => l.value === selectedLayer);
+  const viewTabs: { key: typeof activeTab; label: string }[] = [
+    { key: "combined", label: "Все кнопки" },
+    { key: "top", label: "Верхняя панель" },
+    { key: "side", label: "Боковая клавиатура" },
+  ];
+  const viewIdx = viewTabs.findIndex((t) => t.key === activeTab);
 
   /* ── Render ── */
 
   return (
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
-        {profileTabs}
-        {layerToggle}
-        <div className="view-tabs">
-          <button
-            type="button"
-            className={`mouse-visual-tabs__btn${activeTab === "combined" ? " mouse-visual-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab("combined")}
-          >
-            Все кнопки
-          </button>
-          <button
-            type="button"
-            className={`mouse-visual-tabs__btn${activeTab === "top" ? " mouse-visual-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab("top")}
-          >
-            Верхняя панель
-          </button>
-          <button
-            type="button"
-            className={`mouse-visual-tabs__btn${activeTab === "side" ? " mouse-visual-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab("side")}
-          >
-            Боковая клавиатура
-          </button>
+        <div className="pill-track" style={{ "--pill-count": viewTabs.length } as React.CSSProperties}>
+          {viewIdx >= 0 ? (
+            <div
+              className="pill-track__indicator"
+              style={{ transform: `translateX(${viewIdx * 100}%)` }}
+            />
+          ) : null}
+          {viewTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={`pill-track__pill${tab.key === activeTab ? " pill-track__pill--active" : ""}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -602,6 +586,27 @@ export function MouseVisualizationSvg({
             {renderLabelColumn(COMBINED_RIGHT_BUTTONS, "right")}
           </div>
         )}
+      </div>
+
+      <div className="mouse-visual-tabs__footer">
+        <div className="pill-track pill-track--layer" style={{ "--pill-count": layerCopy.length } as React.CSSProperties}>
+          {layerIdx >= 0 ? (
+            <div
+              className={`pill-track__indicator pill-track__indicator--${selectedLayer}`}
+              style={{ transform: `translateX(${layerIdx * 100}%)` }}
+            />
+          ) : null}
+          {layerCopy.map((layer) => (
+            <button
+              key={layer.value}
+              type="button"
+              className={`pill-track__pill${layer.value === selectedLayer ? " pill-track__pill--active" : ""}`}
+              onClick={() => onSelectLayer(layer.value)}
+            >
+              {layer.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

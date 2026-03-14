@@ -18,6 +18,7 @@ import type {
 } from "../lib/runtime";
 import type { ViewState } from "../lib/constants";
 import {
+  controlName,
   formatTimestamp,
   isActionLiveRunnable,
   labelForExecutionMode,
@@ -122,8 +123,8 @@ export function ServiceToolsPanel({
 
           {lastCapture ? (
             <div className="fact-grid">
-              <Fact label="Исполняемый файл" value={lastCapture.exe} />
-              <Fact label="HWND" value={lastCapture.hwnd} />
+              <Fact label="Исполняемый файл" value={lastCapture.exe} mono />
+              <Fact label="HWND" value={lastCapture.hwnd} mono />
               <Fact
                 label="Выбранный профиль"
                 value={lastCapture.resolvedProfileId ?? "н/д"}
@@ -188,19 +189,19 @@ export function ServiceToolsPanel({
 
           <button
             type="button"
-            className="action-button action-button--secondary"
+            className="action-button action-button--warning"
             onClick={() => {
               void handleRunPreviewAction();
             }}
             disabled={!canRunLiveAction}
           >
-            Выполнить вживую
+            ⚠ Выполнить вживую
           </button>
 
           {lastEncodedKey ? (
             <div className="fact-grid">
-              <Fact label="Сигнал" value={lastEncodedKey.encodedKey} />
-              <Fact label="Бэкенд" value={lastEncodedKey.backend} />
+              <Fact label="Сигнал" value={lastEncodedKey.encodedKey} mono />
+              <Fact label="Бэкенд" value={lastEncodedKey.backend} mono />
               <Fact label="Получен" value={formatTimestamp(lastEncodedKey.receivedAt)} />
             </div>
           ) : null}
@@ -210,23 +211,35 @@ export function ServiceToolsPanel({
               <Fact label="Статус" value={labelForPreviewStatus(lastResolutionPreview.status)} />
               <Fact
                 label="Профиль"
-                value={lastResolutionPreview.resolvedProfileId ?? "н/д"}
+                value={
+                  lastResolutionPreview.resolvedProfileId
+                    ? (profiles.find((p) => p.id === lastResolutionPreview.resolvedProfileId)?.name ??
+                        lastResolutionPreview.resolvedProfileId)
+                    : "н/д"
+                }
               />
               <Fact
                 label="Кнопка"
-                value={lastResolutionPreview.controlId ?? "н/д"}
+                value={
+                  lastResolutionPreview.controlId
+                    ? controlName(activeConfig.physicalControls, lastResolutionPreview.controlId)
+                    : "н/д"
+                }
               />
               <Fact
                 label="Слой"
                 value={lastResolutionPreview.layer ?? "н/д"}
+                mono
               />
               <Fact
                 label="Назначение"
                 value={lastResolutionPreview.bindingId ?? "н/д"}
+                mono
               />
               <Fact
                 label="Действие"
                 value={lastResolutionPreview.actionId ?? "н/д"}
+                mono
               />
             </div>
           ) : (

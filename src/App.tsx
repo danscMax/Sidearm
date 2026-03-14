@@ -13,9 +13,8 @@ import "./App.css";
 import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmModal } from "./components/ConfirmModal";
-import { ExpertWorkspace } from "./components/ExpertWorkspace";
+import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
-import { VerificationWorkspace } from "./components/VerificationWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
 import { Toolbar } from "./components/Toolbar";
@@ -56,11 +55,10 @@ function App() {
   const {
     viewState,
     workingConfig,
-    lastSave,
     error, setError,
     undoStack,
     redoStack,
-    activeConfig, activeWarnings, activePath,
+    activeConfig,
     refreshConfig, updateDraft, handleUndo, handleRedo,
   } = persistence;
 
@@ -86,7 +84,7 @@ function App() {
     lastCapture, lastEncodedKey,
     resolutionKeyInput, setResolutionKeyInput,
     lastResolutionPreview, lastExecution, lastRuntimeError,
-    handleStartRuntime, handleReloadRuntime, handleStopRuntime, handleRehookCapture,
+    handleStartRuntime, handleReloadRuntime, handleStopRuntime,
     handleCaptureActiveWindow, handlePreviewResolution,
     handleExecutePreviewAction, handleRunPreviewAction,
   } = runtime;
@@ -353,9 +351,11 @@ function App() {
   );
 
   const isProfilesMode = workspaceMode === "profiles";
-  const isVerificationMode = workspaceMode === "verification";
   const activeModeCopy = workspaceModeCopy.find((mode) => mode.value === workspaceMode)!;
-  const workspaceClass = "workspace workspace--1col";
+  const isDebugMode = workspaceMode === "debug";
+  const workspaceClass = isDebugMode
+    ? "workspace workspace--expert"
+    : "workspace workspace--1col";
 
   return (
     <main className="shell">
@@ -374,6 +374,9 @@ function App() {
         }}
         runtimeStatus={runtimeSummary.status}
         viewState={viewState}
+        updateDraft={updateDraft}
+        setSelectedProfileId={setSelectedProfileId}
+        setConfirmModal={setConfirmModal}
       />
 
       <div className="content">
@@ -419,20 +422,27 @@ function App() {
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
               />
-            ) : isVerificationMode ? (
-              <VerificationWorkspace
-                effectiveProfileId={effectiveProfileId}
-                selectedLayer={selectedLayer}
+            ) : (
+              <DebugWorkspace
+                activeConfig={activeConfig}
+                profiles={profiles}
                 selectedControl={selectedControl}
                 selectedBinding={selectedBinding}
                 selectedAction={selectedAction}
                 selectedEncoder={selectedEncoder}
-                multiSelectedControlIds={multiSelectedControlIds}
-                familySections={familySections}
                 snippetById={snippetById}
-                onSelectLayer={(layer) => setSelectedLayer(layer)}
-                setSelectedControlId={setSelectedControlId}
-                setMultiSelectedControlIds={setMultiSelectedControlIds}
+                debugLog={debugLog}
+                resolutionKeyInput={resolutionKeyInput}
+                setResolutionKeyInput={setResolutionKeyInput}
+                lastResolutionPreview={lastResolutionPreview}
+                lastExecution={lastExecution}
+                lastRuntimeError={lastRuntimeError}
+                handlePreviewResolution={handlePreviewResolution}
+                handleExecutePreviewAction={handleExecutePreviewAction}
+                handleRunPreviewAction={handleRunPreviewAction}
+                selectedLayer={selectedLayer}
+                lastEncodedKey={lastEncodedKey}
+                updateDraft={updateDraft}
                 verificationSession={verificationSession}
                 verificationScope={verificationScope}
                 setVerificationScope={setVerificationScope}
@@ -441,6 +451,7 @@ function App() {
                 currentVerificationStep={currentVerificationStep}
                 suggestedSessionResult={suggestedSessionResult}
                 hasVerificationResults={hasVerificationResults}
+                runtimeSummary={runtimeSummary}
                 handleStartVerificationSession={handleStartVerificationSession}
                 handleRestartVerificationStep={handleRestartVerificationStep}
                 handleVerificationResult={handleVerificationResult}
@@ -449,52 +460,6 @@ function App() {
                 handleReopenVerificationStep={handleReopenVerificationStep}
                 handleResetVerificationSession={handleResetVerificationSession}
                 handleExportVerificationSession={handleExportVerificationSession}
-                runtimeSummary={runtimeSummary}
-                viewState={viewState}
-                handleStartRuntime={handleStartRuntime}
-                handleReloadRuntime={handleReloadRuntime}
-                handleStopRuntime={handleStopRuntime}
-                lastEncodedKey={lastEncodedKey}
-                lastResolutionPreview={lastResolutionPreview}
-                updateDraft={updateDraft}
-              />
-            ) : (
-              <ExpertWorkspace
-                activeConfig={activeConfig}
-                profiles={profiles}
-                effectiveProfileId={effectiveProfileId}
-                selectedLayer={selectedLayer}
-                selectedControl={selectedControl}
-                selectedBinding={selectedBinding}
-                selectedAction={selectedAction}
-                selectedEncoder={selectedEncoder}
-                snippetById={snippetById}
-                updateDraft={updateDraft}
-                runtimeSummary={runtimeSummary}
-                debugLog={debugLog}
-                captureDelayMs={captureDelayMs}
-                setCaptureDelayMs={setCaptureDelayMs}
-                lastCapture={lastCapture}
-                lastEncodedKey={lastEncodedKey}
-                resolutionKeyInput={resolutionKeyInput}
-                setResolutionKeyInput={setResolutionKeyInput}
-                lastResolutionPreview={lastResolutionPreview}
-                lastExecution={lastExecution}
-                lastRuntimeError={lastRuntimeError}
-                handleStartRuntime={handleStartRuntime}
-                handleReloadRuntime={handleReloadRuntime}
-                handleStopRuntime={handleStopRuntime}
-                handleRehookCapture={handleRehookCapture}
-                handleCaptureActiveWindow={handleCaptureActiveWindow}
-                handlePreviewResolution={handlePreviewResolution}
-                handleExecutePreviewAction={handleExecutePreviewAction}
-                handleRunPreviewAction={handleRunPreviewAction}
-                viewState={viewState}
-                activePath={activePath}
-                activeWarnings={activeWarnings}
-                lastSave={lastSave}
-                error={error}
-                setError={setError}
               />
             )}
           </section>
@@ -558,11 +523,8 @@ function App() {
               case "tab-profiles":
                 switchWorkspaceMode("profiles");
                 break;
-              case "tab-verification":
-                switchWorkspaceMode("verification");
-                break;
-              case "tab-expert":
-                switchWorkspaceMode("advanced");
+              case "tab-debug":
+                switchWorkspaceMode("debug");
                 break;
               case "layer-standard":
                 setSelectedLayer("standard");

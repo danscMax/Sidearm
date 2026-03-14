@@ -8,209 +8,263 @@ import type {
   PhysicalControl,
   SnippetLibraryItem,
 } from "../lib/config";
+import type {
+  EncodedKeyEvent,
+  ResolvedInputPreview,
+} from "../lib/runtime";
 import {
-  ensureEncoderMapping,
+  expectedEncodedKeyForControl,
+  seedExpectedEncoderMapping,
   updateControlCapabilityStatus,
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import {
   describeActionSummary,
+  describeVerificationAlignment,
+  formatTimestamp,
   labelForCapability,
   labelForControlFamily,
-  labelForEncoderSource,
 } from "../lib/helpers";
-import { Fact } from "./shared";
 
 export interface ControlPropertiesPanelProps {
-  selectedLayer: Layer;
   selectedControl: PhysicalControl | null;
   selectedBinding: Binding | null;
   selectedAction: Action | null;
   selectedEncoder: EncoderMapping | null;
   snippetById: Map<string, SnippetLibraryItem>;
-  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
+  // Verification-mode props (optional — omit for read-only display)
+  selectedLayer?: Layer;
+  lastEncodedKey?: EncodedKeyEvent | null;
+  lastResolutionPreview?: ResolvedInputPreview | null;
+  updateDraft?: (updater: (config: AppConfig) => AppConfig) => void;
+  verificationSessionActive?: boolean;
 }
 
 export function ControlPropertiesPanel({
-  selectedLayer,
   selectedControl,
   selectedBinding,
   selectedAction,
   selectedEncoder,
   snippetById,
+  selectedLayer,
+  lastEncodedKey,
+  lastResolutionPreview,
   updateDraft,
+  verificationSessionActive,
 }: ControlPropertiesPanelProps) {
-  return (
-    <>
+  const hasVerificationMode = selectedLayer != null && updateDraft != null;
+
+  // Verification-mode derived values
+  const expectedEncodedKey =
+    hasVerificationMode && selectedControl
+      ? expectedEncodedKeyForControl(selectedControl.id, selectedLayer)
+      : null;
+  const lastObservedEncodedKey = lastEncodedKey?.encodedKey ?? null;
+  const lastObservedResolvedSelectedControl = Boolean(
+    selectedControl &&
+      lastResolutionPreview?.controlId === selectedControl.id &&
+      lastResolutionPreview?.layer === selectedLayer &&
+      lastEncodedKey,
+  );
+  const verificationAlignment =
+    hasVerificationMode && selectedControl
+      ? describeVerificationAlignment(
+          expectedEncodedKey,
+          selectedEncoder?.encodedKey ?? null,
+          lastObservedEncodedKey,
+          lastObservedResolvedSelectedControl,
+        )
+      : null;
+
+  if (!selectedControl) {
+    return (
       <section className="panel panel--accent">
-        <p className="panel__eyebrow">Свойства кнопки</p>
-        {selectedControl ? (
-          <>
-            <h2>{selectedControl.defaultName}</h2>
-            <p className="inspector__lede">
-              {selectedControl.notes ??
-                "Для этой кнопки пока нет дополнительных заметок."}
-            </p>
-
-            <div className="fact-grid">
-              <Fact
-                label="Статус"
-                value={labelForCapability(selectedControl.capabilityStatus)}
-              />
-              <Fact
-                label="Сигнал"
-                value={selectedEncoder?.encodedKey ?? "не назначен"}
-              />
-              <Fact
-                label="Можно переназначить"
-                value={selectedControl.remappable ? "Да" : "Нет"}
-              />
-              <Fact label="Группа" value={labelForControlFamily(selectedControl.family)} />
-              <Fact label="ID кнопки" value={selectedControl.id} />
-              <Fact
-                label="Источник сигнала"
-                value={labelForEncoderSource(selectedEncoder?.source)}
-              />
-            </div>
-
-            <label className="field">
-              <span className="field__label">Статус кнопки</span>
-              <select
-                value={selectedControl.capabilityStatus}
-                onChange={(event) => {
-                  updateDraft((config) =>
-                    updateControlCapabilityStatus(
-                      config,
-                      selectedControl.id,
-                      event.target.value as CapabilityStatus,
-                    ),
-                  );
-                }}
-              >
-                <option value="verified">Подтверждена</option>
-                <option value="needsValidation">Нужна проверка</option>
-                <option value="partiallyRemappable">Частично переназначается</option>
-                <option value="reserved">Зарезервирована</option>
-              </select>
-            </label>
-
-            <div className="inspector__binding-card">
-              <h3>Что сработает</h3>
-              {selectedBinding ? (
-                <>
-                  <p>
-                    <strong>{selectedBinding.label}</strong>
-                  </p>
-                  <p>{describeActionSummary(selectedAction, snippetById)}</p>
-                  <p>
-                    Ссылка на действие: <code>{selectedBinding.actionRef}</code>
-                  </p>
-                  <p>
-                    Тип действия:{" "}
-                    <code>{selectedAction?.type ?? "действие отсутствует"}</code>
-                  </p>
-                </>
-              ) : (
-                <p>Для этой кнопки на текущем слое назначение ещё не создано.</p>
-              )}
-            </div>
-          </>
-        ) : (
-          <p>Выберите кнопку на схеме мыши</p>
-        )}
+        <div className="props-empty">
+          <p className="props-empty__icon">⊹</p>
+          <p className="props-empty__text">Выберите кнопку, чтобы увидеть свойства</p>
+        </div>
       </section>
+    );
+  }
 
-      <section className="panel">
-        <p className="panel__eyebrow">Сигнал кнопки</p>
-        {selectedControl ? (
-          selectedEncoder ? (
-            <div className="editor-grid">
-              <label className="field">
-                <span className="field__label">Код сигнала</span>
-                <input
-                  type="text"
-                  value={selectedEncoder.encodedKey}
-                  placeholder="F13"
-                  onChange={(event) => {
-                    updateDraft((config) =>
-                      upsertEncoderMapping(config, {
-                        ...selectedEncoder,
-                        encodedKey: event.target.value,
-                      }),
-                    );
-                  }}
-                  onBlur={(event) => {
-                    if (!event.target.value.trim()) {
-                      updateDraft((config) =>
-                        upsertEncoderMapping(config, {
-                          ...selectedEncoder,
-                          encodedKey: selectedEncoder.encodedKey || "F13",
-                        }),
-                      );
-                    }
-                  }}
-                />
-              </label>
-
-              <label className="field">
-                <span className="field__label">Источник</span>
-                <select
-                  value={selectedEncoder.source}
-                  onChange={(event) => {
-                    updateDraft((config) =>
-                      upsertEncoderMapping(config, {
-                        ...selectedEncoder,
-                        source: event.target.value as EncoderMapping["source"],
-                      }),
-                    );
-                  }}
-                >
-                  <option value="synapse">Synapse</option>
-                  <option value="detected">Обнаружен</option>
-                  <option value="reserved">Зарезервирован</option>
-                </select>
-              </label>
-
-              <label className="field field--inline">
-                <span className="field__label">Подтверждён</span>
-                <input
-                  type="checkbox"
-                  checked={selectedEncoder.verified}
-                  onChange={(event) => {
-                    updateDraft((config) =>
-                      upsertEncoderMapping(config, {
-                        ...selectedEncoder,
-                        verified: event.target.checked,
-                      }),
-                    );
-                  }}
-                />
-              </label>
-            </div>
+  return (
+    <section className="panel panel--accent">
+      {/* ── Identity & metadata ── */}
+      <div className="props-header">
+        <div className="props-header__title">
+          <h2>{selectedControl.defaultName}</h2>
+          {selectedEncoder?.encodedKey ? (
+            <code className="props-header__signal">{selectedEncoder.encodedKey}</code>
           ) : (
-            <div className="editor-grid">
-              <p className="panel__muted">
-                Для <code>{selectedControl.id}</code> на текущем слое ещё нет сигнала.
-              </p>
-              <button
-                type="button"
-                className="action-button"
-                onClick={() => {
-                  updateDraft((config) =>
-                    ensureEncoderMapping(config, selectedLayer, selectedControl),
-                  );
-                }}
-              >
-                Создать временный сигнал
-              </button>
-            </div>
-          )
+            <span className="props-header__signal props-header__signal--empty">не назначен</span>
+          )}
+        </div>
+        <span className="props-header__group">{labelForControlFamily(selectedControl.family)}</span>
+      </div>
+
+      {hasVerificationMode ? (
+        <div className="props-meta">
+          <div className="props-meta__status">
+            <span className="props-meta__label">Статус</span>
+            <span className="props-meta__value">{labelForCapability(selectedControl.capabilityStatus)}</span>
+          </div>
+          <label className="props-meta__select">
+            <select
+              value={selectedControl.capabilityStatus}
+              onChange={(event) => {
+                updateDraft((config) =>
+                  updateControlCapabilityStatus(
+                    config,
+                    selectedControl.id,
+                    event.target.value as CapabilityStatus,
+                  ),
+                );
+              }}
+            >
+              <option value="verified">Подтверждена</option>
+              <option value="needsValidation">Нужна проверка</option>
+              <option value="partiallyRemappable">Частично переназначается</option>
+              <option value="reserved">Зарезервирована</option>
+            </select>
+          </label>
+        </div>
+      ) : null}
+
+      {/* ── Action preview ── */}
+      <div className="props-action">
+        <span className="props-action__eyebrow">Назначенное действие</span>
+        {selectedBinding ? (
+          <div className="props-action__body">
+            <strong className="props-action__name">{selectedBinding.label}</strong>
+            <span className="props-action__detail">{describeActionSummary(selectedAction, snippetById)}</span>
+          </div>
         ) : (
-          <p className="panel__muted">
-            Выберите кнопку перед редактированием сигнала.
-          </p>
+          <p className="props-action__empty">Для этой кнопки на текущем слое назначение ещё не создано.</p>
         )}
-      </section>
-    </>
+      </div>
+
+      {/* ── Verification workflow ── */}
+      {hasVerificationMode && !verificationSessionActive && verificationAlignment ? (
+        <div className="props-verification">
+          <div className={`notice ${verificationAlignment.noticeClass}`}>
+            <strong>{verificationAlignment.title}</strong>
+            <p>{verificationAlignment.body}</p>
+            <p className="notice__meta">
+              {lastObservedResolvedSelectedControl
+                ? "Последняя проверка совпала с этой кнопкой и слоем."
+                : "Последний сигнал мог относиться к другой кнопке или к ручной проверке."}
+            </p>
+          </div>
+
+          <div className="props-signals">
+            <div className="props-signal">
+              <span className="props-signal__label">Ожидалось</span>
+              <code className="props-signal__value">{expectedEncodedKey ?? "н/д"}</code>
+            </div>
+            <div className="props-signal">
+              <span className="props-signal__label">Настроено</span>
+              <code className="props-signal__value">{selectedEncoder?.encodedKey ?? "—"}</code>
+            </div>
+            <div className="props-signal">
+              <span className="props-signal__label">Наблюдалось</span>
+              <code className="props-signal__value props-signal__value--observed">
+                {lastObservedEncodedKey ?? "ничего"}
+              </code>
+            </div>
+            <div className="props-signal">
+              <span className="props-signal__label">Время</span>
+              <span className="props-signal__value">
+                {lastEncodedKey ? formatTimestamp(lastEncodedKey.receivedAt) : "н/д"}
+              </span>
+            </div>
+          </div>
+
+          <div className="verification-steps">
+            <button
+              type="button"
+              className={`verification-step${expectedEncodedKey ? " verification-step--ready" : ""}`}
+              onClick={() => {
+                updateDraft((config) =>
+                  seedExpectedEncoderMapping(config, selectedLayer, selectedControl),
+                );
+              }}
+              disabled={!expectedEncodedKey}
+            >
+              <span className="verification-step__num">1</span>
+              <span className="verification-step__label">
+                {selectedEncoder ? "Применить ожидаемый" : "Создать ожидаемый"}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              className={`verification-step${lastObservedEncodedKey && selectedEncoder ? " verification-step--ready" : ""}`}
+              onClick={() => {
+                if (!lastObservedEncodedKey) return;
+                updateDraft((config) =>
+                  upsertEncoderMapping(config, {
+                    controlId: selectedControl.id,
+                    layer: selectedLayer,
+                    encodedKey: lastObservedEncodedKey,
+                    source: "detected",
+                    verified: false,
+                  }),
+                );
+              }}
+              disabled={!lastObservedEncodedKey}
+            >
+              <span className="verification-step__num">2</span>
+              <span className="verification-step__label">Наблюдаемый сигнал</span>
+            </button>
+
+            <button
+              type="button"
+              className={`verification-step${
+                selectedEncoder &&
+                lastObservedEncodedKey &&
+                selectedEncoder.encodedKey === lastObservedEncodedKey
+                  ? " verification-step--ready"
+                  : ""
+              }`}
+              onClick={() => {
+                if (!selectedEncoder) return;
+                updateDraft((config) =>
+                  upsertEncoderMapping(config, {
+                    ...selectedEncoder,
+                    verified: true,
+                  }),
+                );
+              }}
+              disabled={
+                !selectedEncoder ||
+                !lastObservedEncodedKey ||
+                selectedEncoder.encodedKey !== lastObservedEncodedKey
+              }
+            >
+              <span className="verification-step__num">3</span>
+              <span className="verification-step__label">Подтвердить</span>
+            </button>
+
+            <button
+              type="button"
+              className={`verification-step${selectedEncoder?.verified ? " verification-step--ready" : ""}`}
+              onClick={() => {
+                updateDraft((config) =>
+                  updateControlCapabilityStatus(
+                    config,
+                    selectedControl.id,
+                    selectedEncoder?.verified ? "verified" : "needsValidation",
+                  ),
+                );
+              }}
+              disabled={!selectedEncoder}
+            >
+              <span className="verification-step__num">4</span>
+              <span className="verification-step__label">Повысить статус</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }

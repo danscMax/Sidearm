@@ -16,6 +16,7 @@ import {
 } from "../lib/config-editing";
 import { getExeIcon } from "../lib/backend";
 import { parseCommaSeparatedUniqueValues, sortAppMappings } from "../lib/helpers";
+import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
 
 /** Module-level icon cache: exe name -> base64 PNG (or empty string for "no icon"). */
@@ -108,20 +109,21 @@ function ExeIcon({ exe, className }: { exe: string; className: string }) {
 
 interface AppMappingModalProps {
   mapping: AppMapping;
+  profileName: string;
   lastCapture: WindowCaptureResult | null;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   onClose: () => void;
-  setConfirmModal: ProfilesWorkspaceProps["setConfirmModal"];
 }
 
 function AppMappingModal({
   mapping,
+  profileName,
   lastCapture,
   updateDraft,
   onClose,
-  setConfirmModal,
 }: AppMappingModalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const hasCapture = lastCapture && !lastCapture.ignored;
 
   // Escape key closes the modal
@@ -180,7 +182,10 @@ function AppMappingModal({
         {/* Header */}
         <div className="rule-modal__header">
           <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
-          <span className="rule-modal__title">{mapping.exe}</span>
+          <div>
+            <span className="rule-modal__title">{mapping.exe}</span>
+            <span className="rule-modal__profile-name">Профиль: {profileName}</span>
+          </div>
           <button
             type="button"
             className="rule-modal__close"
@@ -227,14 +232,10 @@ function AppMappingModal({
               <input
                 type="text"
                 value={mapping.exe}
-                placeholder="example.exe"
+                placeholder="chrome.exe"
                 onChange={(e) =>
                   updateDraft((c) => upsertAppMapping(c, { ...mapping, exe: e.target.value }))
                 }
-                onBlur={(e) => {
-                  if (!e.target.value.trim())
-                    updateDraft((c) => upsertAppMapping(c, { ...mapping, exe: "example.exe" }));
-                }}
               />
               <button
                 type="button"
@@ -303,7 +304,15 @@ function AppMappingModal({
             </label>
 
             <label className="field field--inline profiles__field-no-margin">
-              <span className="field__label">Приоритет</span>
+              <span className="field__label">
+                Приоритет
+                <span
+                  className="field__hint"
+                  title="Чем выше число, тем выше приоритет. При совпадении нескольких правил побеждает правило с наибольшим приоритетом."
+                >
+                  ?
+                </span>
+              </span>
               <input
                 type="number"
                 min={0}
@@ -324,26 +333,39 @@ function AppMappingModal({
 
         {/* Footer */}
         <div className="rule-modal__footer">
+          <span className="rule-modal__autosave">Изменения сохраняются автоматически</span>
           <span className="rule-modal__spacer" />
 
-          <button
-            type="button"
-            className="action-button action-button--ghost profiles__delete-btn"
-            onClick={() => {
-              setConfirmModal({
-                title: "Удалить правило?",
-                message: `Правило для «${mapping.exe}» будет удалено.`,
-                confirmLabel: "Удалить",
-                onConfirm: () => {
+          {confirmingDelete ? (
+            <div className="rule-modal__delete-confirm">
+              Точно удалить?
+              <button
+                type="button"
+                className="action-button action-button--small action-button--ghost profiles__delete-btn"
+                onClick={() => {
                   updateDraft((c) => deleteAppMapping(c, mapping.id));
                   onClose();
-                  setConfirmModal(null);
-                },
-              });
-            }}
-          >
-            Удалить правило
-          </button>
+                }}
+              >
+                Да
+              </button>
+              <button
+                type="button"
+                className="action-button action-button--small action-button--ghost"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                Нет
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="action-button action-button--ghost profiles__delete-btn"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              Удалить правило
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -379,6 +401,14 @@ export function ProfilesWorkspace({
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [captureCountdown, setCaptureCountdown] = useState<number | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [newRuleOpen, setNewRuleOpen] = useState(false);
+  const [newRuleExe, setNewRuleExe] = useState("");
+  const [newRuleCapturedTitle, setNewRuleCapturedTitle] = useState("");
+  const [captureForNewRule, setCaptureForNewRule] = useState(false);
+  const prevCaptureRef = useRef(lastCapture);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileMenuRef = useRef<HTMLDivElement>(null);
+  const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
 
   const selectedAppMappings = useMemo(
     () =>
@@ -408,6 +438,33 @@ export function ProfilesWorkspace({
     };
   }, []);
 
+  // Close profile menu on outside click
+  useEffect(() => {
+    if (!profileMenuOpen) return;
+    function handleClick(e: MouseEvent) {
+      if (profileMenuRef.current && !profileMenuRef.current.contains(e.target as Node)) {
+        setProfileMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [profileMenuOpen]);
+
+  // Fill new-rule dialog fields after capture completes
+  useEffect(() => {
+    if (
+      captureForNewRule &&
+      lastCapture &&
+      lastCapture !== prevCaptureRef.current &&
+      !lastCapture.ignored
+    ) {
+      setCaptureForNewRule(false);
+      setNewRuleExe(lastCapture.exe);
+      setNewRuleCapturedTitle(lastCapture.title);
+    }
+    prevCaptureRef.current = lastCapture;
+  });
+
   async function handleCaptureWithCountdown() {
     const totalMs = captureDelayMs;
     const startTime = Date.now();
@@ -432,6 +489,21 @@ export function ProfilesWorkspace({
       }
       setCaptureCountdown(null);
     }
+  }
+
+  async function handleCaptureForDialog() {
+    setCaptureForNewRule(true);
+    await handleCaptureWithCountdown();
+  }
+
+  function handleConfirmNewRule() {
+    const exe = newRuleExe.trim().toLowerCase();
+    if (!exe) return;
+    const title = newRuleCapturedTitle;
+    setNewRuleOpen(false);
+    setNewRuleExe("");
+    setNewRuleCapturedTitle("");
+    handleCreateRule(exe, title, !!title);
   }
 
   function handleCreateRule(exe: string, title: string, withTitleFilter: boolean) {
@@ -524,10 +596,6 @@ export function ProfilesWorkspace({
     URL.revokeObjectURL(url);
   }
 
-  const hasCapture = lastCapture && !lastCapture.ignored;
-
-  const useToggleSelector = profiles.length <= 6;
-  const selectedIndex = profiles.findIndex((p) => p.id === effectiveProfileId);
 
   function handleOpenActionPicker(controlId: ControlId, binding: Binding | null) {
     if (!effectiveProfileId) return;
@@ -546,49 +614,9 @@ export function ProfilesWorkspace({
     setActionPickerOpen(true);
   }
 
-  const profileTabsSlot = useToggleSelector ? (
-    <div className="profile-selector profile-selector--compact">
-      <div
-        className="profile-selector__track"
-        style={{ "--pill-count": profiles.length } as React.CSSProperties}
-      >
-        {selectedIndex >= 0 ? (
-          <div
-            className="profile-selector__indicator"
-            style={{ transform: `translateX(${selectedIndex * 100}%)` }}
-          />
-        ) : null}
-        {profiles.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`profile-selector__pill${p.id === effectiveProfileId ? " profile-selector__pill--active" : ""}`}
-            onClick={() => {
-              startTransition(() => setSelectedProfileId(p.id));
-            }}
-          >
-            {p.name}
-          </button>
-        ))}
-      </div>
-    </div>
-  ) : (
-    <select
-      className="profile-selector__dropdown"
-      value={effectiveProfileId ?? ""}
-      onChange={(e) => {
-        startTransition(() => setSelectedProfileId(e.target.value));
-      }}
-    >
-      {profiles.map((p) => (
-        <option key={p.id} value={p.id}>{p.name}</option>
-      ))}
-    </select>
-  );
-
   return (
     <div className="profiles-workspace">
-      {/* ── Mouse visualization (profile tabs embedded in nav) ── */}
+      {/* ── Mouse visualization ── */}
       <div className="profiles__mouse-viz">
         <MouseVisualization
           entries={familySections.flatMap((section) => section.entries)}
@@ -610,19 +638,17 @@ export function ProfilesWorkspace({
           }}
           onOpenActionPicker={handleOpenActionPicker}
           onSelectLayer={onSelectLayer}
-          profileTabs={profileTabsSlot}
         />
       </div>
 
-      {/* ── Profile banner ── */}
+      {/* ── Profile pill ── */}
       {activeProfile ? (
-        <div className="profiles__banner">
-          <div className="profiles__banner-row1">
-            <span className="profiles__banner-avatar">{profileMonogram(activeProfile.name)}</span>
-
+        <div className="profile-pill-row">
+          <div className="profile-pill">
+            <span className="profile-pill__avatar">{profileMonogram(activeProfile.name)}</span>
             <input
               type="text"
-              className="profiles__banner-name"
+              className="profile-pill__name"
               value={activeProfile.name}
               onChange={(e) =>
                 updateDraft((c) => upsertProfile(c, { ...activeProfile, name: e.target.value }))
@@ -634,8 +660,7 @@ export function ProfilesWorkspace({
                   );
               }}
             />
-
-            <label className="profiles__banner-toggle-label">
+            <label className="profile-pill__toggle">
               <input
                 className="profiles__toggle"
                 type="checkbox"
@@ -647,130 +672,64 @@ export function ProfilesWorkspace({
                 }
               />
             </label>
-
-            <label className="profiles__banner-priority">
-              <span>P</span>
-              <input
-                type="number"
-                min={0}
-                max={9999}
-                value={activeProfile.priority}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  const clamped = Number.isFinite(v)
-                    ? Math.max(0, Math.min(9999, Math.round(v)))
-                    : 0;
-                  updateDraft((c) => upsertProfile(c, { ...activeProfile, priority: clamped }));
-                }}
-              />
-            </label>
-
-            <div className="profiles__banner-actions">
-              <button
-                type="button"
-                className="profiles__banner-action-btn"
-                onClick={handleDuplicateProfile}
-                title="Копировать профиль"
-              >
-                Копировать
-              </button>
-              <button
-                type="button"
-                className="profiles__banner-action-btn"
-                onClick={handleExportProfile}
-                title="Экспорт профиля"
-              >
-                Экспорт
-              </button>
-              {profiles.length > 1 ? (
+            {!activeProfile.enabled && (
+              <span className="profile-pill__status">Отключён</span>
+            )}
+          </div>
+          <div className="profile-pill__menu-wrap" ref={profileMenuRef}>
+            <button
+              type="button"
+              className="profile-pill__menu-btn"
+              onClick={() => setProfileMenuOpen((v) => !v)}
+              aria-label="Действия с профилем"
+            >
+              ⋯
+            </button>
+            {profileMenuOpen && (
+              <div className="profile-pill__dropdown">
                 <button
                   type="button"
-                  className="profiles__banner-action-btn profiles__banner-action-btn--danger"
-                  onClick={() => {
-                    setConfirmModal({
-                      title: "Удалить профиль?",
-                      message: `Профиль «${activeProfile.name}» будет удалён вместе со всеми назначениями и правилами.`,
-                      confirmLabel: "Удалить",
-                      onConfirm: () => {
-                        updateDraft((c) => deleteProfile(c, activeProfile.id));
-                        setSelectedProfileId(null);
-                        setConfirmModal(null);
-                      },
-                    });
-                  }}
+                  className="profile-pill__dropdown-item"
+                  onClick={() => { handleDuplicateProfile(); setProfileMenuOpen(false); }}
                 >
-                  Удалить
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
+                  Копировать
                 </button>
-              ) : null}
-            </div>
+                <button
+                  type="button"
+                  className="profile-pill__dropdown-item"
+                  onClick={() => { handleExportProfile(); setProfileMenuOpen(false); }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                  Экспорт
+                </button>
+                {profiles.length > 1 && (
+                  <button
+                    type="button"
+                    className="profile-pill__dropdown-item profile-pill__dropdown-item--danger"
+                    onClick={() => {
+                      setProfileMenuOpen(false);
+                      setConfirmModal({
+                        title: "Удалить профиль?",
+                        message: `Профиль «${activeProfile.name}» будет удалён вместе со всеми назначениями и правилами.`,
+                        confirmLabel: "Удалить",
+                        onConfirm: () => {
+                          updateDraft((c) => deleteProfile(c, activeProfile.id));
+                          setSelectedProfileId(null);
+                          setConfirmModal(null);
+                        },
+                      });
+                    }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    Удалить
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-
-          <input
-            type="text"
-            className="profiles__banner-desc"
-            value={activeProfile.description ?? ""}
-            placeholder="Описание профиля..."
-            onChange={(e) =>
-              updateDraft((c) =>
-                upsertProfile(c, {
-                  ...activeProfile,
-                  description: e.target.value || undefined,
-                }),
-              )
-            }
-          />
         </div>
-      ) : (
-        <div className="profiles__banner profiles__banner--empty">
-          <span className="profiles__banner-avatar">?</span>
-          <span className="profiles__banner-name-placeholder">Профиль не выбран</span>
-        </div>
-      )}
-
-      {/* ── Capture bar (pure tool — no creation buttons) ── */}
-      <div className="profiles__capture-bar">
-        <div className="profiles__capture-bar-left">
-          <select
-            className="profiles__capture-delay"
-            value={captureDelayMs}
-            onChange={(e) => setCaptureDelayMs(Number(e.target.value))}
-          >
-            <option value={500}>0.5с</option>
-            <option value={1000}>1с</option>
-            <option value={1500}>1.5с</option>
-            <option value={2000}>2с</option>
-            <option value={3000}>3с</option>
-            <option value={5000}>5с</option>
-          </select>
-          <button
-            type="button"
-            className="action-button action-button--small"
-            onClick={() => {
-              void handleCaptureWithCountdown();
-            }}
-            disabled={
-              viewState === "loading" || viewState === "saving" || captureCountdown !== null
-            }
-          >
-            {captureCountdown !== null ? `${captureCountdown}...` : "Захватить окно"}
-          </button>
-        </div>
-
-        {hasCapture ? (
-          <div className="profiles__capture-bar-right">
-            <span className="profiles__capture-bar-result">
-              <span className="profiles__capture-exe">{lastCapture.exe}</span>
-              <span className="profiles__capture-title">
-                {lastCapture.title || "(без заголовка)"}
-              </span>
-            </span>
-          </div>
-        ) : (
-          <span className="profiles__capture-bar-hint">
-            Переключитесь на нужное окно и нажмите «Захватить»
-          </span>
-        )}
-      </div>
+      ) : null}
 
       {/* ── Section header ── */}
       <div className="profiles__section-header">
@@ -789,6 +748,10 @@ export function ProfilesWorkspace({
               type="button"
               className={`profiles__app-card${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}`}
               onClick={() => setEditingMappingId(mapping.id)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
+              }}
             >
               <input
                 className="profiles__app-card-toggle profiles__toggle"
@@ -822,7 +785,7 @@ export function ProfilesWorkspace({
           <button
             type="button"
             className="profiles__add-card"
-            onClick={() => handleCreateRule("example.exe", "", false)}
+            onClick={() => { setNewRuleOpen(true); setNewRuleExe(""); }}
           >
             + Добавить правило
           </button>
@@ -835,16 +798,204 @@ export function ProfilesWorkspace({
         </p>
       ) : null}
 
+      {/* ── New rule dialog ── */}
+      {newRuleOpen ? (
+        <div className="modal-backdrop" onClick={() => setNewRuleOpen(false)}>
+          <div
+            className="rule-modal rule-modal--compact"
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => { if (e.key === "Escape") setNewRuleOpen(false); }}
+          >
+            <div className="rule-modal__header">
+              <span className="rule-modal__title">Новое правило</span>
+              <button
+                type="button"
+                className="rule-modal__close"
+                onClick={() => setNewRuleOpen(false)}
+                aria-label="Закрыть"
+              >
+                &times;
+              </button>
+            </div>
+            <div
+              className={`rule-modal__body new-rule__dropzone${newRuleExe ? "" : " new-rule__dropzone--empty"}`}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                (e.currentTarget as HTMLElement).classList.add("dragover");
+              }}
+              onDragLeave={(e) => {
+                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                  (e.currentTarget as HTMLElement).classList.remove("dragover");
+                }
+              }}
+              onDrop={(e) => {
+                (e.currentTarget as HTMLElement).classList.remove("dragover");
+                e.preventDefault();
+                const file = e.dataTransfer.files[0];
+                if (file) {
+                  const name = file.name.replace(/\.lnk$/i, ".exe").toLowerCase();
+                  if (name.endsWith(".exe")) {
+                    setNewRuleExe(name);
+                    setNewRuleCapturedTitle("");
+                  }
+                }
+              }}
+            >
+              <div className="field">
+                <span className="field__label">Исполняемый файл</span>
+                <div className="field__row">
+                  <input
+                    type="text"
+                    autoFocus
+                    value={newRuleExe}
+                    placeholder="chrome.exe, telegram.exe..."
+                    onChange={(e) => { setNewRuleExe(e.target.value); setNewRuleCapturedTitle(""); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newRuleExe.trim()) handleConfirmNewRule();
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="action-button action-button--small"
+                    onClick={async () => {
+                      const selected = await open({
+                        title: "Выберите исполняемый файл",
+                        filters: [{ name: "Программы", extensions: ["exe", "lnk"] }],
+                        multiple: false,
+                      });
+                      if (typeof selected === "string") {
+                        const exeName = selected.split(/[/\\]/).pop() ?? selected;
+                        setNewRuleExe(exeName.toLowerCase());
+                        setNewRuleCapturedTitle("");
+                      }
+                    }}
+                  >
+                    Обзор...
+                  </button>
+                </div>
+                {!newRuleExe && (
+                  <span className="new-rule__drop-hint">или перетащите .exe / ярлык сюда</span>
+                )}
+              </div>
+
+              <div className="new-rule__divider">или</div>
+
+              <div className="new-rule__capture">
+                <button
+                  type="button"
+                  className="new-rule__capture-btn"
+                  onClick={() => { void handleCaptureForDialog(); }}
+                  disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                  {captureCountdown !== null ? `${captureCountdown}...` : "Захватить активное окно"}
+                </button>
+                <select
+                  className="new-rule__delay"
+                  value={captureDelayMs}
+                  onChange={(e) => setCaptureDelayMs(Number(e.target.value))}
+                  title="Задержка: переключитесь на нужное окно за это время"
+                >
+                  <option value={500}>0.5с</option>
+                  <option value={1000}>1с</option>
+                  <option value={1500}>1.5с</option>
+                  <option value={2000}>2с</option>
+                  <option value={3000}>3с</option>
+                  <option value={5000}>5с</option>
+                </select>
+              </div>
+
+              {newRuleCapturedTitle ? (
+                <p className="new-rule__captured-title">
+                  Заголовок: {newRuleCapturedTitle}
+                </p>
+              ) : null}
+            </div>
+            <div className="rule-modal__footer">
+              <button
+                type="button"
+                className="action-button action-button--accent"
+                disabled={!newRuleExe.trim()}
+                onClick={handleConfirmNewRule}
+              >
+                Создать
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* ── Rule editor modal ── */}
       {editingMapping ? (
         <AppMappingModal
           mapping={editingMapping}
+          profileName={activeProfile?.name ?? ""}
           lastCapture={lastCapture}
           updateDraft={updateDraft}
           onClose={() => setEditingMappingId(null)}
-          setConfirmModal={setConfirmModal}
         />
       ) : null}
+
+      {/* ── Rule context menu ── */}
+      {ruleCtxMenu ? (() => {
+        const targetMapping = selectedAppMappings.find((m) => m.id === ruleCtxMenu.mappingId);
+        if (!targetMapping) return null;
+        return (
+          <ContextMenu
+            x={ruleCtxMenu.x}
+            y={ruleCtxMenu.y}
+            onClose={() => setRuleCtxMenu(null)}
+            items={[
+              {
+                label: "Редактировать",
+                onClick: () => setEditingMappingId(targetMapping.id),
+              },
+              {
+                label: "Дублировать",
+                onClick: () => {
+                  if (!activeProfile) return;
+                  let newId: string | null = null;
+                  updateDraft((config) => {
+                    const result = createAppMappingFromCapture(
+                      config,
+                      activeProfile.id,
+                      targetMapping.priority,
+                      targetMapping.exe,
+                      (targetMapping.titleIncludes ?? [])[0] ?? "",
+                      !!(targetMapping.titleIncludes && targetMapping.titleIncludes.length > 0),
+                    );
+                    newId = result.newMappingId;
+                    return result.config;
+                  });
+                  if (newId) {
+                    startTransition(() => setEditingMappingId(newId));
+                  }
+                },
+              },
+              null,
+              {
+                label: "Удалить",
+                danger: true,
+                onClick: () => {
+                  setConfirmModal({
+                    title: "Удалить правило?",
+                    message: `Правило для «${targetMapping.exe}» будет удалено.`,
+                    confirmLabel: "Удалить",
+                    onConfirm: () => {
+                      updateDraft((c) => deleteAppMapping(c, targetMapping.id));
+                      setConfirmModal(null);
+                    },
+                  });
+                },
+              },
+            ]}
+          />
+        );
+      })() : null}
     </div>
   );
 }

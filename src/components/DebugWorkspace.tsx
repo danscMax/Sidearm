@@ -1,20 +1,21 @@
-import { startTransition } from "react";
+import { useMemo } from "react";
+
 import type {
   Action,
   AppConfig,
   Binding,
-  CapabilityStatus,
-  ControlId,
   EncoderMapping,
   Layer,
   PhysicalControl,
+  Profile,
   SnippetLibraryItem,
 } from "../lib/config";
-import type { ViewState } from "../lib/constants";
-import { verificationScopeCopy } from "../lib/constants";
 import type {
+  ActionExecutionEvent,
+  DebugLogEntry,
   EncodedKeyEvent,
   ResolvedInputPreview,
+  RuntimeErrorEvent,
   RuntimeStateSummary,
 } from "../lib/runtime";
 import type {
@@ -24,45 +25,46 @@ import type {
   VerificationSessionSummary,
   VerificationStepResult,
 } from "../lib/verification-session";
+import { verificationScopeCopy } from "../lib/constants";
 import {
-  expectedEncodedKeyForControl,
-  seedExpectedEncoderMapping,
-  updateControlCapabilityStatus,
-  upsertEncoderMapping,
-} from "../lib/config-editing";
-import {
+  controlName,
   controlPhysicalHint,
-  describeActionSummary,
-  describeVerificationAlignment,
   describeVerificationSessionSuggestion,
   dotLabel,
   formatTimestamp,
-  labelForCapability,
-  labelForRuntimeStatus,
+  isActionLiveRunnable,
+  labelForExecutionMode,
+  labelForExecutionOutcome,
+  labelForPreviewStatus,
   labelForVerificationResult,
+  logLevelBadgeClass,
   verificationResultColor,
 } from "../lib/helpers";
-import { MouseVisualization } from "./MouseVisualization";
+
+import { ControlPropertiesPanel } from "./ControlPropertiesPanel";
 import { Fact } from "./shared";
-import type { FamilySection } from "../lib/constants";
 
-export interface VerificationWorkspaceProps {
-
-  effectiveProfileId: string | null;
-  selectedLayer: Layer;
+export interface DebugWorkspaceProps {
+  activeConfig: AppConfig;
+  profiles: Profile[];
   selectedControl: PhysicalControl | null;
   selectedBinding: Binding | null;
   selectedAction: Action | null;
   selectedEncoder: EncoderMapping | null;
-  multiSelectedControlIds: Set<ControlId>;
-  familySections: FamilySection[];
   snippetById: Map<string, SnippetLibraryItem>;
-
-  onSelectLayer: (layer: Layer) => void;
-  setSelectedControlId: (id: ControlId | null) => void;
-  setMultiSelectedControlIds: (ids: Set<ControlId> | ((prev: Set<ControlId>) => Set<ControlId>)) => void;
-
-  // Verification state
+  debugLog: DebugLogEntry[];
+  resolutionKeyInput: string;
+  setResolutionKeyInput: (value: string) => void;
+  lastResolutionPreview: ResolvedInputPreview | null;
+  lastExecution: ActionExecutionEvent | null;
+  lastRuntimeError: RuntimeErrorEvent | null;
+  handlePreviewResolution: () => Promise<void>;
+  handleExecutePreviewAction: () => Promise<void>;
+  handleRunPreviewAction: () => Promise<void>;
+  // Verification props
+  selectedLayer: Layer;
+  lastEncodedKey: EncodedKeyEvent | null;
+  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
   verificationSession: VerificationSession | null;
   verificationScope: VerificationSessionScope;
   setVerificationScope: (scope: VerificationSessionScope) => void;
@@ -71,8 +73,7 @@ export interface VerificationWorkspaceProps {
   currentVerificationStep: VerificationSessionStep | null;
   suggestedSessionResult: Exclude<VerificationStepResult, "pending"> | null;
   hasVerificationResults: boolean;
-
-  // Verification handlers
+  runtimeSummary: RuntimeStateSummary;
   handleStartVerificationSession: () => Promise<void>;
   handleRestartVerificationStep: () => void;
   handleVerificationResult: (result: Exclude<VerificationStepResult, "pending">) => void;
@@ -81,178 +82,195 @@ export interface VerificationWorkspaceProps {
   handleReopenVerificationStep: (index: number) => void;
   handleResetVerificationSession: () => void;
   handleExportVerificationSession: () => Promise<void>;
-
-  // Runtime state
-  runtimeSummary: RuntimeStateSummary;
-  viewState: ViewState;
-
-  // Runtime handlers
-  handleStartRuntime: () => Promise<void>;
-  handleReloadRuntime: () => Promise<void>;
-  handleStopRuntime: () => Promise<void>;
-
-  // Pre-session verification card data
-  lastEncodedKey: EncodedKeyEvent | null;
-  lastResolutionPreview: ResolvedInputPreview | null;
-
-  // Draft update
-  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
 }
 
-export function VerificationWorkspace({
-  selectedLayer,
-  selectedControl,
-  selectedBinding,
-  selectedAction,
-  selectedEncoder,
-  multiSelectedControlIds,
-  familySections,
-  snippetById,
-  onSelectLayer,
-  setSelectedControlId,
-  setMultiSelectedControlIds,
-  verificationSession,
-  verificationScope,
-  setVerificationScope,
-  lastVerificationExportPath,
-  sessionSummary,
-  currentVerificationStep,
-  suggestedSessionResult,
-  hasVerificationResults,
-  handleStartVerificationSession,
-  handleRestartVerificationStep,
-  handleVerificationResult,
-  handleVerificationNotesChange,
-  handleNavigateVerificationStep,
-  handleReopenVerificationStep,
-  handleResetVerificationSession,
-  handleExportVerificationSession,
-  runtimeSummary,
-  viewState,
-  handleStartRuntime,
-  handleReloadRuntime,
-  handleStopRuntime,
-  lastEncodedKey,
-  lastResolutionPreview,
-  updateDraft,
-}: VerificationWorkspaceProps) {
-  // --- Derived values (moved from App.tsx) ---
-  const expectedEncodedKey = selectedControl
-    ? expectedEncodedKeyForControl(selectedControl.id, selectedLayer)
-    : null;
-  const lastObservedEncodedKey = lastEncodedKey?.encodedKey ?? null;
-  const lastObservedResolvedSelectedControl = Boolean(
-    selectedControl &&
-      lastResolutionPreview?.controlId === selectedControl.id &&
-      lastResolutionPreview?.layer === selectedLayer &&
-      lastEncodedKey,
-  );
-  const verificationAlignment = describeVerificationAlignment(
-    expectedEncodedKey,
-    selectedEncoder?.encodedKey ?? null,
-    lastObservedEncodedKey,
-    lastObservedResolvedSelectedControl,
-  );
+export function DebugWorkspace(props: DebugWorkspaceProps) {
+  const {
+    activeConfig,
+    profiles,
+    selectedControl,
+    selectedBinding,
+    selectedAction,
+    selectedEncoder,
+    snippetById,
+    debugLog,
+    resolutionKeyInput,
+    setResolutionKeyInput,
+    lastResolutionPreview,
+    lastExecution,
+    lastRuntimeError,
+    handlePreviewResolution,
+    handleExecutePreviewAction,
+    handleRunPreviewAction,
+    selectedLayer,
+    lastEncodedKey,
+    updateDraft,
+    verificationSession,
+    verificationScope,
+    setVerificationScope,
+    lastVerificationExportPath,
+    sessionSummary,
+    currentVerificationStep,
+    suggestedSessionResult,
+    hasVerificationResults,
+    runtimeSummary,
+    handleStartVerificationSession,
+    handleRestartVerificationStep,
+    handleVerificationResult,
+    handleVerificationNotesChange,
+    handleNavigateVerificationStep,
+    handleReopenVerificationStep,
+    handleResetVerificationSession,
+    handleExportVerificationSession,
+  } = props;
+
+  const reversedLog = useMemo(() => [...debugLog].reverse(), [debugLog]);
+
+  const resolvedLiveRunnable =
+    lastResolutionPreview?.actionId
+      ? isActionLiveRunnable(activeConfig, lastResolutionPreview.actionId)
+      : false;
+  const canRunLiveAction =
+    lastResolutionPreview?.status === "resolved" && resolvedLiveRunnable;
 
   return (
-    <>
-      <div className="workspace__left">
-        <section className="panel">
-          <MouseVisualization
-            entries={familySections.flatMap((section) => section.entries)}
-            selectedLayer={selectedLayer}
-            multiSelectedControlIds={multiSelectedControlIds}
-            onSelectControl={(id) => {
-              startTransition(() => {
-                setSelectedControlId(id);
-                setMultiSelectedControlIds(new Set());
-              });
+    <div className="expert-layout">
+      {/* ── Testing toolbar ── */}
+      <div className="debug-testing">
+        <div className="debug-testing__bar">
+          <input
+            type="text"
+            className="debug-testing__input"
+            value={resolutionKeyInput}
+            onChange={(event) => {
+              setResolutionKeyInput(event.target.value);
             }}
-            onToggleMultiSelect={(id) => {
-              setMultiSelectedControlIds((prev) => {
-                const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
-                return next;
-              });
+            placeholder="Введите код сигнала, напр. F13"
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && resolutionKeyInput.trim()) {
+                void handlePreviewResolution();
+              }
             }}
-            onOpenActionPicker={(id, _binding) => {
-              startTransition(() => {
-                setSelectedControlId(id);
-                setMultiSelectedControlIds(new Set());
-              });
-            }}
-            onSelectLayer={onSelectLayer}
           />
-        </section>
+          <div className="debug-testing__actions">
+            <button
+              type="button"
+              className="action-button"
+              onClick={() => { void handlePreviewResolution(); }}
+              disabled={!resolutionKeyInput.trim()}
+            >
+              Проверить
+            </button>
+            <button
+              type="button"
+              className="action-button action-button--secondary"
+              onClick={() => { void handleExecutePreviewAction(); }}
+              disabled={!resolutionKeyInput.trim()}
+            >
+              Пробный
+            </button>
+            <button
+              type="button"
+              className="action-button action-button--warning"
+              onClick={() => { void handleRunPreviewAction(); }}
+              disabled={!canRunLiveAction}
+            >
+              Вживую
+            </button>
+          </div>
+        </div>
+
+        {lastResolutionPreview ? (
+          <div className="debug-testing__result">
+            <span className="debug-testing__result-item">
+              <span className="debug-testing__result-label">Профиль</span>
+              {lastResolutionPreview.resolvedProfileId
+                ? (profiles.find((p) => p.id === lastResolutionPreview.resolvedProfileId)?.name ??
+                    lastResolutionPreview.resolvedProfileId)
+                : "н/д"}
+            </span>
+            <span className="debug-testing__result-item">
+              <span className="debug-testing__result-label">Кнопка</span>
+              {lastResolutionPreview.controlId
+                ? controlName(activeConfig.physicalControls, lastResolutionPreview.controlId)
+                : "н/д"}
+            </span>
+            <span className="debug-testing__result-item">
+              <span className="debug-testing__result-label">Результат</span>
+              <span className={`debug-testing__status debug-testing__status--${lastResolutionPreview.status}`}>
+                {labelForPreviewStatus(lastResolutionPreview.status)}
+              </span>
+            </span>
+            {lastResolutionPreview.actionId ? (
+              <span className="debug-testing__result-item debug-testing__result-item--mono">
+                <span className="debug-testing__result-label">Действие</span>
+                {lastResolutionPreview.actionId}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+
+        {lastExecution ? (
+          <div className="debug-testing__result">
+            <span className="debug-testing__result-item">
+              <span className="debug-testing__result-label">Исход</span>
+              {labelForExecutionOutcome(lastExecution.outcome)}
+            </span>
+            <span className="debug-testing__result-item">
+              <span className="debug-testing__result-label">Режим</span>
+              {labelForExecutionMode(lastExecution.mode)}
+            </span>
+            <span className="debug-testing__result-item debug-testing__result-item--mono">
+              <span className="debug-testing__result-label">Действие</span>
+              {lastExecution.actionId}
+            </span>
+            <span className="debug-testing__result-item">
+              <span className="debug-testing__result-label">Когда</span>
+              {formatTimestamp(lastExecution.executedAt)}
+            </span>
+          </div>
+        ) : null}
+
+        {lastRuntimeError ? (
+          <div className="notice notice--error" style={{ margin: "10px 0 0" }}>
+            <strong>{lastRuntimeError.category}</strong>
+            <p>{lastRuntimeError.message}</p>
+          </div>
+        ) : null}
       </div>
 
-      <div className="workspace__right">
-        {/* Control properties panel (verification variant) */}
-        <section className="panel panel--accent">
-          <p className="panel__eyebrow">Проверяемая кнопка</p>
-          {selectedControl ? (
-            <>
-              <h2>{selectedControl.defaultName}</h2>
+      {/* ── Properties panel (full width) ── */}
+      <div className="expert-section">
+        <ControlPropertiesPanel
+          selectedControl={selectedControl}
+          selectedBinding={selectedBinding}
+          selectedAction={selectedAction}
+          selectedEncoder={selectedEncoder}
+          snippetById={snippetById}
+          selectedLayer={selectedLayer}
+          lastEncodedKey={lastEncodedKey}
+          lastResolutionPreview={lastResolutionPreview}
+          updateDraft={updateDraft}
+          verificationSessionActive={!!verificationSession}
+        />
+      </div>
 
-              <div className="fact-grid">
-                <Fact
-                  label="Статус"
-                  value={labelForCapability(selectedControl.capabilityStatus)}
-                />
-                <Fact
-                  label="Сигнал"
-                  value={selectedEncoder?.encodedKey ?? "не назначен"}
-                />
-              </div>
-
-              <label className="field">
-                <span className="field__label">Статус кнопки</span>
-                <select
-                  value={selectedControl.capabilityStatus}
-                  onChange={(event) => {
-                    updateDraft((config) =>
-                      updateControlCapabilityStatus(
-                        config,
-                        selectedControl.id,
-                        event.target.value as CapabilityStatus,
-                      ),
-                    );
-                  }}
-                >
-                  <option value="verified">Подтверждена</option>
-                  <option value="needsValidation">Нужна проверка</option>
-                  <option value="partiallyRemappable">Частично переназначается</option>
-                  <option value="reserved">Зарезервирована</option>
-                </select>
-              </label>
-
-              <div className="inspector__binding-card">
-                <h3>Что сработает</h3>
-                {selectedBinding ? (
-                  <>
-                    <p>
-                      <strong>{selectedBinding.label}</strong>
-                    </p>
-                    <p>{describeActionSummary(selectedAction, snippetById)}</p>
-                  </>
-                ) : (
-                  <p>Для этой кнопки на текущем слое назначение ещё не создано.</p>
-                )}
-              </div>
-            </>
-          ) : (
-            <p>Выберите кнопку на схеме мыши</p>
-          )}
-        </section>
-
-        {/* Verification panel */}
-        <section className="panel">
-          <p className="panel__eyebrow">Проверка кнопки</p>
+      {/* ── Collapsible verification session ── */}
+      <details className="expert-log">
+        <summary className="expert-log__summary">
+          Сессия проверки
+          {verificationSession ? (
+            <span className="expert-log__count">
+              {" "}({sessionSummary.matched + sessionSummary.mismatched + sessionSummary.noSignal + sessionSummary.skipped}
+              /{verificationSession.steps.length})
+            </span>
+          ) : null}
+        </summary>
+        <div className="expert-section">
           {selectedControl ? (
             <div className="editor-grid">
               <div className="compound-card">
-                {/* Session header: scope selector + start/reset */}
+                {/* Session setup (pre-start) */}
                 {!verificationSession ? (
                   <>
                     <div className="compound-card__header">
@@ -290,22 +308,22 @@ export function VerificationWorkspace({
                     </p>
 
                     <div className="editor-actions">
-                        <button
-                          type="button"
-                          className="action-button"
-                          onClick={() => {
-                            void handleStartVerificationSession();
-                          }}
-                        >
-                          {runtimeSummary.status !== "running"
-                            ? "Запустить перехват и начать"
-                            : "Начать сессию"}
-                        </button>
+                      <button
+                        type="button"
+                        className="action-button"
+                        onClick={() => {
+                          void handleStartVerificationSession();
+                        }}
+                      >
+                        {runtimeSummary.status !== "running"
+                          ? "Запустить перехват и начать"
+                          : "Начать сессию"}
+                      </button>
                     </div>
                   </>
                 ) : null}
 
-                {/* Step progress bar */}
+                {/* Active session: progress + steps */}
                 {verificationSession ? (
                   <>
                     <div className="verification-progress">
@@ -433,7 +451,7 @@ export function VerificationWorkspace({
                               />
                             </label>
 
-                            {/* Primary action: Совпало */}
+                            {/* Primary action */}
                             <button
                               type="button"
                               className="action-button verification-action--primary"
@@ -569,196 +587,48 @@ export function VerificationWorkspace({
                   </>
                 ) : null}
               </div>
-
-              {!verificationSession ? (
-                <>
-                  <div className={`notice ${verificationAlignment.noticeClass}`}>
-                    <strong>{verificationAlignment.title}</strong>
-                    <p>{verificationAlignment.body}</p>
-                    {lastObservedResolvedSelectedControl ? (
-                      <p className="notice__meta">
-                        Последняя проверка совпала с этой кнопкой и слоем.
-                      </p>
-                    ) : (
-                      <p className="notice__meta">
-                        Последний сигнал мог относиться к другой кнопке или к
-                        ручной проверке.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="fact-grid">
-                    <Fact label="Ожидалось" value={expectedEncodedKey ?? "н/д"} />
-                    <Fact label="Настроено" value={selectedEncoder?.encodedKey ?? "не назначено"} />
-                    <Fact label="Наблюдалось" value={lastObservedEncodedKey ?? "ничего"} />
-                    <Fact
-                      label="Время наблюдения"
-                      value={
-                        lastEncodedKey ? formatTimestamp(lastEncodedKey.receivedAt) : "н/д"
-                      }
-                    />
-                  </div>
-
-                  <div className="editor-actions">
-                    <button
-                      type="button"
-                      className="action-button action-button--small"
-                      onClick={() => {
-                        updateDraft((config) =>
-                          seedExpectedEncoderMapping(config, selectedLayer, selectedControl),
-                        );
-                      }}
-                      disabled={!expectedEncodedKey}
-                    >
-                      {selectedEncoder ? "Применить ожидаемый сигнал" : "Создать ожидаемый сигнал"}
-                    </button>
-
-                    <button
-                      type="button"
-                      className="action-button action-button--small action-button--secondary"
-                      onClick={() => {
-                        if (!lastObservedEncodedKey) {
-                          return;
-                        }
-
-                        updateDraft((config) =>
-                          upsertEncoderMapping(config, {
-                            controlId: selectedControl.id,
-                            layer: selectedLayer,
-                            encodedKey: lastObservedEncodedKey,
-                            source: "detected",
-                            verified: false,
-                          }),
-                        );
-                      }}
-                      disabled={!lastObservedEncodedKey}
-                    >
-                      Использовать наблюдаемый сигнал
-                    </button>
-
-                    <button
-                      type="button"
-                      className="action-button action-button--small action-button--secondary"
-                      onClick={() => {
-                        if (!selectedEncoder) {
-                          return;
-                        }
-
-                        updateDraft((config) =>
-                          upsertEncoderMapping(config, {
-                            ...selectedEncoder,
-                            verified: true,
-                          }),
-                        );
-                      }}
-                      disabled={
-                        !selectedEncoder ||
-                        !lastObservedEncodedKey ||
-                        selectedEncoder.encodedKey !== lastObservedEncodedKey
-                      }
-                    >
-                      Пометить сигнал как подтверждённый
-                    </button>
-
-                    <button
-                      type="button"
-                      className="action-button action-button--small action-button--secondary"
-                      onClick={() => {
-                        updateDraft((config) =>
-                          updateControlCapabilityStatus(
-                            config,
-                            selectedControl.id,
-                            selectedEncoder?.verified ? "verified" : "needsValidation",
-                          ),
-                        );
-                      }}
-                      disabled={!selectedEncoder}
-                    >
-                      Повысить статус кнопки
-                    </button>
-                  </div>
-                </>
-              ) : null}
             </div>
           ) : (
             <p className="panel__muted">
-              Выберите кнопку перед сверкой ожидаемого, настроенного и
-              наблюдаемого сигнала.
+              Выберите кнопку перед началом сессии проверки.
             </p>
           )}
-        </section>
+        </div>
+      </details>
 
-        {/* Runtime panel */}
-        <section className="panel">
-          <p className="panel__eyebrow">Фоновый перехват</p>
-          <div className="runtime-controls">
-            <button
-              type="button"
-              className="action-button"
-              onClick={() => {
-                void handleStartRuntime();
-              }}
-              disabled={
-                viewState === "loading" ||
-                viewState === "saving" ||
-                runtimeSummary.status === "running"
-              }
-            >
-              Запустить
-            </button>
-            <button
-              type="button"
-              className="action-button action-button--secondary"
-              onClick={() => {
-                void handleReloadRuntime();
-              }}
-              disabled={
-                viewState === "loading" ||
-                viewState === "saving" ||
-                runtimeSummary.status !== "running"
-              }
-            >
-              Перезапустить
-            </button>
-            <button
-              type="button"
-              className="action-button action-button--secondary"
-              onClick={() => {
-                void handleStopRuntime();
-              }}
-              disabled={
-                viewState === "loading" ||
-                viewState === "saving" ||
-                runtimeSummary.status !== "running"
-              }
-            >
-              Остановить
-            </button>
-          </div>
-
-          <div className="fact-grid">
-            <Fact label="Состояние" value={labelForRuntimeStatus(runtimeSummary.status)} />
-            <Fact label="Бэкенд" value={runtimeSummary.captureBackend} />
-            <Fact
-              label="Версия конфигурации"
-              value={String(runtimeSummary.activeConfigVersion ?? "н/д")}
-            />
-            <Fact
-              label="Предупреждений"
-              value={String(runtimeSummary.warningCount)}
-            />
-            <Fact
-              label="Запущен"
-              value={formatTimestamp(runtimeSummary.startedAt)}
-            />
-            <Fact
-              label="Последняя перезагрузка"
-              value={formatTimestamp(runtimeSummary.lastReloadAt)}
-            />
-          </div>
-
-        </section>
-      </div>
-    </>
+      {/* ── Collapsible event log ── */}
+      <details className="expert-log" open>
+        <summary className="expert-log__summary">
+          Журнал событий
+          {debugLog.length > 0 ? (
+            <span className="expert-log__count">
+              {" "}({debugLog.length})
+            </span>
+          ) : null}
+        </summary>
+        {reversedLog.length > 0 ? (
+          <ul className="log-list">
+            {reversedLog.map((entry) => (
+              <li key={entry.id} className="log-item">
+                <span className={`badge ${logLevelBadgeClass(entry.level)}`}>
+                  {entry.level === "info" ? "инфо" : "вним."}
+                </span>
+                <div className="log-item__body">
+                  <strong>{entry.message}</strong>
+                  <span>
+                    <span className="log-item__category">{entry.category}</span>
+                    <time className="log-item__time">{formatTimestamp(entry.createdAt)}</time>
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="panel__muted" style={{ padding: "0 16px 16px" }}>
+            Журнал пока пуст. Запустите перехват, чтобы увидеть события.
+          </p>
+        )}
+      </details>
+    </div>
   );
 }

@@ -13,7 +13,7 @@ import type {
 import type { VerificationSessionScope } from "./verification-session";
 
 export type ViewState = "idle" | "loading" | "ready" | "saving" | "error";
-export type WorkspaceMode = "profiles" | "verification" | "advanced";
+export type WorkspaceMode = "profiles" | "debug";
 
 export type FamilySection = {
   family: string;
@@ -50,18 +50,11 @@ export const workspaceModeCopy: Array<{
     meta: "Маршрутизация профилей",
   },
   {
-    value: "verification",
-    label: "Проверка",
-    heading: "Проверка на реальной мыши",
-    body: "Пошаговая сессия проверки: ожидалось, наблюдалось и что нужно исправить.",
-    meta: "Живая валидация",
-  },
-  {
-    value: "advanced",
-    label: "Эксперт",
-    heading: "Экспертный режим",
-    body: "Сложные действия, библиотека фрагментов, журнал, диагностика и служебные инструменты.",
-    meta: "Служебные инструменты",
+    value: "debug",
+    label: "Отладка",
+    heading: "Отладка и проверка",
+    body: "Тестирование сигналов, пошаговая проверка кнопок, журнал событий и диагностика.",
+    meta: "Диагностика и проверка",
   },
 ];
 

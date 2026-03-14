@@ -36,6 +36,11 @@ import {
   type ViewState,
 } from "./constants";
 
+/** Look up human-readable button name from its ControlId, falling back to the raw ID. */
+export function controlName(controls: readonly PhysicalControl[], id: string): string {
+  return controls.find((c) => c.id === id)?.defaultName ?? id;
+}
+
 export function resolveInitialProfileId(config: AppConfig): string | null {
   return (
     config.profiles.find((profile) => profile.id === config.settings.fallbackProfileId)?.id ??
@@ -162,16 +167,16 @@ export function describeVerificationAlignment(
 ): { title: string; body: string; noticeClass: string } {
   if (!expectedEncodedKey && !configuredEncodedKey) {
     return {
-      title: "Namespace для проверки пока не задан",
-      body: "Для этого контрола пока не задан ожидаемый encoded key. Считайте это ручной задачей на валидацию.",
+      title: "Ожидаемый сигнал ещё не задан",
+      body: "Для этой кнопки пока не задан ожидаемый сигнал. Нажмите кнопку на мыши, чтобы зафиксировать сигнал, или создайте его вручную.",
       noticeClass: "notice--info",
     };
   }
 
   if (!configuredEncodedKey && expectedEncodedKey) {
     return {
-      title: "Ожидаемый key известен, но ещё не настроен",
-      body: `Создайте ожидаемый сигнал \`${expectedEncodedKey}\`, сохраните конфигурацию, запустите перехват и затем нажмите физическую кнопку для проверки.`,
+      title: "Ожидаемый сигнал известен, но ещё не настроен",
+      body: `Создайте сигнал «${expectedEncodedKey}», сохраните конфигурацию, запустите перехват и затем нажмите физическую кнопку для проверки.`,
       noticeClass: "notice--warning",
     };
   }

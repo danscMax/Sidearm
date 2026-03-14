@@ -15,7 +15,6 @@ interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
-  profileTabs?: React.ReactNode;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -73,7 +72,6 @@ export function MouseVisualization({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
-  profileTabs,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
@@ -83,7 +81,6 @@ export function MouseVisualization({
     return (
       <div className="mouse-visual-tabs">
         <div className="mouse-visual-tabs__nav">
-          {profileTabs}
           <button
             type="button"
             className="view-mode-toggle view-mode-toggle--icon"
@@ -102,7 +99,6 @@ export function MouseVisualization({
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}
           onSelectLayer={onSelectLayer}
-          profileTabs={profileTabs}
         />
       </div>
     );
@@ -242,48 +238,35 @@ export function MouseVisualization({
     );
   }
 
-  const layerToggle = (
-    <div className="layer-toggle">
-      {layerCopy.map((layer) => (
-        <button
-          key={layer.value}
-          type="button"
-          className={`layer-toggle__btn layer-toggle__btn--${layer.value}${selectedLayer === layer.value ? " layer-toggle__btn--active" : ""}`}
-          onClick={() => onSelectLayer(layer.value)}
-        >
-          {layer.label}
-        </button>
-      ))}
-    </div>
-  );
+  const layerIdx = layerCopy.findIndex((l) => l.value === selectedLayer);
+
+  const viewTabs: { key: ViewTab; label: string }[] = [
+    { key: "combined", label: "Все кнопки" },
+    { key: "top", label: "Верхняя панель" },
+    { key: "side", label: "Боковая клавиатура" },
+  ];
+  const viewIdx = viewTabs.findIndex((t) => t.key === activeTab);
 
   return (
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
-        {profileTabs}
-        {layerToggle}
-        <div className="view-tabs">
-          <button
-            type="button"
-            className={`mouse-visual-tabs__btn${activeTab === "combined" ? " mouse-visual-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab("combined")}
-          >
-            Все кнопки
-          </button>
-          <button
-            type="button"
-            className={`mouse-visual-tabs__btn${activeTab === "top" ? " mouse-visual-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab("top")}
-          >
-            Верхняя панель
-          </button>
-          <button
-            type="button"
-            className={`mouse-visual-tabs__btn${activeTab === "side" ? " mouse-visual-tabs__btn--active" : ""}`}
-            onClick={() => setActiveTab("side")}
-          >
-            Боковая клавиатура
-          </button>
+        <div className="pill-track" style={{ "--pill-count": viewTabs.length } as React.CSSProperties}>
+          {viewIdx >= 0 ? (
+            <div
+              className="pill-track__indicator"
+              style={{ transform: `translateX(${viewIdx * 100}%)` }}
+            />
+          ) : null}
+          {viewTabs.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              className={`pill-track__pill${tab.key === activeTab ? " pill-track__pill--active" : ""}`}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
         <button
           type="button"
@@ -350,6 +333,27 @@ export function MouseVisualization({
             {renderLabelColumn(COMBINED_RIGHT_BUTTONS, combinedViewHotspots, "right")}
           </div>
         )}
+      </div>
+
+      <div className="mouse-visual-tabs__footer">
+        <div className="pill-track pill-track--layer" style={{ "--pill-count": layerCopy.length } as React.CSSProperties}>
+          {layerIdx >= 0 ? (
+            <div
+              className={`pill-track__indicator pill-track__indicator--${selectedLayer}`}
+              style={{ transform: `translateX(${layerIdx * 100}%)` }}
+            />
+          ) : null}
+          {layerCopy.map((layer) => (
+            <button
+              key={layer.value}
+              type="button"
+              className={`pill-track__pill${layer.value === selectedLayer ? " pill-track__pill--active" : ""}`}
+              onClick={() => onSelectLayer(layer.value)}
+            >
+              {layer.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );

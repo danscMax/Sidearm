@@ -28,7 +28,7 @@ import {
   startMacroRecording,
   recordKeystroke,
   stopMacroRecording,
-  listenEncodedKeyEvent,
+  captureNextKeystroke,
 } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
@@ -470,50 +470,17 @@ export function ActionPickerModal({
     setIsCapturing(false);
   }
 
-  function formatEncoderKey(event: KeyboardEvent): string {
-    const parts: string[] = [];
-    if (event.ctrlKey) parts.push("Ctrl");
-    if (event.altKey) parts.push("Alt");
-    if (event.shiftKey) parts.push("Shift");
-    const rawKey = resolveKeyName(event);
-    const key = normalizeKeyName(rawKey);
-    if (!["Control", "Shift", "Alt", "Meta"].includes(rawKey)) {
-      parts.push(key);
-    }
-    return parts.join("+") || key;
-  }
-
-  useEffect(() => {
-    if (!isCapturingSignal) return;
-
-    let cancelled = false;
-
-    // Primary: listen to Rust runtime's encoded_key_received event (correct key names)
-    const unlistenPromise = listenEncodedKeyEvent("encoded_key_received", (event) => {
-      if (cancelled) return;
-      setSignalDraft(event.encodedKey);
-      setIsCapturingSignal(false);
-    });
-
-    // Fallback: browser keydown for when runtime is not running
-    function handleSignalCapture(e: KeyboardEvent) {
-      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      const signal = formatEncoderKey(e);
+  async function handleCaptureSignal() {
+    setIsCapturingSignal(true);
+    try {
+      const signal = await captureNextKeystroke();
       setSignalDraft(signal);
+    } catch {
+      // Timeout or error — silently ignore
+    } finally {
       setIsCapturingSignal(false);
     }
-
-    window.addEventListener("keydown", handleSignalCapture, true);
-
-    return () => {
-      cancelled = true;
-      window.removeEventListener("keydown", handleSignalCapture, true);
-      void unlistenPromise.then((unlisten) => unlisten());
-    };
-  }, [isCapturingSignal]);
+  }
 
   function buildAction(): Action {
     const category = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory) ?? ACTION_CATEGORIES[0];
@@ -841,9 +808,10 @@ export function ActionPickerModal({
                     <button
                       type="button"
                       className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
-                      onClick={() => setIsCapturingSignal(!isCapturingSignal)}
+                      onClick={() => { if (!isCapturingSignal) void handleCaptureSignal(); }}
+                      disabled={isCapturingSignal}
                     >
-                      {isCapturingSignal ? "Отмена" : "Записать"}
+                      {isCapturingSignal ? "Ожидание..." : "Записать"}
                     </button>
                   </div>
                 </label>

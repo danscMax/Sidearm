@@ -815,22 +815,27 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?;
             let tray_menu = Menu::with_items(
                 app,
                 &[
-                    &MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?,
+                    &toggle_item,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
                 ],
             )?;
 
+            // Store the toggle menu item handle so we can update its text
+            let toggle_item_handle = toggle_item.clone();
+
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
-                .on_menu_event(|app, event| match event.id.as_ref() {
+                .on_menu_event(move |app, event| match event.id.as_ref() {
                     "toggle_runtime" => {
                         let app = app.clone();
+                        let toggle_item = toggle_item_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             let runtime_store: tauri::State<'_, Arc<Mutex<RuntimeStore>>> =
                                 app.state();
@@ -855,6 +860,7 @@ pub fn run() {
                                         store.stop()
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
+                                    let _ = toggle_item.set_text("Включить перехват");
                                 }
                             } else {
                                 let config_dir = match app.path().app_config_dir() {
@@ -891,6 +897,7 @@ pub fn run() {
                                         )
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STARTED, &summary);
+                                    let _ = toggle_item.set_text("Выключить перехват");
                                 }
                             }
                         });

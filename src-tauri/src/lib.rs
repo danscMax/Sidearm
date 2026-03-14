@@ -820,7 +820,6 @@ pub fn run() {
                 &[
                     &MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?,
                     &PredefinedMenuItem::separator(app)?,
-                    &MenuItem::with_id(app, "show", "Открыть студию", true, None::<&str>)?,
                     &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
                 ],
             )?;
@@ -828,13 +827,8 @@ pub fn run() {
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
                 .menu(&tray_menu)
+                .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
-                    "show" => {
-                        if let Some(window) = app.get_webview_window("main") {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
                     "toggle_runtime" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {

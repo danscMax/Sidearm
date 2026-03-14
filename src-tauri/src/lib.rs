@@ -6,6 +6,7 @@ mod exe_icon;
 mod executor;
 mod hotkeys;
 mod input_synthesis;
+mod recorder;
 mod resolver;
 mod runtime;
 mod window_capture;
@@ -19,6 +20,7 @@ use std::{
 pub use capture_backend::capture_helper_main;
 use capture_backend::RuntimeController;
 use command_error::CommandError;
+use recorder::MacroRecorder;
 use config::{
     load_or_initialize_config, save_config as save_config_to_store, AppConfig, ConfigStoreError,
     LoadConfigResponse, SaveConfigResponse,
@@ -689,6 +691,40 @@ fn runtime_error_context(event: &RuntimeErrorEvent) -> String {
 }
 
 #[tauri::command]
+async fn start_macro_recording(
+    recorder: State<'_, Arc<Mutex<MacroRecorder>>>,
+) -> Result<(), CommandError> {
+    let mut rec = recorder
+        .lock()
+        .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
+    rec.start(runtime::timestamp_millis())
+        .map_err(|msg| CommandError::new("recording_error", msg, None))
+}
+
+#[tauri::command]
+async fn record_keystroke(
+    recorder: State<'_, Arc<Mutex<MacroRecorder>>>,
+    key: String,
+) -> Result<(), CommandError> {
+    let mut rec = recorder
+        .lock()
+        .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
+    rec.record_keystroke(key, runtime::timestamp_millis());
+    Ok(())
+}
+
+#[tauri::command]
+async fn stop_macro_recording(
+    recorder: State<'_, Arc<Mutex<MacroRecorder>>>,
+) -> Result<recorder::MacroRecording, CommandError> {
+    let mut rec = recorder
+        .lock()
+        .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
+    rec.stop(runtime::timestamp_millis())
+        .map_err(|msg| CommandError::new("recording_error", msg, None))
+}
+
+#[tauri::command]
 async fn get_exe_icon(exe_name: String) -> Result<Option<String>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         // Try common install locations for the exe
@@ -921,6 +957,7 @@ pub fn run() {
         })
         .manage(Arc::new(Mutex::new(RuntimeStore::default())))
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
+        .manage(Arc::new(Mutex::new(MacroRecorder::new())))
         .invoke_handler(tauri::generate_handler![
             export_verification_session,
             load_config,
@@ -936,7 +973,10 @@ pub fn run() {
             run_preview_action,
             get_exe_icon,
             write_text_file,
-            read_text_file
+            read_text_file,
+            start_macro_recording,
+            record_keystroke,
+            stop_macro_recording
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useOptimistic } from "react";
 import { enable as enableAutostart, disable as disableAutostart } from "@tauri-apps/plugin-autostart";
 
 import { normalizeCommandError } from "../lib/backend";
@@ -80,6 +80,10 @@ export function ServiceToolsPanel({
   updateDraft,
   setError,
 }: ServiceToolsPanelProps) {
+  const [optimisticAutostart, setOptimisticAutostart] = useOptimistic(
+    activeConfig.settings.startWithWindows,
+  );
+
   const reversedLog = useMemo(() => [...debugLog].reverse(), [debugLog]);
 
   const resolvedLiveRunnable =
@@ -393,9 +397,10 @@ export function ServiceToolsPanel({
             <span className="field__label">Запускать вместе с Windows</span>
             <input
               type="checkbox"
-              checked={activeConfig.settings.startWithWindows}
+              checked={optimisticAutostart}
               onChange={(event) => {
                 const enabled = event.target.checked;
+                setOptimisticAutostart(enabled);
                 (enabled ? enableAutostart() : disableAutostart())
                   .then(() => {
                     updateDraft((config) => ({

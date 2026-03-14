@@ -28,6 +28,7 @@ import {
   startMacroRecording,
   recordKeystroke,
   stopMacroRecording,
+  listenEncodedKeyEvent,
 } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
@@ -485,8 +486,17 @@ export function ActionPickerModal({
   useEffect(() => {
     if (!isCapturingSignal) return;
 
+    let cancelled = false;
+
+    // Primary: listen to Rust runtime's encoded_key_received event (correct key names)
+    const unlistenPromise = listenEncodedKeyEvent("encoded_key_received", (event) => {
+      if (cancelled) return;
+      setSignalDraft(event.encodedKey);
+      setIsCapturingSignal(false);
+    });
+
+    // Fallback: browser keydown for when runtime is not running
     function handleSignalCapture(e: KeyboardEvent) {
-      // Ignore bare modifier presses — wait for a "real" key
       if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
       e.preventDefault();
       e.stopPropagation();
@@ -497,7 +507,12 @@ export function ActionPickerModal({
     }
 
     window.addEventListener("keydown", handleSignalCapture, true);
-    return () => window.removeEventListener("keydown", handleSignalCapture, true);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("keydown", handleSignalCapture, true);
+      void unlistenPromise.then((unlisten) => unlisten());
+    };
   }, [isCapturingSignal]);
 
   function buildAction(): Action {

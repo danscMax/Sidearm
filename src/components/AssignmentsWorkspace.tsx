@@ -9,6 +9,7 @@ import type {
 } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { useActionPicker } from "../hooks/useActionPicker";
+import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
 import { makeBindingId, removeBinding, upsertBinding } from "../lib/config-editing";
 import { MouseVisualization } from "./MouseVisualization";
 import { ContextMenu } from "./ContextMenu";
@@ -62,30 +63,11 @@ export function AssignmentsWorkspace({
     setActionPickerOpen,
   });
 
-  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
-
-  function handleDropBinding(targetControlId: ControlId, sourceActionId: string) {
-    if (!effectiveProfileId) return;
-    updateDraft((config) => {
-      const sourceAction = config.actions.find((a) => a.id === sourceActionId);
-      if (!sourceAction) return config;
-      const newAction = { ...sourceAction, id: crypto.randomUUID() };
-      const bindingId = makeBindingId(effectiveProfileId, selectedLayer, targetControlId);
-      const newBinding: Binding = {
-        id: bindingId,
-        profileId: effectiveProfileId,
-        layer: selectedLayer,
-        controlId: targetControlId,
-        label: newAction.pretty,
-        actionRef: newAction.id,
-        enabled: true,
-      };
-      return upsertBinding(
-        { ...config, actions: [...config.actions, newAction] },
-        newBinding,
-      );
-    });
-  }
+  const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVizPanel({
+    effectiveProfileId,
+    selectedLayer,
+    updateDraft,
+  });
 
   const [ctxMenu, setCtxMenu] = useState<{
     x: number; y: number;

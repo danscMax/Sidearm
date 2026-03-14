@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, AppMapping, Binding, ControlId, Layer, Profile } from "../lib/config";
+import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
@@ -9,12 +9,11 @@ import {
   deleteAppMapping,
   extractProfileExport,
   findDuplicateAppMapping,
-  makeBindingId,
   mergeImportedProfile,
   upsertAppMapping,
-  upsertBinding,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
+import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
 import { getExeIcon, readTextFile, writeTextFile } from "../lib/backend";
 import { parseCommaSeparatedUniqueValues, sortAppMappings } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
@@ -365,30 +364,11 @@ export function ProfilesWorkspace({
   setActionPickerOpen,
   executionCounts,
 }: ProfilesWorkspaceProps) {
-  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
-
-  function handleDropBinding(targetControlId: ControlId, sourceActionId: string) {
-    if (!effectiveProfileId) return;
-    updateDraft((config) => {
-      const sourceAction = config.actions.find((a) => a.id === sourceActionId);
-      if (!sourceAction) return config;
-      const newAction = { ...sourceAction, id: crypto.randomUUID() };
-      const bindingId = makeBindingId(effectiveProfileId, selectedLayer, targetControlId);
-      const newBinding: Binding = {
-        id: bindingId,
-        profileId: effectiveProfileId,
-        layer: selectedLayer,
-        controlId: targetControlId,
-        label: newAction.pretty,
-        actionRef: newAction.id,
-        enabled: true,
-      };
-      return upsertBinding(
-        { ...config, actions: [...config.actions, newAction] },
-        newBinding,
-      );
-    });
-  }
+  const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVizPanel({
+    effectiveProfileId,
+    selectedLayer,
+    updateDraft,
+  });
 
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,

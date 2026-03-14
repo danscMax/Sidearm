@@ -3298,6 +3298,12 @@ code {
   max-width: 400px;
 }
 
+.profiles__profile-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 /* --- D. Section header --- */
 
 .profiles__section-header {

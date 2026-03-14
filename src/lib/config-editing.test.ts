@@ -40,7 +40,10 @@ import {
   makeProfileId,
   makeSnippetId,
   makeAppMappingId,
+  extractProfileExport,
+  mergeImportedProfile,
 } from "./config-editing";
+import type { ProfileExportData } from "./config-editing";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1782,5 +1785,286 @@ describe("removeBinding", () => {
     const result = removeBinding(config, "nonexistent-binding");
 
     expect(result).toBe(config);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractProfileExport
+// ---------------------------------------------------------------------------
+
+describe("extractProfileExport", () => {
+  it("extracts profile with its bindings, actions, and appMappings", () => {
+    const profile = makeProfile({ id: "p1", name: "Gaming" });
+    const action1 = makeAction({ id: "act-1", pretty: "Ctrl+C" });
+    const action2 = makeAction({ id: "act-2", pretty: "Ctrl+V" });
+    const binding1 = makeBinding({
+      id: "b1",
+      profileId: "p1",
+      controlId: "thumb_01",
+      actionRef: "act-1",
+    });
+    const binding2 = makeBinding({
+      id: "b2",
+      profileId: "p1",
+      controlId: "thumb_02",
+      actionRef: "act-2",
+    });
+    const appMapping = makeAppMapping({
+      id: "app-1",
+      profileId: "p1",
+      exe: "game.exe",
+    });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [profile],
+      bindings: [binding1, binding2],
+      actions: [action1, action2],
+      appMappings: [appMapping],
+    };
+
+    const result = extractProfileExport(config, "p1");
+
+    expect(result.version).toBe(2);
+    expect(result.exportedAt).toBeTruthy();
+    // exportedAt should be a valid ISO date string
+    expect(() => new Date(result.exportedAt).toISOString()).not.toThrow();
+    expect(result.profile).toEqual(profile);
+    expect(result.bindings).toEqual([binding1, binding2]);
+    expect(result.actions).toEqual([action1, action2]);
+    expect(result.appMappings).toEqual([appMapping]);
+  });
+
+  it("only includes actions referenced by the profile's bindings", () => {
+    const profileA = makeProfile({ id: "pA", name: "Profile A" });
+    const profileB = makeProfile({ id: "pB", name: "Profile B" });
+    const actionA = makeAction({ id: "act-a", pretty: "Action A" });
+    const actionB = makeAction({ id: "act-b", pretty: "Action B" });
+    const actionOrphan = makeAction({ id: "act-orphan", pretty: "Orphan" });
+    const bindingA = makeBinding({
+      id: "bA",
+      profileId: "pA",
+      controlId: "thumb_01",
+      actionRef: "act-a",
+    });
+    const bindingB = makeBinding({
+      id: "bB",
+      profileId: "pB",
+      controlId: "thumb_01",
+      actionRef: "act-b",
+    });
+    const appMappingB = makeAppMapping({
+      id: "app-b",
+      profileId: "pB",
+      exe: "other.exe",
+    });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [profileA, profileB],
+      bindings: [bindingA, bindingB],
+      actions: [actionA, actionB, actionOrphan],
+      appMappings: [appMappingB],
+    };
+
+    const result = extractProfileExport(config, "pA");
+
+    expect(result.actions).toEqual([actionA]);
+    expect(result.actions).not.toContainEqual(actionB);
+    expect(result.actions).not.toContainEqual(actionOrphan);
+    expect(result.bindings).toEqual([bindingA]);
+    expect(result.appMappings).toEqual([]);
+  });
+
+  it("throws if profileId not found", () => {
+    const config = createMinimalConfig();
+
+    expect(() => extractProfileExport(config, "nonexistent")).toThrow(
+      "Profile not found: nonexistent",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeImportedProfile
+// ---------------------------------------------------------------------------
+
+function makeExportData(overrides: Partial<ProfileExportData> = {}): ProfileExportData {
+  return {
+    version: 2,
+    exportedAt: "2026-03-14T12:00:00.000Z",
+    profile: makeProfile({ id: "imported-profile", name: "Imported" }),
+    bindings: [
+      makeBinding({
+        id: "imported-binding-1",
+        profileId: "imported-profile",
+        controlId: "thumb_01",
+        actionRef: "imported-action-1",
+      }),
+    ],
+    actions: [
+      makeAction({ id: "imported-action-1", pretty: "Imported Action" }),
+    ],
+    appMappings: [
+      makeAppMapping({
+        id: "imported-app-1",
+        profileId: "imported-profile",
+        exe: "imported.exe",
+      }),
+    ],
+    ...overrides,
+  };
+}
+
+describe("mergeImportedProfile", () => {
+  it("merges imported profile into existing config with no collisions", () => {
+    const existingProfile = makeProfile({ id: "existing-profile", name: "Existing" });
+    const existingAction = makeAction({ id: "existing-action", pretty: "Existing" });
+    const existingBinding = makeBinding({
+      id: "existing-binding",
+      profileId: "existing-profile",
+      actionRef: "existing-action",
+    });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [existingProfile],
+      actions: [existingAction],
+      bindings: [existingBinding],
+    };
+    const exportData = makeExportData();
+
+    const result = mergeImportedProfile(config, exportData);
+
+    // Should have both profiles
+    expect(result.profiles).toHaveLength(2);
+    expect(result.profiles.some((p) => p.name === "Imported")).toBe(true);
+
+    // Should have both bindings
+    expect(result.bindings).toHaveLength(2);
+
+    // Should have both actions
+    expect(result.actions).toHaveLength(2);
+
+    // Should have the imported appMapping
+    expect(result.appMappings).toHaveLength(1);
+
+    // Imported binding should reference the imported profile and action
+    const importedBinding = result.bindings.find((b) => b.id !== "existing-binding");
+    expect(importedBinding).toBeDefined();
+    const importedProfileInResult = result.profiles.find((p) => p.name === "Imported");
+    expect(importedBinding!.profileId).toBe(importedProfileInResult!.id);
+    const importedActionInResult = result.actions.find((a) => a.id !== "existing-action");
+    expect(importedBinding!.actionRef).toBe(importedActionInResult!.id);
+
+    // Imported appMapping should reference the imported profile
+    const importedMapping = result.appMappings[0];
+    expect(importedMapping!.profileId).toBe(importedProfileInResult!.id);
+  });
+
+  it("generates new IDs on collision and remaps internal references", () => {
+    // Set up a config that has the SAME IDs as the import data
+    const collidingProfile = makeProfile({ id: "imported-profile", name: "Collider" });
+    const collidingAction = makeAction({ id: "imported-action-1", pretty: "Collider Action" });
+    const collidingBinding = makeBinding({
+      id: "imported-binding-1",
+      profileId: "imported-profile",
+      controlId: "thumb_03",
+      actionRef: "imported-action-1",
+    });
+    const collidingAppMapping = makeAppMapping({
+      id: "imported-app-1",
+      profileId: "imported-profile",
+      exe: "collider.exe",
+    });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [collidingProfile],
+      actions: [collidingAction],
+      bindings: [collidingBinding],
+      appMappings: [collidingAppMapping],
+    };
+    const exportData = makeExportData();
+
+    const result = mergeImportedProfile(config, exportData);
+
+    // Should have 2 profiles, 2 actions, 2 bindings, 2 appMappings
+    expect(result.profiles).toHaveLength(2);
+    expect(result.actions).toHaveLength(2);
+    expect(result.bindings).toHaveLength(2);
+    expect(result.appMappings).toHaveLength(2);
+
+    // New profile ID should differ from original
+    const newProfile = result.profiles.find((p) => p.id !== "imported-profile");
+    expect(newProfile).toBeDefined();
+    expect(newProfile!.name).toBe("Imported");
+
+    // New action ID should differ from original
+    const newAction = result.actions.find((a) => a.id !== "imported-action-1");
+    expect(newAction).toBeDefined();
+    expect(newAction!.pretty).toBe("Imported Action");
+
+    // New binding ID should differ from original
+    const newBinding = result.bindings.find((b) => b.id !== "imported-binding-1");
+    expect(newBinding).toBeDefined();
+
+    // Internal references must be updated:
+    // binding.profileId -> new profile ID
+    expect(newBinding!.profileId).toBe(newProfile!.id);
+    // binding.actionRef -> new action ID
+    expect(newBinding!.actionRef).toBe(newAction!.id);
+
+    // New appMapping ID should differ from original
+    const newAppMapping = result.appMappings.find((m) => m.id !== "imported-app-1");
+    expect(newAppMapping).toBeDefined();
+    // appMapping.profileId -> new profile ID
+    expect(newAppMapping!.profileId).toBe(newProfile!.id);
+
+    // Existing data should still be unchanged
+    expect(result.profiles.find((p) => p.id === "imported-profile")).toEqual(collidingProfile);
+    expect(result.actions.find((a) => a.id === "imported-action-1")).toEqual(collidingAction);
+    expect(result.bindings.find((b) => b.id === "imported-binding-1")).toEqual(collidingBinding);
+    expect(result.appMappings.find((m) => m.id === "imported-app-1")).toEqual(collidingAppMapping);
+  });
+
+  it("does not modify existing config data", () => {
+    const existingProfile = makeProfile({ id: "keep-me", name: "Original" });
+    const existingAction = makeAction({ id: "keep-action", pretty: "Original Action" });
+    const existingBinding = makeBinding({
+      id: "keep-binding",
+      profileId: "keep-me",
+      controlId: "thumb_02",
+      actionRef: "keep-action",
+    });
+    const existingAppMapping = makeAppMapping({
+      id: "keep-app",
+      profileId: "keep-me",
+      exe: "original.exe",
+    });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [existingProfile],
+      actions: [existingAction],
+      bindings: [existingBinding],
+      appMappings: [existingAppMapping],
+    };
+    const exportData = makeExportData();
+
+    const result = mergeImportedProfile(config, exportData);
+
+    // Existing profile is preserved exactly
+    expect(result.profiles.find((p) => p.id === "keep-me")).toEqual(existingProfile);
+
+    // Existing action is preserved exactly
+    expect(result.actions.find((a) => a.id === "keep-action")).toEqual(existingAction);
+
+    // Existing binding is preserved exactly
+    expect(result.bindings.find((b) => b.id === "keep-binding")).toEqual(existingBinding);
+
+    // Existing appMapping is preserved exactly
+    expect(result.appMappings.find((m) => m.id === "keep-app")).toEqual(existingAppMapping);
+
+    // Original config arrays are not mutated
+    expect(config.profiles).toHaveLength(1);
+    expect(config.actions).toHaveLength(1);
+    expect(config.bindings).toHaveLength(1);
+    expect(config.appMappings).toHaveLength(1);
   });
 });

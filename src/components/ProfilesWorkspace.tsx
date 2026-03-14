@@ -1,16 +1,19 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
+import type { ProfileExportData } from "../lib/config-editing";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
 import {
   createAppMappingFromCapture,
   deleteAppMapping,
+  extractProfileExport,
   findDuplicateAppMapping,
+  mergeImportedProfile,
   upsertAppMapping,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
-import { getExeIcon } from "../lib/backend";
+import { getExeIcon, readTextFile, writeTextFile } from "../lib/backend";
 import { parseCommaSeparatedUniqueValues, sortAppMappings } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
@@ -525,6 +528,54 @@ export function ProfilesWorkspace({
           onSelectLayer={onSelectLayer}
         />
       </div>
+
+      {/* ── Profile actions ── */}
+      {activeProfile ? (
+        <div className="profiles__profile-actions">
+          <button
+            type="button"
+            className="action-button action-button--small"
+            onClick={async () => {
+              if (!activeConfig || !activeProfile) return;
+              const data = extractProfileExport(activeConfig, activeProfile.id);
+              const json = JSON.stringify(data, null, 2);
+              const path = await save({
+                title: "Экспорт профиля",
+                defaultPath: `${activeProfile.name}.json`,
+                filters: [{ name: "JSON", extensions: ["json"] }],
+              });
+              if (path) await writeTextFile(path, json);
+            }}
+          >
+            Экспорт профиля
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--small"
+            onClick={async () => {
+              const path = await open({
+                title: "Импорт профиля",
+                filters: [{ name: "JSON", extensions: ["json"] }],
+                multiple: false,
+              });
+              if (typeof path !== "string" || !activeConfig) return;
+              try {
+                const json = await readTextFile(path);
+                const data = JSON.parse(json) as ProfileExportData;
+                if (!data.profile || !data.version) {
+                  console.error("Invalid profile export file");
+                  return;
+                }
+                updateDraft((c) => mergeImportedProfile(c, data));
+              } catch (e) {
+                console.error("Failed to import profile:", e);
+              }
+            }}
+          >
+            Импорт профиля
+          </button>
+        </div>
+      ) : null}
 
       {/* ── Section header ── */}
       <div className="profiles__section-header">

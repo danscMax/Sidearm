@@ -3745,3 +3745,25 @@ img.profiles__app-card-monogram {
   display: flex;
   gap: 4px;
 }
+
+.settings-profile-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--c-border);
+}
+
+.settings-delete-btn {
+  color: var(--c-danger, #e55);
+}
+
+.settings-delete-btn:hover {
+  background: rgba(238, 85, 85, 0.1);
+}
+
+.settings-bottom-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}

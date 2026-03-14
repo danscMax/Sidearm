@@ -1,5 +1,15 @@
+import { useState } from "react";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, Profile } from "../lib/config";
-import { upsertProfile, deleteProfile, duplicateProfile, createProfile } from "../lib/config-editing";
+import {
+  upsertProfile,
+  deleteProfile,
+  duplicateProfile,
+  createProfile,
+  extractProfileForExport,
+  importProfile,
+} from "../lib/config-editing";
+import { readTextFile, writeTextFile } from "../lib/backend";
 import { Toggle } from "./shared";
 
 export interface SettingsWorkspaceProps {
@@ -24,6 +34,8 @@ export function SettingsWorkspace({
   setSelectedProfileId,
   setConfirmModal,
 }: SettingsWorkspaceProps) {
+  const [importError, setImportError] = useState<string | null>(null);
+
   const sortedProfiles = [...activeConfig.profiles].sort(
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
   );
@@ -60,6 +72,56 @@ export function SettingsWorkspace({
         setConfirmModal(null);
       },
     });
+  }
+
+  async function handleExport(profile: Profile) {
+    const data = extractProfileForExport(activeConfig, profile.id);
+    if (!data) return;
+
+    const exportPayload = { ...data, exportedAt: new Date().toISOString() };
+    const defaultName = `${profile.name.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, "_")}.profile.json`;
+
+    const filePath = await save({
+      title: "Экспорт профиля",
+      defaultPath: defaultName,
+      filters: [{ name: "Профиль", extensions: ["json"] }],
+    });
+
+    if (typeof filePath === "string") {
+      await writeTextFile(filePath, JSON.stringify(exportPayload, null, 2));
+    }
+  }
+
+  async function handleImport() {
+    setImportError(null);
+
+    const filePath = await open({
+      title: "Импорт профиля",
+      filters: [{ name: "Профиль", extensions: ["json"] }],
+      multiple: false,
+    });
+
+    if (typeof filePath !== "string") return;
+
+    try {
+      const raw = await readTextFile(filePath);
+      const data = JSON.parse(raw);
+
+      if (!data.profile || !data.bindings || !data.actions) {
+        setImportError("Файл не содержит данных профиля.");
+        return;
+      }
+
+      let newId: string | null = null;
+      updateDraft((c) => {
+        const result = importProfile(c, data);
+        newId = result.profiles[result.profiles.length - 1]?.id ?? null;
+        return result;
+      });
+      if (newId) setSelectedProfileId(newId);
+    } catch {
+      setImportError("Не удалось прочитать файл профиля.");
+    }
   }
 
   return (
@@ -132,6 +194,36 @@ export function SettingsWorkspace({
               />
             </label>
           </div>
+
+          {/* Profile actions row */}
+          <div className="settings-profile-actions">
+            <button
+              type="button"
+              className="action-button action-button--secondary action-button--small"
+              onClick={() => handleDuplicate(activeProfile.id)}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
+              Копировать
+            </button>
+            <button
+              type="button"
+              className="action-button action-button--secondary action-button--small"
+              onClick={() => { void handleExport(activeProfile); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+              Экспорт
+            </button>
+            {sortedProfiles.length > 1 ? (
+              <button
+                type="button"
+                className="action-button action-button--small settings-delete-btn"
+                onClick={() => handleDelete(activeProfile)}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                Удалить
+              </button>
+            ) : null}
+          </div>
         </section>
       ) : null}
 
@@ -162,18 +254,26 @@ export function SettingsWorkspace({
                     type="button"
                     className="action-button action-button--small action-button--ghost"
                     onClick={(e) => { e.stopPropagation(); handleDuplicate(profile.id); }}
-                    title="Дублировать"
+                    title="Копировать"
                   >
-                    ⎘
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>
+                  </button>
+                  <button
+                    type="button"
+                    className="action-button action-button--small action-button--ghost"
+                    onClick={(e) => { e.stopPropagation(); void handleExport(profile); }}
+                    title="Экспорт"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   </button>
                   {sortedProfiles.length > 1 ? (
                     <button
                       type="button"
-                      className="action-button action-button--small action-button--ghost"
+                      className="action-button action-button--small action-button--ghost settings-delete-btn"
                       onClick={(e) => { e.stopPropagation(); handleDelete(profile); }}
                       title="Удалить"
                     >
-                      ✕
+                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
                   ) : null}
                 </div>
@@ -181,14 +281,28 @@ export function SettingsWorkspace({
             );
           })}
         </div>
-        <button
-          type="button"
-          className="action-button action-button--secondary"
-          style={{ alignSelf: "flex-start", marginTop: 8 }}
-          onClick={handleCreateProfile}
-        >
-          + Новый профиль
-        </button>
+        <div className="settings-bottom-actions">
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={handleCreateProfile}
+          >
+            + Новый профиль
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={() => { void handleImport(); }}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 10V1M5 4l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            Импорт профиля
+          </button>
+        </div>
+        {importError ? (
+          <div className="notice notice--error" style={{ marginTop: 8 }}>
+            <p>{importError}</p>
+          </div>
+        ) : null}
       </section>
     </div>
   );

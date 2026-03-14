@@ -88,11 +88,12 @@ export function SequenceStepEditor({
       e.preventDefault();
       e.stopPropagation();
 
+      const rawKey = e.key === "Unidentified" ? e.code : e.key;
       const parts: string[] = [];
       if (e.ctrlKey) parts.push("Ctrl");
       if (e.altKey) parts.push("Alt");
       if (e.shiftKey) parts.push("Shift");
-      const keyName = normalizeKeyName(e.key);
+      const keyName = normalizeKeyName(rawKey);
       parts.push(keyName);
       const formatted = parts.join("+");
 
@@ -439,7 +440,7 @@ export function ActionPickerModal({
     event.preventDefault();
     event.stopPropagation();
 
-    const key = event.key;
+    const key = event.key === "Unidentified" ? event.code : event.key;
     if (["Control", "Shift", "Alt", "Meta"].includes(key)) return;
 
     setShortcutDraft({
@@ -457,8 +458,10 @@ export function ActionPickerModal({
     if (event.ctrlKey) parts.push("Ctrl");
     if (event.altKey) parts.push("Alt");
     if (event.shiftKey) parts.push("Shift");
-    const key = normalizeKeyName(event.key);
-    if (!["Control", "Shift", "Alt", "Meta"].includes(event.key)) {
+    // event.key is "Unidentified" for F13-F24 in Chromium — fall back to event.code
+    const rawKey = event.key === "Unidentified" ? event.code : event.key;
+    const key = normalizeKeyName(rawKey);
+    if (!["Control", "Shift", "Alt", "Meta"].includes(rawKey)) {
       parts.push(key);
     }
     return parts.join("+") || key;

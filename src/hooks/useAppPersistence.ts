@@ -15,12 +15,9 @@ const AUTO_SAVE_DELAY_MS = 500;
 export interface AppPersistence {
   // State (read-only for consumers)
   viewState: ViewState;
-  setViewState: React.Dispatch<React.SetStateAction<ViewState>>;
   snapshot: LoadConfigResponse | null;
-  setSnapshot: React.Dispatch<React.SetStateAction<LoadConfigResponse | null>>;
   workingConfig: AppConfig | null;
   lastSave: SaveConfigResponse | null;
-  setLastSave: React.Dispatch<React.SetStateAction<SaveConfigResponse | null>>;
   error: CommandError | null;
   setError: React.Dispatch<React.SetStateAction<CommandError | null>>;
   undoStack: readonly AppConfig[];
@@ -179,12 +176,9 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
 
   return {
     viewState,
-    setViewState,
     snapshot,
-    setSnapshot,
     workingConfig,
     lastSave,
-    setLastSave,
     error,
     setError,
     undoStack,

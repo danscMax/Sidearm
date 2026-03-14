@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
+import type { AppConfig, AppMapping, Binding, ControlId, Layer, Profile } from "../lib/config";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
@@ -9,8 +9,10 @@ import {
   deleteAppMapping,
   extractProfileExport,
   findDuplicateAppMapping,
+  makeBindingId,
   mergeImportedProfile,
   upsertAppMapping,
+  upsertBinding,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { getExeIcon, readTextFile, writeTextFile } from "../lib/backend";
@@ -48,6 +50,7 @@ export interface ProfilesWorkspaceProps {
   setMultiSelectedControlIds: (ids: Set<ControlId> | ((prev: Set<ControlId>) => Set<ControlId>)) => void;
   setActionPickerBindingId: (id: string | null) => void;
   setActionPickerOpen: (open: boolean) => void;
+  executionCounts?: Map<string, number>;
 }
 
 /** First 2 uppercase letters of exe name (sans extension) for monogram icon. */
@@ -360,7 +363,33 @@ export function ProfilesWorkspace({
   setMultiSelectedControlIds,
   setActionPickerBindingId,
   setActionPickerOpen,
+  executionCounts,
 }: ProfilesWorkspaceProps) {
+  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
+
+  function handleDropBinding(targetControlId: ControlId, sourceActionId: string) {
+    if (!effectiveProfileId) return;
+    updateDraft((config) => {
+      const sourceAction = config.actions.find((a) => a.id === sourceActionId);
+      if (!sourceAction) return config;
+      const newAction = { ...sourceAction, id: crypto.randomUUID() };
+      const bindingId = makeBindingId(effectiveProfileId, selectedLayer, targetControlId);
+      const newBinding: Binding = {
+        id: bindingId,
+        profileId: effectiveProfileId,
+        layer: selectedLayer,
+        controlId: targetControlId,
+        label: newAction.pretty,
+        actionRef: newAction.id,
+        enabled: true,
+      };
+      return upsertBinding(
+        { ...config, actions: [...config.actions, newAction] },
+        newBinding,
+      );
+    });
+  }
+
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
     selectedLayer,
@@ -526,7 +555,20 @@ export function ProfilesWorkspace({
           }}
           onOpenActionPicker={handleOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          executionCounts={executionCounts}
+          heatmapEnabled={heatmapEnabled}
+          onDropBinding={handleDropBinding}
         />
+        <div className="heatmap-toggle">
+          <button
+            type="button"
+            className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
+            onClick={() => setHeatmapEnabled((prev) => !prev)}
+            title={heatmapEnabled ? "Выключить тепловую карту" : "Включить тепловую карту"}
+          >
+            {heatmapEnabled ? "Тепловая карта: вкл" : "Тепловая карта: выкл"}
+          </button>
+        </div>
       </div>
 
       {/* ── Profile actions ── */}

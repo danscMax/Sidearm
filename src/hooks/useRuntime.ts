@@ -49,10 +49,12 @@ export interface RuntimeControl {
   lastExecution: ActionExecutionEvent | null;
   lastRuntimeError: RuntimeErrorEvent | null;
   lastEncodedKey: EncodedKeyEvent | null;
+  executionCounts: Map<string, number>;
 
   // Actions
   ensureRuntimeStarted: () => Promise<void>;
   clearRuntimeError: () => void;
+  clearExecutionCounts: () => void;
   refreshDebugLog: () => Promise<void>;
   handleStartRuntime: () => Promise<void>;
   handleReloadRuntime: () => Promise<void>;
@@ -83,6 +85,7 @@ export function useRuntime(deps: {
   const [lastExecution, setLastExecution] = useState<ActionExecutionEvent | null>(null);
   const [lastRuntimeError, setLastRuntimeError] = useState<RuntimeErrorEvent | null>(null);
   const [lastEncodedKey, setLastEncodedKey] = useState<EncodedKeyEvent | null>(null);
+  const [executionCounts, setExecutionCounts] = useState<Map<string, number>>(new Map());
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -122,6 +125,14 @@ export function useRuntime(deps: {
     startTransition(() => {
       setLastExecution(event);
       setLastRuntimeError(null);
+      const cid = event.controlId;
+      if (event.mode === "live" && cid) {
+        setExecutionCounts((prev) => {
+          const next = new Map(prev);
+          next.set(cid, (next.get(cid) ?? 0) + 1);
+          return next;
+        });
+      }
     });
     void refreshDebugLog();
   });
@@ -225,6 +236,10 @@ export function useRuntime(deps: {
     startTransition(() => setLastRuntimeError(null));
   }
 
+  function clearExecutionCounts() {
+    startTransition(() => setExecutionCounts(new Map()));
+  }
+
   async function handleStartRuntime() {
     await runtimeCommand(() => startRuntime(), (summary) => setRuntimeSummary(summary));
   }
@@ -299,8 +314,10 @@ export function useRuntime(deps: {
     lastExecution,
     lastRuntimeError,
     lastEncodedKey,
+    executionCounts,
     ensureRuntimeStarted,
     clearRuntimeError,
+    clearExecutionCounts,
     refreshDebugLog,
     handleStartRuntime,
     handleReloadRuntime,

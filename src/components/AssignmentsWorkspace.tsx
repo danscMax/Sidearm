@@ -34,6 +34,7 @@ export interface AssignmentsWorkspaceProps {
   onSelectLayer: (layer: Layer) => void;
   setActionPickerBindingId: (id: string | null) => void;
   setActionPickerOpen: (open: boolean) => void;
+  executionCounts?: Map<string, number>;
 }
 
 export function AssignmentsWorkspace({
@@ -51,6 +52,7 @@ export function AssignmentsWorkspace({
   setMultiSelectedControlIds,
   setActionPickerBindingId,
   setActionPickerOpen,
+  executionCounts,
 }: AssignmentsWorkspaceProps) {
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
@@ -59,6 +61,31 @@ export function AssignmentsWorkspace({
     setActionPickerBindingId,
     setActionPickerOpen,
   });
+
+  const [heatmapEnabled, setHeatmapEnabled] = useState(false);
+
+  function handleDropBinding(targetControlId: ControlId, sourceActionId: string) {
+    if (!effectiveProfileId) return;
+    updateDraft((config) => {
+      const sourceAction = config.actions.find((a) => a.id === sourceActionId);
+      if (!sourceAction) return config;
+      const newAction = { ...sourceAction, id: crypto.randomUUID() };
+      const bindingId = makeBindingId(effectiveProfileId, selectedLayer, targetControlId);
+      const newBinding: Binding = {
+        id: bindingId,
+        profileId: effectiveProfileId,
+        layer: selectedLayer,
+        controlId: targetControlId,
+        label: newAction.pretty,
+        actionRef: newAction.id,
+        enabled: true,
+      };
+      return upsertBinding(
+        { ...config, actions: [...config.actions, newAction] },
+        newBinding,
+      );
+    });
+  }
 
   const [ctxMenu, setCtxMenu] = useState<{
     x: number; y: number;
@@ -187,7 +214,20 @@ export function AssignmentsWorkspace({
         onOpenActionPicker={handleOpenActionPicker}
         onSelectLayer={onSelectLayer}
         onContextMenu={handleContextMenu}
+        executionCounts={executionCounts}
+        heatmapEnabled={heatmapEnabled}
+        onDropBinding={handleDropBinding}
       />
+      <div className="heatmap-toggle">
+        <button
+          type="button"
+          className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
+          onClick={() => setHeatmapEnabled((prev) => !prev)}
+          title={heatmapEnabled ? "Выключить тепловую карту" : "Включить тепловую карту"}
+        >
+          {heatmapEnabled ? "Тепловая карта: вкл" : "Тепловая карта: выкл"}
+        </button>
+      </div>
       {ctxMenu ? (
         <ContextMenu
           x={ctxMenu.x}

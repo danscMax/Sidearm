@@ -13,6 +13,9 @@ interface MouseVisualizationProps {
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
   onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
+  executionCounts?: Map<string, number>;
+  heatmapEnabled?: boolean;
+  onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
 }
 
 type ViewTab = "top" | "side" | "combined";
@@ -277,11 +280,24 @@ export function MouseVisualizationSvg({
   onOpenActionPicker,
   onSelectLayer,
   onContextMenu,
+  executionCounts,
+  heatmapEnabled,
+  onDropBinding,
 }: MouseVisualizationProps) {
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
+  const [dragOverId, setDragOverId] = useState<ControlId | null>(null);
 
   const entryMap = new Map(entries.map((e) => [e.control.id, e]));
+
+  const maxCount = Math.max(1, ...Array.from(executionCounts?.values() ?? []));
+  function heatFill(controlId: ControlId): string | undefined {
+    if (!heatmapEnabled || !executionCounts) return undefined;
+    const count = executionCounts.get(controlId) ?? 0;
+    if (count === 0) return undefined;
+    const intensity = Math.min(count / maxCount, 1);
+    return `rgba(159, 202, 105, ${0.15 + intensity * 0.55})`;
+  }
 
   function handleClick(id: ControlId, e: React.MouseEvent) {
     if (e.ctrlKey || e.metaKey) {
@@ -366,24 +382,46 @@ export function MouseVisualizationSvg({
     const entry = entryMap.get(id);
     const isSelected = entry?.isSelected || multiSelectedControlIds.has(id);
     const isHovered = hoveredId === id;
+    const isDragOver = dragOverId === id;
     const colors = buttonColors(entry, isSelected, isHovered);
+    const heat = heatFill(id);
+    const fillColor = heat ?? colors.fill;
     const title = entry
       ? `${displayNameForControl(entry.control)} \u00B7 ${surfacePrimaryLabel(entry.binding, entry.action)}`
       : id;
     const fs = fontSize ?? 10;
     const hasGlow = isSelected || isHovered;
+    const hasDragBinding = !!(entry?.binding && entry?.action);
 
     return (
       <g
         key={id}
         className="mouse-svg__btn"
         data-control-id={id}
-        style={{ cursor: "pointer" }}
+        style={{ cursor: hasDragBinding ? "grab" : "pointer" }}
         onClick={(e) => handleClick(id, e)}
         onDoubleClick={(e) => handleDblClick(id, e)}
         onContextMenu={(e) => handleRightClick(id, e)}
         onMouseEnter={() => setHoveredId(id)}
         onMouseLeave={() => setHoveredId(null)}
+        onDragStart={(e) => {
+          if (!entry?.binding || !entry?.action) { e.preventDefault(); return; }
+          e.dataTransfer.effectAllowed = "copy";
+          e.dataTransfer.setData("application/json", JSON.stringify({
+            type: "binding", actionId: entry.action.id,
+          }));
+        }}
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+        onDragEnter={(e) => { e.preventDefault(); setDragOverId(id); }}
+        onDragLeave={() => setDragOverId(null)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOverId(null);
+          try {
+            const data = JSON.parse(e.dataTransfer.getData("application/json")) as { type: string; actionId: string };
+            if (data.type === "binding") onDropBinding?.(id, data.actionId);
+          } catch { /* ignore malformed data */ }
+        }}
       >
         <title>{title}</title>
         <g
@@ -396,10 +434,10 @@ export function MouseVisualizationSvg({
         >
           {/* Hit area / visible shape */}
           <g
-            fill={colors.fill}
-            stroke={colors.stroke}
-            strokeWidth={isSelected ? 2.5 : isHovered ? 2 : 1.5}
-            strokeDasharray={colors.strokeDasharray}
+            fill={fillColor}
+            stroke={isDragOver ? "var(--c-accent, #9fca69)" : colors.stroke}
+            strokeWidth={isDragOver ? 3 : isSelected ? 2.5 : isHovered ? 2 : 1.5}
+            strokeDasharray={isDragOver ? "6 3" : colors.strokeDasharray}
           >
             {shape}
           </g>
@@ -511,18 +549,44 @@ export function MouseVisualizationSvg({
           const badge = HOTSPOT_LABELS[controlId] ?? controlId;
           const isSelected = entry.isSelected || multiSelectedControlIds.has(controlId);
           const isHovered = hoveredId === controlId;
+          const isDragOver = dragOverId === controlId;
           return (
             <button
               type="button"
               key={controlId}
-              className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}`}
+              className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
               data-action-type={entry.action?.type ?? ""}
               data-tooltip={tooltipText(entry)}
+              style={heatmapEnabled && executionCounts ? (() => {
+                const count = executionCounts.get(controlId) ?? 0;
+                if (count === 0) return undefined;
+                const intensity = Math.min(count / maxCount, 1);
+                return { backgroundColor: `rgba(159, 202, 105, ${0.15 + intensity * 0.55})` };
+              })() : undefined}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
               onContextMenu={(e) => handleRightClick(controlId, e)}
               onMouseEnter={() => setHoveredId(controlId)}
               onMouseLeave={() => setHoveredId(null)}
+              draggable={!!entry.binding && !!entry.action}
+              onDragStart={(e) => {
+                if (!entry.binding || !entry.action) { e.preventDefault(); return; }
+                e.dataTransfer.effectAllowed = "copy";
+                e.dataTransfer.setData("application/json", JSON.stringify({
+                  type: "binding", actionId: entry.action.id,
+                }));
+              }}
+              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
+              onDragEnter={(e) => { e.preventDefault(); setDragOverId(controlId); }}
+              onDragLeave={() => setDragOverId(null)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setDragOverId(null);
+                try {
+                  const data = JSON.parse(e.dataTransfer.getData("application/json")) as { type: string; actionId: string };
+                  if (data.type === "binding") onDropBinding?.(controlId, data.actionId);
+                } catch { /* ignore malformed data */ }
+              }}
             >
               <span className="btn-legend__badge">{badge}</span>
               <span className="btn-legend__label">{actionLabel(entry)}</span>

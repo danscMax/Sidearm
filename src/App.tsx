@@ -431,6 +431,7 @@ function App() {
                 setMultiSelectedControlIds={setMultiSelectedControlIds}
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
+                executionCounts={runtime.executionCounts}
               />
             ) : workspaceMode === "settings" ? (
               <SettingsWorkspace

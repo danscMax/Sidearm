@@ -1564,6 +1564,19 @@ select::checkmark {
   font-size: 0.55rem;
 }
 
+/* Drag-over feedback for binding drop targets */
+.mouse-visual__hotspot--dragover {
+  outline: 2px dashed var(--c-accent);
+  outline-offset: 2px;
+}
+
+/* Heatmap toggle positioning */
+.heatmap-toggle {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0;
+}
+
 .mouse-visual__label {
   margin-top: 4px;
   text-align: center;

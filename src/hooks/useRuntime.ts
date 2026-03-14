@@ -204,46 +204,31 @@ export function useRuntime(deps: {
     }, 50); // 50ms debounce - groups rapid successive events
   }
 
-  async function handleStartRuntime() {
+  async function runtimeCommand<T>(
+    command: () => Promise<T>,
+    onSuccess: (result: T) => void,
+  ) {
     try {
-      const summary = await startRuntime();
-      startTransition(() => {
-        setRuntimeSummary(summary);
-      });
+      const result = await command();
+      startTransition(() => onSuccess(result));
       await refreshDebugLog();
     } catch (unknownError) {
       startTransition(() => {
         setError(normalizeCommandError(unknownError));
       });
     }
+  }
+
+  async function handleStartRuntime() {
+    await runtimeCommand(() => startRuntime(), (summary) => setRuntimeSummary(summary));
   }
 
   async function handleReloadRuntime() {
-    try {
-      const summary = await reloadRuntime();
-      startTransition(() => {
-        setRuntimeSummary(summary);
-      });
-      await refreshDebugLog();
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-      });
-    }
+    await runtimeCommand(() => reloadRuntime(), (summary) => setRuntimeSummary(summary));
   }
 
   async function handleStopRuntime() {
-    try {
-      const summary = await stopRuntime();
-      startTransition(() => {
-        setRuntimeSummary(summary);
-      });
-      await refreshDebugLog();
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-      });
-    }
+    await runtimeCommand(() => stopRuntime(), (summary) => setRuntimeSummary(summary));
   }
 
   async function handleRehookCapture() {
@@ -257,73 +242,43 @@ export function useRuntime(deps: {
   }
 
   async function handleCaptureActiveWindow() {
-    try {
-      const result = await captureActiveWindow(captureDelayMs);
-      startTransition(() => {
-        setLastCapture(result);
-      });
-      await refreshDebugLog();
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-      });
-    }
+    await runtimeCommand(
+      () => captureActiveWindow(captureDelayMs),
+      (result) => setLastCapture(result),
+    );
   }
 
   async function handlePreviewResolution() {
-    try {
-      const result = await previewResolution(
+    await runtimeCommand(
+      () => previewResolution(
         resolutionKeyInput,
         lastCapture && !lastCapture.ignored ? lastCapture.exe : undefined,
         lastCapture && !lastCapture.ignored ? lastCapture.title : undefined,
-      );
-      startTransition(() => {
-        setLastResolutionPreview(result);
-      });
-      await refreshDebugLog();
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-      });
-    }
+      ),
+      (result) => setLastResolutionPreview(result),
+    );
   }
 
   async function handleExecutePreviewAction() {
-    try {
-      const result = await executePreviewAction(
+    await runtimeCommand(
+      () => executePreviewAction(
         resolutionKeyInput,
         lastCapture && !lastCapture.ignored ? lastCapture.exe : undefined,
         lastCapture && !lastCapture.ignored ? lastCapture.title : undefined,
-      );
-      startTransition(() => {
-        setLastExecution(result);
-        setLastRuntimeError(null);
-      });
-      await refreshDebugLog();
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-      });
-    }
+      ),
+      (result) => { setLastExecution(result); setLastRuntimeError(null); },
+    );
   }
 
   async function handleRunPreviewAction() {
-    try {
-      const result = await runPreviewAction(
+    await runtimeCommand(
+      () => runPreviewAction(
         resolutionKeyInput,
         lastCapture && !lastCapture.ignored ? lastCapture.exe : undefined,
         lastCapture && !lastCapture.ignored ? lastCapture.title : undefined,
-      );
-      startTransition(() => {
-        setLastExecution(result);
-        setLastRuntimeError(null);
-      });
-      await refreshDebugLog();
-    } catch (unknownError) {
-      startTransition(() => {
-        setError(normalizeCommandError(unknownError));
-      });
-    }
+      ),
+      (result) => { setLastExecution(result); setLastRuntimeError(null); },
+    );
   }
 
   return {

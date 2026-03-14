@@ -3754,12 +3754,28 @@ img.profiles__app-card-monogram {
   border-top: 1px solid var(--c-border);
 }
 
+.settings-profile-actions .action-button svg,
+.settings-profile-card__actions .action-button svg,
+.settings-bottom-actions .action-button svg {
+  flex-shrink: 0;
+}
+
+.settings-profile-actions .action-button,
+.settings-bottom-actions .action-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .settings-delete-btn {
-  color: var(--c-danger, #e55);
+  color: var(--c-text-muted);
+  border-color: var(--c-border);
 }
 
 .settings-delete-btn:hover {
-  background: rgba(238, 85, 85, 0.1);
+  color: var(--c-danger, #e55);
+  background: rgba(238, 85, 85, 0.08);
+  border-color: var(--c-danger, #e55);
 }
 
 .settings-bottom-actions {

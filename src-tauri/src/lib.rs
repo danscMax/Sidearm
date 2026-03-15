@@ -1032,6 +1032,46 @@ fn find_running_process_path(_exe_name: &str) -> Option<String> {
     None
 }
 
+/// Check for a crash sentinel from the previous run and log it, then create
+/// a new sentinel. The sentinel is deleted on clean shutdown. If it exists at
+/// startup, the previous session crashed without a clean exit.
+fn check_crash_sentinel(app: &AppHandle) {
+    let Ok(log_dir) = app.path().app_log_dir() else { return };
+    let sentinel = log_dir.join(".running");
+
+    if sentinel.exists() {
+        // Previous run did not shut down cleanly
+        log::error!("[system] Previous session ended abnormally (crash or force-kill).");
+
+        // Try to read the sentinel for session start time
+        if let Ok(contents) = fs::read_to_string(&sentinel) {
+            log::error!("[system] Crashed session started at: {}", contents.trim());
+        }
+    }
+
+    // Write new sentinel with current timestamp
+    let _ = fs::create_dir_all(&log_dir);
+    let timestamp = chrono_like_timestamp();
+    let _ = fs::write(&sentinel, timestamp);
+}
+
+/// Remove the crash sentinel on clean shutdown.
+fn remove_crash_sentinel(app: &AppHandle) {
+    let Ok(log_dir) = app.path().app_log_dir() else { return };
+    let sentinel = log_dir.join(".running");
+    let _ = fs::remove_file(sentinel);
+}
+
+/// Simple timestamp without external crates.
+fn chrono_like_timestamp() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    // Return Unix timestamp — good enough for crash diagnostics
+    format!("{now}")
+}
+
 /// Delete log files older than 30 days from the log directory.
 fn cleanup_old_logs(app: &AppHandle) {
     let Ok(log_dir) = app.path().app_log_dir() else {
@@ -1079,6 +1119,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
+                .clear_targets()
                 .target(Target::new(TargetKind::LogDir { file_name: None }))
                 .target(Target::new(TargetKind::Stdout))
                 .target(Target::new(TargetKind::Webview))
@@ -1109,6 +1150,7 @@ pub fn run() {
             // Pre-create hidden OSD window (WebView loads once, reused on every show)
             create_osd_window(&app.handle());
 
+            check_crash_sentinel(&app.handle());
             cleanup_old_logs(&app.handle());
             log::info!(
                 "[system] Naga Workflow Studio v{} started",
@@ -1287,6 +1329,12 @@ pub fn run() {
             record_keystroke,
             stop_macro_recording
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                log::info!("[system] Clean shutdown.");
+                remove_crash_sentinel(app);
+            }
+        });
 }

@@ -82,6 +82,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         .skip_taskbar(true)
         .focused(false)
         .resizable(false)
+        .background_color(tauri::window::Color(0x1a, 0x1f, 0x16, 0xff))
         .build()
     {
         Ok(_) => {}

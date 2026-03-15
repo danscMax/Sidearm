@@ -81,18 +81,69 @@ button, input, textarea, select {
   font: inherit;
 }
 
+/* ── Custom Titlebar ── */
+.titlebar {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  background: var(--c-bg);
+  border-bottom: 1px solid var(--c-border);
+  user-select: none;
+  -webkit-user-select: none;
+  position: sticky;
+  top: 0;
+  z-index: 9999;
+}
+
+.titlebar__title {
+  flex: 1;
+  padding-left: 14px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--c-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.titlebar__controls {
+  display: flex;
+  height: 100%;
+}
+
+.titlebar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  border: none;
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+
+.titlebar__btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-text-bright);
+}
+
+.titlebar__btn--close:hover {
+  background: #e81123;
+  color: #fff;
+}
+
 /* ── Shell ── */
 .shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: calc(100vh - 32px);
 }
 
 /* ── Sidebar ── */
 .sidebar {
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 32px;
+  height: calc(100vh - 32px);
   overflow-y: auto;
   display: flex;
   flex-direction: column;

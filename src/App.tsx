@@ -20,6 +20,7 @@ import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
+import { TitleBar } from "./components/TitleBar";
 import { Toolbar } from "./components/Toolbar";
 import {
   createProfile,
@@ -396,6 +397,8 @@ function App() {
     : "workspace workspace--1col";
 
   return (
+    <>
+    <TitleBar />
     <main className="shell">
       <Sidebar
         workspaceMode={workspaceMode}
@@ -591,6 +594,7 @@ function App() {
         />
       ) : null}
     </main>
+    </>
   );
 }
 

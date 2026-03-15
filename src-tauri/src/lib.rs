@@ -37,6 +37,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
 use window_capture::WindowCaptureResult;
 
 /// Show a small always-on-top OSD bubble with the profile name.
@@ -1005,11 +1006,23 @@ pub fn run() {
     // sets panic="abort" for release, this hook won't run in release builds.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        log::error!("[system] PANIC: {info}");
         input_synthesis::release_all_modifiers();
         default_hook(info);
     }));
 
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .target(Target::new(TargetKind::LogDir { file_name: None }))
+                .target(Target::new(TargetKind::Stdout))
+                .target(Target::new(TargetKind::Webview))
+                .max_file_size(10_000_000)
+                .rotation_strategy(RotationStrategy::KeepAll)
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_autostart::init(
@@ -1023,9 +1036,9 @@ pub fn run() {
             // This is informational — helps diagnose UIPI issues where hotkey
             // registration or SendInput fails against elevated target windows.
             if window_capture::is_current_process_elevated() {
-                eprintln!("[startup] Running as administrator (elevated).");
+                log::info!("[system] Running as administrator (elevated).");
             } else {
-                eprintln!("[startup] Running as standard user (non-elevated).");
+                log::info!("[system] Running as standard user (non-elevated).");
             }
 
             // Pre-create hidden OSD window (WebView loads once, reused on every show)

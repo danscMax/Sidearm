@@ -12,6 +12,7 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "global-shortcut:allow-register",
-    "notification:default"
+    "notification:default",
+    "log:default"
   ]
 }

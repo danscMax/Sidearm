@@ -206,7 +206,7 @@ function AppMappingModal({
                 value={mapping.exe}
                 placeholder="chrome.exe"
                 onChange={(e) =>
-                  updateDraft((c) => upsertAppMapping(c, { ...mapping, exe: e.target.value }))
+                  updateDraft((c) => upsertAppMapping(c, { ...mapping, exe: e.target.value, processPath: undefined }))
                 }
               />
               <button
@@ -221,7 +221,7 @@ function AppMappingModal({
                   if (typeof selected === "string") {
                     const exeName = selected.split(/[/\\]/).pop() ?? selected;
                     updateDraft((c) =>
-                      upsertAppMapping(c, { ...mapping, exe: exeName.toLowerCase() }),
+                      upsertAppMapping(c, { ...mapping, exe: exeName.toLowerCase(), processPath: selected }),
                     );
                   }
                 }}

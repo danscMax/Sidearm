@@ -1370,21 +1370,23 @@ fn process_encoded_key_event(
     if capture_result.ignored {
         log_entries.push((
             "перехват",
-            capture_result
-                .ignore_reason
-                .clone()
-                .unwrap_or_else(|| "Окно студии на переднем плане — игнорируется.".into()),
-            true,
+            "Окно студии — используется fallback-профиль.".into(),
+            false,
         ));
-        flush_log_entries(runtime_store, log_entries);
-        return;
     }
+
+    // Resolve action — use empty exe/title when ignored (forces fallback profile)
+    let (exe, title) = if capture_result.ignored {
+        (String::new(), String::new())
+    } else {
+        (capture_result.exe.clone(), capture_result.title.clone())
+    };
 
     let preview = resolver::resolve_input_preview(
         config,
         &event.encoded_key,
-        &capture_result.exe,
-        &capture_result.title,
+        &exe,
+        &title,
     );
 
     match preview.status {

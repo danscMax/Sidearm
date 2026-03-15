@@ -9,6 +9,7 @@ import {
 import { useAppPersistence } from "./hooks/useAppPersistence";
 import { useRuntime } from "./hooks/useRuntime";
 import { useVerification } from "./hooks/useVerification";
+import { error as logError } from "@tauri-apps/plugin-log";
 import "./App.css";
 import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette } from "./components/CommandPalette";
@@ -114,6 +115,26 @@ function App() {
       }
     }
     void initApp();
+  }, []);
+
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      void logError(
+        `[ui] Unhandled: ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`,
+      );
+    };
+
+    const handleRejection = (event: PromiseRejectionEvent) => {
+      void logError(`[ui] Unhandled rejection: ${String(event.reason)}`);
+    };
+
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleRejection);
+
+    return () => {
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleRejection);
+    };
   }, []);
 
   useEffect(() => {

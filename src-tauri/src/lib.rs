@@ -48,6 +48,13 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
 
+    // Close all existing OSD windows before creating a new one
+    for (label, window) in app.webview_windows() {
+        if label.starts_with("osd-") {
+            let _ = window.close();
+        }
+    }
+
     // Each OSD gets a unique label — avoids "label already exists" error
     // when previous window's async close hasn't completed yet.
     let osd_id = OSD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

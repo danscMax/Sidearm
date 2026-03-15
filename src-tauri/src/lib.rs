@@ -50,21 +50,23 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         let _ = existing.close();
     }
 
-    // Position: bottom-center of primary monitor
+    // Position: top-center of screen, offset down slightly
     let (x, y) = app
         .get_webview_window("main")
         .and_then(|w| {
-            let outer = w.outer_size().ok()?;
-            let pos = w.outer_position().ok()?;
+            let monitor = w.current_monitor().ok()??;
+            let size = monitor.size();
+            let pos = monitor.position();
             let scale = w.scale_factor().ok().unwrap_or(1.0);
-            let screen_w = (pos.x as f64 + outer.width as f64) / scale;
-            let screen_h = (pos.y as f64 + outer.height as f64) / scale;
-            Some((screen_w / 2.0 - 150.0, screen_h - 80.0))
+            let screen_w = size.width as f64 / scale;
+            let screen_x = pos.x as f64 / scale;
+            let screen_y = pos.y as f64 / scale;
+            Some((screen_x + screen_w / 2.0 - 150.0, screen_y + 40.0))
         })
-        .unwrap_or((500.0, 900.0));
+        .unwrap_or((500.0, 40.0));
 
     let url = format!("/osd.html?name={}", urlencoding(profile_name));
-    let _ = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App(url.into()))
+    match WebviewWindowBuilder::new(app, "osd", WebviewUrl::App(url.into()))
         .title("")
         .inner_size(300.0, 50.0)
         .position(x, y)
@@ -74,7 +76,11 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         .skip_taskbar(true)
         .focused(false)
         .shadow(false)
-        .build();
+        .build()
+    {
+        Ok(_) => {}
+        Err(e) => eprintln!("[osd] Failed to create OSD window: {e}"),
+    }
 
     // Auto-close OSD after 2 seconds (Rust-side timer — no JS permissions needed)
     let app_handle = app.clone();

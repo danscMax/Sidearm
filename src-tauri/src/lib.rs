@@ -856,65 +856,67 @@ fn lookup_app_paths_registry(exe_name: &str) -> Option<String> {
     None
 }
 
-/// Build a list of candidate full paths for a given exe name.
-/// Tries App Paths registry first, then PATH, then common directories.
+/// Resolve the full path of an exe using proper Windows APIs.
+///
+/// 1. App Paths registry (HKLM + HKCU) — the canonical install location.
+/// 2. `SearchPathW` — uses the same search order as `CreateProcess`:
+///    system directories, Windows directory, PATH, and current directory.
+///
+/// No hardcoded directory lists — both methods are standard Windows mechanisms.
 fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
     let mut paths = Vec::new();
 
-    // 1. Windows Registry App Paths — canonical install location (O(1) lookup)
+    // 1. App Paths registry — many apps register here (Office, Chrome, etc.)
     if let Some(path) = lookup_app_paths_registry(exe_name) {
         paths.push(path);
     }
 
-    // 2. Try to find via PATH environment variable
-    if let Ok(path_env) = std::env::var("PATH") {
-        for dir in path_env.split(';') {
-            let candidate = std::path::Path::new(dir).join(exe_name);
-            if candidate.exists() {
-                if let Some(s) = candidate.to_str() {
-                    paths.push(s.to_owned());
-                }
-            }
-        }
-    }
-
-    // 3. Common install directories
-    let local_app_data = std::env::var("LocalAppData").ok();
-    let program_dirs: Vec<String> = [
-        std::env::var("ProgramFiles").ok(),
-        std::env::var("ProgramFiles(x86)").ok(),
-        local_app_data.clone(),
-        // Per-user installs (Cursor, Discord, Slack, etc.)
-        local_app_data.map(|d| format!("{d}\\Programs")),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    let stem = exe_name.strip_suffix(".exe").unwrap_or(exe_name);
-
-    for base in &program_dirs {
-        // e.g. C:\Program Files\Code\code.exe
-        let candidate = std::path::Path::new(base).join(stem).join(exe_name);
-        if candidate.exists() {
-            if let Some(s) = candidate.to_str() {
-                paths.push(s.to_owned());
-            }
-        }
-        // e.g. C:\Program Files\Microsoft VS Code\code.exe (search subdirectories)
-        if let Ok(entries) = std::fs::read_dir(base) {
-            for entry in entries.flatten() {
-                let candidate = entry.path().join(exe_name);
-                if candidate.exists() {
-                    if let Some(s) = candidate.to_str() {
-                        paths.push(s.to_owned());
-                    }
-                }
+    // 2. SearchPathW — standard Win32 API, searches PATH + system dirs
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(path) = search_path_win32(exe_name) {
+            if !paths.contains(&path) {
+                paths.push(path);
             }
         }
     }
 
     paths
+}
+
+/// Use Win32 `SearchPathW` to find an executable.
+///
+/// Searches in the same order as `CreateProcess`:
+/// application directory, current directory, System32, System, Windows, PATH.
+#[cfg(target_os = "windows")]
+fn search_path_win32(exe_name: &str) -> Option<String> {
+    use windows_sys::Win32::Storage::FileSystem::SearchPathW;
+
+    let wide_name: Vec<u16> = exe_name.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 512];
+    let mut file_part = std::ptr::null_mut();
+
+    let len = unsafe {
+        SearchPathW(
+            std::ptr::null(),      // use default search order
+            wide_name.as_ptr(),
+            std::ptr::null(),      // no additional extension
+            buf.len() as u32,
+            buf.as_mut_ptr(),
+            &mut file_part,
+        )
+    };
+
+    if len == 0 || len as usize >= buf.len() {
+        return None;
+    }
+
+    let path = String::from_utf16_lossy(&buf[..len as usize]);
+    if std::path::Path::new(&path).exists() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

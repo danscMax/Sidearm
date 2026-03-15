@@ -1147,6 +1147,13 @@ pub fn run() {
                 log::info!("[system] Running as standard user (non-elevated).");
             }
 
+            // Force-disable native decorations on the main window.
+            // tauri-plugin-window-state may restore a saved state that had
+            // decorations enabled (from before we set decorations:false in config).
+            if let Some(main_window) = app.get_webview_window("main") {
+                let _ = main_window.set_decorations(false);
+            }
+
             // Pre-create hidden OSD window (WebView loads once, reused on every show)
             create_osd_window(&app.handle());
 

@@ -233,10 +233,12 @@ if (-not $SkipBuild) {
     Write-Ok "Frontend built"
     Write-Host ""
 
-    # --- Phase 2: Rust backend (cargo build --release) ---
+    # --- Phase 2: Rust backend ---
+    # custom-protocol embeds the frontend dist/ into the EXE (without it,
+    # the app tries to connect to localhost dev server and fails).
     Write-Host "    $([char]0x25B6) Compiling Rust backend..." -ForegroundColor White
     Set-Location -LiteralPath $TAURI_DIR
-    & cargo build --release 2>&1 | ForEach-Object {
+    & cargo build --release --features custom-protocol 2>&1 | ForEach-Object {
         Write-BuildProgress $_
     }
     $buildExitCode = $LASTEXITCODE

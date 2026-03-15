@@ -1193,10 +1193,10 @@ select::checkmark {
 }
 
 .mouse-top-layout .mouse-visual {
-  width: 100%;
+  width: auto;
   max-width: 100%;
   height: min(480px, 58vh);
-  object-fit: contain;
+  justify-self: center;
 }
 
 .mouse-top-labels {

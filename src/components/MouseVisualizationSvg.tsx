@@ -290,13 +290,40 @@ export function MouseVisualizationSvg({
 
   const entryMap = new Map(entries.map((e) => [e.control.id, e]));
 
-  const maxCount = Math.max(1, ...Array.from(executionCounts?.values() ?? []));
   function heatFill(controlId: ControlId): string | undefined {
     if (!heatmapEnabled || !executionCounts) return undefined;
     const count = executionCounts.get(controlId) ?? 0;
     if (count === 0) return undefined;
+    return "rgba(159, 202, 105, 0.07)";
+  }
+
+  function heatCountText(controlId: ControlId): string | undefined {
+    if (!heatmapEnabled || !executionCounts) return undefined;
+    const count = executionCounts.get(controlId) ?? 0;
+    if (count === 0) return undefined;
+    return `${count}x`;
+  }
+
+  function heatCountOpacity(controlId: ControlId): number {
+    if (!executionCounts) return 0;
+    const count = executionCounts.get(controlId) ?? 0;
+    const maxCount = Math.max(1, ...Array.from(executionCounts.values()));
     const intensity = Math.min(count / maxCount, 1);
-    return `rgba(159, 202, 105, ${0.15 + intensity * 0.55})`;
+    return 0.35 + intensity * 0.65;
+  }
+
+  function heatCountNode(controlId: ControlId): React.ReactNode {
+    if (!heatmapEnabled || !executionCounts) return null;
+    const count = executionCounts.get(controlId) ?? 0;
+    if (count === 0) return null;
+    const maxCount = Math.max(1, ...Array.from(executionCounts.values()));
+    const intensity = Math.min(count / maxCount, 1);
+    const opacity = 0.35 + intensity * 0.65;
+    return (
+      <span className="heat-count" style={{ opacity }}>
+        {count}x
+      </span>
+    );
   }
 
   function handleClick(id: ControlId, e: React.MouseEvent) {
@@ -457,6 +484,23 @@ export function MouseVisualizationSvg({
         >
           {label}
         </text>
+        {/* Heatmap count */}
+        {heatCountText(id) ? (
+          <text
+            x={labelX}
+            y={labelY + fs + 2}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fill="rgb(159, 202, 105)"
+            fontSize={7}
+            fontWeight={600}
+            fontFamily="'Segoe UI Variable Display', 'Bahnschrift', sans-serif"
+            pointerEvents="none"
+            style={{ userSelect: "none", opacity: heatCountOpacity(id) }}
+          >
+            {heatCountText(id)}
+          </text>
+        ) : null}
       </g>
     );
   }
@@ -557,12 +601,9 @@ export function MouseVisualizationSvg({
               className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
               data-action-type={entry.action?.type ?? ""}
               data-tooltip={tooltipText(entry)}
-              style={heatmapEnabled && executionCounts ? (() => {
-                const count = executionCounts.get(controlId) ?? 0;
-                if (count === 0) return undefined;
-                const intensity = Math.min(count / maxCount, 1);
-                return { backgroundColor: `rgba(159, 202, 105, ${0.15 + intensity * 0.55})` };
-              })() : undefined}
+              style={heatmapEnabled && executionCounts && (executionCounts.get(controlId) ?? 0) > 0
+                ? { backgroundColor: "rgba(159, 202, 105, 0.07)" }
+                : undefined}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
               onContextMenu={(e) => handleRightClick(controlId, e)}
@@ -590,6 +631,7 @@ export function MouseVisualizationSvg({
             >
               <span className="btn-legend__badge">{badge}</span>
               <span className="btn-legend__label">{actionLabel(entry)}</span>
+              {heatCountNode(controlId)}
             </button>
           );
         })}

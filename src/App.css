@@ -1581,6 +1581,34 @@ select::checkmark {
   padding: 4px 0;
 }
 
+/* Heatmap count indicator */
+.heat-count {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: var(--font-mono, monospace);
+  color: var(--c-accent, #9fca69);
+  pointer-events: none;
+  line-height: 1;
+}
+
+.btn-legend__cell .heat-count {
+  position: static;
+  transform: none;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.mouse-visual__hotspot .heat-count {
+  font-size: 0.55rem;
+  right: 2px;
+  top: 2px;
+  transform: none;
+}
+
 .mouse-visual__label {
   margin-top: 4px;
   text-align: center;

@@ -86,13 +86,25 @@ export function MouseVisualization({
   const [visualMode, setVisualMode] = useState<VisualMode>("photo");
   const [dragOverId, setDragOverId] = useState<ControlId | null>(null);
 
-  const maxCount = Math.max(1, ...Array.from(executionCounts?.values() ?? []));
   function heatStyle(controlId: ControlId): React.CSSProperties | undefined {
     if (!heatmapEnabled || !executionCounts) return undefined;
     const count = executionCounts.get(controlId) ?? 0;
     if (count === 0) return undefined;
+    return { backgroundColor: "rgba(159, 202, 105, 0.07)" };
+  }
+
+  function heatCount(controlId: ControlId): React.ReactNode {
+    if (!heatmapEnabled || !executionCounts) return null;
+    const count = executionCounts.get(controlId) ?? 0;
+    if (count === 0) return null;
+    const maxCount = Math.max(1, ...Array.from(executionCounts.values()));
     const intensity = Math.min(count / maxCount, 1);
-    return { backgroundColor: `rgba(159, 202, 105, ${0.15 + intensity * 0.55})` };
+    const opacity = 0.35 + intensity * 0.65;
+    return (
+      <span className="heat-count" style={{ opacity }}>
+        {count}x
+      </span>
+    );
   }
 
   if (visualMode === "schematic") {
@@ -206,6 +218,7 @@ export function MouseVisualization({
           }}
         >
           {pos.label}
+          {heatCount(entry.control.id)}
         </button>
       );
     });
@@ -261,6 +274,7 @@ export function MouseVisualization({
             >
               <span className="btn-legend__badge">{badge}</span>
               <span className="btn-legend__label">{actionLabel(entry)}</span>
+              {heatCount(controlId)}
             </button>
           );
         })}
@@ -324,6 +338,7 @@ export function MouseVisualization({
                 >
                   <span className="btn-legend__badge">{badge}</span>
                   <span className="btn-legend__label">{actionLabel(entry)}</span>
+                  {heatCount(controlId)}
                 </button>
               );
             })}

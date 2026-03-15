@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .osd {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 20px;
+    border-radius: 12px;
+    background: rgba(20, 24, 18, 0.92);
+    border: 1px solid rgba(159, 202, 105, 0.3);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #e8eae4;
+    animation: osd-in 200ms ease-out;
+    pointer-events: none;
+  }
+  .osd__icon {
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: rgba(159, 202, 105, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .osd__icon svg { width: 12px; height: 12px; }
+  .osd__label {
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    color: rgba(159, 202, 105, 0.9);
+  }
+  .osd__name {
+    font-size: 13px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  @keyframes osd-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .osd--out {
+    animation: osd-out 300ms ease-in forwards;
+  }
+  @keyframes osd-out {
+    from { opacity: 1; transform: translateY(0); }
+    to   { opacity: 0; transform: translateY(-8px); }
+  }
+</style>
+</head>
+<body>
+<div class="osd" id="osd">
+  <div class="osd__icon">
+    <svg viewBox="0 0 16 16" fill="none" stroke="rgba(159,202,105,0.8)" stroke-width="1.5" stroke-linecap="round">
+      <circle cx="8" cy="8" r="6"/>
+      <path d="M8 5v3l2 1.5"/>
+    </svg>
+  </div>
+  <span class="osd__label">Профиль:</span>
+  <span class="osd__name" id="profile-name">—</span>
+</div>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const name = params.get("name") || "Default";
+  document.getElementById("profile-name").textContent = name;
+
+  // Auto-fade out after 1.5s, then close
+  setTimeout(() => {
+    document.getElementById("osd").classList.add("osd--out");
+  }, 1500);
+  setTimeout(() => {
+    window.__TAURI_INTERNALS__?.invoke("close_osd").catch(() => {});
+  }, 1800);
+</script>
+</body>
+</html>

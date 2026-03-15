@@ -39,15 +39,75 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use window_capture::WindowCaptureResult;
 
-/// Show a native OS notification when the active profile changes.
-pub(crate) fn notify_profile_switch(app: &AppHandle, profile_name: &str) {
-    use tauri_plugin_notification::NotificationExt;
-    let _ = app
-        .notification()
-        .builder()
-        .title("Naga Studio")
-        .body(format!("Профиль: {profile_name}"))
-        .show();
+/// Show a small always-on-top OSD bubble with the profile name.
+/// The OSD auto-closes after ~2 seconds via its own JS timer.
+pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    // Close any existing OSD first
+    if let Some(existing) = app.get_webview_window("osd") {
+        let _ = existing.close();
+    }
+
+    // Position: top-center of screen, offset down slightly
+    let (x, y) = app
+        .get_webview_window("main")
+        .and_then(|w| {
+            let monitor = w.current_monitor().ok()??;
+            let size = monitor.size();
+            let pos = monitor.position();
+            let scale = w.scale_factor().ok().unwrap_or(1.0);
+            let screen_w = size.width as f64 / scale;
+            let screen_x = pos.x as f64 / scale;
+            let screen_y = pos.y as f64 / scale;
+            Some((screen_x + screen_w / 2.0 - 150.0, screen_y + 40.0))
+        })
+        .unwrap_or((500.0, 40.0));
+
+    let url = format!("/osd.html?name={}", urlencoding(profile_name));
+    match WebviewWindowBuilder::new(app, "osd", WebviewUrl::App(url.into()))
+        .title("")
+        .inner_size(300.0, 50.0)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .shadow(false)
+        .build()
+    {
+        Ok(_) => {}
+        Err(e) => eprintln!("[osd] Failed to create OSD window: {e}"),
+    }
+
+    // Auto-close OSD after 2 seconds (Rust-side timer — no JS permissions needed)
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        if let Some(w) = app_handle.get_webview_window("osd") {
+            let _ = w.close();
+        }
+    });
+}
+
+fn urlencoding(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                String::from(b as char)
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn close_osd(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("osd") {
+        let _ = w.close();
+    }
 }
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
@@ -429,7 +489,7 @@ async fn capture_active_window(
         };
         if should_notify {
             let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
-            notify_profile_switch(&app, profile_name);
+            show_osd(&app, profile_name);
         }
     }
 
@@ -1079,6 +1139,7 @@ pub fn run() {
             execute_preview_action,
             run_preview_action,
             get_exe_icon,
+            close_osd,
             write_text_file,
             read_text_file,
             start_macro_recording,

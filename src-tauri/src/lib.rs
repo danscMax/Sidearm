@@ -68,14 +68,13 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
     let url = format!("/osd.html?name={}", urlencoding(profile_name));
     match WebviewWindowBuilder::new(app, "osd", WebviewUrl::App(url.into()))
         .title("")
-        .inner_size(300.0, 50.0)
+        .inner_size(300.0, 44.0)
         .position(x, y)
         .decorations(false)
-        .transparent(true)
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
-        .shadow(false)
+        .resizable(false)
         .build()
     {
         Ok(_) => {}

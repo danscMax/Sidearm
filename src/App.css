@@ -65,16 +65,15 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
-/* ── Scrollbar: hidden by default, visible on hover ── */
-::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; transition: background 0.2s; }
-::-webkit-scrollbar-corner { background: transparent; }
+/* ── Scrollbar: thin overlay, no reserved gutter ── */
+* { scrollbar-width: thin; scrollbar-color: transparent transparent; }
+*:hover { scrollbar-color: rgba(255,255,255,0.12) transparent; }
 
-/* Show scrollbar thumb only when hovering the scrollable container */
-*:hover > ::-webkit-scrollbar-thumb,
+::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; }
+::-webkit-scrollbar-corner { background: transparent; }
 *:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); }
-*:hover > ::-webkit-scrollbar-thumb:hover,
 *:hover::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
 
 html, body, #root {
@@ -152,6 +151,7 @@ button, input, textarea, select {
   top: 0;
   height: 100%;
   overflow-y: auto;
+  overflow-y: overlay;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -445,6 +445,8 @@ select::checkmark {
   padding: 0;
   min-width: 0;
   overflow-y: auto;
+  /* overlay: scrollbar floats on top, no gutter reserved */
+  overflow-y: overlay;
 }
 
 /* ── Toolbar ── */

@@ -37,9 +37,27 @@ export function TitleBar() {
     void appWindow.close();
   }, []);
 
+  const handleDrag = useCallback((e: React.MouseEvent) => {
+    // Only drag on left mouse button, ignore if clicking buttons
+    if (e.button !== 0) return;
+    void appWindow.startDragging();
+  }, []);
+
+  const handleDoubleClick = useCallback(() => {
+    if (maximized) {
+      void appWindow.unmaximize();
+    } else {
+      void appWindow.maximize();
+    }
+  }, [maximized]);
+
   return (
-    <div className="titlebar" data-tauri-drag-region>
-      <span className="titlebar__title" data-tauri-drag-region>
+    <div
+      className="titlebar"
+      onMouseDown={handleDrag}
+      onDoubleClick={handleDoubleClick}
+    >
+      <span className="titlebar__title">
         Naga Workflow Studio
       </span>
       <div className="titlebar__controls">

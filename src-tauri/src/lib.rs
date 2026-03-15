@@ -413,6 +413,30 @@ async fn get_debug_log(
 }
 
 #[tauri::command]
+async fn get_log_directory(app: AppHandle) -> Result<String, CommandError> {
+    let log_dir = app.path().app_log_dir().map_err(|error| {
+        CommandError::internal(format!("Failed to resolve log directory: {error}"))
+    })?;
+    Ok(log_dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
+    let log_dir = app.path().app_log_dir().map_err(|error| {
+        CommandError::internal(format!("Failed to resolve log directory: {error}"))
+    })?;
+    if log_dir.exists() {
+        std::process::Command::new("explorer")
+            .arg(log_dir.as_os_str())
+            .spawn()
+            .map_err(|error| {
+                CommandError::internal(format!("Failed to open log directory: {error}"))
+            })?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
 async fn capture_active_window(
     app: AppHandle,
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
@@ -1203,6 +1227,8 @@ pub fn run() {
             reload_runtime,
             rehook_capture,
             get_debug_log,
+            get_log_directory,
+            open_log_directory,
             capture_active_window,
             preview_resolution,
             execute_preview_action,

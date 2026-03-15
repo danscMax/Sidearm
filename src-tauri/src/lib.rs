@@ -53,7 +53,9 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
     let osd_id = OSD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let label = format!("osd-{osd_id}");
 
-    // Position: top-center of screen
+    // Position: bottom-right corner, above the taskbar
+    let osd_w = 200.0;
+    let osd_h = 32.0;
     let (x, y) = app
         .get_webview_window("main")
         .and_then(|w| {
@@ -62,16 +64,18 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
             let pos = monitor.position();
             let scale = w.scale_factor().ok().unwrap_or(1.0);
             let screen_w = size.width as f64 / scale;
+            let screen_h = size.height as f64 / scale;
             let screen_x = pos.x as f64 / scale;
             let screen_y = pos.y as f64 / scale;
-            Some((screen_x + screen_w / 2.0 - 150.0, screen_y + 40.0))
+            // 48px above bottom for taskbar, 12px from right edge
+            Some((screen_x + screen_w - osd_w - 12.0, screen_y + screen_h - osd_h - 48.0))
         })
-        .unwrap_or((500.0, 40.0));
+        .unwrap_or((1600.0, 1000.0));
 
     let url = format!("/osd.html?name={}", urlencoding(profile_name));
     match WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title("")
-        .inner_size(300.0, 44.0)
+        .inner_size(osd_w, osd_h)
         .position(x, y)
         .decorations(false)
         .always_on_top(true)

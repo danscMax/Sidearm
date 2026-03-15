@@ -41,16 +41,19 @@ use window_capture::WindowCaptureResult;
 
 /// Show a small always-on-top OSD bubble with the profile name.
 /// The OSD auto-closes after ~2 seconds via its own JS timer.
+/// Counter for unique OSD window labels (avoids label collision on rapid switches).
+static OSD_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
 
-    // Close any existing OSD first
-    if let Some(existing) = app.get_webview_window("osd") {
-        let _ = existing.close();
-    }
+    // Each OSD gets a unique label — avoids "label already exists" error
+    // when previous window's async close hasn't completed yet.
+    let osd_id = OSD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let label = format!("osd-{osd_id}");
 
-    // Position: top-center of screen, offset down slightly
+    // Position: top-center of screen
     let (x, y) = app
         .get_webview_window("main")
         .and_then(|w| {
@@ -66,7 +69,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         .unwrap_or((500.0, 40.0));
 
     let url = format!("/osd.html?name={}", urlencoding(profile_name));
-    match WebviewWindowBuilder::new(app, "osd", WebviewUrl::App(url.into()))
+    match WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
         .title("")
         .inner_size(300.0, 44.0)
         .position(x, y)
@@ -81,11 +84,11 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         Err(e) => eprintln!("[osd] Failed to create OSD window: {e}"),
     }
 
-    // Auto-close OSD after 2 seconds (Rust-side timer — no JS permissions needed)
+    // Auto-close after 2 seconds
     let app_handle = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(2000));
-        if let Some(w) = app_handle.get_webview_window("osd") {
+        if let Some(w) = app_handle.get_webview_window(&label) {
             let _ = w.close();
         }
     });
@@ -100,13 +103,6 @@ fn urlencoding(s: &str) -> String {
             _ => format!("%{b:02X}"),
         })
         .collect()
-}
-
-#[tauri::command]
-async fn close_osd(app: AppHandle) {
-    if let Some(w) = app.get_webview_window("osd") {
-        let _ = w.close();
-    }
 }
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
@@ -1138,7 +1134,6 @@ pub fn run() {
             execute_preview_action,
             run_preview_action,
             get_exe_icon,
-            close_osd,
             write_text_file,
             read_text_file,
             start_macro_recording,

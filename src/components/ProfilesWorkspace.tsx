@@ -754,26 +754,35 @@ export function ProfilesWorkspace({
               <div className="new-rule__capture">
                 <button
                   type="button"
-                  className="action-button action-button--accent"
+                  className="action-button action-button--accent new-rule__capture-btn"
                   onClick={() => { void handleCaptureForDialog(); }}
                   disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
-                  title="Нажмите и переключитесь на нужное окно. После задержки программа определит его и заполнит поля автоматически."
                 >
                   {captureCountdown !== null ? `Переключитесь на окно... ${captureCountdown}` : "Захватить активное окно"}
                 </button>
-                <select
-                  className="new-rule__delay"
-                  value={captureDelayMs}
-                  onChange={(e) => setCaptureDelayMs(Number(e.target.value))}
-                  title="Задержка перед захватом"
-                >
-                  <option value={500}>0.5с</option>
-                  <option value={1000}>1с</option>
-                  <option value={1500}>1.5с</option>
-                  <option value={2000}>2с</option>
-                  <option value={3000}>3с</option>
-                  <option value={5000}>5с</option>
-                </select>
+                <div className="new-rule__delay-row">
+                  <span className="new-rule__delay-label">Задержка:</span>
+                  <div className="new-rule__delay-pills">
+                    {[
+                      { value: 1000, label: "1с" },
+                      { value: 2000, label: "2с" },
+                      { value: 3000, label: "3с" },
+                      { value: 5000, label: "5с" },
+                    ].map((opt) => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        className={`new-rule__delay-pill${captureDelayMs === opt.value ? " new-rule__delay-pill--active" : ""}`}
+                        onClick={() => setCaptureDelayMs(opt.value)}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <p className="new-rule__capture-hint">
+                  Нажмите кнопку, переключитесь на нужное окно — программа определит его автоматически.
+                </p>
               </div>
 
               {newRuleExe && newRuleCapturedTitle ? (

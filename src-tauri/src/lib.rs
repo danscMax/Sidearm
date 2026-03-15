@@ -1022,35 +1022,40 @@ fn find_running_process_path(_exe_name: &str) -> Option<String> {
 }
 
 /// Migrate config from the old "com.nagaworkflowstudio.desktop" directory
-/// to the new "com.sidearm.desktop" directory (one-time, on first launch).
+/// to the new "com.sidearm.desktop" directory (one-time).
+/// Overwrites the new config if the old one is larger (has real user data
+/// vs a freshly-generated default).
 fn migrate_old_config(app: &AppHandle) {
     let Ok(new_config_dir) = app.path().app_config_dir() else { return };
-    let new_config = new_config_dir.join("config.json");
+    let Some(roaming) = dirs_fallback_roaming() else { return };
 
-    // Already has config — nothing to migrate
-    if new_config.exists() {
+    let old_dir = roaming.join("com.nagaworkflowstudio.desktop");
+    let old_config = old_dir.join("config.json");
+    if !old_config.exists() {
         return;
     }
 
-    // Try to find old config directory
-    if let Some(roaming) = dirs_fallback_roaming() {
-        let old_dir = roaming.join("com.nagaworkflowstudio.desktop");
-        let old_config = old_dir.join("config.json");
-        if old_config.exists() {
-            let _ = fs::create_dir_all(&new_config_dir);
-            // Copy all json files (config + backups + window-state)
-            if let Ok(entries) = fs::read_dir(&old_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().is_some_and(|ext| ext == "json") {
-                        let dest = new_config_dir.join(entry.file_name());
-                        let _ = fs::copy(&path, &dest);
-                    }
-                }
+    let new_config = new_config_dir.join("config.json");
+    let old_size = fs::metadata(&old_config).map(|m| m.len()).unwrap_or(0);
+    let new_size = fs::metadata(&new_config).map(|m| m.len()).unwrap_or(0);
+
+    // Only migrate if old config has more data (user profiles vs empty default)
+    if old_size <= new_size {
+        return;
+    }
+
+    let _ = fs::create_dir_all(&new_config_dir);
+    // Copy all json files (config + backups + window-state)
+    if let Ok(entries) = fs::read_dir(&old_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                let dest = new_config_dir.join(entry.file_name());
+                let _ = fs::copy(&path, &dest);
             }
-            log::info!("[system] Migrated config from old directory: {}", old_dir.display());
         }
     }
+    log::info!("[system] Migrated config from old directory: {}", old_dir.display());
 }
 
 /// Get %APPDATA% without depending on the Tauri path resolver (which uses the new identifier).

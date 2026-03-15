@@ -878,11 +878,14 @@ fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
         }
     }
 
-    // 2. Common install directories
+    // 3. Common install directories
+    let local_app_data = std::env::var("LocalAppData").ok();
     let program_dirs: Vec<String> = [
         std::env::var("ProgramFiles").ok(),
         std::env::var("ProgramFiles(x86)").ok(),
-        std::env::var("LocalAppData").ok(),
+        local_app_data.clone(),
+        // Per-user installs (Cursor, Discord, Slack, etc.)
+        local_app_data.map(|d| format!("{d}\\Programs")),
     ]
     .into_iter()
     .flatten()

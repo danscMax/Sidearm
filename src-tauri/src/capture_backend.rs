@@ -120,6 +120,8 @@ struct CaptureBackendHandle {
     hook_thread: JoinHandle<()>,
     worker_thread: JoinHandle<()>,
     helper: Option<HelperHandle>,
+    foreground_watcher_thread_id: Option<u32>,
+    foreground_watcher_thread: Option<JoinHandle<()>>,
 }
 
 struct HelperHandle {
@@ -195,11 +197,24 @@ impl CaptureBackendHandle {
             // Spawn helper process for modifier-combo hotkeys (non-fatal if fails)
             let helper = spawn_capture_helper(&registrations, helper_event_tx);
 
+            // Spawn foreground window watcher — detects window switches instantly
+            let fg_app = app.clone();
+            let fg_runtime_store = runtime_store.clone();
+            let fg_config = config.clone();
+            let fg_app_name = app_name.clone();
+            let (fg_ready_tx, fg_ready_rx) = mpsc::channel::<u32>();
+            let foreground_watcher_thread = thread::spawn(move || {
+                run_foreground_watcher(fg_app, fg_runtime_store, fg_config, fg_app_name, fg_ready_tx);
+            });
+            let foreground_watcher_thread_id = fg_ready_rx.recv().ok();
+
             Ok(Self {
                 hook_thread_id,
                 hook_thread,
                 worker_thread,
                 helper,
+                foreground_watcher_thread_id,
+                foreground_watcher_thread: Some(foreground_watcher_thread),
             })
         }
 
@@ -225,6 +240,11 @@ impl CaptureBackendHandle {
                     self.hook_thread_id
                 ));
             }
+
+            // Stop foreground watcher thread
+            if let Some(fg_thread_id) = self.foreground_watcher_thread_id {
+                unsafe { PostThreadMessageW(fg_thread_id, WM_QUIT, 0, 0) };
+            }
         }
 
         // Signal helper to exit by closing its stdin pipe, then wait for cleanup
@@ -245,6 +265,9 @@ impl CaptureBackendHandle {
         self.worker_thread
             .join()
             .map_err(|_| "Capture worker thread panicked.".to_owned())?;
+        if let Some(fg_thread) = self.foreground_watcher_thread {
+            let _ = fg_thread.join();
+        }
         Ok(())
     }
 
@@ -1109,6 +1132,157 @@ fn run_hotkey_message_loop(
     let _ = ready_tx.send(Err(
         "Global capture backend is only implemented for Windows.".into(),
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Foreground window watcher — detects window switches instantly via WinEvent
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "windows")]
+fn run_foreground_watcher(
+    app: AppHandle,
+    runtime_store: Arc<Mutex<RuntimeStore>>,
+    config: AppConfig,
+    app_name: String,
+    ready_tx: mpsc::Sender<u32>,
+) {
+    use std::cell::RefCell;
+    use std::mem::MaybeUninit;
+    use windows_sys::Win32::{
+        System::Threading::GetCurrentThreadId,
+        UI::Accessibility::{SetWinEventHook, UnhookWinEvent},
+        UI::WindowsAndMessaging::{
+            DispatchMessageW, GetMessageW, TranslateMessage, MSG,
+        },
+    };
+
+    // Thread-local storage for the callback to access our context.
+    thread_local! {
+        static FG_CTX: RefCell<Option<ForegroundWatcherCtx>> = const { RefCell::new(None) };
+    }
+
+    struct ForegroundWatcherCtx {
+        app: AppHandle,
+        runtime_store: Arc<Mutex<RuntimeStore>>,
+        config: AppConfig,
+        app_name: String,
+    }
+
+    unsafe extern "system" fn winevent_callback(
+        _hook: *mut std::ffi::c_void,
+        _event: u32,
+        _hwnd: *mut std::ffi::c_void,
+        _id_object: i32,
+        _id_child: i32,
+        _event_thread: u32,
+        _event_time: u32,
+    ) {
+        FG_CTX.with(|cell| {
+            let borrow = cell.borrow();
+            let Some(ctx) = borrow.as_ref() else { return };
+
+            let capture_result = match window_capture::capture_active_window_with_resolution(
+                &ctx.config,
+                &ctx.app_name,
+                None,
+            ) {
+                Ok(result) => result,
+                Err(_) => return,
+            };
+
+            let _ = ctx.app.emit(runtime::EVENT_PROFILE_RESOLVED, &capture_result);
+
+            if !capture_result.ignored {
+                let should_notify = ctx
+                    .runtime_store
+                    .lock()
+                    .ok()
+                    .map(|mut store| {
+                        store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
+                    })
+                    .unwrap_or(false);
+                if should_notify {
+                    use tauri_plugin_notification::NotificationExt;
+                    let profile_name = capture_result
+                        .resolved_profile_name
+                        .as_deref()
+                        .unwrap_or("Default");
+                    let _ = ctx
+                        .app
+                        .notification()
+                        .builder()
+                        .title("Naga Studio")
+                        .body(format!("Профиль: {profile_name}"))
+                        .show();
+                }
+            }
+        });
+    }
+
+    // Store context in thread-local
+    FG_CTX.with(|cell| {
+        *cell.borrow_mut() = Some(ForegroundWatcherCtx {
+            app,
+            runtime_store,
+            config,
+            app_name,
+        });
+    });
+
+    const EVENT_SYSTEM_FOREGROUND: u32 = 0x0003;
+
+    let hook = unsafe {
+        SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            std::ptr::null_mut(), // no DLL — callback in our process
+            Some(winevent_callback),
+            0, // all processes
+            0, // all threads
+            0, // WINEVENT_OUTOFCONTEXT (default)
+        )
+    };
+
+    if hook.is_null() {
+        eprintln!("[capture] WARNING: SetWinEventHook(EVENT_SYSTEM_FOREGROUND) failed.");
+        let _ = ready_tx.send(0);
+        return;
+    }
+
+    let thread_id = unsafe { GetCurrentThreadId() };
+    let _ = ready_tx.send(thread_id);
+
+    // Message loop — required for WinEvent callbacks to fire
+    let mut msg = MaybeUninit::<MSG>::zeroed();
+    loop {
+        let status = unsafe { GetMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0) };
+        if status <= 0 {
+            break;
+        }
+        unsafe {
+            let m = msg.assume_init();
+            TranslateMessage(&m);
+            DispatchMessageW(&m);
+        }
+    }
+
+    unsafe { UnhookWinEvent(hook) };
+
+    // Clean up thread-local
+    FG_CTX.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_foreground_watcher(
+    _app: AppHandle,
+    _runtime_store: Arc<Mutex<RuntimeStore>>,
+    _config: AppConfig,
+    _app_name: String,
+    _ready_tx: mpsc::Sender<u32>,
+) {
+    // No foreground watcher on non-Windows platforms.
 }
 
 fn process_encoded_key_event(

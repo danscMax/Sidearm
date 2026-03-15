@@ -1,6 +1,6 @@
 # Project Backlog
 
-- Project: `Naga Workflow Studio`
+- Project: `Sidearm`
 - Date: `2026-03-08`
 - Status: canonical backlog and execution source of truth
 
@@ -564,7 +564,7 @@ Remaining items:
 
 ```text
 Open and use `docs/PROJECT-BACKLOG.md` as the canonical source of truth.
-We are continuing Naga Workflow Studio in `E:\Scripts\Razer Naga Studio`.
+We are continuing Sidearm in `E:\Scripts\Razer Naga Studio`.
 Read `docs/PROJECT-HANDOFF-2026-03-08.md`, `docs/UI-REDESIGN-TODO.md`, and `docs/OPEN-ISSUES.md` after that.
 Start with the highest-priority open items unless I redirect you.
 Before changing code, inspect the current `src/App.tsx` and `src/App.css`.

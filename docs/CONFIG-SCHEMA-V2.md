@@ -7,7 +7,7 @@
 
 ## Purpose
 
-Config v2 defines the persisted state for Naga Workflow Studio iteration 1.
+Config v2 defines the persisted state for Sidearm iteration 1.
 
 It is designed to support:
 

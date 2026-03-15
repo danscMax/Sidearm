@@ -41,7 +41,7 @@ export function Sidebar({
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        Naga Studio
+        Sidearm
         <strong>Razer Naga V2 HyperSpeed</strong>
       </div>
       {workspaceModeCopy.map((mode) => (

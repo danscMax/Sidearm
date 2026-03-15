@@ -5,7 +5,7 @@
 
 ## Context
 
-Naga Workflow Studio is intended to replace a working AutoHotkey-based setup with a long-lived Windows desktop application built around Tauri, Rust, and a typed frontend. Several early choices are expensive to reverse later:
+Sidearm is intended to replace a working AutoHotkey-based setup with a long-lived Windows desktop application built around Tauri, Rust, and a typed frontend. Several early choices are expensive to reverse later:
 
 - the runtime split between Synapse, the app shell, the Rust core, and the frontend
 - the control-based domain model

@@ -1160,7 +1160,7 @@ pub fn run() {
             check_crash_sentinel(&app.handle());
             cleanup_old_logs(&app.handle());
             log::info!(
-                "[system] Naga Workflow Studio v{} started",
+                "[system] Sidearm v{} started",
                 app.package_info().version
             );
 

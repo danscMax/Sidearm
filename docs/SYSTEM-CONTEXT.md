@@ -5,7 +5,7 @@
 
 ## Purpose
 
-Naga Workflow Studio is a Windows desktop application that turns Synapse-encoded mouse input into profile-aware actions resolved by a Rust runtime and edited through a desktop GUI.
+Sidearm is a Windows desktop application that turns Synapse-encoded mouse input into profile-aware actions resolved by a Rust runtime and edited through a desktop GUI.
 
 The system exists to replace the current AutoHotkey-based setup with a maintainable architecture that supports the full physical control model of the Razer Naga V2 HyperSpeed.
 

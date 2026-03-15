@@ -1,5 +1,5 @@
 # ============================================================================
-# Naga Workflow Studio -- Portable Build Script
+# Sidearm -- Portable Build Script
 # ============================================================================
 # Builds a portable release:
 #   1. Builds Tauri frontend (npm build) + Rust backend (cargo tauri build)
@@ -12,7 +12,7 @@
 #   .\build_portable.ps1 -Verify        - Verify existing build only
 #   .\build_portable.ps1 -Clean         - Clean build artifacts
 #
-# Output: ..\NagaWorkflowStudio-Portable\ folder ready for distribution
+# Output: ..\Sidearm-Portable\ folder ready for distribution
 # ============================================================================
 
 param(
@@ -29,7 +29,7 @@ $ErrorActionPreference = "Stop"
 # ---- Paths ----
 $PROJECT_ROOT = $PSScriptRoot
 $TAURI_DIR    = Join-Path $PROJECT_ROOT 'src-tauri'
-$PORTABLE_DIR = Join-Path $PROJECT_ROOT '..\NagaWorkflowStudio-Portable'
+$PORTABLE_DIR = Join-Path $PROJECT_ROOT '..\Sidearm-Portable'
 
 # Detect custom target-dir from .cargo/config.toml
 $TAURI_TARGET_DIR = Join-Path $TAURI_DIR 'target'
@@ -44,7 +44,7 @@ if (Test-Path -LiteralPath $cargoConfig) {
 
 # The Tauri v2 build produces the EXE with the Cargo package name
 $BUILD_EXE_NAME = 'naga-workflow-studio.exe'
-$EXE_NAME       = 'Naga Workflow Studio.exe'
+$EXE_NAME       = 'Sidearm.exe'
 $TAURI_EXE      = Join-Path $TAURI_TARGET_DIR "release\$BUILD_EXE_NAME"
 
 # WebView2
@@ -149,7 +149,7 @@ function Write-FrontendProgress {
 }
 
 function Stop-AppProcessIfRunning {
-    $running = Get-Process -Name 'Naga Workflow Studio' -ErrorAction SilentlyContinue
+    $running = Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue
     if (-not $running) {
         # Try the dev build name too
         $running = Get-Process -Name 'naga-workflow-studio' -ErrorAction SilentlyContinue
@@ -157,7 +157,7 @@ function Stop-AppProcessIfRunning {
     if (-not $running) { return }
 
     $pids = ($running | ForEach-Object { $_.Id }) -join ', '
-    Write-Warn "Detected running Naga Workflow Studio (PID: $pids). Stopping..."
+    Write-Warn "Detected running Sidearm (PID: $pids). Stopping..."
 
     try {
         $running | Stop-Process -Force -ErrorAction Stop
@@ -175,7 +175,7 @@ function Stop-AppProcessIfRunning {
 
 Write-Host ""
 Write-Host ("  " + $BOX_TL + ($BOX_H * 58) + $BOX_TR) -ForegroundColor Cyan
-Write-Host ("  " + $BOX_V + "  Naga Workflow Studio  Portable Build                    " + $BOX_V) -ForegroundColor Cyan
+Write-Host ("  " + $BOX_V + "  Sidearm  Portable Build                                 " + $BOX_V) -ForegroundColor Cyan
 Write-Host ("  " + $BOX_BL + ($BOX_H * 58) + $BOX_BR) -ForegroundColor Cyan
 Write-Host ""
 Write-Host "    Target dir: $TAURI_TARGET_DIR" -ForegroundColor DarkGray
@@ -357,7 +357,7 @@ if (Test-Path -LiteralPath $WEBVIEW2_EXE) {
 
 # --- Install WebView2 helper script ---
 $installBat = Join-Path $resOutDir 'install-webview2.bat'
-$installBatContent = "@echo off`r`necho Installing Microsoft Edge WebView2 Runtime...`r`n""%~dp0MicrosoftEdgeWebview2Setup.exe"" /install`r`necho Done. You can now run Naga Workflow Studio.`r`npause"
+$installBatContent = "@echo off`r`necho Installing Microsoft Edge WebView2 Runtime...`r`n""%~dp0MicrosoftEdgeWebview2Setup.exe"" /install`r`necho Done. You can now run Sidearm.`r`npause"
 [System.IO.File]::WriteAllText($installBat, $installBatContent, [System.Text.Encoding]::ASCII)
 Write-Ok "resources/install-webview2.bat"
 

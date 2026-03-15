@@ -40,7 +40,7 @@ export function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <span className="titlebar__title" data-tauri-drag-region>
-        Naga Workflow Studio
+        Sidearm
       </span>
       <div className="titlebar__controls">
         <button

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:naga-workflow-studio:schema:config:v2",
-  "title": "Naga Workflow Studio Config v2",
+  "title": "Sidearm Config v2",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -478,6 +478,12 @@ async fn capture_active_window(
         }
     }
 
+    // Return focus to the studio window after capture
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+
     Ok(result)
 }
 

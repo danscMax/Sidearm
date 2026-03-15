@@ -32,7 +32,7 @@ pub struct WindowCaptureResult {
 
 pub fn capture_active_window_with_resolution(
     config: &AppConfig,
-    app_name: &str,
+    _app_name: &str,
     delay_ms: Option<u64>,
 ) -> Result<WindowCaptureResult, String> {
     if let Some(delay_ms) = delay_ms {
@@ -40,7 +40,7 @@ pub fn capture_active_window_with_resolution(
     }
 
     let raw_window = capture_foreground_window()?;
-    let is_ignored = should_ignore_window(&raw_window.exe, &raw_window.process_path, app_name);
+    let is_ignored = should_ignore_window(raw_window.pid);
     let capture_result = if is_ignored {
         WindowCaptureResult {
             hwnd: raw_window.hwnd,
@@ -68,6 +68,7 @@ pub fn capture_active_window_with_resolution(
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RawWindowCapture {
     hwnd: String,
+    pid: u32,
     exe: String,
     process_path: String,
     title: String,
@@ -117,17 +118,10 @@ fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> W
     }
 }
 
-fn should_ignore_window(exe: &str, process_path: &str, app_name: &str) -> bool {
-    let normalized_exe = exe.to_ascii_lowercase();
-    let normalized_path = process_path.to_ascii_lowercase();
-    let normalized_app_name = app_name.to_ascii_lowercase();
-
-    normalized_exe == format!("{normalized_app_name}.exe")
-        || Path::new(process_path)
-            .file_stem()
-            .and_then(|stem| stem.to_str())
-            .is_some_and(|stem| stem.eq_ignore_ascii_case(app_name))
-        || normalized_path.contains(&normalized_app_name)
+/// Returns true if the foreground window belongs to our own process.
+/// Uses PID comparison — foolproof regardless of exe naming (hyphens vs spaces).
+fn should_ignore_window(foreground_pid: u32) -> bool {
+    foreground_pid == std::process::id()
 }
 
 #[cfg(target_os = "windows")]
@@ -191,6 +185,7 @@ fn capture_foreground_window() -> Result<RawWindowCapture, String> {
 
         Ok(RawWindowCapture {
             hwnd: format!("0x{:X}", hwnd as usize),
+            pid,
             exe,
             process_path,
             title,

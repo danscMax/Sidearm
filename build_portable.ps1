@@ -43,7 +43,7 @@ if (Test-Path -LiteralPath $cargoConfig) {
 }
 
 # The Tauri v2 build produces the EXE with the Cargo package name
-$BUILD_EXE_NAME = 'naga-workflow-studio.exe'
+$BUILD_EXE_NAME = 'sidearm.exe'
 $EXE_NAME       = 'Sidearm.exe'
 $TAURI_EXE      = Join-Path $TAURI_TARGET_DIR "release\$BUILD_EXE_NAME"
 
@@ -152,7 +152,7 @@ function Stop-AppProcessIfRunning {
     $running = Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue
     if (-not $running) {
         # Try the dev build name too
-        $running = Get-Process -Name 'naga-workflow-studio' -ErrorAction SilentlyContinue
+        $running = Get-Process -Name 'sidearm' -ErrorAction SilentlyContinue
     }
     if (-not $running) { return }
 

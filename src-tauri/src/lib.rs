@@ -50,28 +50,17 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         let _ = app.emit("osd-show", profile_name.to_owned());
 
         // Position bottom-right above taskbar.
-        // Try main window's monitor first; fall back to primary monitor
-        // (at startup the main window may not be positioned yet).
-        let main_win = app.get_webview_window("main");
-        let monitor = main_win
-            .as_ref()
-            .and_then(|m| m.current_monitor().ok().flatten())
-            .or_else(|| app.primary_monitor().ok().flatten());
-
-        if let Some(monitor) = monitor {
-            let scale = main_win
-                .as_ref()
-                .and_then(|m| m.scale_factor().ok())
-                .unwrap_or(1.0);
-            let sw = monitor.size().width as f64 / scale;
-            let sh = monitor.size().height as f64 / scale;
-            let sx = monitor.position().x as f64 / scale;
-            let sy = monitor.position().y as f64 / scale;
-            let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                x: sx + sw - 210.0,
-                y: sy + sh - 80.0,
-            }));
-        }
+        // Use Win32 GetSystemMetrics as the reliable source of screen size —
+        // Tauri's monitor APIs may return None at startup before the window
+        // is fully realized, causing the OSD to appear at (0,0).
+        let (sw, sh) = unsafe {
+            use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
+            (GetSystemMetrics(SM_CXSCREEN) as f64, GetSystemMetrics(SM_CYSCREEN) as f64)
+        };
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: (sw - 210.0) as i32,
+            y: (sh - 80.0) as i32,
+        }));
 
         let _ = w.show();
 
@@ -1032,6 +1021,43 @@ fn find_running_process_path(_exe_name: &str) -> Option<String> {
     None
 }
 
+/// Migrate config from the old "com.nagaworkflowstudio.desktop" directory
+/// to the new "com.sidearm.desktop" directory (one-time, on first launch).
+fn migrate_old_config(app: &AppHandle) {
+    let Ok(new_config_dir) = app.path().app_config_dir() else { return };
+    let new_config = new_config_dir.join("config.json");
+
+    // Already has config — nothing to migrate
+    if new_config.exists() {
+        return;
+    }
+
+    // Try to find old config directory
+    if let Some(roaming) = dirs_fallback_roaming() {
+        let old_dir = roaming.join("com.nagaworkflowstudio.desktop");
+        let old_config = old_dir.join("config.json");
+        if old_config.exists() {
+            let _ = fs::create_dir_all(&new_config_dir);
+            // Copy all json files (config + backups + window-state)
+            if let Ok(entries) = fs::read_dir(&old_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.extension().is_some_and(|ext| ext == "json") {
+                        let dest = new_config_dir.join(entry.file_name());
+                        let _ = fs::copy(&path, &dest);
+                    }
+                }
+            }
+            log::info!("[system] Migrated config from old directory: {}", old_dir.display());
+        }
+    }
+}
+
+/// Get %APPDATA% without depending on the Tauri path resolver (which uses the new identifier).
+fn dirs_fallback_roaming() -> Option<PathBuf> {
+    std::env::var("APPDATA").ok().map(PathBuf::from)
+}
+
 /// Check for a crash sentinel from the previous run and log it, then create
 /// a new sentinel. The sentinel is deleted on clean shutdown. If it exists at
 /// startup, the previous session crashed without a clean exit.
@@ -1138,6 +1164,9 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
+            // One-time migration from old "com.nagaworkflowstudio.desktop" config dir.
+            migrate_old_config(&app.handle());
+
             // Log whether the process is running with elevated (admin) privileges.
             // This is informational — helps diagnose UIPI issues where hotkey
             // registration or SendInput fails against elevated target windows.

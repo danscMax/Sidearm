@@ -48,7 +48,7 @@ describe("useLogPanel", () => {
       result.current._ingestForTest({
         level: 3,
         message:
-          "[19:13:52][INFO][naga_workflow_studio_lib::capture_backend] [capture] Capture helper spawned (pid 55528).",
+          "[19:13:52][INFO][sidearm_lib::capture_backend] [capture] Capture helper spawned (pid 55528).",
       });
     });
 

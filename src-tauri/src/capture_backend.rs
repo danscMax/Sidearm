@@ -1706,7 +1706,7 @@ mod helper_key_event_tests {
 
 // ---------------------------------------------------------------------------
 // Diagnostic tests — verify Win32 capture mechanisms via SendInput
-// Run with: cargo test -p naga-workflow-studio capture_diag -- --nocapture
+// Run with: cargo test -p sidearm capture_diag -- --nocapture
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]

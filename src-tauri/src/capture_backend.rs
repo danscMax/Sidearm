@@ -1202,18 +1202,11 @@ fn run_foreground_watcher(
                     })
                     .unwrap_or(false);
                 if should_notify {
-                    use tauri_plugin_notification::NotificationExt;
                     let profile_name = capture_result
                         .resolved_profile_name
                         .as_deref()
                         .unwrap_or("Default");
-                    let _ = ctx
-                        .app
-                        .notification()
-                        .builder()
-                        .title("Naga Studio")
-                        .body(format!("Профиль: {profile_name}"))
-                        .show();
+                    crate::show_osd(&ctx.app, profile_name);
                 }
             }
         });
@@ -1366,17 +1359,11 @@ fn process_encoded_key_event(
             })
             .unwrap_or(false);
         if should_notify {
-            use tauri_plugin_notification::NotificationExt;
             let profile_name = capture_result
                 .resolved_profile_name
                 .as_deref()
                 .unwrap_or("Default");
-            let _ = app
-                .notification()
-                .builder()
-                .title("Naga Studio")
-                .body(format!("Профиль: {profile_name}"))
-                .show();
+            crate::show_osd(app, profile_name);
         }
     }
 

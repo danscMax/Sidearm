@@ -39,6 +39,62 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use window_capture::WindowCaptureResult;
 
+/// Show a small always-on-top OSD bubble with the profile name.
+/// The OSD auto-closes after ~2 seconds via its own JS timer.
+pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
+    use tauri::WebviewWindowBuilder;
+    use tauri::WebviewUrl;
+
+    // Close any existing OSD first
+    if let Some(existing) = app.get_webview_window("osd") {
+        let _ = existing.close();
+    }
+
+    // Position: bottom-center of primary monitor
+    let (x, y) = app
+        .get_webview_window("main")
+        .and_then(|w| {
+            let outer = w.outer_size().ok()?;
+            let pos = w.outer_position().ok()?;
+            let scale = w.scale_factor().ok().unwrap_or(1.0);
+            let screen_w = (pos.x as f64 + outer.width as f64) / scale;
+            let screen_h = (pos.y as f64 + outer.height as f64) / scale;
+            Some((screen_w / 2.0 - 150.0, screen_h - 80.0))
+        })
+        .unwrap_or((500.0, 900.0));
+
+    let url = format!("/osd.html?name={}", urlencoding(profile_name));
+    let _ = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App(url.into()))
+        .title("")
+        .inner_size(300.0, 50.0)
+        .position(x, y)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .focused(false)
+        .shadow(false)
+        .build();
+}
+
+fn urlencoding(s: &str) -> String {
+    s.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                String::from(b as char)
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn close_osd(app: AppHandle) {
+    if let Some(w) = app.get_webview_window("osd") {
+        let _ = w.close();
+    }
+}
+
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     app.path().app_config_dir().map_err(|error| {
         CommandError::from(ConfigStoreError::ConfigDirectoryUnavailable(format!(
@@ -417,14 +473,8 @@ async fn capture_active_window(
             store.notify_profile_change(result.resolved_profile_id.as_deref())
         };
         if should_notify {
-            use tauri_plugin_notification::NotificationExt;
             let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
-            let _ = app
-                .notification()
-                .builder()
-                .title("Naga Studio")
-                .body(format!("Профиль: {profile_name}"))
-                .show();
+            show_osd(&app, profile_name);
         }
     }
 
@@ -1052,6 +1102,7 @@ pub fn run() {
             execute_preview_action,
             run_preview_action,
             get_exe_icon,
+            close_osd,
             write_text_file,
             read_text_file,
             start_macro_recording,

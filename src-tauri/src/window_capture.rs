@@ -277,6 +277,7 @@ mod tests {
             &config,
             RawWindowCapture {
                 hwnd: "0x123".into(),
+                pid: 9999,
                 exe: "code.exe".into(),
                 process_path: "C:\\Apps\\code.exe".into(),
                 title: "Pull Request Review".into(),
@@ -306,6 +307,7 @@ mod tests {
             &config,
             RawWindowCapture {
                 hwnd: "0x123".into(),
+                pid: 9999,
                 exe: "chrome.exe".into(),
                 process_path: "C:\\Apps\\chrome.exe".into(),
                 title: "Docs".into(),
@@ -333,6 +335,7 @@ mod tests {
             &config,
             RawWindowCapture {
                 hwnd: "0x123".into(),
+                pid: 9999,
                 exe: "code.exe".into(),
                 process_path: "C:\\Apps\\code.exe".into(),
                 title: "Pull Request".into(),
@@ -428,6 +431,7 @@ mod tests {
         AppMapping {
             id: id.into(),
             exe: exe.into(),
+            process_path: None,
             title_includes: title_includes.into_iter().map(str::to_owned).collect(),
             profile_id: profile_id.into(),
             enabled: true,

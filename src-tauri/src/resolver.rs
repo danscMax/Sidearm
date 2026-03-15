@@ -441,6 +441,7 @@ mod tests {
         AppMapping {
             id: id.into(),
             exe: exe.into(),
+            process_path: None,
             title_includes: title_includes.into_iter().map(str::to_owned).collect(),
             profile_id: profile_id.into(),
             enabled: true,

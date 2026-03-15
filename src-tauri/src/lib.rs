@@ -75,6 +75,15 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         .focused(false)
         .shadow(false)
         .build();
+
+    // Auto-close OSD after 2 seconds (Rust-side timer — no JS permissions needed)
+    let app_handle = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        if let Some(w) = app_handle.get_webview_window("osd") {
+            let _ = w.close();
+        }
+    });
 }
 
 fn urlencoding(s: &str) -> String {

@@ -100,6 +100,7 @@ export interface EncoderMapping {
 export interface AppMapping {
   id: string;
   exe: string;
+  processPath?: string;
   titleIncludes?: string[];
   profileId: string;
   enabled: boolean;

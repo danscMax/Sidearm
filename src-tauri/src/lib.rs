@@ -782,9 +782,20 @@ async fn stop_macro_recording(
 }
 
 #[tauri::command]
-async fn get_exe_icon(exe_name: String) -> Result<Option<String>, CommandError> {
+async fn get_exe_icon(
+    exe_name: String,
+    process_path: Option<String>,
+) -> Result<Option<String>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        // Try common install locations for the exe
+        // 1. Try the known process path first (most reliable — captured from OS)
+        if let Some(ref path) = process_path {
+            if std::path::Path::new(path).exists() {
+                if let Some(b64) = exe_icon::extract_icon_base64(path) {
+                    return Ok(Some(b64));
+                }
+            }
+        }
+        // 2. Fall back to API-based search (App Paths registry + SearchPathW)
         let candidates = exe_icon_search_paths(&exe_name);
         for path in &candidates {
             if let Some(b64) = exe_icon::extract_icon_base64(path) {

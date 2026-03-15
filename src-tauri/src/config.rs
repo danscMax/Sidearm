@@ -303,6 +303,8 @@ pub struct EncoderMapping {
 pub struct AppMapping {
     pub id: String,
     pub exe: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub title_includes: Vec<String>,
     pub profile_id: String,
@@ -2380,6 +2382,7 @@ fn app_mapping(id: &str, exe: &str, profile_id: &str, priority: i32) -> AppMappi
     AppMapping {
         id: id.into(),
         exe: exe.into(),
+        process_path: None,
         title_includes: Vec::new(),
         profile_id: profile_id.into(),
         enabled: true,

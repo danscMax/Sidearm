@@ -105,8 +105,8 @@ export async function runPreviewAction(
   });
 }
 
-export async function getExeIcon(exeName: string): Promise<string | null> {
-  return invoke<string | null>("get_exe_icon", { exeName });
+export async function getExeIcon(exeName: string, processPath?: string): Promise<string | null> {
+  return invoke<string | null>("get_exe_icon", { exeName, processPath: processPath ?? null });
 }
 
 export async function writeTextFile(path: string, contents: string): Promise<void> {

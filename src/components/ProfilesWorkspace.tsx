@@ -59,37 +59,38 @@ function exeMonogram(exe: string): string {
 }
 
 /** Renders an exe icon (fetched from backend) with monogram fallback. */
-function ExeIcon({ exe, className }: { exe: string; className: string }) {
+function ExeIcon({ exe, processPath, className }: { exe: string; processPath?: string; className: string }) {
+  const cacheKey = exe;
   const [iconSrc, setIconSrc] = useState<string | null>(() => {
-    const cached = exeIconCache.get(exe);
+    const cached = exeIconCache.get(cacheKey);
     return cached ? `data:image/png;base64,${cached}` : null;
   });
 
   useEffect(() => {
-    if (exeIconCache.has(exe)) {
-      const v = exeIconCache.get(exe)!;
+    if (exeIconCache.has(cacheKey)) {
+      const v = exeIconCache.get(cacheKey)!;
       setIconSrc(v ? `data:image/png;base64,${v}` : null);
       return;
     }
 
     let cancelled = false;
-    let pending = exeIconPending.get(exe);
+    let pending = exeIconPending.get(cacheKey);
     if (!pending) {
-      pending = getExeIcon(exe);
-      exeIconPending.set(exe, pending);
+      pending = getExeIcon(exe, processPath);
+      exeIconPending.set(cacheKey, pending);
     }
     pending.then((b64) => {
-      exeIconCache.set(exe, b64 ?? "");
-      exeIconPending.delete(exe);
+      exeIconCache.set(cacheKey, b64 ?? "");
+      exeIconPending.delete(cacheKey);
       if (!cancelled && b64) {
         setIconSrc(`data:image/png;base64,${b64}`);
       }
     }).catch(() => {
-      exeIconCache.set(exe, "");
-      exeIconPending.delete(exe);
+      exeIconCache.set(cacheKey, "");
+      exeIconPending.delete(cacheKey);
     });
     return () => { cancelled = true; };
-  }, [exe]);
+  }, [exe, processPath]);
 
   if (iconSrc) {
     return <img className={className} src={iconSrc} alt={exe} draggable={false} />;
@@ -183,7 +184,7 @@ function AppMappingModal({
 
         {/* Header */}
         <div className="rule-modal__header">
-          <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
+          <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
           <div>
             <span className="rule-modal__title">{mapping.exe}</span>
             <span className="rule-modal__profile-name">Профиль: {profileName}</span>
@@ -384,6 +385,7 @@ export function ProfilesWorkspace({
   const [newRuleOpen, setNewRuleOpen] = useState(false);
   const [newRuleExe, setNewRuleExe] = useState("");
   const [newRuleCapturedTitle, setNewRuleCapturedTitle] = useState("");
+  const [newRuleCapturedProcessPath, setNewRuleCapturedProcessPath] = useState("");
   const [newRuleTitleEnabled, setNewRuleTitleEnabled] = useState(false);
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
   const prevCaptureRef = useRef(lastCapture);
@@ -428,6 +430,7 @@ export function ProfilesWorkspace({
       setCaptureForNewRule(false);
       setNewRuleExe(lastCapture.exe);
       setNewRuleCapturedTitle(lastCapture.title);
+      setNewRuleCapturedProcessPath(lastCapture.processPath);
     }
     prevCaptureRef.current = lastCapture;
   });
@@ -467,14 +470,16 @@ export function ProfilesWorkspace({
     const exe = newRuleExe.trim().toLowerCase();
     if (!exe) return;
     const title = newRuleTitleEnabled ? newRuleCapturedTitle : "";
+    const processPath = newRuleCapturedProcessPath || undefined;
     setNewRuleOpen(false);
     setNewRuleExe("");
     setNewRuleCapturedTitle("");
+    setNewRuleCapturedProcessPath("");
     setNewRuleTitleEnabled(false);
-    handleCreateRule(exe, title, newRuleTitleEnabled && !!title);
+    handleCreateRule(exe, title, newRuleTitleEnabled && !!title, processPath);
   }
 
-  function handleCreateRule(exe: string, title: string, withTitleFilter: boolean) {
+  function handleCreateRule(exe: string, title: string, withTitleFilter: boolean, processPath?: string) {
     if (!activeProfile) return;
     const duplicate = findDuplicateAppMapping(activeConfig, activeProfile.id, exe);
     if (duplicate) {
@@ -483,16 +488,16 @@ export function ProfilesWorkspace({
         message: `Для «${duplicate.exe}» уже есть правило в этом профиле. Создать ещё одно?`,
         confirmLabel: "Создать",
         onConfirm: () => {
-          doCreateRule(exe, title, withTitleFilter);
+          doCreateRule(exe, title, withTitleFilter, processPath);
           setConfirmModal(null);
         },
       });
       return;
     }
-    doCreateRule(exe, title, withTitleFilter);
+    doCreateRule(exe, title, withTitleFilter, processPath);
   }
 
-  function doCreateRule(exe: string, title: string, withTitleFilter: boolean) {
+  function doCreateRule(exe: string, title: string, withTitleFilter: boolean, processPath?: string) {
     if (!activeProfile) return;
     let newId: string | null = null;
     updateDraft((config) => {
@@ -503,6 +508,7 @@ export function ProfilesWorkspace({
         exe,
         title,
         withTitleFilter,
+        processPath,
       );
       newId = result.newMappingId;
       return result.config;
@@ -623,7 +629,7 @@ export function ProfilesWorkspace({
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
               }}
             >
-              <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
+              <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
               <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
               <input
                 className="profiles__toggle"
@@ -795,7 +801,7 @@ export function ProfilesWorkspace({
               {newRuleExe && newRuleCapturedTitle ? (
                 <div className="new-rule__capture-result">
                   <div className="new-rule__capture-result-row">
-                    <ExeIcon exe={newRuleExe} className="profiles__app-card-monogram" />
+                    <ExeIcon exe={newRuleExe} processPath={newRuleCapturedProcessPath || undefined} className="profiles__app-card-monogram" />
                     <span className="new-rule__capture-exe">{newRuleExe}</span>
                   </div>
                   <label className="new-rule__title-toggle">

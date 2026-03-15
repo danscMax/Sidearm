@@ -405,6 +405,7 @@ export function createAppMappingFromCapture(
   exe: string,
   title: string,
   includeTitleFilter: boolean,
+  processPath?: string,
 ): CreateAppMappingResult {
   const normalizedExe = exe.trim().toLowerCase();
   const baseId = makeAppMappingId(normalizedExe);
@@ -415,6 +416,7 @@ export function createAppMappingFromCapture(
   const nextMapping: AppMapping = {
     id: nextId,
     exe: normalizedExe,
+    processPath: processPath || undefined,
     profileId,
     enabled: true,
     priority,

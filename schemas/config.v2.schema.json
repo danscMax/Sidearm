@@ -307,6 +307,9 @@
         "exe": {
           "$ref": "#/$defs/exeName"
         },
+        "processPath": {
+          "type": "string"
+        },
         "titleIncludes": {
           "type": "array",
           "minItems": 1,

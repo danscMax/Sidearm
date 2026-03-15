@@ -174,8 +174,8 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
             Ok(_report) => return Ok(()),
             Err(clipboard_error) => {
                 // Clipboard-paste failed — fall through to per-character injection.
-                eprintln!(
-                    "Clipboard-paste fallback failed for long text ({} chars), \
+                log::warn!(
+                    "[input] Clipboard-paste fallback failed for long text ({} chars), \
                      falling back to KEYEVENTF_UNICODE: {clipboard_error}",
                     text.chars().count()
                 );

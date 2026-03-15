@@ -166,7 +166,7 @@ impl CaptureBackendHandle {
                 // Channel closed (graceful shutdown) — release all held keys
                 for (encoded_key, held) in held_actions.drain() {
                     if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
-                        eprintln!("[capture] WARNING: Failed to release held shortcut `{encoded_key}` on shutdown: {e}");
+                        log::warn!("[capture] Failed to release held shortcut `{encoded_key}` on shutdown: {e}");
                     }
                 }
             });
@@ -644,6 +644,12 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
 /// Exits when stdin is closed (parent process stopped).
 #[cfg(target_os = "windows")]
 pub fn capture_helper_main() {
+    // Initialize a stderr logger for the helper subprocess (no Tauri runtime here).
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Info)
+        .target(env_logger::Target::Stderr)
+        .init();
+
     use std::io::BufRead;
     use std::mem::MaybeUninit;
     use windows_sys::Win32::{
@@ -660,24 +666,24 @@ pub fn capture_helper_main() {
     let stdin = std::io::stdin();
     let mut line = String::new();
     if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
-        eprintln!("[capture-helper] No input received on stdin, exiting.");
+        log::warn!("[capture-helper] No input received on stdin, exiting.");
         return;
     }
 
     let registrations: Vec<HelperRegistration> = match serde_json::from_str(line.trim()) {
         Ok(regs) => regs,
         Err(e) => {
-            eprintln!("[capture-helper] Failed to parse registrations: {e}");
+            log::error!("[capture-helper] Failed to parse registrations: {e}");
             return;
         }
     };
 
     if registrations.is_empty() {
-        eprintln!("[capture-helper] No registrations, exiting.");
+        log::warn!("[capture-helper] No registrations, exiting.");
         return;
     }
 
-    eprintln!(
+    log::info!(
         "[capture-helper] Loaded {} modifier-combo registrations.",
         registrations.len()
     );
@@ -698,19 +704,19 @@ pub fn capture_helper_main() {
         };
         SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
     }
-    eprintln!("[capture-helper] Thread priority set to TIME_CRITICAL.");
+    log::info!("[capture-helper] Thread priority set to TIME_CRITICAL.");
 
     // 3. Install WH_KEYBOARD_LL hook
     let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
     let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0) };
     if hook.is_null() {
-        eprintln!(
+        log::error!(
             "[capture-helper] SetWindowsHookExW failed: {}",
             std::io::Error::last_os_error()
         );
         return;
     }
-    eprintln!("[capture-helper] LL keyboard hook installed successfully.");
+    log::info!("[capture-helper] LL keyboard hook installed successfully.");
 
     // 4. Spawn stdin watcher — reads commands from parent.
     //    "REHOOK" → reinstall LL hook (WM_APP + 1)
@@ -725,17 +731,17 @@ pub fn capture_helper_main() {
             buf.clear();
             match stdin.lock().read_line(&mut buf) {
                 Ok(0) | Err(_) => {
-                    eprintln!("[capture-helper] stdin closed, posting WM_QUIT.");
+                    log::info!("[capture-helper] stdin closed, posting WM_QUIT.");
                     unsafe { PostThreadMessageW(hook_tid, WM_QUIT, 0, 0); }
                     break;
                 }
                 Ok(_) => {
                     let cmd = buf.trim();
                     if cmd == "REHOOK" {
-                        eprintln!("[capture-helper] REHOOK command received.");
+                        log::info!("[capture-helper] REHOOK command received.");
                         unsafe { PostThreadMessageW(hook_tid, WM_REHOOK, 0, 0); }
                     } else {
-                        eprintln!("[capture-helper] Unknown command: {cmd:?}");
+                        log::warn!("[capture-helper] Unknown command: {cmd:?}");
                     }
                 }
             }
@@ -767,8 +773,8 @@ pub fn capture_helper_main() {
         };
 
         if wait_result == WAIT_FAILED {
-            eprintln!(
-                "[capture-helper] WARNING: MsgWaitForMultipleObjectsEx failed: {}",
+            log::warn!(
+                "[capture-helper] MsgWaitForMultipleObjectsEx failed: {}",
                 std::io::Error::last_os_error()
             );
             // Continue the loop — next iteration will retry.
@@ -785,8 +791,8 @@ pub fn capture_helper_main() {
                     probe_sent = false;
                 } else {
                     // Hook is dead — reinstall it.
-                    eprintln!(
-                        "[capture-helper] WARNING: Hook health probe not received — \
+                    log::warn!(
+                        "[capture-helper] Hook health probe not received — \
                          hook appears dead.  Reinstalling WH_KEYBOARD_LL..."
                     );
                     unsafe { UnhookWindowsHookEx(hook); }
@@ -794,15 +800,15 @@ pub fn capture_helper_main() {
                         SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
                     };
                     if new_hook.is_null() {
-                        eprintln!(
-                            "[capture-helper] FATAL: Failed to reinstall hook: {}. Exiting.",
+                        log::error!(
+                            "[capture-helper] Failed to reinstall hook: {}. Exiting.",
                             std::io::Error::last_os_error()
                         );
                         break;
                     }
                     hook = new_hook;
                     hook_reinstall_count += 1;
-                    eprintln!(
+                    log::info!(
                         "[capture-helper] Hook reinstalled successfully \
                          (total reinstalls: {hook_reinstall_count})."
                     );
@@ -831,18 +837,18 @@ pub fn capture_helper_main() {
                 // Drain any remaining matches before exiting.
                 drain_helper_matches(&mut stdout);
                 unsafe { UnhookWindowsHookEx(hook); }
-                eprintln!("[capture-helper] Hook uninstalled, exiting.");
+                log::info!("[capture-helper] Hook uninstalled, exiting.");
                 return;
             }
             if m.message == WM_REHOOK {
-                eprintln!("[capture-helper] REHOOK: reinstalling WH_KEYBOARD_LL...");
+                log::info!("[capture-helper] REHOOK: reinstalling WH_KEYBOARD_LL...");
                 unsafe { UnhookWindowsHookEx(hook); }
                 let new_hook = unsafe {
                     SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
                 };
                 if new_hook.is_null() {
-                    eprintln!(
-                        "[capture-helper] FATAL: Failed to reinstall hook on REHOOK: {}. Exiting.",
+                    log::error!(
+                        "[capture-helper] Failed to reinstall hook on REHOOK: {}. Exiting.",
                         std::io::Error::last_os_error()
                     );
                     break;
@@ -850,7 +856,7 @@ pub fn capture_helper_main() {
                 hook = new_hook;
                 hook_reinstall_count += 1;
                 probe_sent = false;
-                eprintln!(
+                log::info!(
                     "[capture-helper] Hook reinstalled via REHOOK \
                      (total reinstalls: {hook_reinstall_count})."
                 );
@@ -881,7 +887,7 @@ pub fn capture_helper_main() {
     }
 
     // 6. Cleanup (reached only on reinstall failure)
-    eprintln!("[capture-helper] Exiting message pump.");
+    log::info!("[capture-helper] Exiting message pump.");
 }
 
 #[cfg(target_os = "windows")]
@@ -897,7 +903,7 @@ fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) {
 
 #[cfg(not(target_os = "windows"))]
 pub fn capture_helper_main() {
-    eprintln!("[capture-helper] Only supported on Windows.");
+    log::error!("[capture-helper] Only supported on Windows.");
 }
 
 /// Spawns the capture helper child process for modifier-combo hotkeys.
@@ -931,7 +937,7 @@ fn spawn_capture_helper(
     let exe_path = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("[capture] WARNING: Failed to get current exe path for helper: {e}");
+            log::warn!("[capture] Failed to get current exe path for helper: {e}");
             return None;
         }
     };
@@ -946,7 +952,7 @@ fn spawn_capture_helper(
     {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("[capture] WARNING: Failed to spawn capture helper: {e}");
+            log::warn!("[capture] Failed to spawn capture helper: {e}");
             return None;
         }
     };
@@ -958,7 +964,7 @@ fn spawn_capture_helper(
     let json = match serde_json::to_string(&helper_regs) {
         Ok(j) => j,
         Err(e) => {
-            eprintln!("[capture] WARNING: Failed to serialize helper registrations: {e}");
+            log::warn!("[capture] Failed to serialize helper registrations: {e}");
             let _ = child.kill();
             return None;
         }
@@ -966,12 +972,12 @@ fn spawn_capture_helper(
 
     let write_result = writeln!(stdin_pipe, "{json}").and_then(|()| stdin_pipe.flush());
     if let Err(e) = write_result {
-        eprintln!("[capture] WARNING: Failed to write to helper stdin: {e}");
+        log::warn!("[capture] Failed to write to helper stdin: {e}");
         let _ = child.kill();
         return None;
     }
 
-    eprintln!(
+    log::info!(
         "[capture] Capture helper spawned (pid {}), {} modifier-combo registrations.",
         child.id(),
         helper_regs.len()
@@ -1105,7 +1111,7 @@ fn run_hotkey_message_loop(
                     is_key_up: false,
                 });
             } else {
-                eprintln!("[capture] WARNING: received WM_HOTKEY with unrecognized id {hotkey_id}");
+                log::warn!("[capture] Received WM_HOTKEY with unrecognized id {hotkey_id}");
             }
         }
 
@@ -1237,7 +1243,7 @@ fn run_foreground_watcher(
     };
 
     if hook.is_null() {
-        eprintln!("[capture] WARNING: SetWinEventHook(EVENT_SYSTEM_FOREGROUND) failed.");
+        log::warn!("[capture] SetWinEventHook(EVENT_SYSTEM_FOREGROUND) failed.");
         let _ = ready_tx.send(0);
         return;
     }
@@ -1558,7 +1564,7 @@ fn flush_log_entries(runtime_store: &Arc<Mutex<RuntimeStore>>, entries: Vec<(&st
             }
         }
     } else {
-        eprintln!("[capture] WARNING: runtime_store mutex poisoned while flushing log entries");
+        log::error!("[capture] runtime_store mutex poisoned while flushing log entries");
     }
 }
 
@@ -1586,8 +1592,8 @@ fn emit_runtime_error(
             format!("{}{}", event.message, suffix),
         );
     } else {
-        eprintln!(
-            "[{}] WARNING: runtime_store mutex poisoned while recording runtime error: {}",
+        log::error!(
+            "[{}] runtime_store mutex poisoned while recording runtime error: {}",
             event.category, event.message
         );
     }
@@ -1806,7 +1812,7 @@ mod capture_diag {
 
     #[test]
     fn diag_register_hotkey_simple_f13() {
-        eprintln!("\n=== TEST: RegisterHotKey + SendInput(F13) ===");
+        log::debug!("\n=== TEST: RegisterHotKey + SendInput(F13) ===");
         let id = 8001;
         let ok = unsafe { RegisterHotKey(std::ptr::null_mut(), id, MOD_NOREPEAT, VK_F13 as u32) };
         assert!(
@@ -1818,10 +1824,10 @@ mod capture_diag {
         let mut inputs = [kbd_down(VK_F13), kbd_up(VK_F13)];
         let sent =
             unsafe { SendInput(2, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32) };
-        eprintln!("  SendInput returned {sent}");
+        log::debug!("  SendInput returned {sent}");
 
         let received = poll_wm_hotkey(Duration::from_millis(500));
-        eprintln!("  WM_HOTKEY received: {:?} (expected Some({id}))", received);
+        log::debug!("  WM_HOTKEY received: {:?} (expected Some({id}))", received);
 
         unsafe { UnregisterHotKey(std::ptr::null_mut(), id) };
 
@@ -1834,7 +1840,7 @@ mod capture_diag {
 
     #[test]
     fn diag_register_hotkey_ctrl_shift_f23() {
-        eprintln!("\n=== TEST: RegisterHotKey + SendInput(Ctrl+Shift+F23) ===");
+        log::debug!("\n=== TEST: RegisterHotKey + SendInput(Ctrl+Shift+F23) ===");
         let id = 8002;
         let mask = MOD_NOREPEAT | MOD_CONTROL | MOD_SHIFT;
         let ok = unsafe { RegisterHotKey(std::ptr::null_mut(), id, mask, VK_F23 as u32) };
@@ -1855,10 +1861,10 @@ mod capture_diag {
         ];
         let sent =
             unsafe { SendInput(6, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32) };
-        eprintln!("  SendInput returned {sent}");
+        log::debug!("  SendInput returned {sent}");
 
         let received = poll_wm_hotkey(Duration::from_millis(500));
-        eprintln!(
+        log::debug!(
             "  WM_HOTKEY received: {:?} (expected Some({id}) if working)",
             received
         );
@@ -1867,9 +1873,9 @@ mod capture_diag {
 
         // This test documents behavior — it may or may not pass depending on system
         if received.is_some() {
-            eprintln!("  RESULT: RegisterHotKey CAN catch Ctrl+Shift+F23 via SendInput");
+            log::debug!("  RESULT: RegisterHotKey CAN catch Ctrl+Shift+F23 via SendInput");
         } else {
-            eprintln!("  RESULT: RegisterHotKey CANNOT catch Ctrl+Shift+F23 via SendInput");
+            log::debug!("  RESULT: RegisterHotKey CANNOT catch Ctrl+Shift+F23 via SendInput");
         }
     }
 
@@ -1885,7 +1891,7 @@ mod capture_diag {
             },
         };
 
-        eprintln!("\n=== TEST: WH_KEYBOARD_LL + SendInput(Ctrl+Shift+F23) ===");
+        log::debug!("\n=== TEST: WH_KEYBOARD_LL + SendInput(Ctrl+Shift+F23) ===");
 
         struct TestHookState {
             hits: Vec<(u32, bool, bool)>, // (vk, ctrl_down, shift_down)
@@ -1921,10 +1927,10 @@ mod capture_diag {
         });
 
         let hmod = unsafe { GetModuleHandleW(std::ptr::null()) };
-        eprintln!("  GetModuleHandleW(NULL) = {:?}", hmod);
+        log::debug!("  GetModuleHandleW(NULL) = {:?}", hmod);
 
         let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(test_hook_proc), hmod, 0) };
-        eprintln!("  SetWindowsHookExW result: {:?} (null=failed)", hook);
+        log::debug!("  SetWindowsHookExW result: {:?} (null=failed)", hook);
         assert!(
             !hook.is_null(),
             "SetWindowsHookExW failed: {}",
@@ -1942,7 +1948,7 @@ mod capture_diag {
         ];
         let sent =
             unsafe { SendInput(6, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32) };
-        eprintln!("  SendInput returned {sent}");
+        log::debug!("  SendInput returned {sent}");
 
         // Pump messages to let hook callbacks fire
         pump_messages(Duration::from_millis(300));
@@ -1954,32 +1960,32 @@ mod capture_diag {
                 .unwrap_or_default()
         });
 
-        eprintln!("  Hook received {} key-down events:", hits.len());
+        log::debug!("  Hook received {} key-down events:", hits.len());
         for (vk, ctrl, shift) in &hits {
             let name = match *vk as u16 {
                 0x11 => "VK_CONTROL",
                 0x10 => "VK_SHIFT",
                 0x86 => "VK_F23",
                 other => {
-                    eprintln!("    vk=0x{other:02X} ctrl={ctrl} shift={shift}");
+                    log::debug!("    vk=0x{other:02X} ctrl={ctrl} shift={shift}");
                     continue;
                 }
             };
-            eprintln!("    {name} (0x{vk:02X}) ctrl={ctrl} shift={shift}");
+            log::debug!("    {name} (0x{vk:02X}) ctrl={ctrl} shift={shift}");
         }
 
         let f23_hit = hits.iter().find(|(vk, _, _)| *vk == VK_F23 as u32);
         if let Some((_, ctrl, shift)) = f23_hit {
-            eprintln!("  RESULT: LL hook DID catch F23. ctrl={ctrl}, shift={shift}");
+            log::debug!("  RESULT: LL hook DID catch F23. ctrl={ctrl}, shift={shift}");
             if *ctrl && *shift {
-                eprintln!(
+                log::debug!(
                     "  RESULT: Modifier state CORRECT — LL hook can intercept Ctrl+Shift+F23"
                 );
             } else {
-                eprintln!("  RESULT: Modifier state WRONG — GetAsyncKeyState unreliable in hook");
+                log::debug!("  RESULT: Modifier state WRONG — GetAsyncKeyState unreliable in hook");
             }
         } else {
-            eprintln!("  RESULT: LL hook did NOT receive F23 key event at all!");
+            log::debug!("  RESULT: LL hook did NOT receive F23 key event at all!");
         }
 
         unsafe { UnhookWindowsHookEx(hook) };
@@ -1999,7 +2005,7 @@ mod capture_diag {
             },
         };
 
-        eprintln!("\n=== TEST: WH_KEYBOARD_LL + SendInput(F13) ===");
+        log::debug!("\n=== TEST: WH_KEYBOARD_LL + SendInput(F13) ===");
 
         thread_local! {
             static TEST_HITS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
@@ -2035,18 +2041,18 @@ mod capture_diag {
         let mut inputs = [kbd_down(VK_F13), kbd_up(VK_F13)];
         let sent =
             unsafe { SendInput(2, inputs.as_mut_ptr(), std::mem::size_of::<INPUT>() as i32) };
-        eprintln!("  SendInput returned {sent}");
+        log::debug!("  SendInput returned {sent}");
 
         pump_messages(Duration::from_millis(300));
 
         let hits = TEST_HITS.with(|cell| cell.borrow().clone());
-        eprintln!("  Hook received {} key-down events: {:?}", hits.len(), hits);
+        log::debug!("  Hook received {} key-down events: {:?}", hits.len(), hits);
 
         let f13_hit = hits.iter().any(|vk| *vk == VK_F13 as u32);
         if f13_hit {
-            eprintln!("  RESULT: LL hook CAN catch simple F13 via SendInput");
+            log::debug!("  RESULT: LL hook CAN catch simple F13 via SendInput");
         } else {
-            eprintln!("  RESULT: LL hook CANNOT catch F13 — hook callbacks not firing!");
+            log::debug!("  RESULT: LL hook CANNOT catch F13 — hook callbacks not firing!");
         }
 
         unsafe { UnhookWindowsHookEx(hook) };

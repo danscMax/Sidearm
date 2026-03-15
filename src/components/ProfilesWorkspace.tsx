@@ -384,6 +384,7 @@ export function ProfilesWorkspace({
   const [newRuleOpen, setNewRuleOpen] = useState(false);
   const [newRuleExe, setNewRuleExe] = useState("");
   const [newRuleCapturedTitle, setNewRuleCapturedTitle] = useState("");
+  const [newRuleTitleEnabled, setNewRuleTitleEnabled] = useState(false);
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
@@ -465,11 +466,12 @@ export function ProfilesWorkspace({
   function handleConfirmNewRule() {
     const exe = newRuleExe.trim().toLowerCase();
     if (!exe) return;
-    const title = newRuleCapturedTitle;
+    const title = newRuleTitleEnabled ? newRuleCapturedTitle : "";
     setNewRuleOpen(false);
     setNewRuleExe("");
     setNewRuleCapturedTitle("");
-    handleCreateRule(exe, title, !!title);
+    setNewRuleTitleEnabled(false);
+    handleCreateRule(exe, title, newRuleTitleEnabled && !!title);
   }
 
   function handleCreateRule(exe: string, title: string, withTitleFilter: boolean) {
@@ -747,18 +749,17 @@ export function ProfilesWorkspace({
               <div className="new-rule__capture">
                 <button
                   type="button"
-                  className="new-rule__capture-btn"
+                  className="action-button action-button--accent"
                   onClick={() => { void handleCaptureForDialog(); }}
                   disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
                 >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="3" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                  {captureCountdown !== null ? `${captureCountdown}...` : "Захватить активное окно"}
+                  {captureCountdown !== null ? `Переключитесь на окно... ${captureCountdown}` : "Захватить активное окно"}
                 </button>
                 <select
                   className="new-rule__delay"
                   value={captureDelayMs}
                   onChange={(e) => setCaptureDelayMs(Number(e.target.value))}
-                  title="Задержка: переключитесь на нужное окно за это время"
+                  title="Задержка перед захватом"
                 >
                   <option value={500}>0.5с</option>
                   <option value={1000}>1с</option>
@@ -769,10 +770,31 @@ export function ProfilesWorkspace({
                 </select>
               </div>
 
-              {newRuleCapturedTitle ? (
-                <p className="new-rule__captured-title">
-                  Заголовок: {newRuleCapturedTitle}
-                </p>
+              {newRuleExe && newRuleCapturedTitle ? (
+                <div className="new-rule__capture-result">
+                  <div className="new-rule__capture-result-row">
+                    <ExeIcon exe={newRuleExe} className="profiles__app-card-monogram" />
+                    <span className="new-rule__capture-exe">{newRuleExe}</span>
+                  </div>
+                  <label className="new-rule__title-toggle">
+                    <input
+                      className="profiles__toggle"
+                      type="checkbox"
+                      checked={newRuleTitleEnabled}
+                      onChange={(e) => setNewRuleTitleEnabled(e.target.checked)}
+                    />
+                    <span>Фильтр по заголовку</span>
+                  </label>
+                  {newRuleTitleEnabled ? (
+                    <div className="new-rule__title-detail">
+                      <span className="new-rule__title-value">{newRuleCapturedTitle}</span>
+                      <p className="new-rule__title-hint">
+                        Правило сработает только если заголовок окна содержит этот текст.
+                        Без фильтра — сработает для любого окна этого приложения.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
               ) : null}
             </div>
             <div className="rule-modal__footer">

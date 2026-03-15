@@ -239,87 +239,59 @@ if (-not $SkipBuild) {
     Write-Host "    $([char]0x25B6) Compiling Rust backend..." -ForegroundColor White
     Set-Location -LiteralPath $TAURI_DIR
 
-    $stderrFile = Join-Path $env:TEMP 'naga-cargo-stderr.log'
-    if (Test-Path $stderrFile) { Remove-Item $stderrFile -Force }
+    # Use .NET Process to read stderr line-by-line in real time.
+    # PowerShell's native 2>&1 pipe buffers ErrorRecords until process exit,
+    # so cargo output appears all at once instead of progressively.
+    # CARGO_TERM_PROGRESS_WHEN=never disables \r-based progress bar so
+    # each "Compiling" line gets a proper \n that ReadLine() can process.
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = (Get-Command cargo -ErrorAction SilentlyContinue).Source
+    if (-not $psi.FileName) { $psi.FileName = 'cargo' }
+    $psi.Arguments = 'build --release --features custom-protocol'
+    $psi.WorkingDirectory = $TAURI_DIR
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardError = $true
+    $psi.RedirectStandardOutput = $true
+    $psi.CreateNoWindow = $true
+    $psi.EnvironmentVariables['CARGO_TERM_PROGRESS_WHEN'] = 'never'
 
-    # Start cargo as a background process with stderr redirected to a file
-    $cargoProc = Start-Process -FilePath 'cargo' `
-        -ArgumentList 'build','--release','--features','custom-protocol' `
-        -WorkingDirectory $TAURI_DIR `
-        -RedirectStandardError $stderrFile `
-        -PassThru -NoNewWindow -WindowStyle Hidden
+    $proc = [System.Diagnostics.Process]::Start($psi)
 
-    # Poll the stderr file for new output while cargo runs
-    $lastSize = 0
-    $lastCrate = ''
+    # Drain stdout in background (otherwise pipe buffer fills and deadlocks)
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+
     $crateCount = 0
-
-    while (-not $cargoProc.HasExited) {
-        Start-Sleep -Milliseconds 400
-
-        if (-not (Test-Path $stderrFile)) { continue }
-        $currentSize = (Get-Item $stderrFile -ErrorAction SilentlyContinue).Length
-        if ($currentSize -le $lastSize) { continue }
-
-        # Read only the new bytes
-        try {
-            $stream = [System.IO.FileStream]::new($stderrFile, 'Open', 'Read', 'ReadWrite')
-            $stream.Seek($lastSize, 'Begin') | Out-Null
-            $bytes = [byte[]]::new($currentSize - $lastSize)
-            $stream.Read($bytes, 0, $bytes.Length) | Out-Null
-            $stream.Close()
-            $newText = [System.Text.Encoding]::UTF8.GetString($bytes)
-            $lastSize = $currentSize
-        } catch {
-            continue
+    while ($null -ne ($line = $proc.StandardError.ReadLine())) {
+        if ($line -match 'Compiling\s+(\S+)\s+v') {
+            $crate = $Matches[1]
+            $crateCount++
+            $elapsed = ''
+            if ($script:buildStartTime) {
+                $secs = [math]::Round(((Get-Date) - $script:buildStartTime).TotalSeconds)
+                $min = [math]::Floor($secs / 60)
+                $sec = $secs % 60
+                $elapsed = " [{0}:{1:D2}]" -f $min, $sec
+            }
+            $msg = "    Compiling ($crateCount): $crate$elapsed"
+            if ($msg.Length -gt 78) { $msg = $msg.Substring(0, 75) + '...' }
+            Write-Host "`r$($msg.PadRight(80))" -NoNewline -ForegroundColor DarkCyan
         }
-
-        # Parse cargo output for crate names
-        $lines = $newText -split '[\r\n]+'
-        foreach ($line in $lines) {
-            if ($line -match 'Compiling\s+(\S+)\s+v') {
-                $crate = $Matches[1]
-                $crateCount++
-                $elapsed = ''
-                if ($script:buildStartTime) {
-                    $secs = [math]::Round(((Get-Date) - $script:buildStartTime).TotalSeconds)
-                    $min = [math]::Floor($secs / 60)
-                    $sec = $secs % 60
-                    $elapsed = " [{0}:{1:D2}]" -f $min, $sec
-                }
-                $msg = "    Compiling ($crateCount): $crate$elapsed"
-                if ($msg.Length -gt 78) { $msg = $msg.Substring(0, 75) + '...' }
-                Write-Host "`r$($msg.PadRight(80))" -NoNewline -ForegroundColor DarkCyan
-                $lastCrate = $crate
-            }
-            elseif ($line -match 'Linking\s') {
-                Write-Host "`r$(' ' * 80)`r" -NoNewline
-                Write-Host "    Linking executable..." -ForegroundColor Magenta -NoNewline
-            }
-            elseif ($line -match 'error(\[E\d+\]|:)') {
-                Write-Host "`r$(' ' * 80)`r" -NoNewline
-                Write-Host "    $line" -ForegroundColor Red
-            }
+        elseif ($line -match 'Linking\s') {
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
+            Write-Host "    Linking executable..." -ForegroundColor Magenta
+        }
+        elseif ($line -match 'error(\[E\d+\]|:)') {
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
+            Write-Host "    $line" -ForegroundColor Red
+        }
+        elseif ($line -match 'Finished') {
+            Write-Host "`r$(' ' * 80)`r" -NoNewline
         }
     }
-
-    # Clear progress line
-    Write-Host "`r$(' ' * 80)`r" -NoNewline
-
-    # Read any remaining output for errors
-    if (Test-Path $stderrFile) {
-        $remaining = Get-Content $stderrFile -Raw -ErrorAction SilentlyContinue
-        if ($cargoProc.ExitCode -ne 0 -and $remaining) {
-            $remaining -split '[\r\n]+' | ForEach-Object {
-                if ($_ -match 'error(\[E\d+\]|:)' -or $_ -match '^\s*-->') {
-                    Write-Host "    $_" -ForegroundColor Red
-                }
-            }
-        }
-        Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
-    }
-
-    $buildExitCode = $cargoProc.ExitCode
+    $proc.WaitForExit()
+    $buildExitCode = $proc.ExitCode
+    $proc.Dispose()
+    [void]$stdoutTask.Result
 
     $ErrorActionPreference = $oldEAP
 

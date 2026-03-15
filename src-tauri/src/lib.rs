@@ -89,10 +89,18 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         .skip_taskbar(true)
         .focused(false)
         .resizable(false)
+        .visible(false) // hidden until content loads
         .background_color(tauri::window::Color(0x1a, 0x1f, 0x16, 0xff))
         .build()
     {
-        Ok(_) => {}
+        Ok(w) => {
+            // Show after WebView2 has time to render the tiny HTML
+            let win = w.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(120));
+                let _ = win.show();
+            });
+        }
         Err(e) => eprintln!("[osd] Failed to create OSD window: {e}"),
     }
 
@@ -824,6 +832,12 @@ async fn get_exe_icon(
                 return Ok(Some(b64));
             }
         }
+        // 3. Try to find path from a running process with this exe name
+        if let Some(path) = find_running_process_path(&exe_name) {
+            if let Some(b64) = exe_icon::extract_icon_base64(&path) {
+                return Ok(Some(b64));
+            }
+        }
         Ok(None)
     })
     .await
@@ -950,6 +964,71 @@ fn search_path_win32(exe_name: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Find the full path of a running process by exe name.
+///
+/// Uses `CreateToolhelp32Snapshot` + `QueryFullProcessImageNameW` — standard
+/// Win32 API for enumerating running processes. Works for any exe that is
+/// currently running, regardless of install location.
+#[cfg(target_os = "windows")]
+fn find_running_process_path(exe_name: &str) -> Option<String> {
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            TH32CS_SNAPPROCESS,
+        },
+        System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() {
+            return None;
+        }
+
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        if Process32FirstW(snapshot, &mut entry) == 0 {
+            CloseHandle(snapshot);
+            return None;
+        }
+
+        let target = exe_name.to_ascii_lowercase();
+        loop {
+            let name_len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+            let name = String::from_utf16_lossy(&entry.szExeFile[..name_len]).to_ascii_lowercase();
+
+            if name == target {
+                let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
+                if !process.is_null() {
+                    let mut path_buf = vec![0u16; 512];
+                    let mut path_len = path_buf.len() as u32;
+                    let ok = QueryFullProcessImageNameW(process, 0, path_buf.as_mut_ptr(), &mut path_len);
+                    CloseHandle(process);
+                    if ok != 0 {
+                        let path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
+                        CloseHandle(snapshot);
+                        return Some(path);
+                    }
+                }
+            }
+
+            if Process32NextW(snapshot, &mut entry) == 0 {
+                break;
+            }
+        }
+
+        CloseHandle(snapshot);
+        None
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn find_running_process_path(_exe_name: &str) -> Option<String> {
+    None
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

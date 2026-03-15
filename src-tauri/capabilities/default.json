@@ -5,6 +5,8 @@
   "windows": ["main", "osd"],
   "permissions": [
     "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-decorations",
     "dialog:allow-open",
     "dialog:allow-save",
     "window-state:default",

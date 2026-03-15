@@ -65,12 +65,17 @@ textarea:focus-visible {
   outline-offset: 1px;
 }
 
-/* ── Scrollbar ── */
+/* ── Scrollbar: hidden by default, visible on hover ── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 4px; transition: background 0.2s; }
 ::-webkit-scrollbar-corner { background: transparent; }
+
+/* Show scrollbar thumb only when hovering the scrollable container */
+*:hover > ::-webkit-scrollbar-thumb,
+*:hover::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.12); }
+*:hover > ::-webkit-scrollbar-thumb:hover,
+*:hover::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.24); }
 
 html, body, #root {
   height: 100%;

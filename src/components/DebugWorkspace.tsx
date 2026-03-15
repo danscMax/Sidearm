@@ -1,5 +1,3 @@
-import { useMemo } from "react";
-
 import type {
   Action,
   AppConfig,
@@ -33,7 +31,6 @@ import {
   labelForExecutionOutcome,
   labelForPreviewStatus,
   labelForVerificationResult,
-  logLevelBadgeClass,
 } from "../lib/labels";
 import {
   controlPhysicalHint,
@@ -44,7 +41,9 @@ import {
 import { isActionLiveRunnable } from "../lib/action-helpers";
 
 import { ControlPropertiesPanel } from "./ControlPropertiesPanel";
+import { LogPanel } from "./LogPanel";
 import { Fact } from "./shared";
+import type { LogPanelControl } from "../hooks/useLogPanel";
 
 export interface DebugRuntimeProps {
   debugLog: DebugLogEntry[];
@@ -89,6 +88,7 @@ export interface DebugWorkspaceProps {
   snippetById: Map<string, SnippetLibraryItem>;
   selectedLayer: Layer;
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
+  logPanel: LogPanelControl;
   runtime: DebugRuntimeProps;
   verification: DebugVerificationProps;
 }
@@ -104,12 +104,12 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
     snippetById,
     selectedLayer,
     updateDraft,
+    logPanel,
     runtime,
     verification,
   } = props;
 
   const {
-    debugLog,
     resolutionKeyInput,
     setResolutionKeyInput,
     lastResolutionPreview,
@@ -140,8 +140,6 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
     handleReset: handleResetVerificationSession,
     handleExport: handleExportVerificationSession,
   } = verification;
-
-  const reversedLog = useMemo(() => [...debugLog].reverse(), [debugLog]);
 
   const resolvedLiveRunnable =
     lastResolutionPreview?.actionId
@@ -617,34 +615,13 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
       <details className="expert-log" open>
         <summary className="expert-log__summary">
           Журнал событий
-          {debugLog.length > 0 ? (
+          {logPanel.logs.length > 0 ? (
             <span className="expert-log__count">
-              {" "}({debugLog.length})
+              {" "}({logPanel.filteredLogs.length})
             </span>
           ) : null}
         </summary>
-        {reversedLog.length > 0 ? (
-          <ul className="log-list">
-            {reversedLog.map((entry) => (
-              <li key={entry.id} className="log-item">
-                <span className={`badge ${logLevelBadgeClass(entry.level)}`}>
-                  {entry.level === "info" ? "инфо" : "вним."}
-                </span>
-                <div className="log-item__body">
-                  <strong>{entry.message}</strong>
-                  <span>
-                    <span className="log-item__category">{entry.category}</span>
-                    <time className="log-item__time">{formatTimestamp(entry.createdAt)}</time>
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="panel__muted" style={{ padding: "0 16px 16px" }}>
-            Журнал пока пуст. Запустите перехват, чтобы увидеть события.
-          </p>
-        )}
+        <LogPanel logPanel={logPanel} />
       </details>
     </div>
   );

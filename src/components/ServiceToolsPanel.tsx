@@ -1,4 +1,4 @@
-import { useMemo, useOptimistic } from "react";
+import { useOptimistic } from "react";
 import { enable as enableAutostart, disable as disableAutostart } from "@tauri-apps/plugin-autostart";
 
 import { normalizeCommandError } from "../lib/backend";
@@ -23,10 +23,11 @@ import {
   labelForExecutionMode,
   labelForExecutionOutcome,
   labelForPreviewStatus,
-  logLevelBadgeClass,
 } from "../lib/labels";
 import { isActionLiveRunnable } from "../lib/action-helpers";
+import { LogPanel } from "./LogPanel";
 import { Fact, PanelGroup, WarningsPanel, ErrorPanel } from "./shared";
+import type { LogPanelControl } from "../hooks/useLogPanel";
 
 export interface ServiceToolsPanelProps {
   activeConfig: AppConfig;
@@ -47,6 +48,7 @@ export interface ServiceToolsPanelProps {
   lastExecution: ActionExecutionEvent | null;
   lastRuntimeError: RuntimeErrorEvent | null;
   debugLog: DebugLogEntry[];
+  logPanel: LogPanelControl;
   handleCaptureActiveWindow: () => Promise<void>;
   handlePreviewResolution: () => Promise<void>;
   handleExecutePreviewAction: () => Promise<void>;
@@ -72,7 +74,7 @@ export function ServiceToolsPanel({
   lastResolutionPreview,
   lastExecution,
   lastRuntimeError,
-  debugLog,
+  logPanel,
   handleCaptureActiveWindow,
   handlePreviewResolution,
   handleExecutePreviewAction,
@@ -83,8 +85,6 @@ export function ServiceToolsPanel({
   const [optimisticAutostart, setOptimisticAutostart] = useOptimistic(
     activeConfig.settings.startWithWindows,
   );
-
-  const reversedLog = useMemo(() => [...debugLog].reverse(), [debugLog]);
 
   const resolvedLiveRunnable =
     lastResolutionPreview?.actionId
@@ -302,28 +302,7 @@ export function ServiceToolsPanel({
 
       <section className="panel">
         <p className="panel__eyebrow">Журнал событий</p>
-        {debugLog.length > 0 ? (
-          <ul className="log-list">
-            {reversedLog.map((entry) => (
-              <li key={entry.id} className="log-item">
-                <span className={`badge ${logLevelBadgeClass(entry.level)}`}>
-                  {entry.level}
-                </span>
-                <div className="log-item__body">
-                  <strong>{entry.message}</strong>
-                  <span>
-                    {entry.category} · {formatTimestamp(entry.createdAt)}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="panel__muted">
-            Журнал пока пуст. Запустите, перезапустите или остановите
-            фоновый перехват, чтобы увидеть события.
-          </p>
-        )}
+        <LogPanel logPanel={logPanel} />
       </section>
 
       <section className="panel">

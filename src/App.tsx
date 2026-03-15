@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useAppPersistence } from "./hooks/useAppPersistence";
+import { useLogPanel } from "./hooks/useLogPanel";
 import { useRuntime } from "./hooks/useRuntime";
 import { useVerification } from "./hooks/useVerification";
 import { error as logError } from "@tauri-apps/plugin-log";
@@ -63,6 +64,8 @@ function App() {
     activeConfig,
     refreshConfig, updateDraft, handleUndo, handleRedo,
   } = persistence;
+
+  const logPanel = useLogPanel();
 
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [selectedLayer, setSelectedLayer] = useState<Layer>("standard");
@@ -474,6 +477,7 @@ function App() {
                 snippetById={snippetById}
                 selectedLayer={selectedLayer}
                 updateDraft={updateDraft}
+                logPanel={logPanel}
                 runtime={{
                   debugLog,
                   resolutionKeyInput,

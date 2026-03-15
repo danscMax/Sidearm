@@ -1023,6 +1023,38 @@ fn find_running_process_path(_exe_name: &str) -> Option<String> {
     None
 }
 
+/// Delete log files older than 30 days from the log directory.
+fn cleanup_old_logs(app: &AppHandle) {
+    let Ok(log_dir) = app.path().app_log_dir() else {
+        return;
+    };
+    if !log_dir.exists() {
+        return;
+    }
+
+    let cutoff = std::time::SystemTime::now()
+        - std::time::Duration::from_secs(30 * 24 * 60 * 60);
+
+    let Ok(entries) = fs::read_dir(&log_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().is_some_and(|ext| ext == "log")
+            || path.to_string_lossy().contains(".log.")
+        {
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(modified) = metadata.modified() {
+                    if modified < cutoff {
+                        let _ = fs::remove_file(&path);
+                        log::info!("[system] Deleted old log: {}", path.display());
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Safety net: release all modifier keys if we panic while holding keys.
@@ -1067,6 +1099,12 @@ pub fn run() {
 
             // Pre-create hidden OSD window (WebView loads once, reused on every show)
             create_osd_window(&app.handle());
+
+            cleanup_old_logs(&app.handle());
+            log::info!(
+                "[system] Naga Workflow Studio v{} started",
+                app.package_info().version
+            );
 
             let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?;
             let tray_menu = Menu::with_items(

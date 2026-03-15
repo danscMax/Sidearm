@@ -41,6 +41,37 @@ describe("useLogPanel", () => {
     expect(result.current.logs[0].message).toBe("plain message");
   });
 
+  it("strips tauri-plugin-log formatted prefix", () => {
+    const { result } = renderHook(() => useLogPanel());
+
+    act(() => {
+      result.current._ingestForTest({
+        level: 3,
+        message:
+          "[19:13:52][INFO][naga_workflow_studio_lib::capture_backend] [capture] Capture helper spawned (pid 55528).",
+      });
+    });
+
+    expect(result.current.logs[0].category).toBe("capture");
+    expect(result.current.logs[0].message).toBe(
+      "Capture helper spawned (pid 55528).",
+    );
+  });
+
+  it("strips plugin prefix and defaults category when no custom bracket", () => {
+    const { result } = renderHook(() => useLogPanel());
+
+    act(() => {
+      result.current._ingestForTest({
+        level: 4,
+        message: "[19:13:52][WARN][hyper::proto] connection reset",
+      });
+    });
+
+    expect(result.current.logs[0].category).toBe("app");
+    expect(result.current.logs[0].message).toBe("connection reset");
+  });
+
   it("maps plugin LogLevel numbers to string names", () => {
     const { result } = renderHook(() => useLogPanel());
 

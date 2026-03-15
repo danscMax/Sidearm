@@ -49,19 +49,28 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
         // Emit event — osd.js updates text + replays animation
         let _ = app.emit("osd-show", profile_name.to_owned());
 
-        // Position bottom-right above taskbar
-        if let Some(main) = app.get_webview_window("main") {
-            if let Some(Some(monitor)) = main.current_monitor().ok() {
-                let scale = main.scale_factor().ok().unwrap_or(1.0);
-                let sw = monitor.size().width as f64 / scale;
-                let sh = monitor.size().height as f64 / scale;
-                let sx = monitor.position().x as f64 / scale;
-                let sy = monitor.position().y as f64 / scale;
-                let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition {
-                    x: sx + sw - 210.0,
-                    y: sy + sh - 80.0,
-                }));
-            }
+        // Position bottom-right above taskbar.
+        // Try main window's monitor first; fall back to primary monitor
+        // (at startup the main window may not be positioned yet).
+        let main_win = app.get_webview_window("main");
+        let monitor = main_win
+            .as_ref()
+            .and_then(|m| m.current_monitor().ok().flatten())
+            .or_else(|| app.primary_monitor().ok().flatten());
+
+        if let Some(monitor) = monitor {
+            let scale = main_win
+                .as_ref()
+                .and_then(|m| m.scale_factor().ok())
+                .unwrap_or(1.0);
+            let sw = monitor.size().width as f64 / scale;
+            let sh = monitor.size().height as f64 / scale;
+            let sx = monitor.position().x as f64 / scale;
+            let sy = monitor.position().y as f64 / scale;
+            let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                x: sx + sw - 210.0,
+                y: sy + sh - 80.0,
+            }));
         }
 
         let _ = w.show();

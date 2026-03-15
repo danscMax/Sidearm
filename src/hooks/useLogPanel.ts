@@ -31,13 +31,25 @@ function levelName(level: number): LogPanelEntry["level"] {
   }
 }
 
-/** Extract [category] prefix from log message, e.g. "[capture] foo" -> "capture" */
+/**
+ * Parse a log message from tauri-plugin-log.
+ *
+ * The plugin format is: `[HH:MM:SS][LEVEL][rust::module::path] [category] body`
+ * We strip all leading `[…]` groups (timestamp, level, module), then look for
+ * our own `[category]` bracket prefix in the remaining text.
+ */
 function extractCategory(message: string): { category: string; body: string } {
-  const match = message.match(/^\[([^\]]+)\]\s*(.*)/s);
+  // Strip plugin-added prefix: [timestamp][LEVEL][module::path]
+  // Requires 2+ consecutive brackets (plugin always adds at least [TIME][LEVEL])
+  // so a single [category] bracket from our code is NOT stripped.
+  const stripped = message.replace(/^(?:\[[^\]]*\]){2,}\s*/, "");
+
+  // Now check for our [category] prefix
+  const match = stripped.match(/^\[([^\]]+)\]\s*(.*)/s);
   if (match) {
     return { category: match[1], body: match[2] };
   }
-  return { category: "app", body: message };
+  return { category: "app", body: stripped };
 }
 
 export interface LogPanelControl {

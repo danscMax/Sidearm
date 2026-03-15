@@ -221,13 +221,23 @@ if (-not $SkipBuild) {
     $oldEAP = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'
 
-    Set-Location -LiteralPath $TAURI_DIR
-
-    Write-Host "    $([char]0x25B6) cargo tauri build (frontend + backend)..." -ForegroundColor White
+    # --- Phase 1: Frontend (npm build) ---
+    Write-Host "    $([char]0x25B6) Building frontend (npm)..." -ForegroundColor White
+    Set-Location -LiteralPath $PROJECT_ROOT
+    & npm run build 2>&1 | ForEach-Object { Write-FrontendProgress $_ }
+    if ($LASTEXITCODE -ne 0) {
+        $ErrorActionPreference = $oldEAP
+        Write-Fail "Frontend build failed (exit code $LASTEXITCODE)"
+        exit 1
+    }
+    Write-Ok "Frontend built"
     Write-Host ""
-    & cargo tauri build --no-bundle 2>&1 | ForEach-Object {
+
+    # --- Phase 2: Rust backend (cargo build --release) ---
+    Write-Host "    $([char]0x25B6) Compiling Rust backend..." -ForegroundColor White
+    Set-Location -LiteralPath $TAURI_DIR
+    & cargo build --release 2>&1 | ForEach-Object {
         Write-BuildProgress $_
-        Write-FrontendProgress $_
     }
     $buildExitCode = $LASTEXITCODE
 
@@ -242,7 +252,7 @@ if (-not $SkipBuild) {
     Write-Host ""
 
     if ($buildExitCode -ne 0) {
-        Write-Fail "Build failed (exit code $buildExitCode) after $durStr"
+        Write-Fail "Rust build failed (exit code $buildExitCode) after $durStr"
         exit 1
     }
 

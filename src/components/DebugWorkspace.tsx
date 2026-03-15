@@ -196,53 +196,33 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
         </div>
 
         {lastResolutionPreview ? (
-          <div className="debug-testing__result">
-            <span className="debug-testing__result-item">
-              <span className="debug-testing__result-label">Профиль</span>
-              {lastResolutionPreview.resolvedProfileId
+          <div className="fact-grid" style={{ marginTop: 10 }}>
+            <Fact
+              label="Профиль"
+              value={lastResolutionPreview.resolvedProfileId
                 ? (profiles.find((p) => p.id === lastResolutionPreview.resolvedProfileId)?.name ??
                     lastResolutionPreview.resolvedProfileId)
                 : "н/д"}
-            </span>
-            <span className="debug-testing__result-item">
-              <span className="debug-testing__result-label">Кнопка</span>
-              {lastResolutionPreview.controlId
+            />
+            <Fact
+              label="Кнопка"
+              value={lastResolutionPreview.controlId
                 ? controlName(activeConfig.physicalControls, lastResolutionPreview.controlId)
                 : "н/д"}
-            </span>
-            <span className="debug-testing__result-item">
-              <span className="debug-testing__result-label">Результат</span>
-              <span className={`debug-testing__status debug-testing__status--${lastResolutionPreview.status}`}>
-                {labelForPreviewStatus(lastResolutionPreview.status)}
-              </span>
-            </span>
+            />
+            <Fact label="Результат" value={labelForPreviewStatus(lastResolutionPreview.status)} />
             {lastResolutionPreview.actionId ? (
-              <span className="debug-testing__result-item debug-testing__result-item--mono">
-                <span className="debug-testing__result-label">Действие</span>
-                {lastResolutionPreview.actionId}
-              </span>
+              <Fact label="Действие" value={lastResolutionPreview.actionId} mono />
             ) : null}
           </div>
         ) : null}
 
         {lastExecution ? (
-          <div className="debug-testing__result">
-            <span className="debug-testing__result-item">
-              <span className="debug-testing__result-label">Исход</span>
-              {labelForExecutionOutcome(lastExecution.outcome)}
-            </span>
-            <span className="debug-testing__result-item">
-              <span className="debug-testing__result-label">Режим</span>
-              {labelForExecutionMode(lastExecution.mode)}
-            </span>
-            <span className="debug-testing__result-item debug-testing__result-item--mono">
-              <span className="debug-testing__result-label">Действие</span>
-              {lastExecution.actionId}
-            </span>
-            <span className="debug-testing__result-item">
-              <span className="debug-testing__result-label">Когда</span>
-              {formatTimestamp(lastExecution.executedAt)}
-            </span>
+          <div className="fact-grid" style={{ marginTop: 8 }}>
+            <Fact label="Исход" value={labelForExecutionOutcome(lastExecution.outcome)} />
+            <Fact label="Режим" value={labelForExecutionMode(lastExecution.mode)} />
+            <Fact label="Действие" value={lastExecution.actionId} mono />
+            <Fact label="Время" value={formatTimestamp(lastExecution.executedAt)} />
           </div>
         ) : null}
 

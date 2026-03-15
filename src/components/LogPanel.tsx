@@ -14,6 +14,14 @@ const levelLabels: Record<string, string> = {
   debug: "Отладка",
 };
 
+const badgeLabels: Record<string, string> = {
+  error: "ошибка",
+  warn: "вним.",
+  info: "инфо",
+  debug: "отлад.",
+  trace: "отлад.",
+};
+
 const levelClasses: Record<string, string> = {
   error: "badge--error",
   warn: "badge--warn",
@@ -79,7 +87,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             <button
               key={level}
               type="button"
-              className={`log-panel__level-btn${levelFilter === level ? " log-panel__level-btn--active" : ""}`}
+              className={`action-button action-button--small${levelFilter === level ? "" : " action-button--ghost"}`}
               onClick={() => {
                 setLevelFilter(level);
               }}
@@ -147,7 +155,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             <li key={entry.id} className={`log-item log-item--${entry.level}`}>
               <time className="log-item__time">{formatTime(entry.timestamp)}</time>
               <span className={`badge ${levelClasses[entry.level] ?? "badge--info"}`}>
-                {entry.level}
+                {badgeLabels[entry.level] ?? entry.level}
               </span>
               <span className="log-item__category">{entry.category}</span>
               <span className="log-item__message">{entry.message}</span>

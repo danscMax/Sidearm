@@ -3918,34 +3918,13 @@ img.profiles__app-card-monogram {
   flex-wrap: wrap;
 }
 
-.log-panel__level-btn {
-  padding: 2px 8px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--c-text);
-  font-size: 0.75rem;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.log-panel__level-btn:hover {
-  background: var(--c-card-bg);
-}
-
-.log-panel__level-btn--active {
-  background: var(--c-accent);
-  color: var(--c-text-on-accent);
-  border-color: var(--c-accent);
-}
-
 .log-panel__category-select {
-  padding: 2px 6px;
+  padding: 4px 8px;
   border: 1px solid var(--c-border);
   border-radius: var(--radius-xs);
-  background: var(--c-bg);
+  background: var(--c-card-bg);
   color: var(--c-text);
-  font-size: 0.75rem;
+  font-size: var(--fs-body-sm);
 }
 
 .log-panel__actions {
@@ -3956,13 +3935,18 @@ img.profiles__app-card-monogram {
 }
 
 .log-panel__search {
-  padding: 2px 8px;
+  padding: 4px 10px;
   border: 1px solid var(--c-border);
   border-radius: var(--radius-xs);
-  background: var(--c-bg);
+  background: var(--c-card-bg);
   color: var(--c-text);
-  font-size: 0.75rem;
-  width: 140px;
+  font-size: var(--fs-body-sm);
+  width: 150px;
+}
+
+.log-panel__search:focus {
+  outline: none;
+  border-color: var(--c-accent);
 }
 
 .log-panel__list {
@@ -3978,7 +3962,6 @@ img.profiles__app-card-monogram {
   gap: 6px;
   padding: 3px 6px;
   font-size: var(--fs-body-sm, 0.8125rem);
-  font-family: var(--font-mono, monospace);
   border-top: none;
   border-radius: 3px;
 }

@@ -13,7 +13,7 @@ pub const EVENT_CONTROL_RESOLVED: &str = "control_resolved";
 pub const EVENT_ACTION_EXECUTED: &str = "action_executed";
 pub const EVENT_RUNTIME_ERROR: &str = "runtime_error";
 
-const DEBUG_LOG_LIMIT: usize = 200;
+const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -37,8 +37,10 @@ pub struct RuntimeStateSummary {
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DebugLogLevel {
+    Debug,
     Info,
     Warn,
+    Error,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -175,12 +177,31 @@ impl RuntimeStore {
         self.push_log(DebugLogLevel::Warn, category, message);
     }
 
+    pub fn record_error(&mut self, category: impl Into<String>, message: impl Into<String>) {
+        self.push_log(DebugLogLevel::Error, category, message);
+    }
+
+    pub fn record_debug(&mut self, category: impl Into<String>, message: impl Into<String>) {
+        self.push_log(DebugLogLevel::Debug, category, message);
+    }
+
     fn push_log(
         &mut self,
         level: DebugLogLevel,
         category: impl Into<String>,
         message: impl Into<String>,
     ) {
+        let category = category.into();
+        let message = message.into();
+
+        // Emit to log crate (goes to file + webview via tauri-plugin-log)
+        match level {
+            DebugLogLevel::Debug => log::debug!("[{}] {}", category, message),
+            DebugLogLevel::Info => log::info!("[{}] {}", category, message),
+            DebugLogLevel::Warn => log::warn!("[{}] {}", category, message),
+            DebugLogLevel::Error => log::error!("[{}] {}", category, message),
+        }
+
         if self.logs.len() >= DEBUG_LOG_LIMIT {
             self.logs.pop_front();
         }
@@ -188,8 +209,8 @@ impl RuntimeStore {
         self.logs.push_back(DebugLogEntry {
             id: self.next_log_id,
             level,
-            category: category.into(),
-            message: message.into(),
+            category,
+            message,
             created_at: timestamp_millis(),
         });
         self.next_log_id += 1;
@@ -247,13 +268,32 @@ mod tests {
     fn runtime_store_caps_log_history() {
         let mut store = RuntimeStore::default();
 
-        for index in 0..220 {
+        for index in 0..1100 {
             store.push_log(DebugLogLevel::Info, "test", format!("message-{index}"));
         }
 
         let logs = store.logs();
         assert_eq!(logs.len(), DEBUG_LOG_LIMIT);
-        assert_eq!(logs.first().map(|entry| entry.id), Some(21));
-        assert_eq!(logs.last().map(|entry| entry.id), Some(220));
+        assert_eq!(logs.first().map(|entry| entry.id), Some(101));
+        assert_eq!(logs.last().map(|entry| entry.id), Some(1100));
+    }
+
+    #[test]
+    fn runtime_store_supports_error_level() {
+        let mut store = RuntimeStore::default();
+        store.record_error("capture", "Hook registration failed");
+        let logs = store.logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, DebugLogLevel::Error);
+        assert_eq!(logs[0].category, "capture");
+    }
+
+    #[test]
+    fn runtime_store_supports_debug_level() {
+        let mut store = RuntimeStore::default();
+        store.record_debug("capture", "Key event received");
+        let logs = store.logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, DebugLogLevel::Debug);
     }
 }

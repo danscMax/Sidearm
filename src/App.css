@@ -1186,18 +1186,20 @@ select::checkmark {
 /* ── Top view: 3-column layout (labels | image | labels) ── */
 .mouse-top-layout {
   display: grid;
-  /* minmax(0, auto) lets the image column shrink on narrow screens
-     (unlike plain `auto` which has min-content floor). */
-  grid-template-columns: minmax(0, 200px) minmax(0, auto) minmax(0, 200px);
+  grid-template-columns: minmax(0, 200px) 1fr minmax(0, 200px);
   gap: 12px;
   align-items: start;
-  justify-content: center;
   width: 100%;
 }
 
 .mouse-top-layout .mouse-visual {
-  width: auto;
-  height: min(480px, 58vh);
+  /* Width fills the 1fr column but capped by max-width.
+     Height is NOT set explicitly — computed from width via aspect-ratio.
+     On narrow: column shrinks → width shrinks → height shrinks proportionally.
+     On wide: max-width caps → height caps via aspect-ratio. */
+  max-width: min(480px, 58vh);
+  max-height: min(480px, 58vh);
+  justify-self: center;
 }
 
 .mouse-top-labels {

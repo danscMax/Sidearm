@@ -160,7 +160,8 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             onChange={(event) => {
               setResolutionKeyInput(event.target.value);
             }}
-            placeholder="Введите код сигнала, напр. F13"
+            placeholder="Код сигнала (F13, Ctrl+Shift+F20...)"
+            title="Код сигнала, который отправляет мышь при нажатии кнопки"
             onKeyDown={(event) => {
               if (event.key === "Enter" && resolutionKeyInput.trim()) {
                 void handlePreviewResolution();
@@ -173,6 +174,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
               className="action-button"
               onClick={() => { void handlePreviewResolution(); }}
               disabled={!resolutionKeyInput.trim()}
+              title="Определить профиль и действие для введённого кода сигнала"
             >
               Проверить
             </button>
@@ -181,6 +183,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
               className="action-button action-button--secondary"
               onClick={() => { void handleExecutePreviewAction(); }}
               disabled={!resolutionKeyInput.trim()}
+              title="Имитировать выполнение действия (без реальных нажатий клавиш)"
             >
               Пробный
             </button>
@@ -189,11 +192,16 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
               className="action-button action-button--warning"
               onClick={() => { void handleRunPreviewAction(); }}
               disabled={!canRunLiveAction}
+              title="Выполнить привязанное действие по-настоящему (отправит клавиши в систему)"
             >
               Вживую
             </button>
           </div>
         </div>
+        <p className="panel__muted" style={{ fontSize: "0.75rem", margin: "6px 0 0" }}>
+          Введите код сигнала (например F13, Ctrl+Shift+F20) и нажмите Проверить, чтобы узнать, какой профиль и действие будут выполнены.
+          Пробный выполнит действие без реальных нажатий. Вживую выполнит действие по-настоящему.
+        </p>
 
         {lastResolutionPreview ? (
           <div className="fact-grid" style={{ marginTop: 10 }}>
@@ -227,7 +235,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
         ) : null}
 
         {lastRuntimeError ? (
-          <div className="notice notice--error" style={{ margin: "10px 0 0" }}>
+          <div className="notice notice--error" style={{ margin: "10px 0 0" }} title="Последняя ошибка рантайма">
             <strong>{lastRuntimeError.category}</strong>
             <p>{lastRuntimeError.message}</p>
           </div>
@@ -261,6 +269,9 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             </span>
           ) : null}
         </summary>
+        <p className="panel__muted" style={{ fontSize: "0.75rem", padding: "0 20px 8px" }}>
+          Пошаговая проверка каждой кнопки мыши. Нажимайте кнопки на устройстве и отмечайте, совпадает ли результат с ожидаемым.
+        </p>
         <div className="expert-section">
           {selectedControl ? (
             <div className="editor-grid">
@@ -601,6 +612,9 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             </span>
           ) : null}
         </summary>
+        <p className="panel__muted" style={{ fontSize: "0.75rem", padding: "0 20px 8px" }}>
+          Все события перехвата, ошибки и действия в реальном времени. Фильтруйте по уровню, категории или тексту.
+        </p>
         <LogPanel logPanel={logPanel} />
       </details>
     </div>

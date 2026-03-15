@@ -2,7 +2,7 @@ import type { ActionType, ControlId, Layer, MappingSource } from "./config";
 
 export type RuntimeStatus = "idle" | "running";
 
-export type DebugLogLevel = "info" | "warn";
+export type DebugLogLevel = "debug" | "info" | "warn" | "error";
 
 export type RuntimeEventName =
   | "runtime_started"

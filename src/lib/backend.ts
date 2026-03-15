@@ -52,6 +52,14 @@ export async function getDebugLog(): Promise<DebugLogEntry[]> {
   return invoke<DebugLogEntry[]>("get_debug_log");
 }
 
+export async function getLogDirectory(): Promise<string> {
+  return invoke<string>("get_log_directory");
+}
+
+export async function openLogDirectory(): Promise<void> {
+  return invoke<void>("open_log_directory");
+}
+
 export async function captureActiveWindow(
   delayMs?: number,
 ): Promise<WindowCaptureResult> {

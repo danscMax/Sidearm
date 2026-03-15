@@ -29,10 +29,14 @@ export function formatTimestamp(timestamp: number | null): string {
 
 export function logLevelBadgeClass(level: DebugLogEntry["level"]): string {
   switch (level) {
+    case "debug":
+      return "badge--debug";
     case "info":
       return "badge--info";
     case "warn":
       return "badge--warn";
+    case "error":
+      return "badge--error";
   }
 }
 

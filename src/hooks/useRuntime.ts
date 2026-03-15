@@ -77,7 +77,7 @@ export function useRuntime(deps: {
     idleRuntimeStateSummary,
   );
   const [debugLog, setDebugLog] = useState<DebugLogEntry[]>([]);
-  const [captureDelayMs, setCaptureDelayMs] = useState(1500);
+  const [captureDelayMs, setCaptureDelayMs] = useState(2000);
   const [lastCapture, setLastCapture] = useState<WindowCaptureResult | null>(null);
   const [resolutionKeyInput, setResolutionKeyInput] = useState("F13");
   const [lastResolutionPreview, setLastResolutionPreview] =

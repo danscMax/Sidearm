@@ -312,13 +312,13 @@ describe("useRuntime", () => {
       const { result } = renderHook(() => useRuntime({ setError }));
       await flushDebounce();
 
-      // Default captureDelayMs is 1500
+      // Default captureDelayMs is 2000
       await act(async () => {
         await result.current.handleCaptureActiveWindow();
       });
       await flushDebounce();
 
-      expect(mockedCaptureActiveWindow).toHaveBeenCalledWith(1500);
+      expect(mockedCaptureActiveWindow).toHaveBeenCalledWith(2000);
       expect(result.current.lastCapture).toEqual(captureResult);
     });
 

@@ -684,34 +684,7 @@ export function ProfilesWorkspace({
                 Укажите приложение — профиль переключится автоматически при фокусе на него.
               </p>
             </div>
-            <div
-              className={`rule-modal__body new-rule__dropzone${newRuleExe ? "" : " new-rule__dropzone--empty"}`}
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "copy";
-              }}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                (e.currentTarget as HTMLElement).classList.add("dragover");
-              }}
-              onDragLeave={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  (e.currentTarget as HTMLElement).classList.remove("dragover");
-                }
-              }}
-              onDrop={(e) => {
-                (e.currentTarget as HTMLElement).classList.remove("dragover");
-                e.preventDefault();
-                const file = e.dataTransfer.files[0];
-                if (file) {
-                  const name = file.name.replace(/\.lnk$/i, ".exe").toLowerCase();
-                  if (name.endsWith(".exe")) {
-                    setNewRuleExe(name);
-                    setNewRuleCapturedTitle("");
-                  }
-                }
-              }}
-            >
+            <div className="rule-modal__body">
               <div className="field">
                 <span className="field__label">Исполняемый файл</span>
                 <div className="field__row">
@@ -744,9 +717,42 @@ export function ProfilesWorkspace({
                     Обзор...
                   </button>
                 </div>
-                {!newRuleExe && (
-                  <span className="new-rule__drop-hint">или перетащите .exe / ярлык сюда</span>
-                )}
+              </div>
+
+              <div
+                className="new-rule__dropzone"
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "copy";
+                }}
+                onDragEnter={(e) => {
+                  e.preventDefault();
+                  (e.currentTarget as HTMLElement).classList.add("new-rule__dropzone--active");
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+                    (e.currentTarget as HTMLElement).classList.remove("new-rule__dropzone--active");
+                  }
+                }}
+                onDrop={(e) => {
+                  (e.currentTarget as HTMLElement).classList.remove("new-rule__dropzone--active");
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file) {
+                    const name = file.name.replace(/\.lnk$/i, ".exe").toLowerCase();
+                    if (name.endsWith(".exe")) {
+                      setNewRuleExe(name);
+                      setNewRuleCapturedTitle("");
+                    }
+                  }
+                }}
+              >
+                <svg className="new-rule__dropzone-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7 10 12 15 17 10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                <span>Перетащите .exe или ярлык сюда</span>
               </div>
 
               <div className="new-rule__divider">или</div>
@@ -781,7 +787,8 @@ export function ProfilesWorkspace({
                   </div>
                 </div>
                 <p className="new-rule__capture-hint">
-                  Нажмите кнопку, переключитесь на нужное окно — программа определит его автоматически.
+                  Нажмите кнопку и переключитесь на нужное окно за выбранное время.
+                  После задержки программа определит приложение и заполнит поля.
                 </p>
               </div>
 

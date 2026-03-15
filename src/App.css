@@ -3464,20 +3464,36 @@ code {
   border: 1px solid rgba(159, 202, 105, 0.1);
 }
 
-.new-rule__drop-hint {
-  display: block;
-  margin-top: 6px;
-  font-size: var(--fs-caption);
-  color: var(--c-text-muted);
-  opacity: 0.6;
-}
-
 .new-rule__dropzone {
-  transition: background 150ms, border-color 150ms;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  border: 2px dashed rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  transition: border-color 200ms, background 200ms, color 200ms;
+  cursor: default;
 }
 
-.new-rule__dropzone.dragover {
-  background: rgba(159, 202, 105, 0.06);
+.new-rule__dropzone-icon {
+  opacity: 0.4;
+  transition: opacity 200ms;
+}
+
+.new-rule__dropzone--active {
+  border-color: var(--c-accent);
+  background: rgba(159, 202, 105, 0.08);
+  color: var(--c-accent);
+}
+
+.new-rule__dropzone--active .new-rule__dropzone-icon {
+  opacity: 1;
+  stroke: var(--c-accent);
 }
 
 /* --- E. Card grid --- */

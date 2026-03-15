@@ -106,12 +106,14 @@ impl RuntimeStore {
         self.active_config_version = Some(config_version);
         self.warning_count = warning_count;
 
+        log::info!("[рантайм] Перехват запущен, версия конфигурации {config_version}.");
         self.push_log(
             DebugLogLevel::Info,
             "рантайм",
             format!("Перехват запущен, версия конфигурации {config_version}."),
         );
         if warning_count > 0 {
+            log::warn!("[рантайм] При запуске обнаружено предупреждений: {warning_count}.");
             self.push_log(
                 DebugLogLevel::Warn,
                 "рантайм",
@@ -125,6 +127,7 @@ impl RuntimeStore {
     pub fn stop(&mut self) -> RuntimeStateSummary {
         self.status = RuntimeStatus::Idle;
         self.last_notified_profile_id = None;
+        log::info!("[рантайм] Перехват остановлен.");
         self.push_log(DebugLogLevel::Info, "рантайм", "Перехват остановлен.");
         self.summary()
     }
@@ -149,12 +152,14 @@ impl RuntimeStore {
         self.active_config_version = Some(config_version);
         self.warning_count = warning_count;
 
+        log::info!("[рантайм] Конфигурация перезагружена, версия {config_version}.");
         self.push_log(
             DebugLogLevel::Info,
             "рантайм",
             format!("Конфигурация перезагружена, версия {config_version}."),
         );
         if warning_count > 0 {
+            log::warn!("[рантайм] После перезагрузки обнаружено предупреждений: {warning_count}.");
             self.push_log(
                 DebugLogLevel::Warn,
                 "рантайм",
@@ -194,13 +199,10 @@ impl RuntimeStore {
         let category = category.into();
         let message = message.into();
 
-        // Emit to log crate (goes to file + webview via tauri-plugin-log)
-        match level {
-            DebugLogLevel::Debug => log::debug!("[{}] {}", category, message),
-            DebugLogLevel::Info => log::info!("[{}] {}", category, message),
-            DebugLogLevel::Warn => log::warn!("[{}] {}", category, message),
-            DebugLogLevel::Error => log::error!("[{}] {}", category, message),
-        }
+        // NOTE: We intentionally do NOT call log::info!() etc. here.
+        // This method runs on the Windows LL keyboard hook thread (small stack),
+        // and fern + 3 targets would overflow it. The capture_backend already
+        // emits log::*() calls directly — this ring buffer is only for the UI.
 
         if self.logs.len() >= DEBUG_LOG_LIMIT {
             self.logs.pop_front();

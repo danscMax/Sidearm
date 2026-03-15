@@ -41,88 +41,55 @@ use window_capture::WindowCaptureResult;
 
 /// Show a small always-on-top OSD bubble with the profile name.
 /// The OSD auto-closes after ~2 seconds via its own JS timer.
-/// Counter for unique OSD window labels (avoids label collision on rapid switches).
-static OSD_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
+/// Show the pre-created OSD window with the given profile name.
+/// The OSD window is created once at startup (hidden) and reused.
 pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
+    if let Some(w) = app.get_webview_window("osd") {
+        // Emit event — osd.js updates text + replays animation
+        let _ = app.emit("osd-show", profile_name.to_owned());
+
+        // Position bottom-right above taskbar
+        if let Some(main) = app.get_webview_window("main") {
+            if let Some(Some(monitor)) = main.current_monitor().ok() {
+                let scale = main.scale_factor().ok().unwrap_or(1.0);
+                let sw = monitor.size().width as f64 / scale;
+                let sh = monitor.size().height as f64 / scale;
+                let sx = monitor.position().x as f64 / scale;
+                let sy = monitor.position().y as f64 / scale;
+                let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+                    x: sx + sw - 210.0,
+                    y: sy + sh - 80.0,
+                }));
+            }
+        }
+
+        let _ = w.show();
+
+        // Auto-hide after 2 seconds
+        let win = w.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(2000));
+            let _ = win.hide();
+        });
+    }
+}
+
+/// Create the hidden OSD window at startup (called from setup).
+pub(crate) fn create_osd_window(app: &AppHandle) {
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
 
-    // Close all existing OSD windows before creating a new one
-    for (label, window) in app.webview_windows() {
-        if label.starts_with("osd-") {
-            let _ = window.close();
-        }
-    }
-
-    // Each OSD gets a unique label — avoids "label already exists" error
-    // when previous window's async close hasn't completed yet.
-    let osd_id = OSD_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let label = format!("osd-{osd_id}");
-
-    // Position: bottom-right corner, above the taskbar
-    let osd_w = 200.0;
-    let osd_h = 32.0;
-    let (x, y) = app
-        .get_webview_window("main")
-        .and_then(|w| {
-            let monitor = w.current_monitor().ok()??;
-            let size = monitor.size();
-            let pos = monitor.position();
-            let scale = w.scale_factor().ok().unwrap_or(1.0);
-            let screen_w = size.width as f64 / scale;
-            let screen_h = size.height as f64 / scale;
-            let screen_x = pos.x as f64 / scale;
-            let screen_y = pos.y as f64 / scale;
-            // 48px above bottom for taskbar, 12px from right edge
-            Some((screen_x + screen_w - osd_w - 12.0, screen_y + screen_h - osd_h - 48.0))
-        })
-        .unwrap_or((1600.0, 1000.0));
-
-    let url = format!("/osd.html?name={}", urlencoding(profile_name));
-    match WebviewWindowBuilder::new(app, &label, WebviewUrl::App(url.into()))
+    let _ = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App("/osd.html".into()))
         .title("")
-        .inner_size(osd_w, osd_h)
-        .position(x, y)
+        .inner_size(200.0, 32.0)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .focused(false)
         .resizable(false)
-        .visible(false) // hidden until content loads
+        .visible(false)
         .background_color(tauri::window::Color(0x1a, 0x1f, 0x16, 0xff))
-        .build()
-    {
-        Ok(w) => {
-            // Show after WebView2 has time to render the tiny HTML
-            let win = w.clone();
-            std::thread::spawn(move || {
-                std::thread::sleep(std::time::Duration::from_millis(120));
-                let _ = win.show();
-            });
-        }
-        Err(e) => eprintln!("[osd] Failed to create OSD window: {e}"),
-    }
-
-    // Auto-close after 2 seconds
-    let app_handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(2000));
-        if let Some(w) = app_handle.get_webview_window(&label) {
-            let _ = w.close();
-        }
-    });
-}
-
-fn urlencoding(s: &str) -> String {
-    s.bytes()
-        .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                String::from(b as char)
-            }
-            _ => format!("%{b:02X}"),
-        })
-        .collect()
+        .build();
 }
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
@@ -1060,6 +1027,9 @@ pub fn run() {
             } else {
                 eprintln!("[startup] Running as standard user (non-elevated).");
             }
+
+            // Pre-create hidden OSD window (WebView loads once, reused on every show)
+            create_osd_window(&app.handle());
 
             let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?;
             let tray_menu = Menu::with_items(

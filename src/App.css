@@ -1186,16 +1186,17 @@ select::checkmark {
 /* ── Top view: 3-column layout (labels | image | labels) ── */
 .mouse-top-layout {
   display: grid;
-  grid-template-columns: minmax(0, 200px) auto minmax(0, 200px);
-  gap: 12px;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) minmax(120px, 200px);
+  gap: 8px;
   align-items: start;
-  justify-content: center;
   width: 100%;
 }
 
 .mouse-top-layout .mouse-visual {
-  width: auto;
+  width: 100%;
+  max-width: 100%;
   height: min(480px, 58vh);
+  object-fit: contain;
 }
 
 .mouse-top-labels {

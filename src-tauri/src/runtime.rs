@@ -36,6 +36,7 @@ pub struct RuntimeStateSummary {
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)]
 pub enum DebugLogLevel {
     Debug,
     Info,
@@ -182,10 +183,12 @@ impl RuntimeStore {
         self.push_log(DebugLogLevel::Warn, category, message);
     }
 
+    #[allow(dead_code)]
     pub fn record_error(&mut self, category: impl Into<String>, message: impl Into<String>) {
         self.push_log(DebugLogLevel::Error, category, message);
     }
 
+    #[allow(dead_code)]
     pub fn record_debug(&mut self, category: impl Into<String>, message: impl Into<String>) {
         self.push_log(DebugLogLevel::Debug, category, message);
     }

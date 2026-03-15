@@ -192,6 +192,10 @@ function AppMappingModal({
 
         {/* Body */}
         <div className="rule-modal__body">
+          <p className="rule-modal__description">
+            Когда это приложение окажется в фокусе, профиль «{profileName}» активируется автоматически.
+          </p>
+
           {/* Exe input + Browse */}
           <div className="field">
             <span className="field__label">Исполняемый файл</span>
@@ -227,21 +231,13 @@ function AppMappingModal({
           </div>
 
           {/* Title filters */}
-          <label className="field">
-            <span className="field__label">
-              Фильтры заголовка
-              <span
-                className="field__hint"
-                title="Через запятую. Правило сработает, только если заголовок содержит ВСЕ фрагменты."
-              >
-                ?
-              </span>
-            </span>
+          <div className="field">
+            <span className="field__label">Фильтр по заголовку окна</span>
             <input
               type="text"
               defaultValue={(mapping.titleIncludes ?? []).join(", ")}
               key={mapping.id}
-              placeholder="часть заголовка, ещё часть"
+              placeholder="необязательно"
               onBlur={(e) => {
                 const vals = parseCommaSeparatedUniqueValues(e.target.value);
                 updateDraft((c) =>
@@ -252,7 +248,11 @@ function AppMappingModal({
                 );
               }}
             />
-          </label>
+            <p className="field__description">
+              Оставьте пустым — правило сработает для любого окна этого приложения.
+              Укажите текст — только если заголовок окна его содержит.
+            </p>
+          </div>
 
           {/* Toggle + Priority row */}
           <div className="rule-modal__inline-row">
@@ -622,7 +622,6 @@ export function ProfilesWorkspace({
                 e.preventDefault();
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
               }}
-              title={`${mapping.exe}${mapping.titleIncludes?.length ? ` (заголовок: ${mapping.titleIncludes.join(", ")})` : ""}\nПриоритет: ${mapping.priority}${isDisabled ? "\nОтключено" : ""}\nКлик — редактировать, ПКМ — меню`}
             >
               <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
               <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>

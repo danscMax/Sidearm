@@ -3668,6 +3668,21 @@ img.profiles__app-card-monogram {
   line-height: 1.4;
 }
 
+.rule-modal__description {
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.field__description {
+  font-size: var(--fs-micro);
+  color: var(--c-text-muted);
+  margin: 0;
+  line-height: 1.4;
+  opacity: 0.8;
+}
+
 .rule-modal__profile-name {
   display: block;
   color: var(--c-text-muted);

@@ -31,3 +31,14 @@ _bootstrap_app
 
 # Tauri build output
 src-tauri/target/
+
+# Resources (binary downloads, not source)
+resources/
+
+# Temporary docs (research, mockups — one-off artifacts)
+docs/plans/
+docs/research/
+docs/mockups/
+
+# Portable build output
+NagaWorkflowStudio-Portable/

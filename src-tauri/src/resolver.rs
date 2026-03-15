@@ -1,6 +1,9 @@
+use regex::Regex;
 use serde::Serialize;
 
-use crate::config::{ActionType, AppConfig, AppMapping, EncoderMapping, Profile};
+use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile, TriggerMode};
+
+const REGEX_PREFIX: &str = "regex:";
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -57,6 +60,8 @@ pub struct ResolvedInputPreview {
     pub mapping_verified: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mapping_source: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trigger_mode: Option<TriggerMode>,
 }
 
 pub fn resolve_profile_for_app_context(
@@ -108,7 +113,9 @@ pub fn resolve_input_preview(
     let matching_mappings: Vec<&EncoderMapping> = config
         .encoder_mappings
         .iter()
-        .filter(|mapping| normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&normalized_key))
+        .filter(|mapping| {
+            normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&normalized_key)
+        })
         .collect();
 
     if matching_mappings.is_empty() {
@@ -131,6 +138,7 @@ pub fn resolve_input_preview(
             action_pretty: None,
             mapping_verified: None,
             mapping_source: None,
+            trigger_mode: None,
         };
     }
 
@@ -159,6 +167,7 @@ pub fn resolve_input_preview(
             action_pretty: None,
             mapping_verified: None,
             mapping_source: None,
+            trigger_mode: None,
         };
     }
 
@@ -219,14 +228,19 @@ pub fn resolve_input_preview(
         binding_id: binding.map(|binding| binding.id.clone()),
         binding_label: binding.map(|binding| binding.label.clone()),
         action_id: action.map(|action| action.id.clone()),
-        action_type: action.map(|action| action_type_name(action.action_type).to_owned()),
+        action_type: action.map(|action| action.action_type.as_str().to_owned()),
         action_pretty: action.map(|action| action.pretty.clone()),
         mapping_verified: Some(mapping.verified),
         mapping_source: Some(mapping_source_name(mapping).to_owned()),
+        trigger_mode: binding.and_then(|b| b.trigger_mode),
     }
 }
 
-fn matching_app_mappings<'a>(config: &'a AppConfig, exe: &str, title: &str) -> Vec<&'a AppMapping> {
+pub(crate) fn matching_app_mappings<'a>(
+    config: &'a AppConfig,
+    exe: &str,
+    title: &str,
+) -> Vec<&'a AppMapping> {
     let normalized_exe = exe.to_ascii_lowercase();
     let normalized_title = title.to_ascii_lowercase();
     let mut matches: Vec<&AppMapping> = config
@@ -236,10 +250,15 @@ fn matching_app_mappings<'a>(config: &'a AppConfig, exe: &str, title: &str) -> V
         .filter(|mapping| mapping.exe.eq_ignore_ascii_case(&normalized_exe))
         .filter(|mapping| {
             mapping.title_includes.is_empty()
-                || mapping
-                    .title_includes
-                    .iter()
-                    .all(|needle| normalized_title.contains(&needle.to_ascii_lowercase()))
+                || mapping.title_includes.iter().all(|needle| {
+                    if let Some(pattern) = needle.strip_prefix(REGEX_PREFIX) {
+                        Regex::new(&format!("(?i){pattern}"))
+                            .map(|re| re.is_match(&normalized_title))
+                            .unwrap_or(false)
+                    } else {
+                        normalized_title.contains(&needle.to_ascii_lowercase())
+                    }
+                })
         })
         .collect();
 
@@ -259,22 +278,11 @@ fn matching_app_mappings<'a>(config: &'a AppConfig, exe: &str, title: &str) -> V
     matches
 }
 
-fn find_profile<'a>(config: &'a AppConfig, profile_id: &str) -> Option<&'a Profile> {
+pub(crate) fn find_profile<'a>(config: &'a AppConfig, profile_id: &str) -> Option<&'a Profile> {
     config
         .profiles
         .iter()
         .find(|profile| profile.id == profile_id && profile.enabled)
-}
-
-fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::Shortcut => "shortcut",
-        ActionType::TextSnippet => "textSnippet",
-        ActionType::Sequence => "sequence",
-        ActionType::Launch => "launch",
-        ActionType::Menu => "menu",
-        ActionType::Disabled => "disabled",
-    }
 }
 
 fn mapping_source_name(mapping: &EncoderMapping) -> &'static str {
@@ -293,8 +301,8 @@ fn normalized_encoded_key(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{
-        Action, ActionPayload, Binding, CapabilityStatus, ControlFamily, ControlId, Layer,
-        MappingSource, PhysicalControl, Settings, SnippetLibraryItem,
+        Action, ActionPayload, ActionType, Binding, CapabilityStatus, ControlFamily, ControlId,
+        Layer, MappingSource, PhysicalControl, Settings, SnippetLibraryItem, TriggerMode,
     };
 
     #[test]
@@ -380,6 +388,8 @@ mod tests {
                 label: "Example".into(),
                 action_ref: "action-default-standard-thumb-01".into(),
                 color_tag: None,
+                trigger_mode: None,
+                chord_partner: None,
                 enabled: true,
             }],
             actions: vec![Action {
@@ -388,6 +398,7 @@ mod tests {
                 payload: ActionPayload::Disabled(Default::default()),
                 pretty: "Disabled".into(),
                 notes: None,
+                conditions: Vec::new(),
             }],
             snippet_library: vec![SnippetLibraryItem {
                 id: "snippet-example".into(),
@@ -410,6 +421,16 @@ mod tests {
         }
     }
 
+    #[test]
+    fn resolve_input_preview_includes_trigger_mode_from_binding() {
+        let mut config = test_config(vec![]);
+        config.bindings[0].trigger_mode = Some(TriggerMode::Hold);
+
+        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs");
+
+        assert_eq!(result.trigger_mode, Some(TriggerMode::Hold));
+    }
+
     fn app_mapping(
         id: &str,
         exe: &str,
@@ -420,6 +441,7 @@ mod tests {
         AppMapping {
             id: id.into(),
             exe: exe.into(),
+            process_path: None,
             title_includes: title_includes.into_iter().map(str::to_owned).collect(),
             profile_id: profile_id.into(),
             enabled: true,

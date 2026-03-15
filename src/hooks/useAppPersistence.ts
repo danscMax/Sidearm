@@ -1,0 +1,194 @@
+import { startTransition, useEffect, useRef, useState } from "react";
+
+import { loadConfig, normalizeCommandError, saveConfig } from "../lib/backend";
+import type {
+  AppConfig,
+  CommandError,
+  LoadConfigResponse,
+  SaveConfigResponse,
+} from "../lib/config";
+import type { ViewState } from "../lib/constants";
+
+const MAX_UNDO = 15;
+const AUTO_SAVE_DELAY_MS = 500;
+
+export interface AppPersistence {
+  // State (read-only for consumers)
+  viewState: ViewState;
+  snapshot: LoadConfigResponse | null;
+  workingConfig: AppConfig | null;
+  lastSave: SaveConfigResponse | null;
+  error: CommandError | null;
+  setError: React.Dispatch<React.SetStateAction<CommandError | null>>;
+  undoStack: readonly AppConfig[];
+  redoStack: readonly AppConfig[];
+
+  // Derived
+  activeConfig: AppConfig | null;
+  activeWarnings: import("../lib/config").ValidationWarning[];
+  activePath: string;
+
+  // Functions
+  refreshConfig: () => Promise<boolean>;
+  updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
+  handleUndo: () => void;
+  handleRedo: () => void;
+}
+
+export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
+  const [viewState, setViewState] = useState<ViewState>("idle");
+  const [snapshot, setSnapshot] = useState<LoadConfigResponse | null>(null);
+  const [workingConfig, setWorkingConfig] = useState<AppConfig | null>(null);
+  const [lastSave, setLastSave] = useState<SaveConfigResponse | null>(null);
+  const [error, setError] = useState<CommandError | null>(null);
+  const [undoStack, setUndoStack] = useState<AppConfig[]>([]);
+  const [redoStack, setRedoStack] = useState<AppConfig[]>([]);
+
+  // Auto-save refs
+  const saveQueueRef = useRef<AppConfig | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isSavingRef = useRef(false);
+  const onAutoSavedRef = useRef(onAutoSaved);
+  onAutoSavedRef.current = onAutoSaved;
+
+  const activeConfig = workingConfig;
+  const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
+  const activePath = lastSave?.path ?? snapshot?.path ?? "Пока не загружен";
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(saveTimerRef.current);
+  }, []);
+
+  function scheduleSave(config: AppConfig) {
+    saveQueueRef.current = config;
+    clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(flushSave, AUTO_SAVE_DELAY_MS);
+  }
+
+  async function flushSave() {
+    const config = saveQueueRef.current;
+    if (!config || isSavingRef.current) return;
+
+    saveQueueRef.current = null;
+    isSavingRef.current = true;
+    setViewState("saving");
+
+    try {
+      const result = await saveConfig(config);
+      startTransition(() => {
+        setSnapshot({
+          config: result.config,
+          warnings: result.warnings,
+          path: result.path,
+          createdDefault: false,
+        });
+        setLastSave(result);
+        setError(null);
+        setViewState("ready");
+      });
+      onAutoSavedRef.current?.();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+        setViewState("error");
+      });
+    } finally {
+      isSavingRef.current = false;
+      // If new changes queued during save, save again promptly
+      if (saveQueueRef.current) {
+        saveTimerRef.current = setTimeout(flushSave, 100);
+      }
+    }
+  }
+
+  async function refreshConfig(): Promise<boolean> {
+    // Cancel any pending auto-save
+    clearTimeout(saveTimerRef.current);
+    saveQueueRef.current = null;
+
+    setViewState("loading");
+    setError(null);
+
+    try {
+      const result = await loadConfig();
+      startTransition(() => {
+        setSnapshot(result);
+        setWorkingConfig(result.config);
+        setLastSave(null);
+        setError(null);
+        setViewState("ready");
+      });
+      return true;
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+        setViewState("error");
+      });
+      return false;
+    }
+  }
+
+  function updateDraft(updateConfig: (config: AppConfig) => AppConfig) {
+    setWorkingConfig((current) => {
+      if (!current) return current;
+      setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), current]);
+      setRedoStack([]);
+      setError(null);
+      setViewState("ready");
+      const next = updateConfig(current);
+      scheduleSave(next);
+      return next;
+    });
+  }
+
+  function handleUndo() {
+    setUndoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const previous = stack[stack.length - 1];
+      const remaining = stack.slice(0, -1);
+      setWorkingConfig((current) => {
+        if (current) {
+          setRedoStack((redo) => [...redo, current]);
+        }
+        return previous;
+      });
+      scheduleSave(previous);
+      return remaining;
+    });
+  }
+
+  function handleRedo() {
+    setRedoStack((stack) => {
+      if (stack.length === 0) return stack;
+      const next = stack[stack.length - 1];
+      const remaining = stack.slice(0, -1);
+      setWorkingConfig((current) => {
+        if (current) {
+          setUndoStack((undo) => [...undo, current]);
+        }
+        return next;
+      });
+      scheduleSave(next);
+      return remaining;
+    });
+  }
+
+  return {
+    viewState,
+    snapshot,
+    workingConfig,
+    lastSave,
+    error,
+    setError,
+    undoStack,
+    redoStack,
+    activeConfig,
+    activeWarnings,
+    activePath,
+    refreshConfig,
+    updateDraft,
+    handleUndo,
+    handleRedo,
+  };
+}

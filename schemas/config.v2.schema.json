@@ -124,6 +124,9 @@
         "sequence",
         "launch",
         "menu",
+        "mouseAction",
+        "mediaKey",
+        "profileSwitch",
         "disabled"
       ]
     },
@@ -304,6 +307,9 @@
         "exe": {
           "$ref": "#/$defs/exeName"
         },
+        "processPath": {
+          "type": "string"
+        },
         "titleIncludes": {
           "type": "array",
           "minItems": 1,
@@ -358,8 +364,37 @@
         "colorTag": {
           "$ref": "#/$defs/uiToken"
         },
+        "triggerMode": {
+          "type": "string",
+          "enum": ["press", "doublePress", "triplePress", "hold", "chord"]
+        },
+        "chordPartner": {
+          "$ref": "#/$defs/controlId"
+        },
         "enabled": {
           "type": "boolean"
+        }
+      }
+    },
+    "actionCondition": {
+      "type": "object",
+      "required": [
+        "type",
+        "value"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "windowTitleContains",
+            "windowTitleNotContains",
+            "exeEquals",
+            "exeNotEquals"
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     },
@@ -387,6 +422,12 @@
         },
         "notes": {
           "type": "string"
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/actionCondition"
+          }
         }
       },
       "allOf": [
@@ -474,6 +515,54 @@
           "if": {
             "properties": {
               "type": {
+                "const": "mouseAction"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/mouseActionPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "mediaKey"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/mediaKeyPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "profileSwitch"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/profileSwitchPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
                 "const": "disabled"
               }
             }
@@ -535,7 +624,7 @@
       ],
       "properties": {
         "key": {
-          "$ref": "#/$defs/nonEmptyString"
+          "type": "string"
         },
         "ctrl": {
           "type": "boolean",
@@ -834,6 +923,54 @@
         },
         "enabled": {
           "type": "boolean"
+        }
+      }
+    },
+    "mouseActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "ctrl": {
+          "type": "boolean"
+        },
+        "shift": {
+          "type": "boolean"
+        },
+        "alt": {
+          "type": "boolean"
+        },
+        "win": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mediaKeyPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "profileSwitchPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "targetProfileId"
+      ],
+      "properties": {
+        "targetProfileId": {
+          "$ref": "#/$defs/idToken"
         }
       }
     },

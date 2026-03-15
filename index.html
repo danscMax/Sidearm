@@ -8,6 +8,13 @@
 
   <body>
     <div id="root"></div>
+    <script>
+      // Dev-only: restore mock Tauri backend from sessionStorage (for browser testing without Tauri)
+      try {
+        const s = sessionStorage.getItem("__mock_tauri__");
+        if (s && !window.__TAURI_INTERNALS__) new Function(s)();
+      } catch(_) {}
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

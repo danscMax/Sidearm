@@ -29,9 +29,11 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
     if trimmed.chars().count() == 1 {
         let ch = trimmed.chars().next().expect("single-character branch");
         return match ch {
-            'a'..='z' | 'A'..='Z' => Ok(simple_key(ch.to_ascii_uppercase() as u16, false, &ch
-                .to_ascii_uppercase()
-                .to_string())),
+            'a'..='z' | 'A'..='Z' => Ok(simple_key(
+                ch.to_ascii_uppercase() as u16,
+                false,
+                &ch.to_ascii_uppercase().to_string(),
+            )),
             '0'..='9' => Ok(simple_key(ch as u16, false, &ch.to_string())),
             '-' => Ok(simple_key(VK_OEM_MINUS, false, "-")),
             '=' => Ok(simple_key(VK_OEM_PLUS, false, "=")),
@@ -44,12 +46,8 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
             ']' => Ok(simple_key(VK_OEM_6, false, "]")),
             '\\' => Ok(simple_key(VK_OEM_5, false, "\\")),
             '`' => Ok(simple_key(VK_OEM_3, false, "`")),
-            '+' => Err(
-                "Hotkey primary key `+` is ambiguous. Use `=` with Shift instead.".into()
-            ),
-            '_' => Err(
-                "Hotkey primary key `_` is ambiguous. Use `-` with Shift instead.".into()
-            ),
+            '+' => Err("Hotkey primary key `+` is ambiguous. Use `=` with Shift instead.".into()),
+            '_' => Err("Hotkey primary key `_` is ambiguous. Use `-` with Shift instead.".into()),
             other => Err(format!("Unsupported hotkey primary key `{other}`.")),
         };
     }
@@ -79,9 +77,7 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
         "DOWN" | "DOWNARROW" => Ok(simple_key(VK_DOWN, true, "Down")),
         "CAPSLOCK" => Ok(simple_key(VK_CAPITAL, false, "CapsLock")),
         "NUMLOCK" => Ok(simple_key(VK_NUMLOCK, true, "NumLock")),
-        "PRINTSCREEN" | "PRTSC" | "PRTSCN" => {
-            Ok(simple_key(VK_SNAPSHOT, true, "PrintScreen"))
-        }
+        "PRINTSCREEN" | "PRTSC" | "PRTSCN" => Ok(simple_key(VK_SNAPSHOT, true, "PrintScreen")),
         "SCROLLLOCK" => Ok(simple_key(VK_SCROLL, false, "ScrollLock")),
         "PAUSE" => Ok(simple_key(VK_PAUSE, false, "Pause")),
         "APPS" | "APPLICATION" | "MENU" => Ok(simple_key(VK_APPS, false, "Apps")),
@@ -96,7 +92,14 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
         "RBRACKET" | "RIGHTBRACKET" => Ok(simple_key(VK_OEM_6, false, "]")),
         "BACKSLASH" => Ok(simple_key(VK_OEM_5, false, "\\")),
         "GRAVE" | "BACKTICK" => Ok(simple_key(VK_OEM_3, false, "`")),
-        _ => Err(format!("Unsupported hotkey primary key `{trimmed}`.")),
+        _ => {
+            // Support raw VK codes: "VK_232" or "VK232" → VK code 232
+            if let Some(code) = parse_vk_code(&compact) {
+                Ok(simple_key(code, false, &format!("VK_{code}")))
+            } else {
+                Err(format!("Unsupported hotkey primary key `{trimmed}`."))
+            }
+        }
     }
 }
 
@@ -109,7 +112,11 @@ pub fn parse_hotkey(raw: &str) -> Result<HotkeySpec, String> {
     let mut modifiers = HotkeyModifiers::default();
     let mut primary_key: Option<HotkeyKey> = None;
 
-    for token in trimmed.split('+').map(str::trim).filter(|token| !token.is_empty()) {
+    for token in trimmed
+        .split('+')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+    {
         match normalize_modifier_token(token) {
             Some(ModifierToken::Ctrl) => {
                 if modifiers.ctrl {
@@ -144,9 +151,8 @@ pub fn parse_hotkey(raw: &str) -> Result<HotkeySpec, String> {
         }
     }
 
-    let primary_key = primary_key.ok_or_else(|| {
-        "encodedKey must contain one non-modifier primary key.".to_owned()
-    })?;
+    let primary_key = primary_key
+        .ok_or_else(|| "encodedKey must contain one non-modifier primary key.".to_owned())?;
 
     let mut parts = Vec::new();
     if modifiers.ctrl {
@@ -172,6 +178,20 @@ pub fn parse_hotkey(raw: &str) -> Result<HotkeySpec, String> {
 
 pub fn normalize_hotkey(raw: &str) -> Result<String, String> {
     parse_hotkey(raw).map(|hotkey| hotkey.canonical)
+}
+
+/// Extract which modifiers are part of the Synapse encoding for a given
+/// `encodedKey` string (e.g. `"Ctrl+Alt+F13"` → ctrl=true, alt=true).
+///
+/// These modifiers are injected by the Razer driver when the mouse button is
+/// pressed and must be cleared before action execution. Any modifier NOT in
+/// this mask is presumed to be a user's physical keyboard modifier and should
+/// pass through to the action.
+pub fn extract_encoding_modifiers(encoded_key: &str) -> HotkeyModifiers {
+    match parse_hotkey(encoded_key) {
+        Ok(spec) => spec.modifiers,
+        Err(_) => HotkeyModifiers::default(),
+    }
 }
 
 impl HotkeyModifiers {
@@ -271,6 +291,16 @@ const VK_OEM_5: u16 = 0xDC;
 const VK_OEM_6: u16 = 0xDD;
 const VK_OEM_7: u16 = 0xDE;
 
+/// Parse raw VK code from format "VK232" or "VK_232" (after normalization removes underscores).
+fn parse_vk_code(compact: &str) -> Option<u16> {
+    let digits = compact.strip_prefix("VK")?;
+    let code: u16 = digits.parse().ok()?;
+    if code == 0 {
+        return None;
+    }
+    Some(code)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,5 +326,45 @@ mod tests {
         let parsed = parse_hotkey("Shift+Enter").expect("expected enter hotkey");
         assert_eq!(parsed.canonical, "Shift+Enter");
         assert_eq!(parsed.key.code, VK_RETURN);
+    }
+
+    #[test]
+    fn extracts_encoding_modifiers_from_combo_key() {
+        let mods = extract_encoding_modifiers("Ctrl+Alt+F13");
+        assert!(mods.ctrl);
+        assert!(mods.alt);
+        assert!(!mods.shift);
+        assert!(!mods.win);
+    }
+
+    #[test]
+    fn extracts_no_encoding_modifiers_from_bare_key() {
+        let mods = extract_encoding_modifiers("F13");
+        assert!(!mods.ctrl);
+        assert!(!mods.alt);
+        assert!(!mods.shift);
+        assert!(!mods.win);
+    }
+
+    #[test]
+    fn extracts_encoding_modifiers_returns_default_for_invalid() {
+        let mods = extract_encoding_modifiers("+++garbage");
+        assert_eq!(mods, HotkeyModifiers::default());
+    }
+
+    #[test]
+    fn parses_raw_vk_code() {
+        let parsed = parse_hotkey("Ctrl+Alt+VK_232").expect("expected hotkey with VK code");
+        assert_eq!(parsed.canonical, "Ctrl+Alt+VK_232");
+        assert!(parsed.modifiers.ctrl);
+        assert!(parsed.modifiers.alt);
+        assert_eq!(parsed.key.code, 232);
+    }
+
+    #[test]
+    fn parses_raw_vk_code_bare() {
+        let parsed = parse_hotkey("VK_128").expect("expected bare VK code");
+        assert_eq!(parsed.canonical, "VK_128");
+        assert_eq!(parsed.key.code, 128);
     }
 }

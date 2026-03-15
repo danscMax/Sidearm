@@ -303,11 +303,23 @@ pub struct EncoderMapping {
 pub struct AppMapping {
     pub id: String,
     pub exe: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub title_includes: Vec<String>,
     pub profile_id: String,
     pub enabled: bool,
     pub priority: i32,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum TriggerMode {
+    Press,
+    DoublePress,
+    TriplePress,
+    Hold,
+    Chord,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -321,6 +333,10 @@ pub struct Binding {
     pub action_ref: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_tag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trigger_mode: Option<TriggerMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chord_partner: Option<ControlId>,
     pub enabled: bool,
 }
 
@@ -332,7 +348,39 @@ pub enum ActionType {
     Sequence,
     Launch,
     Menu,
+    MouseAction,
+    MediaKey,
+    ProfileSwitch,
     Disabled,
+}
+
+impl ActionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ActionType::Shortcut => "shortcut",
+            ActionType::TextSnippet => "textSnippet",
+            ActionType::Sequence => "sequence",
+            ActionType::Launch => "launch",
+            ActionType::Menu => "menu",
+            ActionType::MouseAction => "mouseAction",
+            ActionType::MediaKey => "mediaKey",
+            ActionType::ProfileSwitch => "profileSwitch",
+            ActionType::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ActionCondition {
+    #[serde(rename_all = "camelCase")]
+    WindowTitleContains { value: String },
+    #[serde(rename_all = "camelCase")]
+    WindowTitleNotContains { value: String },
+    #[serde(rename_all = "camelCase")]
+    ExeEquals { value: String },
+    #[serde(rename_all = "camelCase")]
+    ExeNotEquals { value: String },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -345,6 +393,8 @@ pub struct Action {
     pub pretty: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub conditions: Vec<ActionCondition>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -355,6 +405,9 @@ pub enum ActionPayload {
     Sequence(SequenceActionPayload),
     Launch(LaunchActionPayload),
     Menu(MenuActionPayload),
+    MouseAction(MouseActionPayload),
+    MediaKey(MediaKeyPayload),
+    ProfileSwitch(ProfileSwitchPayload),
     Disabled(DisabledActionPayload),
 }
 
@@ -380,6 +433,7 @@ pub enum PasteMode {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "source", rename_all = "camelCase")]
 pub enum TextSnippetPayload {
+    #[serde(rename_all = "camelCase")]
     Inline {
         text: String,
         paste_mode: PasteMode,
@@ -400,19 +454,21 @@ pub struct SequenceActionPayload {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SequenceStep {
+    #[serde(rename_all = "camelCase")]
     Send {
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
     },
+    #[serde(rename_all = "camelCase")]
     Text {
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
     },
-    Sleep {
-        delay_ms: u32,
-    },
+    #[serde(rename_all = "camelCase")]
+    Sleep { delay_ms: u32 },
+    #[serde(rename_all = "camelCase")]
     Launch {
         value: String,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -443,18 +499,46 @@ pub struct MenuActionPayload {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum MenuItem {
+    #[serde(rename_all = "camelCase")]
     Action {
         id: String,
         label: String,
         action_ref: String,
         enabled: bool,
     },
+    #[serde(rename_all = "camelCase")]
     Submenu {
         id: String,
         label: String,
         items: Vec<MenuItem>,
         enabled: bool,
     },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MouseActionPayload {
+    pub action: String,
+    #[serde(default)]
+    pub ctrl: bool,
+    #[serde(default)]
+    pub shift: bool,
+    #[serde(default)]
+    pub alt: bool,
+    #[serde(default)]
+    pub win: bool,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MediaKeyPayload {
+    pub key: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProfileSwitchPayload {
+    pub target_profile_id: String,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -840,9 +924,10 @@ fn validate_action<'a>(
 ) {
     match (&action.action_type, &action.payload) {
         (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => {
-            if payload.key.trim().is_empty() {
+            let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
+            if payload.key.trim().is_empty() && !has_modifier {
                 errors.push(format!(
-                    "action `{}` shortcut key must not be empty.",
+                    "action `{}` shortcut must have a key or at least one modifier.",
                     action.id
                 ));
             }
@@ -896,11 +981,35 @@ fn validate_action<'a>(
                 errors,
             );
         }
+        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
+            if payload.action.trim().is_empty() {
+                errors.push(format!(
+                    "action `{}` mouseAction must specify an action.",
+                    action.id
+                ));
+            }
+        }
+        (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => {
+            if payload.key.trim().is_empty() {
+                errors.push(format!(
+                    "action `{}` mediaKey must specify a key.",
+                    action.id
+                ));
+            }
+        }
+        (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => {
+            if payload.target_profile_id.trim().is_empty() {
+                errors.push(format!(
+                    "action `{}` profileSwitch must specify a targetProfileId.",
+                    action.id
+                ));
+            }
+        }
         (ActionType::Disabled, ActionPayload::Disabled(_)) => {}
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
-            action_type_name(action.action_type)
+            action.action_type.as_str()
         )),
     }
 }
@@ -1051,17 +1160,6 @@ fn io_error(path: Option<&Path>, error: std::io::Error) -> ConfigStoreError {
             Some(path) => format!("I/O error at {}: {error}", path_string(path)),
             None => format!("I/O error: {error}"),
         },
-    }
-}
-
-fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::Shortcut => "shortcut",
-        ActionType::TextSnippet => "textSnippet",
-        ActionType::Sequence => "sequence",
-        ActionType::Launch => "launch",
-        ActionType::Menu => "menu",
-        ActionType::Disabled => "disabled",
     }
 }
 
@@ -1251,90 +1349,92 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             ControlFamily::TopPanel,
             "Right Click",
             Some("Right Click"),
-            true,
-            CapabilityStatus::NeedsValidation,
-            Some("Observed in screenshots; exact remap behavior still needs confirmation."),
+            false,
+            CapabilityStatus::Reserved,
+            Some(
+                "Remapped to Hypershift in Synapse. Actual right-click = Hypershift + Left Click.",
+            ),
         ),
         physical_control(
             ControlId::TopAux01,
             ControlFamily::TopPanel,
             "Top Aux 1",
-            Some("Unknown top auxiliary control"),
+            Some("DPI Stage Up"),
             true,
-            CapabilityStatus::NeedsValidation,
-            Some("Temporary naming; current hardware identity is not fully confirmed."),
+            CapabilityStatus::Verified,
+            Some("Verified: Alt+F23 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::TopAux02,
             ControlFamily::TopPanel,
             "Top Aux 2",
-            Some("Unknown top auxiliary control"),
+            Some("DPI Stage Down"),
             true,
-            CapabilityStatus::NeedsValidation,
-            Some("Temporary naming; current hardware identity is not fully confirmed."),
+            CapabilityStatus::Verified,
+            Some("Verified: Alt+F24 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::Mouse4,
             ControlFamily::TopPanel,
             "Mouse 4",
-            Some("Mouse Button 4"),
+            Some("Forward"),
             true,
-            CapabilityStatus::NeedsValidation,
-            Some("Common Windows concept, but emitted behavior still needs verification."),
+            CapabilityStatus::Verified,
+            Some("Verified: Alt+F13 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::Mouse5,
             ControlFamily::TopPanel,
             "Mouse 5",
-            Some("Mouse Button 5"),
+            Some("Back"),
             true,
-            CapabilityStatus::NeedsValidation,
-            Some("Common Windows concept, but emitted behavior still needs verification."),
+            CapabilityStatus::Verified,
+            Some("Verified: Alt+F14 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::WheelUp,
-            ControlFamily::Wheel,
+            ControlFamily::TopPanel,
             "Wheel Up",
             Some("Scroll Up"),
             true,
             CapabilityStatus::PartiallyRemappable,
-            Some("Wheel behavior can collide with native OS semantics."),
+            Some("Standard layer: native scroll (not intercepted). Hypershift: Ctrl+Alt+F16."),
         ),
         physical_control(
             ControlId::WheelDown,
-            ControlFamily::Wheel,
+            ControlFamily::TopPanel,
             "Wheel Down",
             Some("Scroll Down"),
             true,
             CapabilityStatus::PartiallyRemappable,
-            Some("Wheel behavior can collide with native OS semantics."),
+            Some("Standard layer: native scroll (not intercepted). Hypershift: Ctrl+Alt+F17."),
         ),
         physical_control(
             ControlId::WheelClick,
-            ControlFamily::Wheel,
+            ControlFamily::TopPanel,
             "Wheel Click",
-            Some("Scroll Click"),
+            Some("Middle Click"),
             true,
-            CapabilityStatus::NeedsValidation,
-            Some("Click behavior is modeled, but encoded mapping still needs confirmation."),
+            CapabilityStatus::Verified,
+            Some("Verified: Alt+F15 standard layer confirmed via hardware test."),
         ),
         physical_control(
             ControlId::WheelLeft,
-            ControlFamily::Wheel,
+            ControlFamily::TopPanel,
             "Wheel Tilt Left",
             Some("Scroll Left Tilt"),
-            true,
-            CapabilityStatus::NeedsValidation,
-            Some("Included from day one; current mapping and naming are still provisional."),
+            false,
+            CapabilityStatus::Reserved,
+            Some("Not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
             ControlId::WheelRight,
-            ControlFamily::Wheel,
+            ControlFamily::TopPanel,
             "Wheel Tilt Right",
             Some("Scroll Right Tilt"),
-            true,
-            CapabilityStatus::NeedsValidation,
-            Some("Included from day one; current mapping and naming are still provisional."),
+            false,
+            CapabilityStatus::Reserved,
+            Some("Not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
             ControlId::HypershiftButton,
@@ -1350,27 +1450,27 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             ControlFamily::TopPanel,
             "Top Special 1",
             Some("Unknown special control 1"),
-            true,
-            CapabilityStatus::NeedsValidation,
-            Some("Currently observed with Zoom In behavior; identity still temporary."),
+            false,
+            CapabilityStatus::Reserved,
+            Some("Phantom control — not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
             ControlId::TopSpecial02,
             ControlFamily::TopPanel,
             "Top Special 2",
             Some("Unknown special control 2"),
-            true,
-            CapabilityStatus::NeedsValidation,
-            Some("Currently observed with Ctrl Click behavior; identity still temporary."),
+            false,
+            CapabilityStatus::Reserved,
+            Some("Phantom control — not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
             ControlId::TopSpecial03,
             ControlFamily::TopPanel,
             "Top Special 3",
             Some("Unknown special control 3"),
-            true,
-            CapabilityStatus::NeedsValidation,
-            Some("Currently observed with Zoom Out behavior; identity still temporary."),
+            false,
+            CapabilityStatus::Reserved,
+            Some("Phantom control — not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
     ]
 }
@@ -1401,6 +1501,20 @@ fn seed_encoder_mappings() -> Vec<EncoderMapping> {
         encoder_mapping(ControlId::Thumb10, Layer::Hypershift, "Ctrl+Alt+Shift+F22"),
         encoder_mapping(ControlId::Thumb11, Layer::Hypershift, "Ctrl+Alt+Shift+F23"),
         encoder_mapping(ControlId::Thumb12, Layer::Hypershift, "Ctrl+Alt+Shift+F24"),
+        // Top panel – standard layer (Alt+F-key avoids Win+F-key system conflicts)
+        encoder_mapping(ControlId::TopAux01, Layer::Standard, "Alt+F23"),
+        encoder_mapping(ControlId::TopAux02, Layer::Standard, "Alt+F24"),
+        encoder_mapping(ControlId::Mouse4, Layer::Standard, "Alt+F13"),
+        encoder_mapping(ControlId::Mouse5, Layer::Standard, "Alt+F14"),
+        encoder_mapping(ControlId::WheelClick, Layer::Standard, "Alt+F15"),
+        // Top panel – hypershift layer
+        encoder_mapping(ControlId::TopAux01, Layer::Hypershift, "Ctrl+Alt+F23"),
+        encoder_mapping(ControlId::TopAux02, Layer::Hypershift, "Ctrl+Alt+F24"),
+        encoder_mapping(ControlId::Mouse4, Layer::Hypershift, "Ctrl+Alt+F13"),
+        encoder_mapping(ControlId::Mouse5, Layer::Hypershift, "Ctrl+Alt+F14"),
+        encoder_mapping(ControlId::WheelClick, Layer::Hypershift, "Ctrl+Alt+F15"),
+        encoder_mapping(ControlId::WheelUp, Layer::Hypershift, "Ctrl+Alt+F16"),
+        encoder_mapping(ControlId::WheelDown, Layer::Hypershift, "Ctrl+Alt+F17"),
     ]
 }
 
@@ -2268,6 +2382,7 @@ fn app_mapping(id: &str, exe: &str, profile_id: &str, priority: i32) -> AppMappi
     AppMapping {
         id: id.into(),
         exe: exe.into(),
+        process_path: None,
         title_includes: Vec::new(),
         profile_id: profile_id.into(),
         enabled: true,
@@ -2309,6 +2424,7 @@ fn shortcut_action(
         }),
         pretty: pretty.into(),
         notes: None,
+        conditions: Vec::new(),
     }
 }
 
@@ -2321,6 +2437,7 @@ fn text_snippet_library_action(id: String, pretty: &str, snippet_id: &str) -> Ac
         }),
         pretty: pretty.into(),
         notes: None,
+        conditions: Vec::new(),
     }
 }
 
@@ -2331,6 +2448,7 @@ fn disabled_placeholder_action(id: String, pretty: &str, notes: &str) -> Action 
         payload: ActionPayload::Disabled(DisabledActionPayload::default()),
         pretty: pretty.into(),
         notes: Some(notes.into()),
+        conditions: Vec::new(),
     }
 }
 
@@ -2350,6 +2468,8 @@ fn binding(
         label: label.into(),
         action_ref,
         color_tag: None,
+        trigger_mode: None,
+        chord_partner: None,
         enabled: true,
     }
 }
@@ -2468,11 +2588,27 @@ mod tests {
         match result {
             Err(ConfigStoreError::InvalidConfig { errors }) => {
                 assert!(
-                    errors.iter().any(|error| error.contains("Ctrl+Alt+Shift+F13")),
+                    errors
+                        .iter()
+                        .any(|error| error.contains("Ctrl+Alt+Shift+F13")),
                     "expected canonical duplicate encodedKey validation error, got {errors:?}"
                 );
             }
             other => panic!("expected invalid config, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn save_and_load_preserves_trigger_mode() {
+        let temp_dir = tempdir().expect("temp dir");
+        let mut config = default_seed_config();
+        config.bindings[0].trigger_mode = Some(TriggerMode::Hold);
+
+        save_config(temp_dir.path(), config.clone()).expect("save should succeed");
+
+        let loaded = load_or_initialize_config(temp_dir.path()).expect("load should succeed");
+        assert_eq!(loaded.config.bindings[0].trigger_mode, Some(TriggerMode::Hold));
+        // Other bindings remain None
+        assert_eq!(loaded.config.bindings[1].trigger_mode, None);
     }
 }

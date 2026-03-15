@@ -322,7 +322,7 @@ It should be:
 
 - Title: Validate top-panel controls on the real device
 - Priority: `P1`
-- Status: `todo`
+- Status: `done`
 - Why it exists: top-panel control behavior is not fully trusted yet
 - Dependencies:
   - a physical mouse session
@@ -339,7 +339,7 @@ It should be:
 
 - Title: Validate wheel controls on the real device
 - Priority: `P1`
-- Status: `todo`
+- Status: `done`
 - Why it exists: wheel remapping confidence is still incomplete
 - Dependencies:
   - a physical mouse session
@@ -354,7 +354,7 @@ It should be:
 
 - Title: Validate Hypershift edge cases on the real device
 - Priority: `P1`
-- Status: `todo`
+- Status: `done`
 - Why it exists: Hypershift is one of the most important ambiguity zones
 - Dependencies:
   - a physical mouse session
@@ -369,7 +369,7 @@ It should be:
 
 - Title: Confirm final policy for reserved and risky controls
 - Priority: `P2`
-- Status: `todo`
+- Status: `done`
 - Why it exists: some controls may need to remain reserved for safety
 - Dependencies:
   - `VERIFY-001`
@@ -387,7 +387,7 @@ It should be:
 
 - Title: Improve wording of verification UX based on live hardware evidence
 - Priority: `P2`
-- Status: `todo`
+- Status: `done`
 - Why it exists: real-device testing should refine how the UI talks about confidence and evidence
 - Dependencies:
   - `VERIFY-001`
@@ -529,7 +529,7 @@ It should be:
 
 - Title: Decide whether to initialize git in this folder
 - Priority: `P2`
-- Status: `todo`
+- Status: `done`
 - Why it exists: long-term project tracking is weaker without a repo
 - Dependencies: none
 - Target files:
@@ -540,13 +540,12 @@ It should be:
 
 ## Active Focus
 
-Completed: `UX-001` through `UX-008`, `VIS-001`, `VIS-002`, `VIS-004`, `PACK-001`, `PACK-002`.
+Completed: `UX-001` through `UX-008`, `VIS-001`, `VIS-002`, `VIS-004`, `PACK-001` through `PACK-003`, `VERIFY-001` through `VERIFY-005`.
 
 Remaining items:
 
-1. `PACK-003` (P2) — decide on git init
-2. `VERIFY-001` through `VERIFY-005` — hardware validation (requires physical mouse)
-3. `WIN-001` through `WIN-003` — Windows platform hardening
+1. End-to-end action execution testing (shortcut, text snippet, sequence, launch)
+2. `WIN-001` through `WIN-003` — Windows platform hardening
 
 ## Immediate Blockers
 

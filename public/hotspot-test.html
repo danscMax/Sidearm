@@ -33,7 +33,7 @@
   .viewport.dragging-view { cursor: grabbing; }
   .viewport.dragging-dot { cursor: default; }
 
-  /* Canvas that holds both zones */
+  /* Canvas that holds all zones */
   .canvas { transform-origin: 0 0; padding: 40px; display: flex; flex-direction: column; gap: 30px; min-width: fit-content; }
 
   /* Zone */
@@ -62,6 +62,12 @@
     border-color: #9fca69; box-shadow: 0 0 0 4px rgba(159,202,105,0.4), 0 4px 16px rgba(0,0,0,0.6);
   }
   .hotspot.sm { width: 24px; height: 24px; font-size: 0.55rem; }
+  .hotspot.xs { width: 18px; height: 18px; font-size: 0.45rem; border-width: 1.5px; }
+
+  /* Color-code: top buttons = blue, thumb = green */
+  .hotspot.top-btn { border-color: rgba(120,180,230,0.7); color: rgba(180,220,255,0.95); }
+  .hotspot.top-btn:hover { box-shadow: 0 0 0 3px rgba(120,180,230,0.3), 0 2px 8px rgba(0,0,0,0.5); }
+  .hotspot.top-btn.dragging { border-color: #78b4e6; box-shadow: 0 0 0 4px rgba(120,180,230,0.4), 0 4px 16px rgba(0,0,0,0.6); }
 
   /* Tooltip on hover */
   .hotspot::after {
@@ -100,6 +106,7 @@
   <span class="sep"></span>
   <button id="btnTop" class="active">Top</button>
   <button id="btnSide" class="active">Side</button>
+  <button id="btnCombined" class="active">Combined</button>
   <span class="sep"></span>
   <button id="btnExport">📋 Export</button>
   <button id="btnReset">↺ Reset</button>
@@ -118,6 +125,11 @@
       <span class="zone-label">Боковая клавиатура (Side View)</span>
       <img src="/assets/naga-side.png" alt="Side view" />
       <div class="overlay" id="sideOverlay"></div>
+    </div>
+    <div class="zone" id="combinedZone" style="width:601px;">
+      <span class="zone-label">Все кнопки (Combined View) — 246×424 portrait</span>
+      <img src="/assets/naga-combined.png" alt="Combined view" />
+      <div class="overlay" id="combinedOverlay"></div>
     </div>
   </div>
 </div>
@@ -156,6 +168,34 @@ const sideHotspots = {
   thumb_12: { left: 50, top: 30, label: '12' },
 };
 
+// Combined view: all buttons on the 3/4-angle photo.
+// Green = thumb buttons, Blue = top buttons. All use xs size.
+const combinedHotspots = {
+  // ── Thumb grid (green dots) ──
+  thumb_01: { left: 38.5, top: 48, label: '1', sm: true, group: 'thumb' },
+  thumb_02: { left: 42, top: 47, label: '2', sm: true, group: 'thumb' },
+  thumb_03: { left: 45, top: 45.5, label: '3', sm: true, group: 'thumb' },
+  thumb_04: { left: 40, top: 53.5, label: '4', sm: true, group: 'thumb' },
+  thumb_05: { left: 43, top: 52, label: '5', sm: true, group: 'thumb' },
+  thumb_06: { left: 46, top: 51, label: '6', sm: true, group: 'thumb' },
+  thumb_07: { left: 39.5, top: 59.5, label: '7', sm: true, group: 'thumb' },
+  thumb_08: { left: 43.5, top: 57.5, label: '8', sm: true, group: 'thumb' },
+  thumb_09: { left: 46.5, top: 56.5, label: '9', sm: true, group: 'thumb' },
+  thumb_10: { left: 40, top: 65, label: '10', sm: true, group: 'thumb' },
+  thumb_11: { left: 43, top: 64, label: '11', sm: true, group: 'thumb' },
+  thumb_12: { left: 47, top: 62, label: '12', sm: true, group: 'thumb' },
+  // ── Top buttons (blue dots) ──
+  mouse_left:  { left: 48.5, top: 21, label: 'ЛКМ', sm: true, group: 'top' },
+  top_aux_01:  { left: 44, top: 21.5, label: 'D+', sm: true, group: 'top' },
+  top_aux_02:  { left: 45.5, top: 30.5, label: 'D−', sm: true, group: 'top' },
+  wheel_up:    { left: 53.5, top: 24, label: '▲', sm: true, group: 'top' },
+  wheel_click: { left: 54.5, top: 32, label: '●', sm: true, group: 'top' },
+  wheel_down:  { left: 55.5, top: 39.5, label: '▼', sm: true, group: 'top' },
+  hypershift_button: { left: 57, top: 22, label: 'HS', sm: true, group: 'top' },
+  mouse_4:     { left: 51, top: 32, label: '←', sm: true, group: 'top' },
+  mouse_5:     { left: 58, top: 31.5, label: '→', sm: true, group: 'top' },
+};
+
 // ── State ──
 let zoom = 1;
 const viewport = document.getElementById('viewport');
@@ -166,7 +206,9 @@ function renderHotspots(overlay, hotspots, zoneName) {
   overlay.innerHTML = '';
   for (const [id, h] of Object.entries(hotspots)) {
     const el = document.createElement('div');
-    el.className = 'hotspot' + (h.sm ? ' sm' : '');
+    const isTopBtn = h.group === 'top';
+    const sizeClass = h.sm ? ' sm' : '';
+    el.className = 'hotspot' + sizeClass + (isTopBtn ? ' top-btn' : '');
     el.style.left = h.left + '%';
     el.style.top = h.top + '%';
     el.textContent = h.label;
@@ -234,7 +276,7 @@ document.getElementById('btnZoomIn').addEventListener('click', () => setZoom(zoo
 document.getElementById('btnZoomOut').addEventListener('click', () => setZoom(zoom / 1.25));
 document.getElementById('btnFit').addEventListener('click', () => {
   const vw = viewport.clientWidth - 80;
-  const cw = 700; // widest zone
+  const cw = 900; // widest zone
   setZoom(Math.min(vw / cw, 2));
 });
 
@@ -278,39 +320,37 @@ window.addEventListener('pointerup', () => {
 });
 
 // ── Toggle zones ──
-const btnTop = document.getElementById('btnTop');
-const btnSide = document.getElementById('btnSide');
-btnTop.addEventListener('click', () => {
-  const z = document.getElementById('topZone');
-  const vis = z.style.display !== 'none';
-  z.style.display = vis ? 'none' : '';
-  btnTop.classList.toggle('active', !vis);
-});
-btnSide.addEventListener('click', () => {
-  const z = document.getElementById('sideZone');
-  const vis = z.style.display !== 'none';
-  z.style.display = vis ? 'none' : '';
-  btnSide.classList.toggle('active', !vis);
-});
+function setupToggle(btnId, zoneId) {
+  const btn = document.getElementById(btnId);
+  btn.addEventListener('click', () => {
+    const z = document.getElementById(zoneId);
+    const vis = z.style.display !== 'none';
+    z.style.display = vis ? 'none' : '';
+    btn.classList.toggle('active', !vis);
+  });
+}
+setupToggle('btnTop', 'topZone');
+setupToggle('btnSide', 'sideZone');
+setupToggle('btnCombined', 'combinedZone');
 
 // ── Export ──
 function generateExport() {
-  let code = '// ── topViewHotspots ──\n';
-  code += 'const topViewHotspots = {\n';
-  for (const [id, h] of Object.entries(topHotspots)) {
-    const sizeStr = h.sm ? ', size: "sm"' : '';
-    code += `  ${id}: { left: ${h.left}, top: ${h.top}, label: "${h.label}"${sizeStr} },\n`;
+  function formatHotspots(name, hotspots, allSmall) {
+    let code = `// ── ${name} ──\n`;
+    code += `const ${name} = {\n`;
+    for (const [id, h] of Object.entries(hotspots)) {
+      const sizeStr = allSmall ? ', size: "sm"' : (h.sm ? ', size: "sm"' : '');
+      code += `  ${id}: { left: ${h.left}, top: ${h.top}, label: "${h.label}"${sizeStr} },\n`;
+    }
+    code += '};\n';
+    return code;
   }
-  code += '};\n\n';
 
-  code += '// ── sideViewHotspots ──\n';
-  code += 'const sideViewHotspots = {\n';
-  for (const [id, h] of Object.entries(sideHotspots)) {
-    const sizeStr = h.sm ? ', size: "sm"' : '';
-    code += `  ${id}: { left: ${h.left}, top: ${h.top}, label: "${h.label}"${sizeStr} },\n`;
-  }
-  code += '};\n';
-  return code;
+  return [
+    formatHotspots('topViewHotspots', topHotspots, false),
+    formatHotspots('sideViewHotspots', sideHotspots, false),
+    formatHotspots('combinedViewHotspots', combinedHotspots, true),
+  ].join('\n');
 }
 
 document.getElementById('btnExport').addEventListener('click', () => {
@@ -335,11 +375,12 @@ document.getElementById('btnReset').addEventListener('click', () => {
 // ── Init ──
 renderHotspots(document.getElementById('topOverlay'), topHotspots, 'top');
 renderHotspots(document.getElementById('sideOverlay'), sideHotspots, 'side');
+renderHotspots(document.getElementById('combinedOverlay'), combinedHotspots, 'combined');
 
 // Auto-fit on load
 window.addEventListener('load', () => {
   const vw = viewport.clientWidth - 80;
-  setZoom(Math.min(vw / 700, 1.5));
+  setZoom(Math.min(vw / 900, 1.5));
 });
 </script>
 </body>

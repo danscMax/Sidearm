@@ -13,7 +13,7 @@ pub const EVENT_CONTROL_RESOLVED: &str = "control_resolved";
 pub const EVENT_ACTION_EXECUTED: &str = "action_executed";
 pub const EVENT_RUNTIME_ERROR: &str = "runtime_error";
 
-const DEBUG_LOG_LIMIT: usize = 200;
+const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -36,9 +36,12 @@ pub struct RuntimeStateSummary {
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[allow(dead_code)]
 pub enum DebugLogLevel {
+    Debug,
     Info,
     Warn,
+    Error,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -58,6 +61,7 @@ pub struct RuntimeStore {
     last_reload_at: Option<u64>,
     active_config_version: Option<i32>,
     warning_count: usize,
+    last_notified_profile_id: Option<String>,
     logs: VecDeque<DebugLogEntry>,
     next_log_id: u64,
 }
@@ -70,6 +74,7 @@ impl Default for RuntimeStore {
             last_reload_at: None,
             active_config_version: None,
             warning_count: 0,
+            last_notified_profile_id: None,
             logs: VecDeque::new(),
             next_log_id: 1,
         }
@@ -102,16 +107,18 @@ impl RuntimeStore {
         self.active_config_version = Some(config_version);
         self.warning_count = warning_count;
 
+        log::info!("[рантайм] Перехват запущен, версия конфигурации {config_version}.");
         self.push_log(
             DebugLogLevel::Info,
-            "runtime",
-            format!("Runtime started with config version {config_version}."),
+            "рантайм",
+            format!("Перехват запущен, версия конфигурации {config_version}."),
         );
         if warning_count > 0 {
+            log::warn!("[рантайм] При запуске обнаружено предупреждений: {warning_count}.");
             self.push_log(
                 DebugLogLevel::Warn,
-                "runtime",
-                format!("Runtime started with {warning_count} validation warning(s)."),
+                "рантайм",
+                format!("При запуске обнаружено предупреждений: {warning_count}."),
             );
         }
 
@@ -120,8 +127,20 @@ impl RuntimeStore {
 
     pub fn stop(&mut self) -> RuntimeStateSummary {
         self.status = RuntimeStatus::Idle;
-        self.push_log(DebugLogLevel::Info, "runtime", "Runtime stopped.");
+        self.last_notified_profile_id = None;
+        log::info!("[рантайм] Перехват остановлен.");
+        self.push_log(DebugLogLevel::Info, "рантайм", "Перехват остановлен.");
         self.summary()
+    }
+
+    /// Returns true if the profile changed (caller should send notification).
+    pub fn notify_profile_change(&mut self, profile_id: Option<&str>) -> bool {
+        let changed = profile_id.is_some()
+            && self.last_notified_profile_id.as_deref() != profile_id;
+        if changed {
+            self.last_notified_profile_id = profile_id.map(|s| s.to_owned());
+        }
+        changed
     }
 
     pub fn reload(&mut self, config_version: i32, warning_count: usize) -> RuntimeStateSummary {
@@ -134,16 +153,18 @@ impl RuntimeStore {
         self.active_config_version = Some(config_version);
         self.warning_count = warning_count;
 
+        log::info!("[рантайм] Конфигурация перезагружена, версия {config_version}.");
         self.push_log(
             DebugLogLevel::Info,
-            "runtime",
-            format!("Runtime reloaded config version {config_version}."),
+            "рантайм",
+            format!("Конфигурация перезагружена, версия {config_version}."),
         );
         if warning_count > 0 {
+            log::warn!("[рантайм] После перезагрузки обнаружено предупреждений: {warning_count}.");
             self.push_log(
                 DebugLogLevel::Warn,
-                "runtime",
-                format!("Reloaded config carries {warning_count} validation warning(s)."),
+                "рантайм",
+                format!("После перезагрузки обнаружено предупреждений: {warning_count}."),
             );
         }
 
@@ -162,12 +183,30 @@ impl RuntimeStore {
         self.push_log(DebugLogLevel::Warn, category, message);
     }
 
+    #[allow(dead_code)]
+    pub fn record_error(&mut self, category: impl Into<String>, message: impl Into<String>) {
+        self.push_log(DebugLogLevel::Error, category, message);
+    }
+
+    #[allow(dead_code)]
+    pub fn record_debug(&mut self, category: impl Into<String>, message: impl Into<String>) {
+        self.push_log(DebugLogLevel::Debug, category, message);
+    }
+
     fn push_log(
         &mut self,
         level: DebugLogLevel,
         category: impl Into<String>,
         message: impl Into<String>,
     ) {
+        let category = category.into();
+        let message = message.into();
+
+        // NOTE: We intentionally do NOT call log::info!() etc. here.
+        // This method runs on the Windows LL keyboard hook thread (small stack),
+        // and fern + 3 targets would overflow it. The capture_backend already
+        // emits log::*() calls directly — this ring buffer is only for the UI.
+
         if self.logs.len() >= DEBUG_LOG_LIMIT {
             self.logs.pop_front();
         }
@@ -175,15 +214,15 @@ impl RuntimeStore {
         self.logs.push_back(DebugLogEntry {
             id: self.next_log_id,
             level,
-            category: category.into(),
-            message: message.into(),
+            category,
+            message,
             created_at: timestamp_millis(),
         });
         self.next_log_id += 1;
     }
 }
 
-fn timestamp_millis() -> u64 {
+pub(crate) fn timestamp_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -215,16 +254,51 @@ mod tests {
     }
 
     #[test]
+    fn notify_profile_change_detects_transitions() {
+        let mut store = RuntimeStore::default();
+        // First profile — should notify
+        assert!(store.notify_profile_change(Some("p1")));
+        // Same profile — should not notify
+        assert!(!store.notify_profile_change(Some("p1")));
+        // Different profile — should notify
+        assert!(store.notify_profile_change(Some("p2")));
+        // None — should not notify
+        assert!(!store.notify_profile_change(None));
+        // After stop, should notify again for any profile
+        store.stop();
+        assert!(store.notify_profile_change(Some("p1")));
+    }
+
+    #[test]
     fn runtime_store_caps_log_history() {
         let mut store = RuntimeStore::default();
 
-        for index in 0..220 {
+        for index in 0..1100 {
             store.push_log(DebugLogLevel::Info, "test", format!("message-{index}"));
         }
 
         let logs = store.logs();
         assert_eq!(logs.len(), DEBUG_LOG_LIMIT);
-        assert_eq!(logs.first().map(|entry| entry.id), Some(21));
-        assert_eq!(logs.last().map(|entry| entry.id), Some(220));
+        assert_eq!(logs.first().map(|entry| entry.id), Some(101));
+        assert_eq!(logs.last().map(|entry| entry.id), Some(1100));
+    }
+
+    #[test]
+    fn runtime_store_supports_error_level() {
+        let mut store = RuntimeStore::default();
+        store.record_error("capture", "Hook registration failed");
+        let logs = store.logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, DebugLogLevel::Error);
+        assert_eq!(logs[0].category, "capture");
+    }
+
+    #[test]
+    fn runtime_store_supports_debug_level() {
+        let mut store = RuntimeStore::default();
+        store.record_debug("capture", "Key event received");
+        let logs = store.logs();
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, DebugLogLevel::Debug);
     }
 }

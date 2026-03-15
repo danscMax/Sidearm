@@ -17,6 +17,16 @@ import type {
 const PLACEHOLDER_ACTION_NOTE =
   "Created from the shell editor. Replace this placeholder before using it in runtime.";
 
+const TOP_PANEL_MAP: Record<string, { standard: string | null; hypershift: string | null }> = {
+  top_aux_01: { standard: "Ctrl+Shift+F23", hypershift: "Ctrl+Alt+F23" },
+  top_aux_02: { standard: "Ctrl+Shift+F24", hypershift: "Ctrl+Alt+F24" },
+  mouse_4: { standard: "Ctrl+Shift+F13", hypershift: "Ctrl+Alt+F13" },
+  mouse_5: { standard: "Ctrl+Shift+F14", hypershift: "Ctrl+Alt+F14" },
+  wheel_click: { standard: "Ctrl+Shift+F15", hypershift: "Ctrl+Alt+F15" },
+  wheel_up: { standard: null, hypershift: "Ctrl+Alt+F16" },
+  wheel_down: { standard: null, hypershift: "Ctrl+Alt+F17" },
+};
+
 export function findBinding(
   config: AppConfig,
   profileId: string,
@@ -31,6 +41,17 @@ export function findBinding(
         binding.controlId === controlId,
     ) ?? null
   );
+}
+
+export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
+  const binding = config.bindings.find((b) => b.id === bindingId);
+  if (!binding) return config;
+  const nextBindings = config.bindings.filter((b) => b.id !== bindingId);
+  const actionStillReferenced = nextBindings.some((b) => b.actionRef === binding.actionRef);
+  const nextActions = actionStillReferenced
+    ? config.actions
+    : config.actions.filter((a) => a.id !== binding.actionRef);
+  return { ...config, bindings: nextBindings, actions: nextActions };
 }
 
 export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfig {
@@ -138,6 +159,13 @@ export function upsertPhysicalControl(
   return {
     ...config,
     physicalControls,
+  };
+}
+
+export function deleteAppMapping(config: AppConfig, appMappingId: string): AppConfig {
+  return {
+    ...config,
+    appMappings: config.appMappings.filter((m) => m.id !== appMappingId),
   };
 }
 
@@ -282,6 +310,24 @@ export function coerceActionType(
             ],
           },
         };
+      case "mouseAction":
+        return {
+          ...action,
+          type: "mouseAction",
+          payload: { action: "leftClick" },
+        };
+      case "mediaKey":
+        return {
+          ...action,
+          type: "mediaKey",
+          payload: { key: "playPause" },
+        };
+      case "profileSwitch":
+        return {
+          ...action,
+          type: "profileSwitch",
+          payload: { targetProfileId: nextConfig.profiles[0]?.id ?? "" },
+        };
       case "disabled":
         return {
           ...action,
@@ -304,7 +350,6 @@ export function promoteInlineSnippetActionToLibrary(
   if (
     !action ||
     action.type !== "textSnippet" ||
-    !("source" in action.payload) ||
     action.payload.source !== "inline"
   ) {
     return config;
@@ -336,6 +381,23 @@ export function promoteInlineSnippetActionToLibrary(
   });
 }
 
+/** Finds existing app mapping for same exe+profile (ignoring title filters). */
+export function findDuplicateAppMapping(
+  config: AppConfig,
+  profileId: string,
+  exe: string,
+): AppMapping | undefined {
+  const normalizedExe = exe.trim().toLowerCase();
+  return config.appMappings.find(
+    (m) => m.profileId === profileId && m.exe === normalizedExe,
+  );
+}
+
+export interface CreateAppMappingResult {
+  config: AppConfig;
+  newMappingId: string;
+}
+
 export function createAppMappingFromCapture(
   config: AppConfig,
   profileId: string,
@@ -343,7 +405,8 @@ export function createAppMappingFromCapture(
   exe: string,
   title: string,
   includeTitleFilter: boolean,
-): AppConfig {
+  processPath?: string,
+): CreateAppMappingResult {
   const normalizedExe = exe.trim().toLowerCase();
   const baseId = makeAppMappingId(normalizedExe);
   const nextId = nextUniqueId(
@@ -353,6 +416,7 @@ export function createAppMappingFromCapture(
   const nextMapping: AppMapping = {
     id: nextId,
     exe: normalizedExe,
+    processPath: processPath || undefined,
     profileId,
     enabled: true,
     priority,
@@ -361,8 +425,11 @@ export function createAppMappingFromCapture(
   };
 
   return {
-    ...config,
-    appMappings: [...config.appMappings, nextMapping],
+    config: {
+      ...config,
+      appMappings: [...config.appMappings, nextMapping],
+    },
+    newMappingId: nextId,
   };
 }
 
@@ -378,11 +445,12 @@ export function ensurePlaceholderBinding(
   }
 
   const baseActionId = makeActionId(profileId, layer, control.id);
-  const actionId = config.actions.some((action) => action.id === baseActionId)
+  const actionIdSet = new Set(config.actions.map((action) => action.id));
+  const actionId = actionIdSet.has(baseActionId)
     ? baseActionId
-    : nextUniqueId(config.actions.map((action) => action.id), baseActionId);
+    : nextUniqueId(actionIdSet, baseActionId);
   const baseBindingId = makeBindingId(profileId, layer, control.id);
-  const bindingId = nextUniqueId(config.bindings.map((binding) => binding.id), baseBindingId);
+  const bindingId = nextUniqueId(new Set(config.bindings.map((binding) => binding.id)), baseBindingId);
 
   const nextBinding: Binding = {
     id: bindingId,
@@ -394,7 +462,7 @@ export function ensurePlaceholderBinding(
     enabled: false,
   };
 
-  if (config.actions.some((action) => action.id === actionId)) {
+  if (actionIdSet.has(actionId)) {
     return {
       ...upsertBinding(config, nextBinding),
     };
@@ -403,7 +471,7 @@ export function ensurePlaceholderBinding(
   const nextAction: Action = {
     id: actionId,
     type: "disabled",
-    payload: {},
+    payload: {} as Record<string, never>,
     pretty: `Unassigned - ${control.defaultName}`,
     notes: PLACEHOLDER_ACTION_NOTE,
   };
@@ -488,15 +556,76 @@ export function expectedEncodedKeyForControl(
       : `Ctrl+Alt+Shift+F${baseFunction}`;
   }
 
-  const plannedIndex = plannedValidationIndex(controlId);
-  if (plannedIndex !== null) {
-    const baseFunction = 13 + plannedIndex;
-    return layer === "standard"
-      ? `Ctrl+F${baseFunction}`
-      : `Ctrl+Shift+F${baseFunction}`;
+  // Top panel controls – direct mapping to match Synapse layout
+  const entry = TOP_PANEL_MAP[controlId];
+  if (entry) {
+    const key = layer === "standard" ? entry.standard : entry.hypershift;
+    return key ?? null;
   }
 
   return null;
+}
+
+export function duplicateProfile(
+  config: AppConfig,
+  sourceProfileId: string,
+): { config: AppConfig; newProfileId: string } {
+  const source = config.profiles.find((p) => p.id === sourceProfileId);
+  if (!source) return { config, newProfileId: "" };
+
+  const newName = `${source.name} (копия)`;
+  const newId = nextUniqueId(
+    config.profiles.map((p) => p.id),
+    makeProfileId(newName),
+  );
+
+  const newProfile: Profile = { ...source, id: newId, name: newName };
+
+  // Clone all appMappings for this profile
+  const sourceAppMappings = config.appMappings.filter(
+    (m) => m.profileId === sourceProfileId,
+  );
+  const newAppMappings = sourceAppMappings.map((m) => ({
+    ...m,
+    id: crypto.randomUUID(),
+    profileId: newId,
+  }));
+
+  // Clone bindings + actions
+  const sourceBindings = config.bindings.filter(
+    (b) => b.profileId === sourceProfileId,
+  );
+  const actionIdMap = new Map<string, string>();
+  const newActions: typeof config.actions = [];
+
+  for (const binding of sourceBindings) {
+    if (!actionIdMap.has(binding.actionRef)) {
+      const sourceAction = config.actions.find((a) => a.id === binding.actionRef);
+      if (sourceAction) {
+        const newActionId = crypto.randomUUID();
+        actionIdMap.set(binding.actionRef, newActionId);
+        newActions.push({ ...structuredClone(sourceAction), id: newActionId });
+      }
+    }
+  }
+
+  const newBindings = sourceBindings.map((b) => ({
+    ...b,
+    id: crypto.randomUUID(),
+    profileId: newId,
+    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+  }));
+
+  return {
+    config: {
+      ...config,
+      profiles: [...config.profiles, newProfile],
+      appMappings: [...config.appMappings, ...newAppMappings],
+      bindings: [...config.bindings, ...newBindings],
+      actions: [...config.actions, ...newActions],
+    },
+    newProfileId: newId,
+  };
 }
 
 export function createProfile(config: AppConfig, preferredName: string): AppConfig {
@@ -520,6 +649,88 @@ export function createProfile(config: AppConfig, preferredName: string): AppConf
       },
     ],
   };
+}
+
+export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
+  const nextBindings = config.bindings.filter((b) => b.profileId !== profileId);
+
+  // Remove orphaned actions no longer referenced by any remaining binding.
+  // Walk menu items recursively to preserve nested action refs.
+  const referencedActionIds = new Set(nextBindings.map((b) => b.actionRef));
+  for (const actionId of referencedActionIds) {
+    const action = config.actions.find((a) => a.id === actionId);
+    if (action?.type === "menu") {
+      collectMenuActionRefs(action.payload.items, referencedActionIds);
+    }
+  }
+  const nextActions = config.actions.filter((a) => referencedActionIds.has(a.id));
+
+  return {
+    ...config,
+    profiles: config.profiles.filter((p) => p.id !== profileId),
+    bindings: nextBindings,
+    actions: nextActions,
+    appMappings: config.appMappings.filter((m) => m.profileId !== profileId),
+  };
+}
+
+export function duplicateBinding(
+  config: AppConfig,
+  bindingId: string,
+  targetControlId: ControlId,
+  targetLayer?: Layer,
+): AppConfig {
+  const binding = config.bindings.find((b) => b.id === bindingId);
+  if (!binding) return config;
+
+  const action = config.actions.find((a) => a.id === binding.actionRef);
+  if (!action) return config;
+
+  const layer = targetLayer ?? binding.layer;
+
+  // Clone action
+  const newActionId = nextUniqueId(
+    config.actions.map((a) => a.id),
+    `${action.id}-copy`,
+  );
+  const newAction: Action = { ...structuredClone(action), id: newActionId };
+
+  // Clone binding
+  const newBindingId = nextUniqueId(
+    config.bindings.map((b) => b.id),
+    makeBindingId(binding.profileId, layer, targetControlId),
+  );
+  const newBinding: Binding = {
+    ...binding,
+    id: newBindingId,
+    controlId: targetControlId,
+    layer,
+    actionRef: newActionId,
+  };
+
+  // Remove existing binding for target if any
+  const filteredBindings = config.bindings.filter(
+    (b) =>
+      !(b.profileId === binding.profileId && b.layer === layer && b.controlId === targetControlId),
+  );
+
+  return {
+    ...config,
+    actions: [...config.actions, newAction],
+    bindings: [...filteredBindings, newBinding],
+  };
+}
+
+export function copyBindingFromLayer(
+  config: AppConfig,
+  profileId: string,
+  controlId: ControlId,
+  sourceLayer: Layer,
+  targetLayer: Layer,
+): AppConfig {
+  const sourceBinding = findBinding(config, profileId, sourceLayer, controlId);
+  if (!sourceBinding) return config;
+  return duplicateBinding(config, sourceBinding.id, controlId, targetLayer);
 }
 
 export function makeBindingId(
@@ -604,6 +815,16 @@ export function createDefaultSubmenuItem(
   };
 }
 
+export function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): void {
+  for (const item of items) {
+    if (item.kind === "action") {
+      refs.add(item.actionRef);
+    } else if (item.kind === "submenu" && item.items) {
+      collectMenuActionRefs(item.items, refs);
+    }
+  }
+}
+
 function normalizeControlToken(controlId: ControlId): string {
   return controlId.replace(/_/g, "-");
 }
@@ -625,17 +846,212 @@ function uniqueTags(tags: string[]): string[] {
   });
 }
 
-function nextUniqueId(existingIds: string[], baseId: string): string {
-  if (!existingIds.includes(baseId)) {
+function nextUniqueId(existingIds: string[] | Set<string>, baseId: string): string {
+  const idSet = existingIds instanceof Set ? existingIds : new Set(existingIds);
+  if (!idSet.has(baseId)) {
     return baseId;
   }
 
   let index = 2;
-  while (existingIds.includes(`${baseId}-${index}`)) {
+  const limit = idSet.size + 1000;
+  while (idSet.has(`${baseId}-${index}`) && index < limit) {
     index += 1;
   }
 
   return `${baseId}-${index}`;
+}
+
+export interface ProfileExportData {
+  version: number;
+  exportedAt: string;
+  profile: Profile;
+  bindings: Binding[];
+  actions: Action[];
+  appMappings: AppMapping[];
+}
+
+/** Extract a single profile with its bindings, actions, and app mappings into an export envelope. */
+export function extractProfileExport(
+  config: AppConfig,
+  profileId: string,
+): ProfileExportData {
+  const profile = config.profiles.find((p) => p.id === profileId);
+  if (!profile) {
+    throw new Error(`Profile not found: ${profileId}`);
+  }
+
+  const bindings = config.bindings.filter((b) => b.profileId === profileId);
+  const actionRefs = new Set(bindings.map((b) => b.actionRef));
+  const actions = config.actions.filter((a) => actionRefs.has(a.id));
+  const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
+
+  return {
+    version: 2,
+    exportedAt: new Date().toISOString(),
+    profile,
+    bindings,
+    actions,
+    appMappings,
+  };
+}
+
+/** Merge an imported profile into an existing config, generating new IDs on collision. */
+export function mergeImportedProfile(
+  config: AppConfig,
+  data: ProfileExportData,
+): AppConfig {
+  // Collect all existing IDs into a single Set for collision detection
+  const existingIds = new Set<string>([
+    ...config.profiles.map((p) => p.id),
+    ...config.bindings.map((b) => b.id),
+    ...config.actions.map((a) => a.id),
+    ...config.appMappings.map((m) => m.id),
+  ]);
+
+  function resolveId(id: string): string {
+    if (!existingIds.has(id)) return id;
+    const newId = crypto.randomUUID();
+    return newId;
+  }
+
+  // Build ID maps (old -> new) for all entity types
+  const profileIdMap = new Map<string, string>();
+  const actionIdMap = new Map<string, string>();
+  const bindingIdMap = new Map<string, string>();
+  const appMappingIdMap = new Map<string, string>();
+
+  // Profile
+  const newProfileId = resolveId(data.profile.id);
+  profileIdMap.set(data.profile.id, newProfileId);
+
+  // Actions
+  for (const action of data.actions) {
+    const newId = resolveId(action.id);
+    actionIdMap.set(action.id, newId);
+  }
+
+  // Bindings
+  for (const binding of data.bindings) {
+    const newId = resolveId(binding.id);
+    bindingIdMap.set(binding.id, newId);
+  }
+
+  // AppMappings
+  for (const appMapping of data.appMappings) {
+    const newId = resolveId(appMapping.id);
+    appMappingIdMap.set(appMapping.id, newId);
+  }
+
+  // Build remapped entities
+  const newProfile: Profile = {
+    ...data.profile,
+    id: profileIdMap.get(data.profile.id) ?? data.profile.id,
+  };
+
+  const newActions: Action[] = data.actions.map((a) => ({
+    ...structuredClone(a),
+    id: actionIdMap.get(a.id) ?? a.id,
+  }));
+
+  const newBindings: Binding[] = data.bindings.map((b) => ({
+    ...b,
+    id: bindingIdMap.get(b.id) ?? b.id,
+    profileId: profileIdMap.get(b.profileId) ?? b.profileId,
+    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+  }));
+
+  const newAppMappings: AppMapping[] = data.appMappings.map((m) => ({
+    ...m,
+    id: appMappingIdMap.get(m.id) ?? m.id,
+    profileId: profileIdMap.get(m.profileId) ?? m.profileId,
+  }));
+
+  return {
+    ...config,
+    profiles: [...config.profiles, newProfile],
+    actions: [...config.actions, ...newActions],
+    bindings: [...config.bindings, ...newBindings],
+    appMappings: [...config.appMappings, ...newAppMappings],
+  };
+}
+
+/** Extract a single profile and all its related data for export. */
+export function extractProfileForExport(
+  config: AppConfig,
+  profileId: string,
+): {
+  profile: Profile;
+  appMappings: AppMapping[];
+  bindings: Binding[];
+  actions: Action[];
+  encoderMappings: EncoderMapping[];
+} | null {
+  const profile = config.profiles.find((p) => p.id === profileId);
+  if (!profile) return null;
+
+  const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
+  const bindings = config.bindings.filter((b) => b.profileId === profileId);
+  const actionRefs = new Set(bindings.map((b) => b.actionRef));
+  const actions = config.actions.filter((a) => actionRefs.has(a.id));
+  const encoderMappings = config.encoderMappings.filter(
+    (e) => bindings.some((b) => b.controlId === e.controlId && b.layer === e.layer),
+  );
+
+  return { profile, appMappings, bindings, actions, encoderMappings };
+}
+
+/** Import a profile from exported data, assigning new IDs to avoid conflicts. */
+export function importProfile(
+  config: AppConfig,
+  data: {
+    profile: Profile;
+    appMappings: AppMapping[];
+    bindings: Binding[];
+    actions: Action[];
+    encoderMappings: EncoderMapping[];
+  },
+): AppConfig {
+  const existingIds = config.profiles.map((p) => p.id);
+  const newId = nextUniqueId(existingIds, makeProfileId(data.profile.name));
+  const newName = existingIds.includes(data.profile.id)
+    ? `${data.profile.name} (импорт)`
+    : data.profile.name;
+
+  const actionIdMap = new Map<string, string>();
+  const newActions: Action[] = data.actions.map((a) => {
+    const id = crypto.randomUUID();
+    actionIdMap.set(a.id, id);
+    return { ...structuredClone(a), id };
+  });
+
+  const newBindings: Binding[] = data.bindings.map((b) => ({
+    ...b,
+    id: crypto.randomUUID(),
+    profileId: newId,
+    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+  }));
+
+  const newAppMappings: AppMapping[] = data.appMappings.map((m) => ({
+    ...m,
+    id: crypto.randomUUID(),
+    profileId: newId,
+  }));
+
+  return {
+    ...config,
+    profiles: [...config.profiles, { ...data.profile, id: newId, name: newName }],
+    appMappings: [...config.appMappings, ...newAppMappings],
+    bindings: [...config.bindings, ...newBindings],
+    actions: [...config.actions, ...newActions],
+    encoderMappings: [
+      ...config.encoderMappings,
+      ...data.encoderMappings.filter(
+        (e) => !config.encoderMappings.some(
+          (existing) => existing.controlId === e.controlId && existing.layer === e.layer,
+        ),
+      ),
+    ],
+  };
 }
 
 function thumbGridIndex(controlId: ControlId): number | null {
@@ -648,22 +1064,3 @@ function thumbGridIndex(controlId: ControlId): number | null {
   return index >= 0 && index < 12 ? index : null;
 }
 
-function plannedValidationIndex(controlId: ControlId): number | null {
-  const orderedControls: ControlId[] = [
-    "top_aux_01",
-    "top_aux_02",
-    "mouse_4",
-    "mouse_5",
-    "wheel_up",
-    "wheel_down",
-    "wheel_click",
-    "wheel_left",
-    "wheel_right",
-    "top_special_01",
-    "top_special_02",
-    "top_special_03",
-  ];
-
-  const index = orderedControls.indexOf(controlId);
-  return index === -1 ? null : index;
-}

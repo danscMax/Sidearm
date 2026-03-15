@@ -6,6 +6,7 @@ import type {
   CommandError,
   LoadConfigResponse,
   SaveConfigResponse,
+  SequenceStep,
 } from "./config";
 import type {
   ActionExecutionEvent,
@@ -43,8 +44,20 @@ export async function reloadRuntime(): Promise<RuntimeStateSummary> {
   return invoke<RuntimeStateSummary>("reload_runtime");
 }
 
+export async function rehookCapture(): Promise<void> {
+  return invoke<void>("rehook_capture");
+}
+
 export async function getDebugLog(): Promise<DebugLogEntry[]> {
   return invoke<DebugLogEntry[]>("get_debug_log");
+}
+
+export async function getLogDirectory(): Promise<string> {
+  return invoke<string>("get_log_directory");
+}
+
+export async function openLogDirectory(): Promise<void> {
+  return invoke<void>("open_log_directory");
 }
 
 export async function captureActiveWindow(
@@ -65,6 +78,11 @@ export async function previewResolution(
   });
 }
 
+/**
+ * Dry-run simulation of action execution. Resolves the input and summarizes
+ * what the action WOULD do, without producing any side effects (no keystrokes,
+ * no process launches). Uses `ExecutionMode::DryRun` on the Rust side.
+ */
 export async function executePreviewAction(
   encodedKey: string,
   exe?: string,
@@ -77,6 +95,12 @@ export async function executePreviewAction(
   });
 }
 
+/**
+ * Live execution of the resolved action. Actually performs side effects such as
+ * sending keystrokes, launching processes, or typing text snippets. Requires
+ * the config to be saved (no dirty state) and the action to be live-runnable.
+ * Uses `ExecutionMode::Live` on the Rust side.
+ */
 export async function runPreviewAction(
   encodedKey: string,
   exe?: string,
@@ -89,11 +113,23 @@ export async function runPreviewAction(
   });
 }
 
+export async function getExeIcon(exeName: string, processPath?: string): Promise<string | null> {
+  return invoke<string | null>("get_exe_icon", { exeName, processPath: processPath ?? null });
+}
+
+export async function writeTextFile(path: string, contents: string): Promise<void> {
+  return invoke<void>("write_text_file", { path, contents });
+}
+
+export async function readTextFile(path: string): Promise<string> {
+  return invoke<string>("read_text_file", { path });
+}
+
 export async function exportVerificationSession(
-  path: string,
+  filename: string,
   contents: string,
 ): Promise<string> {
-  return invoke<string>("export_verification_session", { path, contents });
+  return invoke<string>("export_verification_session", { filename, contents });
 }
 
 export async function listenRuntimeEvent(
@@ -150,6 +186,28 @@ export async function listenRuntimeErrorEvent(
   });
 }
 
+/* ─────────────────────────────────────────────────────────
+   Macro Recording IPC
+   ───────────────────────────────────────────────────────── */
+
+export async function startMacroRecording(): Promise<void> {
+  return invoke<void>("start_macro_recording");
+}
+
+export async function recordKeystroke(key: string): Promise<void> {
+  return invoke<void>("record_keystroke", { key });
+}
+
+export interface MacroRecording {
+  steps: SequenceStep[];
+  startedAt: number;
+  stoppedAt: number | null;
+}
+
+export async function stopMacroRecording(): Promise<MacroRecording> {
+  return invoke<MacroRecording>("stop_macro_recording");
+}
+
 export function normalizeCommandError(error: unknown): CommandError {
   if (
     typeof error === "object" &&
@@ -157,15 +215,15 @@ export function normalizeCommandError(error: unknown): CommandError {
     "code" in error &&
     "message" in error
   ) {
-    const candidate = error as Partial<CommandError>;
+    const obj = error as Record<string, unknown>;
     return {
-      code: typeof candidate.code === "string" ? candidate.code : "command_error",
+      code: typeof obj.code === "string" ? obj.code : "command_error",
       message:
-        typeof candidate.message === "string"
-          ? candidate.message
+        typeof obj.message === "string"
+          ? obj.message
           : "Command failed.",
-      details: Array.isArray(candidate.details)
-        ? candidate.details.filter(
+      details: Array.isArray(obj.details)
+        ? obj.details.filter(
             (detail): detail is string => typeof detail === "string",
           )
         : undefined,

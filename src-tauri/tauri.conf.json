@@ -14,11 +14,15 @@
       {
         "title": "Naga Workflow Studio",
         "width": 1280,
-        "height": 840
+        "height": 840,
+        "minWidth": 900,
+        "minHeight": 600,
+        "dragDropEnabled": false,
+        "decorations": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: asset: https://asset.localhost; connect-src ipc: http://ipc.localhost"
     }
   },
   "bundle": {

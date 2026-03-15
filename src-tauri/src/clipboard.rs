@@ -20,7 +20,15 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
     let snapshot = ClipboardSnapshot::capture()?;
     let write_result = set_clipboard_text(text)?;
 
-    if let Err(error) = input_synthesis::send_hotkey_string("Ctrl+V") {
+    // Full clearing: clipboard paste is always an internal operation, not a
+    // user-triggered shortcut that should inherit physical keyboard modifiers.
+    let all_mods = crate::hotkeys::HotkeyModifiers {
+        ctrl: true,
+        shift: true,
+        alt: true,
+        win: true,
+    };
+    if let Err(error) = input_synthesis::send_hotkey_string("Ctrl+V", &all_mods) {
         let restore_message = snapshot
             .restore_force()
             .err()
@@ -33,7 +41,10 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
 
     thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
 
-    let warnings = snapshot.restore_if_unchanged(write_result.sequence_number)?;
+    let warnings = match snapshot.restore_if_unchanged(write_result.sequence_number) {
+        Ok(w) => w,
+        Err(restore_error) => vec![restore_error],
+    };
     Ok(ClipboardPasteReport { warnings })
 }
 
@@ -48,8 +59,7 @@ impl ClipboardSnapshot {
         #[cfg(target_os = "windows")]
         unsafe {
             use windows_sys::Win32::System::{
-                DataExchange::CountClipboardFormats,
-                Ole::OleGetClipboard,
+                DataExchange::CountClipboardFormats, Ole::OleGetClipboard,
             };
 
             let format_count = CountClipboardFormats();
@@ -134,13 +144,24 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
         open_clipboard_with_retry()?;
         let close_guard = ClipboardOpenGuard;
 
+        // NOTE: The Windows clipboard API requires EmptyClipboard() to be called
+        // before SetClipboardData(). This means if GlobalAlloc fails below, the
+        // clipboard will have already been emptied and the prior contents are lost.
+        // This is an inherent limitation of the Win32 clipboard API -- there is no
+        // way to atomically replace clipboard contents. The caller (paste_text)
+        // mitigates this by capturing a snapshot via OleGetClipboard before we get
+        // here, but the snapshot restore is best-effort and may not recover all
+        // original clipboard formats.
         if EmptyClipboard() == 0 {
             return Err("EmptyClipboard failed while staging snippet text.".into());
         }
 
         let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
         if handle.is_null() {
-            return Err("GlobalAlloc failed while staging snippet text.".into());
+            return Err(
+                "GlobalAlloc failed after EmptyClipboard; prior clipboard contents are lost."
+                    .into(),
+            );
         }
 
         let locked = GlobalLock(handle);
@@ -149,11 +170,7 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
             return Err("GlobalLock failed while staging snippet text.".into());
         }
 
-        ptr::copy_nonoverlapping(
-            encoded.as_ptr() as *const u8,
-            locked as *mut u8,
-            byte_len,
-        );
+        ptr::copy_nonoverlapping(encoded.as_ptr() as *const u8, locked as *mut u8, byte_len);
         let _ = GlobalUnlock(handle);
 
         let clipboard_handle = SetClipboardData(u32::from(CF_UNICODETEXT), handle);
@@ -183,7 +200,7 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
 fn clear_clipboard() -> Result<(), String> {
     #[cfg(target_os = "windows")]
     unsafe {
-        use windows_sys::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard};
+        use windows_sys::Win32::System::DataExchange::EmptyClipboard;
 
         open_clipboard_with_retry()?;
         let close_guard = ClipboardOpenGuard;
@@ -191,7 +208,6 @@ fn clear_clipboard() -> Result<(), String> {
             return Err("EmptyClipboard failed while restoring an empty clipboard.".into());
         }
         drop(close_guard);
-        let _ = CloseClipboard;
         Ok(())
     }
 
@@ -250,8 +266,7 @@ fn open_clipboard_with_retry() -> Result<(), String> {
         let owner = GetOpenClipboardWindow();
         Err(format!(
             "OpenClipboard failed after {} attempts. OpenClipboard owner: 0x{:X}.",
-            CLIPBOARD_OPEN_RETRIES,
-            owner as usize
+            CLIPBOARD_OPEN_RETRIES, owner as usize
         ))
     }
 
@@ -371,5 +386,122 @@ mod tests {
     fn utf16_helper_appends_nul() {
         let encoded = utf16_null_terminated("Hi");
         assert_eq!(encoded, vec![72, 105, 0]);
+    }
+
+    /// Read the current clipboard text via Win32 API. Test-only helper.
+    #[cfg(target_os = "windows")]
+    fn read_clipboard_text() -> Result<String, String> {
+        unsafe {
+            use windows_sys::Win32::System::{
+                DataExchange::{GetClipboardData, IsClipboardFormatAvailable},
+                Memory::GlobalLock,
+                Ole::CF_UNICODETEXT,
+            };
+
+            let format = u32::from(CF_UNICODETEXT);
+            if IsClipboardFormatAvailable(format) == 0 {
+                return Err("CF_UNICODETEXT not available on clipboard".into());
+            }
+
+            open_clipboard_with_retry()?;
+            let _guard = ClipboardOpenGuard;
+
+            let handle = GetClipboardData(format);
+            if handle.is_null() {
+                return Err("GetClipboardData returned null".into());
+            }
+
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                return Err("GlobalLock on clipboard data returned null".into());
+            }
+
+            let mut len = 0usize;
+            let wide_ptr = locked as *const u16;
+            while *wide_ptr.add(len) != 0 {
+                len += 1;
+            }
+            let slice = std::slice::from_raw_parts(wide_ptr, len);
+            let text = String::from_utf16(slice)
+                .map_err(|e| format!("Invalid UTF-16 in clipboard: {e}"))?;
+
+            use windows_sys::Win32::System::Memory::GlobalUnlock;
+            let _ = GlobalUnlock(handle);
+
+            Ok(text)
+        }
+    }
+
+    /// Serialize clipboard tests: the Windows clipboard is a global singleton,
+    /// so concurrent tests would race. This lock ensures one test at a time.
+    #[cfg(target_os = "windows")]
+    static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn clipboard_set_and_read_roundtrip() {
+        let _lock = CLIPBOARD_LOCK.lock().unwrap();
+        let _ole = OleScope::initialize().expect("OleInitialize");
+
+        let text = "Naga Studio roundtrip test";
+        set_clipboard_text(text).expect("set_clipboard_text");
+
+        let read_back = read_clipboard_text().expect("read_clipboard_text");
+        assert_eq!(read_back, text);
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn clipboard_handles_empty_text() {
+        let _lock = CLIPBOARD_LOCK.lock().unwrap();
+        let _ole = OleScope::initialize().expect("OleInitialize");
+
+        // Setting empty string should succeed without panic.
+        set_clipboard_text("").expect("set_clipboard_text with empty string");
+
+        let read_back = read_clipboard_text().expect("read_clipboard_text");
+        assert_eq!(read_back, "");
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn clipboard_handles_unicode() {
+        let _lock = CLIPBOARD_LOCK.lock().unwrap();
+        let _ole = OleScope::initialize().expect("OleInitialize");
+
+        let text = "Привет мир";
+        set_clipboard_text(text).expect("set_clipboard_text with Cyrillic");
+
+        let read_back = read_clipboard_text().expect("read_clipboard_text");
+        assert_eq!(read_back, text);
+    }
+
+    /// This test calls `paste_text`, which simulates a real Ctrl+V keystroke.
+    /// It is marked `#[ignore]` because the injected input would type into
+    /// whatever window is focused, causing unintended side effects.
+    /// Run manually with: `cargo test clipboard_restore -- --ignored`
+    #[test]
+    #[ignore]
+    #[cfg(target_os = "windows")]
+    fn clipboard_restore_preserves_original() {
+        let _lock = CLIPBOARD_LOCK.lock().unwrap();
+
+        let original = "original clipboard content";
+        {
+            let _ole = OleScope::initialize().expect("OleInitialize");
+            set_clipboard_text(original).expect("set original text");
+        }
+
+        // paste_text sets "injected text", sends Ctrl+V, then restores.
+        let report = paste_text("injected text").expect("paste_text");
+
+        // After paste_text returns, the clipboard should be restored to the
+        // original text (unless another application grabbed it in the meantime,
+        // which paste_text reports as a warning).
+        if report.warnings.is_empty() {
+            let _ole = OleScope::initialize().expect("OleInitialize for read-back");
+            let restored = read_clipboard_text().expect("read_clipboard_text after restore");
+            assert_eq!(restored, original);
+        }
     }
 }

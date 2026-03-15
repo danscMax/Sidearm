@@ -4,17 +4,21 @@ use std::{
     process::Command,
     thread,
     time::Duration,
-    time::{SystemTime, UNIX_EPOCH},
 };
+
+/// Maximum delay (in milliseconds) allowed for a single sequence step sleep.
+/// Prevents unbounded thread blocking from malformed or malicious configs.
+const MAX_STEP_DELAY_MS: u64 = 30_000;
 
 use crate::{
     clipboard,
     config::{
-        Action, ActionPayload, ActionType, AppConfig, MenuItem, PasteMode, SequenceStep,
-        TextSnippetPayload,
+        Action, ActionCondition, ActionPayload, ActionType, AppConfig, MenuItem,
+        MouseActionPayload, PasteMode, SequenceStep, TextSnippetPayload,
     },
     input_synthesis,
-    resolver::{ResolvedInputPreview, ResolutionStatus},
+    resolver::{ResolutionStatus, ResolvedInputPreview},
+    runtime::timestamp_millis,
 };
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
@@ -86,7 +90,7 @@ pub fn execute_preview_action(
     if preview.status != ResolutionStatus::Resolved {
         return Err(execution_error(
             "execution_blocked",
-            "execution",
+            "выполнение",
             &preview.reason,
             Some(preview.encoded_key.clone()),
             preview.action_id.clone(),
@@ -99,8 +103,8 @@ pub fn execute_preview_action(
         .ok_or_else(|| {
             execution_error(
                 "missing_action",
-                "execution",
-                "Resolved preview is missing action id.",
+                "выполнение",
+                "В разрешённом превью отсутствует ID действия.",
                 Some(preview.encoded_key.clone()),
                 None,
             )
@@ -113,8 +117,8 @@ pub fn execute_preview_action(
         .ok_or_else(|| {
             execution_error(
                 "missing_action",
-                "execution",
-                &format!("Resolved action `{action_id}` no longer exists in config."),
+                "выполнение",
+                &format!("Действие `{action_id}` больше не существует в конфигурации."),
                 Some(preview.encoded_key.clone()),
                 Some(action_id.clone()),
             )
@@ -123,7 +127,7 @@ pub fn execute_preview_action(
     let (outcome, summary, warnings) = summarize_action(config, action).map_err(|message| {
         execution_error(
             "execution_failed",
-            "execution",
+            "выполнение",
             &message,
             Some(preview.encoded_key.clone()),
             Some(action_id.clone()),
@@ -133,7 +137,7 @@ pub fn execute_preview_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -157,7 +161,7 @@ pub fn run_preview_action(
     if preview.status != ResolutionStatus::Resolved {
         return Err(execution_error(
             "execution_blocked",
-            "execution",
+            "выполнение",
             &preview.reason,
             Some(preview.encoded_key.clone()),
             preview.action_id.clone(),
@@ -170,8 +174,8 @@ pub fn run_preview_action(
         .ok_or_else(|| {
             execution_error(
                 "missing_action",
-                "execution",
-                "Resolved preview is missing action id.",
+                "выполнение",
+                "В разрешённом превью отсутствует ID действия.",
                 Some(preview.encoded_key.clone()),
                 None,
             )
@@ -184,8 +188,8 @@ pub fn run_preview_action(
         .ok_or_else(|| {
             execution_error(
                 "missing_action",
-                "execution",
-                &format!("Resolved action `{action_id}` no longer exists in config."),
+                "выполнение",
+                &format!("Действие `{action_id}` больше не существует в конфигурации."),
                 Some(preview.encoded_key.clone()),
                 Some(action_id.clone()),
             )
@@ -210,10 +214,13 @@ pub fn run_preview_action(
         (ActionType::Sequence, ActionPayload::Sequence(payload)) => {
             run_live_sequence_action(action, preview, payload, Some(action_id))
         }
+        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
+            run_live_mouse_action(action, preview, payload, Some(action_id))
+        }
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok(ActionExecutionEvent {
             encoded_key: preview.encoded_key.clone(),
             action_id: action.id.clone(),
-            action_type: action_type_name(action.action_type).into(),
+            action_type: action.action_type.as_str().into(),
             action_pretty: action.pretty.clone(),
             resolved_profile_id: preview.resolved_profile_id.clone(),
             resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -224,14 +231,14 @@ pub fn run_preview_action(
             mode: ExecutionMode::Live,
             outcome: ExecutionOutcome::Noop,
             process_id: None,
-            summary: "Disabled action results in a live no-op.".into(),
+            summary: "Отключённое действие — ничего не выполнено.".into(),
             warnings: Vec::new(),
             executed_at: timestamp_millis(),
         }),
         _ => Err(execution_error(
             "unsupported_live_execution",
-            "execution",
-            "Live execution is currently implemented for `shortcut`, `textSnippet` with `sendText`, `launch`, `disabled`, and `sequence` actions composed of supported live steps.",
+            "выполнение",
+            "Выполнение вживую поддерживается для шорткатов, действий мыши, текстовых вставок, запуска программ, отключённых действий и последовательностей из поддерживаемых шагов.",
             Some(preview.encoded_key.clone()),
             Some(action_id),
         )),
@@ -245,7 +252,7 @@ fn summarize_action(
     match (&action.action_type, &action.payload) {
         (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => Ok((
             ExecutionOutcome::Simulated,
-            format!("Would send shortcut `{}`.", format_shortcut(payload)),
+            format!("Отправит шорткат `{}`.", format_shortcut(payload)),
             Vec::new(),
         )),
         (ActionType::TextSnippet, ActionPayload::TextSnippet(payload)) => {
@@ -254,7 +261,7 @@ fn summarize_action(
         (ActionType::Sequence, ActionPayload::Sequence(payload)) => Ok((
             ExecutionOutcome::Simulated,
             format!(
-                "Would execute sequence with {} step(s): {}.",
+                "Выполнит последовательность из {} шагов: {}.",
                 payload.steps.len(),
                 payload
                     .steps
@@ -268,18 +275,18 @@ fn summarize_action(
         (ActionType::Launch, ActionPayload::Launch(payload)) => {
             let mut warnings = Vec::new();
             if Path::new(&payload.target).is_absolute() && !Path::new(&payload.target).exists() {
-                warnings.push("Launch target path does not currently exist.".into());
+                warnings.push("Путь к цели запуска не существует.".into());
             }
 
             Ok((
                 ExecutionOutcome::Simulated,
                 format!(
-                    "Would launch `{}`{}.",
+                    "Запустит `{}`{}.",
                     payload.target,
                     if payload.args.is_empty() {
                         String::new()
                     } else {
-                        format!(" with {} arg(s)", payload.args.len())
+                        format!(" с {} арг.", payload.args.len())
                     }
                 ),
                 warnings,
@@ -288,19 +295,34 @@ fn summarize_action(
         (ActionType::Menu, ActionPayload::Menu(payload)) => Ok((
             ExecutionOutcome::Simulated,
             format!(
-                "Would open menu with {} root item(s) and {} enabled item(s).",
+                "Откроет меню с {} пунктами ({} активных).",
                 payload.items.len(),
                 count_enabled_menu_items(&payload.items)
             ),
             Vec::new(),
         )),
+        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => Ok((
+            ExecutionOutcome::Simulated,
+            format_mouse_summary(payload),
+            Vec::new(),
+        )),
+        (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => Ok((
+            ExecutionOutcome::Simulated,
+            format!("Отправит медиа-клавишу `{}`.", payload.key),
+            Vec::new(),
+        )),
+        (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => Ok((
+            ExecutionOutcome::Simulated,
+            format!("Переключит на профиль `{}`.", payload.target_profile_id),
+            Vec::new(),
+        )),
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok((
             ExecutionOutcome::Noop,
-            "Disabled action results in a no-op.".into(),
+            "Отключённое действие — ничего не выполняется.".into(),
             Vec::new(),
         )),
         _ => Err(format!(
-            "Action `{}` has mismatched type/payload combination.",
+            "Действие `{}` имеет несовместимый тип/полезную нагрузку.",
             action.id
         )),
     }
@@ -323,7 +345,7 @@ fn run_live_launch_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -334,12 +356,21 @@ fn run_live_launch_action(
         mode: ExecutionMode::Live,
         outcome: ExecutionOutcome::Spawned,
         process_id: Some(process_id),
-        summary: format!("Launched `{}`.", payload.target),
+        summary: format!("Запущено `{}`.", payload.target),
         warnings: Vec::new(),
         executed_at: timestamp_millis(),
     })
 }
 
+/// Executes a sequence of steps (send, text, sleep, launch) synchronously on the
+/// worker thread.
+///
+/// **Limitation:** Launch steps within a sequence spawn detached processes (see
+/// [`spawn_launch_target`] doc comment). If a later step in the sequence fails, any
+/// processes spawned by earlier launch steps will remain running -- there is no
+/// automatic rollback. Additionally, the studio only surfaces the PID of the *last*
+/// launched process in the returned event; earlier PIDs are recorded in warnings but
+/// not tracked for lifecycle management.
 fn run_live_sequence_action(
     action: &Action,
     preview: &ResolvedInputPreview,
@@ -349,19 +380,22 @@ fn run_live_sequence_action(
     validate_live_sequence(payload).map_err(|message| {
         execution_error(
             "unsupported_live_execution",
-            "execution",
+            "выполнение",
             &message,
             Some(preview.encoded_key.clone()),
             action_id.clone(),
         )
     })?;
 
+    let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
     let mut launched_processes = Vec::new();
     let mut injected_input_steps = 0usize;
     for step in &payload.steps {
         match step {
             SequenceStep::Sleep { delay_ms } => {
-                thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                thread::sleep(Duration::from_millis(
+                    u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                ));
             }
             SequenceStep::Launch {
                 value,
@@ -380,14 +414,16 @@ fn run_live_sequence_action(
                 )?;
                 launched_processes.push(process_id);
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                    thread::sleep(Duration::from_millis(
+                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                    ));
                 }
             }
             SequenceStep::Text { value, delay_ms } => {
                 input_synthesis::send_text(value).map_err(|message| {
                     execution_error(
                         "execution_failed",
-                        "execution",
+                        "выполнение",
                         &message,
                         Some(preview.encoded_key.clone()),
                         action_id.clone(),
@@ -395,14 +431,16 @@ fn run_live_sequence_action(
                 })?;
                 injected_input_steps += 1;
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                    thread::sleep(Duration::from_millis(
+                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                    ));
                 }
             }
             SequenceStep::Send { value, delay_ms } => {
-                input_synthesis::send_hotkey_string(value).map_err(|message| {
+                input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(|message| {
                     execution_error(
                         "execution_failed",
-                        "execution",
+                        "выполнение",
                         &message,
                         Some(preview.encoded_key.clone()),
                         action_id.clone(),
@@ -410,7 +448,9 @@ fn run_live_sequence_action(
                 })?;
                 injected_input_steps += 1;
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(u64::from(*delay_ms)));
+                    thread::sleep(Duration::from_millis(
+                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                    ));
                 }
             }
         }
@@ -427,7 +467,7 @@ fn run_live_sequence_action(
     let mut warnings = Vec::new();
     if launched_processes.len() > 1 {
         warnings.push(format!(
-            "Sequence launched {} processes; only the last process id is surfaced in this event.",
+            "Последовательность запустила {} процессов; отображается только PID последнего.",
             launched_processes.len()
         ));
     }
@@ -435,7 +475,7 @@ fn run_live_sequence_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -447,7 +487,7 @@ fn run_live_sequence_action(
         outcome,
         process_id: launched_processes.last().copied(),
         summary: format!(
-            "Executed live sequence with {} injected input step(s) and {} launch step(s).",
+            "Выполнена последовательность: {} шагов ввода, {} запусков.",
             injected_input_steps,
             launched_processes.len()
         ),
@@ -456,9 +496,7 @@ fn run_live_sequence_action(
     })
 }
 
-fn validate_live_sequence(
-    payload: &crate::config::SequenceActionPayload,
-) -> Result<(), String> {
+fn validate_live_sequence(payload: &crate::config::SequenceActionPayload) -> Result<(), String> {
     for step in &payload.steps {
         match step {
             SequenceStep::Sleep { .. } => {}
@@ -477,14 +515,16 @@ fn validate_live_sequence(
             SequenceStep::Text { value, .. } => {
                 if value.contains('\0') {
                     return Err(
-                        "Live sequence execution does not support text steps containing NUL characters."
+                        "Текстовые шаги с NUL-символами не поддерживаются."
                             .into(),
                     );
                 }
             }
             SequenceStep::Send { value, .. } => {
                 crate::hotkeys::parse_hotkey(value).map_err(|message| {
-                    format!("Live sequence send step `{value}` is not a supported hotkey: {message}")
+                    format!(
+                        "Шаг отправки `{value}` не является поддерживаемым шорткатом: {message}"
+                    )
                 })?;
             }
         }
@@ -499,10 +539,11 @@ fn run_live_shortcut_action(
     payload: &crate::config::ShortcutActionPayload,
     action_id: Option<String>,
 ) -> Result<ActionExecutionEvent, ExecutorError> {
-    let dispatch = input_synthesis::send_shortcut(payload).map_err(|message| {
+    let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
+    let dispatch = input_synthesis::send_shortcut(payload, &encoding_mods).map_err(|message| {
         execution_error(
             "execution_failed",
-            "execution",
+            "выполнение",
             &message,
             Some(preview.encoded_key.clone()),
             action_id.clone(),
@@ -512,7 +553,7 @@ fn run_live_shortcut_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -523,10 +564,71 @@ fn run_live_shortcut_action(
         mode: ExecutionMode::Live,
         outcome: ExecutionOutcome::Injected,
         process_id: None,
-        summary: format!("Sent shortcut `{}`.", format_shortcut(payload)),
+        summary: format!("Отправлен шорткат `{}`.", format_shortcut(payload)),
         warnings: dispatch.warnings,
         executed_at: timestamp_millis(),
     })
+}
+
+fn run_live_mouse_action(
+    action: &Action,
+    preview: &ResolvedInputPreview,
+    payload: &MouseActionPayload,
+    action_id: Option<String>,
+) -> Result<ActionExecutionEvent, ExecutorError> {
+    let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
+    let dispatch =
+        input_synthesis::send_mouse_action(payload, &encoding_mods).map_err(|message| {
+            execution_error(
+                "execution_failed",
+                "выполнение",
+                &message,
+                Some(preview.encoded_key.clone()),
+                action_id.clone(),
+            )
+        })?;
+
+    Ok(ActionExecutionEvent {
+        encoded_key: preview.encoded_key.clone(),
+        action_id: action.id.clone(),
+        action_type: action.action_type.as_str().into(),
+        action_pretty: action.pretty.clone(),
+        resolved_profile_id: preview.resolved_profile_id.clone(),
+        resolved_profile_name: preview.resolved_profile_name.clone(),
+        matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+        control_id: preview.control_id.clone(),
+        layer: preview.layer.clone(),
+        binding_id: preview.binding_id.clone(),
+        mode: ExecutionMode::Live,
+        outcome: ExecutionOutcome::Injected,
+        process_id: None,
+        summary: format_mouse_summary(payload),
+        warnings: dispatch.warnings,
+        executed_at: timestamp_millis(),
+    })
+}
+
+fn format_mouse_summary(payload: &MouseActionPayload) -> String {
+    let modifiers: Vec<&str> = [
+        (payload.ctrl, "Ctrl"),
+        (payload.shift, "Shift"),
+        (payload.alt, "Alt"),
+        (payload.win, "Win"),
+    ]
+    .iter()
+    .filter(|(active, _)| *active)
+    .map(|(_, label)| *label)
+    .collect();
+
+    if modifiers.is_empty() {
+        format!("Выполнено действие мыши `{}`.", payload.action)
+    } else {
+        format!(
+            "Выполнено действие мыши `{}` + `{}`.",
+            modifiers.join(" + "),
+            payload.action
+        )
+    }
 }
 
 fn run_live_text_snippet_action(
@@ -539,7 +641,7 @@ fn run_live_text_snippet_action(
     let live_text = resolve_live_text_snippet(config, payload).map_err(|message| {
         execution_error(
             "execution_failed",
-            "execution",
+            "выполнение",
             &message,
             Some(preview.encoded_key.clone()),
             action_id.clone(),
@@ -552,7 +654,7 @@ fn run_live_text_snippet_action(
             input_synthesis::send_text(&live_text.text).map_err(|message| {
                 execution_error(
                     "execution_failed",
-                    "execution",
+                    "выполнение",
                     &message,
                     Some(preview.encoded_key.clone()),
                     Some(action.id.clone()),
@@ -563,7 +665,7 @@ fn run_live_text_snippet_action(
             let paste_report = clipboard::paste_text(&live_text.text).map_err(|message| {
                 execution_error(
                     "execution_failed",
-                    "execution",
+                    "выполнение",
                     &message,
                     Some(preview.encoded_key.clone()),
                     Some(action.id.clone()),
@@ -576,7 +678,7 @@ fn run_live_text_snippet_action(
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
-        action_type: action_type_name(action.action_type).into(),
+        action_type: action.action_type.as_str().into(),
         action_pretty: action.pretty.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
@@ -593,6 +695,20 @@ fn run_live_text_snippet_action(
     })
 }
 
+/// Spawns a launch target and returns its OS process ID.
+///
+/// **Design note:** The `Child` handle returned by `Command::spawn()` is intentionally
+/// dropped immediately after extracting the PID. Launched programs are meant to run
+/// independently of the studio process -- we do not wait on them, send signals, or
+/// manage their lifecycle. Dropping the `Child` detaches the process on Windows (the
+/// child continues running), which is the desired behaviour for "launch application"
+/// actions.
+///
+/// A consequence is that we have no way to terminate these processes later. For
+/// standalone launch actions this is fine, but for sequence steps it means the studio
+/// cannot roll back a partially-executed sequence by killing processes spawned in
+/// earlier steps. True child-process tracking would require storing `Child` handles
+/// in `RuntimeStore`, which is a larger refactor tracked separately.
 fn spawn_launch_target(
     payload: &crate::config::LaunchActionPayload,
     preview: &ResolvedInputPreview,
@@ -601,7 +717,7 @@ fn spawn_launch_target(
     let launch_request = validate_launch_request(payload).map_err(|message| {
         execution_error(
             "execution_failed",
-            "execution",
+            "выполнение",
             &message,
             Some(preview.encoded_key.clone()),
             action_id.clone(),
@@ -614,18 +730,15 @@ fn spawn_launch_target(
         command.current_dir(working_dir);
     }
 
-    command
-        .spawn()
-        .map(|child| child.id())
-        .map_err(|error| {
-            execution_error(
-                "execution_failed",
-                "execution",
-                &format!("Failed to launch `{}`: {error}", payload.target),
-                Some(preview.encoded_key.clone()),
-                action_id,
-            )
-        })
+    command.spawn().map(|child| child.id()).map_err(|error| {
+        execution_error(
+            "execution_failed",
+            "выполнение",
+            &format!("Не удалось запустить `{}`: {error}", payload.target),
+            Some(preview.encoded_key.clone()),
+            action_id,
+        )
+    })
 }
 
 fn validate_launch_request(
@@ -633,13 +746,19 @@ fn validate_launch_request(
 ) -> Result<LaunchRequest, String> {
     let target = PathBuf::from(&payload.target);
     if !target.is_absolute() {
-        return Err("Launch target must be an absolute path for live execution.".into());
+        return Err("Цель запуска должна быть абсолютным путём.".into());
     }
     if !target.exists() {
-        return Err(format!("Launch target `{}` does not exist.", payload.target));
+        return Err(format!(
+            "Цель запуска `{}` не существует.",
+            payload.target
+        ));
     }
     if target.is_dir() {
-        return Err(format!("Launch target `{}` points to a directory.", payload.target));
+        return Err(format!(
+            "Цель запуска `{}` — это директория, а не файл.",
+            payload.target
+        ));
     }
 
     let working_dir = payload
@@ -650,23 +769,26 @@ fn validate_launch_request(
 
     if let Some(working_dir) = &working_dir {
         if !working_dir.is_absolute() {
-            return Err("Working directory must be an absolute path for live execution.".into());
+            return Err("Рабочая директория должна быть абсолютным путём.".into());
         }
         if !working_dir.exists() {
             return Err(format!(
-                "Working directory `{}` does not exist.",
+                "Рабочая директория `{}` не существует.",
                 working_dir.display()
             ));
         }
         if !working_dir.is_dir() {
             return Err(format!(
-                "Working directory `{}` is not a directory.",
+                "Рабочая директория `{}` — не директория.",
                 working_dir.display()
             ));
         }
     }
 
-    Ok(LaunchRequest { target, working_dir })
+    Ok(LaunchRequest {
+        target,
+        working_dir,
+    })
 }
 
 fn summarize_text_snippet(
@@ -677,7 +799,7 @@ fn summarize_text_snippet(
     Ok((
         ExecutionOutcome::Simulated,
         format!(
-            "Would insert {} via {}.",
+            "Вставит {} через {}.",
             live_text.target_label,
             paste_mode_name(live_text.paste_mode)
         ),
@@ -705,9 +827,9 @@ fn resolve_live_text_snippet(
         } => Ok(ResolvedLiveTextSnippet {
             text: text.clone(),
             paste_mode: *paste_mode,
-            target_label: format!("inline snippet ({} chars)", text.chars().count()),
+            target_label: format!("инлайн-сниппет ({} симв.)", text.chars().count()),
             summary: format!(
-                "Sent inline snippet ({} chars) via {}.",
+                "Отправлен инлайн-сниппет ({} симв.) через {}.",
                 text.chars().count(),
                 paste_mode_name(*paste_mode)
             ),
@@ -718,18 +840,18 @@ fn resolve_live_text_snippet(
                 .snippet_library
                 .iter()
                 .find(|candidate| candidate.id == *snippet_id)
-                .ok_or_else(|| format!("textSnippet references missing snippet `{snippet_id}`."))?;
+                .ok_or_else(|| format!("Сниппет `{snippet_id}` не найден в библиотеке."))?;
 
             Ok(ResolvedLiveTextSnippet {
                 text: snippet.text.clone(),
                 paste_mode: snippet.paste_mode,
                 target_label: format!(
-                    "library snippet `{}` ({} chars)",
+                    "сниппет `{}` ({} симв.)",
                     snippet.name,
                     snippet.text.chars().count()
                 ),
                 summary: format!(
-                    "Sent library snippet `{}` ({} chars) via {}.",
+                    "Отправлен сниппет `{}` ({} симв.) через {}.",
                     snippet.name,
                     snippet.text.chars().count(),
                     paste_mode_name(snippet.paste_mode)
@@ -744,12 +866,13 @@ fn snippet_tag_warnings(tags: &[String]) -> Vec<String> {
     if tags.is_empty() {
         Vec::new()
     } else {
-        vec![format!("Snippet carries tags: {}.", tags.join(", "))]
+        vec![format!("Сниппет содержит теги: {}.", tags.join(", "))]
     }
 }
 
 fn count_enabled_menu_items(items: &[MenuItem]) -> usize {
-    items.iter()
+    items
+        .iter()
         .map(|item| match item {
             MenuItem::Action { enabled, .. } => usize::from(*enabled),
             MenuItem::Submenu { enabled, items, .. } => {
@@ -761,10 +884,10 @@ fn count_enabled_menu_items(items: &[MenuItem]) -> usize {
 
 fn sequence_step_summary(step: &SequenceStep) -> String {
     match step {
-        SequenceStep::Send { value, .. } => format!("send `{value}`"),
-        SequenceStep::Text { value, .. } => format!("text {} chars", value.chars().count()),
-        SequenceStep::Sleep { delay_ms } => format!("sleep {delay_ms}ms"),
-        SequenceStep::Launch { value, .. } => format!("launch `{value}`"),
+        SequenceStep::Send { value, .. } => format!("шорткат `{value}`"),
+        SequenceStep::Text { value, .. } => format!("текст {} симв.", value.chars().count()),
+        SequenceStep::Sleep { delay_ms } => format!("пауза {delay_ms}мс"),
+        SequenceStep::Launch { value, .. } => format!("запуск `{value}`"),
     }
 }
 
@@ -782,26 +905,38 @@ fn format_shortcut(payload: &crate::config::ShortcutActionPayload) -> String {
     if payload.win {
         parts.push("Win");
     }
-    parts.push(payload.key.as_str());
-    parts.join(" + ")
-}
-
-fn action_type_name(action_type: ActionType) -> &'static str {
-    match action_type {
-        ActionType::Shortcut => "shortcut",
-        ActionType::TextSnippet => "textSnippet",
-        ActionType::Sequence => "sequence",
-        ActionType::Launch => "launch",
-        ActionType::Menu => "menu",
-        ActionType::Disabled => "disabled",
+    if !payload.key.trim().is_empty() {
+        parts.push(payload.key.as_str());
     }
+    parts.join(" + ")
 }
 
 fn paste_mode_name(paste_mode: PasteMode) -> &'static str {
     match paste_mode {
-        PasteMode::ClipboardPaste => "clipboardPaste",
-        PasteMode::SendText => "sendText",
+        PasteMode::ClipboardPaste => "буфер обмена",
+        PasteMode::SendText => "ввод текста",
     }
+}
+
+/// Evaluate whether all conditions on an action are satisfied.
+/// `exe` and `title` are the active window context at time of execution.
+#[allow(dead_code)]
+pub fn evaluate_conditions(conditions: &[ActionCondition], exe: &str, title: &str) -> bool {
+    // Empty conditions = always pass
+    if conditions.is_empty() {
+        return true;
+    }
+
+    conditions.iter().all(|condition| match condition {
+        ActionCondition::WindowTitleContains { value } => {
+            title.to_lowercase().contains(&value.to_lowercase())
+        }
+        ActionCondition::WindowTitleNotContains { value } => {
+            !title.to_lowercase().contains(&value.to_lowercase())
+        }
+        ActionCondition::ExeEquals { value } => exe.eq_ignore_ascii_case(value),
+        ActionCondition::ExeNotEquals { value } => !exe.eq_ignore_ascii_case(value),
+    })
 }
 
 fn execution_error(
@@ -823,18 +958,11 @@ fn execution_error(
     }
 }
 
-fn timestamp_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
-        config::default_seed_config,
+        config::{default_seed_config, ActionCondition},
         resolver::{resolve_input_preview, ResolutionStatus},
     };
 
@@ -847,7 +975,7 @@ mod tests {
 
         assert_eq!(result.outcome, ExecutionOutcome::Simulated);
         assert_eq!(result.action_type, "shortcut");
-        assert!(result.summary.contains("Would send shortcut"));
+        assert!(result.summary.contains("Отправит шорткат"));
     }
 
     #[test]
@@ -900,6 +1028,7 @@ mod tests {
             action_pretty: Some("Ask Me".into()),
             mapping_verified: Some(true),
             mapping_source: Some("detected".into()),
+            trigger_mode: None,
         };
 
         let error = execute_preview_action(&config, &preview).expect_err("expected failure");
@@ -946,7 +1075,7 @@ mod tests {
 
         let error = validate_launch_request(&payload).expect_err("expected invalid");
 
-        assert!(error.contains("absolute path"));
+        assert!(error.contains("абсолютным путём"));
     }
 
     #[test]
@@ -982,7 +1111,7 @@ mod tests {
 
         let error = validate_live_sequence(&payload).expect_err("expected invalid sequence");
 
-        assert!(error.contains("supported hotkey"));
+        assert!(error.contains("поддерживаемым шорткатом"));
     }
 
     #[test]
@@ -1032,5 +1161,116 @@ mod tests {
         };
 
         validate_live_sequence(&payload).expect("expected live sequence support");
+    }
+
+    #[test]
+    fn evaluate_conditions_empty_always_passes() {
+        assert!(evaluate_conditions(&[], "code.exe", "main.rs - VSCode"));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_contains_match() {
+        let conditions = vec![ActionCondition::WindowTitleContains {
+            value: "VSCode".into(),
+        }];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_contains_case_insensitive() {
+        let conditions = vec![ActionCondition::WindowTitleContains {
+            value: "vscode".into(),
+        }];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_contains_no_match() {
+        let conditions = vec![ActionCondition::WindowTitleContains {
+            value: "Notepad".into(),
+        }];
+        assert!(!evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_title_not_contains() {
+        let conditions = vec![ActionCondition::WindowTitleNotContains {
+            value: "Notepad".into(),
+        }];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_exe_equals() {
+        let conditions = vec![ActionCondition::ExeEquals {
+            value: "code.exe".into(),
+        }];
+        assert!(evaluate_conditions(&conditions, "code.exe", "anything"));
+    }
+
+    #[test]
+    fn evaluate_conditions_exe_equals_case_insensitive() {
+        let conditions = vec![ActionCondition::ExeEquals {
+            value: "Code.EXE".into(),
+        }];
+        assert!(evaluate_conditions(&conditions, "code.exe", "anything"));
+    }
+
+    #[test]
+    fn evaluate_conditions_exe_not_equals() {
+        let conditions = vec![ActionCondition::ExeNotEquals {
+            value: "explorer.exe".into(),
+        }];
+        assert!(evaluate_conditions(&conditions, "code.exe", "anything"));
+    }
+
+    #[test]
+    fn evaluate_conditions_multiple_all_must_pass() {
+        let conditions = vec![
+            ActionCondition::WindowTitleContains {
+                value: "VSCode".into(),
+            },
+            ActionCondition::ExeEquals {
+                value: "code.exe".into(),
+            },
+        ];
+        assert!(evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
+    }
+
+    #[test]
+    fn evaluate_conditions_multiple_one_fails() {
+        let conditions = vec![
+            ActionCondition::WindowTitleContains {
+                value: "VSCode".into(),
+            },
+            ActionCondition::ExeEquals {
+                value: "notepad.exe".into(),
+            },
+        ];
+        assert!(!evaluate_conditions(
+            &conditions,
+            "code.exe",
+            "main.rs - VSCode"
+        ));
     }
 }

@@ -622,6 +622,7 @@ export function ProfilesWorkspace({
                 e.preventDefault();
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
               }}
+              title={`${mapping.exe}${mapping.titleIncludes?.length ? ` (заголовок: ${mapping.titleIncludes.join(", ")})` : ""}\nПриоритет: ${mapping.priority}${isDisabled ? "\nОтключено" : ""}\nКлик — редактировать, ПКМ — меню`}
             >
               <ExeIcon exe={mapping.exe} className="profiles__app-card-monogram" />
               <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
@@ -646,6 +647,7 @@ export function ProfilesWorkspace({
             type="button"
             className="profiles__add-card"
             onClick={() => { setNewRuleOpen(true); setNewRuleExe(""); }}
+            title="Привязать приложение к этому профилю. При фокусе на приложение профиль переключится автоматически."
           >
             + Добавить правило
           </button>
@@ -654,7 +656,8 @@ export function ProfilesWorkspace({
 
       {selectedAppMappings.length === 0 && activeProfile ? (
         <p className="profiles__empty-hint">
-          Правил пока нет. Нажмите «+ Добавить правило».
+          Правил пока нет. Нажмите «+ Добавить правило», чтобы привязать приложение к этому профилю.
+          При фокусе на привязанное приложение профиль переключится автоматически.
         </p>
       ) : null}
 
@@ -666,18 +669,21 @@ export function ProfilesWorkspace({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={(e) => { if (e.key === "Escape") setNewRuleOpen(false); }}
           >
+            <button
+              type="button"
+              className="rule-modal__close"
+              onClick={() => setNewRuleOpen(false)}
+              aria-label="Закрыть"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M1 1l12 12M13 1L1 13" />
+              </svg>
+            </button>
             <div className="rule-modal__header">
               <span className="rule-modal__title">Новое правило</span>
-              <button
-                type="button"
-                className="rule-modal__close"
-                onClick={() => setNewRuleOpen(false)}
-                aria-label="Закрыть"
-              >
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                  <path d="M1 1l12 12M13 1L1 13" />
-                </svg>
-              </button>
+              <p className="rule-modal__subtitle">
+                Укажите приложение — профиль переключится автоматически при фокусе на него.
+              </p>
             </div>
             <div
               className={`rule-modal__body new-rule__dropzone${newRuleExe ? "" : " new-rule__dropzone--empty"}`}
@@ -752,6 +758,7 @@ export function ProfilesWorkspace({
                   className="action-button action-button--accent"
                   onClick={() => { void handleCaptureForDialog(); }}
                   disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
+                  title="Нажмите и переключитесь на нужное окно. После задержки программа определит его и заполнит поля автоматически."
                 >
                   {captureCountdown !== null ? `Переключитесь на окно... ${captureCountdown}` : "Захватить активное окно"}
                 </button>

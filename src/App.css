@@ -3660,6 +3660,14 @@ img.profiles__app-card-monogram {
   font-style: italic;
 }
 
+.rule-modal__subtitle {
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  font-weight: 400;
+  margin: 4px 0 0;
+  line-height: 1.4;
+}
+
 .rule-modal__profile-name {
   display: block;
   color: var(--c-text-muted);

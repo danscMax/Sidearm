@@ -1193,8 +1193,11 @@ select::checkmark {
 }
 
 .mouse-top-layout .mouse-visual {
-  width: 100%;
-  max-height: min(480px, 58vh);
+  /* Let aspect-ratio + max-height determine the size.
+     height controls the cap, aspect-ratio computes width from it.
+     max-width: 100% prevents overflow on narrow screens. */
+  height: min(480px, 58vh);
+  max-width: 100%;
   justify-self: center;
 }
 

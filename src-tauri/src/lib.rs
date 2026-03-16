@@ -1311,7 +1311,9 @@ pub fn run() {
             let shortcut: Shortcut = "ctrl+alt+n".parse()
                 .expect("Failed to parse global shortcut Ctrl+Alt+N");
 
-            app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
+            // Non-fatal: if the shortcut is already registered (e.g. previous
+            // instance didn't clean up yet), log a warning and continue.
+            if let Err(e) = app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
                 if event.state == ShortcutState::Pressed {
                     if let Some(window) = app.get_webview_window("main") {
                         if window.is_visible().unwrap_or(false) {
@@ -1322,7 +1324,9 @@ pub fn run() {
                         }
                     }
                 }
-            })?;
+            }) {
+                log::warn!("[system] Could not register Ctrl+Alt+N shortcut: {e}");
+            }
 
             Ok(())
         })

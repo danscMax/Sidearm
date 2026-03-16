@@ -524,28 +524,25 @@ select::checkmark {
 
 /* Language selector in toolbar */
 .toolbar__lang {
-  appearance: none;
-  -webkit-appearance: none;
-  padding: 4px 6px;
-  border: none;
+  padding: 4px 8px;
+  border: 1px solid transparent;
   border-radius: var(--radius-xs);
-  background: transparent;
+  background: rgba(255, 255, 255, 0.06);
   color: var(--c-text-muted);
   font-size: 0.7rem;
   font-weight: 600;
   cursor: pointer;
   letter-spacing: 0.04em;
-  text-align: center;
-  min-width: 32px;
 }
 
 .toolbar__lang:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.1);
   color: var(--c-text-bright);
 }
 
 .toolbar__lang:focus {
   outline: none;
+  border-color: var(--c-accent);
 }
 
 .toolbar__actions {

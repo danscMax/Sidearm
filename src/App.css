@@ -524,7 +524,8 @@ select::checkmark {
 
 /* Language selector in toolbar */
 .toolbar__lang {
-  padding: 4px 8px;
+  width: 48px;
+  padding: 4px 4px;
   border: 1px solid transparent;
   border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.06);

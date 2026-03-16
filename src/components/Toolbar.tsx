@@ -60,15 +60,14 @@ export function Toolbar({
           <span className="toolbar__status">{t("toolbar.saving")}</span>
         )}
 
-        <select
+        <button
+          type="button"
           className="toolbar__lang"
-          value={i18n.language}
-          onChange={(e) => changeLanguage(e.target.value)}
+          onClick={() => changeLanguage(i18n.language === "ru" ? "en" : "ru")}
           title={t("settings.languageHeader")}
         >
-          <option value="ru">RU</option>
-          <option value="en">EN</option>
-        </select>
+          {i18n.language.toUpperCase()}
+        </button>
 
         <button
           type="button"

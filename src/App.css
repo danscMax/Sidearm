@@ -523,27 +523,27 @@ select::checkmark {
 }
 
 /* Language selector in toolbar */
+/* Language toggle button */
 .toolbar__lang {
-  width: 48px;
-  padding: 4px 4px;
-  border: 1px solid transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
   border-radius: var(--radius-xs);
-  background: rgba(255, 255, 255, 0.06);
+  background: transparent;
   color: var(--c-text-muted);
   font-size: 0.7rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   letter-spacing: 0.04em;
+  transition: background 0.12s, color 0.12s;
 }
 
 .toolbar__lang:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--c-text-bright);
-}
-
-.toolbar__lang:focus {
-  outline: none;
-  border-color: var(--c-accent);
 }
 
 .toolbar__actions {

@@ -524,8 +524,10 @@ select::checkmark {
 
 /* Language selector in toolbar */
 .toolbar__lang {
-  padding: 3px 4px;
-  border: 1px solid var(--c-border);
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 4px 6px;
+  border: none;
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--c-text-muted);
@@ -533,11 +535,17 @@ select::checkmark {
   font-weight: 600;
   cursor: pointer;
   letter-spacing: 0.04em;
+  text-align: center;
+  min-width: 32px;
 }
 
 .toolbar__lang:hover {
-  border-color: var(--c-accent);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--c-text-bright);
+}
+
+.toolbar__lang:focus {
+  outline: none;
 }
 
 .toolbar__actions {

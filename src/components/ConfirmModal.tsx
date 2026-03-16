@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 
 /* ─────────────────────────────────────────────────────────
    Confirm Modal
@@ -17,6 +18,7 @@ export function ConfirmModal({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Escape key closes the modal
@@ -80,14 +82,14 @@ export function ConfirmModal({
             className="action-button action-button--ghost"
             onClick={onCancel}
           >
-            Отмена
+            {t("common.cancel")}
           </button>
           <button
             type="button"
             className="action-button action-button--primary"
             onClick={onConfirm}
           >
-            {confirmLabel ?? "Подтвердить"}
+            {confirmLabel ?? t("common.confirm")}
           </button>
         </div>
       </div>

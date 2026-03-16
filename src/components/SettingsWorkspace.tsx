@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import { changeLanguage } from "../i18n";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, Profile } from "../lib/config";
 import {
@@ -34,6 +36,7 @@ export function SettingsWorkspace({
   setSelectedProfileId,
   setConfirmModal,
 }: SettingsWorkspaceProps) {
+  const { t, i18n } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
 
   const sortedProfiles = [...activeConfig.profiles].sort(
@@ -41,7 +44,7 @@ export function SettingsWorkspace({
   );
 
   function handleCreateProfile() {
-    const nextConfig = createProfile(activeConfig, "Новый профиль");
+    const nextConfig = createProfile(activeConfig, t("settings.newProfile"));
     const newProfile = nextConfig.profiles.find(
       (p) => !activeConfig.profiles.some((existing) => existing.id === p.id),
     );
@@ -63,9 +66,9 @@ export function SettingsWorkspace({
 
   function handleDelete(profile: Profile) {
     setConfirmModal({
-      title: "Удалить профиль?",
-      message: `Профиль «${profile.name}» будет удалён вместе со всеми назначениями и правилами.`,
-      confirmLabel: "Удалить",
+      title: t("settings.deleteConfirmTitle"),
+      message: t("settings.deleteConfirmMessage", { name: profile.name }),
+      confirmLabel: t("common.delete"),
       onConfirm: () => {
         updateDraft((c) => deleteProfile(c, profile.id));
         setSelectedProfileId(null);
@@ -82,9 +85,9 @@ export function SettingsWorkspace({
     const defaultName = `${profile.name.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, "_")}.profile.json`;
 
     const filePath = await save({
-      title: "Экспорт профиля",
+      title: t("settings.exportDialogTitle"),
       defaultPath: defaultName,
-      filters: [{ name: "Профиль", extensions: ["json"] }],
+      filters: [{ name: "JSON", extensions: ["json"] }],
     });
 
     if (typeof filePath === "string") {
@@ -96,8 +99,8 @@ export function SettingsWorkspace({
     setImportError(null);
 
     const filePath = await open({
-      title: "Импорт профиля",
-      filters: [{ name: "Профиль", extensions: ["json"] }],
+      title: t("settings.importDialogTitle"),
+      filters: [{ name: "JSON", extensions: ["json"] }],
       multiple: false,
     });
 
@@ -108,7 +111,7 @@ export function SettingsWorkspace({
       const data = JSON.parse(raw);
 
       if (!data.profile || !data.bindings || !data.actions) {
-        setImportError("Файл не содержит данных профиля.");
+        setImportError(t("settings.invalidProfileError"));
         return;
       }
 
@@ -120,19 +123,37 @@ export function SettingsWorkspace({
       });
       if (newId) setSelectedProfileId(newId);
     } catch {
-      setImportError("Не удалось прочитать файл профиля.");
+      setImportError(t("settings.readProfileError"));
     }
   }
 
   return (
     <div className="settings-workspace">
+      {/* Language selector */}
+      <section className="panel">
+        <div className="profiles__section-header">
+          <span>{t("settings.languageHeader")}</span>
+        </div>
+        <div className="settings-bottom-actions">
+          <select
+            value={i18n.language}
+            onChange={(e) => {
+              changeLanguage(e.target.value);
+            }}
+          >
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </div>
+      </section>
+
       {/* Active profile editor */}
       {activeProfile ? (
         <section className="panel panel--accent">
-          <h2 className="panel__title">Профиль: {activeProfile.name}</h2>
+          <h2 className="panel__title">{t("settings.profileTitle", { name: activeProfile.name })}</h2>
           <div className="editor-grid">
             <label className="field">
-              <span className="field__label">Имя</span>
+              <span className="field__label">{t("settings.nameLabel")}</span>
               <input
                 type="text"
                 value={activeProfile.name}
@@ -144,17 +165,17 @@ export function SettingsWorkspace({
                 onBlur={(e) => {
                   if (!e.target.value.trim())
                     updateDraft((c) =>
-                      upsertProfile(c, { ...activeProfile, name: "Безымянный профиль" }),
+                      upsertProfile(c, { ...activeProfile, name: t("settings.unnamed") }),
                     );
                 }}
               />
             </label>
             <label className="field">
               <span className="field__label">
-                Приоритет
+                {t("settings.priorityLabel")}
                 <span
                   className="field__hint"
-                  title="Чем выше число, тем выше приоритет. При совпадении нескольких правил побеждает профиль с наибольшим приоритетом."
+                  title={t("settings.priorityTooltip")}
                 >
                   ?
                 </span>
@@ -172,7 +193,7 @@ export function SettingsWorkspace({
               />
             </label>
             <label className="field field--inline">
-              <span className="field__label">Включён</span>
+              <span className="field__label">{t("settings.enabledLabel")}</span>
               <Toggle
                 checked={activeProfile.enabled}
                 onChange={(checked) =>
@@ -181,11 +202,11 @@ export function SettingsWorkspace({
               />
             </label>
             <label className="field">
-              <span className="field__label">Описание</span>
+              <span className="field__label">{t("settings.descriptionLabel")}</span>
               <textarea
                 rows={2}
                 value={activeProfile.description ?? ""}
-                placeholder="Необязательное описание"
+                placeholder={t("settings.descriptionPlaceholder")}
                 onChange={(e) =>
                   updateDraft((c) =>
                     upsertProfile(c, { ...activeProfile, description: e.target.value || undefined }),
@@ -203,7 +224,7 @@ export function SettingsWorkspace({
               onClick={() => handleDuplicate(activeProfile.id)}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
-              Копировать
+              {t("inspector.copyLabel")}
             </button>
             <button
               type="button"
@@ -211,7 +232,7 @@ export function SettingsWorkspace({
               onClick={() => { void handleExport(activeProfile); }}
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-              Экспорт
+              {t("common.export")}
             </button>
             {sortedProfiles.length > 1 ? (
               <button
@@ -220,7 +241,7 @@ export function SettingsWorkspace({
                 onClick={() => handleDelete(activeProfile)}
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                Удалить
+                {t("common.delete")}
               </button>
             ) : null}
           </div>
@@ -230,7 +251,7 @@ export function SettingsWorkspace({
       {/* All profiles list */}
       <section className="panel">
         <div className="profiles__section-header">
-          <span>ВСЕ ПРОФИЛИ</span>
+          <span>{t("settings.allProfilesHeader")}</span>
           <span className="profiles__section-count">{sortedProfiles.length}</span>
         </div>
         <div className="settings-profile-list">
@@ -245,8 +266,8 @@ export function SettingsWorkspace({
                 <div className="settings-profile-card__info">
                   <strong>{profile.name}</strong>
                   <span className="settings-profile-card__meta">
-                    Приоритет: {profile.priority}
-                    {!profile.enabled ? " · Отключён" : ""}
+                    {t("settings.priorityMeta", { priority: profile.priority })}
+                    {!profile.enabled ? ` · ${t("settings.disabledMeta")}` : ""}
                   </span>
                 </div>
                 <div className="settings-profile-card__actions">
@@ -254,7 +275,7 @@ export function SettingsWorkspace({
                     type="button"
                     className="action-button action-button--small action-button--ghost"
                     onClick={(e) => { e.stopPropagation(); handleDuplicate(profile.id); }}
-                    title="Копировать"
+                    title={t("inspector.copyLabel")}
                   >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>
                   </button>
@@ -262,7 +283,7 @@ export function SettingsWorkspace({
                     type="button"
                     className="action-button action-button--small action-button--ghost"
                     onClick={(e) => { e.stopPropagation(); void handleExport(profile); }}
-                    title="Экспорт"
+                    title={t("common.export")}
                   >
                     <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                   </button>
@@ -271,7 +292,7 @@ export function SettingsWorkspace({
                       type="button"
                       className="action-button action-button--small action-button--ghost settings-delete-btn"
                       onClick={(e) => { e.stopPropagation(); handleDelete(profile); }}
-                      title="Удалить"
+                      title={t("common.delete")}
                     >
                       <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
@@ -287,7 +308,7 @@ export function SettingsWorkspace({
             className="action-button action-button--secondary"
             onClick={handleCreateProfile}
           >
-            + Новый профиль
+            {t("settings.createProfile")}
           </button>
           <button
             type="button"
@@ -295,7 +316,7 @@ export function SettingsWorkspace({
             onClick={() => { void handleImport(); }}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 10V1M5 4l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-            Импорт профиля
+            {t("settings.importProfileButton")}
           </button>
         </div>
         {importError ? (
@@ -308,10 +329,10 @@ export function SettingsWorkspace({
       {/* Full config backup */}
       <section className="panel">
         <div className="profiles__section-header">
-          <span>РЕЗЕРВНОЕ КОПИРОВАНИЕ</span>
+          <span>{t("settings.backupHeader")}</span>
         </div>
         <p className="panel__muted" style={{ fontSize: "0.8rem", marginBottom: 12 }}>
-          Экспортируйте всю конфигурацию (профили, правила, привязки, настройки) в файл для бэкапа или переноса на другой компьютер.
+          {t("settings.backupHelp")}
         </p>
         <div className="settings-bottom-actions">
           <button
@@ -319,7 +340,7 @@ export function SettingsWorkspace({
             className="action-button action-button--secondary"
             onClick={async () => {
               const path = await save({
-                title: "Сохранить конфигурацию",
+                title: t("settings.saveConfigTitle"),
                 defaultPath: `sidearm-backup-${new Date().toISOString().slice(0, 10)}.json`,
                 filters: [{ name: "JSON", extensions: ["json"] }],
               });
@@ -329,14 +350,14 @@ export function SettingsWorkspace({
               }
             }}
           >
-            Экспорт конфигурации
+            {t("settings.exportConfig")}
           </button>
           <button
             type="button"
             className="action-button action-button--secondary"
             onClick={async () => {
               const path = await open({
-                title: "Загрузить конфигурацию",
+                title: t("settings.loadConfigTitle"),
                 filters: [{ name: "JSON", extensions: ["json"] }],
                 multiple: false,
               });
@@ -345,25 +366,25 @@ export function SettingsWorkspace({
                   const text = await readTextFile(path);
                   const imported = JSON.parse(text) as AppConfig;
                   if (!imported.profiles || !imported.bindings || !imported.settings) {
-                    setImportError("Файл не содержит полной конфигурации Sidearm.");
+                    setImportError(t("settings.invalidConfigError"));
                     return;
                   }
                   setConfirmModal({
-                    title: "Заменить конфигурацию?",
-                    message: `Текущая конфигурация будет полностью заменена данными из файла. Это действие нельзя отменить. Продолжить?`,
-                    confirmLabel: "Заменить",
+                    title: t("settings.replaceConfigTitle"),
+                    message: t("settings.replaceConfigMessage"),
+                    confirmLabel: t("settings.replaceConfigConfirm"),
                     onConfirm: () => {
                       updateDraft(() => imported);
                       setImportError(null);
                     },
                   });
                 } catch {
-                  setImportError("Не удалось прочитать файл конфигурации.");
+                  setImportError(t("settings.readConfigError"));
                 }
               }
             }}
           >
-            Импорт конфигурации
+            {t("settings.importConfig")}
           </button>
         </div>
       </section>

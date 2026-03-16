@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   Action,
   ActionCondition,
@@ -75,11 +76,11 @@ function normalizeKeyName(key: string): string {
    Condition Types
    ───────────────────────────────────────────────────────── */
 
-const CONDITION_TYPES: Array<{ value: ActionCondition["type"]; label: string }> = [
-  { value: "windowTitleContains", label: "Заголовок окна содержит" },
-  { value: "windowTitleNotContains", label: "Заголовок окна НЕ содержит" },
-  { value: "exeEquals", label: "Процесс равен" },
-  { value: "exeNotEquals", label: "Процесс НЕ равен" },
+const CONDITION_TYPE_KEYS: Array<{ value: ActionCondition["type"]; key: string }> = [
+  { value: "windowTitleContains", key: "picker.conditionWindowTitleContains" },
+  { value: "windowTitleNotContains", key: "picker.conditionWindowTitleNotContains" },
+  { value: "exeEquals", key: "picker.conditionExeEquals" },
+  { value: "exeNotEquals", key: "picker.conditionExeNotEquals" },
 ];
 
 /* ─────────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ export function SequenceStepEditor({
   steps: SequenceStep[];
   onUpdate: (steps: SequenceStep[]) => void;
 }) {
+  const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
 
   // Capture keystrokes during recording and forward to Rust
@@ -158,7 +160,7 @@ export function SequenceStepEditor({
   return (
     <div className="editor-grid">
       <div className="field__header">
-        <span className="field__label">Шаги последовательности</span>
+        <span className="field__label">{t("picker.sequenceSteps")}</span>
         <div className="editor-actions">
           {isRecording ? (
             <button
@@ -166,7 +168,7 @@ export function SequenceStepEditor({
               className="action-button action-button--accent action-button--small"
               onClick={() => { void handleStopRecording(); }}
             >
-              ⏹ Остановить запись
+              {t("picker.stopRecording")}
             </button>
           ) : (
             <>
@@ -175,15 +177,15 @@ export function SequenceStepEditor({
                 className="action-button action-button--small"
                 onClick={() => { void handleStartRecording(); }}
               >
-                ⏺ Записать
+                {t("picker.recordMacro")}
               </button>
               {(
                 [
-                  ["send", "Отправка"],
-                  ["text", "Текст"],
-                  ["sleep", "Пауза"],
-                  ["launch", "Запуск"],
-                ] as const
+                  ["send", t("picker.addSend")],
+                  ["text", t("picker.addText")],
+                  ["sleep", t("picker.addSleep")],
+                  ["launch", t("picker.addLaunch")],
+                ] as Array<[SequenceStep["type"], string]>
               ).map(([stepType, label]) => (
                 <button
                   type="button"
@@ -201,8 +203,8 @@ export function SequenceStepEditor({
 
       {isRecording ? (
         <div className="notice notice--warning" style={{ marginBottom: 8 }}>
-          <strong>⏺ Запись макроса...</strong>
-          <p>Нажимайте клавиши. Каждое нажатие будет записано как шаг последовательности.</p>
+          <strong>{t("picker.recordingNotice")}</strong>
+          <p>{t("picker.recordingHint")}</p>
         </div>
       ) : null}
 
@@ -211,7 +213,7 @@ export function SequenceStepEditor({
           <div className="compound-card" key={index}>
             <div className="compound-card__header">
               <div>
-                <strong>Шаг {index + 1}</strong>
+                <strong>{t("picker.stepTitle", { index: index + 1 })}</strong>
                 <span className="compound-card__meta">{labelForSequenceStep(step.type)}</span>
               </div>
               <button
@@ -220,27 +222,27 @@ export function SequenceStepEditor({
                 disabled={steps.length === 1}
                 onClick={() => removeStep(index)}
               >
-                Удалить
+                {t("common.delete")}
               </button>
             </div>
 
             <div className="editor-grid">
               <label className="field">
-                <span className="field__label">Тип</span>
+                <span className="field__label">{t("picker.stepType")}</span>
                 <select
                   value={step.type}
                   onChange={(e) => updateStep(index, coerceSequenceStepType(step, e.target.value as SequenceStep["type"]))}
                 >
-                  <option value="send">Отправка сочетания</option>
-                  <option value="text">Ввод текста</option>
-                  <option value="sleep">Пауза</option>
-                  <option value="launch">Запуск</option>
+                  <option value="send">{t("picker.stepSend")}</option>
+                  <option value="text">{t("picker.stepText")}</option>
+                  <option value="sleep">{t("picker.stepSleep")}</option>
+                  <option value="launch">{t("picker.stepLaunch")}</option>
                 </select>
               </label>
 
               {step.type !== "sleep" ? (
                 <label className="field">
-                  <span className="field__label">Значение</span>
+                  <span className="field__label">{t("picker.stepValue")}</span>
                   <input
                     type="text"
                     value={step.value}
@@ -252,7 +254,7 @@ export function SequenceStepEditor({
               ) : null}
 
               <label className="field">
-                <span className="field__label">Задержка (мс, макс. 30 000)</span>
+                <span className="field__label">{t("picker.stepDelay")}</span>
                 <input
                   type="number"
                   min={0}
@@ -300,6 +302,7 @@ export function ActionPickerModal({
   onSave: (config: AppConfig) => void;
   onCancel: () => void;
 }) {
+  const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
 
@@ -545,11 +548,11 @@ export function ActionPickerModal({
         case "profileSwitch":
           return { id: actionId, type: "profileSwitch" as const, payload: { targetProfileId: profileDraft }, pretty };
         case "menu":
-          return { id: actionId, type: "menu" as const, payload: { items: [] }, pretty: pretty || "Меню" };
+          return { id: actionId, type: "menu" as const, payload: { items: [] }, pretty: pretty || t("picker.defaultMenu") };
         case "disabled":
-          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || "Отключено" };
+          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || t("picker.defaultDisabled") };
         default:
-          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: "Отключено" };
+          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: t("picker.defaultDisabled") };
       }
     })();
 
@@ -566,7 +569,7 @@ export function ActionPickerModal({
           shortcutDraft.win ? "Win" : null,
           shortcutDraft.key || null,
         ].filter(Boolean);
-        return parts.length > 0 ? parts.join(" + ") : "Шорткат";
+        return parts.length > 0 ? parts.join(" + ") : t("picker.autoShortcut");
       }
       case "mouseAction": {
         const mods = [
@@ -575,27 +578,27 @@ export function ActionPickerModal({
           mouseDraft.alt ? "Alt" : null,
           mouseDraft.win ? "Win" : null,
         ].filter(Boolean);
-        const actionLabel = MOUSE_ACTION_OPTIONS.find((o) => o.value === mouseDraft.action)?.label ?? "Мышь";
+        const actionLabel = MOUSE_ACTION_OPTIONS.find((o) => o.value === mouseDraft.action)?.label ?? t("picker.autoMouse");
         return mods.length > 0 ? `${mods.join(" + ")} + ${actionLabel}` : actionLabel;
       }
       case "textSnippet":
-        return textDraft.text.slice(0, 30) || "Текст";
+        return textDraft.text.slice(0, 30) || t("picker.autoText");
       case "sequence":
-        return "Макрос";
+        return t("picker.autoMacro");
       case "launch":
-        return launchDraft.target.split(/[/\\]/).pop() ?? "Запуск";
+        return launchDraft.target.split(/[/\\]/).pop() ?? t("sequence.launch");
       case "mediaKey":
-        return MEDIA_KEY_OPTIONS.find((o) => o.value === mediaDraft)?.label ?? "Медиа";
+        return MEDIA_KEY_OPTIONS.find((o) => o.value === mediaDraft)?.label ?? t("action.type.mediaKey");
       case "profileSwitch": {
         const p = config.profiles.find((pr) => pr.id === profileDraft);
-        return p ? `Профиль: ${p.name}` : "Профиль";
+        return p ? t("picker.autoProfile", { name: p.name }) : t("picker.autoProfileFallback");
       }
       case "menu":
-        return "Меню";
+        return t("picker.defaultMenu");
       case "disabled":
-        return "Отключено";
+        return t("picker.defaultDisabled");
       default:
-        return "Действие";
+        return t("picker.defaultAction");
     }
   }
 
@@ -635,7 +638,7 @@ export function ActionPickerModal({
       <div className="modal action-picker" ref={modalRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onKeyDown={handleFocusTrap}>
         <div className="action-picker__header">
           <div>
-            <h2>Назначить действие</h2>
+            <h2>{t("picker.title")}</h2>
             {controlLabel ? (
               <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
             ) : null}
@@ -648,7 +651,7 @@ export function ActionPickerModal({
             <input
               className="action-picker__search"
               type="text"
-              placeholder="Поиск действия..."
+              placeholder={t("picker.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               autoComplete="off"
@@ -675,13 +678,13 @@ export function ActionPickerModal({
             {effectiveCategory === "shortcut" ? (
               <div className="editor-grid" onKeyDown={handleKeyCapture}>
                 <label className="field">
-                  <span className="field__label">Клавиша</span>
+                  <span className="field__label">{t("picker.keyLabel")}</span>
                   <div className="capture-row">
                     <input
                       type="text"
                       readOnly
                       value={shortcutDraft.key}
-                      placeholder={isCapturing ? "Нажмите клавишу..." : "Не задана"}
+                      placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
                       className={isCapturing ? "capture-active" : ""}
                     />
                     <button
@@ -689,7 +692,7 @@ export function ActionPickerModal({
                       className={`action-button${isCapturing ? " action-button--accent" : ""}`}
                       onClick={() => setIsCapturing(!isCapturing)}
                     >
-                      {isCapturing ? "Отмена" : "Записать"}
+                      {isCapturing ? t("common.cancel") : t("picker.record")}
                     </button>
                   </div>
                 </label>
@@ -706,7 +709,7 @@ export function ActionPickerModal({
                   ))}
                 </div>
                 <p className="panel__muted">
-                  Можно оставить поле клавиши пустым и назначить только Ctrl, Alt, Shift, Win или их сочетание.
+                  {t("picker.modifiersHint")}
                 </p>
               </div>
             ) : null}
@@ -738,7 +741,7 @@ export function ActionPickerModal({
                   ))}
                 </div>
                 <p className="panel__muted">
-                  Модификаторы зажимаются на время действия. Например, Ctrl + Скролл вверх = зум.
+                  {t("picker.mouseModifiersHint")}
                 </p>
               </div>
             ) : null}
@@ -746,22 +749,22 @@ export function ActionPickerModal({
             {effectiveCategory === "textSnippet" ? (
               <div className="editor-grid">
                 <label className="field">
-                  <span className="field__label">Текст</span>
+                  <span className="field__label">{t("picker.textLabel")}</span>
                   <textarea
                     rows={4}
                     value={textDraft.text}
                     onChange={(e) => setTextDraft({ ...textDraft, text: e.target.value })}
-                    placeholder="Введите текст для ввода..."
+                    placeholder={t("picker.textPlaceholder")}
                   />
                 </label>
                 <label className="field">
-                  <span className="field__label">Способ ввода</span>
+                  <span className="field__label">{t("picker.inputMethod")}</span>
                   <select
                     value={textDraft.pasteMode}
                     onChange={(e) => setTextDraft({ ...textDraft, pasteMode: e.target.value as PasteMode })}
                   >
-                    <option value="clipboardPaste">Через буфер обмена</option>
-                    <option value="sendText">Посимвольный ввод</option>
+                    <option value="clipboardPaste">{t("picker.inputClipboard")}</option>
+                    <option value="sendText">{t("picker.inputDirect")}</option>
                   </select>
                 </label>
               </div>
@@ -777,16 +780,16 @@ export function ActionPickerModal({
             {effectiveCategory === "launch" ? (
               <div className="editor-grid">
                 <label className="field">
-                  <span className="field__label">Программа</span>
+                  <span className="field__label">{t("picker.programLabel")}</span>
                   <input
                     type="text"
                     value={launchDraft.target}
                     onChange={(e) => setLaunchDraft({ ...launchDraft, target: e.target.value })}
-                    placeholder="C:\Program Files\программа.exe"
+                    placeholder="C:\Program Files\app.exe"
                   />
                 </label>
                 <label className="field">
-                  <span className="field__label">Аргументы</span>
+                  <span className="field__label">{t("picker.argumentsLabel")}</span>
                   <input
                     type="text"
                     value={launchDraft.args}
@@ -817,7 +820,7 @@ export function ActionPickerModal({
             {effectiveCategory === "profileSwitch" ? (
               <div className="editor-grid">
                 <label className="field">
-                  <span className="field__label">Переключить на профиль</span>
+                  <span className="field__label">{t("picker.switchProfile")}</span>
                   <select
                     value={profileDraft}
                     onChange={(e) => setProfileDraft(e.target.value)}
@@ -833,7 +836,7 @@ export function ActionPickerModal({
             {effectiveCategory === "disabled" ? (
               <div className="editor-grid">
                 <p className="panel__muted">
-                  Кнопка будет отключена — нажатие не вызовет никакого действия.
+                  {t("picker.disabledHint")}
                 </p>
               </div>
             ) : null}
@@ -842,9 +845,9 @@ export function ActionPickerModal({
               <div className="editor-grid mt-12">
                 <label className="field">
                   <span className="field__label">
-                    Сигнал кнопки
+                    {t("picker.signalLabel")}
                     {expectedSignal ? (
-                      <span className="field__hint" title={`Рекомендуемый сигнал: ${expectedSignal}`}>
+                      <span className="field__hint" title={`${t("picker.signalRecommended")} ${expectedSignal}`}>
                         ?
                       </span>
                     ) : null}
@@ -854,7 +857,7 @@ export function ActionPickerModal({
                       type="text"
                       readOnly
                       value={signalDraft ?? ""}
-                      placeholder={isCapturingSignal ? "Нажмите кнопку на мыши..." : "Не задан"}
+                      placeholder={isCapturingSignal ? t("picker.signalCapturing") : t("picker.signalEmpty")}
                       className={isCapturingSignal ? "capture-active" : ""}
                     />
                     <button
@@ -862,22 +865,22 @@ export function ActionPickerModal({
                       className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
                       onClick={() => setIsCapturingSignal(!isCapturingSignal)}
                     >
-                      {isCapturingSignal ? "Отмена" : "Записать"}
+                      {isCapturingSignal ? t("common.cancel") : t("picker.record")}
                     </button>
                   </div>
                   {isCapturingSignal ? (
-                    <p className="panel__muted">Нажмите кнопку на мыши. Перехват должен быть запущен.</p>
+                    <p className="panel__muted">{t("picker.signalCaptureHint")}</p>
                   ) : null}
                 </label>
                 {expectedSignal && signalDraft !== expectedSignal ? (
                   <p className="panel__muted">
-                    Рекомендуемый: <code>{expectedSignal}</code>{" "}
+                    {t("picker.signalRecommended")} <code>{expectedSignal}</code>{" "}
                     <button
                       type="button"
                       className="action-button action-button--small action-button--ghost"
                       onClick={() => setSignalDraft(expectedSignal)}
                     >
-                      Применить
+                      {t("picker.signalApply")}
                     </button>
                   </p>
                 ) : null}
@@ -885,7 +888,7 @@ export function ActionPickerModal({
             ) : null}
 
             <label className="field mt-12">
-              <span className="field__label">Название</span>
+              <span className="field__label">{t("picker.nameLabel")}</span>
               <input
                 type="text"
                 value={nameDraft}
@@ -896,7 +899,7 @@ export function ActionPickerModal({
 
             <div className="editor-grid mt-12">
               <div className="field__header">
-                <span className="field__label">Условия выполнения</span>
+                <span className="field__label">{t("picker.conditionsLabel")}</span>
                 <button
                   type="button"
                   className="action-button action-button--secondary action-button--small"
@@ -907,20 +910,20 @@ export function ActionPickerModal({
                     ])
                   }
                 >
-                  + Добавить
+                  {t("picker.conditionsAdd")}
                 </button>
               </div>
 
               {conditionsDraft.length === 0 ? (
                 <p className="panel__muted">
-                  Без условий — действие выполняется всегда.
+                  {t("picker.conditionsEmpty")}
                 </p>
               ) : (
                 <div className="stack-list">
                   {conditionsDraft.map((condition, index) => (
                     <div className="compound-card" key={index}>
                       <div className="compound-card__header">
-                        <strong>Условие {index + 1}</strong>
+                        <strong>{t("picker.conditionTitle", { index: index + 1 })}</strong>
                         <button
                           type="button"
                           className="action-button action-button--secondary action-button--small"
@@ -928,12 +931,12 @@ export function ActionPickerModal({
                             setConditionsDraft(conditionsDraft.filter((_, i) => i !== index))
                           }
                         >
-                          Удалить
+                          {t("common.delete")}
                         </button>
                       </div>
                       <div className="editor-grid">
                         <label className="field">
-                          <span className="field__label">Тип</span>
+                          <span className="field__label">{t("picker.conditionType")}</span>
                           <select
                             value={condition.type}
                             onChange={(e) => {
@@ -945,22 +948,22 @@ export function ActionPickerModal({
                               );
                             }}
                           >
-                            {CONDITION_TYPES.map((ct) => (
+                            {CONDITION_TYPE_KEYS.map((ct) => (
                               <option key={ct.value} value={ct.value}>
-                                {ct.label}
+                                {t(ct.key)}
                               </option>
                             ))}
                           </select>
                         </label>
                         <label className="field">
-                          <span className="field__label">Значение</span>
+                          <span className="field__label">{t("picker.conditionValue")}</span>
                           <input
                             type="text"
                             value={condition.value}
                             placeholder={
                               condition.type.startsWith("exe")
-                                ? "chrome.exe"
-                                : "часть заголовка"
+                                ? t("picker.conditionPlaceholderExe")
+                                : t("picker.conditionPlaceholderTitle")
                             }
                             onChange={(e) =>
                               setConditionsDraft(
@@ -975,32 +978,32 @@ export function ActionPickerModal({
                     </div>
                   ))}
                   <p className="panel__muted">
-                    Все условия должны выполняться одновременно (логика «И»).
+                    {t("picker.conditionsAllRequired")}
                   </p>
                 </div>
               )}
             </div>
 
             <label className="field mt-12">
-              <span className="field__label">Режим срабатывания</span>
+              <span className="field__label">{t("picker.triggerMode")}</span>
               <select
                 value={triggerModeDraft}
                 onChange={(e) => setTriggerModeDraft(e.target.value as TriggerMode)}
               >
-                <option value="press">Нажатие</option>
-                <option value="hold">Удержание</option>
-                <option value="chord">Аккорд (две кнопки)</option>
+                <option value="press">{t("picker.triggerPress")}</option>
+                <option value="hold">{t("picker.triggerHold")}</option>
+                <option value="chord">{t("picker.triggerChord")}</option>
               </select>
             </label>
 
             {triggerModeDraft === "chord" && controlId ? (
               <label className="field">
-                <span className="field__label">Вторая кнопка аккорда</span>
+                <span className="field__label">{t("picker.chordPartner")}</span>
                 <select
                   value={chordPartnerDraft}
                   onChange={(e) => setChordPartnerDraft(e.target.value as ControlId)}
                 >
-                  <option value="">Выберите кнопку...</option>
+                  <option value="">{t("picker.chordPartnerEmpty")}</option>
                   {config.physicalControls
                     .filter((c) => c.id !== controlId && c.remappable)
                     .map((c) => (
@@ -1016,7 +1019,7 @@ export function ActionPickerModal({
 
         <div className="action-picker__footer">
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>
-            Отмена
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -1024,7 +1027,7 @@ export function ActionPickerModal({
             onClick={handleSave}
             disabled={effectiveCategory === "shortcut" && !shortcutDraft.key && !shortcutDraft.ctrl && !shortcutDraft.shift && !shortcutDraft.alt && !shortcutDraft.win}
           >
-            Сохранить
+            {t("common.save")}
           </button>
         </div>
       </div>

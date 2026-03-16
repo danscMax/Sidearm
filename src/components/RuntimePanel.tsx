@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { RuntimeStateSummary } from "../lib/runtime";
 import type { ViewState } from "../lib/constants";
 import { formatTimestamp, labelForRuntimeStatus } from "../lib/labels";
@@ -20,9 +21,10 @@ export function RuntimePanel({
   handleStopRuntime,
   handleRehookCapture,
 }: RuntimePanelProps) {
+  const { t } = useTranslation();
   return (
     <section className="panel">
-      <p className="panel__eyebrow">Фоновый перехват</p>
+      <p className="panel__eyebrow">{t("runtime.panelTitle")}</p>
       <div className="runtime-controls">
         <button
           type="button"
@@ -36,7 +38,7 @@ export function RuntimePanel({
             runtimeSummary.status === "running"
           }
         >
-          Запустить
+          {t("runtime.start")}
         </button>
         <button
           type="button"
@@ -50,7 +52,7 @@ export function RuntimePanel({
             runtimeSummary.status !== "running"
           }
         >
-          Перезапустить
+          {t("runtime.reload")}
         </button>
         <button
           type="button"
@@ -64,7 +66,7 @@ export function RuntimePanel({
             runtimeSummary.status !== "running"
           }
         >
-          Остановить
+          {t("runtime.stop")}
         </button>
         <button
           type="button"
@@ -77,30 +79,30 @@ export function RuntimePanel({
             viewState === "saving" ||
             runtimeSummary.status !== "running"
           }
-          title="Переустановить WH_KEYBOARD_LL хук без перезапуска рантайма"
+          title={t("runtime.rehookTooltip")}
         >
-          Переустановить хук
+          {t("runtime.rehook")}
         </button>
       </div>
 
       <div className="fact-grid">
-        <Fact label="Состояние" value={labelForRuntimeStatus(runtimeSummary.status)} />
-        <Fact label="Бэкенд" value={runtimeSummary.captureBackend} mono />
+        <Fact label={t("runtime.status")} value={labelForRuntimeStatus(runtimeSummary.status)} />
+        <Fact label={t("runtime.backend")} value={runtimeSummary.captureBackend} mono />
         <Fact
-          label="Версия конфигурации"
-          value={String(runtimeSummary.activeConfigVersion ?? "н/д")}
+          label={t("runtime.configVersion")}
+          value={String(runtimeSummary.activeConfigVersion ?? t("common.na"))}
           mono
         />
         <Fact
-          label="Предупреждений"
+          label={t("runtime.warnings")}
           value={String(runtimeSummary.warningCount)}
         />
         <Fact
-          label="Запущен"
+          label={t("runtime.started")}
           value={formatTimestamp(runtimeSummary.startedAt)}
         />
         <Fact
-          label="Последняя перезагрузка"
+          label={t("runtime.lastReload")}
           value={formatTimestamp(runtimeSummary.lastReloadAt)}
         />
       </div>

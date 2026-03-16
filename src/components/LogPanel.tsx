@@ -1,26 +1,11 @@
 import { useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { LogPanelControl } from "../hooks/useLogPanel";
 import { openLogDirectory } from "../lib/backend";
 
 export interface LogPanelProps {
   logPanel: LogPanelControl;
 }
-
-const levelLabels: Record<string, string> = {
-  all: "Все",
-  error: "Ошибки",
-  warn: "Предупр.",
-  info: "Инфо",
-  debug: "Отладка",
-};
-
-const badgeLabels: Record<string, string> = {
-  error: "ошибка",
-  warn: "вним.",
-  info: "инфо",
-  debug: "отлад.",
-  trace: "отлад.",
-};
 
 const levelClasses: Record<string, string> = {
   error: "badge--error",
@@ -36,6 +21,7 @@ function formatTime(timestamp: number): string {
 }
 
 export function LogPanel({ logPanel }: LogPanelProps) {
+  const { t } = useTranslation();
   const {
     filteredLogs,
     categories,
@@ -47,6 +33,22 @@ export function LogPanel({ logPanel }: LogPanelProps) {
     setSearchQuery,
     clearLogs,
   } = logPanel;
+
+  const levelLabels: Record<string, string> = {
+    all: t("log.levelAll"),
+    error: t("log.levelError"),
+    warn: t("log.levelWarn"),
+    info: t("log.levelInfo"),
+    debug: t("log.levelDebug"),
+  };
+
+  const badgeLabels: Record<string, string> = {
+    error: t("log.badgeError"),
+    warn: t("log.badgeWarn"),
+    info: t("log.badgeInfo"),
+    debug: t("log.badgeDebug"),
+    trace: t("log.badgeDebug"),
+  };
 
   const listRef = useRef<HTMLUListElement>(null);
   const autoScrollRef = useRef(true);
@@ -102,7 +104,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
               setCategoryFilter(e.target.value);
             }}
           >
-            <option value="all">Все категории</option>
+            <option value="all">{t("log.allCategories")}</option>
             {categories.map((cat) => (
               <option key={cat} value={cat}>
                 {cat}
@@ -114,7 +116,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           <input
             type="text"
             className="log-panel__search"
-            placeholder="Поиск..."
+            placeholder={t("common.search")}
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);
@@ -125,7 +127,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             className="action-button action-button--small action-button--secondary"
             onClick={handleExport}
           >
-            Экспорт
+            {t("log.export")}
           </button>
           <button
             type="button"
@@ -134,14 +136,14 @@ export function LogPanel({ logPanel }: LogPanelProps) {
               void openLogDirectory();
             }}
           >
-            Папка логов
+            {t("log.folder")}
           </button>
           <button
             type="button"
             className="action-button action-button--small action-button--ghost"
             onClick={clearLogs}
           >
-            Очистить
+            {t("log.clear")}
           </button>
         </div>
       </div>
@@ -164,7 +166,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
         </ul>
       ) : (
         <p className="panel__muted" style={{ padding: "8px 16px" }}>
-          Журнал пока пуст. Запустите перехват, чтобы увидеть события.
+          {t("log.empty")}
         </p>
       )}
     </div>

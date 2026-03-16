@@ -1,19 +1,9 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 /* ─────────────────────────────────────────────────────────
    Command Palette
    ───────────────────────────────────────────────────────── */
-
-export const PALETTE_COMMANDS = [
-  { id: "undo", label: "Отменить", shortcut: "Ctrl+Z" },
-  { id: "redo", label: "Повторить", shortcut: "Ctrl+Y" },
-  { id: "reload", label: "Загрузить с диска", shortcut: "" },
-  { id: "tab-profiles", label: "Перейти: Профили", shortcut: "1" },
-  { id: "tab-debug", label: "Перейти: Отладка", shortcut: "2" },
-  { id: "tab-settings", label: "Перейти: Настройки", shortcut: "3" },
-  { id: "layer-standard", label: "Слой: Стандартный", shortcut: "" },
-  { id: "layer-hypershift", label: "Слой: Hypershift", shortcut: "" },
-];
 
 export function CommandPalette({
   onClose,
@@ -22,8 +12,20 @@ export function CommandPalette({
   onClose: () => void;
   onExecute: (commandId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+
+  const PALETTE_COMMANDS = [
+    { id: "undo", label: t("command.undo"), shortcut: "Ctrl+Z" },
+    { id: "redo", label: t("command.redo"), shortcut: "Ctrl+Y" },
+    { id: "reload", label: t("command.reload"), shortcut: "" },
+    { id: "tab-profiles", label: t("command.gotoProfiles"), shortcut: "1" },
+    { id: "tab-debug", label: t("command.gotoDebug"), shortcut: "2" },
+    { id: "tab-settings", label: t("command.gotoSettings"), shortcut: "3" },
+    { id: "layer-standard", label: t("command.layerStandard"), shortcut: "" },
+    { id: "layer-hypershift", label: t("command.layerHypershift"), shortcut: "" },
+  ];
 
   const filtered = PALETTE_COMMANDS.filter((cmd) =>
     cmd.label.toLowerCase().includes(query.toLowerCase()),
@@ -55,7 +57,7 @@ export function CommandPalette({
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Введите команду..."
+          placeholder={t("command.placeholder")}
           autoFocus
         />
         {filtered.length > 0 ? (
@@ -75,7 +77,7 @@ export function CommandPalette({
             ))}
           </ul>
         ) : (
-          <div className="command-palette__empty">Ничего не найдено</div>
+          <div className="command-palette__empty">{t("command.empty")}</div>
         )}
       </div>
     </div>

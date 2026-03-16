@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type { ValidationWarning, CommandError } from "../lib/config";
 
 export function PanelGroup({
@@ -62,9 +63,10 @@ export function Toggle({
 }
 
 export function WarningsPanel({ warnings }: { warnings: ValidationWarning[] }) {
+  const { t } = useTranslation();
   return (
     <div className="notice notice--warning">
-      <strong>Предупреждения проверки</strong>
+      <strong>{t("shared.warnings")}</strong>
       <ul>
         {warnings.map((warning) => (
           <li key={`${warning.code}-${warning.path ?? warning.message}`}>
@@ -94,4 +96,3 @@ export function ErrorPanel({ error }: { error: CommandError }) {
     </div>
   );
 }
-

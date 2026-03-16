@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   Action,
   AppConfig,
@@ -19,6 +20,7 @@ export function SnippetLibraryEditor({
   snippetById,
   updateDraft,
 }: SnippetLibraryEditorProps) {
+  const { t } = useTranslation();
   // --- Derived values ---
   const selectedSnippet =
     selectedAction &&
@@ -56,7 +58,7 @@ export function SnippetLibraryEditor({
 
   return (
     <section className="panel">
-      <p className="panel__eyebrow">Библиотека фрагментов</p>
+      <p className="panel__eyebrow">{t("snippet.eyebrow")}</p>
       {selectedAction &&
       selectedAction.type === "textSnippet" &&
       "source" in selectedAction.payload ? (
@@ -64,12 +66,12 @@ export function SnippetLibraryEditor({
           selectedSnippet ? (
             <div className="editor-grid">
               <div className="field">
-                <span className="field__label">ID фрагмента</span>
+                <span className="field__label">{t("snippet.id")}</span>
                 <code className="field__static">{selectedSnippet.id}</code>
               </div>
 
               <label className="field">
-                <span className="field__label">Название фрагмента</span>
+                <span className="field__label">{t("snippet.name")}</span>
                 <input
                   type="text"
                   value={selectedSnippet.name}
@@ -83,7 +85,7 @@ export function SnippetLibraryEditor({
               </label>
 
               <label className="field">
-                <span className="field__label">Текст фрагмента</span>
+                <span className="field__label">{t("snippet.text")}</span>
                 <textarea
                   rows={6}
                   value={selectedSnippet.text}
@@ -97,7 +99,7 @@ export function SnippetLibraryEditor({
               </label>
 
               <label className="field">
-                <span className="field__label">Способ вставки</span>
+                <span className="field__label">{t("snippet.pasteMode")}</span>
                 <select
                   value={selectedSnippet.pasteMode}
                   onChange={(event) => {
@@ -109,17 +111,17 @@ export function SnippetLibraryEditor({
                     }));
                   }}
                 >
-                  <option value="clipboardPaste">Через буфер обмена</option>
-                  <option value="sendText">Прямой ввод текста</option>
+                  <option value="clipboardPaste">{t("snippet.pasteModeClipboard")}</option>
+                  <option value="sendText">{t("snippet.pasteModeDirect")}</option>
                 </select>
               </label>
 
               <label className="field">
-                <span className="field__label">Теги</span>
+                <span className="field__label">{t("inspector.tags")}</span>
                 <input
                   type="text"
                   value={selectedSnippet.tags.join(", ")}
-                  placeholder="тег1, тег2, тег3"
+                  placeholder="tag1, tag2, tag3"
                   onChange={(event) => {
                     updateSelectedSnippetDraft((snippet) => ({
                       ...snippet,
@@ -130,7 +132,7 @@ export function SnippetLibraryEditor({
               </label>
 
               <label className="field">
-                <span className="field__label">Заметки</span>
+                <span className="field__label">{t("snippet.notes")}</span>
                 <textarea
                   rows={3}
                   value={selectedSnippet.notes ?? ""}
@@ -144,27 +146,25 @@ export function SnippetLibraryEditor({
               </label>
 
               <p className="panel__muted">
-                Этот фрагмент используют действий: {selectedSnippetUsageCount}.
+                {t("snippet.usageCount", { count: selectedSnippetUsageCount })}
               </p>
             </div>
           ) : (
             <div className="notice notice--error">
-              <strong>Запись библиотеки не найдена</strong>
+              <strong>{t("snippet.notFound")}</strong>
               <p>
-                Выбранное действие ссылается на фрагмент, которого нет
-                в <code>snippetLibrary</code>.
+                {t("snippet.notFoundBody")}
               </p>
             </div>
           )
         ) : (
           <p className="panel__muted">
-            Сейчас текст хранится прямо внутри действия.
+            {t("snippet.inlineMessage")}
           </p>
         )
       ) : (
         <p className="panel__muted">
-          Выберите действие типа <code>textSnippet</code>, чтобы
-          редактировать библиотеку фрагментов.
+          {t("snippet.empty")}
         </p>
       )}
     </section>

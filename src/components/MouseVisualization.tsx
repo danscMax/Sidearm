@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy, topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
@@ -30,10 +31,10 @@ function actionLabel(entry: ControlSurfaceEntry): string {
   return displayNameForControl(entry.control);
 }
 
-function tooltipText(entry: ControlSurfaceEntry): string {
+function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {
   const name = displayNameForControl(entry.control);
   if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
-    return `${name}\nНе назначено`;
+    return `${name}\n${unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   return `${name}\n${cat?.label ?? ""}: ${entry.action.pretty}`;
@@ -81,6 +82,7 @@ export function MouseVisualization({
   heatmapEnabled,
   onDropBinding,
 }: MouseVisualizationProps) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
   const [visualMode, setVisualMode] = useState<VisualMode>("photo");
@@ -115,8 +117,8 @@ export function MouseVisualization({
             type="button"
             className="view-mode-toggle view-mode-toggle--icon"
             onClick={() => setVisualMode("photo")}
-            title="Переключить на фото"
-            aria-label="Переключить на фото"
+            title={t("visualization.switchPhoto")}
+            aria-label={t("visualization.switchPhoto")}
           >
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="3" width="14" height="10" rx="1.5" stroke="currentColor" strokeWidth="1.5"/><circle cx="10.5" cy="6.5" r="1.5" stroke="currentColor" strokeWidth="1.2"/><path d="M1 11l3.5-3.5L7 10l3-4 5 5" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>
           </button>
@@ -245,7 +247,7 @@ export function MouseVisualization({
               key={controlId}
               className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
               data-action-type={entry.action?.type ?? ""}
-              data-tooltip={tooltipText(entry)}
+              data-tooltip={tooltipText(entry, t("visualization.unassigned"))}
               style={heatStyle(controlId)}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
@@ -351,9 +353,9 @@ export function MouseVisualization({
   const layerIdx = layerCopy.findIndex((l) => l.value === selectedLayer);
 
   const viewTabs: { key: ViewTab; label: string }[] = [
-    { key: "combined", label: "Все кнопки" },
-    { key: "top", label: "Верхняя панель" },
-    { key: "side", label: "Боковая клавиатура" },
+    { key: "combined", label: t("visualization.tabAll") },
+    { key: "top", label: t("visualization.tabTop") },
+    { key: "side", label: t("visualization.tabSide") },
   ];
   const viewIdx = viewTabs.findIndex((t) => t.key === activeTab);
 
@@ -382,8 +384,8 @@ export function MouseVisualization({
           type="button"
           className="view-mode-toggle view-mode-toggle--icon"
           onClick={() => setVisualMode("schematic")}
-          title="Переключить на схему"
-          aria-label="Переключить на схему"
+          title={t("visualization.switchSchematic")}
+          aria-label={t("visualization.switchSchematic")}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
         </button>
@@ -397,7 +399,7 @@ export function MouseVisualization({
               <img
                 className="mouse-visual__img"
                 src="/assets/naga-top.png"
-                alt="Razer Naga V2 HyperSpeed — вид сверху"
+                alt="Razer Naga V2 HyperSpeed — top view"
                 draggable={false}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
@@ -414,7 +416,7 @@ export function MouseVisualization({
               <img
                 className="mouse-visual__img"
                 src="/assets/naga-side.png"
-                alt="Razer Naga V2 HyperSpeed — боковая клавиатура"
+                alt="Razer Naga V2 HyperSpeed — thumb grid"
                 draggable={false}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
@@ -432,7 +434,7 @@ export function MouseVisualization({
               <img
                 className="mouse-visual__img"
                 src="/assets/naga-combined.png"
-                alt="Razer Naga V2 HyperSpeed — все кнопки"
+                alt="Razer Naga V2 HyperSpeed — all buttons"
                 draggable={false}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />

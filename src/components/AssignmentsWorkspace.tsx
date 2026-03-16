@@ -1,4 +1,5 @@
 import { startTransition, useState, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   Action,
   AppConfig,
@@ -55,6 +56,7 @@ export function AssignmentsWorkspace({
   setActionPickerOpen,
   executionCounts,
 }: AssignmentsWorkspaceProps) {
+  const { t } = useTranslation();
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
     selectedLayer,
@@ -97,15 +99,15 @@ export function AssignmentsWorkspace({
       // Button with existing binding
       return [
         {
-          label: "Редактировать",
+          label: t("common.edit"),
           onClick: () => handleOpenActionPicker(controlId, binding),
         },
         {
-          label: "Копировать привязку",
+          label: t("assignments.copyBinding"),
           onClick: () => setBindingClipboard({ binding, action }),
         },
         {
-          label: `Копировать на ${otherLayerLabel}`,
+          label: t("assignments.copyToLayer", { layer: otherLayerLabel }),
           onClick: () => {
             const newActionId = crypto.randomUUID();
             const newBindingId = makeBindingId(effectiveProfileId, otherLayer, controlId);
@@ -126,14 +128,14 @@ export function AssignmentsWorkspace({
         },
         null,
         {
-          label: binding.enabled ? "Отключить" : "Включить",
+          label: binding.enabled ? t("assignments.disable") : t("assignments.enable"),
           onClick: () =>
             updateDraft((config) =>
               upsertBinding(config, { ...binding, enabled: !binding.enabled }),
             ),
         },
         {
-          label: "Очистить",
+          label: t("assignments.clear"),
           danger: true,
           onClick: () => updateDraft((config) => removeBinding(config, binding.id)),
         },
@@ -143,11 +145,11 @@ export function AssignmentsWorkspace({
     // Empty button
     return [
       {
-        label: "Назначить действие",
+        label: t("assignments.assignAction"),
         onClick: () => handleOpenActionPicker(controlId, null),
       },
       {
-        label: "Вставить привязку",
+        label: t("assignments.pasteBinding"),
         disabled: !bindingClipboard,
         onClick: () => {
           if (!bindingClipboard) return;
@@ -205,9 +207,9 @@ export function AssignmentsWorkspace({
           type="button"
           className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
           onClick={() => setHeatmapEnabled((prev) => !prev)}
-          title={heatmapEnabled ? "Выключить тепловую карту" : "Включить тепловую карту"}
+          title={heatmapEnabled ? t("profile.heatmapDisable") : t("profile.heatmapEnable")}
         >
-          {heatmapEnabled ? "Тепловая карта: вкл" : "Тепловая карта: выкл"}
+          {heatmapEnabled ? t("profile.heatmapOn") : t("profile.heatmapOff")}
         </button>
       </div>
       {ctxMenu ? (

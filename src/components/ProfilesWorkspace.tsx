@@ -1,4 +1,5 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
 import type { ProfileExportData } from "../lib/config-editing";
@@ -118,6 +119,7 @@ function AppMappingModal({
   updateDraft,
   onClose,
 }: AppMappingModalProps) {
+  const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
 
@@ -170,7 +172,7 @@ function AppMappingModal({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
-        aria-label={`Правило: ${mapping.exe}`}
+        aria-label={`${mapping.exe}`}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
@@ -178,7 +180,7 @@ function AppMappingModal({
           type="button"
           className="rule-modal__close"
           onClick={onClose}
-          aria-label="Закрыть"
+          aria-label={t("common.close")}
         >
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
             <path d="M1 1l12 12M13 1L1 13" />
@@ -190,19 +192,19 @@ function AppMappingModal({
           <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
           <div>
             <span className="rule-modal__title">{mapping.exe}</span>
-            <span className="rule-modal__profile-name">Профиль: {profileName}</span>
+            <span className="rule-modal__profile-name">{t("ruleModal.profileLabel", { name: profileName })}</span>
           </div>
         </div>
 
         {/* Body */}
         <div className="rule-modal__body">
           <p className="rule-modal__description">
-            Когда это приложение окажется в фокусе, профиль «{profileName}» активируется автоматически.
+            {t("ruleModal.description", { name: profileName })}
           </p>
 
           {/* Exe input + Browse */}
           <div className="field">
-            <span className="field__label">Исполняемый файл</span>
+            <span className="field__label">{t("ruleModal.exeLabel")}</span>
             <div className="field__row">
               <input
                 type="text"
@@ -217,8 +219,8 @@ function AppMappingModal({
                 className="action-button action-button--small"
                 onClick={async () => {
                   const selected = await open({
-                    title: "Выберите исполняемый файл",
-                    filters: [{ name: "Программы", extensions: ["exe", "lnk"] }],
+                    title: t("newRule.browseTitle"),
+                    filters: [{ name: t("newRule.browseFilter"), extensions: ["exe", "lnk"] }],
                     multiple: false,
                   });
                   if (typeof selected === "string") {
@@ -229,19 +231,19 @@ function AppMappingModal({
                   }
                 }}
               >
-                Обзор...
+                {t("common.browse")}
               </button>
             </div>
           </div>
 
           {/* Title filters */}
           <div className="field">
-            <span className="field__label">Фильтр по заголовку окна</span>
+            <span className="field__label">{t("ruleModal.titleLabel")}</span>
             <input
               type="text"
               defaultValue={(mapping.titleIncludes ?? []).join(", ")}
               key={mapping.id}
-              placeholder="необязательно"
+              placeholder={t("common.optional")}
               onBlur={(e) => {
                 const vals = parseCommaSeparatedUniqueValues(e.target.value);
                 updateDraft((c) =>
@@ -253,15 +255,14 @@ function AppMappingModal({
               }}
             />
             <p className="field__description">
-              Оставьте пустым — правило сработает для любого окна этого приложения.
-              Укажите текст — только если заголовок окна его содержит.
+              {t("ruleModal.titleHelp")}
             </p>
           </div>
 
           {/* Toggle + Priority row */}
           <div className="rule-modal__inline-row">
             <label className="rule-modal__inline-field">
-              <span className="field__label">Включено</span>
+              <span className="field__label">{t("common.enabled")}</span>
               <input
                 className="profiles__toggle"
                 type="checkbox"
@@ -276,10 +277,10 @@ function AppMappingModal({
 
             <label className="rule-modal__inline-field">
               <span className="field__label">
-                Приоритет
+                {t("ruleModal.priorityLabel")}
                 <span
                   className="field__hint"
-                  title="Чем выше число, тем выше приоритет. При совпадении нескольких правил побеждает правило с наибольшим приоритетом."
+                  title={t("ruleModal.priorityTooltip")}
                 >
                   ?
                 </span>
@@ -303,7 +304,7 @@ function AppMappingModal({
 
           {/* Move to another profile */}
           <div className="field">
-            <span className="field__label">Профиль</span>
+            <span className="field__label">{t("debug.profile")}</span>
             <select
               value={mapping.profileId}
               onChange={(e) => {
@@ -320,19 +321,19 @@ function AppMappingModal({
               ))}
             </select>
             <p className="field__description">
-              Переместите правило в другой профиль.
+              {t("ruleModal.moveProfileHelp")}
             </p>
           </div>
         </div>
 
         {/* Footer */}
         <div className="rule-modal__footer">
-          <span className="rule-modal__autosave">Изменения сохраняются автоматически</span>
+          <span className="rule-modal__autosave">{t("ruleModal.autosave")}</span>
           <span className="rule-modal__spacer" />
 
           {confirmingDelete ? (
             <div className="rule-modal__delete-confirm">
-              Точно удалить?
+              {t("ruleModal.deleteConfirm")}
               <button
                 type="button"
                 className="action-button action-button--small action-button--ghost profiles__delete-btn"
@@ -341,14 +342,14 @@ function AppMappingModal({
                   onClose();
                 }}
               >
-                Да
+                {t("common.yes")}
               </button>
               <button
                 type="button"
                 className="action-button action-button--small action-button--ghost"
                 onClick={() => setConfirmingDelete(false)}
               >
-                Нет
+                {t("common.no")}
               </button>
             </div>
           ) : (
@@ -357,7 +358,7 @@ function AppMappingModal({
               className="action-button action-button--ghost profiles__delete-btn"
               onClick={() => setConfirmingDelete(true)}
             >
-              Удалить правило
+              {t("ruleModal.deleteRule")}
             </button>
           )}
         </div>
@@ -392,6 +393,7 @@ export function ProfilesWorkspace({
   setActionPickerOpen,
   executionCounts,
 }: ProfilesWorkspaceProps) {
+  const { t } = useTranslation();
   const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVizPanel({
     effectiveProfileId,
     selectedLayer,
@@ -518,9 +520,9 @@ export function ProfilesWorkspace({
     const duplicate = findDuplicateAppMapping(activeConfig, activeProfile.id, exe);
     if (duplicate) {
       setConfirmModal({
-        title: "Правило уже существует",
-        message: `Для «${duplicate.exe}» уже есть правило в этом профиле. Создать ещё одно?`,
-        confirmLabel: "Создать",
+        title: t("confirm.duplicateRuleTitle"),
+        message: t("confirm.duplicateRuleMessage", { exe: duplicate.exe }),
+        confirmLabel: t("common.create"),
         onConfirm: () => {
           doCreateRule(exe, title, withTitleFilter, processPath);
           setConfirmModal(null);
@@ -586,9 +588,9 @@ export function ProfilesWorkspace({
             type="button"
             className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
             onClick={() => setHeatmapEnabled((prev) => !prev)}
-            title={heatmapEnabled ? "Выключить тепловую карту" : "Включить тепловую карту"}
+            title={heatmapEnabled ? t("profile.heatmapDisable") : t("profile.heatmapEnable")}
           >
-            {heatmapEnabled ? "Тепловая карта: вкл" : "Тепловая карта: выкл"}
+            {heatmapEnabled ? t("profile.heatmapOn") : t("profile.heatmapOff")}
           </button>
         </div>
       </div>
@@ -604,21 +606,21 @@ export function ProfilesWorkspace({
               const data = extractProfileExport(activeConfig, activeProfile.id);
               const json = JSON.stringify(data, null, 2);
               const path = await save({
-                title: "Экспорт профиля",
+                title: t("settings.exportDialogTitle"),
                 defaultPath: `${activeProfile.name}.json`,
                 filters: [{ name: "JSON", extensions: ["json"] }],
               });
               if (path) await writeTextFile(path, json);
             }}
           >
-            Экспорт профиля
+            {t("profile.exportProfile")}
           </button>
           <button
             type="button"
             className="action-button action-button--small"
             onClick={async () => {
               const path = await open({
-                title: "Импорт профиля",
+                title: t("settings.importDialogTitle"),
                 filters: [{ name: "JSON", extensions: ["json"] }],
                 multiple: false,
               });
@@ -636,14 +638,14 @@ export function ProfilesWorkspace({
               }
             }}
           >
-            Импорт профиля
+            {t("profile.importProfile")}
           </button>
         </div>
       ) : null}
 
       {/* ── Section header ── */}
       <div className="profiles__section-header">
-        <span>ПРАВИЛА ДЛЯ ПРИЛОЖЕНИЙ</span>
+        <span>{t("profile.rulesHeader")}</span>
         <span className="profiles__section-count">{selectedAppMappings.length}</span>
       </div>
 
@@ -669,7 +671,7 @@ export function ProfilesWorkspace({
                 className="profiles__toggle"
                 type="checkbox"
                 checked={mapping.enabled}
-                title={mapping.enabled ? "Отключить" : "Включить"}
+                title={mapping.enabled ? t("common.disabled") : t("common.enabled")}
                 onClick={(e) => e.stopPropagation()}
                 onChange={(e) =>
                   updateDraft((c) =>
@@ -686,17 +688,16 @@ export function ProfilesWorkspace({
             type="button"
             className="profiles__add-card"
             onClick={() => { setNewRuleOpen(true); setNewRuleExe(""); }}
-            title="Привязать приложение к этому профилю. При фокусе на приложение профиль переключится автоматически."
+            title={t("profile.addRuleTooltip")}
           >
-            + Добавить правило
+            {t("profile.addRule")}
           </button>
         ) : null}
       </div>
 
       {selectedAppMappings.length === 0 && activeProfile ? (
         <p className="profiles__empty-hint">
-          Правил пока нет. Нажмите «+ Добавить правило», чтобы привязать приложение к этому профилю.
-          При фокусе на привязанное приложение профиль переключится автоматически.
+          {t("profile.emptyHint")}
         </p>
       ) : null}
 
@@ -712,21 +713,21 @@ export function ProfilesWorkspace({
               type="button"
               className="rule-modal__close"
               onClick={() => setNewRuleOpen(false)}
-              aria-label="Закрыть"
+              aria-label={t("common.close")}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
                 <path d="M1 1l12 12M13 1L1 13" />
               </svg>
             </button>
             <div className="rule-modal__header">
-              <span className="rule-modal__title">Новое правило</span>
+              <span className="rule-modal__title">{t("newRule.title")}</span>
               <p className="rule-modal__subtitle">
-                Укажите приложение — профиль переключится автоматически при фокусе на него.
+                {t("newRule.subtitle")}
               </p>
             </div>
             <div className="rule-modal__body">
               <div className="field">
-                <span className="field__label">Исполняемый файл</span>
+                <span className="field__label">{t("newRule.exe")}</span>
                 <div className="field__row">
                   <input
                     type="text"
@@ -743,8 +744,8 @@ export function ProfilesWorkspace({
                     className="action-button action-button--small"
                     onClick={async () => {
                       const selected = await open({
-                        title: "Выберите исполняемый файл",
-                        filters: [{ name: "Программы", extensions: ["exe", "lnk"] }],
+                        title: t("newRule.browseTitle"),
+                        filters: [{ name: t("newRule.browseFilter"), extensions: ["exe", "lnk"] }],
                         multiple: false,
                       });
                       if (typeof selected === "string") {
@@ -754,7 +755,7 @@ export function ProfilesWorkspace({
                       }
                     }}
                   >
-                    Обзор...
+                    {t("common.browse")}
                   </button>
                 </div>
               </div>
@@ -792,10 +793,10 @@ export function ProfilesWorkspace({
                   <polyline points="7 10 12 15 17 10"/>
                   <line x1="12" y1="15" x2="12" y2="3"/>
                 </svg>
-                <span>Перетащите .exe или ярлык сюда</span>
+                <span>{t("newRule.dropzone")}</span>
               </div>
 
-              <div className="new-rule__divider">или</div>
+              <div className="new-rule__divider">{t("newRule.divider")}</div>
 
               <div className="new-rule__capture">
                 <button
@@ -804,10 +805,10 @@ export function ProfilesWorkspace({
                   onClick={() => { void handleCaptureForDialog(); }}
                   disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
                 >
-                  {captureCountdown !== null ? `Переключитесь на окно... ${captureCountdown}` : "Захватить активное окно"}
+                  {captureCountdown !== null ? t("newRule.captureCountdown", { countdown: captureCountdown }) : t("newRule.captureButton")}
                 </button>
                 <div className="new-rule__delay-row">
-                  <span className="new-rule__delay-label">Задержка:</span>
+                  <span className="new-rule__delay-label">{t("newRule.delayLabel")}</span>
                   <div className="new-rule__delay-pills">
                     {[
                       { value: 1000, label: "1с" },
@@ -827,8 +828,7 @@ export function ProfilesWorkspace({
                   </div>
                 </div>
                 <p className="new-rule__capture-hint">
-                  Нажмите кнопку и переключитесь на нужное окно за выбранное время.
-                  После задержки программа определит приложение и заполнит поля.
+                  {t("newRule.captureHelp")}
                 </p>
               </div>
 
@@ -845,14 +845,13 @@ export function ProfilesWorkspace({
                       checked={newRuleTitleEnabled}
                       onChange={(e) => setNewRuleTitleEnabled(e.target.checked)}
                     />
-                    <span>Фильтр по заголовку</span>
+                    <span>{t("newRule.titleFilter")}</span>
                   </label>
                   {newRuleTitleEnabled ? (
                     <div className="new-rule__title-detail">
                       <span className="new-rule__title-value">{newRuleCapturedTitle}</span>
                       <p className="new-rule__title-hint">
-                        Правило сработает только если заголовок окна содержит этот текст.
-                        Без фильтра — сработает для любого окна этого приложения.
+                        {t("newRule.titleFilterHelp")}
                       </p>
                     </div>
                   ) : null}
@@ -866,7 +865,7 @@ export function ProfilesWorkspace({
                 disabled={!newRuleExe.trim()}
                 onClick={handleConfirmNewRule}
               >
-                Создать
+                {t("common.create")}
               </button>
             </div>
           </div>
@@ -895,11 +894,11 @@ export function ProfilesWorkspace({
             onClose={() => setRuleCtxMenu(null)}
             items={[
               {
-                label: "Редактировать",
+                label: t("common.edit"),
                 onClick: () => setEditingMappingId(targetMapping.id),
               },
               {
-                label: "Дублировать",
+                label: t("common.duplicate"),
                 onClick: () => {
                   if (!activeProfile) return;
                   let newId: string | null = null;
@@ -922,13 +921,13 @@ export function ProfilesWorkspace({
               },
               null,
               {
-                label: "Удалить",
+                label: t("common.delete"),
                 danger: true,
                 onClick: () => {
                   setConfirmModal({
-                    title: "Удалить правило?",
-                    message: `Правило для «${targetMapping.exe}» будет удалено.`,
-                    confirmLabel: "Удалить",
+                    title: t("confirm.deleteRuleTitle"),
+                    message: t("confirm.deleteRuleMessage", { exe: targetMapping.exe }),
+                    confirmLabel: t("common.delete"),
                     onConfirm: () => {
                       updateDraft((c) => deleteAppMapping(c, targetMapping.id));
                       setConfirmModal(null);

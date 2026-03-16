@@ -22,8 +22,10 @@
     "@tauri-apps/plugin-global-shortcut": "^2.3.1",
     "@tauri-apps/plugin-log": "^2.8.0",
     "@tauri-apps/plugin-notification": "^2.3.3",
+    "i18next": "^25.8.18",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "react-i18next": "^16.5.8"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

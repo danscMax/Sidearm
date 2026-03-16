@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import type {
   ActionType,
   Binding,
@@ -21,7 +22,7 @@ import { ACTION_CATEGORIES, type ViewState } from "./constants";
 
 export function formatTimestamp(timestamp: number | null): string {
   if (timestamp == null) {
-    return "н/д";
+    return i18n.t("common.na");
   }
 
   return new Date(timestamp).toLocaleString();
@@ -43,41 +44,41 @@ export function logLevelBadgeClass(level: DebugLogEntry["level"]): string {
 export function labelForControlFamily(family: ControlFamily): string {
   switch (family) {
     case "thumbGrid":
-      return "Боковая клавиатура";
+      return i18n.t("control.family.thumbGrid");
     case "topPanel":
-      return "Верхняя панель";
+      return i18n.t("control.family.topPanel");
     case "wheel":
-      return "Колесо";
+      return i18n.t("control.family.wheel");
     case "system":
-      return "Системные контролы";
+      return i18n.t("control.family.system");
   }
 }
 
 export function labelForEncoderSource(source: EncoderMapping["source"] | undefined): string {
   switch (source) {
     case "synapse":
-      return "Synapse";
+      return i18n.t("encoder.synapse");
     case "detected":
-      return "Обнаружен";
+      return i18n.t("encoder.detected");
     case "reserved":
-      return "Зарезервирован";
+      return i18n.t("encoder.reserved");
     default:
-      return "н/д";
+      return i18n.t("common.na");
   }
 }
 
 export function labelForRuntimeStatus(status: RuntimeStateSummary["status"]): string {
-  return status === "running" ? "Запущен" : "Остановлен";
+  return status === "running" ? i18n.t("runtime.statusRunning") : i18n.t("runtime.statusStopped");
 }
 
 export function labelForPreviewStatus(status: ResolvedInputPreview["status"]): string {
   switch (status) {
     case "resolved":
-      return "Найдено";
+      return i18n.t("preview.resolved");
     case "unresolved":
-      return "Не найдено";
+      return i18n.t("preview.unresolved");
     case "ambiguous":
-      return "Неоднозначно";
+      return i18n.t("preview.ambiguous");
     default:
       return status;
   }
@@ -86,36 +87,36 @@ export function labelForPreviewStatus(status: ResolvedInputPreview["status"]): s
 export function labelForExecutionOutcome(outcome: ActionExecutionEvent["outcome"]): string {
   switch (outcome) {
     case "spawned":
-      return "Запущено";
+      return i18n.t("execution.spawned");
     case "injected":
-      return "Отправлено";
+      return i18n.t("execution.injected");
     case "simulated":
-      return "Смоделировано";
+      return i18n.t("execution.simulated");
     case "noop":
-      return "Без действия";
+      return i18n.t("execution.noop");
     default:
       return outcome;
   }
 }
 
 export function labelForExecutionMode(mode: ActionExecutionEvent["mode"]): string {
-  return mode === "live" ? "Живой" : "Пробный";
+  return mode === "live" ? i18n.t("execution.modeLive") : i18n.t("execution.modeTest");
 }
 
 export function labelForPasteMode(mode: PasteMode): string {
-  return mode === "clipboardPaste" ? "буфер обмена" : "прямой ввод";
+  return mode === "clipboardPaste" ? i18n.t("paste.clipboard") : i18n.t("paste.direct");
 }
 
 export function labelForSequenceStep(stepType: SequenceStep["type"]): string {
   switch (stepType) {
     case "send":
-      return "Отправка сочетания";
+      return i18n.t("sequence.send");
     case "text":
-      return "Ввод текста";
+      return i18n.t("sequence.text");
     case "sleep":
-      return "Пауза";
+      return i18n.t("sequence.sleep");
     case "launch":
-      return "Запуск";
+      return i18n.t("sequence.launch");
   }
 }
 
@@ -131,32 +132,32 @@ export function badgeClassForCapability(status: PhysicalControl["capabilityStatu
 export function labelForCapability(controlStatus: PhysicalControl["capabilityStatus"]): string {
   switch (controlStatus) {
     case "verified":
-      return "Подтверждён";
+      return i18n.t("control.capability.verified");
     case "needsValidation":
-      return "Нужна проверка";
+      return i18n.t("control.capability.needsValidation");
     case "reserved":
-      return "Зарезервирован";
+      return i18n.t("control.capability.reserved");
     case "partiallyRemappable":
-      return "Частично";
+      return i18n.t("control.capability.partiallyRemappable");
   }
 }
 
 export function labelForLayer(layer: Layer): string {
-  return layer === "standard" ? "Стандартный" : "Hypershift";
+  return layer === "standard" ? i18n.t("layer.standard") : i18n.t("layer.hypershift");
 }
 
 export function labelForVerificationResult(result: VerificationStepResult): string {
   switch (result) {
     case "pending":
-      return "Ожидает";
+      return i18n.t("verification.pending");
     case "matched":
-      return "Совпало";
+      return i18n.t("verification.matched");
     case "mismatched":
-      return "Не совпало";
+      return i18n.t("verification.mismatched");
     case "noSignal":
-      return "Нет сигнала";
+      return i18n.t("verification.noSignal");
     case "skipped":
-      return "Пропущено";
+      return i18n.t("verification.skipped");
   }
 }
 
@@ -164,47 +165,64 @@ export function actionCategoryIcon(actionType: ActionType): string {
   return ACTION_CATEGORIES.find((c) => c.actionType === actionType)?.icon ?? "—";
 }
 
-const CONTROL_DISPLAY_NAMES: Partial<Record<ControlId, string>> = {
-  thumb_01: "Кнопка 1", thumb_02: "Кнопка 2", thumb_03: "Кнопка 3",
-  thumb_04: "Кнопка 4", thumb_05: "Кнопка 5", thumb_06: "Кнопка 6",
-  thumb_07: "Кнопка 7", thumb_08: "Кнопка 8", thumb_09: "Кнопка 9",
-  thumb_10: "Кнопка 10", thumb_11: "Кнопка 11", thumb_12: "Кнопка 12",
-  mouse_left: "ЛКМ", mouse_right: "ПКМ",
-  mouse_4: "Назад", mouse_5: "Вперёд",
-  wheel_up: "Прокрутка вверх", wheel_down: "Прокрутка вниз",
-  wheel_click: "Клик колесом", wheel_left: "Колесо влево", wheel_right: "Колесо вправо",
-  hypershift_button: "Razer Hypershift",
-  top_aux_01: "Кнопка DPI+", top_aux_02: "Кнопка DPI−",
-  top_special_01: "Доп. кнопка 1", top_special_02: "Доп. кнопка 2", top_special_03: "Доп. кнопка 3",
+const CONTROL_ID_TO_I18N_KEY: Partial<Record<ControlId, string>> = {
+  thumb_01: "control.name.thumb01",
+  thumb_02: "control.name.thumb02",
+  thumb_03: "control.name.thumb03",
+  thumb_04: "control.name.thumb04",
+  thumb_05: "control.name.thumb05",
+  thumb_06: "control.name.thumb06",
+  thumb_07: "control.name.thumb07",
+  thumb_08: "control.name.thumb08",
+  thumb_09: "control.name.thumb09",
+  thumb_10: "control.name.thumb10",
+  thumb_11: "control.name.thumb11",
+  thumb_12: "control.name.thumb12",
+  mouse_left: "control.name.mouseLeft",
+  mouse_right: "control.name.mouseRight",
+  mouse_4: "control.name.mouseBack",
+  mouse_5: "control.name.mouseForward",
+  wheel_up: "control.name.wheelUp",
+  wheel_down: "control.name.wheelDown",
+  wheel_click: "control.name.wheelClick",
+  wheel_left: "control.name.wheelLeft",
+  wheel_right: "control.name.wheelRight",
+  hypershift_button: "control.name.hypershift",
+  top_aux_01: "control.name.dpiPlus",
+  top_aux_02: "control.name.dpiMinus",
+  top_special_01: "control.name.special01",
+  top_special_02: "control.name.special02",
+  top_special_03: "control.name.special03",
 };
 
 export function displayNameForControl(control: PhysicalControl): string {
-  return CONTROL_DISPLAY_NAMES[control.id] ?? control.defaultName;
+  const key = CONTROL_ID_TO_I18N_KEY[control.id];
+  return key ? i18n.t(key) : control.defaultName;
 }
 
 export function stateLabel(viewState: ViewState): string {
   switch (viewState) {
     case "idle":
-      return "Ожидание";
+      return i18n.t("viewState.idle");
     case "loading":
-      return "Загрузка конфигурации";
+      return i18n.t("viewState.loading");
     case "ready":
-      return "Готово";
+      return i18n.t("viewState.ready");
     case "saving":
-      return "Сохранение";
+      return i18n.t("viewState.saving");
     case "error":
-      return "Ошибка";
+      return i18n.t("viewState.error");
   }
 }
 
 export function surfacePrimaryLabel(binding: Binding | null, action: Action | null): string {
   if (!binding) {
-    return "Не назначено";
+    return i18n.t("binding.notAssigned");
   }
 
   if (!binding.enabled) {
-    return `${binding.label} · отключено`;
+    return `${binding.label} · ${i18n.t("binding.disabledSuffix")}`;
   }
 
-  return binding.label || action?.pretty || "Назначено";
+  return binding.label || action?.pretty || i18n.t("binding.assigned");
 }

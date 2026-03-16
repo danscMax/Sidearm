@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { ViewState } from "../lib/constants";
 
 export function Toolbar({
@@ -20,6 +21,7 @@ export function Toolbar({
   onRedo: () => void;
   onOpenCommandPalette?: () => void;
 }) {
+  const { t } = useTranslation();
   const isBusy = viewState === "loading" || viewState === "saving";
   const [overflowOpen, setOverflowOpen] = useState(false);
   const overflowRef = useRef<HTMLDivElement>(null);
@@ -46,10 +48,10 @@ export function Toolbar({
           type="button"
           className="toolbar__btn toolbar__btn--search"
           onClick={onOpenCommandPalette}
-          title="Палитра команд (Ctrl+K)"
+          title={t("toolbar.commandPalette")}
         >
           <span className="toolbar__icon">⌘</span>
-          <span className="toolbar__shortcut">Ctrl+K</span>
+          <span className="toolbar__shortcut">{t("toolbar.shortcut")}</span>
         </button>
       )}
       <div className="toolbar__actions">
@@ -59,7 +61,7 @@ export function Toolbar({
             className="toolbar__btn toolbar__btn--secondary"
             onClick={onUndo}
             disabled={undoCount === 0}
-            title="Отменить (Ctrl+Z)"
+            title={t("toolbar.undo")}
           >
             ↩
             {undoCount > 0 && (
@@ -71,20 +73,20 @@ export function Toolbar({
             className="toolbar__btn toolbar__btn--secondary"
             onClick={onRedo}
             disabled={redoCount === 0}
-            title="Повторить (Ctrl+Y)"
+            title={t("toolbar.redo")}
           >
             ↪
           </button>
         </div>
         {viewState === "saving" && (
-          <span className="toolbar__status">Сохранение…</span>
+          <span className="toolbar__status">{t("toolbar.saving")}</span>
         )}
         <div className="toolbar__overflow" ref={overflowRef}>
           <button
             type="button"
             className="toolbar__btn toolbar__btn--secondary"
             onClick={() => setOverflowOpen(!overflowOpen)}
-            title="Ещё"
+            title={t("toolbar.overflow")}
           >
             ⋯
           </button>
@@ -99,7 +101,7 @@ export function Toolbar({
                 }}
                 disabled={isBusy}
               >
-                Загрузить с диска
+                {t("toolbar.reload")}
               </button>
             </div>
           )}

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   Action,
   ActionType,
@@ -53,6 +54,7 @@ export function ActionInspector({
   selectedActionUsageCount,
   updateDraft,
 }: ActionInspectorProps) {
+  const { t } = useTranslation();
   // --- Derived values ---
   const selectedSequencePayload =
     selectedAction && selectedAction.type === "sequence"
@@ -140,7 +142,7 @@ export function ActionInspector({
           <div>
             <strong>{item.label}</strong>
             <span className="compound-card__meta">
-              {item.kind === "action" ? "Пункт действия" : "Подменю"}
+              {item.kind === "action" ? t("inspector.menuItemAction") : t("inspector.menuItemSubmenu")}
             </span>
           </div>
           <button
@@ -151,18 +153,18 @@ export function ActionInspector({
               updateSelectedMenuItems((items) => removeMenuItem(items, item.id));
             }}
           >
-            Удалить
+            {t("common.delete")}
           </button>
         </div>
 
         <div className="editor-grid">
           <div className="field">
-            <span className="field__label">ID пункта меню</span>
+            <span className="field__label">{t("inspector.menuItemId")}</span>
             <code className="field__static">{item.id}</code>
           </div>
 
           <label className="field">
-            <span className="field__label">Название</span>
+            <span className="field__label">{t("inspector.menuItemLabel")}</span>
             <input
               type="text"
               value={item.label}
@@ -178,7 +180,7 @@ export function ActionInspector({
           </label>
 
           <label className="field field--inline">
-            <span className="field__label">Включено</span>
+            <span className="field__label">{t("inspector.menuItemEnabled")}</span>
             <input
               type="checkbox"
               checked={item.enabled}
@@ -195,7 +197,7 @@ export function ActionInspector({
 
           {item.kind === "action" ? (
             <label className="field">
-              <span className="field__label">Ссылка на действие</span>
+              <span className="field__label">{t("inspector.menuItemActionRef")}</span>
               <select
                 value={item.actionRef}
                 onChange={(event) => {
@@ -221,7 +223,7 @@ export function ActionInspector({
           ) : (
             <>
               <div className="field__header">
-                <span className="field__label">Вложенные пункты</span>
+                <span className="field__label">{t("inspector.menuItemNested")}</span>
                 <div className="editor-actions">
                   <button
                     type="button"
@@ -231,7 +233,7 @@ export function ActionInspector({
                     }}
                     disabled={menuActionOptions.length === 0}
                   >
-                    Добавить действие
+                    {t("inspector.addActionItem")}
                   </button>
                   <button
                     type="button"
@@ -241,7 +243,7 @@ export function ActionInspector({
                     }}
                     disabled={menuActionOptions.length === 0}
                   >
-                    Добавить подменю
+                    {t("inspector.addSubmenu")}
                   </button>
                 </div>
               </div>
@@ -264,11 +266,11 @@ export function ActionInspector({
 
   return (
     <section className="panel">
-      <p className="panel__eyebrow">Действие кнопки</p>
+      <p className="panel__eyebrow">{t("inspector.actionEyebrow")}</p>
       {selectedAction ? (
         <div className="editor-grid">
           <label className="field">
-            <span className="field__label">Название действия</span>
+            <span className="field__label">{t("inspector.actionName")}</span>
             <input
               type="text"
               value={selectedAction.pretty}
@@ -282,7 +284,7 @@ export function ActionInspector({
           </label>
 
           <label className="field">
-            <span className="field__label">Тип действия</span>
+            <span className="field__label">{t("inspector.actionType")}</span>
             <select
               value={selectedAction.type}
               onChange={(event) => {
@@ -306,7 +308,7 @@ export function ActionInspector({
           {selectedAction.type === "shortcut" ? (
             <>
               <label className="field">
-                <span className="field__label">Клавиша</span>
+                <span className="field__label">{t("inspector.key")}</span>
                 <input
                   type="text"
                   value={selectedAction.payload.key}
@@ -322,7 +324,7 @@ export function ActionInspector({
               </label>
 
               <div className="field">
-                <span className="field__label">Модификаторы</span>
+                <span className="field__label">{t("inspector.modifiers")}</span>
                 <div className="toggle-grid">
                   {(
                     [
@@ -354,7 +356,7 @@ export function ActionInspector({
               </div>
 
               <label className="field">
-                <span className="field__label">Исходная строка шортката</span>
+                <span className="field__label">{t("inspector.rawShortcut")}</span>
                 <input
                   type="text"
                   value={selectedAction.payload.raw ?? ""}
@@ -374,7 +376,7 @@ export function ActionInspector({
           {selectedAction.type === "textSnippet" ? (
             <>
               <label className="field">
-                <span className="field__label">Источник фрагмента</span>
+                <span className="field__label">{t("inspector.snippetSource")}</span>
                 <select
                   value={selectedAction.payload.source}
                   onChange={(event) => {
@@ -406,12 +408,12 @@ export function ActionInspector({
                     );
                   }}
                 >
-                  <option value="inline">Встроенный текст</option>
+                  <option value="inline">{t("inspector.inlineText")}</option>
                   <option
                     value="libraryRef"
                     disabled={activeConfig.snippetLibrary.length === 0}
                   >
-                    Библиотека фрагментов
+                    {t("inspector.libraryRef")}
                   </option>
                 </select>
               </label>
@@ -419,7 +421,7 @@ export function ActionInspector({
               {selectedAction.payload.source === "inline" ? (
                 <>
                   <label className="field">
-                    <span className="field__label">Текст</span>
+                    <span className="field__label">{t("inspector.text")}</span>
                     <textarea
                       rows={5}
                       value={selectedAction.payload.text}
@@ -439,7 +441,7 @@ export function ActionInspector({
                   </label>
 
                   <label className="field">
-                    <span className="field__label">Способ вставки</span>
+                    <span className="field__label">{t("inspector.pasteMode")}</span>
                     <select
                       value={selectedAction.payload.pasteMode}
                       onChange={(event) => {
@@ -457,17 +459,17 @@ export function ActionInspector({
                         );
                       }}
                     >
-                      <option value="clipboardPaste">Через буфер обмена</option>
-                      <option value="sendText">Прямой ввод текста</option>
+                      <option value="clipboardPaste">{t("inspector.pasteModeClipboard")}</option>
+                      <option value="sendText">{t("inspector.pasteModeDirect")}</option>
                     </select>
                   </label>
 
                   <label className="field">
-                    <span className="field__label">Теги</span>
+                    <span className="field__label">{t("inspector.tags")}</span>
                     <input
                       type="text"
                       value={selectedAction.payload.tags.join(", ")}
-                      placeholder="тег1, тег2, тег3"
+                      placeholder="tag1, tag2, tag3"
                       onChange={(event) => {
                         updateSelectedActionDraft((action) =>
                           withTextSnippetPayload(action, (payload) =>
@@ -496,12 +498,12 @@ export function ActionInspector({
                       );
                     }}
                   >
-                    Создать запись в библиотеке
+                    {t("inspector.promoteSnippet")}
                   </button>
                 </>
               ) : (
                 <label className="field">
-                  <span className="field__label">Запись из библиотеки</span>
+                  <span className="field__label">{t("inspector.librarySnippet")}</span>
                   <select
                     value={selectedAction.payload.snippetId}
                     onChange={(event) => {
@@ -531,15 +533,15 @@ export function ActionInspector({
           {selectedSequencePayload ? (
             <div className="field">
               <div className="field__header">
-                <span className="field__label">Шаги последовательности</span>
+                <span className="field__label">{t("inspector.sequenceHeader")}</span>
                 <div className="editor-actions">
                   {(
                     [
-                      ["send", "Добавить отправку"],
-                      ["text", "Добавить текст"],
-                      ["sleep", "Добавить паузу"],
-                      ["launch", "Добавить запуск"],
-                    ] as const
+                      ["send", t("inspector.addSend")],
+                      ["text", t("inspector.addText")],
+                      ["sleep", t("inspector.addSleep")],
+                      ["launch", t("inspector.addLaunch")],
+                    ] as Array<[SequenceStep["type"], string]>
                   ).map(([stepType, label]) => (
                     <button
                       type="button"
@@ -568,7 +570,7 @@ export function ActionInspector({
                   <div className="compound-card" key={index}>
                     <div className="compound-card__header">
                       <div>
-                        <strong>Шаг {index + 1}</strong>
+                        <strong>{t("inspector.stepTitle", { index: index + 1 })}</strong>
                         <span className="compound-card__meta">
                           {labelForSequenceStep(step.type)}
                         </span>
@@ -588,13 +590,13 @@ export function ActionInspector({
                           );
                         }}
                       >
-                        Удалить
+                        {t("common.delete")}
                       </button>
                     </div>
 
                     <div className="editor-grid">
                       <label className="field">
-                        <span className="field__label">Тип шага</span>
+                        <span className="field__label">{t("inspector.stepType")}</span>
                         <select
                           value={step.type}
                           onChange={(event) => {
@@ -615,16 +617,16 @@ export function ActionInspector({
                             );
                           }}
                         >
-                          <option value="send">Отправка сочетания</option>
-                          <option value="text">Ввод текста</option>
-                          <option value="sleep">Пауза</option>
-                          <option value="launch">Запуск</option>
+                          <option value="send">{t("sequence.send")}</option>
+                          <option value="text">{t("sequence.text")}</option>
+                          <option value="sleep">{t("sequence.sleep")}</option>
+                          <option value="launch">{t("sequence.launch")}</option>
                         </select>
                       </label>
 
                       {step.type !== "sleep" ? (
                         <label className="field">
-                          <span className="field__label">Значение</span>
+                          <span className="field__label">{t("inspector.value")}</span>
                           <input
                             type="text"
                             value={step.value}
@@ -650,7 +652,7 @@ export function ActionInspector({
                       ) : null}
 
                       <label className="field">
-                        <span className="field__label">Задержка (мс, макс. 30 000)</span>
+                        <span className="field__label">{t("inspector.delay")}</span>
                         <input
                           type="number"
                           min={0}
@@ -685,11 +687,11 @@ export function ActionInspector({
                       {step.type === "launch" ? (
                         <>
                           <label className="field">
-                            <span className="field__label">Аргументы</span>
+                            <span className="field__label">{t("inspector.arguments")}</span>
                             <input
                               type="text"
                               value={(step.args ?? []).join(", ")}
-                              placeholder="арг1, арг2"
+                              placeholder="arg1, arg2"
                               onChange={(event) => {
                                 updateSelectedActionDraft((action) =>
                                   withSequencePayload(action, (payload) => ({
@@ -714,7 +716,7 @@ export function ActionInspector({
                           </label>
 
                           <label className="field">
-                            <span className="field__label">Рабочая папка</span>
+                            <span className="field__label">{t("inspector.workingDir")}</span>
                             <input
                               type="text"
                               value={step.workingDir ?? ""}
@@ -751,7 +753,7 @@ export function ActionInspector({
           {selectedAction.type === "launch" ? (
             <>
               <label className="field">
-                <span className="field__label">Цель запуска</span>
+                <span className="field__label">{t("inspector.launchTarget")}</span>
                 <input
                   type="text"
                   value={selectedAction.payload.target}
@@ -778,11 +780,11 @@ export function ActionInspector({
               </label>
 
               <label className="field">
-                <span className="field__label">Аргументы</span>
+                <span className="field__label">{t("inspector.arguments")}</span>
                 <input
                   type="text"
                   value={(selectedAction.payload.args ?? []).join(", ")}
-                  placeholder="арг1, арг2"
+                  placeholder="arg1, arg2"
                   onChange={(event) => {
                     updateSelectedActionDraft((action) =>
                       withLaunchPayload(action, (payload) => ({
@@ -795,7 +797,7 @@ export function ActionInspector({
               </label>
 
               <label className="field">
-                <span className="field__label">Рабочая папка</span>
+                <span className="field__label">{t("inspector.workingDir")}</span>
                 <input
                   type="text"
                   value={selectedAction.payload.workingDir ?? ""}
@@ -815,7 +817,7 @@ export function ActionInspector({
           {selectedMenuPayload ? (
             <div className="field">
               <div className="field__header">
-                <span className="field__label">Пункты меню</span>
+                <span className="field__label">{t("inspector.menuHeader")}</span>
                 <div className="editor-actions">
                   <button
                     type="button"
@@ -825,7 +827,7 @@ export function ActionInspector({
                     }}
                     disabled={menuActionOptions.length === 0}
                   >
-                    Добавить действие
+                    {t("inspector.addActionItem")}
                   </button>
                   <button
                     type="button"
@@ -835,17 +837,16 @@ export function ActionInspector({
                     }}
                     disabled={menuActionOptions.length === 0}
                   >
-                    Добавить подменю
+                    {t("inspector.addSubmenu")}
                   </button>
                 </div>
               </div>
 
               {menuActionOptions.length === 0 ? (
                 <div className="notice notice--warning">
-                  <strong>Нет доступных действий для меню</strong>
+                  <strong>{t("inspector.noActions")}</strong>
                   <p>
-                    Пункты меню должны ссылаться на другие действия.
-                    Создайте хотя бы ещё одно действие.
+                    {t("inspector.noActionsBody")}
                   </p>
                 </div>
               ) : null}
@@ -864,12 +865,12 @@ export function ActionInspector({
 
           <p className="panel__muted">
             {describeActionSummary(selectedAction, snippetById)}
-            {" "}Назначений: {selectedActionUsageCount}.
+            {" "}{t("inspector.assignmentCount", { count: selectedActionUsageCount })}
           </p>
         </div>
       ) : (
         <p className="panel__muted">
-          Сначала выберите или создайте назначение.
+          {t("inspector.empty")}
         </p>
       )}
     </section>

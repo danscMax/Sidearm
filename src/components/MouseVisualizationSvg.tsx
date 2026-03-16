@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { ACTION_CATEGORIES, layerCopy } from "../lib/constants";
@@ -29,10 +30,10 @@ function actionLabel(entry: ControlSurfaceEntry): string {
   return displayNameForControl(entry.control);
 }
 
-function tooltipText(entry: ControlSurfaceEntry): string {
+function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {
   const name = displayNameForControl(entry.control);
   if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
-    return `${name}\nНе назначено`;
+    return `${name}\n${unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   return `${name}\n${cat?.label ?? ""}: ${entry.action.pretty}`;
@@ -284,6 +285,7 @@ export function MouseVisualizationSvg({
   heatmapEnabled,
   onDropBinding,
 }: MouseVisualizationProps) {
+  const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
   const [dragOverId, setDragOverId] = useState<ControlId | null>(null);
@@ -541,7 +543,7 @@ export function MouseVisualizationSvg({
         xmlns="http://www.w3.org/2000/svg"
         style={{ width: "100%", height: "100%", display: "block" }}
         role="img"
-        aria-label="Razer Naga V2 HyperSpeed \u2014 схематический вид"
+        aria-label="Razer Naga V2 HyperSpeed — schematic view"
       >
         <defs>
           <linearGradient id="bodyGradient" x1="0" y1="0" x2="0" y2="1">
@@ -600,7 +602,7 @@ export function MouseVisualizationSvg({
               key={controlId}
               className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
               data-action-type={entry.action?.type ?? ""}
-              data-tooltip={tooltipText(entry)}
+              data-tooltip={tooltipText(entry, t("visualization.unassigned"))}
               style={heatmapEnabled && executionCounts && (executionCounts.get(controlId) ?? 0) > 0
                 ? { backgroundColor: "rgba(159, 202, 105, 0.07)" }
                 : undefined}
@@ -643,9 +645,9 @@ export function MouseVisualizationSvg({
 
   const layerIdx = layerCopy.findIndex((l) => l.value === selectedLayer);
   const viewTabs: { key: typeof activeTab; label: string }[] = [
-    { key: "combined", label: "Все кнопки" },
-    { key: "top", label: "Верхняя панель" },
-    { key: "side", label: "Боковая клавиатура" },
+    { key: "combined", label: t("visualization.tabAll") },
+    { key: "top", label: t("visualization.tabTop") },
+    { key: "side", label: t("visualization.tabSide") },
   ];
   const viewIdx = viewTabs.findIndex((t) => t.key === activeTab);
 

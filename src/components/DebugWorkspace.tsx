@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   Action,
   AppConfig,
@@ -94,6 +95,7 @@ export interface DebugWorkspaceProps {
 }
 
 export function DebugWorkspace(props: DebugWorkspaceProps) {
+  const { t } = useTranslation();
   const {
     activeConfig,
     profiles,
@@ -160,8 +162,8 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             onChange={(event) => {
               setResolutionKeyInput(event.target.value);
             }}
-            placeholder="Код сигнала (F13, Ctrl+Shift+F20...)"
-            title="Код сигнала, который отправляет мышь при нажатии кнопки"
+            placeholder={t("debug.signalPlaceholder")}
+            title={t("debug.signalTooltip")}
             onKeyDown={(event) => {
               if (event.key === "Enter" && resolutionKeyInput.trim()) {
                 void handlePreviewResolution();
@@ -174,68 +176,67 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
               className="action-button"
               onClick={() => { void handlePreviewResolution(); }}
               disabled={!resolutionKeyInput.trim()}
-              title="Определить профиль и действие для введённого кода сигнала"
+              title={t("debug.checkTooltip")}
             >
-              Проверить
+              {t("debug.check")}
             </button>
             <button
               type="button"
               className="action-button action-button--secondary"
               onClick={() => { void handleExecutePreviewAction(); }}
               disabled={!resolutionKeyInput.trim()}
-              title="Имитировать выполнение действия (без реальных нажатий клавиш)"
+              title={t("debug.testTooltip")}
             >
-              Пробный
+              {t("debug.test")}
             </button>
             <button
               type="button"
               className="action-button action-button--warning"
               onClick={() => { void handleRunPreviewAction(); }}
               disabled={!canRunLiveAction}
-              title="Выполнить привязанное действие по-настоящему (отправит клавиши в систему)"
+              title={t("debug.liveTooltip")}
             >
-              Вживую
+              {t("debug.live")}
             </button>
           </div>
         </div>
         <p className="panel__muted" style={{ fontSize: "0.75rem", margin: "6px 0 0" }}>
-          Введите код сигнала (например F13, Ctrl+Shift+F20) и нажмите Проверить, чтобы узнать, какой профиль и действие будут выполнены.
-          Пробный выполнит действие без реальных нажатий. Вживую выполнит действие по-настоящему.
+          {t("debug.helpTesting")}
         </p>
 
         {lastResolutionPreview ? (
           <div className="fact-grid" style={{ marginTop: 10 }}>
             <Fact
-              label="Профиль"
+              label={t("debug.profile")}
               value={lastResolutionPreview.resolvedProfileId
                 ? (profiles.find((p) => p.id === lastResolutionPreview.resolvedProfileId)?.name ??
                     lastResolutionPreview.resolvedProfileId)
-                : "н/д"}
+                : t("common.na")}
             />
             <Fact
-              label="Кнопка"
+              label={t("debug.control")}
               value={lastResolutionPreview.controlId
                 ? controlName(activeConfig.physicalControls, lastResolutionPreview.controlId)
-                : "н/д"}
+                : t("common.na")}
             />
-            <Fact label="Результат" value={labelForPreviewStatus(lastResolutionPreview.status)} />
+            <Fact label={t("debug.result")} value={labelForPreviewStatus(lastResolutionPreview.status)} />
             {lastResolutionPreview.actionId ? (
-              <Fact label="Действие" value={lastResolutionPreview.actionId} mono />
+              <Fact label={t("debug.action")} value={lastResolutionPreview.actionId} mono />
             ) : null}
           </div>
         ) : null}
 
         {lastExecution ? (
           <div className="fact-grid" style={{ marginTop: 8 }}>
-            <Fact label="Исход" value={labelForExecutionOutcome(lastExecution.outcome)} />
-            <Fact label="Режим" value={labelForExecutionMode(lastExecution.mode)} />
-            <Fact label="Действие" value={lastExecution.actionId} mono />
-            <Fact label="Время" value={formatTimestamp(lastExecution.executedAt)} />
+            <Fact label={t("debug.outcome")} value={labelForExecutionOutcome(lastExecution.outcome)} />
+            <Fact label={t("debug.mode")} value={labelForExecutionMode(lastExecution.mode)} />
+            <Fact label={t("debug.action")} value={lastExecution.actionId} mono />
+            <Fact label={t("debug.time")} value={formatTimestamp(lastExecution.executedAt)} />
           </div>
         ) : null}
 
         {lastRuntimeError ? (
-          <div className="notice notice--error" style={{ margin: "10px 0 0" }} title="Последняя ошибка рантайма">
+          <div className="notice notice--error" style={{ margin: "10px 0 0" }} title={t("debug.lastRuntimeError")}>
             <strong>{lastRuntimeError.category}</strong>
             <p>{lastRuntimeError.message}</p>
           </div>
@@ -261,7 +262,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
       {/* ── Collapsible verification session ── */}
       <details className="expert-log">
         <summary className="expert-log__summary">
-          Сессия проверки
+          {t("debug.sessionTitle")}
           {verificationSession ? (
             <span className="expert-log__count">
               {" "}({sessionSummary.matched + sessionSummary.mismatched + sessionSummary.noSignal + sessionSummary.skipped}
@@ -270,7 +271,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
           ) : null}
         </summary>
         <p className="panel__muted" style={{ fontSize: "0.75rem", padding: "0 20px 8px" }}>
-          Пошаговая проверка каждой кнопки мыши. Нажимайте кнопки на устройстве и отмечайте, совпадает ли результат с ожидаемым.
+          {t("debug.sessionHelp")}
         </p>
         <div className="expert-section">
           {selectedControl ? (
@@ -281,13 +282,13 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                   <>
                     <div className="compound-card__header">
                       <div>
-                        <strong>Сессия проверки</strong>
+                        <strong>{t("debug.sessionTitle")}</strong>
                         <span className="compound-card__meta">
-                          Пошаговая проверка каждой кнопки на реальном устройстве.
+                          {t("debug.sessionSetupMeta")}
                         </span>
                       </div>
                       <label className="field verification-session__scope">
-                        <span className="field__label">Объём</span>
+                        <span className="field__label">{t("debug.scopeLabel")}</span>
                         <select
                           value={verificationScope}
                           onChange={(event) => {
@@ -322,8 +323,8 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                         }}
                       >
                         {runtimeSummary.status !== "running"
-                          ? "Запустить перехват и начать"
-                          : "Начать сессию"}
+                          ? t("debug.startWithInterception")
+                          : t("debug.startSession")}
                       </button>
                     </div>
                   </>
@@ -335,9 +336,10 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     <div className="verification-progress">
                       <div className="verification-progress__header">
                         <strong>
-                          Шаг {Math.min(verificationSession.activeStepIndex + 1, verificationSession.steps.length)}
-                          {" / "}
-                          {verificationSession.steps.length}
+                          {t("debug.stepProgress", {
+                            current: Math.min(verificationSession.activeStepIndex + 1, verificationSession.steps.length),
+                            total: verificationSession.steps.length,
+                          })}
                         </strong>
                         <span className="verification-progress__stats">
                           {sessionSummary.matched > 0 ? `${sessionSummary.matched} ✓` : null}
@@ -377,21 +379,21 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                       <div className="editor-grid">
                         <div className="verification-instruction">
                           <h3 className="verification-instruction__title">
-                            Нажмите: {currentVerificationStep.controlLabel}
+                            {t("debug.pressButton", { label: currentVerificationStep.controlLabel })}
                           </h3>
                           <p className="verification-instruction__hint">
                             {controlPhysicalHint[currentVerificationStep.controlId] ??
-                              "Расположение этой кнопки пока не описано."}
+                              t("debug.unknownHint")}
                           </p>
                         </div>
 
                         {currentVerificationStep.result !== "pending" ? (
                           <div className="notice notice--info">
                             <strong>
-                              Этот шаг уже завершён: {labelForVerificationResult(currentVerificationStep.result)}
+                              {t("debug.stepAlreadyDone", { result: labelForVerificationResult(currentVerificationStep.result) })}
                             </strong>
                             <p>
-                              Вы можете перепроверить его или перейти к другому шагу.
+                              {t("debug.canRecheckOrSkip")}
                             </p>
                             <div className="editor-actions mt-8">
                               <button
@@ -401,7 +403,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                   handleReopenVerificationStep(verificationSession.activeStepIndex);
                                 }}
                               >
-                                Перепроверить
+                                {t("debug.recheck")}
                               </button>
                             </div>
                           </div>
@@ -409,16 +411,16 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                           <>
                             <div className="fact-grid">
                               <Fact
-                                label="Ожидалось"
-                                value={currentVerificationStep.expectedEncodedKey ?? "н/д"}
+                                label={t("debug.expectedLabel")}
+                                value={currentVerificationStep.expectedEncodedKey ?? t("common.na")}
                               />
                               <Fact
-                                label="Настроено"
-                                value={currentVerificationStep.configuredEncodedKey ?? "не назначено"}
+                                label={t("debug.configuredLabel")}
+                                value={currentVerificationStep.configuredEncodedKey ?? t("debug.configuredEmpty")}
                               />
                               <Fact
-                                label="Наблюдалось"
-                                value={currentVerificationStep.observedEncodedKey ?? "ожидание сигнала…"}
+                                label={t("debug.observedLabel")}
+                                value={currentVerificationStep.observedEncodedKey ?? t("debug.observedWaiting")}
                               />
                             </div>
 
@@ -433,8 +435,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                 }`}
                               >
                                 <strong>
-                                  Подсказка:{" "}
-                                  {labelForVerificationResult(suggestedSessionResult)}
+                                  {t("debug.suggestion", { result: labelForVerificationResult(suggestedSessionResult) })}
                                 </strong>
                                 <p>
                                   {describeVerificationSessionSuggestion(
@@ -446,11 +447,11 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                             ) : null}
 
                             <label className="field">
-                              <span className="field__label">Заметка по шагу</span>
+                              <span className="field__label">{t("debug.stepNotes")}</span>
                               <textarea
                                 rows={2}
                                 value={currentVerificationStep.notes}
-                                placeholder="Например: сработало только после повторного нажатия."
+                                placeholder={t("debug.stepNotesPlaceholder")}
                                 onChange={(event) => {
                                   handleVerificationNotesChange(event.target.value);
                                 }}
@@ -466,7 +467,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                               }}
                               disabled={!currentVerificationStep.observedEncodedKey}
                             >
-                              ✓ Совпало
+                              {`✓ ${t("debug.matched")}`}
                             </button>
 
                             {/* Secondary actions row */}
@@ -479,7 +480,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                 }}
                                 disabled={!currentVerificationStep.observedEncodedKey}
                               >
-                                Не совпало
+                                {t("debug.mismatched")}
                               </button>
                               <button
                                 type="button"
@@ -488,7 +489,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                   handleVerificationResult("noSignal");
                                 }}
                               >
-                                Нет сигнала
+                                {t("debug.noSignal")}
                               </button>
                               <button
                                 type="button"
@@ -497,7 +498,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                   handleVerificationResult("skipped");
                                 }}
                               >
-                                Пропустить
+                                {t("debug.skip")}
                               </button>
                               <button
                                 type="button"
@@ -507,7 +508,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                 }}
                                 disabled={runtimeSummary.status !== "running"}
                               >
-                                Перезапустить
+                                {t("debug.restart")}
                               </button>
                             </div>
                           </>
@@ -519,20 +520,22 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     {verificationSession.activeStepIndex >= verificationSession.steps.length ? (
                       <div className="editor-grid">
                         <div className="notice notice--ok">
-                          <strong>Сессия завершена</strong>
+                          <strong>{t("debug.sessionComplete")}</strong>
                           <p>
-                            Совпало: {sessionSummary.matched} · Не совпало: {sessionSummary.mismatched}
-                            {" · "}Нет сигнала: {sessionSummary.noSignal} · Пропущено: {sessionSummary.skipped}
+                            {t("debug.summaryMatched", { count: sessionSummary.matched })}
+                            {" · "}{t("debug.summaryMismatched", { count: sessionSummary.mismatched })}
+                            {" · "}{t("debug.summaryNoSignal", { count: sessionSummary.noSignal })}
+                            {" · "}{t("debug.summarySkipped", { count: sessionSummary.skipped })}
                           </p>
                         </div>
 
                         <table className="verification-summary-table">
                           <thead>
                             <tr>
-                              <th>Кнопка</th>
-                              <th>Ожидалось</th>
-                              <th>Наблюдалось</th>
-                              <th>Результат</th>
+                              <th>{t("debug.tableButton")}</th>
+                              <th>{t("debug.tableExpected")}</th>
+                              <th>{t("debug.tableObserved")}</th>
+                              <th>{t("debug.tableResult")}</th>
                             </tr>
                           </thead>
                           <tbody>
@@ -564,7 +567,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
 
                     {lastVerificationExportPath ? (
                       <div className="notice notice--ok">
-                        <strong>Отчёт сохранён</strong>
+                        <strong>{t("debug.reportSaved")}</strong>
                         <p className="panel__path">{lastVerificationExportPath}</p>
                       </div>
                     ) : null}
@@ -578,7 +581,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                         }}
                         disabled={!hasVerificationResults}
                       >
-                        Экспорт JSON
+                        {t("debug.exportJson")}
                       </button>
                       <button
                         type="button"
@@ -587,7 +590,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                           handleResetVerificationSession();
                         }}
                       >
-                        Сбросить сессию
+                        {t("debug.resetSession")}
                       </button>
                     </div>
                   </>
@@ -596,7 +599,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             </div>
           ) : (
             <p className="panel__muted">
-              Выберите кнопку перед началом сессии проверки.
+              {t("debug.selectButtonFirst")}
             </p>
           )}
         </div>
@@ -605,7 +608,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
       {/* ── Collapsible event log ── */}
       <details className="expert-log" open>
         <summary className="expert-log__summary">
-          Журнал событий
+          {t("debug.logTitle")}
           {logPanel.logs.length > 0 ? (
             <span className="expert-log__count">
               {" "}({logPanel.filteredLogs.length})
@@ -613,7 +616,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
           ) : null}
         </summary>
         <p className="panel__muted" style={{ fontSize: "0.75rem", padding: "0 20px 8px" }}>
-          Все события перехвата, ошибки и действия в реальном времени. Фильтруйте по уровню, категории или тексту.
+          {t("debug.logHelp")}
         </p>
         <LogPanel logPanel={logPanel} />
       </details>

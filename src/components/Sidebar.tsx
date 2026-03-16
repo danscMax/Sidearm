@@ -1,4 +1,5 @@
 import { startTransition, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorkspaceMode } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
@@ -37,12 +38,13 @@ export function Sidebar({
     onConfirm: () => void;
   } | null) => void;
 }) {
+  const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        Sidearm
-        <strong>Razer Naga V2 HyperSpeed</strong>
+        {t("app.name")}
+        <strong>{t("app.device")}</strong>
       </div>
       {workspaceModeCopy.map((mode) => (
         <button
@@ -57,13 +59,13 @@ export function Sidebar({
       <div className="sidebar__sep" />
       <div className="sidebar__section">
         <div className="sidebar__section-header">
-          <span className="sidebar__section-label">ПРОФИЛЬ</span>
+          <span className="sidebar__section-label">{t("sidebar.profileHeader")}</span>
           <div style={{ display: "flex", gap: 4 }}>
             <button
               type="button"
               className="sidebar__add-profile-btn"
               onClick={() => onSwitchMode("settings")}
-              title="Настройки профилей"
+              title={t("sidebar.settingsTooltip")}
             >
               ⚙
             </button>
@@ -71,7 +73,7 @@ export function Sidebar({
               type="button"
               className="sidebar__add-profile-btn"
               onClick={onCreateProfile}
-              title="Добавить профиль"
+              title={t("sidebar.addProfileTooltip")}
             >
               +
             </button>
@@ -111,7 +113,7 @@ export function Sidebar({
               >
                 {p.name}
                 {runtimeStatus === "running" && runtimeResolvedProfileName === p.name ? (
-                  <span className="pill-track__active-dot" title="Активный в runtime" />
+                  <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
                 ) : null}
               </button>
             ))}
@@ -147,10 +149,10 @@ export function Sidebar({
       >
         <span className={`sidebar__runtime-dot sidebar__runtime-dot--${runtimeStatus === "running" ? "running" : "stopped"}`} />
         <span className="sidebar__runtime-label">
-          {runtimeStatus === "running" ? "Перехват активен" : "Перехват остановлен"}
+          {runtimeStatus === "running" ? t("sidebar.runtimeActive") : t("sidebar.runtimeStopped")}
         </span>
         <span className="sidebar__runtime-action">
-          {runtimeStatus === "running" ? "Стоп" : "Старт"}
+          {runtimeStatus === "running" ? t("sidebar.stop") : t("sidebar.start")}
         </span>
       </button>
       {ctxMenu ? (
@@ -163,13 +165,13 @@ export function Sidebar({
             if (!targetProfile) return [];
             return [
               {
-                label: "Настройки",
+                label: t("workspace.settings.label"),
                 onClick: () => {
                   onSwitchMode("settings");
                 },
               },
               {
-                label: "Дублировать",
+                label: t("common.duplicate"),
                 onClick: () => {
                   let newId: string | null = null;
                   updateDraft((c) => {
@@ -185,13 +187,13 @@ export function Sidebar({
               null,
               ...(profiles.length > 1
                 ? [{
-                    label: "Удалить",
+                    label: t("common.delete"),
                     danger: true as const,
                     onClick: () => {
                       setConfirmModal({
-                        title: "Удалить профиль?",
-                        message: `Профиль «${targetProfile.name}» будет удалён вместе со всеми назначениями и правилами.`,
-                        confirmLabel: "Удалить",
+                        title: t("confirm.deleteProfileTitle"),
+                        message: t("confirm.deleteProfileMessage", { name: targetProfile.name }),
+                        confirmLabel: t("common.delete"),
                         onConfirm: () => {
                           updateDraft((c) => deleteProfile(c, targetProfile.id));
                           setSelectedProfileId(null);

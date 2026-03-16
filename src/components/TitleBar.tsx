@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
 export function TitleBar() {
+  const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
   const appWindow = getCurrentWindow();
 
@@ -40,15 +42,15 @@ export function TitleBar() {
   return (
     <div className="titlebar" data-tauri-drag-region>
       <span className="titlebar__title" data-tauri-drag-region>
-        Sidearm
+        {t("app.name")}
       </span>
       <div className="titlebar__controls">
         <button
           type="button"
           className="titlebar__btn"
           onClick={handleMinimize}
-          aria-label="Свернуть"
-          title="Свернуть"
+          aria-label={t("titlebar.minimize")}
+          title={t("titlebar.minimize")}
         >
           <svg width="10" height="1" viewBox="0 0 10 1">
             <rect width="10" height="1" fill="currentColor" />
@@ -58,8 +60,8 @@ export function TitleBar() {
           type="button"
           className="titlebar__btn"
           onClick={handleMaximize}
-          aria-label={maximized ? "Восстановить" : "Развернуть"}
-          title={maximized ? "Восстановить" : "Развернуть"}
+          aria-label={maximized ? t("titlebar.restore") : t("titlebar.maximize")}
+          title={maximized ? t("titlebar.restore") : t("titlebar.maximize")}
         >
           {maximized ? (
             <svg width="10" height="10" viewBox="0 0 10 10">
@@ -78,8 +80,8 @@ export function TitleBar() {
           type="button"
           className="titlebar__btn titlebar__btn--close"
           onClick={handleClose}
-          aria-label="Закрыть"
-          title="Закрыть"
+          aria-label={t("titlebar.close")}
+          title={t("titlebar.close")}
         >
           <svg width="10" height="10" viewBox="0 0 10 10">
             <path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />

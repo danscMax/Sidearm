@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import type {
   Action,
   AppConfig,
@@ -52,6 +53,7 @@ export function ControlPropertiesPanel({
   updateDraft,
   verificationSessionActive,
 }: ControlPropertiesPanelProps) {
+  const { t } = useTranslation();
   const hasVerificationMode = selectedLayer != null && updateDraft != null;
 
   // Verification-mode derived values
@@ -81,7 +83,7 @@ export function ControlPropertiesPanel({
       <section className="panel panel--accent">
         <div className="props-empty">
           <p className="props-empty__icon">⊹</p>
-          <p className="props-empty__text">Выберите кнопку, чтобы увидеть свойства</p>
+          <p className="props-empty__text">{t("properties.empty")}</p>
         </div>
       </section>
     );
@@ -96,7 +98,7 @@ export function ControlPropertiesPanel({
           {selectedEncoder?.encodedKey ? (
             <code className="props-header__signal">{selectedEncoder.encodedKey}</code>
           ) : (
-            <span className="props-header__signal props-header__signal--empty">не назначен</span>
+            <span className="props-header__signal props-header__signal--empty">{t("properties.signalEmpty")}</span>
           )}
         </div>
         <span className="props-header__group">{labelForControlFamily(selectedControl.family)}</span>
@@ -105,7 +107,7 @@ export function ControlPropertiesPanel({
       {hasVerificationMode ? (
         <div className="props-meta">
           <div className="props-meta__status">
-            <span className="props-meta__label">Статус</span>
+            <span className="props-meta__label">{t("properties.status")}</span>
             <span className="props-meta__value">{labelForCapability(selectedControl.capabilityStatus)}</span>
           </div>
           <label className="props-meta__select">
@@ -121,10 +123,10 @@ export function ControlPropertiesPanel({
                 );
               }}
             >
-              <option value="verified">Подтверждена</option>
-              <option value="needsValidation">Нужна проверка</option>
-              <option value="partiallyRemappable">Частично переназначается</option>
-              <option value="reserved">Зарезервирована</option>
+              <option value="verified">{t("inspector.capabilityVerified")}</option>
+              <option value="needsValidation">{t("inspector.capabilityNeedsValidation")}</option>
+              <option value="partiallyRemappable">{t("inspector.capabilityPartially")}</option>
+              <option value="reserved">{t("inspector.capabilityReserved")}</option>
             </select>
           </label>
         </div>
@@ -132,14 +134,14 @@ export function ControlPropertiesPanel({
 
       {/* ── Action preview ── */}
       <div className="props-action">
-        <span className="props-action__eyebrow">Назначенное действие</span>
+        <span className="props-action__eyebrow">{t("properties.actionEyebrow")}</span>
         {selectedBinding ? (
           <div className="props-action__body">
             <strong className="props-action__name">{selectedBinding.label}</strong>
             <span className="props-action__detail">{describeActionSummary(selectedAction, snippetById)}</span>
           </div>
         ) : (
-          <p className="props-action__empty">Для этой кнопки на текущем слое назначение ещё не создано.</p>
+          <p className="props-action__empty">{t("properties.actionEmpty")}</p>
         )}
       </div>
 
@@ -151,30 +153,30 @@ export function ControlPropertiesPanel({
             <p>{verificationAlignment.body}</p>
             <p className="notice__meta">
               {lastObservedResolvedSelectedControl
-                ? "Последняя проверка совпала с этой кнопкой и слоем."
-                : "Последний сигнал мог относиться к другой кнопке или к ручной проверке."}
+                ? t("debug.verificationMatch")
+                : t("debug.verificationOther")}
             </p>
           </div>
 
           <div className="props-signals">
             <div className="props-signal">
-              <span className="props-signal__label">Ожидалось</span>
-              <code className="props-signal__value">{expectedEncodedKey ?? "н/д"}</code>
+              <span className="props-signal__label">{t("properties.expected")}</span>
+              <code className="props-signal__value">{expectedEncodedKey ?? t("common.na")}</code>
             </div>
             <div className="props-signal">
-              <span className="props-signal__label">Настроено</span>
+              <span className="props-signal__label">{t("properties.configured")}</span>
               <code className="props-signal__value">{selectedEncoder?.encodedKey ?? "—"}</code>
             </div>
             <div className="props-signal">
-              <span className="props-signal__label">Наблюдалось</span>
+              <span className="props-signal__label">{t("properties.observed")}</span>
               <code className="props-signal__value props-signal__value--observed">
-                {lastObservedEncodedKey ?? "ничего"}
+                {lastObservedEncodedKey ?? t("properties.observedEmpty")}
               </code>
             </div>
             <div className="props-signal">
-              <span className="props-signal__label">Время</span>
+              <span className="props-signal__label">{t("properties.time")}</span>
               <span className="props-signal__value">
-                {lastEncodedKey ? formatTimestamp(lastEncodedKey.receivedAt) : "н/д"}
+                {lastEncodedKey ? formatTimestamp(lastEncodedKey.receivedAt) : t("common.na")}
               </span>
             </div>
           </div>
@@ -192,7 +194,7 @@ export function ControlPropertiesPanel({
             >
               <span className="verification-step__num">1</span>
               <span className="verification-step__label">
-                {selectedEncoder ? "Применить ожидаемый" : "Создать ожидаемый"}
+                {selectedEncoder ? t("properties.applyExpected") : t("properties.createExpected")}
               </span>
             </button>
 
@@ -214,7 +216,7 @@ export function ControlPropertiesPanel({
               disabled={!lastObservedEncodedKey}
             >
               <span className="verification-step__num">2</span>
-              <span className="verification-step__label">Наблюдаемый сигнал</span>
+              <span className="verification-step__label">{t("properties.observedSignal")}</span>
             </button>
 
             <button
@@ -242,7 +244,7 @@ export function ControlPropertiesPanel({
               }
             >
               <span className="verification-step__num">3</span>
-              <span className="verification-step__label">Подтвердить</span>
+              <span className="verification-step__label">{t("properties.confirm")}</span>
             </button>
 
             <button
@@ -260,7 +262,7 @@ export function ControlPropertiesPanel({
               disabled={!selectedEncoder}
             >
               <span className="verification-step__num">4</span>
-              <span className="verification-step__label">Повысить статус</span>
+              <span className="verification-step__label">{t("properties.promoteStatus")}</span>
             </button>
           </div>
         </div>

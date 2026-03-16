@@ -446,10 +446,40 @@ fn push_virtual_key_up(inputs: &mut Vec<KeyboardInputSpec>, key: VirtualKeySpec)
     });
 }
 
+/// Map Cyrillic characters to their QWERTY Latin equivalents.
+/// Users often capture shortcuts with Russian keyboard layout active,
+/// producing 'С' (Cyrillic) instead of 'C' (Latin) for Ctrl+C.
+fn normalize_cyrillic_key(key: &str) -> String {
+    key.chars()
+        .map(|ch| match ch {
+            'а' | 'А' => 'A', 'б' | 'Б' => 'B', 'в' | 'В' => 'V',
+            'г' | 'Г' => 'G', 'д' | 'Д' => 'D', 'е' | 'Е' => 'E',
+            'ж' | 'Ж' => ';', 'з' | 'З' => 'Z', 'и' | 'И' => 'I',
+            'й' | 'Й' => 'Q', 'к' | 'К' => 'K', 'л' | 'Л' => 'L',
+            'м' | 'М' => 'M', 'н' | 'Н' => 'N', 'о' | 'О' => 'O',
+            'п' | 'П' => 'P', 'р' | 'Р' => 'R', 'с' | 'С' => 'C',
+            'т' | 'Т' => 'T', 'у' | 'У' => 'U', 'ф' | 'Ф' => 'F',
+            'х' | 'Х' => '[', 'ц' | 'Ц' => 'W', 'ч' | 'Ч' => 'X',
+            'ш' | 'Ш' => 'S', 'щ' | 'Щ' => 'S', 'ъ' | 'Ъ' => ']',
+            'ы' | 'Ы' => 'Y', 'э' | 'Э' => '\'', 'ю' | 'Ю' => '.',
+            'я' | 'Я' => 'J',
+            _ => ch,
+        })
+        .collect()
+}
+
 fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
     let trimmed = key.trim();
     if trimmed.is_empty() {
         return Err("Shortcut key must not be empty for live execution.".into());
+    }
+
+    // Normalize Cyrillic → Latin (e.g. Ctrl+С → Ctrl+C)
+    let has_cyrillic = trimmed.chars().any(|c| matches!(c, '\u{0400}'..='\u{04FF}'));
+    if has_cyrillic {
+        let normalized = normalize_cyrillic_key(trimmed);
+        log::info!("[input] Normalized Cyrillic key: `{trimmed}` → `{normalized}`");
+        return parse_primary_key(&normalized);
     }
 
     if trimmed.chars().count() == 1 {

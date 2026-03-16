@@ -432,7 +432,6 @@ function App() {
           undoCount={undoStack.length}
           redoCount={redoStack.length}
           viewState={viewState}
-          onLoad={() => { void refreshConfig(); }}
           onUndo={handleUndo}
           onRedo={handleRedo}
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}

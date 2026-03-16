@@ -195,6 +195,12 @@ pub fn run_preview_action(
             )
         })?;
 
+    log::info!(
+        "[executor] Executing action: {} for key {}",
+        action.action_type.as_str(),
+        preview.encoded_key
+    );
+
     match (&action.action_type, &action.payload) {
         (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => run_live_shortcut_action(
             action,
@@ -541,6 +547,10 @@ fn run_live_shortcut_action(
 ) -> Result<ActionExecutionEvent, ExecutorError> {
     let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
     let dispatch = input_synthesis::send_shortcut(payload, &encoding_mods).map_err(|message| {
+        log::error!(
+            "[executor] Shortcut injection failed for key {}: {message}",
+            preview.encoded_key
+        );
         execution_error(
             "execution_failed",
             "выполнение",
@@ -579,6 +589,11 @@ fn run_live_mouse_action(
     let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
     let dispatch =
         input_synthesis::send_mouse_action(payload, &encoding_mods).map_err(|message| {
+            log::error!(
+                "[executor] Mouse action `{}` failed for key {}: {message}",
+                payload.action,
+                preview.encoded_key
+            );
             execution_error(
                 "execution_failed",
                 "выполнение",
@@ -651,7 +666,16 @@ fn run_live_text_snippet_action(
     let mut warnings = live_text.warnings;
     match live_text.paste_mode {
         PasteMode::SendText => {
+            log::info!(
+                "[executor] TextSnippet sendText: {} chars for key {}",
+                live_text.text.chars().count(),
+                preview.encoded_key
+            );
             input_synthesis::send_text(&live_text.text).map_err(|message| {
+                log::error!(
+                    "[executor] TextSnippet sendText failed for key {}: {message}",
+                    preview.encoded_key
+                );
                 execution_error(
                     "execution_failed",
                     "выполнение",
@@ -662,7 +686,16 @@ fn run_live_text_snippet_action(
             })?;
         }
         PasteMode::ClipboardPaste => {
+            log::info!(
+                "[executor] Clipboard paste: preparing text ({} chars) for key {}",
+                live_text.text.chars().count(),
+                preview.encoded_key
+            );
             let paste_report = clipboard::paste_text(&live_text.text).map_err(|message| {
+                log::error!(
+                    "[executor] Clipboard paste failed for key {}: {message}",
+                    preview.encoded_key
+                );
                 execution_error(
                     "execution_failed",
                     "выполнение",
@@ -671,6 +704,7 @@ fn run_live_text_snippet_action(
                     Some(action.id.clone()),
                 )
             })?;
+            log::info!("[executor] Clipboard paste: complete for key {}", preview.encoded_key);
             warnings.extend(paste_report.warnings);
         }
     }
@@ -731,6 +765,10 @@ fn spawn_launch_target(
     }
 
     command.spawn().map(|child| child.id()).map_err(|error| {
+        log::error!(
+            "[executor] Launch failed for `{}`: {error}",
+            payload.target
+        );
         execution_error(
             "execution_failed",
             "выполнение",

@@ -56,6 +56,14 @@ pub fn send_shortcut(
     payload: &ShortcutActionPayload,
     encoding_mods: &HotkeyModifiers,
 ) -> Result<ShortcutDispatchReport, String> {
+    log::debug!(
+        "[input] Shortcut: {}{}{}{}{}",
+        if payload.ctrl { "Ctrl+" } else { "" },
+        if payload.shift { "Shift+" } else { "" },
+        if payload.alt { "Alt+" } else { "" },
+        if payload.win { "Win+" } else { "" },
+        payload.key
+    );
     clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
     let (plan, reused_modifiers) = plan_shortcut_inputs(payload, &snapshot)?;
@@ -167,6 +175,8 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
     if text.is_empty() {
         return Ok(());
     }
+
+    log::debug!("[input] Text input: {} chars", text.chars().count());
 
     // For long text, attempt clipboard-paste first (much faster than per-char SendInput).
     if text.chars().count() > CLIPBOARD_PASTE_THRESHOLD {
@@ -787,6 +797,8 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
         return Ok(());
     }
 
+    log::debug!("[input] Sending {} inputs", inputs.len());
+
     let windows_inputs: Vec<INPUT> = inputs
         .iter()
         .map(|input| match input {
@@ -851,10 +863,12 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
             }
             None => " SendInput may have been blocked by another thread or by UIPI.".into(),
         };
-        Err(format!(
+        let msg = format!(
             "SendInput inserted {sent} of {} event(s).{suffix}",
             windows_inputs.len()
-        ))
+        );
+        log::error!("[input] {msg}");
+        Err(msg)
     }
 }
 
@@ -1248,6 +1262,7 @@ pub fn send_mouse_action(
     payload: &MouseActionPayload,
     encoding_mods: &HotkeyModifiers,
 ) -> Result<MouseDispatchReport, String> {
+    log::debug!("[input] Mouse action: {}", payload.action);
     clear_modifiers(encoding_mods)?;
 
     let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;

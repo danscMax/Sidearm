@@ -1528,8 +1528,17 @@ fn run_fire_and_forget(
     _event: &EncodedKeyEvent,
     mut log_entries: Vec<(&str, String, bool)>,
 ) {
+    log::info!(
+        "[capture] Dispatching action for {}",
+        preview.encoded_key
+    );
     match executor::run_preview_action(config, preview) {
         Ok(execution) => {
+            log::info!(
+                "[capture] Action complete for {} (outcome: {:?})",
+                execution.encoded_key,
+                execution.outcome
+            );
             log_entries.push((
                 "выполнение",
                 format!(
@@ -1545,6 +1554,11 @@ fn run_fire_and_forget(
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
         }
         Err(error) => {
+            log::error!(
+                "[capture] Action failed for {}: {}",
+                preview.encoded_key,
+                error.event.message
+            );
             flush_log_entries(runtime_store, log_entries);
             emit_runtime_error(app, runtime_store, &error.event);
         }

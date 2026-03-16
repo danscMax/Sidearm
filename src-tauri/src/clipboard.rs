@@ -16,7 +16,12 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
         return Err("clipboardPaste does not support NUL characters in snippet text.".into());
     }
 
+    log::info!(
+        "[clipboard] paste_text: staging {} chars",
+        text.chars().count()
+    );
     let _ole = OleScope::initialize()?;
+    log::debug!("[clipboard] Saving clipboard snapshot");
     let snapshot = ClipboardSnapshot::capture()?;
     let write_result = set_clipboard_text(text)?;
 
@@ -28,7 +33,9 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
         alt: true,
         win: true,
     };
+    log::debug!("[clipboard] Injecting Ctrl+V");
     if let Err(error) = input_synthesis::send_hotkey_string("Ctrl+V", &all_mods) {
+        log::warn!("[clipboard] Ctrl+V injection failed: {error}");
         let restore_message = snapshot
             .restore_force()
             .err()
@@ -41,10 +48,15 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
 
     thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
 
+    log::debug!("[clipboard] Restoring clipboard");
     let warnings = match snapshot.restore_if_unchanged(write_result.sequence_number) {
         Ok(w) => w,
-        Err(restore_error) => vec![restore_error],
+        Err(restore_error) => {
+            log::warn!("[clipboard] Clipboard restore failed: {restore_error}");
+            vec![restore_error]
+        }
     };
+    log::debug!("[clipboard] Clipboard operation complete");
     Ok(ClipboardPasteReport { warnings })
 }
 
@@ -153,11 +165,13 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
         // here, but the snapshot restore is best-effort and may not recover all
         // original clipboard formats.
         if EmptyClipboard() == 0 {
+            log::warn!("[clipboard] EmptyClipboard failed while staging snippet text");
             return Err("EmptyClipboard failed while staging snippet text.".into());
         }
 
         let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
         if handle.is_null() {
+            log::warn!("[clipboard] GlobalAlloc failed after EmptyClipboard; prior clipboard contents are lost");
             return Err(
                 "GlobalAlloc failed after EmptyClipboard; prior clipboard contents are lost."
                     .into(),
@@ -167,6 +181,7 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
         let locked = GlobalLock(handle);
         if locked.is_null() {
             let _ = GlobalFree(handle);
+            log::warn!("[clipboard] GlobalLock failed while staging snippet text");
             return Err("GlobalLock failed while staging snippet text.".into());
         }
 
@@ -177,6 +192,10 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
         if clipboard_handle.is_null() {
             let _ = GlobalFree(handle);
             let owner = GetOpenClipboardWindow();
+            log::warn!(
+                "[clipboard] SetClipboardData failed. OpenClipboard owner: 0x{:X}",
+                owner as usize
+            );
             return Err(format!(
                 "SetClipboardData failed while staging snippet text. OpenClipboard owner: 0x{:X}.",
                 owner as usize
@@ -222,8 +241,13 @@ fn restore_clipboard_object(data_object: &ComPtr) -> Result<Vec<String>, String>
     unsafe {
         use windows_sys::Win32::System::Ole::{OleFlushClipboard, OleSetClipboard};
 
+        log::debug!("[clipboard] Restoring previous clipboard object");
         let hr = OleSetClipboard(data_object.as_raw());
         if !succeeded(hr) {
+            log::warn!(
+                "[clipboard] OleSetClipboard failed: {}",
+                format_hresult(hr)
+            );
             return Err(format!(
                 "Failed to restore the previous clipboard object: {}",
                 format_hresult(hr)
@@ -232,6 +256,10 @@ fn restore_clipboard_object(data_object: &ComPtr) -> Result<Vec<String>, String>
 
         let flush_hr = OleFlushClipboard();
         if !succeeded(flush_hr) {
+            log::warn!(
+                "[clipboard] OleFlushClipboard failed: {}",
+                format_hresult(flush_hr)
+            );
             return Ok(vec![format!(
                 "Clipboard was restored, but OleFlushClipboard failed: {}.",
                 format_hresult(flush_hr)
@@ -253,6 +281,7 @@ fn open_clipboard_with_retry() -> Result<(), String> {
     unsafe {
         use windows_sys::Win32::System::DataExchange::{GetOpenClipboardWindow, OpenClipboard};
 
+        log::debug!("[clipboard] Opening clipboard");
         for attempt in 0..CLIPBOARD_OPEN_RETRIES {
             if OpenClipboard(ptr::null_mut()) != 0 {
                 return Ok(());
@@ -264,10 +293,12 @@ fn open_clipboard_with_retry() -> Result<(), String> {
         }
 
         let owner = GetOpenClipboardWindow();
-        Err(format!(
+        let msg = format!(
             "OpenClipboard failed after {} attempts. OpenClipboard owner: 0x{:X}.",
             CLIPBOARD_OPEN_RETRIES, owner as usize
-        ))
+        );
+        log::warn!("[clipboard] {msg}");
+        Err(msg)
     }
 
     #[cfg(not(target_os = "windows"))]

@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & Discussions
+    url: https://github.com/danscMax/Sidearm/issues
+    about: For general questions, open an issue with the "question" label.

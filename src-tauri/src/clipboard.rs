@@ -27,6 +27,7 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
     let text_owned = text.to_owned();
     let handle = thread::Builder::new()
         .name("clipboard-sta".into())
+        .stack_size(16 * 1024 * 1024) // 16 MB — OleInitialize + COM/Shell extensions need deep stack
         .spawn(move || {
             log::info!("[clipboard] STA thread started");
             let result = paste_text_sta(&text_owned);

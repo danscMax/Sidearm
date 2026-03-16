@@ -23,15 +23,35 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
     // async runtime initializes threads as MTA. Calling OleInitialize on an
     // MTA thread causes RPC_E_CHANGED_MODE or a COM crash. The fix: run the
     // entire clipboard operation on a dedicated STA thread.
+    log::info!("[clipboard] Spawning STA thread for clipboard operation");
     let text_owned = text.to_owned();
     let handle = thread::Builder::new()
         .name("clipboard-sta".into())
-        .spawn(move || paste_text_sta(&text_owned))
+        .spawn(move || {
+            log::info!("[clipboard] STA thread started");
+            let result = paste_text_sta(&text_owned);
+            match &result {
+                Ok(_) => log::info!("[clipboard] STA thread completed successfully"),
+                Err(e) => log::error!("[clipboard] STA thread failed: {e}"),
+            }
+            result
+        })
         .map_err(|e| format!("Failed to spawn clipboard STA thread: {e}"))?;
 
-    handle
-        .join()
-        .map_err(|_| "Clipboard STA thread panicked".to_string())?
+    match handle.join() {
+        Ok(result) => result,
+        Err(panic_info) => {
+            let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                format!("Clipboard STA thread panicked: {s}")
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                format!("Clipboard STA thread panicked: {s}")
+            } else {
+                "Clipboard STA thread panicked (unknown cause)".to_string()
+            };
+            log::error!("[clipboard] {msg}");
+            Err(msg)
+        }
+    }
 }
 
 /// Runs on a dedicated STA thread where OleInitialize succeeds.

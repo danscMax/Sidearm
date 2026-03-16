@@ -28,10 +28,10 @@ function Stop-StaleProcesses {
     # Kill Vite/node holding our port
     $portPids = netstat -ano 2>$null | Select-String ":${VITE_PORT}.*LISTENING" |
         ForEach-Object { ($_ -split '\s+')[-1] } | Sort-Object -Unique
-    foreach ($pid in $portPids) {
-        if ($pid -and $pid -ne '0') {
-            Write-Host "  Freeing port $VITE_PORT (PID $pid)" -ForegroundColor Yellow
-            Stop-Process -Id ([int]$pid) -Force -ErrorAction SilentlyContinue
+    foreach ($procId in $portPids) {
+        if ($procId -and $procId -ne '0') {
+            Write-Host "  Freeing port $VITE_PORT (PID $procId)" -ForegroundColor Yellow
+            Stop-Process -Id ([int]$procId) -Force -ErrorAction SilentlyContinue
         }
     }
 }

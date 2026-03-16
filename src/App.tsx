@@ -177,14 +177,10 @@ function App() {
   }, [activeConfig, selectedControlId]);
 
   // Sync UI profile with runtime's resolved profile (auto-switch on window focus change).
-  // Skip when the user triggered a manual capture (they are assigning a new app rule
-  // to a specific profile and don't want the UI to switch away from it).
-  const manualCaptureRef = useRef(false);
+  // Suppressed while a manual capture is in progress (countdown → capture → result).
+  const [profileSyncSuppressed, setProfileSyncSuppressed] = useState(false);
   useEffect(() => {
-    if (manualCaptureRef.current) {
-      manualCaptureRef.current = false;
-      return;
-    }
+    if (profileSyncSuppressed) return;
     if (
       lastCapture &&
       !lastCapture.ignored &&
@@ -195,7 +191,7 @@ function App() {
         setSelectedProfileId(lastCapture.resolvedProfileId!);
       });
     }
-  }, [lastCapture]);
+  }, [lastCapture, profileSyncSuppressed]);
 
   // H1: Global keyboard shortcuts (useEffectEvent avoids re-registering on every render)
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
@@ -461,10 +457,8 @@ function App() {
                 updateDraft={updateDraft}
                 setCaptureDelayMs={setCaptureDelayMs}
                 setConfirmModal={setConfirmModal}
-                handleCaptureActiveWindow={async () => {
-                  manualCaptureRef.current = true;
-                  await handleCaptureActiveWindow();
-                }}
+                handleCaptureActiveWindow={handleCaptureActiveWindow}
+                setProfileSyncSuppressed={setProfileSyncSuppressed}
                 familySections={familySections}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}

@@ -41,6 +41,7 @@ export interface ProfilesWorkspaceProps {
     onConfirm: () => void;
   } | null) => void;
   handleCaptureActiveWindow: () => Promise<void>;
+  setProfileSyncSuppressed: (suppressed: boolean) => void;
   familySections: FamilySection[];
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
@@ -105,6 +106,7 @@ function ExeIcon({ exe, processPath, className }: { exe: string; processPath?: s
 interface AppMappingModalProps {
   mapping: AppMapping;
   profileName: string;
+  activeConfig: AppConfig;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   onClose: () => void;
 }
@@ -112,6 +114,7 @@ interface AppMappingModalProps {
 function AppMappingModal({
   mapping,
   profileName,
+  activeConfig,
   updateDraft,
   onClose,
 }: AppMappingModalProps) {
@@ -297,6 +300,29 @@ function AppMappingModal({
               />
             </label>
           </div>
+
+          {/* Move to another profile */}
+          <div className="field">
+            <span className="field__label">Профиль</span>
+            <select
+              value={mapping.profileId}
+              onChange={(e) => {
+                const newProfileId = e.target.value;
+                if (newProfileId !== mapping.profileId) {
+                  updateDraft((c) =>
+                    upsertAppMapping(c, { ...mapping, profileId: newProfileId }),
+                  );
+                }
+              }}
+            >
+              {activeConfig.profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <p className="field__description">
+              Переместите правило в другой профиль.
+            </p>
+          </div>
         </div>
 
         {/* Footer */}
@@ -355,6 +381,7 @@ export function ProfilesWorkspace({
   setCaptureDelayMs,
   setConfirmModal,
   handleCaptureActiveWindow,
+  setProfileSyncSuppressed,
   familySections,
   selectedLayer,
   multiSelectedControlIds,
@@ -440,6 +467,12 @@ export function ProfilesWorkspace({
     const startTime = Date.now();
     setCaptureCountdown(Math.ceil(totalMs / 1000));
 
+    // Suppress profile auto-switching for the entire capture duration
+    // (countdown + delay + capture). Without this, Alt+Tabbing to the
+    // target window triggers foreground watcher → profile sync → UI
+    // switches away from the user's chosen profile.
+    setProfileSyncSuppressed(true);
+
     countdownRef.current = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const remaining = Math.max(0, Math.ceil((totalMs - elapsed) / 1000));
@@ -458,6 +491,7 @@ export function ProfilesWorkspace({
         countdownRef.current = null;
       }
       setCaptureCountdown(null);
+      setProfileSyncSuppressed(false);
     }
   }
 
@@ -844,6 +878,7 @@ export function ProfilesWorkspace({
         <AppMappingModal
           mapping={editingMapping}
           profileName={activeProfile?.name ?? ""}
+          activeConfig={activeConfig}
           updateDraft={updateDraft}
           onClose={() => setEditingMappingId(null)}
         />

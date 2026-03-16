@@ -62,6 +62,7 @@ pub struct RuntimeStore {
     active_config_version: Option<i32>,
     warning_count: usize,
     last_notified_profile_id: Option<String>,
+    capture_in_progress: bool,
     logs: VecDeque<DebugLogEntry>,
     next_log_id: u64,
 }
@@ -75,6 +76,7 @@ impl Default for RuntimeStore {
             active_config_version: None,
             warning_count: 0,
             last_notified_profile_id: None,
+            capture_in_progress: false,
             logs: VecDeque::new(),
             next_log_id: 1,
         }
@@ -141,6 +143,15 @@ impl RuntimeStore {
             self.last_notified_profile_id = profile_id.map(|s| s.to_owned());
         }
         changed
+    }
+
+    /// Suppress auto-profile-switching while a window capture is in progress.
+    pub fn set_capture_in_progress(&mut self, in_progress: bool) {
+        self.capture_in_progress = in_progress;
+    }
+
+    pub fn is_capture_in_progress(&self) -> bool {
+        self.capture_in_progress
     }
 
     pub fn reload(&mut self, config_version: i32, warning_count: usize) -> RuntimeStateSummary {

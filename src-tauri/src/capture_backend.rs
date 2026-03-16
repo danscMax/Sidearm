@@ -1187,6 +1187,20 @@ fn run_foreground_watcher(
             let borrow = cell.borrow();
             let Some(ctx) = borrow.as_ref() else { return };
 
+            // Skip auto-profile-switching while a manual window capture is
+            // in progress (the user is Alt+Tabbing to the target window).
+            {
+                let is_capturing = ctx
+                    .runtime_store
+                    .lock()
+                    .ok()
+                    .map(|store| store.is_capture_in_progress())
+                    .unwrap_or(false);
+                if is_capturing {
+                    return;
+                }
+            }
+
             let capture_result = match window_capture::capture_active_window_with_resolution(
                 &ctx.config,
                 &ctx.app_name,

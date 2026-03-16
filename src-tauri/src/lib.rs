@@ -441,6 +441,16 @@ async fn capture_active_window(
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
     delay_ms: Option<u64>,
 ) -> Result<WindowCaptureResult, CommandError> {
+    // Suppress auto-profile-switching during capture so that when the user
+    // Alt+Tabs to the target window, the foreground watcher doesn't change
+    // the active profile before the capture completes.
+    {
+        let mut store = runtime_store
+            .lock()
+            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+        store.set_capture_in_progress(true);
+    }
+
     let config_dir = resolve_config_dir(&app)?;
     let app_name = app.package_info().name.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
@@ -497,6 +507,14 @@ async fn capture_active_window(
             let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
             show_osd(&app, profile_name);
         }
+    }
+
+    // Re-enable auto-profile-switching now that capture is done.
+    {
+        let mut store = runtime_store
+            .lock()
+            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+        store.set_capture_in_progress(false);
     }
 
     // Return focus to the studio window after capture

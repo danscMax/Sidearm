@@ -176,8 +176,15 @@ function App() {
     }
   }, [activeConfig, selectedControlId]);
 
-  // Sync UI profile with runtime's resolved profile (auto-switch on window focus change)
+  // Sync UI profile with runtime's resolved profile (auto-switch on window focus change).
+  // Skip when the user triggered a manual capture (they are assigning a new app rule
+  // to a specific profile and don't want the UI to switch away from it).
+  const manualCaptureRef = useRef(false);
   useEffect(() => {
+    if (manualCaptureRef.current) {
+      manualCaptureRef.current = false;
+      return;
+    }
     if (
       lastCapture &&
       !lastCapture.ignored &&
@@ -454,7 +461,10 @@ function App() {
                 updateDraft={updateDraft}
                 setCaptureDelayMs={setCaptureDelayMs}
                 setConfirmModal={setConfirmModal}
-                handleCaptureActiveWindow={handleCaptureActiveWindow}
+                handleCaptureActiveWindow={async () => {
+                  manualCaptureRef.current = true;
+                  await handleCaptureActiveWindow();
+                }}
                 familySections={familySections}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}

@@ -1197,6 +1197,7 @@ fn run_foreground_watcher(
                     .map(|store| store.is_capture_in_progress())
                     .unwrap_or(false);
                 if is_capturing {
+                    log::debug!("[capture] Foreground change ignored (capture in progress)");
                     return;
                 }
             }

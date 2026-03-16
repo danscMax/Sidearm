@@ -449,6 +449,7 @@ async fn capture_active_window(
             .lock()
             .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
         store.set_capture_in_progress(true);
+        log::info!("[system] capture_in_progress = true (v2 auto-switching suppressed)");
     }
 
     let config_dir = resolve_config_dir(&app)?;
@@ -515,6 +516,7 @@ async fn capture_active_window(
             .lock()
             .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
         store.set_capture_in_progress(false);
+        log::info!("[system] capture_in_progress = false (auto-switching resumed)");
     }
 
     // Return focus to the studio window after capture

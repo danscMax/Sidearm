@@ -423,10 +423,11 @@ pub struct ShortcutActionPayload {
     pub raw: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub enum PasteMode {
     ClipboardPaste,
+    #[default]
     SendText,
 }
 
@@ -2395,7 +2396,7 @@ fn snippet(id: &str, name: &str, text: &str, tags: &[&str]) -> SnippetLibraryIte
         id: id.into(),
         name: name.into(),
         text: text.into(),
-        paste_mode: PasteMode::ClipboardPaste,
+        paste_mode: PasteMode::SendText,
         tags: tags.iter().map(|tag| (*tag).to_owned()).collect(),
         notes: None,
     }

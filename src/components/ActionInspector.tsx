@@ -396,7 +396,7 @@ export function ActionInspector({
                               pasteMode:
                                 payload.source === "inline"
                                   ? payload.pasteMode
-                                  : "clipboardPaste",
+                                  : "sendText",
                               tags:
                                 payload.source === "inline"
                                   ? payload.tags

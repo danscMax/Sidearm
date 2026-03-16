@@ -429,7 +429,7 @@ export function ActionPickerModal({
   const [textDraft, setTextDraft] = useState<{ text: string; pasteMode: PasteMode }>(() =>
     existingAction?.type === "textSnippet" && existingAction.payload.source === "inline"
       ? { text: existingAction.payload.text, pasteMode: existingAction.payload.pasteMode }
-      : { text: "", pasteMode: "clipboardPaste" },
+      : { text: "", pasteMode: "sendText" },
   );
   const [launchDraft, setLaunchDraft] = useState<{ target: string; args: string }>(() =>
     existingAction?.type === "launch"

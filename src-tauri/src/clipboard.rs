@@ -16,12 +16,28 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
         return Err("clipboardPaste does not support NUL characters in snippet text.".into());
     }
 
-    log::info!(
-        "[clipboard] paste_text: staging {} chars",
-        text.chars().count()
-    );
+    let char_count = text.chars().count();
+    log::info!("[clipboard] paste_text: staging {char_count} chars");
+
+    // OleInitialize requires STA (Single-Threaded Apartment), but Tauri's
+    // async runtime initializes threads as MTA. Calling OleInitialize on an
+    // MTA thread causes RPC_E_CHANGED_MODE or a COM crash. The fix: run the
+    // entire clipboard operation on a dedicated STA thread.
+    let text_owned = text.to_owned();
+    let handle = thread::Builder::new()
+        .name("clipboard-sta".into())
+        .spawn(move || paste_text_sta(&text_owned))
+        .map_err(|e| format!("Failed to spawn clipboard STA thread: {e}"))?;
+
+    handle
+        .join()
+        .map_err(|_| "Clipboard STA thread panicked".to_string())?
+}
+
+/// Runs on a dedicated STA thread where OleInitialize succeeds.
+fn paste_text_sta(text: &str) -> Result<ClipboardPasteReport, String> {
     let _ole = OleScope::initialize()?;
-    log::debug!("[clipboard] Saving clipboard snapshot");
+    log::debug!("[clipboard] STA thread: OLE initialized, saving clipboard snapshot");
     let snapshot = ClipboardSnapshot::capture()?;
     let write_result = set_clipboard_text(text)?;
 

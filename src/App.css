@@ -495,6 +495,51 @@ select::checkmark {
   color: var(--c-text-bright);
 }
 
+/* Flat icon buttons for toolbar actions */
+.toolbar__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  position: relative;
+  transition: background 0.12s, color 0.12s;
+}
+
+.toolbar__icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-text-bright);
+}
+
+.toolbar__icon-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+/* Language selector in toolbar */
+.toolbar__lang {
+  padding: 3px 4px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+}
+
+.toolbar__lang:hover {
+  border-color: var(--c-accent);
+  color: var(--c-text-bright);
+}
+
 .toolbar__actions {
   display: flex;
   align-items: center;

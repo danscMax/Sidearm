@@ -135,15 +135,20 @@ export function SettingsWorkspace({
           <span>{t("settings.languageHeader")}</span>
         </div>
         <div className="settings-bottom-actions">
-          <select
-            value={i18n.language}
-            onChange={(e) => {
-              changeLanguage(e.target.value);
-            }}
+          <button
+            type="button"
+            className={`action-button action-button--small${i18n.language === "ru" ? "" : " action-button--ghost"}`}
+            onClick={() => changeLanguage("ru")}
           >
-            <option value="ru">Русский</option>
-            <option value="en">English</option>
-          </select>
+            Русский
+          </button>
+          <button
+            type="button"
+            className={`action-button action-button--small${i18n.language === "en" ? "" : " action-button--ghost"}`}
+            onClick={() => changeLanguage("en")}
+          >
+            English
+          </button>
         </div>
       </section>
 

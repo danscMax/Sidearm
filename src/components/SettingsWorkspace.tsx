@@ -304,6 +304,69 @@ export function SettingsWorkspace({
           </div>
         ) : null}
       </section>
+
+      {/* Full config backup */}
+      <section className="panel">
+        <div className="profiles__section-header">
+          <span>РЕЗЕРВНОЕ КОПИРОВАНИЕ</span>
+        </div>
+        <p className="panel__muted" style={{ fontSize: "0.8rem", marginBottom: 12 }}>
+          Экспортируйте всю конфигурацию (профили, правила, привязки, настройки) в файл для бэкапа или переноса на другой компьютер.
+        </p>
+        <div className="settings-bottom-actions">
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={async () => {
+              const path = await save({
+                title: "Сохранить конфигурацию",
+                defaultPath: `sidearm-backup-${new Date().toISOString().slice(0, 10)}.json`,
+                filters: [{ name: "JSON", extensions: ["json"] }],
+              });
+              if (path) {
+                const json = JSON.stringify(activeConfig, null, 2);
+                await writeTextFile(path, json);
+              }
+            }}
+          >
+            Экспорт конфигурации
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={async () => {
+              const path = await open({
+                title: "Загрузить конфигурацию",
+                filters: [{ name: "JSON", extensions: ["json"] }],
+                multiple: false,
+              });
+              if (typeof path === "string") {
+                try {
+                  const text = await readTextFile(path);
+                  const imported = JSON.parse(text) as AppConfig;
+                  if (!imported.profiles || !imported.bindings || !imported.settings) {
+                    setImportError("Файл не содержит полной конфигурации Sidearm.");
+                    return;
+                  }
+                  setConfirmModal({
+                    title: "Заменить конфигурацию?",
+                    message: `Текущая конфигурация будет полностью заменена данными из файла. Это действие нельзя отменить. Продолжить?`,
+                    confirmLabel: "Заменить",
+                    onConfirm: () => {
+                      updateDraft(() => imported);
+                      setImportError(null);
+                    },
+                  });
+                } catch {
+                  setImportError("Не удалось прочитать файл конфигурации.");
+                }
+              }
+            }}
+          >
+            Импорт конфигурации
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

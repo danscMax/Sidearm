@@ -273,6 +273,18 @@ async fn start_runtime(
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
     runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
 ) -> Result<RuntimeStateSummary, CommandError> {
+    // Guard: if already running, return current state (prevents double spawn
+    // from React.StrictMode double-invoking useEffect in dev mode).
+    {
+        let store = runtime_store
+            .lock()
+            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+        if store.is_running() {
+            log::info!("[system] start_runtime called but already running, skipping");
+            return Ok(store.summary());
+        }
+    }
+
     let config_dir = resolve_config_dir(&app)?;
     let load_response =
         tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))

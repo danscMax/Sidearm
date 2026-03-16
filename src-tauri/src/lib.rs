@@ -81,6 +81,7 @@ pub(crate) fn create_osd_window(app: &AppHandle) {
     let _ = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App("/osd.html".into()))
         .title("")
         .inner_size(200.0, 32.0)
+        .position(-9999.0, -9999.0) // off-screen until first show_osd positions it
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)

@@ -11,6 +11,7 @@ import { useLogPanel } from "./hooks/useLogPanel";
 import { useRuntime } from "./hooks/useRuntime";
 import { useVerification } from "./hooks/useVerification";
 import { error as logError } from "@tauri-apps/plugin-log";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette } from "./components/CommandPalette";
@@ -110,6 +111,10 @@ function App() {
 
   useEffect(() => {
     async function initApp() {
+      // Show the window now that React has mounted (avoids white flash).
+      // The window starts hidden (visible:false in tauri.conf.json).
+      void getCurrentWindow().show();
+
       const configLoaded = await refreshConfig();
       if (!configLoaded) return;
       try {

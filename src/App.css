@@ -91,7 +91,7 @@ button, input, textarea, select {
   display: flex;
   align-items: center;
   height: 32px;
-  background: var(--c-bg);
+  background: rgba(13, 22, 17, 0.85);
   border-bottom: 1px solid var(--c-border);
   user-select: none;
   -webkit-user-select: none;
@@ -156,7 +156,7 @@ button, input, textarea, select {
   flex-direction: column;
   gap: 2px;
   padding: 16px 10px;
-  background: linear-gradient(180deg, rgba(18, 27, 23, 0.97), rgba(10, 16, 13, 0.99));
+  background: rgba(10, 16, 13, 0.65);
   border-right: 1px solid var(--c-border);
 }
 
@@ -444,9 +444,8 @@ select::checkmark {
 .content {
   padding: 0;
   min-width: 0;
-  overflow-y: auto;
-  /* overlay: scrollbar floats on top, no gutter reserved */
   overflow-y: overlay;
+  scrollbar-gutter: auto;
 }
 
 /* ── Toolbar ── */

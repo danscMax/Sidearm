@@ -546,7 +546,7 @@
     "assignAction": "Assign action",
     "pasteBinding": "Paste binding"
   },
-  "inspector": {
+  "snippet": {
     "eyebrow": "Snippet library",
     "id": "Snippet ID",
     "name": "Snippet name",

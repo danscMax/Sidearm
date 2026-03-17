@@ -408,6 +408,10 @@ export function createAppMappingFromCapture(
   processPath?: string,
 ): CreateAppMappingResult {
   const normalizedExe = exe.trim().toLowerCase();
+  if (!normalizedExe) {
+    throw new Error("exe must not be empty");
+  }
+  const clampedPriority = Math.max(0, Math.min(9999, Math.round(priority)));
   const baseId = makeAppMappingId(normalizedExe);
   const nextId = nextUniqueId(
     config.appMappings.map((mapping) => mapping.id),
@@ -419,7 +423,7 @@ export function createAppMappingFromCapture(
     processPath: processPath || undefined,
     profileId,
     enabled: true,
-    priority,
+    priority: clampedPriority,
     titleIncludes:
       includeTitleFilter && title.trim() ? [title.trim()] : undefined,
   };

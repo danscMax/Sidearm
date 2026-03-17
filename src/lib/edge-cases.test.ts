@@ -7,7 +7,6 @@ import type {
   AppMapping,
   Binding,
   ControlId,
-  EncoderMapping,
   Layer,
   Profile,
 } from "./config";
@@ -62,49 +61,6 @@ function createMinimalConfig(overrides?: Partial<AppConfig>): AppConfig {
   };
 }
 
-// Arbitrary for a simple profile
-const arbProfile: fc.Arbitrary<Profile> = fc.record({
-  id: fc.string({ minLength: 1, maxLength: 30 }).map((s) => `profile-${s.replace(/[^a-z0-9-]/g, "x")}`),
-  name: fc.string({ minLength: 1, maxLength: 50 }),
-  enabled: fc.boolean(),
-  priority: fc.integer({ min: 0, max: 100 }),
-});
-
-// Arbitrary for a disabled action
-const arbAction = (profileId: string): fc.Arbitrary<Action> =>
-  fc.string({ minLength: 1, maxLength: 20 }).map((suffix) => ({
-    id: `action-${profileId}-${suffix.replace(/[^a-z0-9-]/g, "x")}`,
-    type: "disabled" as const,
-    payload: {} as Record<string, never>,
-    pretty: `Action ${suffix}`,
-  }));
-
-// Arbitrary for a binding referencing a given profile and action
-const arbBinding = (profileId: string, actionId: string): fc.Arbitrary<Binding> =>
-  fc.record({
-    controlId: fc.constantFrom(...ALL_CONTROL_IDS),
-    layer: fc.constantFrom(...ALL_LAYERS),
-    label: fc.string({ minLength: 0, maxLength: 30 }),
-    enabled: fc.boolean(),
-  }).map((fields) => ({
-    id: `binding-${profileId}-${fields.layer}-${fields.controlId}-${Math.random().toString(36).slice(2, 8)}`,
-    profileId,
-    actionRef: actionId,
-    ...fields,
-  }));
-
-// Arbitrary for an AppMapping
-const arbAppMapping = (profileId: string): fc.Arbitrary<AppMapping> =>
-  fc.record({
-    exe: fc.string({ minLength: 1, maxLength: 40 }),
-    priority: fc.integer({ min: 0, max: 100 }),
-    enabled: fc.boolean(),
-  }).map((fields) => ({
-    id: `app-${Math.random().toString(36).slice(2, 10)}`,
-    profileId,
-    ...fields,
-  }));
-
 // Arbitrary for an existing set of app mappings with unique IDs (realistic input)
 const arbExistingAppMappings: fc.Arbitrary<AppMapping[]> = fc
   .uniqueArray(
@@ -136,7 +92,7 @@ describe("createAppMappingFromCapture (PBT)", () => {
     fc.assert(
       fc.property(
         arbExistingAppMappings,
-        fc.string({ minLength: 1, maxLength: 30 }),
+        fc.string({ minLength: 1, maxLength: 30 }).filter((s) => s.trim().length > 0),
         fc.integer({ min: 0, max: 9999 }),
         fc.string({ minLength: 0, maxLength: 40 }),
         fc.boolean(),
@@ -160,7 +116,7 @@ describe("createAppMappingFromCapture (PBT)", () => {
   it("exe is normalized to lowercase", () => {
     fc.assert(
       fc.property(
-        fc.string({ minLength: 1, maxLength: 50 }),
+        fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0),
         fc.integer({ min: 0, max: 9999 }),
         (exe, priority) => {
           const config = createMinimalConfig({
@@ -179,7 +135,7 @@ describe("createAppMappingFromCapture (PBT)", () => {
   it("exe is trimmed (no leading/trailing whitespace)", () => {
     fc.assert(
       fc.property(
-        fc.string({ minLength: 0, maxLength: 50 }),
+        fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0),
         fc.integer({ min: 0, max: 100 }),
         (exe, priority) => {
           const config = createMinimalConfig({
@@ -195,7 +151,7 @@ describe("createAppMappingFromCapture (PBT)", () => {
     );
   });
 
-  it("empty exe creates a mapping with empty string exe (no crash)", () => {
+  it("empty exe throws error", () => {
     fc.assert(
       fc.property(
         fc.constantFrom("", "  ", "\t", "\n"),
@@ -203,35 +159,31 @@ describe("createAppMappingFromCapture (PBT)", () => {
           const config = createMinimalConfig({
             profiles: [{ id: "p1", name: "P1", enabled: true, priority: 0 }],
           });
-          const result = createAppMappingFromCapture(config, "p1", 0, exe, "", false);
-          // The function does not reject empty exe — it normalizes to empty string
-          const newMapping = result.config.appMappings.find((m) => m.id === result.newMappingId);
-          expect(newMapping).toBeDefined();
-          expect(newMapping!.exe).toBe("");
+          expect(() => createAppMappingFromCapture(config, "p1", 0, exe, "", false)).toThrow();
         },
       ),
       { numRuns: 20 },
     );
   });
 
-  it("priority is stored as-is (no clamping in this function)", () => {
+  it("priority is clamped to 0-9999 range", () => {
     fc.assert(
       fc.property(
-        fc.integer({ min: -100000, max: 100000 }),
+        fc.integer({ min: -10000, max: 20000 }),
         (priority) => {
           const config = createMinimalConfig({
             profiles: [{ id: "p1", name: "P1", enabled: true, priority: 0 }],
           });
           const result = createAppMappingFromCapture(config, "p1", priority, "test.exe", "", false);
-          const newMapping = result.config.appMappings.find((m) => m.id === result.newMappingId);
-          expect(newMapping).toBeDefined();
-          // Priority is stored verbatim — no clamping exists in the function
-          expect(newMapping!.priority).toBe(priority);
+          const mapping = result.config.appMappings.find((m) => m.id === result.newMappingId);
+          expect(mapping!.priority).toBeGreaterThanOrEqual(0);
+          expect(mapping!.priority).toBeLessThanOrEqual(9999);
         },
       ),
       { numRuns: 500 },
     );
   });
+
 });
 
 // ---------------------------------------------------------------------------

@@ -558,6 +558,24 @@ pub struct SnippetLibraryItem {
     pub notes: Option<String>,
 }
 
+/// Migrate legacy clipboardPaste to sendText (avoids COM/OLE crashes).
+fn migrate_paste_mode(config: &mut AppConfig) {
+    for action in &mut config.actions {
+        if let ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode, .. }) =
+            &mut action.payload
+        {
+            if *paste_mode == PasteMode::ClipboardPaste {
+                *paste_mode = PasteMode::SendText;
+            }
+        }
+    }
+    for snippet in &mut config.snippet_library {
+        if snippet.paste_mode == PasteMode::ClipboardPaste {
+            snippet.paste_mode = PasteMode::SendText;
+        }
+    }
+}
+
 pub fn load_or_initialize_config(
     config_dir: &Path,
 ) -> Result<LoadConfigResponse, ConfigStoreError> {
@@ -566,7 +584,8 @@ pub fn load_or_initialize_config(
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
     if config_path.exists() {
-        let config = read_config_from_path(&config_path)?;
+        let mut config = read_config_from_path(&config_path)?;
+        migrate_paste_mode(&mut config);
         let warnings = validate_config(&config)?;
         return Ok(LoadConfigResponse {
             config,

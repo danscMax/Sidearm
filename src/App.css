@@ -953,6 +953,15 @@ select::checkmark {
   color: var(--c-text-on-accent);
 }
 
+.action-button--danger {
+  background: transparent;
+  color: var(--c-danger);
+}
+
+.action-button--danger:hover:not(:disabled) {
+  background: rgba(224, 85, 85, 0.1);
+}
+
 .action-button--ghost:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--c-border);
@@ -3918,13 +3927,83 @@ img.profiles__app-card-monogram {
 /* ── Settings workspace ── */
 
 .settings-workspace {
-  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  max-width: 600px;
+  gap: 16px;
+  padding: 20px 24px;
+  max-width: 720px;
 }
 
+/* Settings section card */
+.settings-section {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--c-border);
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.settings-section__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.settings-section__title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-text-muted);
+}
+
+.settings-section__count {
+  font-size: 0.65rem;
+  color: var(--c-text-muted);
+  opacity: 0.6;
+  background: rgba(255, 255, 255, 0.06);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+/* Settings editor */
+.settings-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-editor__title {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+/* Field row (side by side) */
+.field-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.field-row .field { flex: 1; }
+.field-row .field--narrow { flex: 0 0 120px; }
+
+/* Hide number input spinners */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+input[type="number"] { -moz-appearance: textfield; }
+
+/* Settings actions row */
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Profile cards in settings */
 .settings-profile-list {
   display: flex;
   flex-direction: column;
@@ -3935,20 +4014,21 @@ img.profiles__app-card-monogram {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 10px 12px;
-  border-radius: var(--radius-xs, 6px);
+  padding: 10px 14px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.12s;
 }
 
 .settings-profile-card:hover {
-  background: var(--c-surface-alt);
+  background: rgba(255, 255, 255, 0.06);
 }
 
 .settings-profile-card--active {
-  border-color: var(--c-accent);
-  background: var(--c-surface-alt);
+  background: rgba(159, 202, 105, 0.08);
+  border-color: rgba(159, 202, 105, 0.35);
 }
 
 .settings-profile-card--disabled {
@@ -3961,57 +4041,47 @@ img.profiles__app-card-monogram {
   gap: 2px;
 }
 
+.settings-profile-card__name {
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
 .settings-profile-card__meta {
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   color: var(--c-text-muted);
+  opacity: 0.6;
 }
 
 .settings-profile-card__actions {
   display: flex;
-  gap: 4px;
+  gap: 2px;
 }
 
-.settings-profile-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--c-border);
-}
-
-.settings-profile-actions .action-button svg,
-.settings-profile-card__actions .action-button svg,
-.settings-bottom-actions .action-button svg {
-  flex-shrink: 0;
-}
-
-.settings-profile-actions .action-button,
-.settings-bottom-actions .action-button {
+/* Icon buttons for profile card actions */
+.settings-icon-btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-}
-
-/* Delete in active profile editor — red outline, red fill on hover */
-.settings-profile-actions .settings-delete-btn {
-  color: var(--c-danger, #e55);
-  border-color: var(--c-danger, #e55);
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
   background: transparent;
+  color: var(--c-text-muted);
+  opacity: 0.5;
+  cursor: pointer;
+  transition: all 0.12s;
 }
 
-.settings-profile-actions .settings-delete-btn:hover {
-  background: rgba(238, 85, 85, 0.12);
+.settings-icon-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--c-text-bright);
+  opacity: 1;
 }
 
-/* Delete in profile list — always red */
-.settings-profile-card__actions .settings-delete-btn {
-  color: var(--c-danger, #e55);
-}
-
-.settings-bottom-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 12px;
+.settings-icon-btn--danger:hover {
+  background: rgba(224, 85, 85, 0.12);
+  color: var(--c-danger);
 }
 
 /* ── Log Panel ── */

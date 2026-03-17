@@ -130,11 +130,11 @@ export function SettingsWorkspace({
   return (
     <div className="settings-workspace">
       {/* Language selector */}
-      <section className="panel">
-        <div className="profiles__section-header">
-          <span>{t("settings.languageHeader")}</span>
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.languageHeader")}</span>
         </div>
-        <div className="settings-bottom-actions">
+        <div className="settings-actions">
           <button
             type="button"
             className={`action-button action-button--small${i18n.language === "ru" ? "" : " action-button--ghost"}`}
@@ -154,49 +154,53 @@ export function SettingsWorkspace({
 
       {/* Active profile editor */}
       {activeProfile ? (
-        <section className="panel panel--accent">
-          <h2 className="panel__title">{t("settings.profileTitle", { name: activeProfile.name })}</h2>
-          <div className="editor-grid">
-            <label className="field">
-              <span className="field__label">{t("settings.nameLabel")}</span>
-              <input
-                type="text"
-                value={activeProfile.name}
-                onChange={(e) =>
-                  updateDraft((c) =>
-                    upsertProfile(c, { ...activeProfile, name: e.target.value }),
-                  )
-                }
-                onBlur={(e) => {
-                  if (!e.target.value.trim())
+        <section className="settings-section">
+          <div className="settings-editor">
+            <div className="settings-editor__title">{t("settings.profileTitle", { name: activeProfile.name })}</div>
+
+            <div className="field-row">
+              <label className="field">
+                <span className="field__label">{t("settings.nameLabel")}</span>
+                <input
+                  type="text"
+                  value={activeProfile.name}
+                  onChange={(e) =>
                     updateDraft((c) =>
-                      upsertProfile(c, { ...activeProfile, name: t("settings.unnamed") }),
-                    );
-                }}
-              />
-            </label>
-            <label className="field">
-              <span className="field__label">
-                {t("settings.priorityLabel")}
-                <span
-                  className="field__hint"
-                  title={t("settings.priorityTooltip")}
-                >
-                  ?
+                      upsertProfile(c, { ...activeProfile, name: e.target.value }),
+                    )
+                  }
+                  onBlur={(e) => {
+                    if (!e.target.value.trim())
+                      updateDraft((c) =>
+                        upsertProfile(c, { ...activeProfile, name: t("settings.unnamed") }),
+                      );
+                  }}
+                />
+              </label>
+              <label className="field field--narrow">
+                <span className="field__label">
+                  {t("settings.priorityLabel")}
+                  <span
+                    className="field__hint"
+                    title={t("settings.priorityTooltip")}
+                  >
+                    ?
+                  </span>
                 </span>
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={9999}
-                value={activeProfile.priority}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  const clamped = Number.isFinite(v) ? Math.max(0, Math.min(9999, Math.round(v))) : 0;
-                  updateDraft((c) => upsertProfile(c, { ...activeProfile, priority: clamped }));
-                }}
-              />
-            </label>
+                <input
+                  type="number"
+                  min={0}
+                  max={9999}
+                  value={activeProfile.priority}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    const clamped = Number.isFinite(v) ? Math.max(0, Math.min(9999, Math.round(v))) : 0;
+                    updateDraft((c) => upsertProfile(c, { ...activeProfile, priority: clamped }));
+                  }}
+                />
+              </label>
+            </div>
+
             <label className="field field--inline">
               <span className="field__label">{t("settings.enabledLabel")}</span>
               <Toggle
@@ -206,6 +210,7 @@ export function SettingsWorkspace({
                 }
               />
             </label>
+
             <label className="field">
               <span className="field__label">{t("settings.descriptionLabel")}</span>
               <textarea
@@ -219,45 +224,45 @@ export function SettingsWorkspace({
                 }
               />
             </label>
-          </div>
 
-          {/* Profile actions row */}
-          <div className="settings-profile-actions">
-            <button
-              type="button"
-              className="action-button action-button--secondary action-button--small"
-              onClick={() => handleDuplicate(activeProfile.id)}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
-              {t("inspector.copyLabel")}
-            </button>
-            <button
-              type="button"
-              className="action-button action-button--secondary action-button--small"
-              onClick={() => { void handleExport(activeProfile); }}
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-              {t("common.export")}
-            </button>
-            {sortedProfiles.length > 1 ? (
+            {/* Profile actions row */}
+            <div className="settings-actions">
               <button
                 type="button"
-                className="action-button action-button--small settings-delete-btn"
-                onClick={() => handleDelete(activeProfile)}
+                className="action-button action-button--secondary action-button--small"
+                onClick={() => handleDuplicate(activeProfile.id)}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-                {t("common.delete")}
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
+                {t("inspector.copyLabel")}
               </button>
-            ) : null}
+              <button
+                type="button"
+                className="action-button action-button--secondary action-button--small"
+                onClick={() => { void handleExport(activeProfile); }}
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                {t("common.export")}
+              </button>
+              {sortedProfiles.length > 1 ? (
+                <button
+                  type="button"
+                  className="action-button action-button--small action-button--danger"
+                  onClick={() => handleDelete(activeProfile)}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  {t("common.delete")}
+                </button>
+              ) : null}
+            </div>
           </div>
         </section>
       ) : null}
 
       {/* All profiles list */}
-      <section className="panel">
-        <div className="profiles__section-header">
-          <span>{t("settings.allProfilesHeader")}</span>
-          <span className="profiles__section-count">{sortedProfiles.length}</span>
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.allProfilesHeader")}</span>
+          <span className="settings-section__count">{sortedProfiles.length}</span>
         </div>
         <div className="settings-profile-list">
           {sortedProfiles.map((profile) => {
@@ -269,7 +274,7 @@ export function SettingsWorkspace({
                 onClick={() => setSelectedProfileId(profile.id)}
               >
                 <div className="settings-profile-card__info">
-                  <strong>{profile.name}</strong>
+                  <span className="settings-profile-card__name">{profile.name}</span>
                   <span className="settings-profile-card__meta">
                     {t("settings.priorityMeta", { priority: profile.priority })}
                     {!profile.enabled ? ` · ${t("settings.disabledMeta")}` : ""}
@@ -278,7 +283,7 @@ export function SettingsWorkspace({
                 <div className="settings-profile-card__actions">
                   <button
                     type="button"
-                    className="action-button action-button--small action-button--ghost"
+                    className="settings-icon-btn"
                     onClick={(e) => { e.stopPropagation(); handleDuplicate(profile.id); }}
                     title={t("inspector.copyLabel")}
                   >
@@ -286,7 +291,7 @@ export function SettingsWorkspace({
                   </button>
                   <button
                     type="button"
-                    className="action-button action-button--small action-button--ghost"
+                    className="settings-icon-btn"
                     onClick={(e) => { e.stopPropagation(); void handleExport(profile); }}
                     title={t("common.export")}
                   >
@@ -295,7 +300,7 @@ export function SettingsWorkspace({
                   {sortedProfiles.length > 1 ? (
                     <button
                       type="button"
-                      className="action-button action-button--small action-button--ghost settings-delete-btn"
+                      className="settings-icon-btn settings-icon-btn--danger"
                       onClick={(e) => { e.stopPropagation(); handleDelete(profile); }}
                       title={t("common.delete")}
                     >
@@ -307,10 +312,10 @@ export function SettingsWorkspace({
             );
           })}
         </div>
-        <div className="settings-bottom-actions">
+        <div className="settings-actions" style={{ marginTop: 12 }}>
           <button
             type="button"
-            className="action-button action-button--secondary"
+            className="action-button"
             onClick={handleCreateProfile}
           >
             {t("settings.createProfile")}
@@ -332,14 +337,14 @@ export function SettingsWorkspace({
       </section>
 
       {/* Full config backup */}
-      <section className="panel">
-        <div className="profiles__section-header">
-          <span>{t("settings.backupHeader")}</span>
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.backupHeader")}</span>
         </div>
-        <p className="panel__muted" style={{ fontSize: "0.8rem", marginBottom: 12 }}>
+        <p className="panel__muted" style={{ fontSize: "0.78rem", marginBottom: 12 }}>
           {t("settings.backupHelp")}
         </p>
-        <div className="settings-bottom-actions">
+        <div className="settings-actions">
           <button
             type="button"
             className="action-button action-button--secondary"

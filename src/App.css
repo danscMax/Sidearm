@@ -3931,7 +3931,7 @@ img.profiles__app-card-monogram {
   flex-direction: column;
   gap: 16px;
   padding: 20px 24px;
-  max-width: 720px;
+  max-width: none;
 }
 
 /* Settings section card */

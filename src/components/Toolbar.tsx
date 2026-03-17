@@ -9,7 +9,6 @@ export function Toolbar({
   viewState,
   onUndo,
   onRedo,
-  onOpenCommandPalette,
 }: {
   heading: string;
   undoCount: number;
@@ -17,24 +16,12 @@ export function Toolbar({
   viewState: ViewState;
   onUndo: () => void;
   onRedo: () => void;
-  onOpenCommandPalette?: () => void;
 }) {
   const { t, i18n } = useTranslation();
 
   return (
     <div className="toolbar">
       <span className="toolbar__title">{heading}</span>
-      {onOpenCommandPalette && (
-        <button
-          type="button"
-          className="toolbar__btn toolbar__btn--search"
-          onClick={onOpenCommandPalette}
-          title={t("toolbar.commandPalette")}
-        >
-          <span className="toolbar__icon">&#x2318;</span>
-          <span className="toolbar__shortcut">{t("toolbar.shortcut")}</span>
-        </button>
-      )}
       <div className="toolbar__actions">
         {viewState === "saving" && (
           <span className="toolbar__status">{t("toolbar.saving")}</span>

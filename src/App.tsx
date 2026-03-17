@@ -434,7 +434,6 @@ function App() {
           viewState={viewState}
           onUndo={handleUndo}
           onRedo={handleRedo}
-          onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
         <div className="content__scroll">

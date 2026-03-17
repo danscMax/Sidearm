@@ -11,7 +11,6 @@ use std::{
 const MAX_STEP_DELAY_MS: u64 = 30_000;
 
 use crate::{
-    clipboard,
     config::{
         Action, ActionCondition, ActionPayload, ActionType, AppConfig, MenuItem,
         MouseActionPayload, PasteMode, SequenceStep, TextSnippetPayload,
@@ -663,51 +662,28 @@ fn run_live_text_snippet_action(
         )
     })?;
 
-    let mut warnings = live_text.warnings;
-    match live_text.paste_mode {
-        PasteMode::SendText => {
-            log::info!(
-                "[executor] TextSnippet sendText: {} chars for key {}",
-                live_text.text.chars().count(),
-                preview.encoded_key
-            );
-            input_synthesis::send_text(&live_text.text).map_err(|message| {
-                log::error!(
-                    "[executor] TextSnippet sendText failed for key {}: {message}",
-                    preview.encoded_key
-                );
-                execution_error(
-                    "execution_failed",
-                    "выполнение",
-                    &message,
-                    Some(preview.encoded_key.clone()),
-                    Some(action.id.clone()),
-                )
-            })?;
-        }
-        PasteMode::ClipboardPaste => {
-            log::info!(
-                "[executor] Clipboard paste: preparing text ({} chars) for key {}",
-                live_text.text.chars().count(),
-                preview.encoded_key
-            );
-            let paste_report = clipboard::paste_text(&live_text.text).map_err(|message| {
-                log::error!(
-                    "[executor] Clipboard paste failed for key {}: {message}",
-                    preview.encoded_key
-                );
-                execution_error(
-                    "execution_failed",
-                    "выполнение",
-                    &message,
-                    Some(preview.encoded_key.clone()),
-                    Some(action.id.clone()),
-                )
-            })?;
-            log::info!("[executor] Clipboard paste: complete for key {}", preview.encoded_key);
-            warnings.extend(paste_report.warnings);
-        }
-    }
+    let warnings = live_text.warnings;
+    // Always use SendInput (sendText) regardless of paste_mode setting.
+    // clipboardPaste causes COM/OLE crashes in debug builds and is
+    // unreliable. SendInput + KEYEVENTF_UNICODE works universally.
+    log::info!(
+        "[executor] TextSnippet sendText: {} chars for key {}",
+        live_text.text.chars().count(),
+        preview.encoded_key
+    );
+    input_synthesis::send_text(&live_text.text).map_err(|message| {
+        log::error!(
+            "[executor] TextSnippet sendText failed for key {}: {message}",
+            preview.encoded_key
+        );
+        execution_error(
+            "execution_failed",
+            "выполнение",
+            &message,
+            Some(preview.encoded_key.clone()),
+            Some(action.id.clone()),
+        )
+    })?;
 
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),

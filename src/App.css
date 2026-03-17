@@ -442,17 +442,21 @@ select::checkmark {
 
 /* ── Content ── */
 .content {
-  padding: 0;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  overflow: hidden;
+}
+
+.content__scroll {
+  flex: 1;
   overflow-y: overlay;
   scrollbar-gutter: auto;
 }
 
 /* ── Toolbar ── */
 .toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 10;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 12px;

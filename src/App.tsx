@@ -437,6 +437,7 @@ function App() {
           onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         />
 
+        <div className="content__scroll">
         {error && viewState === "error" ? (
           <div className="global-error-banner">
             <ErrorPanel error={error} />
@@ -536,6 +537,7 @@ function App() {
             </section>
           </section>
         )}
+        </div>
       </div>
       {actionPickerOpen && activeConfig ? (
         <ActionPickerModal

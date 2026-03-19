@@ -74,6 +74,14 @@ pub struct RuntimeController {
     backend: Option<CaptureBackendHandle>,
 }
 
+impl Drop for RuntimeController {
+    fn drop(&mut self) {
+        if let Err(e) = self.stop() {
+            log::error!("[capture] Failed to stop runtime during drop: {e}");
+        }
+    }
+}
+
 impl RuntimeController {
     pub fn start(
         &mut self,

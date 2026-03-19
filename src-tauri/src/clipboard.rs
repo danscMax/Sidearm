@@ -104,45 +104,6 @@ fn paste_text_sta(text: &str) -> Result<ClipboardPasteReport, String> {
     Ok(ClipboardPasteReport { warnings })
 }
 
-// ---------------------------------------------------------------------------
-// Clipboard snapshot: raw HGLOBAL data approach (no COM proxy)
-//
-// Previous implementation used OleGetClipboard() → IDataObject COM proxy.
-// This caused STATUS_FATAL_USER_CALLBACK_EXCEPTION (0xc000041d) crashes when
-// the clipboard owner process exited between capture and restore, leaving a
-// dangling COM vtable pointer.
-//
-// The new approach copies raw clipboard data via Win32 API:
-//   capture:  OpenClipboard → EnumClipboardFormats → GetClipboardData → GlobalAlloc copy
-//   restore:  OpenClipboard → EmptyClipboard → SetClipboardData for each saved format
-//
-// This is the same approach used by AutoHotkey v2. The data lives in our
-// process memory, with no dependency on the clipboard owner's lifetime.
-// ---------------------------------------------------------------------------
-
-/// A single clipboard format entry: format ID + owned HGLOBAL copy.
-#[cfg(target_os = "windows")]
-struct SavedClipboardFormat {
-    format: u32,
-    /// Owned HGLOBAL with a copy of the clipboard data. Must be freed on drop
-    /// unless ownership is transferred to SetClipboardData.
-    handle: *mut core::ffi::c_void,
-    /// Size in bytes of the HGLOBAL allocation.
-    size: usize,
-}
-
-#[cfg(target_os = "windows")]
-impl Drop for SavedClipboardFormat {
-    fn drop(&mut self) {
-        if !self.handle.is_null() {
-            unsafe {
-                use windows_sys::Win32::Foundation::GlobalFree;
-                let _ = GlobalFree(self.handle);
-            }
-        }
-    }
-}
-
 #[derive(Debug)]
 enum ClipboardSnapshot {
     Empty,
@@ -544,10 +505,6 @@ impl Drop for OleScope {
             }
         }
     }
-}
-
-fn succeeded(hr: windows_sys::core::HRESULT) -> bool {
-    hr >= 0
 }
 
 fn format_hresult(hr: windows_sys::core::HRESULT) -> String {

@@ -446,23 +446,29 @@ fn push_virtual_key_up(inputs: &mut Vec<KeyboardInputSpec>, key: VirtualKeySpec)
     });
 }
 
-/// Map Cyrillic characters to their QWERTY Latin equivalents.
-/// Users often capture shortcuts with Russian keyboard layout active,
-/// producing 'С' (Cyrillic) instead of 'C' (Latin) for Ctrl+C.
+/// Map Cyrillic characters to the QWERTY key at the same physical position
+/// on a standard ЙЦУКЕН keyboard layout.  Users often capture shortcuts with
+/// Russian layout active, producing 'С' (Cyrillic) instead of 'C' (Latin)
+/// for Ctrl+C — this function reverses that by physical key position.
 fn normalize_cyrillic_key(key: &str) -> String {
     key.chars()
         .map(|ch| match ch {
-            'а' | 'А' => 'A', 'б' | 'Б' => 'B', 'в' | 'В' => 'V',
-            'г' | 'Г' => 'G', 'д' | 'Д' => 'D', 'е' | 'Е' => 'E',
-            'ж' | 'Ж' => ';', 'з' | 'З' => 'Z', 'и' | 'И' => 'I',
-            'й' | 'Й' => 'Q', 'к' | 'К' => 'K', 'л' | 'Л' => 'L',
-            'м' | 'М' => 'M', 'н' | 'Н' => 'N', 'о' | 'О' => 'O',
-            'п' | 'П' => 'P', 'р' | 'Р' => 'R', 'с' | 'С' => 'C',
-            'т' | 'Т' => 'T', 'у' | 'У' => 'U', 'ф' | 'Ф' => 'F',
-            'х' | 'Х' => '[', 'ц' | 'Ц' => 'W', 'ч' | 'Ч' => 'X',
-            'ш' | 'Ш' => 'S', 'щ' | 'Щ' => 'S', 'ъ' | 'Ъ' => ']',
-            'ы' | 'Ы' => 'Y', 'э' | 'Э' => '\'', 'ю' | 'Ю' => '.',
-            'я' | 'Я' => 'J',
+            // Row 0: Ё → `
+            'ё' | 'Ё' => '`',
+            // Row 1: Й Ц У К Е Н Г Ш Щ З Х Ъ → Q W E R T Y U I O P [ ]
+            'й' | 'Й' => 'Q', 'ц' | 'Ц' => 'W', 'у' | 'У' => 'E',
+            'к' | 'К' => 'R', 'е' | 'Е' => 'T', 'н' | 'Н' => 'Y',
+            'г' | 'Г' => 'U', 'ш' | 'Ш' => 'I', 'щ' | 'Щ' => 'O',
+            'з' | 'З' => 'P', 'х' | 'Х' => '[', 'ъ' | 'Ъ' => ']',
+            // Row 2: Ф Ы В А П Р О Л Д Ж Э → A S D F G H J K L ; '
+            'ф' | 'Ф' => 'A', 'ы' | 'Ы' => 'S', 'в' | 'В' => 'D',
+            'а' | 'А' => 'F', 'п' | 'П' => 'G', 'р' | 'Р' => 'H',
+            'о' | 'О' => 'J', 'л' | 'Л' => 'K', 'д' | 'Д' => 'L',
+            'ж' | 'Ж' => ';', 'э' | 'Э' => '\'',
+            // Row 3: Я Ч С М И Т Ь Б Ю → Z X C V B N M , .
+            'я' | 'Я' => 'Z', 'ч' | 'Ч' => 'X', 'с' | 'С' => 'C',
+            'м' | 'М' => 'V', 'и' | 'И' => 'B', 'т' | 'Т' => 'N',
+            'ь' | 'Ь' => 'M', 'б' | 'Б' => ',', 'ю' | 'Ю' => '.',
             _ => ch,
         })
         .collect()

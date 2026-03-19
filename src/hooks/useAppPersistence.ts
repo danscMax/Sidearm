@@ -130,48 +130,39 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
   }
 
   function updateDraft(updateConfig: (config: AppConfig) => AppConfig) {
-    setWorkingConfig((current) => {
-      if (!current) return current;
-      setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), current]);
-      setRedoStack([]);
-      setError(null);
-      setViewState("ready");
-      const next = updateConfig(current);
-      scheduleSave(next);
-      return next;
-    });
+    const current = workingConfig;
+    if (!current) return;
+    const next = updateConfig(current);
+    setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), current]);
+    setRedoStack([]);
+    setError(null);
+    setViewState("ready");
+    setWorkingConfig(next);
+    scheduleSave(next);
   }
 
   function handleUndo() {
-    setUndoStack((stack) => {
-      if (stack.length === 0) return stack;
-      const previous = stack[stack.length - 1];
-      const remaining = stack.slice(0, -1);
-      setWorkingConfig((current) => {
-        if (current) {
-          setRedoStack((redo) => [...redo, current]);
-        }
-        return previous;
-      });
-      scheduleSave(previous);
-      return remaining;
-    });
+    if (undoStack.length === 0) return;
+    const previous = undoStack[undoStack.length - 1];
+    const current = workingConfig;
+    setUndoStack(undoStack.slice(0, -1));
+    if (current) {
+      setRedoStack((redo) => [...redo, current]);
+    }
+    setWorkingConfig(previous);
+    scheduleSave(previous);
   }
 
   function handleRedo() {
-    setRedoStack((stack) => {
-      if (stack.length === 0) return stack;
-      const next = stack[stack.length - 1];
-      const remaining = stack.slice(0, -1);
-      setWorkingConfig((current) => {
-        if (current) {
-          setUndoStack((undo) => [...undo, current]);
-        }
-        return next;
-      });
-      scheduleSave(next);
-      return remaining;
-    });
+    if (redoStack.length === 0) return;
+    const next = redoStack[redoStack.length - 1];
+    const current = workingConfig;
+    setRedoStack(redoStack.slice(0, -1));
+    if (current) {
+      setUndoStack((undo) => [...undo, current]);
+    }
+    setWorkingConfig(next);
+    scheduleSave(next);
   }
 
   return {

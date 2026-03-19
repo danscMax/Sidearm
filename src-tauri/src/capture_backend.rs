@@ -196,6 +196,16 @@ impl CaptureBackendHandle {
 
             // Spawn helper process for modifier-combo hotkeys (non-fatal if fails)
             let helper = spawn_capture_helper(&registrations, helper_event_tx);
+            // Warn user if modifier-combo hotkeys exist but the helper failed to start
+            let has_modifier_combos = registrations.iter().any(|r| r.has_modifiers);
+            if has_modifier_combos && helper.is_none() {
+                if let Ok(mut store) = runtime_store.lock() {
+                    store.record_warn(
+                        "перехват",
+                        "Не удалось запустить вспомогательный процесс. Горячие клавиши с модификаторами (Ctrl/Alt/Shift + кнопка) могут не работать.",
+                    );
+                }
+            }
 
             // Spawn foreground window watcher — detects window switches instantly
             let fg_app = app.clone();

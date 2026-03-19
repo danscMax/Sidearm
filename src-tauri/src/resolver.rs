@@ -250,15 +250,26 @@ pub(crate) fn matching_app_mappings<'a>(
         .filter(|mapping| mapping.exe.eq_ignore_ascii_case(&normalized_exe))
         .filter(|mapping| {
             mapping.title_includes.is_empty()
-                || mapping.title_includes.iter().all(|needle| {
-                    if let Some(pattern) = needle.strip_prefix(REGEX_PREFIX) {
-                        Regex::new(&format!("(?i){pattern}"))
-                            .map(|re| re.is_match(&normalized_title))
-                            .unwrap_or(false)
-                    } else {
-                        normalized_title.contains(&needle.to_ascii_lowercase())
-                    }
-                })
+                || mapping
+                    .title_includes
+                    .iter()
+                    .enumerate()
+                    .all(|(i, needle)| {
+                        if needle.starts_with(REGEX_PREFIX) {
+                            // Use pre-compiled regex if available, fall back to compile-on-demand
+                            if let Some(Some(re)) = mapping.compiled_title_regexes.get(i) {
+                                re.is_match(&normalized_title)
+                            } else if let Some(pattern) = needle.strip_prefix(REGEX_PREFIX) {
+                                Regex::new(&format!("(?i){pattern}"))
+                                    .map(|re| re.is_match(&normalized_title))
+                                    .unwrap_or(false)
+                            } else {
+                                false
+                            }
+                        } else {
+                            normalized_title.contains(&needle.to_ascii_lowercase())
+                        }
+                    })
         })
         .collect();
 
@@ -446,6 +457,7 @@ mod tests {
             profile_id: profile_id.into(),
             enabled: true,
             priority,
+            compiled_title_regexes: Vec::new(),
         }
     }
 }

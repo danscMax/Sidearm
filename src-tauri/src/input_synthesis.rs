@@ -1292,7 +1292,7 @@ pub fn send_mouse_action(
     payload: &MouseActionPayload,
     encoding_mods: &HotkeyModifiers,
 ) -> Result<MouseDispatchReport, String> {
-    log::debug!("[input] Mouse action: {}", payload.action);
+    log::debug!("[input] Mouse action: {:?}", payload.action);
     clear_modifiers(encoding_mods)?;
 
     let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
@@ -1328,7 +1328,7 @@ pub fn send_mouse_action(
     };
 
     // Inject the mouse event
-    let result = send_mouse_event(&payload.action);
+    let result = send_mouse_event(payload.action);
 
     // Release modifiers in reverse order (LIFO)
     if !pressed_modifiers.is_empty() {
@@ -1346,7 +1346,8 @@ pub fn send_mouse_action(
 const WHEEL_DELTA: i32 = 120;
 
 #[cfg(target_os = "windows")]
-fn send_mouse_event(action: &str) -> Result<(), String> {
+fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String> {
+    use crate::config::MouseActionKind;
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
@@ -1372,37 +1373,36 @@ fn send_mouse_event(action: &str) -> Result<(), String> {
     };
 
     let inputs: Vec<INPUT> = match action {
-        "leftClick" => vec![
+        MouseActionKind::LeftClick => vec![
             make_mouse(MOUSEEVENTF_LEFTDOWN, 0),
             make_mouse(MOUSEEVENTF_LEFTUP, 0),
         ],
-        "rightClick" => vec![
+        MouseActionKind::RightClick => vec![
             make_mouse(MOUSEEVENTF_RIGHTDOWN, 0),
             make_mouse(MOUSEEVENTF_RIGHTUP, 0),
         ],
-        "middleClick" => vec![
+        MouseActionKind::MiddleClick => vec![
             make_mouse(MOUSEEVENTF_MIDDLEDOWN, 0),
             make_mouse(MOUSEEVENTF_MIDDLEUP, 0),
         ],
-        "doubleClick" => vec![
+        MouseActionKind::DoubleClick => vec![
             make_mouse(MOUSEEVENTF_LEFTDOWN, 0),
             make_mouse(MOUSEEVENTF_LEFTUP, 0),
             make_mouse(MOUSEEVENTF_LEFTDOWN, 0),
             make_mouse(MOUSEEVENTF_LEFTUP, 0),
         ],
-        "scrollUp" => vec![make_mouse(MOUSEEVENTF_WHEEL, WHEEL_DELTA)],
-        "scrollDown" => vec![make_mouse(MOUSEEVENTF_WHEEL, -WHEEL_DELTA)],
-        "scrollLeft" => vec![make_mouse(MOUSEEVENTF_HWHEEL, -WHEEL_DELTA)],
-        "scrollRight" => vec![make_mouse(MOUSEEVENTF_HWHEEL, WHEEL_DELTA)],
-        "mouseBack" => vec![
+        MouseActionKind::ScrollUp => vec![make_mouse(MOUSEEVENTF_WHEEL, WHEEL_DELTA)],
+        MouseActionKind::ScrollDown => vec![make_mouse(MOUSEEVENTF_WHEEL, -WHEEL_DELTA)],
+        MouseActionKind::ScrollLeft => vec![make_mouse(MOUSEEVENTF_HWHEEL, -WHEEL_DELTA)],
+        MouseActionKind::ScrollRight => vec![make_mouse(MOUSEEVENTF_HWHEEL, WHEEL_DELTA)],
+        MouseActionKind::MouseBack => vec![
             make_mouse(MOUSEEVENTF_XDOWN, 0x0001),
             make_mouse(MOUSEEVENTF_XUP, 0x0001),
         ],
-        "mouseForward" => vec![
+        MouseActionKind::MouseForward => vec![
             make_mouse(MOUSEEVENTF_XDOWN, 0x0002),
             make_mouse(MOUSEEVENTF_XUP, 0x0002),
         ],
-        other => return Err(format!("Неизвестное действие мыши: `{other}`.")),
     };
 
     let sent = unsafe {
@@ -1424,7 +1424,7 @@ fn send_mouse_event(action: &str) -> Result<(), String> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn send_mouse_event(_action: &str) -> Result<(), String> {
+fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), String> {
     Err("Live mouse action injection is only implemented for Windows.".into())
 }
 

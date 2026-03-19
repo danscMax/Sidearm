@@ -80,9 +80,10 @@ const testConfig: AppConfig = {
 
 const encodedKeyEvent: EncodedKeyEvent = {
   encodedKey: "F13",
-  backend: "windows-register-hotkey",
+  backend: "windows-hotkey",
   receivedAt: Date.now() + 1000,
   isRepeat: false,
+  isKeyUp: false,
 };
 
 const resolutionPreview: ResolvedInputPreview = {
@@ -429,7 +430,7 @@ describe("useVerification", () => {
       const step = result.current.verificationSession!.steps[0];
       expect(step.observedEncodedKey).toBe("F13");
       expect(step.observedAt).toBe(encodedKeyEvent.receivedAt);
-      expect(step.observedBackend).toBe("windows-register-hotkey");
+      expect(step.observedBackend).toBe("windows-hotkey");
     });
 
     it("onEncodedKeyEvent is ignored when no session exists", () => {

@@ -436,6 +436,7 @@ mod tests {
             profile_id: profile_id.into(),
             enabled: true,
             priority,
+            compiled_title_regexes: Vec::new(),
         }
     }
 

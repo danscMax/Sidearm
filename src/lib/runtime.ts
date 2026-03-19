@@ -1,4 +1,4 @@
-import type { ActionType, ControlId, Layer, MappingSource } from "./config";
+import type { ActionType, ControlId, Layer, MappingSource, TriggerMode } from "./config";
 
 export type RuntimeStatus = "idle" | "running";
 
@@ -41,6 +41,7 @@ export interface EncodedKeyEvent {
   backend: string;
   receivedAt: number;
   isRepeat: boolean;
+  isKeyUp: boolean;
 }
 
 export interface WindowCaptureResult {
@@ -79,6 +80,7 @@ export interface ResolvedInputPreview {
   actionPretty?: string;
   mappingVerified?: boolean;
   mappingSource?: MappingSource;
+  triggerMode?: TriggerMode;
 }
 
 export interface ActionExecutionEvent {
@@ -112,7 +114,7 @@ export const idleRuntimeStateSummary: RuntimeStateSummary = {
   status: "idle",
   startedAt: null,
   lastReloadAt: null,
-  captureBackend: "windows-register-hotkey",
+  captureBackend: "windows-hotkey",
   activeConfigVersion: null,
   warningCount: 0,
 };

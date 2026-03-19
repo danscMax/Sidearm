@@ -15,7 +15,10 @@ mod window_capture;
 use std::{
     fs,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
 };
 
 pub use capture_backend::capture_helper_main;
@@ -39,6 +42,11 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
 use window_capture::WindowCaptureResult;
+
+/// Generation counter for OSD hide timer cancellation.
+/// Each show_osd call increments this; the hide thread only hides if the
+/// generation hasn't changed, preventing premature hide on rapid switches.
+static OSD_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Show a small always-on-top OSD bubble with the profile name.
 /// The OSD auto-closes after ~2 seconds via its own JS timer.
@@ -64,11 +72,16 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
 
         let _ = w.show();
 
-        // Auto-hide after 2 seconds
+        // Auto-hide after 2 seconds. Use generation counter to cancel stale
+        // hide timers — if show_osd is called again before the timer fires,
+        // the old thread skips the hide (generation mismatch).
+        let gen = OSD_GENERATION.fetch_add(1, Ordering::Relaxed);
         let win = w.clone();
         std::thread::spawn(move || {
             std::thread::sleep(std::time::Duration::from_millis(2000));
-            let _ = win.hide();
+            if OSD_GENERATION.load(Ordering::Relaxed) == gen {
+                let _ = win.hide();
+            }
         });
     }
 }
@@ -100,16 +113,68 @@ fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     })
 }
 
-/// Write arbitrary text to a user-chosen file path (for profile export).
+/// Validate that a user-supplied file path is within an allowed directory.
+/// Paths must be under the user's home directory and must not contain `..` segments.
+fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
+    let path = PathBuf::from(path);
+
+    // Reject relative paths
+    if !path.is_absolute() {
+        return Err(CommandError::new(
+            "invalid_path",
+            "File path must be absolute.",
+            None,
+        ));
+    }
+
+    // Reject path traversal
+    let path_str = path.to_string_lossy();
+    if path_str.contains("..") {
+        return Err(CommandError::new(
+            "invalid_path",
+            "File path must not contain `..` traversal segments.",
+            None,
+        ));
+    }
+
+    // Must be under the user's home directory
+    if let Some(home) = dirs_next_home() {
+        if path.starts_with(&home) {
+            return Ok(path);
+        }
+    }
+
+    Err(CommandError::new(
+        "invalid_path",
+        "File path must be within the user home directory.",
+        None,
+    ))
+}
+
+/// Resolve the user's home directory via the HOME / USERPROFILE env var.
+fn dirs_next_home() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("USERPROFILE").map(PathBuf::from)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME").map(PathBuf::from)
+    }
+}
+
+/// Write text to a user-chosen file path (for profile export).
+/// Path must be absolute and within the user's home directory.
 #[tauri::command]
 async fn write_text_file(path: String, contents: String) -> Result<(), CommandError> {
+    let validated_path = validate_user_file_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
-        if let Some(parent) = std::path::Path::new(&path).parent() {
+        if let Some(parent) = validated_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 CommandError::internal(format!("Failed to create directory: {e}"))
             })?;
         }
-        fs::write(&path, contents).map_err(|e| {
+        fs::write(&validated_path, contents).map_err(|e| {
             CommandError::internal(format!("Failed to write file: {e}"))
         })
     })
@@ -118,10 +183,12 @@ async fn write_text_file(path: String, contents: String) -> Result<(), CommandEr
 }
 
 /// Read text from a user-chosen file path (for profile import).
+/// Path must be absolute and within the user's home directory.
 #[tauri::command]
 async fn read_text_file(path: String) -> Result<String, CommandError> {
+    let validated_path = validate_user_file_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
-        fs::read_to_string(&path).map_err(|e| {
+        fs::read_to_string(&validated_path).map_err(|e| {
             CommandError::internal(format!("Failed to read file: {e}"))
         })
     })
@@ -464,72 +531,81 @@ async fn capture_active_window(
         log::info!("[system] capture_in_progress = true (v2 auto-switching suppressed)");
     }
 
-    let config_dir = resolve_config_dir(&app)?;
-    let app_name = app.package_info().name.clone();
-    let result = tauri::async_runtime::spawn_blocking(move || {
-        let load_response = load_or_initialize_config(&config_dir)?;
-        window_capture::capture_active_window_with_resolution(
-            &load_response.config,
-            &app_name,
-            delay_ms,
-        )
-        .map_err(|message| CommandError::new("window_capture_error", message, None))
-    })
-    .await
-    .map_err(|error| {
-        CommandError::internal(format!("capture_active_window task failed: {error}"))
-    })??;
+    // Run the capture logic in a block so that capture_in_progress is ALWAYS
+    // reset on exit — success or failure. Without this, a failed capture would
+    // permanently disable auto-profile-switching until runtime restart.
+    let capture_result: Result<WindowCaptureResult, CommandError> = async {
+        let config_dir = resolve_config_dir(&app)?;
+        let app_name = app.package_info().name.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            let load_response = load_or_initialize_config(&config_dir)?;
+            window_capture::capture_active_window_with_resolution(
+                &load_response.config,
+                &app_name,
+                delay_ms,
+            )
+            .map_err(|message| CommandError::new("window_capture_error", message, None))
+        })
+        .await
+        .map_err(|error| {
+            CommandError::internal(format!("capture_active_window task failed: {error}"))
+        })??;
 
-    {
-        let mut store = runtime_store
-            .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-        if result.ignored {
-            store.record_warn(
-                "захват окна",
-                result
-                    .ignore_reason
-                    .clone()
-                    .unwrap_or_else(|| "Окно игнорируется.".into()),
-            );
-        } else {
-            store.record_info(
-                "захват окна",
-                format!(
-                    "Захвачено `{}`, профиль `{}`.",
-                    result.exe,
-                    result.resolved_profile_id.as_deref().unwrap_or("н/д")
-                ),
-            );
-        }
-    }
-
-    app.emit(EVENT_PROFILE_RESOLVED, &result).map_err(|error| {
-        CommandError::internal(format!("Failed to emit profile_resolved event: {error}"))
-    })?;
-
-    // Send OSD notification if active profile changed
-    if !result.ignored {
-        let should_notify = {
+        {
             let mut store = runtime_store
                 .lock()
                 .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-            store.notify_profile_change(result.resolved_profile_id.as_deref())
-        };
-        if should_notify {
-            let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
-            show_osd(&app, profile_name);
+            if result.ignored {
+                store.record_warn(
+                    "захват окна",
+                    result
+                        .ignore_reason
+                        .clone()
+                        .unwrap_or_else(|| "Окно игнорируется.".into()),
+                );
+            } else {
+                store.record_info(
+                    "захват окна",
+                    format!(
+                        "Захвачено `{}`, профиль `{}`.",
+                        result.exe,
+                        result.resolved_profile_id.as_deref().unwrap_or("н/д")
+                    ),
+                );
+            }
+        }
+
+        app.emit(EVENT_PROFILE_RESOLVED, &result).map_err(|error| {
+            CommandError::internal(format!("Failed to emit profile_resolved event: {error}"))
+        })?;
+
+        // Send OSD notification if active profile changed
+        if !result.ignored {
+            let should_notify = {
+                let mut store = runtime_store
+                    .lock()
+                    .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+                store.notify_profile_change(result.resolved_profile_id.as_deref())
+            };
+            if should_notify {
+                let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
+                show_osd(&app, profile_name);
+            }
+        }
+
+        Ok(result)
+    }
+    .await;
+
+    // Always reset capture_in_progress regardless of success/failure
+    {
+        if let Ok(mut store) = runtime_store.lock() {
+            store.set_capture_in_progress(false);
+            log::info!("[system] capture_in_progress = false (auto-switching resumed)");
         }
     }
 
-    // Re-enable auto-profile-switching now that capture is done.
-    {
-        let mut store = runtime_store
-            .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-        store.set_capture_in_progress(false);
-        log::info!("[system] capture_in_progress = false (auto-switching resumed)");
-    }
+    let result = capture_result?;
 
     // Return focus to the studio window after capture
     if let Some(window) = app.get_webview_window("main") {
@@ -1176,7 +1252,9 @@ pub fn run() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         log::error!("[system] PANIC: {info}");
-        input_synthesis::release_all_modifiers();
+        // Guard against double-panic: if release_all_modifiers itself panics
+        // (e.g. SendInput fails), we must not abort the process.
+        let _ = std::panic::catch_unwind(input_synthesis::release_all_modifiers);
         default_hook(info);
     }));
 
@@ -1260,20 +1338,26 @@ pub fn run() {
                                 Arc<Mutex<RuntimeController>>,
                             > = app.state();
 
-                            let is_running = {
-                                let store = runtime_store.lock().unwrap();
-                                store.is_running()
+                            let is_running = match runtime_store.lock() {
+                                Ok(store) => store.is_running(),
+                                Err(_) => {
+                                    log::error!("[tray] runtime_store lock poisoned");
+                                    return;
+                                }
                             };
 
                             if is_running {
-                                let stop_result = {
-                                    let mut controller = runtime_controller.lock().unwrap();
-                                    controller.stop()
+                                let stop_result = match runtime_controller.lock() {
+                                    Ok(mut controller) => controller.stop(),
+                                    Err(_) => {
+                                        log::error!("[tray] runtime_controller lock poisoned");
+                                        return;
+                                    }
                                 };
                                 if stop_result.is_ok() {
-                                    let summary = {
-                                        let mut store = runtime_store.lock().unwrap();
-                                        store.stop()
+                                    let summary = match runtime_store.lock() {
+                                        Ok(mut store) => store.stop(),
+                                        Err(_) => return,
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
                                     let _ = toggle_item.set_text("Включить перехват");
@@ -1294,23 +1378,26 @@ pub fn run() {
                                     _ => return,
                                 };
 
-                                let start_result = {
-                                    let mut controller = runtime_controller.lock().unwrap();
-                                    controller.start(
+                                let start_result = match runtime_controller.lock() {
+                                    Ok(mut controller) => controller.start(
                                         app.clone(),
                                         runtime_store.inner().clone(),
                                         load_response.config.clone(),
                                         app.package_info().name.clone(),
-                                    )
+                                    ),
+                                    Err(_) => {
+                                        log::error!("[tray] runtime_controller lock poisoned");
+                                        return;
+                                    }
                                 };
 
                                 if start_result.is_ok() {
-                                    let summary = {
-                                        let mut store = runtime_store.lock().unwrap();
-                                        store.start(
+                                    let summary = match runtime_store.lock() {
+                                        Ok(mut store) => store.start(
                                             load_response.config.version,
                                             load_response.warnings.len(),
-                                        )
+                                        ),
+                                        Err(_) => return,
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STARTED, &summary);
                                     let _ = toggle_item.set_text("Выключить перехват");

@@ -89,6 +89,49 @@ pub struct AppConfig {
     pub snippet_library: Vec<SnippetLibraryItem>,
 }
 
+const REGEX_PREFIX: &str = "regex:";
+const MAX_REGEX_PATTERN_LEN: usize = 500;
+const REGEX_SIZE_LIMIT: usize = 10_240;
+
+impl AppConfig {
+    /// Pre-compile regex patterns in `title_includes` fields for all app mappings.
+    /// Call after config load/save to avoid recompiling on every keypress.
+    pub fn compile_title_regexes(&mut self) {
+        for mapping in &mut self.app_mappings {
+            mapping.compiled_title_regexes = mapping
+                .title_includes
+                .iter()
+                .map(|needle| {
+                    needle.strip_prefix(REGEX_PREFIX).and_then(|pattern| {
+                        if pattern.len() > MAX_REGEX_PATTERN_LEN {
+                            log::warn!(
+                                "[config] Regex pattern too long ({} chars, max {}) in app mapping `{}`",
+                                pattern.len(),
+                                MAX_REGEX_PATTERN_LEN,
+                                mapping.id
+                            );
+                            return None;
+                        }
+                        match regex::RegexBuilder::new(&format!("(?i){pattern}"))
+                            .size_limit(REGEX_SIZE_LIMIT)
+                            .build()
+                        {
+                            Ok(re) => Some(re),
+                            Err(e) => {
+                                log::warn!(
+                                    "[config] Invalid regex in app mapping `{}`: {e}",
+                                    mapping.id
+                                );
+                                None
+                            }
+                        }
+                    })
+                })
+                .collect();
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
@@ -298,7 +341,7 @@ pub struct EncoderMapping {
     pub verified: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppMapping {
     pub id: String,
@@ -310,7 +353,25 @@ pub struct AppMapping {
     pub profile_id: String,
     pub enabled: bool,
     pub priority: i32,
+    /// Pre-compiled regexes for `title_includes` entries starting with `regex:`.
+    /// Populated by `compile_title_regexes()` after config load.
+    #[serde(skip)]
+    pub compiled_title_regexes: Vec<Option<regex::Regex>>,
 }
+
+impl PartialEq for AppMapping {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.exe == other.exe
+            && self.process_path == other.process_path
+            && self.title_includes == other.title_includes
+            && self.profile_id == other.profile_id
+            && self.enabled == other.enabled
+            && self.priority == other.priority
+    }
+}
+
+impl Eq for AppMapping {}
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -516,10 +577,25 @@ pub enum MenuItem {
     },
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MouseActionKind {
+    LeftClick,
+    RightClick,
+    MiddleClick,
+    DoubleClick,
+    ScrollUp,
+    ScrollDown,
+    ScrollLeft,
+    ScrollRight,
+    MouseBack,
+    MouseForward,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MouseActionPayload {
-    pub action: String,
+    pub action: MouseActionKind,
     #[serde(default)]
     pub ctrl: bool,
     #[serde(default)]
@@ -530,10 +606,22 @@ pub struct MouseActionPayload {
     pub win: bool,
 }
 
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MediaKeyKind {
+    PlayPause,
+    NextTrack,
+    PrevTrack,
+    Stop,
+    VolumeUp,
+    VolumeDown,
+    Mute,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MediaKeyPayload {
-    pub key: String,
+    pub key: MediaKeyKind,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -587,6 +675,7 @@ pub fn load_or_initialize_config(
         let mut config = read_config_from_path(&config_path)?;
         migrate_paste_mode(&mut config);
         let warnings = validate_config(&config)?;
+        config.compile_title_regexes();
         return Ok(LoadConfigResponse {
             config,
             warnings,
@@ -595,8 +684,9 @@ pub fn load_or_initialize_config(
         });
     }
 
-    let config = default_seed_config();
+    let mut config = default_seed_config();
     let warnings = validate_config(&config)?;
+    config.compile_title_regexes();
     write_config_to_path(config_dir, &config)?;
 
     Ok(LoadConfigResponse {
@@ -618,6 +708,9 @@ pub fn save_config(
     let warnings = validate_config(&config)?;
     let backup_path = write_config_to_path(config_dir, &config)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
+
+    let mut config = config;
+    config.compile_title_regexes();
 
     Ok(SaveConfigResponse {
         config,
@@ -1001,22 +1094,9 @@ fn validate_action<'a>(
                 errors,
             );
         }
-        (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
-            if payload.action.trim().is_empty() {
-                errors.push(format!(
-                    "action `{}` mouseAction must specify an action.",
-                    action.id
-                ));
-            }
-        }
-        (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => {
-            if payload.key.trim().is_empty() {
-                errors.push(format!(
-                    "action `{}` mediaKey must specify a key.",
-                    action.id
-                ));
-            }
-        }
+        // MouseAction and MediaKey use typed enums — serde validates values at deserialization.
+        (ActionType::MouseAction, ActionPayload::MouseAction(_)) => {}
+        (ActionType::MediaKey, ActionPayload::MediaKey(_)) => {}
         (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => {
             if payload.target_profile_id.trim().is_empty() {
                 errors.push(format!(
@@ -2407,6 +2487,7 @@ fn app_mapping(id: &str, exe: &str, profile_id: &str, priority: i32) -> AppMappi
         profile_id: profile_id.into(),
         enabled: true,
         priority,
+        compiled_title_regexes: Vec::new(),
     }
 }
 

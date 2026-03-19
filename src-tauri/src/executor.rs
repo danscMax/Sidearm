@@ -313,7 +313,7 @@ fn summarize_action(
         )),
         (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => Ok((
             ExecutionOutcome::Simulated,
-            format!("Отправит медиа-клавишу `{}`.", payload.key),
+            format!("Отправит медиа-клавишу `{:?}`.", payload.key),
             Vec::new(),
         )),
         (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => Ok((
@@ -589,7 +589,7 @@ fn run_live_mouse_action(
     let dispatch =
         input_synthesis::send_mouse_action(payload, &encoding_mods).map_err(|message| {
             log::error!(
-                "[executor] Mouse action `{}` failed for key {}: {message}",
+                "[executor] Mouse action `{:?}` failed for key {}: {message}",
                 payload.action,
                 preview.encoded_key
             );
@@ -635,10 +635,10 @@ fn format_mouse_summary(payload: &MouseActionPayload) -> String {
     .collect();
 
     if modifiers.is_empty() {
-        format!("Выполнено действие мыши `{}`.", payload.action)
+        format!("Выполнено действие мыши `{:?}`.", payload.action)
     } else {
         format!(
-            "Выполнено действие мыши `{}` + `{}`.",
+            "Выполнено действие мыши `{}` + `{:?}`.",
             modifiers.join(" + "),
             payload.action
         )

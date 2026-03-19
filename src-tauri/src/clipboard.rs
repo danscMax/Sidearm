@@ -60,7 +60,14 @@ fn paste_text_sta(text: &str) -> Result<ClipboardPasteReport, String> {
     let _ole = OleScope::initialize()?;
     log::debug!("[clipboard] STA thread: OLE initialized, saving clipboard snapshot");
     let snapshot = ClipboardSnapshot::capture()?;
-    let write_result = set_clipboard_text(text)?;
+    let write_result = match set_clipboard_text(text) {
+        Ok(result) => result,
+        Err(e) => {
+            log::warn!("[clipboard] set_clipboard_text failed, restoring snapshot: {e}");
+            let _ = snapshot.restore_force();
+            return Err(e);
+        }
+    };
 
     // Full clearing: clipboard paste is always an internal operation, not a
     // user-triggered shortcut that should inherit physical keyboard modifiers.
@@ -97,18 +104,69 @@ fn paste_text_sta(text: &str) -> Result<ClipboardPasteReport, String> {
     Ok(ClipboardPasteReport { warnings })
 }
 
+// ---------------------------------------------------------------------------
+// Clipboard snapshot: raw HGLOBAL data approach (no COM proxy)
+//
+// Previous implementation used OleGetClipboard() → IDataObject COM proxy.
+// This caused STATUS_FATAL_USER_CALLBACK_EXCEPTION (0xc000041d) crashes when
+// the clipboard owner process exited between capture and restore, leaving a
+// dangling COM vtable pointer.
+//
+// The new approach copies raw clipboard data via Win32 API:
+//   capture:  OpenClipboard → EnumClipboardFormats → GetClipboardData → GlobalAlloc copy
+//   restore:  OpenClipboard → EmptyClipboard → SetClipboardData for each saved format
+//
+// This is the same approach used by AutoHotkey v2. The data lives in our
+// process memory, with no dependency on the clipboard owner's lifetime.
+// ---------------------------------------------------------------------------
+
+/// A single clipboard format entry: format ID + owned HGLOBAL copy.
+#[cfg(target_os = "windows")]
+struct SavedClipboardFormat {
+    format: u32,
+    /// Owned HGLOBAL with a copy of the clipboard data. Must be freed on drop
+    /// unless ownership is transferred to SetClipboardData.
+    handle: *mut core::ffi::c_void,
+    /// Size in bytes of the HGLOBAL allocation.
+    size: usize,
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for SavedClipboardFormat {
+    fn drop(&mut self) {
+        if !self.handle.is_null() {
+            unsafe {
+                use windows_sys::Win32::Foundation::GlobalFree;
+                let _ = GlobalFree(self.handle);
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 enum ClipboardSnapshot {
     Empty,
-    DataObject(ComPtr),
+    #[cfg(target_os = "windows")]
+    RawFormats {
+        formats: Vec<(u32, *mut core::ffi::c_void, usize)>,
+    },
 }
+
+// HGLOBAL pointers are Send-safe — they point to process-local heap memory.
+unsafe impl Send for ClipboardSnapshot {}
 
 impl ClipboardSnapshot {
     fn capture() -> Result<Self, String> {
         #[cfg(target_os = "windows")]
         unsafe {
-            use windows_sys::Win32::System::{
-                DataExchange::CountClipboardFormats, Ole::OleGetClipboard,
+            use windows_sys::Win32::{
+                Foundation::GlobalFree,
+                System::{
+                    DataExchange::{
+                        CountClipboardFormats, EnumClipboardFormats, GetClipboardData,
+                    },
+                    Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
+                },
             };
 
             let format_count = CountClipboardFormats();
@@ -116,21 +174,59 @@ impl ClipboardSnapshot {
                 return Ok(Self::Empty);
             }
 
-            let mut data_object = ptr::null_mut();
-            let hr = OleGetClipboard(&mut data_object);
-            if succeeded(hr) && !data_object.is_null() {
-                return Ok(Self::DataObject(ComPtr::new(data_object)));
+            open_clipboard_with_retry()?;
+            let _close = ClipboardOpenGuard;
+
+            let mut formats: Vec<(u32, *mut core::ffi::c_void, usize)> = Vec::new();
+            let mut format = 0u32;
+            loop {
+                format = EnumClipboardFormats(format);
+                if format == 0 {
+                    break;
+                }
+                let src_handle = GetClipboardData(format);
+                if src_handle.is_null() {
+                    continue;
+                }
+                let src_locked = GlobalLock(src_handle);
+                if src_locked.is_null() {
+                    continue;
+                }
+                let size = GlobalSize(src_handle);
+                if size == 0 {
+                    let _ = GlobalUnlock(src_handle);
+                    continue;
+                }
+
+                let dst_handle = GlobalAlloc(GMEM_MOVEABLE, size);
+                if dst_handle.is_null() {
+                    let _ = GlobalUnlock(src_handle);
+                    continue;
+                }
+                let dst_locked = GlobalLock(dst_handle);
+                if dst_locked.is_null() {
+                    let _ = GlobalUnlock(src_handle);
+                    let _ = GlobalFree(dst_handle);
+                    continue;
+                }
+
+                ptr::copy_nonoverlapping(src_locked as *const u8, dst_locked as *mut u8, size);
+                let _ = GlobalUnlock(dst_handle);
+                let _ = GlobalUnlock(src_handle);
+
+                formats.push((format, dst_handle, size));
             }
 
-            Err(format!(
-                "Failed to snapshot the current clipboard object: {}",
-                format_hresult(hr)
-            ))
+            if formats.is_empty() {
+                return Ok(Self::Empty);
+            }
+
+            log::debug!("[clipboard] Captured {} clipboard formats", formats.len());
+            Ok(Self::RawFormats { formats })
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = text;
             Err("clipboardPaste is only implemented for Windows.".into())
         }
     }
@@ -148,22 +244,107 @@ impl ClipboardSnapshot {
             }
         }
 
-        self.restore_force().map(|mut warnings| {
-            if warnings.is_empty() {
-                warnings
-            } else {
-                let mut prefixed = Vec::with_capacity(warnings.len());
-                prefixed.append(&mut warnings);
-                prefixed
-            }
-        })
+        self.restore_force()
     }
 
     fn restore_force(&self) -> Result<Vec<String>, String> {
         match self {
             Self::Empty => clear_clipboard().map(|()| Vec::new()),
-            Self::DataObject(data_object) => restore_clipboard_object(data_object),
+            #[cfg(target_os = "windows")]
+            Self::RawFormats { formats } => restore_raw_formats(formats),
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ClipboardSnapshot {
+    fn drop(&mut self) {
+        if let Self::RawFormats { formats } = self {
+            for &mut (_, handle, _) in formats.iter_mut() {
+                if !handle.is_null() {
+                    unsafe {
+                        use windows_sys::Win32::Foundation::GlobalFree;
+                        let _ = GlobalFree(handle);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Restore clipboard from saved raw HGLOBAL data.
+/// Each saved format's HGLOBAL is duplicated before SetClipboardData (which
+/// takes ownership of the handle), so the snapshot can still be dropped safely.
+#[cfg(target_os = "windows")]
+fn restore_raw_formats(
+    formats: &[(u32, *mut core::ffi::c_void, usize)],
+) -> Result<Vec<String>, String> {
+    unsafe {
+        use windows_sys::Win32::{
+            Foundation::GlobalFree,
+            System::{
+                DataExchange::{EmptyClipboard, SetClipboardData},
+                Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            },
+        };
+
+        open_clipboard_with_retry()?;
+        let _close = ClipboardOpenGuard;
+
+        if EmptyClipboard() == 0 {
+            return Err("EmptyClipboard failed while restoring clipboard.".into());
+        }
+
+        let mut warnings = Vec::new();
+        for &(format, src_handle, size) in formats {
+            if src_handle.is_null() || size == 0 {
+                continue;
+            }
+
+            // Duplicate the HGLOBAL — SetClipboardData takes ownership
+            let dst_handle = GlobalAlloc(GMEM_MOVEABLE, size);
+            if dst_handle.is_null() {
+                warnings.push(format!(
+                    "GlobalAlloc failed for clipboard format {format} during restore."
+                ));
+                continue;
+            }
+            let src_locked = GlobalLock(src_handle);
+            let dst_locked = GlobalLock(dst_handle);
+            if src_locked.is_null() || dst_locked.is_null() {
+                if !dst_locked.is_null() {
+                    let _ = GlobalUnlock(dst_handle);
+                }
+                if !src_locked.is_null() {
+                    let _ = GlobalUnlock(src_handle);
+                }
+                let _ = GlobalFree(dst_handle);
+                warnings.push(format!(
+                    "GlobalLock failed for clipboard format {format} during restore."
+                ));
+                continue;
+            }
+
+            ptr::copy_nonoverlapping(src_locked as *const u8, dst_locked as *mut u8, size);
+            let _ = GlobalUnlock(dst_handle);
+            let _ = GlobalUnlock(src_handle);
+
+            let result = SetClipboardData(format, dst_handle);
+            if result.is_null() {
+                // SetClipboardData failed — we still own the handle
+                let _ = GlobalFree(dst_handle);
+                warnings.push(format!(
+                    "SetClipboardData failed for clipboard format {format}."
+                ));
+            }
+            // On success, SetClipboardData takes ownership — do NOT free dst_handle
+        }
+
+        log::debug!(
+            "[clipboard] Restored {} clipboard formats",
+            formats.len() - warnings.len()
+        );
+        Ok(warnings)
     }
 }
 
@@ -193,14 +374,6 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
         open_clipboard_with_retry()?;
         let close_guard = ClipboardOpenGuard;
 
-        // NOTE: The Windows clipboard API requires EmptyClipboard() to be called
-        // before SetClipboardData(). This means if GlobalAlloc fails below, the
-        // clipboard will have already been emptied and the prior contents are lost.
-        // This is an inherent limitation of the Win32 clipboard API -- there is no
-        // way to atomically replace clipboard contents. The caller (paste_text)
-        // mitigates this by capturing a snapshot via OleGetClipboard before we get
-        // here, but the snapshot restore is best-effort and may not recover all
-        // original clipboard formats.
         if EmptyClipboard() == 0 {
             log::warn!("[clipboard] EmptyClipboard failed while staging snippet text");
             return Err("EmptyClipboard failed while staging snippet text.".into());
@@ -269,46 +442,6 @@ fn clear_clipboard() -> Result<(), String> {
 
     #[cfg(not(target_os = "windows"))]
     {
-        Err("clipboardPaste is only implemented for Windows.".into())
-    }
-}
-
-fn restore_clipboard_object(data_object: &ComPtr) -> Result<Vec<String>, String> {
-    #[cfg(target_os = "windows")]
-    unsafe {
-        use windows_sys::Win32::System::Ole::{OleFlushClipboard, OleSetClipboard};
-
-        log::debug!("[clipboard] Restoring previous clipboard object");
-        let hr = OleSetClipboard(data_object.as_raw());
-        if !succeeded(hr) {
-            log::warn!(
-                "[clipboard] OleSetClipboard failed: {}",
-                format_hresult(hr)
-            );
-            return Err(format!(
-                "Failed to restore the previous clipboard object: {}",
-                format_hresult(hr)
-            ));
-        }
-
-        let flush_hr = OleFlushClipboard();
-        if !succeeded(flush_hr) {
-            log::warn!(
-                "[clipboard] OleFlushClipboard failed: {}",
-                format_hresult(flush_hr)
-            );
-            return Ok(vec![format!(
-                "Clipboard was restored, but OleFlushClipboard failed: {}.",
-                format_hresult(flush_hr)
-            )]);
-        }
-
-        Ok(Vec::new())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = data_object;
         Err("clipboardPaste is only implemented for Windows.".into())
     }
 }
@@ -408,31 +541,6 @@ impl Drop for OleScope {
             if self.should_uninitialize {
                 use windows_sys::Win32::System::Ole::OleUninitialize;
                 OleUninitialize();
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-struct ComPtr(*mut core::ffi::c_void);
-
-impl ComPtr {
-    fn new(raw: *mut core::ffi::c_void) -> Self {
-        Self(raw)
-    }
-
-    fn as_raw(&self) -> *mut core::ffi::c_void {
-        self.0
-    }
-}
-
-impl Drop for ComPtr {
-    fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
-        unsafe {
-            if !self.0.is_null() {
-                let vtbl = *(self.0 as *mut *mut windows_sys::core::IUnknown_Vtbl);
-                ((*vtbl).Release)(self.0);
             }
         }
     }

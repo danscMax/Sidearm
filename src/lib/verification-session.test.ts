@@ -197,9 +197,10 @@ function createEncodedKeyEvent(
 ): EncodedKeyEvent {
   return {
     encodedKey: "F13",
-    backend: "windows-register-hotkey",
+    backend: "windows-hotkey",
     receivedAt: 2000,
     isRepeat: false,
+    isKeyUp: false,
     ...overrides,
   };
 }

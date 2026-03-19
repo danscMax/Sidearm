@@ -35,7 +35,8 @@ src-tauri/target/
 # Resources (binary downloads, not source)
 resources/
 
-# Temporary docs (research, mockups — one-off artifacts)
+# Temporary docs (research, plans, mockups — one-off artifacts)
+plans/
 docs/plans/
 docs/research/
 docs/mockups/

@@ -64,16 +64,7 @@ pub fn send_shortcut(
         if payload.win { "Win+" } else { "" },
         payload.key
     );
-    // Snapshot BEFORE clearing — we need to know which physical modifiers
-    // the user is holding so we can restore them after the action.
-    let pre_snapshot = current_modifier_snapshot()?;
-
-    // Clear ALL modifiers (encoding + physical).  This ensures the action
-    // fires exactly as configured — e.g. just Backspace, never
-    // Shift+Backspace even when the user holds Shift on the keyboard.
-    clear_modifiers(&ALL_MODIFIERS)?;
-
-    // After clearing, the modifier state is clean.
+    clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
     let (plan, reused_modifiers) = plan_shortcut_inputs(payload, &snapshot)?;
 
@@ -84,15 +75,8 @@ pub fn send_shortcut(
             let cleanup = build_modifier_release_inputs(&pressed);
             let _ = send_keyboard_inputs(&cleanup);
         }
-        // Best-effort: restore physical modifiers even on error
-        let _ = restore_physical_modifiers(&pre_snapshot, encoding_mods);
         return Err(send_error);
     }
-
-    // Restore physical modifiers the user is still holding on the keyboard.
-    // Encoding modifiers are NOT restored — the Razer driver sends key-up
-    // for them when the mouse button is released.
-    restore_physical_modifiers(&pre_snapshot, encoding_mods)?;
 
     let warnings = if reused_modifiers.is_empty() {
         Vec::new()
@@ -126,61 +110,6 @@ fn extract_pressed_modifiers(
     .filter(|(modifier, desired)| *desired && !snapshot.is_active(*modifier))
     .map(|(modifier, _)| *modifier)
     .collect()
-}
-
-/// Re-press physical keyboard modifiers that we temporarily cleared.
-/// Only restores modifiers that were in `pre_snapshot` but are NOT part of
-/// `encoding_mods` (those are handled by the Razer driver's own key-up events).
-#[cfg(target_os = "windows")]
-fn restore_physical_modifiers(
-    pre_snapshot: &ModifierSnapshot,
-    encoding_mods: &HotkeyModifiers,
-) -> Result<(), String> {
-    let mut inputs = Vec::new();
-    if pre_snapshot.ctrl && !encoding_mods.ctrl {
-        inputs.push(KeyboardInputSpec::VirtualKey {
-            code: vk_lcontrol(),
-            extended: false,
-            key_up: false,
-        });
-    }
-    if pre_snapshot.shift && !encoding_mods.shift {
-        inputs.push(KeyboardInputSpec::VirtualKey {
-            code: vk_lshift(),
-            extended: false,
-            key_up: false,
-        });
-    }
-    if pre_snapshot.alt && !encoding_mods.alt {
-        inputs.push(KeyboardInputSpec::VirtualKey {
-            code: vk_lmenu(),
-            extended: false,
-            key_up: false,
-        });
-    }
-    if pre_snapshot.win && !encoding_mods.win {
-        inputs.push(KeyboardInputSpec::VirtualKey {
-            code: vk_lwin(),
-            extended: false,
-            key_up: false,
-        });
-    }
-    if !inputs.is_empty() {
-        log::info!(
-            "[modifier-passthrough] restore_physical_modifiers: re-pressing {} modifier(s)",
-            inputs.len(),
-        );
-        send_keyboard_inputs(&inputs)?;
-    }
-    Ok(())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn restore_physical_modifiers(
-    _pre_snapshot: &ModifierSnapshot,
-    _encoding_mods: &HotkeyModifiers,
-) -> Result<(), String> {
-    Ok(())
 }
 
 /// Build key-up events for the given modifiers, in reverse order (mirror the
@@ -803,10 +732,13 @@ impl ModifierKey {
 
 /// Selectively clears held modifier keys by injecting key-up events.
 ///
-/// Only modifiers whose flag is `true` in `mask` are cleared.
-/// `send_shortcut` passes `ALL_MODIFIERS` so actions fire exactly as
-/// configured regardless of physical keyboard state.  Physical modifiers
-/// are restored afterward by `restore_physical_modifiers`.
+/// Only modifiers whose flag is `true` in `mask` are cleared. This allows
+/// Synapse encoding modifiers (e.g. Ctrl+Alt from "Ctrl+Alt+F13") to be
+/// released while the user's physical keyboard modifiers (e.g. Shift held on
+/// keyboard for Shift+Backspace) pass through untouched.
+///
+/// For text injection, pass `ALL_MODIFIERS` to clear everything — held
+/// Ctrl/Alt corrupts Unicode/VK_PACKET output.
 ///
 /// The injected key-ups carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our own LL hook
 /// ignores them. When the user eventually releases the mouse button, the Razer

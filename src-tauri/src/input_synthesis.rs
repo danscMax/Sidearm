@@ -799,7 +799,7 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
                 _ => None,
             })
             .collect();
-        log::info!(
+        log::debug!(
             "[modifier-passthrough] clear_modifiers: releasing [{}]",
             labels.join(", "),
         );

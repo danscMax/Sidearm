@@ -419,7 +419,7 @@ impl HelperModifierState {
         let result = (current & modifiers_mask) == modifiers_mask;
         if result && current != modifiers_mask {
             let extra = current & !modifiers_mask;
-            log::info!(
+            log::debug!(
                 "[modifier-passthrough] Superset match: current=0x{:04X} mask=0x{:04X} extra=0x{:04X}",
                 current,
                 modifiers_mask,
@@ -523,13 +523,13 @@ fn process_helper_key_event(
 
             if let Some(winner) = best {
                 // Log when most-specific-match resolved ambiguity
-                if log::log_enabled!(log::Level::Info) {
+                if log::log_enabled!(log::Level::Debug) {
                     let total_matches = regs
                         .iter()
                         .filter(|r| r.primary_vk == vk && modifiers.matches_mask(r.modifiers_mask))
                         .count();
                     if total_matches > 1 {
-                        log::info!(
+                        log::debug!(
                             "[modifier-passthrough] Most-specific-match: chose `{}` \
                              (mask=0x{:04X}, {} bits) over {} other candidate(s) for vk=0x{:02X}",
                             winner.encoded_key,
@@ -548,9 +548,14 @@ fn process_helper_key_event(
                 // Always emit the match — including on auto-repeat.
                 // This enables key-repeat for tap-mode actions (e.g.
                 // holding a mouse button mapped to Backspace deletes
-                // characters continuously).  The handler skips repeats
-                // for hold-mode shortcuts.
-                matches.push(winner.encoded_key.clone());
+                // characters continuously).  The handler uses the
+                // REPEAT: prefix to guard hold-mode and non-shortcut
+                // actions from re-firing.
+                if is_repeat {
+                    matches.push(format!("REPEAT:{}", winner.encoded_key));
+                } else {
+                    matches.push(winner.encoded_key.clone());
+                }
                 // Inject mask key only on first press — Alt/Win state
                 // is stable during repeats.
                 let need_mask = !is_repeat && (modifiers.alt || modifiers.win);
@@ -1085,16 +1090,19 @@ fn spawn_capture_helper(
             if trimmed.is_empty() {
                 continue;
             }
-            let (is_key_up, encoded_key) = if let Some(rest) = trimmed.strip_prefix("UP:") {
-                (true, rest.to_owned())
-            } else {
-                (false, trimmed.to_owned())
-            };
+            let (is_key_up, is_repeat, encoded_key) =
+                if let Some(rest) = trimmed.strip_prefix("UP:") {
+                    (true, false, rest.to_owned())
+                } else if let Some(rest) = trimmed.strip_prefix("REPEAT:") {
+                    (false, true, rest.to_owned())
+                } else {
+                    (false, false, trimmed.to_owned())
+                };
             let _ = event_tx.send(EncodedKeyEvent {
                 encoded_key,
                 backend: BACKEND_LL_HOOK.into(),
                 received_at: runtime::timestamp_millis(),
-                is_repeat: false,
+                is_repeat,
                 is_key_up,
             });
         }
@@ -1533,6 +1541,15 @@ fn process_encoded_key_event(
         return;
     }
 
+    // Auto-repeat guard: only tap-mode shortcut actions should repeat.
+    // Launch, text, macro, and other non-shortcut actions must NOT re-fire
+    // on auto-repeat (e.g. holding a button mapped to Launch would spawn
+    // the program 30+ times per second).
+    if event.is_repeat && preview.action_type.as_deref() != Some("shortcut") {
+        flush_log_entries(runtime_store, log_entries);
+        return;
+    }
+
     // Modifier-only shortcuts (Ctrl+Alt, Ctrl+Shift, etc.) are forced to hold
     // mode regardless of configured trigger mode — in tap mode they press and
     // immediately release modifiers, which is useless.
@@ -1934,7 +1951,10 @@ mod helper_key_event_tests {
         assert!(suppress2, "repeat should still be suppressed");
         assert!(wake2, "repeat should wake to emit match");
         assert_eq!(matches.len(), 2, "repeat should emit a second match");
-        assert_eq!(matches[1], "F24");
+        assert_eq!(
+            matches[1], "REPEAT:F24",
+            "repeat match should carry REPEAT: prefix"
+        );
     }
 
     #[test]

@@ -28,6 +28,12 @@ const MOD_SHIFT: u32 = 0x0004;
 #[cfg(target_os = "windows")]
 const MOD_WIN: u32 = 0x0008;
 
+/// Bitmask covering only the modifier-key bits (Alt/Ctrl/Shift/Win).
+/// Used to strip RegisterHotKey-only flags like MOD_NOREPEAT (0x4000)
+/// before passing masks to the LL hook helper.
+#[cfg(target_os = "windows")]
+const MOD_MODIFIER_BITS: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
+
 #[cfg(target_os = "windows")]
 const VK_SHIFT: u32 = 0x10;
 #[cfg(target_os = "windows")]
@@ -1004,7 +1010,9 @@ fn spawn_capture_helper(
         .filter(|r| r.has_modifiers)
         .map(|r| HelperRegistration {
             encoded_key: r.encoded_key.clone(),
-            modifiers_mask: r.modifiers_mask,
+            // Strip MOD_NOREPEAT — it's a RegisterHotKey API flag that has
+            // no meaning for the LL hook's superset modifier matching.
+            modifiers_mask: r.modifiers_mask & MOD_MODIFIER_BITS,
             primary_vk: r.primary_vk,
         })
         .collect();
@@ -1886,6 +1894,27 @@ mod helper_key_event_tests {
         assert!(suppress, "bare F24 should fire even with extra Shift held");
         assert!(wake);
         assert_eq!(matches, vec!["F24"]);
+    }
+
+    #[test]
+    fn mod_norepeat_stripped_from_helper_mask() {
+        // register_hotkey_mask() includes MOD_NOREPEAT (0x4000).
+        // Verify that MOD_MODIFIER_BITS correctly strips it.
+        let mask_with_norepeat = super::MOD_ALT | 0x4000; // e.g. Alt+F24
+        let clean = mask_with_norepeat & super::MOD_MODIFIER_BITS;
+        assert_eq!(clean, super::MOD_ALT);
+
+        // Verify superset matching works with the cleaned mask
+        let mut modifiers = HelperModifierState::default();
+        modifiers.apply_vk_event(VK_LMENU, true); // Alt held
+        assert!(
+            modifiers.matches_mask(clean),
+            "Alt+F24 should match when Alt is held and mask is clean"
+        );
+        assert!(
+            !modifiers.matches_mask(mask_with_norepeat),
+            "mask with MOD_NOREPEAT should NOT match (bit 0x4000 never set in current)"
+        );
     }
 }
 

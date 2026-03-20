@@ -208,15 +208,16 @@ impl CaptureBackendHandle {
                 }
             };
 
-            // Spawn helper process for modifier-combo hotkeys (non-fatal if fails)
+            // Spawn helper process for LL hook (handles superset modifier matching
+            // for all keys, not just modifier-combos).  Non-fatal if fails —
+            // RegisterHotKey still handles bare keys with exact matching.
             let helper = spawn_capture_helper(&registrations, helper_event_tx);
-            // Warn user if modifier-combo hotkeys exist but the helper failed to start
-            let has_modifier_combos = registrations.iter().any(|r| r.has_modifiers);
-            if has_modifier_combos && helper.is_none() {
+            if !registrations.is_empty() && helper.is_none() {
                 if let Ok(mut store) = runtime_store.lock() {
                     store.record_warn(
                         "перехват",
-                        "Не удалось запустить вспомогательный процесс. Горячие клавиши с модификаторами (Ctrl/Alt/Shift + кнопка) могут не работать.",
+                        "Не удалось запустить вспомогательный процесс перехвата. \
+                         Кнопки с зажатыми модификаторами (Ctrl/Shift) могут не срабатывать.",
                     );
                 }
             }
@@ -319,8 +320,6 @@ struct RegisteredHotkey {
     encoded_key: String,
     modifiers_mask: u32,
     primary_vk: u32,
-    /// True if this hotkey includes Ctrl / Alt / Shift / Win modifiers.
-    has_modifiers: bool,
 }
 
 fn build_hotkey_registrations(config: &AppConfig) -> Result<Vec<RegisteredHotkey>, String> {
@@ -336,13 +335,11 @@ fn build_hotkey_registrations(config: &AppConfig) -> Result<Vec<RegisteredHotkey
             )
         })?;
 
-        let m = &hotkey.modifiers;
         registrations.push(RegisteredHotkey {
             id: (index + 1) as i32,
             encoded_key: hotkey.canonical,
             modifiers_mask: hotkey.modifiers.register_hotkey_mask(),
             primary_vk: u32::from(hotkey.key.code),
-            has_modifiers: m.ctrl || m.alt || m.shift || m.win,
         });
     }
 
@@ -1004,10 +1001,13 @@ fn spawn_capture_helper(
 
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    // Only send modifier-combo registrations to the helper
+    // Send ALL registrations to the helper so that bare keys (mask=0)
+    // also benefit from superset modifier matching.  When the user holds
+    // a physical modifier (e.g. Shift) and presses a bare-key button,
+    // the LL hook still matches via (current & 0) == 0, while
+    // RegisterHotKey (exact matching) would reject the extra modifier.
     let helper_regs: Vec<HelperRegistration> = registrations
         .iter()
-        .filter(|r| r.has_modifiers)
         .map(|r| HelperRegistration {
             encoded_key: r.encoded_key.clone(),
             // Strip MOD_NOREPEAT — it's a RegisterHotKey API flag that has

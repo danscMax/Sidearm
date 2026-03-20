@@ -1643,6 +1643,153 @@ mod tests {
     }
 
     #[test]
+    fn physical_shift_not_in_plan_when_action_has_no_shift() {
+        // User holds Shift on keyboard, action = Backspace (no modifiers).
+        // Shift is NOT in the action payload → it should not appear in the
+        // injection plan.  The OS will combine the physical Shift with the
+        // injected Backspace, producing Shift+Backspace.
+        let payload = ShortcutActionPayload {
+            key: "Backspace".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+            win: false,
+            raw: None,
+        };
+
+        let (plan, reused) = plan_shortcut_inputs(
+            &payload,
+            &ModifierSnapshot {
+                ctrl: false,
+                shift: true, // physical Shift held
+                alt: false,
+                win: false,
+            },
+        )
+        .expect("plan should succeed");
+
+        // Physical Shift is not desired by the action, so it's neither
+        // injected nor listed as reused — it simply passes through.
+        assert!(reused.is_empty(), "Shift should not be reused");
+        assert_eq!(plan.len(), 2, "only Backspace down + up");
+        assert!(plan.iter().all(|i| match i {
+            KeyboardInputSpec::VirtualKey { code, .. } => *code == vk_back(),
+            _ => false,
+        }));
+    }
+
+    #[test]
+    fn action_modifier_injected_despite_unrelated_physical_modifier() {
+        // User holds Shift, action = Ctrl+C.  Ctrl is NOT active → must be
+        // injected.  Shift is active but not in the action → passes through.
+        let payload = ShortcutActionPayload {
+            key: "C".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+            raw: None,
+        };
+
+        let (plan, reused) = plan_shortcut_inputs(
+            &payload,
+            &ModifierSnapshot {
+                ctrl: false,
+                shift: true, // physical
+                alt: false,
+                win: false,
+            },
+        )
+        .expect("plan should succeed");
+
+        assert!(reused.is_empty());
+        // Plan: Ctrl-down, C-down, C-up, Ctrl-up
+        assert_eq!(plan.len(), 4);
+        // First event must be Ctrl press
+        assert!(matches!(
+            plan[0],
+            KeyboardInputSpec::VirtualKey {
+                code,
+                key_up: false,
+                ..
+            } if code == vk_lcontrol()
+        ));
+    }
+
+    #[test]
+    fn hold_down_reuses_already_active_modifier() {
+        // Shift is physically held, action = Shift+Win hold.
+        // Shift should be reused (not re-injected), Win should be injected.
+        let payload = ShortcutActionPayload {
+            key: String::new(),
+            ctrl: false,
+            shift: true,
+            alt: false,
+            win: true,
+            raw: None,
+        };
+
+        let (inputs, held) = plan_shortcut_hold_down_inputs(
+            &payload,
+            &ModifierSnapshot {
+                ctrl: false,
+                shift: true, // already held
+                alt: false,
+                win: false,
+            },
+        )
+        .unwrap();
+
+        // Only Win should be injected (Shift is reused from physical state)
+        assert_eq!(held.pressed_modifier_vks.len(), 1, "only Win injected");
+        assert_eq!(
+            held.pressed_modifier_vks[0].code,
+            ModifierKey::Win.virtual_key().code,
+        );
+        assert_eq!(inputs.len(), 1, "only Win-down");
+    }
+
+    #[test]
+    fn hold_down_modifier_only_shortcut() {
+        // Modifier-only action (Shift+Win) with nothing held → both injected.
+        let payload = ShortcutActionPayload {
+            key: String::new(),
+            ctrl: false,
+            shift: true,
+            alt: false,
+            win: true,
+            raw: None,
+        };
+
+        let (inputs, held) = plan_shortcut_hold_down_inputs(
+            &payload,
+            &ModifierSnapshot::default(),
+        )
+        .unwrap();
+
+        assert!(held.primary_key.is_none());
+        assert_eq!(held.pressed_modifier_vks.len(), 2, "Win + Shift injected");
+        // All inputs should be key-down only
+        assert!(inputs.iter().all(|i| match i {
+            KeyboardInputSpec::VirtualKey { key_up, .. } => !key_up,
+            _ => false,
+        }));
+        assert_eq!(inputs.len(), 2);
+    }
+
+    #[test]
+    fn hold_up_empty_when_all_reused() {
+        // If all modifiers were reused (none injected), hold-up has nothing to release.
+        let held = HeldShortcutState {
+            pressed_modifier_vks: vec![],
+            primary_key: None,
+        };
+
+        let inputs = plan_shortcut_hold_up_inputs(&held);
+        assert!(inputs.is_empty());
+    }
+
+    #[test]
     fn hold_down_presses_without_releasing() {
         let payload = ShortcutActionPayload {
             key: "A".into(),

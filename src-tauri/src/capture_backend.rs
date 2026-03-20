@@ -1938,6 +1938,158 @@ mod helper_key_event_tests {
     }
 
     #[test]
+    fn auto_repeat_does_not_inject_mask_key() {
+        // The mask key (VK 0xE8) prevents Alt/Win menu activation.
+        // It should only fire on the FIRST press, not on auto-repeats.
+        let regs = vec![reg("Alt+F24", MOD_ALT, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        modifiers.apply_vk_event(VK_LMENU, true); // Alt held (encoding)
+
+        // First press — inject_mask should be true (Alt active)
+        let (_, _, inject_mask) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(inject_mask, "first press with Alt should inject mask key");
+
+        // Repeat — inject_mask should be false
+        let (_, _, inject_mask2) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(!inject_mask2, "repeat should NOT inject mask key");
+    }
+
+    #[test]
+    fn superset_match_modifier_combo_with_extra_physical() {
+        // Alt+F24 registered (mask=MOD_ALT). User holds Shift+Alt physically.
+        // Should match via superset: (Shift|Alt & Alt) == Alt.
+        let regs = vec![reg("Alt+F24", MOD_ALT, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        modifiers.apply_vk_event(VK_LMENU, true);  // Alt (encoding)
+        modifiers.apply_vk_event(VK_LSHIFT, true);  // Shift (physical, extra)
+
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress, "should match with extra physical Shift");
+        assert!(wake);
+        assert_eq!(matches, vec!["Alt+F24"]);
+    }
+
+    #[test]
+    fn overlapping_modifier_combo_masks_resolved() {
+        // Ctrl+F24 (mask=0x0002) and Ctrl+Alt+F24 (mask=0x0003) both registered.
+        // Pressing Ctrl+Alt+F24 should pick Ctrl+Alt+F24 (more specific).
+        let regs = vec![
+            reg("Ctrl+F24", MOD_CONTROL, VK_F24),
+            reg("Ctrl+Alt+F24", MOD_CONTROL | MOD_ALT, VK_F24),
+        ];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        modifiers.apply_vk_event(VK_LCONTROL, true);
+        modifiers.apply_vk_event(VK_LMENU, true);
+
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress);
+        assert!(wake);
+        assert_eq!(matches, vec!["Ctrl+Alt+F24"], "most-specific mask should win");
+    }
+
+    #[test]
+    fn full_press_repeat_release_lifecycle() {
+        // Simulate complete lifecycle: press → repeat → repeat → release
+        let regs = vec![reg("F24", 0, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        // 1. First press
+        let (s, w, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(s && w);
+        assert_eq!(matches.len(), 1);
+
+        // 2. Repeat
+        let (s, w, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(s && w);
+        assert_eq!(matches.len(), 2);
+
+        // 3. Another repeat
+        let (s, w, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(s && w);
+        assert_eq!(matches.len(), 3);
+
+        // 4. Release
+        let (s, w, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+        );
+        assert!(s && w);
+        assert_eq!(matches[3], "UP:F24");
+
+        // 5. Suppressions are now empty — another release does nothing
+        let (s, w, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+        );
+        assert!(!s && !w, "second release should be a no-op");
+    }
+
+    #[test]
+    fn modifier_key_up_not_suppressed() {
+        // Modifier key events (Shift, Ctrl, etc.) should never be suppressed —
+        // they pass through so the OS tracks modifier state correctly.
+        let regs = vec![reg("Ctrl+F24", MOD_CONTROL, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        // Ctrl down — should pass through
+        let (suppress, _, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_LCONTROL, WM_KEYDOWN,
+        );
+        assert!(!suppress, "modifier key-down must not be suppressed");
+        assert!(modifiers.ctrl);
+
+        // Ctrl up — should pass through
+        let (suppress, _, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_LCONTROL, WM_KEYUP,
+        );
+        assert!(!suppress, "modifier key-up must not be suppressed");
+        assert!(!modifiers.ctrl);
+    }
+
+    #[test]
+    fn no_match_when_required_modifier_missing() {
+        // Ctrl+F24 registered but only Shift is held — should NOT match.
+        let regs = vec![reg("Ctrl+F24", MOD_CONTROL, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        modifiers.apply_vk_event(VK_LSHIFT, true); // wrong modifier
+
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(!suppress, "should not match without required Ctrl");
+        assert!(!wake);
+        assert!(matches.is_empty());
+    }
+
+    #[test]
     fn mod_norepeat_stripped_from_helper_mask() {
         // register_hotkey_mask() includes MOD_NOREPEAT (0x4000).
         // Verify that MOD_MODIFIER_BITS correctly strips it.

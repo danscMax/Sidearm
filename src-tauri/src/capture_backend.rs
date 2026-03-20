@@ -389,11 +389,41 @@ impl HelperModifierState {
         false
     }
 
+    /// Returns the current modifier state as a bitmask compatible with
+    /// MOD_ALT / MOD_CONTROL / MOD_SHIFT / MOD_WIN flags.
+    fn as_modifier_flags(self) -> u32 {
+        let mut flags = 0u32;
+        if self.ctrl {
+            flags |= MOD_CONTROL;
+        }
+        if self.alt {
+            flags |= MOD_ALT;
+        }
+        if self.shift {
+            flags |= MOD_SHIFT;
+        }
+        if self.win {
+            flags |= MOD_WIN;
+        }
+        flags
+    }
+
+    /// Superset match: returns true when all required modifier bits in
+    /// `modifiers_mask` are active.  Extra physical modifiers are allowed
+    /// (e.g. user holds Shift while pressing a bare F-key mapping).
     fn matches_mask(self, modifiers_mask: u32) -> bool {
-        self.ctrl == ((modifiers_mask & MOD_CONTROL) != 0)
-            && self.alt == ((modifiers_mask & MOD_ALT) != 0)
-            && self.shift == ((modifiers_mask & MOD_SHIFT) != 0)
-            && self.win == ((modifiers_mask & MOD_WIN) != 0)
+        let current = self.as_modifier_flags();
+        let result = (current & modifiers_mask) == modifiers_mask;
+        if result && current != modifiers_mask {
+            let extra = current & !modifiers_mask;
+            log::info!(
+                "[modifier-passthrough] Superset match: current=0x{:04X} mask=0x{:04X} extra=0x{:04X}",
+                current,
+                modifiers_mask,
+                extra,
+            );
+        }
+        result
     }
 }
 
@@ -472,20 +502,51 @@ fn process_helper_key_event(
                 return (false, false, false);
             }
 
+            // Collect all matching registrations for this VK, then pick
+            // the most specific one (highest modifier bit count wins).
+            // This prevents ambiguity when e.g. both F13 (mask=0) and
+            // Shift+Ctrl+Alt+F13 (mask=0x0007) are registered.
+            let mut best: Option<&HelperRegistration> = None;
             for reg in regs.iter() {
                 if reg.primary_vk == vk && modifiers.matches_mask(reg.modifiers_mask) {
-                    let is_repeat = suppressions.contains_key(&vk);
-                    if !is_repeat {
-                        suppressions.insert(vk, reg.encoded_key.clone());
+                    let dominated = best
+                        .map(|b| reg.modifiers_mask.count_ones() > b.modifiers_mask.count_ones())
+                        .unwrap_or(true);
+                    if dominated {
+                        best = Some(reg);
                     }
-                    if !is_repeat {
-                        matches.push(reg.encoded_key.clone());
-                    }
-                    // Inject mask key if Alt or Win is active — prevents
-                    // SC_KEYMENU (ribbon/menu activation) and Start menu.
-                    let need_mask = !is_repeat && (modifiers.alt || modifiers.win);
-                    return (true, !is_repeat, need_mask);
                 }
+            }
+
+            if let Some(winner) = best {
+                // Log when most-specific-match resolved ambiguity
+                if log::log_enabled!(log::Level::Info) {
+                    let total_matches = regs
+                        .iter()
+                        .filter(|r| r.primary_vk == vk && modifiers.matches_mask(r.modifiers_mask))
+                        .count();
+                    if total_matches > 1 {
+                        log::info!(
+                            "[modifier-passthrough] Most-specific-match: chose `{}` \
+                             (mask=0x{:04X}, {} bits) over {} other candidate(s) for vk=0x{:02X}",
+                            winner.encoded_key,
+                            winner.modifiers_mask,
+                            winner.modifiers_mask.count_ones(),
+                            total_matches - 1,
+                            vk,
+                        );
+                    }
+                }
+
+                let is_repeat = suppressions.contains_key(&vk);
+                if !is_repeat {
+                    suppressions.insert(vk, winner.encoded_key.clone());
+                    matches.push(winner.encoded_key.clone());
+                }
+                // Inject mask key if Alt or Win is active — prevents
+                // SC_KEYMENU (ribbon/menu activation) and Start menu.
+                let need_mask = !is_repeat && (modifiers.alt || modifiers.win);
+                return (true, !is_repeat, need_mask);
             }
 
             (false, false, false)
@@ -1677,7 +1738,7 @@ mod helper_modifier_state_tests {
     }
 
     #[test]
-    fn matches_modifier_mask_exactly() {
+    fn matches_modifier_mask_superset() {
         let state = HelperModifierState {
             ctrl: true,
             alt: false,
@@ -1685,9 +1746,25 @@ mod helper_modifier_state_tests {
             win: false,
         };
 
+        // Exact match
         assert!(state.matches_mask(MOD_CONTROL | MOD_SHIFT));
-        assert!(!state.matches_mask(MOD_CONTROL));
+        // Superset: Ctrl+Shift held, only Ctrl required — should match
+        assert!(state.matches_mask(MOD_CONTROL));
+        // Bare (mask=0) — always matches regardless of held modifiers
+        assert!(state.matches_mask(0));
+        // Requires Alt which is not held — should NOT match
         assert!(!state.matches_mask(MOD_CONTROL | MOD_SHIFT | MOD_ALT));
+    }
+
+    #[test]
+    fn as_modifier_flags_roundtrip() {
+        let state = HelperModifierState {
+            ctrl: true,
+            alt: true,
+            shift: false,
+            win: false,
+        };
+        assert_eq!(state.as_modifier_flags(), MOD_CONTROL | MOD_ALT);
     }
 }
 
@@ -1748,6 +1825,67 @@ mod helper_key_event_tests {
         assert!(!suppress);
         assert!(!wake);
         assert!(matches.is_empty());
+    }
+
+    #[test]
+    fn most_specific_match_wins_over_bare() {
+        // Register both bare F24 (mask=0) and Shift+Ctrl+Alt+F24 (mask=0x0007)
+        let regs = vec![
+            reg("F24", 0, VK_F24),
+            reg("Shift+Ctrl+Alt+F24", MOD_SHIFT | MOD_CONTROL | MOD_ALT, VK_F24),
+        ];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        // Press Shift+Ctrl+Alt then F24 — most specific (3 bits) should win
+        modifiers.apply_vk_event(VK_LSHIFT, true);
+        modifiers.apply_vk_event(VK_LCONTROL, true);
+        modifiers.apply_vk_event(VK_LMENU, true);
+
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress);
+        assert!(wake);
+        assert_eq!(matches, vec!["Shift+Ctrl+Alt+F24"]);
+    }
+
+    #[test]
+    fn bare_match_fires_when_no_modifiers_held() {
+        // Both registrations exist but no modifiers are held — bare should win
+        let regs = vec![
+            reg("F24", 0, VK_F24),
+            reg("Shift+Ctrl+Alt+F24", MOD_SHIFT | MOD_CONTROL | MOD_ALT, VK_F24),
+        ];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress);
+        assert!(wake);
+        // Only bare F24 qualifies (Shift+Ctrl+Alt requires those modifiers)
+        assert_eq!(matches, vec!["F24"]);
+    }
+
+    #[test]
+    fn superset_fires_bare_when_extra_modifiers_held() {
+        // Only a bare F24 is registered; user holds Shift physically
+        let regs = vec![reg("F24", 0, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        modifiers.apply_vk_event(VK_LSHIFT, true);
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress, "bare F24 should fire even with extra Shift held");
+        assert!(wake);
+        assert_eq!(matches, vec!["F24"]);
     }
 }
 

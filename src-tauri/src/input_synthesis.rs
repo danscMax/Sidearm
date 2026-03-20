@@ -786,6 +786,23 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     }
 
     if !release_inputs.is_empty() {
+        let labels: Vec<&str> = release_inputs
+            .iter()
+            .filter_map(|input| match input {
+                KeyboardInputSpec::VirtualKey { code, .. } => match *code {
+                    c if c == vk_lcontrol() => Some("Ctrl"),
+                    c if c == vk_lshift() => Some("Shift"),
+                    c if c == vk_lmenu() => Some("Alt"),
+                    c if c == vk_lwin() => Some("Win"),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        log::info!(
+            "[modifier-passthrough] clear_modifiers: releasing [{}]",
+            labels.join(", "),
+        );
         send_keyboard_inputs(&release_inputs)?;
     }
 

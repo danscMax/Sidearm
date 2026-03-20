@@ -544,12 +544,17 @@ fn process_helper_key_event(
                 let is_repeat = suppressions.contains_key(&vk);
                 if !is_repeat {
                     suppressions.insert(vk, winner.encoded_key.clone());
-                    matches.push(winner.encoded_key.clone());
                 }
-                // Inject mask key if Alt or Win is active — prevents
-                // SC_KEYMENU (ribbon/menu activation) and Start menu.
+                // Always emit the match — including on auto-repeat.
+                // This enables key-repeat for tap-mode actions (e.g.
+                // holding a mouse button mapped to Backspace deletes
+                // characters continuously).  The handler skips repeats
+                // for hold-mode shortcuts.
+                matches.push(winner.encoded_key.clone());
+                // Inject mask key only on first press — Alt/Win state
+                // is stable during repeats.
                 let need_mask = !is_repeat && (modifiers.alt || modifiers.win);
-                return (true, !is_repeat, need_mask);
+                return (true, true, need_mask);
             }
 
             (false, false, false)
@@ -1547,6 +1552,15 @@ fn process_encoded_key_event(
             || is_modifier_only_shortcut);
 
     if is_hold_shortcut {
+        // Skip auto-repeat events — the shortcut is already held.
+        // Re-calling hold_down would overwrite held_actions with an empty
+        // state (modifiers already active → "reused" → nothing pressed)
+        // and the eventual hold_up would fail to release.
+        if held_actions.contains_key(&event.encoded_key) {
+            flush_log_entries(runtime_store, log_entries);
+            return;
+        }
+
         let action = config
             .actions
             .iter()
@@ -1894,6 +1908,33 @@ mod helper_key_event_tests {
         assert!(suppress, "bare F24 should fire even with extra Shift held");
         assert!(wake);
         assert_eq!(matches, vec!["F24"]);
+    }
+
+    #[test]
+    fn auto_repeat_emits_match() {
+        // Holding a mouse button should emit matches on every repeat
+        // key-down so tap-mode actions (e.g. Backspace) auto-repeat.
+        let regs = vec![reg("F24", 0, VK_F24)];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = std::collections::HashMap::new();
+        let mut matches = Vec::new();
+
+        // First press
+        let (suppress, wake, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress);
+        assert!(wake);
+        assert_eq!(matches.len(), 1);
+
+        // Auto-repeat (same VK, still key-down, already in suppressions)
+        let (suppress2, wake2, _) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+        );
+        assert!(suppress2, "repeat should still be suppressed");
+        assert!(wake2, "repeat should wake to emit match");
+        assert_eq!(matches.len(), 2, "repeat should emit a second match");
+        assert_eq!(matches[1], "F24");
     }
 
     #[test]

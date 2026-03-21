@@ -801,10 +801,7 @@ fn write_config_to_path(
         .map_err(|error| io_error(Some(&backup_path), error))?;
         backup_tmp
             .persist(&backup_path)
-            .map_err(|error| ConfigStoreError::Io {
-                path: Some(path_string(&backup_path)),
-                message: format!("Failed to persist backup atomically: {}", error.error),
-            })?;
+            .map_err(|error| io_error(Some(&backup_path), error.error))?;
     }
 
     let serialized = serde_json::to_string_pretty(config)

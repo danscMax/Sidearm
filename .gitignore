@@ -41,5 +41,8 @@ docs/plans/
 docs/research/
 docs/mockups/
 
+# Audit reports (generated, not source)
+.audit/
+
 # Portable build output
 Sidearm-Portable/

@@ -121,10 +121,16 @@ button, input, textarea, select {
   width: 46px;
   height: 100%;
   border: none;
+  outline: none;
   background: transparent;
   color: var(--c-text-muted);
   cursor: pointer;
   transition: background-color 0.12s, color 0.12s;
+}
+
+.titlebar__btn:focus-visible {
+  outline: 1px solid var(--c-accent);
+  outline-offset: -1px;
 }
 
 .titlebar__btn:hover {

@@ -342,9 +342,9 @@ fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
     })?;
 
     // For existing paths (reads): canonicalize the path itself.
-    // For new files (writes): canonicalize the parent directory, then append filename.
-    // std::fs::canonicalize returns NotFound on non-existent paths, so we must
-    // handle the write case (new file) by canonicalizing only the parent.
+    // For new files (writes): walk up to the nearest existing ancestor, canonicalize
+    // it, then append the non-existent tail.  This handles writes where intermediate
+    // directories don't exist yet (create_dir_all runs after validation).
     let canonical = if path.exists() {
         std::fs::canonicalize(&path).map_err(|e| {
             CommandError::new(
@@ -354,19 +354,30 @@ fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
             )
         })?
     } else {
-        let parent = path.parent().ok_or_else(|| {
-            CommandError::new("invalid_path", "Path has no parent directory.", None)
-        })?;
-        let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
+        let mut tail: Vec<std::ffi::OsString> = Vec::new();
+        let mut cursor = path.as_path();
+        loop {
+            tail.push(cursor.file_name().ok_or_else(|| {
+                CommandError::new("invalid_path", "Path has no filename component.", None)
+            })?.to_owned());
+            cursor = cursor.parent().ok_or_else(|| {
+                CommandError::new("invalid_path", "No existing ancestor directory found.", None)
+            })?;
+            if cursor.exists() {
+                break;
+            }
+        }
+        let mut canonical = std::fs::canonicalize(cursor).map_err(|e| {
             CommandError::new(
                 "invalid_path",
-                format!("Parent canonicalization failed: {e}"),
+                format!("Ancestor canonicalization failed: {e}"),
                 None,
             )
         })?;
-        canonical_parent.join(path.file_name().ok_or_else(|| {
-            CommandError::new("invalid_path", "Path has no filename.", None)
-        })?)
+        for part in tail.into_iter().rev() {
+            canonical.push(part);
+        }
+        canonical
     };
 
     if !canonical.starts_with(&home) {

@@ -61,6 +61,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
     return () => {
       disposedRef.current = true;
       clearTimeout(saveTimerRef.current);
+      saveQueueRef.current = null;
     };
   }, []);
 

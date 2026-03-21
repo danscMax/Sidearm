@@ -1295,6 +1295,27 @@ const fn vk_oem_7() -> u16 {
     0xDE
 }
 
+/// Send a single virtual key tap (down + up) via SendInput.
+///
+/// Used for media keys and other simple VK injections that don't require
+/// modifier management. The events carry `INTERNAL_SENDINPUT_EXTRA_INFO`
+/// so our LL hook ignores them.
+pub fn send_vk_tap(vk: u16) -> Result<(), String> {
+    let inputs = vec![
+        KeyboardInputSpec::VirtualKey {
+            code: vk,
+            extended: false,
+            key_up: false,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: vk,
+            extended: false,
+            key_up: true,
+        },
+    ];
+    send_keyboard_inputs(&inputs)
+}
+
 // ---------------------------------------------------------------------------
 // Mouse action injection
 // ---------------------------------------------------------------------------

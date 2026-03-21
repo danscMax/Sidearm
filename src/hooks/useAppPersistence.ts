@@ -48,6 +48,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
   const saveQueueRef = useRef<AppConfig | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isSavingRef = useRef(false);
+  const disposedRef = useRef(false);
   const onAutoSavedRef = useRef(onAutoSaved);
   onAutoSavedRef.current = onAutoSaved;
 
@@ -55,9 +56,12 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
   const activePath = lastSave?.path ?? snapshot?.path ?? "Пока не загружен";
 
-  // Cleanup timer on unmount
+  // Cleanup timer on unmount and prevent post-dispose scheduling
   useEffect(() => {
-    return () => clearTimeout(saveTimerRef.current);
+    return () => {
+      disposedRef.current = true;
+      clearTimeout(saveTimerRef.current);
+    };
   }, []);
 
   function scheduleSave(config: AppConfig) {
@@ -95,8 +99,8 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
       });
     } finally {
       isSavingRef.current = false;
-      // If new changes queued during save, save again promptly
-      if (saveQueueRef.current) {
+      // If new changes queued during save, save again promptly (skip if unmounted)
+      if (saveQueueRef.current && !disposedRef.current) {
         saveTimerRef.current = setTimeout(flushSave, 100);
       }
     }

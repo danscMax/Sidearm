@@ -227,9 +227,16 @@ export function useRuntime(deps: {
   }
 
   async function ensureRuntimeStarted(): Promise<void> {
-    const summary = await startRuntime();
-    startTransition(() => setRuntimeSummary(summary));
-    await refreshDebugLog();
+    try {
+      const summary = await startRuntime();
+      startTransition(() => setRuntimeSummary(summary));
+      await refreshDebugLog();
+    } catch (unknownError) {
+      startTransition(() => {
+        setError(normalizeCommandError(unknownError));
+      });
+      throw unknownError;
+    }
   }
 
   function clearRuntimeError() {

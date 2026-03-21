@@ -463,6 +463,12 @@ const VK_PROBE_KEY: u16 = 0xE8;
 #[cfg(target_os = "windows")]
 const HOOK_HEALTH_CHECK_INTERVAL_MS: u32 = 5000;
 
+/// How many consecutive probe failures required before reinstalling the hook.
+/// A single failed probe can be caused by UIPI blocking SendInput (e.g. an
+/// elevated window is in the foreground), not necessarily a dead hook.
+#[cfg(target_os = "windows")]
+const HOOK_PROBE_FAIL_THRESHOLD: u32 = 3;
+
 // Thread-local state for the capture helper's LL keyboard hook callback.
 #[cfg(target_os = "windows")]
 thread_local! {
@@ -478,6 +484,10 @@ thread_local! {
     /// Set to `true` by the hook callback when it receives a probe event
     /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
     static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    /// Set to `true` by the hook callback on ANY invocation (real key or probe).
+    /// Consumed (replaced with `false`) by the health monitor each cycle.
+    /// When `true`, the hook is demonstrably alive — no probe needed.
+    static HOOK_HAD_CALLBACK: std::cell::Cell<bool> = std::cell::Cell::new(false);
 }
 
 #[cfg(target_os = "windows")]
@@ -617,8 +627,11 @@ unsafe fn inject_mask_key() {
 /// The event carries `HOOK_PROBE_EXTRA_INFO` so the hook callback can
 /// recognize it and set the `HELPER_PROBE_RECEIVED` flag without treating
 /// it as a real key event.
+///
+/// Returns `true` if SendInput accepted the events, `false` if injection
+/// failed (e.g. UIPI blocked it because an elevated window is focused).
 #[cfg(target_os = "windows")]
-unsafe fn inject_hook_probe() {
+unsafe fn inject_hook_probe() -> bool {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
@@ -640,11 +653,18 @@ unsafe fn inject_hook_probe() {
     };
 
     let inputs = [make_input(false), make_input(true)];
-    SendInput(
+    let inserted = SendInput(
         inputs.len() as u32,
         inputs.as_ptr(),
         size_of::<INPUT>() as i32,
     );
+    if inserted == 0 {
+        log::debug!(
+            "[capture-helper] SendInput probe failed (UIPI?): {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    inserted > 0
 }
 
 /// LL keyboard hook callback for the capture helper process.
@@ -660,6 +680,10 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
     };
 
     if code >= 0 {
+        // Record that the hook callback fired — the health monitor uses this
+        // to skip unnecessary SendInput probes when the hook is clearly alive.
+        HOOK_HAD_CALLBACK.with(|cell| cell.set(true));
+
         let kb = &*(l_param as *const KBDLLHOOKSTRUCT);
         let msg = w_param as u32;
         let vk = kb.vkCode;
@@ -850,6 +874,7 @@ pub fn capture_helper_main() {
     let mut msg = MaybeUninit::<MSG>::zeroed();
     let mut hook = hook; // make mutable for reinstallation
     let mut probe_sent = false;
+    let mut consecutive_probe_failures: u32 = 0;
     let mut hook_reinstall_count: u32 = 0;
 
     loop {
@@ -875,42 +900,60 @@ pub fn capture_helper_main() {
 
         if wait_result == WAIT_TIMEOUT {
             // No messages arrived within the interval — run health check.
-            if probe_sent {
+
+            // Fast path: if ANY LL hook callback fired since the last check,
+            // the hook is demonstrably alive — no probe needed.
+            let had_callback = HOOK_HAD_CALLBACK.with(|cell| cell.replace(false));
+            if had_callback {
+                probe_sent = false;
+                consecutive_probe_failures = 0;
+            } else if probe_sent {
                 // We sent a probe last cycle.  Check if the hook saw it.
                 let received = HELPER_PROBE_RECEIVED.with(|cell| cell.replace(false));
                 if received {
                     // Hook is alive.
                     probe_sent = false;
+                    consecutive_probe_failures = 0;
                 } else {
-                    // Hook is dead — reinstall it.
-                    log::warn!(
-                        "[capture-helper] Hook health probe not received — \
-                         hook appears dead.  Reinstalling WH_KEYBOARD_LL..."
-                    );
-                    unsafe { UnhookWindowsHookEx(hook); }
-                    let new_hook = unsafe {
-                        SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
-                    };
-                    if new_hook.is_null() {
-                        log::error!(
-                            "[capture-helper] Failed to reinstall hook: {}. Exiting.",
-                            std::io::Error::last_os_error()
+                    consecutive_probe_failures += 1;
+                    if consecutive_probe_failures >= HOOK_PROBE_FAIL_THRESHOLD {
+                        // Hook is dead — reinstall it.
+                        log::warn!(
+                            "[capture-helper] Hook health probe not received \
+                             ({consecutive_probe_failures} consecutive failures) — \
+                             hook appears dead.  Reinstalling WH_KEYBOARD_LL..."
                         );
-                        break;
+                        unsafe { UnhookWindowsHookEx(hook); }
+                        let new_hook = unsafe {
+                            SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
+                        };
+                        if new_hook.is_null() {
+                            log::error!(
+                                "[capture-helper] Failed to reinstall hook: {}. Exiting.",
+                                std::io::Error::last_os_error()
+                            );
+                            break;
+                        }
+                        hook = new_hook;
+                        hook_reinstall_count += 1;
+                        log::info!(
+                            "[capture-helper] Hook reinstalled successfully \
+                             (total reinstalls: {hook_reinstall_count})."
+                        );
+                        consecutive_probe_failures = 0;
                     }
-                    hook = new_hook;
-                    hook_reinstall_count += 1;
-                    log::info!(
-                        "[capture-helper] Hook reinstalled successfully \
-                         (total reinstalls: {hook_reinstall_count})."
-                    );
-                    probe_sent = false;
+                    // Re-send probe for the next cycle.
+                    probe_sent = unsafe { inject_hook_probe() };
+                    if probe_sent {
+                        HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
+                    }
                 }
             } else {
-                // Send a probe to test whether the hook is alive.
-                unsafe { inject_hook_probe(); }
-                probe_sent = true;
-                HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
+                // No callbacks, no probe in-flight — send a probe.
+                probe_sent = unsafe { inject_hook_probe() };
+                if probe_sent {
+                    HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
+                }
             }
             // Fall through to pump any messages that may have arrived.
         }

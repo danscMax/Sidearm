@@ -52,11 +52,7 @@ import {
 const ALL_HOTSPOT_IDS = [...Object.keys(sideViewHotspots), ...Object.keys(topViewHotspots)];
 
 function App() {
-  const handleReloadRuntimeRef = useRef<(() => Promise<void>) | null>(null);
-  const persistence = useAppPersistence(() => {
-    // Auto-save callback: reload runtime so saved changes take effect
-    void handleReloadRuntimeRef.current?.();
-  });
+  const persistence = useAppPersistence();
   const {
     viewState,
     workingConfig,
@@ -91,11 +87,11 @@ function App() {
     lastCapture, lastEncodedKey,
     resolutionKeyInput, setResolutionKeyInput,
     lastResolutionPreview, lastExecution, lastRuntimeError,
-    handleStartRuntime, handleReloadRuntime, handleStopRuntime,
+    handleStartRuntime, handleStopRuntime,
     handleCaptureActiveWindow, handlePreviewResolution,
     handleExecutePreviewAction, handleRunPreviewAction,
   } = runtime;
-  handleReloadRuntimeRef.current = handleReloadRuntime;
+
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");
   const [actionPickerOpen, setActionPickerOpen] = useState(false);

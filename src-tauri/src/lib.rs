@@ -149,7 +149,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     let height = (32.0 * dpi_scale).ceil() as i32;
     let margin = (6.0 * dpi_scale).ceil() as i32;
 
-    log::info!(
+    log::debug!(
         "[osd] label_w={label_width} name_w={name_width} pad={logical_padding} \
          logical={logical_width} dpi={dpi_scale} physical_w={win_width} h={height}"
     );

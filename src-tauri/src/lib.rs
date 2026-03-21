@@ -16,10 +16,15 @@ use std::{
     fs,
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
+
+/// Managed state: cached `minimize_to_tray` setting for the close handler.
+/// Updated by `load_config` and `save_config`; read by `CloseRequested`.
+/// Initial value `false` (window closes) until config is loaded.
+type MinimizeToTray = Arc<AtomicBool>;
 
 pub use capture_backend::capture_helper_main;
 use capture_backend::RuntimeController;
@@ -219,12 +224,12 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     );
 
     // Auto-hide
-    let gen = OSD_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let gen = OSD_GENERATION.fetch_add(1, Ordering::Release) + 1;
     let duration_ms = settings.osd_duration_ms.max(500).min(10000) as u64;
     let win = w.clone();
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(duration_ms));
-        if OSD_GENERATION.load(Ordering::Relaxed) == gen {
+        if OSD_GENERATION.load(Ordering::Acquire) == gen {
             let _ = win.hide();
         }
     });
@@ -320,28 +325,59 @@ fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
         ));
     }
 
-    // Reject path traversal
-    let path_str = path.to_string_lossy();
-    if path_str.contains("..") {
+    // Must be under the user's home directory (canonicalized for consistent comparison)
+    let home = dirs_next_home().ok_or_else(|| {
+        CommandError::new(
+            "invalid_path",
+            "Could not determine user home directory.",
+            None,
+        )
+    })?;
+    let home = std::fs::canonicalize(&home).map_err(|e| {
+        CommandError::new(
+            "invalid_path",
+            format!("Home directory canonicalization failed: {e}"),
+            None,
+        )
+    })?;
+
+    // For existing paths (reads): canonicalize the path itself.
+    // For new files (writes): canonicalize the parent directory, then append filename.
+    // std::fs::canonicalize returns NotFound on non-existent paths, so we must
+    // handle the write case (new file) by canonicalizing only the parent.
+    let canonical = if path.exists() {
+        std::fs::canonicalize(&path).map_err(|e| {
+            CommandError::new(
+                "invalid_path",
+                format!("Path canonicalization failed: {e}"),
+                None,
+            )
+        })?
+    } else {
+        let parent = path.parent().ok_or_else(|| {
+            CommandError::new("invalid_path", "Path has no parent directory.", None)
+        })?;
+        let canonical_parent = std::fs::canonicalize(parent).map_err(|e| {
+            CommandError::new(
+                "invalid_path",
+                format!("Parent canonicalization failed: {e}"),
+                None,
+            )
+        })?;
+        canonical_parent.join(path.file_name().ok_or_else(|| {
+            CommandError::new("invalid_path", "Path has no filename.", None)
+        })?)
+    };
+
+    if !canonical.starts_with(&home) {
         return Err(CommandError::new(
             "invalid_path",
-            "File path must not contain `..` traversal segments.",
+            "File path must be within the user home directory.",
             None,
         ));
     }
 
-    // Must be under the user's home directory
-    if let Some(home) = dirs_next_home() {
-        if path.starts_with(&home) {
-            return Ok(path);
-        }
-    }
-
-    Err(CommandError::new(
-        "invalid_path",
-        "File path must be within the user home directory.",
-        None,
-    ))
+    Ok(canonical)
 }
 
 /// Resolve the user's home directory via the HOME / USERPROFILE env var.
@@ -453,10 +489,17 @@ async fn export_verification_session(
 #[tauri::command]
 async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
-        .await
-        .map_err(|error| CommandError::internal(format!("load_config task failed: {error}")))?
-        .map_err(CommandError::from)
+    let response =
+        tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
+            .await
+            .map_err(|error| CommandError::internal(format!("load_config task failed: {error}")))?
+            .map_err(CommandError::from)?;
+
+    // Sync the cached minimize_to_tray flag for the close handler
+    app.state::<MinimizeToTray>()
+        .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
+
+    Ok(response)
 }
 
 /// Save the config to disk and, if the runtime is active, restart the capture
@@ -480,10 +523,14 @@ async fn save_config(
             .map_err(|error| CommandError::internal(format!("save_config task failed: {error}")))?
             .map_err(CommandError::from)?;
 
+    // Sync the cached minimize_to_tray flag for the close handler
+    app.state::<MinimizeToTray>()
+        .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
+
     let is_running = {
         let store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         store.is_running()
     };
 
@@ -492,28 +539,43 @@ async fn save_config(
             let mut controller = runtime_controller
                 .lock()
                 .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-            controller.restart(
-                app.clone(),
-                runtime_store.inner().clone(),
-                result.config.clone(),
-                app.package_info().name.clone(),
-            )
+
+            // TOCTOU guard: re-check runtime status after acquiring the controller lock.
+            // The runtime may have been stopped between the initial check and lock acquisition.
+            let still_running = runtime_store
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_running();
+            if !still_running {
+                None
+            } else {
+                Some(controller.restart(
+                    app.clone(),
+                    runtime_store.inner().clone(),
+                    result.config.clone(),
+                    app.package_info().name.clone(),
+                ))
+            }
         };
-        if let Err(message) = restart_result {
-            let stopped_summary = {
+        match restart_result {
+            Some(Err(message)) => {
+                let stopped_summary = {
+                    let mut store = runtime_store
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    store.stop()
+                };
+                let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
+                return Err(CommandError::new("runtime_reload_failed", message, None));
+            }
+            Some(Ok(())) => {
                 let mut store = runtime_store
                     .lock()
-                    .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-                store.stop()
-            };
-            let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
-            return Err(CommandError::new("runtime_reload_failed", message, None));
+                    .unwrap_or_else(|e| e.into_inner());
+                Some(store.reload(result.config.version, result.warnings.len()))
+            }
+            None => None,
         }
-
-        let mut store = runtime_store
-            .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
-        Some(store.reload(result.config.version, result.warnings.len()))
     } else {
         None
     };
@@ -538,7 +600,7 @@ async fn start_runtime(
     {
         let store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         if store.is_running() {
             log::info!("[system] start_runtime called but already running, skipping");
             return Ok(store.summary());
@@ -569,7 +631,7 @@ async fn start_runtime(
     let summary = {
         let mut store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         store.start(load_response.config.version, load_response.warnings.len())
     };
 
@@ -598,7 +660,7 @@ async fn stop_runtime(
     let summary = {
         let mut store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         store.stop()
     };
 
@@ -639,7 +701,7 @@ async fn reload_runtime(
         let stopped_summary = {
             let mut store = runtime_store
                 .lock()
-                .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+                .unwrap_or_else(|e| e.into_inner());
             store.stop()
         };
         let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
@@ -649,7 +711,7 @@ async fn reload_runtime(
     let summary = {
         let mut store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         store.reload(load_response.config.version, load_response.warnings.len())
     };
 
@@ -678,7 +740,7 @@ async fn get_debug_log(
 ) -> Result<Vec<DebugLogEntry>, CommandError> {
     let store = runtime_store
         .lock()
-        .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+        .unwrap_or_else(|e| e.into_inner());
 
     Ok(store.logs())
 }
@@ -697,7 +759,10 @@ async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
         CommandError::internal(format!("Failed to resolve log directory: {error}"))
     })?;
     if log_dir.exists() {
-        std::process::Command::new("explorer")
+        std::process::Command::new(format!(
+            "{}\\explorer.exe",
+            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
+        ))
             .arg(log_dir.as_os_str())
             .spawn()
             .map_err(|error| {
@@ -719,7 +784,7 @@ async fn capture_active_window(
     {
         let mut store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         store.set_capture_in_progress(true);
         log::info!("[system] capture_in_progress = true (v2 auto-switching suppressed)");
     }
@@ -749,7 +814,7 @@ async fn capture_active_window(
         {
             let mut store = runtime_store
                 .lock()
-                .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+                .unwrap_or_else(|e| e.into_inner());
             if result.ignored {
                 store.record_warn(
                     "захват окна",
@@ -779,7 +844,7 @@ async fn capture_active_window(
             let should_notify = {
                 let mut store = runtime_store
                     .lock()
-                    .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+                    .unwrap_or_else(|e| e.into_inner());
                 store.notify_profile_change(result.resolved_profile_id.as_deref())
             };
             if should_notify {
@@ -847,7 +912,7 @@ async fn preview_resolution(
     {
         let mut store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         match preview.status {
             resolver::ResolutionStatus::Resolved => store.record_info(
                 "разрешение",
@@ -937,7 +1002,7 @@ async fn resolve_and_execute_action(
             {
                 let mut store = runtime_store
                     .lock()
-                    .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+                    .unwrap_or_else(|e| e.into_inner());
                 match mode {
                     ActionRunMode::DryRun => {
                         let message = format!(
@@ -1041,7 +1106,7 @@ fn emit_runtime_error(
     {
         let mut store = runtime_store
             .lock()
-            .map_err(|_| CommandError::internal("runtime state lock poisoned"))?;
+            .unwrap_or_else(|e| e.into_inner());
         store.record_warn(
             event.category.clone(),
             format!("{}{}", event.message, runtime_error_context(event)),
@@ -1647,24 +1712,18 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let app = window.app_handle();
-                let should_minimize = app
-                    .path()
-                    .app_config_dir()
-                    .ok()
-                    .and_then(|dir| fs::read_to_string(dir.join("config.json")).ok())
-                    .and_then(|json| {
-                        serde_json::from_str::<serde_json::Value>(&json).ok()
-                    })
-                    .and_then(|v| v["settings"]["minimizeToTray"].as_bool())
-                    .unwrap_or(false);
+                let minimize = window
+                    .app_handle()
+                    .state::<MinimizeToTray>()
+                    .load(Ordering::Relaxed);
 
-                if should_minimize {
+                if minimize {
                     api.prevent_close();
                     let _ = window.hide();
                 }
             }
         })
+        .manage(Arc::new(AtomicBool::new(false)) as MinimizeToTray)
         .manage(Arc::new(Mutex::new(RuntimeStore::default())))
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .manage(Arc::new(Mutex::new(MacroRecorder::new())))

@@ -12,7 +12,7 @@ const MAX_STEP_DELAY_MS: u64 = 30_000;
 
 use crate::{
     config::{
-        Action, ActionCondition, ActionPayload, ActionType, AppConfig, MenuItem,
+        Action, ActionCondition, ActionPayload, ActionType, AppConfig, MediaKeyKind, MenuItem,
         MouseActionPayload, PasteMode, SequenceStep, TextSnippetPayload,
     },
     input_synthesis,
@@ -221,6 +221,9 @@ pub fn run_preview_action(
         }
         (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
             run_live_mouse_action(action, preview, payload, Some(action_id))
+        }
+        (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => {
+            run_live_media_key_action(action, preview, &payload.key, Some(action_id))
         }
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok(ActionExecutionEvent {
             encoded_key: preview.encoded_key.clone(),
@@ -618,6 +621,57 @@ fn run_live_mouse_action(
         process_id: None,
         summary: format_mouse_summary(payload),
         warnings: dispatch.warnings,
+        executed_at: timestamp_millis(),
+    })
+}
+
+fn run_live_media_key_action(
+    action: &Action,
+    preview: &ResolvedInputPreview,
+    key: &MediaKeyKind,
+    action_id: Option<String>,
+) -> Result<ActionExecutionEvent, ExecutorError> {
+    // Map MediaKeyKind to Windows virtual key codes
+    let vk: u16 = match key {
+        MediaKeyKind::PlayPause => 0xB3,   // VK_MEDIA_PLAY_PAUSE
+        MediaKeyKind::NextTrack => 0xB0,   // VK_MEDIA_NEXT_TRACK
+        MediaKeyKind::PrevTrack => 0xB1,   // VK_MEDIA_PREV_TRACK
+        MediaKeyKind::Stop => 0xB2,        // VK_MEDIA_STOP
+        MediaKeyKind::Mute => 0xAD,        // VK_VOLUME_MUTE
+        MediaKeyKind::VolumeDown => 0xAE,  // VK_VOLUME_DOWN
+        MediaKeyKind::VolumeUp => 0xAF,    // VK_VOLUME_UP
+    };
+
+    input_synthesis::send_vk_tap(vk).map_err(|message| {
+        log::error!(
+            "[executor] MediaKey `{key:?}` injection failed for key {}: {message}",
+            preview.encoded_key
+        );
+        execution_error(
+            "execution_failed",
+            "выполнение",
+            &message,
+            Some(preview.encoded_key.clone()),
+            action_id.clone(),
+        )
+    })?;
+
+    Ok(ActionExecutionEvent {
+        encoded_key: preview.encoded_key.clone(),
+        action_id: action.id.clone(),
+        action_type: action.action_type.as_str().into(),
+        action_pretty: action.pretty.clone(),
+        resolved_profile_id: preview.resolved_profile_id.clone(),
+        resolved_profile_name: preview.resolved_profile_name.clone(),
+        matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+        control_id: preview.control_id.clone(),
+        layer: preview.layer.clone(),
+        binding_id: preview.binding_id.clone(),
+        mode: ExecutionMode::Live,
+        outcome: ExecutionOutcome::Injected,
+        process_id: None,
+        summary: format!("Отправлена медиа-клавиша `{key:?}`."),
+        warnings: Vec::new(),
         executed_at: timestamp_millis(),
     })
 }

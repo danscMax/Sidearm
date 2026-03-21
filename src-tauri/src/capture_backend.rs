@@ -280,7 +280,23 @@ impl CaptureBackendHandle {
                 reader_thread,
             } = helper;
             drop(stdin_pipe);
-            let _ = child.wait();
+
+            // Bounded wait: poll try_wait() up to 5 seconds, then force-kill
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    _ => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                }
+            }
+
             let _ = reader_thread.join();
         }
 
@@ -927,7 +943,7 @@ pub fn capture_helper_main() {
             let m = unsafe { msg.assume_init() };
             if m.message == WM_QUIT {
                 // Drain any remaining matches before exiting.
-                drain_helper_matches(&mut stdout);
+                let _ = drain_helper_matches(&mut stdout);
                 unsafe { UnhookWindowsHookEx(hook); }
                 log::info!("[capture-helper] Hook uninstalled, exiting.");
                 return;
@@ -956,7 +972,11 @@ pub fn capture_helper_main() {
             }
 
             // Drain matches buffered by the hook callback.
-            drain_helper_matches(&mut stdout);
+            if drain_helper_matches(&mut stdout).is_err() {
+                log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
+                unsafe { UnhookWindowsHookEx(hook); }
+                break;
+            }
 
             unsafe {
                 TranslateMessage(&m);
@@ -964,7 +984,11 @@ pub fn capture_helper_main() {
             }
 
             // Also drain after dispatch (hooks may fire during DispatchMessageW).
-            drain_helper_matches(&mut stdout);
+            if drain_helper_matches(&mut stdout).is_err() {
+                log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
+                unsafe { UnhookWindowsHookEx(hook); }
+                break;
+            }
         }
 
         // If the probe was just received inline (during message pumping after
@@ -983,14 +1007,17 @@ pub fn capture_helper_main() {
 }
 
 #[cfg(target_os = "windows")]
-fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) {
+fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) -> std::io::Result<()> {
     use std::io::Write;
 
     let matches: Vec<String> = HELPER_MATCHES.with(|cell| cell.borrow_mut().drain(..).collect());
-    for encoded_key in matches {
-        let _ = writeln!(stdout, "{encoded_key}");
-        let _ = stdout.flush();
+    for encoded_key in &matches {
+        writeln!(stdout, "{encoded_key}")?;
     }
+    if !matches.is_empty() {
+        stdout.flush()?; // single flush for entire batch
+    }
+    Ok(())
 }
 
 #[cfg(not(target_os = "windows"))]

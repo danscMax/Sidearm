@@ -1,8 +1,15 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../i18n";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, Profile } from "../lib/config";
+import type {
+  AppConfig,
+  Profile,
+  Settings,
+  OsdPosition,
+  OsdFontSize,
+  OsdAnimation,
+} from "../lib/config";
 import {
   upsertProfile,
   deleteProfile,
@@ -43,6 +50,22 @@ export function SettingsWorkspace({
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
   );
 
+  const osd = activeConfig.settings;
+
+  const updateSettings = useCallback(
+    (patch: Partial<Settings>) => {
+      updateDraft((c) => ({
+        ...c,
+        settings: { ...c.settings, ...patch },
+      }));
+    },
+    [updateDraft],
+  );
+
+  // Derive a key that changes whenever OSD visual settings change,
+  // causing the preview bubble to replay its animation.
+  const previewKey = `${osd.osdPosition}-${osd.osdFontSize}-${osd.osdAnimation}-${osd.osdDurationMs}`;
+
   function handleCreateProfile() {
     const nextConfig = createProfile(activeConfig, t("settings.newProfile"));
     const newProfile = nextConfig.profiles.find(
@@ -82,7 +105,7 @@ export function SettingsWorkspace({
     if (!data) return;
 
     const exportPayload = { ...data, exportedAt: new Date().toISOString() };
-    const defaultName = `${profile.name.replace(/[^a-zA-Z0-9а-яА-Я_-]/g, "_")}.profile.json`;
+    const defaultName = `${profile.name.replace(/[^a-zA-Z0-9\u0430-\u044F\u0410-\u042F_-]/g, "_")}.profile.json`;
 
     const filePath = await save({
       title: t("settings.exportDialogTitle"),
@@ -127,6 +150,20 @@ export function SettingsWorkspace({
     }
   }
 
+  // Determine flex alignment for preview based on position
+  const posVert = osd.osdPosition.startsWith("top") ? "flex-start" : "flex-end";
+  const posHoriz = osd.osdPosition.endsWith("Left") || osd.osdPosition === "topLeft" || osd.osdPosition === "bottomLeft"
+    ? "flex-start"
+    : "flex-end";
+
+  const previewFontPx = osd.osdFontSize === "small" ? 11 : osd.osdFontSize === "large" ? 14 : 12;
+  const previewAnimClass =
+    osd.osdAnimation === "fadeIn"
+      ? "osd-preview-bubble--fade"
+      : osd.osdAnimation === "none"
+        ? "osd-preview-bubble--none"
+        : "osd-preview-bubble--slide";
+
   return (
     <div className="settings-workspace">
       {/* Language selector */}
@@ -149,6 +186,126 @@ export function SettingsWorkspace({
           >
             English
           </button>
+        </div>
+      </section>
+
+      {/* OSD notification settings */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.osdHeader")}</span>
+          <Toggle
+            checked={osd.osdEnabled}
+            onChange={(checked) => updateSettings({ osdEnabled: checked })}
+          />
+        </div>
+
+        <div
+          className="osd-settings-grid"
+          style={osd.osdEnabled ? undefined : { opacity: 0.4, pointerEvents: "none" }}
+        >
+          {/* Live preview area */}
+          <div
+            className="osd-preview-area"
+            style={{ justifyContent: posVert, alignItems: posHoriz }}
+            title={t("settings.osdPreviewHint")}
+          >
+            <div
+              key={previewKey}
+              className={`osd-preview-bubble ${previewAnimClass}`}
+              style={{ fontSize: previewFontPx }}
+            >
+              <span className="osd-preview-bubble__label">Профиль:</span>
+              <span className="osd-preview-bubble__name">{activeProfile?.name ?? "Main"}</span>
+            </div>
+          </div>
+
+          {/* Duration */}
+          <div className="osd-settings-row">
+            <span className="osd-settings-row__label">{t("settings.osdDuration")}</span>
+            <div className="osd-settings-row__buttons">
+              {([1000, 1500, 2000, 3000, 5000] as const).map((ms) => (
+                <button
+                  key={ms}
+                  type="button"
+                  className={`action-button action-button--small${osd.osdDurationMs === ms ? "" : " action-button--ghost"}`}
+                  onClick={() => updateSettings({ osdDurationMs: ms })}
+                >
+                  {ms >= 1000 ? `${ms / 1000}` : ms}
+                  {"\u0441"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Position */}
+          <div className="osd-settings-row">
+            <span className="osd-settings-row__label">{t("settings.osdPosition")}</span>
+            <div className="osd-settings-row__buttons">
+              {(
+                [
+                  ["topLeft", t("settings.osdPositionTopLeft")],
+                  ["topRight", t("settings.osdPositionTopRight")],
+                  ["bottomLeft", t("settings.osdPositionBottomLeft")],
+                  ["bottomRight", t("settings.osdPositionBottomRight")],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`action-button action-button--small${osd.osdPosition === value ? "" : " action-button--ghost"}`}
+                  onClick={() => updateSettings({ osdPosition: value as OsdPosition })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Font size */}
+          <div className="osd-settings-row">
+            <span className="osd-settings-row__label">{t("settings.osdFontSize")}</span>
+            <div className="osd-settings-row__buttons">
+              {(
+                [
+                  ["small", t("settings.osdFontSmall")],
+                  ["medium", t("settings.osdFontMedium")],
+                  ["large", t("settings.osdFontLarge")],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`action-button action-button--small${osd.osdFontSize === value ? "" : " action-button--ghost"}`}
+                  onClick={() => updateSettings({ osdFontSize: value as OsdFontSize })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Animation */}
+          <div className="osd-settings-row">
+            <span className="osd-settings-row__label">{t("settings.osdAnimation")}</span>
+            <div className="osd-settings-row__buttons">
+              {(
+                [
+                  ["slideIn", t("settings.osdAnimSlideIn")],
+                  ["fadeIn", t("settings.osdAnimFadeIn")],
+                  ["none", t("settings.osdAnimNone")],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={value}
+                  type="button"
+                  className={`action-button action-button--small${osd.osdAnimation === value ? "" : " action-button--ghost"}`}
+                  onClick={() => updateSettings({ osdAnimation: value as OsdAnimation })}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </section>
 
@@ -277,7 +434,7 @@ export function SettingsWorkspace({
                   <span className="settings-profile-card__name">{profile.name}</span>
                   <span className="settings-profile-card__meta">
                     {t("settings.priorityMeta", { priority: profile.priority })}
-                    {!profile.enabled ? ` · ${t("settings.disabledMeta")}` : ""}
+                    {!profile.enabled ? ` \u00B7 ${t("settings.disabledMeta")}` : ""}
                   </span>
                 </div>
                 <div className="settings-profile-card__actions">

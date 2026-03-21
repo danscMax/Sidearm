@@ -1327,7 +1327,7 @@ fn run_foreground_watcher(
                         .resolved_profile_name
                         .as_deref()
                         .unwrap_or("Default");
-                    crate::show_osd(&ctx.app, profile_name);
+                    crate::show_osd(&ctx.app, profile_name, &ctx.config.settings);
                 }
             }
         });
@@ -1484,7 +1484,7 @@ fn process_encoded_key_event(
                 .resolved_profile_name
                 .as_deref()
                 .unwrap_or("Default");
-            crate::show_osd(app, profile_name);
+            crate::show_osd(app, profile_name, &config.settings);
         }
     }
 

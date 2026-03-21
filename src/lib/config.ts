@@ -63,12 +63,21 @@ export interface ValidationWarning {
   severity: ValidationSeverity;
 }
 
+export type OsdPosition = "topLeft" | "topRight" | "bottomLeft" | "bottomRight";
+export type OsdFontSize = "small" | "medium" | "large";
+export type OsdAnimation = "slideIn" | "fadeIn" | "none";
+
 export interface Settings {
   fallbackProfileId: string;
   theme: string;
   startWithWindows: boolean;
   minimizeToTray: boolean;
   debugLogging: boolean;
+  osdEnabled: boolean;
+  osdDurationMs: number;
+  osdPosition: OsdPosition;
+  osdFontSize: OsdFontSize;
+  osdAnimation: OsdAnimation;
 }
 
 export interface Profile {

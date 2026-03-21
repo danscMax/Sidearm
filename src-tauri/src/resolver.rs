@@ -313,7 +313,8 @@ mod tests {
     use super::*;
     use crate::config::{
         Action, ActionPayload, ActionType, Binding, CapabilityStatus, ControlFamily, ControlId,
-        Layer, MappingSource, PhysicalControl, Settings, SnippetLibraryItem, TriggerMode,
+        Layer, MappingSource, OsdAnimation, OsdFontSize, OsdPosition, PhysicalControl, Settings,
+        SnippetLibraryItem, TriggerMode,
     };
 
     #[test]
@@ -368,6 +369,11 @@ mod tests {
                 start_with_windows: false,
                 minimize_to_tray: false,
                 debug_logging: true,
+                osd_enabled: true,
+                osd_duration_ms: 2000,
+                osd_position: OsdPosition::default(),
+                osd_font_size: OsdFontSize::default(),
+                osd_animation: OsdAnimation::default(),
             },
             profiles: vec![
                 profile("default", "Default", 0),

@@ -48,53 +48,242 @@ use window_capture::WindowCaptureResult;
 /// generation hasn't changed, preventing premature hide on rapid switches.
 static OSD_GENERATION: AtomicU64 = AtomicU64::new(0);
 
-/// Show a small always-on-top OSD bubble with the profile name.
-/// The OSD auto-closes after ~2 seconds via its own JS timer.
-/// Show the pre-created OSD window with the given profile name.
-/// The OSD window is created once at startup (hidden) and reused.
-pub(crate) fn show_osd(app: &AppHandle, profile_name: &str) {
-    if let Some(w) = app.get_webview_window("osd") {
-        // Emit event — osd.js updates text + replays animation
-        let _ = app.emit("osd-show", profile_name.to_owned());
-
-        // Position bottom-right above taskbar.
-        // Use Win32 GetSystemMetrics as the reliable source of screen size —
-        // Tauri's monitor APIs may return None at startup before the window
-        // is fully realized, causing the OSD to appear at (0,0).
-        let (sw, sh) = unsafe {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-            (GetSystemMetrics(SM_CXSCREEN) as f64, GetSystemMetrics(SM_CYSCREEN) as f64)
+/// Check whether the current foreground window is fullscreen on its monitor.
+/// Uses MonitorFromWindow + GetMonitorInfoW to be multi-monitor safe.
+fn is_foreground_fullscreen() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
         };
-        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
-            x: (sw - 210.0) as i32,
-            y: (sh - 80.0) as i32,
-        }));
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            GetForegroundWindow, GetWindowRect,
+        };
 
-        let _ = w.show();
-
-        // Auto-hide after 2 seconds. Use generation counter to cancel stale
-        // hide timers — if show_osd is called again before the timer fires,
-        // the old thread skips the hide (generation mismatch).
-        let gen = OSD_GENERATION.fetch_add(1, Ordering::Relaxed);
-        let win = w.clone();
-        std::thread::spawn(move || {
-            std::thread::sleep(std::time::Duration::from_millis(2000));
-            if OSD_GENERATION.load(Ordering::Relaxed) == gen {
-                let _ = win.hide();
+        unsafe {
+            let fg = GetForegroundWindow();
+            if fg.is_null() {
+                return false;
             }
-        });
+            let mut win_rect = std::mem::zeroed();
+            if GetWindowRect(fg, &mut win_rect) == 0 {
+                return false;
+            }
+            let hmon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
+            if hmon.is_null() {
+                return false;
+            }
+            let mut mi: MONITORINFO = std::mem::zeroed();
+            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(hmon, &mut mi) == 0 {
+                return false;
+            }
+            // Compare window rect against monitor work area
+            let rc = mi.rcMonitor;
+            win_rect.left <= rc.left
+                && win_rect.top <= rc.top
+                && win_rect.right >= rc.right
+                && win_rect.bottom >= rc.bottom
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
     }
 }
 
-/// Create the hidden OSD window at startup (called from setup).
-pub(crate) fn create_osd_window(app: &AppHandle) {
+/// Show the OSD notification bubble with the profile name.
+///
+/// OSD window lifecycle (lazy creation):
+/// 1. First call: create the window and return without showing (let WebView load JS).
+/// 2. Subsequent calls: window exists, emit event + position + show + auto-hide.
+///
+/// This avoids startup flash, event loss, and foreground watcher interference.
+pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::Settings) {
+    if !settings.osd_enabled {
+        return;
+    }
+    if is_foreground_fullscreen() {
+        return;
+    }
+
+    let w = match app.get_webview_window("osd") {
+        Some(w) => w,
+        None => {
+            create_osd_window(app);
+            return; // WebView loading; next call will show
+        }
+    };
+
+    // --- Measure text width via Win32 for pixel-perfect sizing ---
+    // GDI returns logical pixels; Tauri set_size/set_position use physical.
+    // Multiply by DPI scale factor to convert.
+    let dpi_scale = {
+        #[cfg(target_os = "windows")]
+        {
+            use windows_sys::Win32::Graphics::Gdi::{GetDC, GetDeviceCaps, ReleaseDC, LOGPIXELSX};
+            unsafe {
+                let hdc = GetDC(std::ptr::null_mut());
+                let dpi = GetDeviceCaps(hdc, LOGPIXELSX as i32);
+                ReleaseDC(std::ptr::null_mut(), hdc);
+                dpi as f64 / 96.0
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        { 1.0_f64 }
+    };
+
+    let font_px = match settings.osd_font_size {
+        config::OsdFontSize::Small => 11_i32,
+        config::OsdFontSize::Medium => 12,
+        config::OsdFontSize::Large => 14,
+    };
+    // Measure label (weight 500) and name (weight 700) separately
+    let label_width = measure_text_width_win32("Профиль:", "Segoe UI", font_px, 500);
+    let name_width = measure_text_width_win32(profile_name, "Segoe UI", font_px, 700);
+    let logical_padding = 16 + 8 + 16 + 4; // left-pad + gap + right-pad + rounding safety
+    let logical_width = label_width + name_width + logical_padding;
+
+    // Convert to physical pixels for Tauri
+    let win_width = (logical_width as f64 * dpi_scale).ceil() as i32;
+    let height = (32.0 * dpi_scale).ceil() as i32;
+    let margin = (6.0 * dpi_scale).ceil() as i32;
+
+    log::info!(
+        "[osd] label_w={label_width} name_w={name_width} pad={logical_padding} \
+         logical={logical_width} dpi={dpi_scale} physical_w={win_width} h={height}"
+    );
+
+    // --- Size → read actual outer size → Position → Show ---
+    let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+        width: win_width as u32,
+        height: height as u32,
+    }));
+
+    // Read back actual outer size (includes any window frame/border added
+    // by the OS or WebView2).  This is what we need for positioning.
+    let outer = w
+        .outer_size()
+        .unwrap_or(tauri::PhysicalSize {
+            width: win_width as u32,
+            height: height as u32,
+        });
+    let ow = outer.width as i32;
+    let oh = outer.height as i32;
+
+    #[cfg(target_os = "windows")]
+    {
+        use windows_sys::Win32::Graphics::Gdi::{
+            GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
+        };
+        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+        let (x, y) = unsafe {
+            let mut cursor_pt = std::mem::zeroed();
+            GetCursorPos(&mut cursor_pt);
+            let hmon = MonitorFromPoint(cursor_pt, MONITOR_DEFAULTTONEAREST);
+            let mut mi: MONITORINFO = std::mem::zeroed();
+            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            GetMonitorInfoW(hmon, &mut mi);
+            let wa = mi.rcWork;
+            match settings.osd_position {
+                config::OsdPosition::TopLeft => (wa.left + margin, wa.top + margin),
+                config::OsdPosition::TopRight => (wa.right - ow - margin, wa.top + margin),
+                config::OsdPosition::BottomLeft => (wa.left + margin, wa.bottom - oh - margin),
+                config::OsdPosition::BottomRight => (wa.right - ow - margin, wa.bottom - oh - margin),
+            }
+        };
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+    }
+
+    let _ = w.show();
+
+    // Emit for JS to update text and animate (no sizing/positioning in JS)
+    let font_size_str = match settings.osd_font_size {
+        config::OsdFontSize::Small => "small",
+        config::OsdFontSize::Medium => "medium",
+        config::OsdFontSize::Large => "large",
+    };
+    let animation_str = match settings.osd_animation {
+        config::OsdAnimation::SlideIn => "slideIn",
+        config::OsdAnimation::FadeIn => "fadeIn",
+        config::OsdAnimation::None => "none",
+    };
+    let _ = app.emit(
+        "osd-show",
+        serde_json::json!({
+            "name": profile_name,
+            "fontSize": font_size_str,
+            "animation": animation_str,
+        }),
+    );
+
+    // Auto-hide
+    let gen = OSD_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let duration_ms = settings.osd_duration_ms.max(500).min(10000) as u64;
+    let win = w.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+        if OSD_GENERATION.load(Ordering::Relaxed) == gen {
+            let _ = win.hide();
+        }
+    });
+}
+
+/// Measure text width in pixels using Win32 GDI with the specified font.
+#[cfg(target_os = "windows")]
+fn measure_text_width_win32(text: &str, font_family: &str, font_size_px: i32, font_weight: i32) -> i32 {
+    use windows_sys::Win32::Graphics::Gdi::{
+        CreateFontW, DeleteObject, GetDC, GetTextExtentPoint32W, ReleaseDC, SelectObject,
+        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+        DEFAULT_QUALITY, DEFAULT_PITCH,
+    };
+    use windows_sys::Win32::Foundation::SIZE;
+
+    unsafe {
+        let hdc = GetDC(std::ptr::null_mut());
+        let family_wide: Vec<u16> = font_family.encode_utf16().chain(std::iter::once(0)).collect();
+        let hfont = CreateFontW(
+            -font_size_px,
+            0, 0, 0,
+            font_weight,
+            0, 0, 0,
+            DEFAULT_CHARSET as u32,
+            OUT_DEFAULT_PRECIS as u32,
+            CLIP_DEFAULT_PRECIS as u32,
+            DEFAULT_QUALITY as u32,
+            DEFAULT_PITCH as u32,
+            family_wide.as_ptr(),
+        );
+        let old_font = SelectObject(hdc, hfont as _);
+
+        let text_wide: Vec<u16> = text.encode_utf16().collect();
+        let mut size = SIZE { cx: 0, cy: 0 };
+        GetTextExtentPoint32W(hdc, text_wide.as_ptr(), text_wide.len() as i32, &mut size);
+
+        SelectObject(hdc, old_font);
+        DeleteObject(hfont as _);
+        ReleaseDC(std::ptr::null_mut(), hdc);
+
+        size.cx
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn measure_text_width_win32(_text: &str, _font_family: &str, font_size_px: i32, _font_weight: i32) -> i32 {
+    font_size_px * 8
+}
+
+/// Create the hidden OSD window (called lazily on first show_osd).
+/// Positioned off-screen and explicitly hidden to prevent any flash.
+fn create_osd_window(app: &AppHandle) {
     use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
 
-    let _ = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App("/osd.html".into()))
+    if let Ok(w) = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App("/osd.html".into()))
         .title("")
-        .inner_size(200.0, 32.0)
-        .position(-9999.0, -9999.0) // off-screen until first show_osd positions it
+        .inner_size(1.0, 1.0) // Rust resizes before showing
+        .position(-9999.0, -9999.0)
         .decorations(false)
         .always_on_top(true)
         .skip_taskbar(true)
@@ -102,7 +291,11 @@ pub(crate) fn create_osd_window(app: &AppHandle) {
         .resizable(false)
         .visible(false)
         .background_color(tauri::window::Color(0x1a, 0x1f, 0x16, 0xff))
-        .build();
+        .build()
+    {
+        // Belt-and-suspenders: force hide even if visible(false) is ignored
+        let _ = w.hide();
+    }
 }
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
@@ -537,14 +730,16 @@ async fn capture_active_window(
     let capture_result: Result<WindowCaptureResult, CommandError> = async {
         let config_dir = resolve_config_dir(&app)?;
         let app_name = app.package_info().name.clone();
-        let result = tauri::async_runtime::spawn_blocking(move || {
+        let (result, settings) = tauri::async_runtime::spawn_blocking(move || {
             let load_response = load_or_initialize_config(&config_dir)?;
-            window_capture::capture_active_window_with_resolution(
+            let settings = load_response.config.settings.clone();
+            let capture = window_capture::capture_active_window_with_resolution(
                 &load_response.config,
                 &app_name,
                 delay_ms,
             )
-            .map_err(|message| CommandError::new("window_capture_error", message, None))
+            .map_err(|message| CommandError::new("window_capture_error", message, None))?;
+            Ok::<_, CommandError>((capture, settings))
         })
         .await
         .map_err(|error| {
@@ -589,7 +784,7 @@ async fn capture_active_window(
             };
             if should_notify {
                 let profile_name = result.resolved_profile_name.as_deref().unwrap_or("Default");
-                show_osd(&app, profile_name);
+                show_osd(&app, profile_name, &settings);
             }
         }
 
@@ -1299,8 +1494,9 @@ pub fn run() {
                 let _ = main_window.set_decorations(false);
             }
 
-            // Pre-create hidden OSD window (WebView loads once, reused on every show)
-            create_osd_window(&app.handle());
+            // OSD window is created lazily on first profile switch (see show_osd).
+            // Pre-creating at startup caused foreground watcher interference and
+            // startup flash when WebView2 wasn't ready yet.
 
             check_crash_sentinel(&app.handle());
             cleanup_old_logs(&app.handle());

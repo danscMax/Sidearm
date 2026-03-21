@@ -256,8 +256,8 @@ mod tests {
     use super::*;
     use crate::config::{
         Action, ActionPayload, ActionType, AppConfig, AppMapping, Binding, CapabilityStatus,
-        ControlFamily, ControlId, EncoderMapping, Layer, MappingSource, PhysicalControl, Profile,
-        Settings, SnippetLibraryItem,
+        ControlFamily, ControlId, EncoderMapping, Layer, MappingSource, OsdAnimation, OsdFontSize,
+        OsdPosition, PhysicalControl, Profile, Settings, SnippetLibraryItem,
     };
 
     #[test]
@@ -357,6 +357,11 @@ mod tests {
                 start_with_windows: false,
                 minimize_to_tray: false,
                 debug_logging: true,
+                osd_enabled: true,
+                osd_duration_ms: 2000,
+                osd_position: OsdPosition::default(),
+                osd_font_size: OsdFontSize::default(),
+                osd_animation: OsdAnimation::default(),
             },
             profiles: vec![
                 profile("default", "Default", 0),

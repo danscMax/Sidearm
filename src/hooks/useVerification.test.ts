@@ -38,6 +38,11 @@ const testConfig: AppConfig = {
     startWithWindows: false,
     minimizeToTray: false,
     debugLogging: false,
+    osdEnabled: true,
+    osdDurationMs: 2000,
+    osdPosition: "bottomRight",
+    osdFontSize: "medium",
+    osdAnimation: "slideIn",
   },
   profiles: [{ id: "p1", name: "Default", enabled: true, priority: 0 }],
   physicalControls: [

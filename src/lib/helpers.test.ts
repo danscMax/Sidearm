@@ -29,6 +29,11 @@ describe("resolveInitialProfileId", () => {
         startWithWindows: false,
         minimizeToTray: false,
         debugLogging: false,
+        osdEnabled: true,
+        osdDurationMs: 2000,
+        osdPosition: "bottomRight",
+        osdFontSize: "medium",
+        osdAnimation: "slideIn",
       },
     });
     expect(resolveInitialProfileId(config)).toBe("p1");
@@ -47,6 +52,11 @@ describe("resolveInitialProfileId", () => {
         startWithWindows: false,
         minimizeToTray: false,
         debugLogging: false,
+        osdEnabled: true,
+        osdDurationMs: 2000,
+        osdPosition: "bottomRight",
+        osdFontSize: "medium",
+        osdAnimation: "slideIn",
       },
       profiles: [{ id: "only", name: "Only", enabled: true, priority: 0 }],
     });

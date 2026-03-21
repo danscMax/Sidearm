@@ -4,6 +4,8 @@
   "description": "Minimal capability for the OSD popup window",
   "windows": ["osd"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position"
   ]
 }

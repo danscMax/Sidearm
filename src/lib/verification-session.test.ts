@@ -42,6 +42,11 @@ function createTestSettings(): Settings {
     startWithWindows: false,
     minimizeToTray: false,
     debugLogging: false,
+    osdEnabled: true,
+    osdDurationMs: 2000,
+    osdPosition: "bottomRight",
+    osdFontSize: "medium",
+    osdAnimation: "slideIn",
   };
 }
 

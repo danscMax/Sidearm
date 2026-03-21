@@ -198,6 +198,31 @@
         "debugLogging": {
           "type": "boolean",
           "default": true
+        },
+        "osdEnabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "osdDurationMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 5000,
+          "default": 2000
+        },
+        "osdPosition": {
+          "type": "string",
+          "enum": ["topLeft", "topRight", "bottomLeft", "bottomRight"],
+          "default": "bottomRight"
+        },
+        "osdFontSize": {
+          "type": "string",
+          "enum": ["small", "medium", "large"],
+          "default": "medium"
+        },
+        "osdAnimation": {
+          "type": "string",
+          "enum": ["slideIn", "fadeIn", "none"],
+          "default": "slideIn"
         }
       }
     },

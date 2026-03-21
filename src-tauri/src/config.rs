@@ -132,6 +132,42 @@ impl AppConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OsdPosition {
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    #[default]
+    BottomRight,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OsdFontSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OsdAnimation {
+    #[default]
+    SlideIn,
+    FadeIn,
+    None,
+}
+
+fn default_osd_enabled() -> bool {
+    true
+}
+
+fn default_osd_duration_ms() -> u32 {
+    2000
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
@@ -140,6 +176,16 @@ pub struct Settings {
     pub start_with_windows: bool,
     pub minimize_to_tray: bool,
     pub debug_logging: bool,
+    #[serde(default = "default_osd_enabled")]
+    pub osd_enabled: bool,
+    #[serde(default = "default_osd_duration_ms")]
+    pub osd_duration_ms: u32,
+    #[serde(default)]
+    pub osd_position: OsdPosition,
+    #[serde(default)]
+    pub osd_font_size: OsdFontSize,
+    #[serde(default)]
+    pub osd_animation: OsdAnimation,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1272,6 +1318,11 @@ pub(crate) fn default_seed_config() -> AppConfig {
             start_with_windows: true,
             minimize_to_tray: true,
             debug_logging: true,
+            osd_enabled: true,
+            osd_duration_ms: 2000,
+            osd_position: OsdPosition::default(),
+            osd_font_size: OsdFontSize::default(),
+            osd_animation: OsdAnimation::default(),
         },
         profiles: seed_profiles(),
         physical_controls: seed_physical_controls(),

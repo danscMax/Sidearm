@@ -791,8 +791,20 @@ fn write_config_to_path(
     let had_existing_config = config_path.exists();
 
     if had_existing_config {
-        fs::copy(&config_path, &backup_path)
+        let mut backup_tmp = NamedTempFile::new_in(config_path.parent().unwrap())
             .map_err(|error| io_error(Some(&backup_path), error))?;
+        std::io::copy(
+            &mut fs::File::open(&config_path)
+                .map_err(|error| io_error(Some(&config_path), error))?,
+            backup_tmp.as_file_mut(),
+        )
+        .map_err(|error| io_error(Some(&backup_path), error))?;
+        backup_tmp
+            .persist(&backup_path)
+            .map_err(|error| ConfigStoreError::Io {
+                path: Some(path_string(&backup_path)),
+                message: format!("Failed to persist backup atomically: {}", error.error),
+            })?;
     }
 
     let serialized = serde_json::to_string_pretty(config)
@@ -941,6 +953,7 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
     for action in &config.actions {
         validate_action(
             action,
+            config,
             &snippet_ids,
             &action_ids,
             &actions_by_id,
@@ -992,6 +1005,29 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
         );
         if !encoder_keys.insert(key.clone()) {
             errors.push(format!("Duplicate encoder mapping detected for `{key}`."));
+        }
+
+        // Warn when encoder mapping references a non-remappable control
+        if let Some(ctrl) = config
+            .physical_controls
+            .iter()
+            .find(|c| c.id == mapping.control_id)
+        {
+            if !ctrl.remappable {
+                warnings.push(ValidationWarning {
+                    code: "non_remappable_encoder_mapping".into(),
+                    message: format!(
+                        "encoder mapping references non-remappable control `{}`",
+                        mapping.control_id.as_str()
+                    ),
+                    path: Some(format!(
+                        "encoderMappings.{}::{}",
+                        mapping.control_id.as_str(),
+                        mapping.layer.as_str()
+                    )),
+                    severity: ValidationSeverity::Warning,
+                });
+            }
         }
 
         let normalized_encoded_key = mapping.encoded_key.trim();
@@ -1076,6 +1112,7 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
 
 fn validate_action<'a>(
     action: &'a Action,
+    config: &AppConfig,
     snippet_ids: &HashSet<String>,
     action_ids: &HashSet<String>,
     actions_by_id: &HashMap<&'a str, &'a Action>,
@@ -1148,6 +1185,15 @@ fn validate_action<'a>(
                 errors.push(format!(
                     "action `{}` profileSwitch must specify a targetProfileId.",
                     action.id
+                ));
+            } else if !config
+                .profiles
+                .iter()
+                .any(|p| p.id == payload.target_profile_id)
+            {
+                errors.push(format!(
+                    "profileSwitch action `{}` references non-existent profile `{}`",
+                    action.id, payload.target_profile_id
                 ));
             }
         }

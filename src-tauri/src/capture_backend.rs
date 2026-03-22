@@ -1558,6 +1558,20 @@ fn process_encoded_key_event(
         }
     }
 
+    let is_fg_elevated = capture_result.is_elevated;
+    if is_fg_elevated {
+        log_entries.push((
+            "UIPI",
+            format!(
+                "Активное окно `{}` запущено с правами администратора. \
+                 SendInput заблокирован Windows (UIPI). \
+                 Запустите Sidearm от имени администратора или с uiAccess.",
+                capture_result.exe
+            ),
+            true,
+        ));
+    }
+
     if capture_result.ignored {
         log_entries.push((
             "перехват",
@@ -1692,7 +1706,11 @@ fn process_encoded_key_event(
                                 "Удержание шортката `{}`.",
                                 preview.action_pretty.as_deref().unwrap_or("?")
                             ),
-                            warnings: Vec::new(),
+                            warnings: if is_fg_elevated {
+                                vec!["Активное окно запущено с правами администратора — ввод может быть заблокирован (UIPI).".into()]
+                            } else {
+                                Vec::new()
+                            },
                             executed_at: runtime::timestamp_millis(),
                         },
                     );
@@ -1716,10 +1734,10 @@ fn process_encoded_key_event(
                 "Запрошено удержание, но действие не шорткат; переключение на нажатие.".into(),
                 true,
             ));
-            run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries);
+            run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
         }
     } else {
-        run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries);
+        run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
     }
 }
 
@@ -1730,13 +1748,19 @@ fn run_fire_and_forget(
     preview: &resolver::ResolvedInputPreview,
     _event: &EncodedKeyEvent,
     mut log_entries: Vec<(&str, String, bool)>,
+    is_fg_elevated: bool,
 ) {
     log::info!(
         "[capture] Dispatching action for {}",
         preview.encoded_key
     );
     match executor::run_preview_action(config, preview) {
-        Ok(execution) => {
+        Ok(mut execution) => {
+            if is_fg_elevated {
+                execution.warnings.push(
+                    "Активное окно запущено с правами администратора — ввод может быть заблокирован (UIPI).".into()
+                );
+            }
             log::info!(
                 "[capture] Action complete for {} (outcome: {:?})",
                 execution.encoded_key,

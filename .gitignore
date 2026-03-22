@@ -35,6 +35,9 @@ src-tauri/target/
 # Resources (binary downloads, not source)
 resources/
 
+# Signing certificates (private keys)
+certs/
+
 # Temporary docs (research, plans, mockups — one-off artifacts)
 plans/
 docs/plans/

@@ -268,3 +268,7 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host ""
 Write-Host "  Done. The signed EXE supports uiAccess (input to admin windows)." -ForegroundColor Green
 Write-Host ""
+Write-Host "  To build with uiAccess manifest:" -ForegroundColor Gray
+Write-Host '    $env:SIDEARM_UIACCESS = "true"' -ForegroundColor Gray
+Write-Host "    cargo tauri build" -ForegroundColor Gray
+Write-Host ""

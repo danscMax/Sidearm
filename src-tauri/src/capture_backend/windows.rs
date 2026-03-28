@@ -5,56 +5,47 @@ use std::{
 };
 use tauri::{AppHandle, Emitter};
 
+use super::{process_encoded_key_event, EncodedKeyEvent, CAPTURE_BACKEND_NAME};
 use crate::{
     config::AppConfig,
-    executor::{self, RuntimeErrorEvent},
-    hotkeys, resolver,
-    runtime::{
-        self, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONTROL_RESOLVED,
-        EVENT_ENCODED_KEY_RECEIVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-    },
+    hotkeys,
+    runtime::{self, RuntimeStore, EVENT_PROFILE_RESOLVED},
     window_capture,
 };
 
-pub const CAPTURE_BACKEND_NAME: &str = "windows-hotkey";
 const BACKEND_LL_HOOK: &str = "windows-ll-hook";
 
-#[cfg(target_os = "windows")]
 const MOD_ALT: u32 = 0x0001;
-#[cfg(target_os = "windows")]
 const MOD_CONTROL: u32 = 0x0002;
-#[cfg(target_os = "windows")]
 const MOD_SHIFT: u32 = 0x0004;
-#[cfg(target_os = "windows")]
 const MOD_WIN: u32 = 0x0008;
+const MOD_NOREPEAT: u32 = 0x4000;
 
 /// Bitmask covering only the modifier-key bits (Alt/Ctrl/Shift/Win).
 /// Used to strip RegisterHotKey-only flags like MOD_NOREPEAT (0x4000)
 /// before passing masks to the LL hook helper.
-#[cfg(target_os = "windows")]
 const MOD_MODIFIER_BITS: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
 
-#[cfg(target_os = "windows")]
+/// Build a RegisterHotKey modifier mask from hotkey modifiers.
+fn register_hotkey_mask(mods: &hotkeys::HotkeyModifiers) -> u32 {
+    let mut mask = MOD_NOREPEAT;
+    if mods.alt { mask |= MOD_ALT; }
+    if mods.ctrl { mask |= MOD_CONTROL; }
+    if mods.shift { mask |= MOD_SHIFT; }
+    if mods.win { mask |= MOD_WIN; }
+    mask
+}
+
 const VK_SHIFT: u32 = 0x10;
-#[cfg(target_os = "windows")]
 const VK_CONTROL: u32 = 0x11;
-#[cfg(target_os = "windows")]
 const VK_MENU: u32 = 0x12;
-#[cfg(target_os = "windows")]
 const VK_LSHIFT: u32 = 0xA0;
-#[cfg(target_os = "windows")]
 const VK_RSHIFT: u32 = 0xA1;
-#[cfg(target_os = "windows")]
 const VK_LCONTROL: u32 = 0xA2;
-#[cfg(target_os = "windows")]
 const VK_RCONTROL: u32 = 0xA3;
-#[cfg(target_os = "windows")]
 const VK_LMENU: u32 = 0xA4;
-#[cfg(target_os = "windows")]
 const VK_RMENU: u32 = 0xA5;
-#[cfg(target_os = "windows")]
 const VK_LWIN: u32 = 0x5B;
-#[cfg(target_os = "windows")]
 const VK_RWIN: u32 = 0x5C;
 
 /// "Menu Mask Key" — an unassigned VK used to prevent Windows from activating
@@ -62,74 +53,44 @@ const VK_RWIN: u32 = 0x5C;
 /// after a hotkey combo.  Injecting this between modifier-down and modifier-up
 /// makes DefWindowProc think a non-modifier key was pressed, suppressing the
 /// system activation.  Pattern borrowed from AutoHotkey v2.
-#[cfg(target_os = "windows")]
 const VK_MASK_KEY: u16 = 0xE8;
 
-#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct EncodedKeyEvent {
-    pub encoded_key: String,
-    pub backend: String,
-    pub received_at: u64,
-    pub is_repeat: bool,
-    pub is_key_up: bool,
+/// dwExtraInfo marker for hook health probe events.  Distinct from
+/// `INTERNAL_SENDINPUT_EXTRA_INFO` so the hook callback can tell them apart.
+const HOOK_PROBE_EXTRA_INFO: usize = 0x4E41_4741_5052_4F42usize;
+
+/// VK used for probe injection (same unassigned key as the mask key).
+const VK_PROBE_KEY: u16 = 0xE8;
+
+/// How often the health monitor checks (milliseconds).
+const HOOK_HEALTH_CHECK_INTERVAL_MS: u32 = 5000;
+
+/// How many consecutive probe failures required before reinstalling the hook.
+/// A single failed probe can be caused by UIPI blocking SendInput (e.g. an
+/// elevated window is in the foreground), not necessarily a dead hook.
+const HOOK_PROBE_FAIL_THRESHOLD: u32 = 3;
+
+// Thread-local state for the capture helper's LL keyboard hook callback.
+thread_local! {
+    static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
+        std::cell::RefCell::new(Vec::new());
+    static HELPER_MODIFIERS: std::cell::RefCell<HelperModifierState> =
+        std::cell::RefCell::new(HelperModifierState::default());
+    static HELPER_SUPPRESSIONS: std::cell::RefCell<std::collections::HashMap<u32, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
+        std::cell::RefCell::new(Vec::new());
+    static HELPER_THREAD_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
+    /// Set to `true` by the hook callback when it receives a probe event
+    /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
+    static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    /// Set to `true` by the hook callback on ANY invocation (real key or probe).
+    /// Consumed (replaced with `false`) by the health monitor each cycle.
+    /// When `true`, the hook is demonstrably alive — no probe needed.
+    static HOOK_HAD_CALLBACK: std::cell::Cell<bool> = std::cell::Cell::new(false);
 }
 
-#[derive(Default)]
-pub struct RuntimeController {
-    backend: Option<CaptureBackendHandle>,
-}
-
-impl Drop for RuntimeController {
-    fn drop(&mut self) {
-        if let Err(e) = self.stop() {
-            log::error!("[capture] Failed to stop runtime during drop: {e}");
-        }
-    }
-}
-
-impl RuntimeController {
-    pub fn start(
-        &mut self,
-        app: AppHandle,
-        runtime_store: Arc<Mutex<RuntimeStore>>,
-        config: AppConfig,
-        app_name: String,
-    ) -> Result<(), String> {
-        self.stop()?;
-        let backend = CaptureBackendHandle::start(app, runtime_store, config, app_name)?;
-        self.backend = Some(backend);
-        Ok(())
-    }
-
-    pub fn restart(
-        &mut self,
-        app: AppHandle,
-        runtime_store: Arc<Mutex<RuntimeStore>>,
-        config: AppConfig,
-        app_name: String,
-    ) -> Result<(), String> {
-        self.start(app, runtime_store, config, app_name)
-    }
-
-    pub fn stop(&mut self) -> Result<(), String> {
-        if let Some(backend) = self.backend.take() {
-            backend.stop()?;
-        }
-        Ok(())
-    }
-
-    /// Send a REHOOK command to the capture helper, causing it to reinstall
-    /// its WH_KEYBOARD_LL hook without restarting the entire runtime.
-    pub fn rehook(&mut self) -> Result<(), String> {
-        match &mut self.backend {
-            Some(backend) => backend.rehook(),
-            None => Err("Runtime is not running.".to_owned()),
-        }
-    }
-}
-
-struct CaptureBackendHandle {
+pub(super) struct CaptureBackendHandle {
     hook_thread_id: u32,
     hook_thread: JoinHandle<()>,
     worker_thread: JoinHandle<()>,
@@ -142,183 +103,6 @@ struct HelperHandle {
     stdin_pipe: std::process::ChildStdin,
     child: std::process::Child,
     reader_thread: JoinHandle<()>,
-}
-
-impl CaptureBackendHandle {
-    fn start(
-        app: AppHandle,
-        runtime_store: Arc<Mutex<RuntimeStore>>,
-        config: AppConfig,
-        app_name: String,
-    ) -> Result<Self, String> {
-        #[cfg(target_os = "windows")]
-        {
-            let registrations = build_hotkey_registrations(&config)?;
-            let (event_tx, event_rx) = mpsc::channel::<EncodedKeyEvent>();
-            let helper_event_tx = event_tx.clone();
-            let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
-
-            let worker_app = app.clone();
-            let worker_runtime_store = runtime_store.clone();
-            let worker_config = config.clone();
-            let worker_app_name = app_name.clone();
-            let worker_thread = thread::spawn(move || {
-                let mut held_actions: std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState> =
-                    std::collections::HashMap::new();
-
-                while let Ok(event) = event_rx.recv() {
-                    process_encoded_key_event(
-                        &worker_app,
-                        &worker_runtime_store,
-                        &worker_config,
-                        &worker_app_name,
-                        event,
-                        &mut held_actions,
-                    );
-                }
-
-                // Channel closed (graceful shutdown) — release all held keys
-                for (encoded_key, held) in held_actions.drain() {
-                    if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
-                        log::warn!("[capture] Failed to release held shortcut `{encoded_key}` on shutdown: {e}");
-                    }
-                }
-            });
-
-            let hook_registrations = registrations.clone();
-            let hook_thread = thread::spawn(move || {
-                run_hotkey_message_loop(hook_registrations, event_tx, ready_tx);
-            });
-
-            let hook_thread_id = match ready_rx.recv() {
-                Ok(Ok(thread_id)) => thread_id,
-                Ok(Err(error)) => {
-                    drop(helper_event_tx);
-                    let _ = hook_thread.join();
-                    let _ = worker_thread.join();
-                    return Err(error);
-                }
-                Err(error) => {
-                    drop(helper_event_tx);
-                    let _ = hook_thread.join();
-                    let _ = worker_thread.join();
-                    return Err(format!(
-                        "Failed to receive capture backend readiness: {error}"
-                    ));
-                }
-            };
-
-            // Spawn helper process for LL hook (handles superset modifier matching
-            // for all keys, not just modifier-combos).  Non-fatal if fails —
-            // RegisterHotKey still handles bare keys with exact matching.
-            let helper = spawn_capture_helper(&registrations, helper_event_tx);
-            if !registrations.is_empty() && helper.is_none() {
-                if let Ok(mut store) = runtime_store.lock() {
-                    store.record_warn(
-                        "перехват",
-                        "Не удалось запустить вспомогательный процесс перехвата. \
-                         Кнопки с зажатыми модификаторами (Ctrl/Shift) могут не срабатывать.",
-                    );
-                }
-            }
-
-            // Spawn foreground window watcher — detects window switches instantly
-            let fg_app = app.clone();
-            let fg_runtime_store = runtime_store.clone();
-            let fg_config = config.clone();
-            let fg_app_name = app_name.clone();
-            let (fg_ready_tx, fg_ready_rx) = mpsc::channel::<u32>();
-            let foreground_watcher_thread = thread::spawn(move || {
-                run_foreground_watcher(fg_app, fg_runtime_store, fg_config, fg_app_name, fg_ready_tx);
-            });
-            let foreground_watcher_thread_id = fg_ready_rx.recv().ok();
-
-            Ok(Self {
-                hook_thread_id,
-                hook_thread,
-                worker_thread,
-                helper,
-                foreground_watcher_thread_id,
-                foreground_watcher_thread: Some(foreground_watcher_thread),
-            })
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = app;
-            let _ = runtime_store;
-            let _ = config;
-            let _ = app_name;
-            Err("Global capture backend is only implemented for Windows.".into())
-        }
-    }
-
-    fn stop(self) -> Result<(), String> {
-        #[cfg(target_os = "windows")]
-        {
-            use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
-
-            let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
-            if posted == 0 {
-                return Err(format!(
-                    "Failed to post WM_QUIT to capture thread {}.",
-                    self.hook_thread_id
-                ));
-            }
-
-            // Stop foreground watcher thread
-            if let Some(fg_thread_id) = self.foreground_watcher_thread_id {
-                unsafe { PostThreadMessageW(fg_thread_id, WM_QUIT, 0, 0) };
-            }
-        }
-
-        // Signal helper to exit by closing its stdin pipe, then wait for cleanup
-        if let Some(helper) = self.helper {
-            let HelperHandle {
-                stdin_pipe,
-                mut child,
-                reader_thread,
-            } = helper;
-            drop(stdin_pipe);
-
-            // Bounded wait: poll try_wait() up to 5 seconds, then force-kill
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                match child.try_wait() {
-                    Ok(Some(_)) => break,
-                    Ok(None) if std::time::Instant::now() < deadline => {
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                    _ => {
-                        let _ = child.kill();
-                        let _ = child.wait();
-                        break;
-                    }
-                }
-            }
-
-            let _ = reader_thread.join();
-        }
-
-        self.hook_thread
-            .join()
-            .map_err(|_| "Capture hook thread panicked.".to_owned())?;
-        self.worker_thread
-            .join()
-            .map_err(|_| "Capture worker thread panicked.".to_owned())?;
-        if let Some(fg_thread) = self.foreground_watcher_thread {
-            let _ = fg_thread.join();
-        }
-        Ok(())
-    }
-
-    fn rehook(&mut self) -> Result<(), String> {
-        if let Some(ref mut helper) = self.helper {
-            helper.send_command("REHOOK")
-        } else {
-            Err("No capture helper process is running.".to_owned())
-        }
-    }
 }
 
 impl HelperHandle {
@@ -338,36 +122,6 @@ struct RegisteredHotkey {
     primary_vk: u32,
 }
 
-fn build_hotkey_registrations(config: &AppConfig) -> Result<Vec<RegisteredHotkey>, String> {
-    let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
-    for (index, mapping) in config.encoder_mappings.iter().enumerate() {
-        let hotkey = hotkeys::parse_hotkey(&mapping.encoded_key).map_err(|message| {
-            format!(
-                "Failed to register encodedKey `{}` for `{}::{}`: {}",
-                mapping.encoded_key,
-                mapping.control_id.as_str(),
-                mapping.layer.as_str(),
-                message
-            )
-        })?;
-
-        registrations.push(RegisteredHotkey {
-            id: (index + 1) as i32,
-            encoded_key: hotkey.canonical,
-            modifiers_mask: hotkey.modifiers.register_hotkey_mask(),
-            primary_vk: u32::from(hotkey.key.code),
-        });
-    }
-
-    Ok(registrations)
-}
-
-// ---------------------------------------------------------------------------
-// Capture helper process — runs WH_KEYBOARD_LL in a child process to avoid
-// WebView2 interference (tauri-apps/tauri#13919). The main process spawns
-// this helper with `--capture-helper`; they communicate via stdin/stdout pipes.
-// ---------------------------------------------------------------------------
-
 /// IPC registration sent from the main process to the capture helper.
 #[derive(Clone, Serialize, Deserialize)]
 struct HelperRegistration {
@@ -376,7 +130,6 @@ struct HelperRegistration {
     primary_vk: u32,
 }
 
-#[cfg(target_os = "windows")]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 struct HelperModifierState {
     ctrl: bool,
@@ -385,7 +138,6 @@ struct HelperModifierState {
     win: bool,
 }
 
-#[cfg(target_os = "windows")]
 impl HelperModifierState {
     fn apply_vk_event(&mut self, vk: u32, is_down: bool) -> bool {
         if is_control_vk(vk) {
@@ -446,67 +198,212 @@ impl HelperModifierState {
     }
 }
 
-#[cfg(target_os = "windows")]
 fn is_control_vk(vk: u32) -> bool {
     matches!(vk, VK_CONTROL | VK_LCONTROL | VK_RCONTROL)
 }
 
-#[cfg(target_os = "windows")]
 fn is_alt_vk(vk: u32) -> bool {
     matches!(vk, VK_MENU | VK_LMENU | VK_RMENU)
 }
 
-#[cfg(target_os = "windows")]
 fn is_shift_vk(vk: u32) -> bool {
     matches!(vk, VK_SHIFT | VK_LSHIFT | VK_RSHIFT)
 }
 
-#[cfg(target_os = "windows")]
 fn is_win_vk(vk: u32) -> bool {
     matches!(vk, VK_LWIN | VK_RWIN)
 }
 
-/// dwExtraInfo marker for hook health probe events.  Distinct from
-/// `INTERNAL_SENDINPUT_EXTRA_INFO` so the hook callback can tell them apart.
-#[cfg(target_os = "windows")]
-const HOOK_PROBE_EXTRA_INFO: usize = 0x4E41_4741_5052_4F42usize;
+impl CaptureBackendHandle {
+    pub(super) fn start(
+        app: AppHandle,
+        runtime_store: Arc<Mutex<RuntimeStore>>,
+        config: AppConfig,
+        app_name: String,
+    ) -> Result<Self, String> {
+        let registrations = build_hotkey_registrations(&config)?;
+        let (event_tx, event_rx) = mpsc::channel::<EncodedKeyEvent>();
+        let helper_event_tx = event_tx.clone();
+        let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
 
-/// VK used for probe injection (same unassigned key as the mask key).
-#[cfg(target_os = "windows")]
-const VK_PROBE_KEY: u16 = 0xE8;
+        let worker_app = app.clone();
+        let worker_runtime_store = runtime_store.clone();
+        let worker_config = config.clone();
+        let worker_app_name = app_name.clone();
+        let worker_thread = thread::spawn(move || {
+            let mut held_actions: std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState> =
+                std::collections::HashMap::new();
 
-/// How often the health monitor checks (milliseconds).
-#[cfg(target_os = "windows")]
-const HOOK_HEALTH_CHECK_INTERVAL_MS: u32 = 5000;
+            while let Ok(event) = event_rx.recv() {
+                process_encoded_key_event(
+                    &worker_app,
+                    &worker_runtime_store,
+                    &worker_config,
+                    &worker_app_name,
+                    event,
+                    &mut held_actions,
+                );
+            }
 
-/// How many consecutive probe failures required before reinstalling the hook.
-/// A single failed probe can be caused by UIPI blocking SendInput (e.g. an
-/// elevated window is in the foreground), not necessarily a dead hook.
-#[cfg(target_os = "windows")]
-const HOOK_PROBE_FAIL_THRESHOLD: u32 = 3;
+            // Channel closed (graceful shutdown) — release all held keys
+            for (encoded_key, held) in held_actions.drain() {
+                if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
+                    log::warn!("[capture] Failed to release held shortcut `{encoded_key}` on shutdown: {e}");
+                }
+            }
+        });
 
-// Thread-local state for the capture helper's LL keyboard hook callback.
-#[cfg(target_os = "windows")]
-thread_local! {
-    static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
-        std::cell::RefCell::new(Vec::new());
-    static HELPER_MODIFIERS: std::cell::RefCell<HelperModifierState> =
-        std::cell::RefCell::new(HelperModifierState::default());
-    static HELPER_SUPPRESSIONS: std::cell::RefCell<std::collections::HashMap<u32, String>> =
-        std::cell::RefCell::new(std::collections::HashMap::new());
-    static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
-        std::cell::RefCell::new(Vec::new());
-    static HELPER_THREAD_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
-    /// Set to `true` by the hook callback when it receives a probe event
-    /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
-    static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = std::cell::Cell::new(false);
-    /// Set to `true` by the hook callback on ANY invocation (real key or probe).
-    /// Consumed (replaced with `false`) by the health monitor each cycle.
-    /// When `true`, the hook is demonstrably alive — no probe needed.
-    static HOOK_HAD_CALLBACK: std::cell::Cell<bool> = std::cell::Cell::new(false);
+        let hook_registrations = registrations.clone();
+        let hook_thread = thread::spawn(move || {
+            run_hotkey_message_loop(hook_registrations, event_tx, ready_tx);
+        });
+
+        let hook_thread_id = match ready_rx.recv() {
+            Ok(Ok(thread_id)) => thread_id,
+            Ok(Err(error)) => {
+                drop(helper_event_tx);
+                let _ = hook_thread.join();
+                let _ = worker_thread.join();
+                return Err(error);
+            }
+            Err(error) => {
+                drop(helper_event_tx);
+                let _ = hook_thread.join();
+                let _ = worker_thread.join();
+                return Err(format!(
+                    "Failed to receive capture backend readiness: {error}"
+                ));
+            }
+        };
+
+        // Spawn helper process for LL hook (handles superset modifier matching
+        // for all keys, not just modifier-combos).  Non-fatal if fails —
+        // RegisterHotKey still handles bare keys with exact matching.
+        let helper = spawn_capture_helper(&registrations, helper_event_tx);
+        if !registrations.is_empty() && helper.is_none() {
+            if let Ok(mut store) = runtime_store.lock() {
+                store.record_warn(
+                    "перехват",
+                    "Не удалось запустить вспомогательный процесс перехвата. \
+                     Кнопки с зажатыми модификаторами (Ctrl/Shift) могут не срабатывать.",
+                );
+            }
+        }
+
+        // Spawn foreground window watcher — detects window switches instantly
+        let fg_app = app.clone();
+        let fg_runtime_store = runtime_store.clone();
+        let fg_config = config.clone();
+        let fg_app_name = app_name.clone();
+        let (fg_ready_tx, fg_ready_rx) = mpsc::channel::<u32>();
+        let foreground_watcher_thread = thread::spawn(move || {
+            run_foreground_watcher(fg_app, fg_runtime_store, fg_config, fg_app_name, fg_ready_tx);
+        });
+        let foreground_watcher_thread_id = fg_ready_rx.recv().ok();
+
+        Ok(Self {
+            hook_thread_id,
+            hook_thread,
+            worker_thread,
+            helper,
+            foreground_watcher_thread_id,
+            foreground_watcher_thread: Some(foreground_watcher_thread),
+        })
+    }
+
+    pub(super) fn stop(self) -> Result<(), String> {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+
+        let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
+        if posted == 0 {
+            return Err(format!(
+                "Failed to post WM_QUIT to capture thread {}.",
+                self.hook_thread_id
+            ));
+        }
+
+        // Stop foreground watcher thread
+        if let Some(fg_thread_id) = self.foreground_watcher_thread_id {
+            unsafe { PostThreadMessageW(fg_thread_id, WM_QUIT, 0, 0) };
+        }
+
+        // Signal helper to exit by closing its stdin pipe, then wait for cleanup
+        if let Some(helper) = self.helper {
+            let HelperHandle {
+                stdin_pipe,
+                mut child,
+                reader_thread,
+            } = helper;
+            drop(stdin_pipe);
+
+            // Bounded wait: poll try_wait() up to 5 seconds, then force-kill
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match child.try_wait() {
+                    Ok(Some(_)) => break,
+                    Ok(None) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    _ => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break;
+                    }
+                }
+            }
+
+            let _ = reader_thread.join();
+        }
+
+        self.hook_thread
+            .join()
+            .map_err(|_| "Capture hook thread panicked.".to_owned())?;
+        self.worker_thread
+            .join()
+            .map_err(|_| "Capture worker thread panicked.".to_owned())?;
+        if let Some(fg_thread) = self.foreground_watcher_thread {
+            let _ = fg_thread.join();
+        }
+        Ok(())
+    }
+
+    pub(super) fn rehook(&mut self) -> Result<(), String> {
+        if let Some(ref mut helper) = self.helper {
+            helper.send_command("REHOOK")
+        } else {
+            Err("No capture helper process is running.".to_owned())
+        }
+    }
 }
 
-#[cfg(target_os = "windows")]
+fn build_hotkey_registrations(config: &AppConfig) -> Result<Vec<RegisteredHotkey>, String> {
+    let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
+    for (index, mapping) in config.encoder_mappings.iter().enumerate() {
+        let hotkey = hotkeys::parse_hotkey(&mapping.encoded_key).map_err(|message| {
+            format!(
+                "Failed to register encodedKey `{}` for `{}::{}`: {}",
+                mapping.encoded_key,
+                mapping.control_id.as_str(),
+                mapping.layer.as_str(),
+                message
+            )
+        })?;
+
+        registrations.push(RegisteredHotkey {
+            id: (index + 1) as i32,
+            encoded_key: hotkey.canonical,
+            modifiers_mask: register_hotkey_mask(&hotkey.modifiers),
+            primary_vk: u32::from(hotkey.key.code),
+        });
+    }
+
+    Ok(registrations)
+}
+
+// ---------------------------------------------------------------------------
+// LL hook key event processing
+// ---------------------------------------------------------------------------
+
 /// Returns `(suppress_key, new_match_added, inject_mask_key)`.
 ///
 /// `inject_mask_key` is `true` when a combo matched while Alt or Win was active.
@@ -609,7 +506,6 @@ fn process_helper_key_event(
 /// only keys between a modifier-down and modifier-up were suppressed by our
 /// hook.  The events carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our LL hook
 /// passes them through without processing.
-#[cfg(target_os = "windows")]
 unsafe fn inject_mask_key() {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -646,7 +542,6 @@ unsafe fn inject_mask_key() {
 ///
 /// Returns `true` if SendInput accepted the events, `false` if injection
 /// failed (e.g. UIPI blocked it because an elevated window is focused).
-#[cfg(target_os = "windows")]
 unsafe fn inject_hook_probe() -> bool {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
@@ -685,7 +580,6 @@ unsafe fn inject_hook_probe() -> bool {
 
 /// LL keyboard hook callback for the capture helper process.
 /// Matches modifier+F-key combos and buffers the encoded key in HELPER_MATCHES.
-#[cfg(target_os = "windows")]
 unsafe extern "system" fn helper_ll_keyboard_proc(
     code: i32,
     w_param: usize,
@@ -774,7 +668,6 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
 /// Reads modifier-combo registrations from stdin (one JSON line),
 /// installs WH_KEYBOARD_LL, and writes matched encoded keys to stdout.
 /// Exits when stdin is closed (parent process stopped).
-#[cfg(target_os = "windows")]
 pub fn capture_helper_main() {
     // Initialize a stderr logger for the helper subprocess (no Tauri runtime here).
     env_logger::Builder::from_default_env()
@@ -1049,7 +942,6 @@ pub fn capture_helper_main() {
     log::info!("[capture-helper] Exiting message pump.");
 }
 
-#[cfg(target_os = "windows")]
 fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) -> std::io::Result<()> {
     use std::io::Write;
 
@@ -1063,14 +955,8 @@ fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) -> std::io::Result
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
-pub fn capture_helper_main() {
-    log::error!("[capture-helper] Only supported on Windows.");
-}
-
 /// Spawns the capture helper child process for modifier-combo hotkeys.
 /// Returns None if there are no modifier combos or if spawning fails (non-fatal).
-#[cfg(target_os = "windows")]
 fn spawn_capture_helper(
     registrations: &[RegisteredHotkey],
     event_tx: mpsc::Sender<EncodedKeyEvent>,
@@ -1185,19 +1071,10 @@ fn spawn_capture_helper(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
-fn spawn_capture_helper(
-    _registrations: &[RegisteredHotkey],
-    _event_tx: mpsc::Sender<EncodedKeyEvent>,
-) -> Option<HelperHandle> {
-    None
-}
-
 // ---------------------------------------------------------------------------
 // RegisterHotKey capture loop
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "windows")]
 fn run_hotkey_message_loop(
     registrations: Vec<RegisteredHotkey>,
     event_tx: mpsc::Sender<EncodedKeyEvent>,
@@ -1299,22 +1176,10 @@ fn run_hotkey_message_loop(
     }
 }
 
-#[cfg(not(target_os = "windows"))]
-fn run_hotkey_message_loop(
-    _registrations: Vec<RegisteredHotkey>,
-    _event_tx: mpsc::Sender<EncodedKeyEvent>,
-    ready_tx: mpsc::Sender<Result<u32, String>>,
-) {
-    let _ = ready_tx.send(Err(
-        "Global capture backend is only implemented for Windows.".into(),
-    ));
-}
-
 // ---------------------------------------------------------------------------
 // Foreground window watcher — detects window switches instantly via WinEvent
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "windows")]
 fn run_foreground_watcher(
     app: AppHandle,
     runtime_store: Arc<Mutex<RuntimeStore>>,
@@ -1381,7 +1246,7 @@ fn run_foreground_watcher(
                 Err(_) => return,
             };
 
-            let _ = ctx.app.emit(runtime::EVENT_PROFILE_RESOLVED, &capture_result);
+            let _ = ctx.app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
 
             if !capture_result.ignored {
                 let should_notify = ctx
@@ -1458,392 +1323,11 @@ fn run_foreground_watcher(
     });
 }
 
-#[cfg(not(target_os = "windows"))]
-fn run_foreground_watcher(
-    _app: AppHandle,
-    _runtime_store: Arc<Mutex<RuntimeStore>>,
-    _config: AppConfig,
-    _app_name: String,
-    _ready_tx: mpsc::Sender<u32>,
-) {
-    // No foreground watcher on non-Windows platforms.
-}
-
-fn process_encoded_key_event(
-    app: &AppHandle,
-    runtime_store: &Arc<Mutex<RuntimeStore>>,
-    config: &AppConfig,
-    app_name: &str,
-    event: EncodedKeyEvent,
-    held_actions: &mut std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState>,
-) {
-    // Accumulate log entries locally and flush in a single lock at the end to
-    // avoid acquiring the runtime_store mutex multiple times per keypress.
-    let mut log_entries: Vec<(&str, String, bool)> = Vec::new(); // (source, message, is_warn)
-
-    log_entries.push((
-        "перехват",
-        format!(
-            "Получен сигнал `{}` от бэкенда перехвата.",
-            event.encoded_key
-        ),
-        false,
-    ));
-
-    let _ = app.emit(EVENT_ENCODED_KEY_RECEIVED, &event);
-
-    // --- Key-up path: release any held shortcut ---
-    if event.is_key_up {
-        if let Some(held) = held_actions.remove(&event.encoded_key) {
-            match crate::input_synthesis::send_shortcut_hold_up(&held) {
-                Ok(()) => {
-                    log_entries.push((
-                        "выполнение",
-                        format!("Отпущен удерживаемый шорткат для `{}`.", event.encoded_key),
-                        false,
-                    ));
-                }
-                Err(e) => {
-                    log_entries.push((
-                        "выполнение",
-                        format!("Не удалось отпустить шорткат для `{}`: {e}", event.encoded_key),
-                        true,
-                    ));
-                }
-            }
-        } else {
-            log_entries.push((
-                "перехват",
-                format!("Отпускание `{}` без активного удержания.", event.encoded_key),
-                false,
-            ));
-        }
-        flush_log_entries(runtime_store, log_entries);
-        return;
-    }
-
-    let capture_result =
-        match window_capture::capture_active_window_with_resolution(config, app_name, None) {
-            Ok(result) => result,
-            Err(message) => {
-                let error = RuntimeErrorEvent {
-                    category: "захват окна".into(),
-                    message,
-                    encoded_key: Some(event.encoded_key.clone()),
-                    action_id: None,
-                    created_at: runtime::timestamp_millis(),
-                };
-                emit_runtime_error(app, runtime_store, &error);
-                return;
-            }
-        };
-
-    let _ = app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
-
-    // Send OSD notification if active profile changed
-    if !capture_result.ignored {
-        let should_notify = runtime_store
-            .lock()
-            .ok()
-            .map(|mut store| {
-                store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
-            })
-            .unwrap_or(false);
-        if should_notify {
-            let profile_name = capture_result
-                .resolved_profile_name
-                .as_deref()
-                .unwrap_or("Default");
-            crate::show_osd(app, profile_name, &config.settings);
-        }
-    }
-
-    let is_fg_elevated = capture_result.is_elevated;
-    if is_fg_elevated {
-        log_entries.push((
-            "UIPI",
-            format!(
-                "Активное окно `{}` запущено с правами администратора. \
-                 SendInput заблокирован Windows (UIPI). \
-                 Запустите Sidearm от имени администратора или с uiAccess.",
-                capture_result.exe
-            ),
-            true,
-        ));
-    }
-
-    if capture_result.ignored {
-        log_entries.push((
-            "перехват",
-            "Окно студии — используется fallback-профиль.".into(),
-            false,
-        ));
-    }
-
-    // Resolve action — use empty exe/title when ignored (forces fallback profile)
-    let (exe, title) = if capture_result.ignored {
-        (String::new(), String::new())
-    } else {
-        (capture_result.exe.clone(), capture_result.title.clone())
-    };
-
-    let preview = resolver::resolve_input_preview(
-        config,
-        &event.encoded_key,
-        &exe,
-        &title,
-    );
-
-    match preview.status {
-        resolver::ResolutionStatus::Resolved => {
-            log_entries.push((
-                "разрешение",
-                format!(
-                    "Сигнал `{}` разрешён в `{}` / `{}`.",
-                    preview.encoded_key,
-                    preview.control_id.as_deref().unwrap_or("н/д"),
-                    preview.layer.as_deref().unwrap_or("н/д")
-                ),
-                false,
-            ));
-        }
-        resolver::ResolutionStatus::Unresolved | resolver::ResolutionStatus::Ambiguous => {
-            log_entries.push((
-                "разрешение",
-                format!(
-                    "Сигнал `{}` не удалось разрешить: {}",
-                    preview.encoded_key, preview.reason
-                ),
-                true,
-            ));
-        }
-    }
-
-    let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
-    if preview.status != resolver::ResolutionStatus::Resolved {
-        flush_log_entries(runtime_store, log_entries);
-        return;
-    }
-
-    // Auto-repeat guard: only tap-mode shortcut actions should repeat.
-    // Launch, text, macro, and other non-shortcut actions must NOT re-fire
-    // on auto-repeat (e.g. holding a button mapped to Launch would spawn
-    // the program 30+ times per second).
-    if event.is_repeat && preview.action_type.as_deref() != Some("shortcut") {
-        flush_log_entries(runtime_store, log_entries);
-        return;
-    }
-
-    // Modifier-only shortcuts (Ctrl+Alt, Ctrl+Shift, etc.) are forced to hold
-    // mode regardless of configured trigger mode — in tap mode they press and
-    // immediately release modifiers, which is useless.
-    let is_modifier_only_shortcut = preview.action_type.as_deref() == Some("shortcut")
-        && config
-            .actions
-            .iter()
-            .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
-            .and_then(|a| match &a.payload {
-                crate::config::ActionPayload::Shortcut(p) => Some(p.key.trim().is_empty()),
-                _ => None,
-            })
-            .unwrap_or(false);
-
-    let is_hold_shortcut = preview.action_type.as_deref() == Some("shortcut")
-        && (preview.trigger_mode == Some(crate::config::TriggerMode::Hold)
-            || is_modifier_only_shortcut);
-
-    if is_hold_shortcut {
-        // Skip auto-repeat events — the shortcut is already held.
-        // Re-calling hold_down would overwrite held_actions with an empty
-        // state (modifiers already active → "reused" → nothing pressed)
-        // and the eventual hold_up would fail to release.
-        if held_actions.contains_key(&event.encoded_key) {
-            flush_log_entries(runtime_store, log_entries);
-            return;
-        }
-
-        let action = config
-            .actions
-            .iter()
-            .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
-
-        if let Some(crate::config::Action {
-            payload: crate::config::ActionPayload::Shortcut(payload),
-            ..
-        }) = action
-        {
-            let encoding_mods = hotkeys::extract_encoding_modifiers(&event.encoded_key);
-            match crate::input_synthesis::send_shortcut_hold_down(payload, &encoding_mods) {
-                Ok(held) => {
-                    log_entries.push((
-                        "выполнение",
-                        format!(
-                            "Удержание шортката `{}` для `{}`.",
-                            preview.action_pretty.as_deref().unwrap_or("?"),
-                            preview.encoded_key
-                        ),
-                        false,
-                    ));
-                    flush_log_entries(runtime_store, log_entries);
-                    held_actions.insert(event.encoded_key.clone(), held);
-                    let _ = app.emit(
-                        EVENT_ACTION_EXECUTED,
-                        &executor::ActionExecutionEvent {
-                            encoded_key: preview.encoded_key.clone(),
-                            action_id: preview.action_id.clone().unwrap_or_default(),
-                            action_type: "shortcut".into(),
-                            action_pretty: preview.action_pretty.clone().unwrap_or_default(),
-                            resolved_profile_id: preview.resolved_profile_id.clone(),
-                            resolved_profile_name: preview.resolved_profile_name.clone(),
-                            matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
-                            control_id: preview.control_id.clone(),
-                            layer: preview.layer.clone(),
-                            binding_id: preview.binding_id.clone(),
-                            mode: executor::ExecutionMode::Live,
-                            outcome: executor::ExecutionOutcome::Injected,
-                            process_id: None,
-                            summary: format!(
-                                "Удержание шортката `{}`.",
-                                preview.action_pretty.as_deref().unwrap_or("?")
-                            ),
-                            warnings: if is_fg_elevated {
-                                vec!["Активное окно запущено с правами администратора — ввод может быть заблокирован (UIPI).".into()]
-                            } else {
-                                Vec::new()
-                            },
-                            executed_at: runtime::timestamp_millis(),
-                        },
-                    );
-                }
-                Err(e) => {
-                    let error_event = executor::RuntimeErrorEvent {
-                        category: "выполнение".into(),
-                        message: e,
-                        encoded_key: Some(event.encoded_key.clone()),
-                        action_id: preview.action_id.clone(),
-                        created_at: runtime::timestamp_millis(),
-                    };
-                    flush_log_entries(runtime_store, log_entries);
-                    emit_runtime_error(app, runtime_store, &error_event);
-                }
-            }
-        } else {
-            // Hold requested but action is not a shortcut — fall back to press
-            log_entries.push((
-                "выполнение",
-                "Запрошено удержание, но действие не шорткат; переключение на нажатие.".into(),
-                true,
-            ));
-            run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
-        }
-    } else {
-        run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
-    }
-}
-
-fn run_fire_and_forget(
-    app: &AppHandle,
-    runtime_store: &Arc<Mutex<RuntimeStore>>,
-    config: &AppConfig,
-    preview: &resolver::ResolvedInputPreview,
-    _event: &EncodedKeyEvent,
-    mut log_entries: Vec<(&str, String, bool)>,
-    is_fg_elevated: bool,
-) {
-    log::info!(
-        "[capture] Dispatching action for {}",
-        preview.encoded_key
-    );
-    match executor::run_preview_action(config, preview) {
-        Ok(mut execution) => {
-            if is_fg_elevated {
-                execution.warnings.push(
-                    "Активное окно запущено с правами администратора — ввод может быть заблокирован (UIPI).".into()
-                );
-            }
-            log::info!(
-                "[capture] Action complete for {} (outcome: {:?})",
-                execution.encoded_key,
-                execution.outcome
-            );
-            log_entries.push((
-                "выполнение",
-                format!(
-                    "Выполнено `{}` для `{}`.",
-                    execution.action_pretty, execution.encoded_key
-                ),
-                false,
-            ));
-            for warning in &execution.warnings {
-                log_entries.push(("выполнение", warning.clone(), true));
-            }
-            flush_log_entries(runtime_store, log_entries);
-            let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
-        }
-        Err(error) => {
-            log::error!(
-                "[capture] Action failed for {}: {}",
-                preview.encoded_key,
-                error.event.message
-            );
-            flush_log_entries(runtime_store, log_entries);
-            emit_runtime_error(app, runtime_store, &error.event);
-        }
-    }
-}
-
-fn flush_log_entries(runtime_store: &Arc<Mutex<RuntimeStore>>, entries: Vec<(&str, String, bool)>) {
-    if entries.is_empty() {
-        return;
-    }
-    if let Ok(mut store) = runtime_store.lock() {
-        for (source, message, is_warn) in entries {
-            if is_warn {
-                store.record_warn(source, message);
-            } else {
-                store.record_info(source, message);
-            }
-        }
-    } else {
-        log::error!("[capture] runtime_store mutex poisoned while flushing log entries");
-    }
-}
-
-fn emit_runtime_error(
-    app: &AppHandle,
-    runtime_store: &Arc<Mutex<RuntimeStore>>,
-    event: &RuntimeErrorEvent,
-) {
-    if let Ok(mut store) = runtime_store.lock() {
-        let mut context = Vec::new();
-        if let Some(encoded_key) = &event.encoded_key {
-            context.push(format!("encodedKey={encoded_key}"));
-        }
-        if let Some(action_id) = &event.action_id {
-            context.push(format!("actionId={action_id}"));
-        }
-
-        let suffix = if context.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", context.join(", "))
-        };
-        store.record_warn(
-            event.category.clone(),
-            format!("{}{}", event.message, suffix),
-        );
-    } else {
-        log::error!(
-            "[{}] runtime_store mutex poisoned while recording runtime error: {}",
-            event.category, event.message
-        );
-    }
-
-    let _ = app.emit(EVENT_RUNTIME_ERROR, event);
-}
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[cfg(target_os = "windows")]
 mod helper_modifier_state_tests {
     use super::*;
 
@@ -1902,7 +1386,6 @@ mod helper_modifier_state_tests {
 }
 
 #[cfg(test)]
-#[cfg(target_os = "windows")]
 mod helper_key_event_tests {
     use super::*;
     use windows_sys::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP};
@@ -2207,9 +1690,9 @@ mod helper_key_event_tests {
     fn mod_norepeat_stripped_from_helper_mask() {
         // register_hotkey_mask() includes MOD_NOREPEAT (0x4000).
         // Verify that MOD_MODIFIER_BITS correctly strips it.
-        let mask_with_norepeat = super::MOD_ALT | 0x4000; // e.g. Alt+F24
-        let clean = mask_with_norepeat & super::MOD_MODIFIER_BITS;
-        assert_eq!(clean, super::MOD_ALT);
+        let mask_with_norepeat = MOD_ALT | 0x4000; // e.g. Alt+F24
+        let clean = mask_with_norepeat & MOD_MODIFIER_BITS;
+        assert_eq!(clean, MOD_ALT);
 
         // Verify superset matching works with the cleaned mask
         let mut modifiers = HelperModifierState::default();
@@ -2231,7 +1714,6 @@ mod helper_key_event_tests {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-#[cfg(target_os = "windows")]
 mod capture_diag {
     use std::mem::MaybeUninit;
     use std::time::{Duration, Instant};

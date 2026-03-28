@@ -194,25 +194,6 @@ pub fn extract_encoding_modifiers(encoded_key: &str) -> HotkeyModifiers {
     }
 }
 
-impl HotkeyModifiers {
-    pub fn register_hotkey_mask(self) -> u32 {
-        let mut mask = MOD_NOREPEAT;
-        if self.alt {
-            mask |= MOD_ALT;
-        }
-        if self.ctrl {
-            mask |= MOD_CONTROL;
-        }
-        if self.shift {
-            mask |= MOD_SHIFT;
-        }
-        if self.win {
-            mask |= MOD_WIN;
-        }
-        mask
-    }
-}
-
 fn simple_key(code: u16, extended: bool, display_name: &str) -> HotkeyKey {
     HotkeyKey {
         code,
@@ -251,12 +232,6 @@ fn normalize_modifier_token(token: &str) -> Option<ModifierToken> {
         _ => None,
     }
 }
-
-const MOD_ALT: u32 = 0x0001;
-const MOD_CONTROL: u32 = 0x0002;
-const MOD_SHIFT: u32 = 0x0004;
-const MOD_WIN: u32 = 0x0008;
-const MOD_NOREPEAT: u32 = 0x4000;
 
 const VK_BACK: u16 = 0x08;
 const VK_TAB: u16 = 0x09;

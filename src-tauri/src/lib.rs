@@ -3,10 +3,12 @@ mod chord;
 mod clipboard;
 mod command_error;
 mod config;
+#[cfg(target_os = "windows")]
 mod exe_icon;
 mod executor;
 mod hotkeys;
 mod input_synthesis;
+mod platform;
 mod recorder;
 mod resolver;
 mod runtime;
@@ -54,47 +56,11 @@ use window_capture::WindowCaptureResult;
 static OSD_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Check whether the current foreground window is fullscreen on its monitor.
-/// Uses MonitorFromWindow + GetMonitorInfoW to be multi-monitor safe.
 fn is_foreground_fullscreen() -> bool {
     #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::Graphics::Gdi::{
-            GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-        };
-        use windows_sys::Win32::UI::WindowsAndMessaging::{
-            GetForegroundWindow, GetWindowRect,
-        };
-
-        unsafe {
-            let fg = GetForegroundWindow();
-            if fg.is_null() {
-                return false;
-            }
-            let mut win_rect = std::mem::zeroed();
-            if GetWindowRect(fg, &mut win_rect) == 0 {
-                return false;
-            }
-            let hmon = MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST);
-            if hmon.is_null() {
-                return false;
-            }
-            let mut mi: MONITORINFO = std::mem::zeroed();
-            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-            if GetMonitorInfoW(hmon, &mut mi) == 0 {
-                return false;
-            }
-            // Compare window rect against monitor work area
-            let rc = mi.rcMonitor;
-            win_rect.left <= rc.left
-                && win_rect.top <= rc.top
-                && win_rect.right >= rc.right
-                && win_rect.bottom >= rc.bottom
-        }
-    }
+    return crate::platform::window::is_foreground_fullscreen();
     #[cfg(not(target_os = "windows"))]
-    {
-        false
-    }
+    return false;
 }
 
 /// Show the OSD notification bubble with the profile name.
@@ -120,20 +86,12 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
         }
     };
 
-    // --- Measure text width via Win32 for pixel-perfect sizing ---
+    // --- Measure text width for pixel-perfect sizing ---
     // GDI returns logical pixels; Tauri set_size/set_position use physical.
     // Multiply by DPI scale factor to convert.
     let dpi_scale = {
         #[cfg(target_os = "windows")]
-        {
-            use windows_sys::Win32::Graphics::Gdi::{GetDC, GetDeviceCaps, ReleaseDC, LOGPIXELSX};
-            unsafe {
-                let hdc = GetDC(std::ptr::null_mut());
-                let dpi = GetDeviceCaps(hdc, LOGPIXELSX as i32);
-                ReleaseDC(std::ptr::null_mut(), hdc);
-                dpi as f64 / 96.0
-            }
-        }
+        { crate::platform::display::get_dpi_scale() }
         #[cfg(not(target_os = "windows"))]
         { 1.0_f64 }
     };
@@ -144,8 +102,8 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
         config::OsdFontSize::Large => 14,
     };
     // Measure label (weight 500) and name (weight 700) separately
-    let label_width = measure_text_width_win32("Профиль:", "Segoe UI", font_px, 500);
-    let name_width = measure_text_width_win32(profile_name, "Segoe UI", font_px, 700);
+    let label_width = measure_text_width("Профиль:", "Segoe UI", font_px, 500);
+    let name_width = measure_text_width(profile_name, "Segoe UI", font_px, 700);
     let logical_padding = 16 + 8 + 16 + 4; // left-pad + gap + right-pad + rounding safety
     let logical_width = label_width + name_width + logical_padding;
 
@@ -178,26 +136,12 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
 
     #[cfg(target_os = "windows")]
     {
-        use windows_sys::Win32::Graphics::Gdi::{
-            GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-        };
-        use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
-
-        let (x, y) = unsafe {
-            let mut cursor_pt = std::mem::zeroed();
-            GetCursorPos(&mut cursor_pt);
-            let hmon = MonitorFromPoint(cursor_pt, MONITOR_DEFAULTTONEAREST);
-            let mut mi: MONITORINFO = std::mem::zeroed();
-            mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-            GetMonitorInfoW(hmon, &mut mi);
-            let wa = mi.rcWork;
-            match settings.osd_position {
-                config::OsdPosition::TopLeft => (wa.left + margin, wa.top + margin),
-                config::OsdPosition::TopRight => (wa.right - ow - margin, wa.top + margin),
-                config::OsdPosition::BottomLeft => (wa.left + margin, wa.bottom - oh - margin),
-                config::OsdPosition::BottomRight => (wa.right - ow - margin, wa.bottom - oh - margin),
-            }
-        };
+        let (x, y) = crate::platform::display::position_osd_on_monitor(
+            &settings.osd_position,
+            ow,
+            oh,
+            margin,
+        );
         let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
 
@@ -235,48 +179,11 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     });
 }
 
-/// Measure text width in pixels using Win32 GDI with the specified font.
-#[cfg(target_os = "windows")]
-fn measure_text_width_win32(text: &str, font_family: &str, font_size_px: i32, font_weight: i32) -> i32 {
-    use windows_sys::Win32::Graphics::Gdi::{
-        CreateFontW, DeleteObject, GetDC, GetTextExtentPoint32W, ReleaseDC, SelectObject,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        DEFAULT_QUALITY, DEFAULT_PITCH,
-    };
-    use windows_sys::Win32::Foundation::SIZE;
-
-    unsafe {
-        let hdc = GetDC(std::ptr::null_mut());
-        let family_wide: Vec<u16> = font_family.encode_utf16().chain(std::iter::once(0)).collect();
-        let hfont = CreateFontW(
-            -font_size_px,
-            0, 0, 0,
-            font_weight,
-            0, 0, 0,
-            DEFAULT_CHARSET as u32,
-            OUT_DEFAULT_PRECIS as u32,
-            CLIP_DEFAULT_PRECIS as u32,
-            DEFAULT_QUALITY as u32,
-            DEFAULT_PITCH as u32,
-            family_wide.as_ptr(),
-        );
-        let old_font = SelectObject(hdc, hfont as _);
-
-        let text_wide: Vec<u16> = text.encode_utf16().collect();
-        let mut size = SIZE { cx: 0, cy: 0 };
-        GetTextExtentPoint32W(hdc, text_wide.as_ptr(), text_wide.len() as i32, &mut size);
-
-        SelectObject(hdc, old_font);
-        DeleteObject(hfont as _);
-        ReleaseDC(std::ptr::null_mut(), hdc);
-
-        size.cx
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn measure_text_width_win32(_text: &str, _font_family: &str, font_size_px: i32, _font_weight: i32) -> i32 {
-    font_size_px * 8
+fn measure_text_width(text: &str, font_family: &str, font_size_px: i32, font_weight: i32) -> i32 {
+    #[cfg(target_os = "windows")]
+    return crate::platform::display::measure_text_width(text, font_family, font_size_px, font_weight);
+    #[cfg(not(target_os = "windows"))]
+    { let _ = (text, font_family, font_weight); return font_size_px * 8; }
 }
 
 /// Create the hidden OSD window (called lazily on first show_osd).
@@ -770,15 +677,18 @@ async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
         CommandError::internal(format!("Failed to resolve log directory: {error}"))
     })?;
     if log_dir.exists() {
-        std::process::Command::new(format!(
-            "{}\\explorer.exe",
-            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
-        ))
-            .arg(log_dir.as_os_str())
-            .spawn()
-            .map_err(|error| {
-                CommandError::internal(format!("Failed to open log directory: {error}"))
-            })?;
+        #[cfg(target_os = "windows")]
+        crate::platform::shell::open_in_explorer(&log_dir)
+            .map_err(CommandError::internal)?;
+        #[cfg(not(target_os = "windows"))]
+        {
+            std::process::Command::new("xdg-open")
+                .arg(log_dir.as_os_str())
+                .spawn()
+                .map_err(|error| {
+                    CommandError::internal(format!("Failed to open log directory: {error}"))
+                })?;
+        }
     }
     Ok(())
 }
@@ -1181,6 +1091,7 @@ async fn stop_macro_recording(
         .map_err(|msg| CommandError::new("recording_error", msg, None))
 }
 
+#[cfg(target_os = "windows")]
 #[tauri::command]
 async fn get_exe_icon(
     exe_name: String,
@@ -1214,191 +1125,35 @@ async fn get_exe_icon(
     .map_err(|error| CommandError::internal(format!("get_exe_icon task failed: {error}")))?
 }
 
-/// Look up the exe path in the Windows App Paths registry.
-///
-/// Most installed applications register their full path under:
-///   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\<exe>`
-///
-/// The default value of this key contains the full path to the executable.
-/// This is an O(1) lookup and the canonical way Windows resolves exe locations.
-fn lookup_app_paths_registry(exe_name: &str) -> Option<String> {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
-        KEY_QUERY_VALUE, REG_EXPAND_SZ, REG_SZ,
-    };
-
-    let subkey = format!(
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}"
-    );
-    let wide_subkey: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
-
-    for &hive in &[HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
-        let mut hkey = std::ptr::null_mut();
-        let status = unsafe {
-            RegOpenKeyExW(hive, wide_subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey)
-        };
-        if status != 0 || hkey.is_null() {
-            continue;
-        }
-
-        // Read the default value (empty string name)
-        let mut buf = vec![0u16; 1024];
-        let mut buf_size = (buf.len() * 2) as u32;
-        let mut value_type: u32 = 0;
-        let result = unsafe {
-            RegQueryValueExW(
-                hkey,
-                [0u16].as_ptr(), // default value
-                std::ptr::null(),
-                &mut value_type,
-                buf.as_mut_ptr().cast(),
-                &mut buf_size,
-            )
-        };
-        unsafe { RegCloseKey(hkey) };
-
-        if result != 0 || (value_type != REG_SZ && value_type != REG_EXPAND_SZ) {
-            continue;
-        }
-
-        // Convert wide string to Rust String, strip NUL and quotes
-        let len = (buf_size as usize) / 2;
-        let s = String::from_utf16_lossy(&buf[..len]);
-        let trimmed = s.trim_end_matches('\0').trim_matches('"').to_owned();
-
-        if !trimmed.is_empty() && std::path::Path::new(&trimmed).exists() {
-            return Some(trimmed);
-        }
-    }
-    None
+#[cfg(not(target_os = "windows"))]
+#[tauri::command]
+async fn get_exe_icon(
+    _exe_name: String,
+    _process_path: Option<String>,
+) -> Result<Option<String>, CommandError> {
+    Ok(None)
 }
 
-/// Resolve the full path of an exe using proper Windows APIs.
-///
-/// 1. App Paths registry (HKLM + HKCU) — the canonical install location.
-/// 2. `SearchPathW` — uses the same search order as `CreateProcess`:
-///    system directories, Windows directory, PATH, and current directory.
-///
-/// No hardcoded directory lists — both methods are standard Windows mechanisms.
+/// Resolve the full path of an exe using platform-specific APIs.
+#[cfg(target_os = "windows")]
 fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
     let mut paths = Vec::new();
-
-    // 1. App Paths registry — many apps register here (Office, Chrome, etc.)
-    if let Some(path) = lookup_app_paths_registry(exe_name) {
+    if let Some(path) = crate::platform::shell::lookup_app_paths_registry(exe_name) {
         paths.push(path);
     }
-
-    // 2. SearchPathW — standard Win32 API, searches PATH + system dirs
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(path) = search_path_win32(exe_name) {
-            if !paths.contains(&path) {
-                paths.push(path);
-            }
+    if let Some(path) = crate::platform::shell::search_path_win32(exe_name) {
+        if !paths.contains(&path) {
+            paths.push(path);
         }
     }
-
     paths
 }
 
-/// Use Win32 `SearchPathW` to find an executable.
-///
-/// Searches in the same order as `CreateProcess`:
-/// application directory, current directory, System32, System, Windows, PATH.
-#[cfg(target_os = "windows")]
-fn search_path_win32(exe_name: &str) -> Option<String> {
-    use windows_sys::Win32::Storage::FileSystem::SearchPathW;
-
-    let wide_name: Vec<u16> = exe_name.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut buf = vec![0u16; 512];
-    let mut file_part = std::ptr::null_mut();
-
-    let len = unsafe {
-        SearchPathW(
-            std::ptr::null(),      // use default search order
-            wide_name.as_ptr(),
-            std::ptr::null(),      // no additional extension
-            buf.len() as u32,
-            buf.as_mut_ptr(),
-            &mut file_part,
-        )
-    };
-
-    if len == 0 || len as usize >= buf.len() {
-        return None;
-    }
-
-    let path = String::from_utf16_lossy(&buf[..len as usize]);
-    if std::path::Path::new(&path).exists() {
-        Some(path)
-    } else {
-        None
-    }
-}
-
-/// Find the full path of a running process by exe name.
-///
-/// Uses `CreateToolhelp32Snapshot` + `QueryFullProcessImageNameW` — standard
-/// Win32 API for enumerating running processes. Works for any exe that is
-/// currently running, regardless of install location.
-#[cfg(target_os = "windows")]
 fn find_running_process_path(exe_name: &str) -> Option<String> {
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
-            TH32CS_SNAPPROCESS,
-        },
-        System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
-    };
-
-    unsafe {
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-        if snapshot.is_null() {
-            return None;
-        }
-
-        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-
-        if Process32FirstW(snapshot, &mut entry) == 0 {
-            CloseHandle(snapshot);
-            return None;
-        }
-
-        let target = exe_name.to_ascii_lowercase();
-        loop {
-            let name_len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-            let name = String::from_utf16_lossy(&entry.szExeFile[..name_len]).to_ascii_lowercase();
-
-            if name == target {
-                let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
-                if !process.is_null() {
-                    let mut path_buf = vec![0u16; 512];
-                    let mut path_len = path_buf.len() as u32;
-                    let ok = QueryFullProcessImageNameW(process, 0, path_buf.as_mut_ptr(), &mut path_len);
-                    CloseHandle(process);
-                    if ok != 0 {
-                        let path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
-                        CloseHandle(snapshot);
-                        return Some(path);
-                    }
-                }
-            }
-
-            if Process32NextW(snapshot, &mut entry) == 0 {
-                break;
-            }
-        }
-
-        CloseHandle(snapshot);
-        None
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
-fn find_running_process_path(_exe_name: &str) -> Option<String> {
-    None
+    #[cfg(target_os = "windows")]
+    return crate::platform::shell::find_running_process_path(exe_name);
+    #[cfg(not(target_os = "windows"))]
+    { let _ = exe_name; return None; }
 }
 
 /// Migrate config from the old "com.nagaworkflowstudio.desktop" directory

@@ -1,9 +1,8 @@
 use serde::Serialize;
-use std::{path::Path, thread, time::Duration};
+use std::{thread, time::Duration};
 
 use crate::config::AppConfig;
 use crate::resolver::{find_profile, matching_app_mappings};
-use crate::runtime::timestamp_millis;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -66,14 +65,14 @@ pub fn capture_active_window_with_resolution(
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct RawWindowCapture {
-    hwnd: String,
-    pid: u32,
-    exe: String,
-    process_path: String,
-    title: String,
-    captured_at: u64,
-    is_elevated: bool,
+pub(crate) struct RawWindowCapture {
+    pub(crate) hwnd: String,
+    pub(crate) pid: u32,
+    pub(crate) exe: String,
+    pub(crate) process_path: String,
+    pub(crate) title: String,
+    pub(crate) captured_at: u64,
+    pub(crate) is_elevated: bool,
 }
 
 fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> WindowCaptureResult {
@@ -124,110 +123,11 @@ fn should_ignore_window(foreground_pid: u32) -> bool {
     foreground_pid == std::process::id()
 }
 
-#[cfg(target_os = "windows")]
 fn capture_foreground_window() -> Result<RawWindowCapture, String> {
-    use windows_sys::Win32::{
-        Foundation::CloseHandle,
-        System::Threading::{
-            OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
-        },
-        UI::WindowsAndMessaging::{
-            GetForegroundWindow, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId,
-        },
-    };
-
-    unsafe {
-        let hwnd = GetForegroundWindow();
-        if hwnd.is_null() {
-            return Err("No foreground window is available.".into());
-        }
-
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(hwnd, &mut pid);
-        if pid == 0 {
-            return Err("Failed to resolve the foreground window process id.".into());
-        }
-
-        let title_len = GetWindowTextLengthW(hwnd);
-        let mut title_buffer = vec![0u16; (title_len as usize).max(1) + 1];
-        let actual_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
-        let title = String::from_utf16_lossy(&title_buffer[..actual_len.max(0) as usize]);
-
-        let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process_handle.is_null() {
-            return Err(format!("Failed to open foreground process {pid}."));
-        }
-
-        let process_path = {
-            let mut path_buffer = vec![0u16; 260];
-            let mut path_length = path_buffer.len() as u32;
-            let success = QueryFullProcessImageNameW(
-                process_handle,
-                0,
-                path_buffer.as_mut_ptr(),
-                &mut path_length,
-            );
-            if success == 0 {
-                CloseHandle(process_handle);
-                return Err("Failed to resolve the foreground process path.".into());
-            }
-            String::from_utf16_lossy(&path_buffer[..path_length as usize])
-        };
-
-        let is_elevated = is_process_elevated(process_handle);
-        CloseHandle(process_handle);
-
-        let exe = Path::new(&process_path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&process_path)
-            .to_ascii_lowercase();
-
-        Ok(RawWindowCapture {
-            hwnd: format!("0x{:X}", hwnd as usize),
-            pid,
-            exe,
-            process_path,
-            title,
-            captured_at: timestamp_millis(),
-            is_elevated,
-        })
-    }
-}
-
-/// Check whether a process is running with elevated privileges (admin token).
-///
-/// When our app runs non-elevated, `OpenProcessToken` fails with
-/// `ERROR_ACCESS_DENIED` for elevated targets (UIPI blocks token access).
-/// We treat access-denied as "elevated" — in all such cases `SendInput`
-/// would also be blocked, so the warning is correct regardless.
-#[cfg(target_os = "windows")]
-unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_ACCESS_DENIED},
-        Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
-        System::Threading::OpenProcessToken,
-    };
-
-    let mut token_handle = std::ptr::null_mut();
-    if OpenProcessToken(process_handle, TOKEN_QUERY, &mut token_handle) == 0 {
-        // Access denied → target is likely elevated (or protected).
-        // Either way, SendInput won't reach it.
-        let err = std::io::Error::last_os_error();
-        return err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32);
-    }
-
-    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
-    let mut return_length = 0u32;
-    let ok = GetTokenInformation(
-        token_handle,
-        TokenElevation,
-        &mut elevation as *mut _ as *mut _,
-        std::mem::size_of::<TOKEN_ELEVATION>() as u32,
-        &mut return_length,
-    );
-    CloseHandle(token_handle);
-    ok != 0 && elevation.TokenIsElevated != 0
+    #[cfg(target_os = "windows")]
+    return crate::platform::window::capture_foreground_window();
+    #[cfg(not(target_os = "windows"))]
+    return Err("Foreground window capture is only implemented for Windows.".into());
 }
 
 /// Check whether the current process itself is running elevated (admin).
@@ -236,19 +136,9 @@ unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HA
 /// where `RegisterHotKey` or `SendInput` silently fail against elevated targets.
 pub fn is_current_process_elevated() -> bool {
     #[cfg(target_os = "windows")]
-    {
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
-        // Safety: GetCurrentProcess returns a pseudo-handle (-1) that is always valid
-        // and does not need to be closed.
-        unsafe { is_process_elevated(GetCurrentProcess()) }
-    }
+    return crate::platform::window::is_current_process_elevated();
     #[cfg(not(target_os = "windows"))]
-    false
-}
-
-#[cfg(not(target_os = "windows"))]
-fn capture_foreground_window() -> Result<RawWindowCapture, String> {
-    Err("Foreground window capture is only implemented for Windows.".into())
+    return false;
 }
 
 #[cfg(test)]
@@ -447,45 +337,10 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn is_process_elevated_returns_false_for_current_non_admin_process() {
-        use windows_sys::Win32::System::Threading::GetCurrentProcess;
-
-        let elevated = unsafe {
-            let handle = GetCurrentProcess();
-            // GetCurrentProcess returns a pseudo-handle (-1) that does not need closing.
-            super::is_process_elevated(handle)
-        };
-
+    fn is_current_process_not_elevated_without_admin() {
         assert!(
-            !elevated,
+            !super::is_current_process_elevated(),
             "Test process should not be elevated (running without admin)"
         );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn is_process_elevated_returns_true_for_system_process() {
-        use windows_sys::Win32::{
-            Foundation::CloseHandle,
-            System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION},
-        };
-
-        unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, 4);
-            if handle.is_null() {
-                // Cannot open System process — skip test.
-                return;
-            }
-
-            let elevated = super::is_process_elevated(handle);
-            CloseHandle(handle);
-
-            // OpenProcessToken fails with ERROR_ACCESS_DENIED for PID 4,
-            // which we now treat as "elevated" (SendInput would also fail).
-            assert!(
-                elevated,
-                "is_process_elevated should return true when token access is denied"
-            );
-        }
     }
 }

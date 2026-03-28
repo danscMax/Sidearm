@@ -249,10 +249,10 @@ pub fn release_all_modifiers() {
     #[cfg(target_os = "windows")]
     {
         let inputs = vec![
-            KeyboardInputSpec::VirtualKey { code: vk_lcontrol(), extended: false, key_up: true },
-            KeyboardInputSpec::VirtualKey { code: vk_lshift(), extended: false, key_up: true },
-            KeyboardInputSpec::VirtualKey { code: vk_lmenu(), extended: false, key_up: true },
-            KeyboardInputSpec::VirtualKey { code: vk_lwin(), extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: VK_LSHIFT, extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up: true },
+            KeyboardInputSpec::VirtualKey { code: VK_LWIN, extended: false, key_up: true },
         ];
         let _ = send_keyboard_inputs(&inputs);
     }
@@ -394,7 +394,7 @@ fn build_text_inputs(text: &str) -> Result<Vec<KeyboardInputSpec>, String> {
                 push_virtual_key_tap(
                     &mut inputs,
                     VirtualKeySpec {
-                        code: vk_return(),
+                        code: VK_RETURN,
                         extended: false,
                     },
                 );
@@ -402,7 +402,7 @@ fn build_text_inputs(text: &str) -> Result<Vec<KeyboardInputSpec>, String> {
             '\n' => push_virtual_key_tap(
                 &mut inputs,
                 VirtualKeySpec {
-                    code: vk_return(),
+                    code: VK_RETURN,
                     extended: false,
                 },
             ),
@@ -499,17 +499,17 @@ fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
                 code: ch as u16,
                 extended: false,
             }),
-            '-' => Ok(oem_key(vk_oem_minus())),
-            '=' => Ok(oem_key(vk_oem_plus())),
-            ',' => Ok(oem_key(vk_oem_comma())),
-            '.' => Ok(oem_key(vk_oem_period())),
-            '/' => Ok(oem_key(vk_oem_2())),
-            ';' => Ok(oem_key(vk_oem_1())),
-            '\'' => Ok(oem_key(vk_oem_7())),
-            '[' => Ok(oem_key(vk_oem_4())),
-            ']' => Ok(oem_key(vk_oem_6())),
-            '\\' => Ok(oem_key(vk_oem_5())),
-            '`' => Ok(oem_key(vk_oem_3())),
+            '-' => Ok(oem_key(VK_OEM_MINUS)),
+            '=' => Ok(oem_key(VK_OEM_PLUS)),
+            ',' => Ok(oem_key(VK_OEM_COMMA)),
+            '.' => Ok(oem_key(VK_OEM_PERIOD)),
+            '/' => Ok(oem_key(VK_OEM_2)),
+            ';' => Ok(oem_key(VK_OEM_1)),
+            '\'' => Ok(oem_key(VK_OEM_7)),
+            '[' => Ok(oem_key(VK_OEM_4)),
+            ']' => Ok(oem_key(VK_OEM_6)),
+            '\\' => Ok(oem_key(VK_OEM_5)),
+            '`' => Ok(oem_key(VK_OEM_3)),
             '+' => Err(
                 "Shortcut key `+` is ambiguous for live execution. Use `=` with shift=true instead."
                     .into(),
@@ -534,100 +534,100 @@ fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
 
     match compact.as_str() {
         "ENTER" | "RETURN" => Ok(VirtualKeySpec {
-            code: vk_return(),
+            code: VK_RETURN,
             extended: false,
         }),
         "TAB" => Ok(VirtualKeySpec {
-            code: vk_tab(),
+            code: VK_TAB,
             extended: false,
         }),
         "SPACE" | "SPACEBAR" => Ok(VirtualKeySpec {
-            code: vk_space(),
+            code: VK_SPACE,
             extended: false,
         }),
         "BACKSPACE" | "BKSP" => Ok(VirtualKeySpec {
-            code: vk_back(),
+            code: VK_BACK,
             extended: false,
         }),
         "DELETE" | "DEL" => Ok(VirtualKeySpec {
-            code: vk_delete(),
+            code: VK_DELETE,
             extended: true,
         }),
         "INSERT" | "INS" => Ok(VirtualKeySpec {
-            code: vk_insert(),
+            code: VK_INSERT,
             extended: true,
         }),
         "ESC" | "ESCAPE" => Ok(VirtualKeySpec {
-            code: vk_escape(),
+            code: VK_ESCAPE,
             extended: false,
         }),
         "HOME" => Ok(VirtualKeySpec {
-            code: vk_home(),
+            code: VK_HOME,
             extended: true,
         }),
         "END" => Ok(VirtualKeySpec {
-            code: vk_end(),
+            code: VK_END,
             extended: true,
         }),
         "PAGEUP" | "PGUP" => Ok(VirtualKeySpec {
-            code: vk_prior(),
+            code: VK_PRIOR,
             extended: true,
         }),
         "PAGEDOWN" | "PGDOWN" | "PGDN" => Ok(VirtualKeySpec {
-            code: vk_next(),
+            code: VK_NEXT,
             extended: true,
         }),
         "LEFT" | "LEFTARROW" => Ok(VirtualKeySpec {
-            code: vk_left(),
+            code: VK_LEFT,
             extended: true,
         }),
         "RIGHT" | "RIGHTARROW" => Ok(VirtualKeySpec {
-            code: vk_right(),
+            code: VK_RIGHT,
             extended: true,
         }),
         "UP" | "UPARROW" => Ok(VirtualKeySpec {
-            code: vk_up(),
+            code: VK_UP,
             extended: true,
         }),
         "DOWN" | "DOWNARROW" => Ok(VirtualKeySpec {
-            code: vk_down(),
+            code: VK_DOWN,
             extended: true,
         }),
         "CAPSLOCK" => Ok(VirtualKeySpec {
-            code: vk_capital(),
+            code: VK_CAPITAL,
             extended: false,
         }),
         "NUMLOCK" => Ok(VirtualKeySpec {
-            code: vk_numlock(),
+            code: VK_NUMLOCK,
             extended: true,
         }),
         "PRINTSCREEN" | "PRTSC" | "PRTSCN" => Ok(VirtualKeySpec {
-            code: vk_snapshot(),
+            code: VK_SNAPSHOT,
             extended: true,
         }),
         "SCROLLLOCK" => Ok(VirtualKeySpec {
-            code: vk_scroll(),
+            code: VK_SCROLL,
             extended: false,
         }),
         "PAUSE" => Ok(VirtualKeySpec {
-            code: vk_pause(),
+            code: VK_PAUSE,
             extended: false,
         }),
         "APPS" | "APPLICATION" | "MENU" => Ok(VirtualKeySpec {
-            code: vk_apps(),
+            code: VK_APPS,
             extended: false,
         }),
-        "MINUS" | "HYPHEN" => Ok(oem_key(vk_oem_minus())),
-        "EQUAL" | "EQUALS" | "PLUS" => Ok(oem_key(vk_oem_plus())),
-        "COMMA" => Ok(oem_key(vk_oem_comma())),
-        "PERIOD" | "DOT" => Ok(oem_key(vk_oem_period())),
-        "SLASH" | "FORWARDSLASH" => Ok(oem_key(vk_oem_2())),
-        "SEMICOLON" => Ok(oem_key(vk_oem_1())),
-        "APOSTROPHE" | "QUOTE" => Ok(oem_key(vk_oem_7())),
-        "LBRACKET" | "LEFTBRACKET" => Ok(oem_key(vk_oem_4())),
-        "RBRACKET" | "RIGHTBRACKET" => Ok(oem_key(vk_oem_6())),
-        "BACKSLASH" => Ok(oem_key(vk_oem_5())),
-        "GRAVE" | "BACKTICK" => Ok(oem_key(vk_oem_3())),
+        "MINUS" | "HYPHEN" => Ok(oem_key(VK_OEM_MINUS)),
+        "EQUAL" | "EQUALS" | "PLUS" => Ok(oem_key(VK_OEM_PLUS)),
+        "COMMA" => Ok(oem_key(VK_OEM_COMMA)),
+        "PERIOD" | "DOT" => Ok(oem_key(VK_OEM_PERIOD)),
+        "SLASH" | "FORWARDSLASH" => Ok(oem_key(VK_OEM_2)),
+        "SEMICOLON" => Ok(oem_key(VK_OEM_1)),
+        "APOSTROPHE" | "QUOTE" => Ok(oem_key(VK_OEM_7)),
+        "LBRACKET" | "LEFTBRACKET" => Ok(oem_key(VK_OEM_4)),
+        "RBRACKET" | "RIGHTBRACKET" => Ok(oem_key(VK_OEM_6)),
+        "BACKSLASH" => Ok(oem_key(VK_OEM_5)),
+        "GRAVE" | "BACKTICK" => Ok(oem_key(VK_OEM_3)),
         _ => Err(format!(
             "Unsupported shortcut key `{trimmed}` for live execution."
         )),
@@ -711,19 +711,19 @@ impl ModifierKey {
     fn virtual_key(self) -> VirtualKeySpec {
         match self {
             ModifierKey::Ctrl => VirtualKeySpec {
-                code: vk_lcontrol(),
+                code: VK_LCONTROL,
                 extended: false,
             },
             ModifierKey::Shift => VirtualKeySpec {
-                code: vk_lshift(),
+                code: VK_LSHIFT,
                 extended: false,
             },
             ModifierKey::Alt => VirtualKeySpec {
-                code: vk_lmenu(),
+                code: VK_LMENU,
                 extended: false,
             },
             ModifierKey::Win => VirtualKeySpec {
-                code: vk_lwin(),
+                code: VK_LWIN,
                 extended: false,
             },
         }
@@ -754,21 +754,21 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     unsafe {
         if mask.ctrl && key_is_down(GetAsyncKeyState(VK_CONTROL as i32)) {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
-                code: vk_lcontrol(),
+                code: VK_LCONTROL,
                 extended: false,
                 key_up: true,
             });
         }
         if mask.shift && key_is_down(GetAsyncKeyState(VK_SHIFT as i32)) {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
-                code: vk_lshift(),
+                code: VK_LSHIFT,
                 extended: false,
                 key_up: true,
             });
         }
         if mask.alt && key_is_down(GetAsyncKeyState(VK_MENU as i32)) {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
-                code: vk_lmenu(),
+                code: VK_LMENU,
                 extended: false,
                 key_up: true,
             });
@@ -778,7 +778,7 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
                 || key_is_down(GetAsyncKeyState(VK_RWIN as i32)))
         {
             release_inputs.push(KeyboardInputSpec::VirtualKey {
-                code: vk_lwin(),
+                code: VK_LWIN,
                 extended: false,
                 key_up: true,
             });
@@ -790,10 +790,10 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
             .iter()
             .filter_map(|input| match input {
                 KeyboardInputSpec::VirtualKey { code, .. } => match *code {
-                    c if c == vk_lcontrol() => Some("Ctrl"),
-                    c if c == vk_lshift() => Some("Shift"),
-                    c if c == vk_lmenu() => Some("Alt"),
-                    c if c == vk_lwin() => Some("Win"),
+                    c if c == VK_LCONTROL => Some("Ctrl"),
+                    c if c == VK_LSHIFT => Some("Shift"),
+                    c if c == VK_LMENU => Some("Alt"),
+                    c if c == VK_LWIN => Some("Win"),
                     _ => None,
                 },
                 _ => None,
@@ -935,365 +935,44 @@ fn key_is_down(state: i16) -> bool {
     state < 0
 }
 
-#[cfg(target_os = "windows")]
-const fn vk_return() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_RETURN
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_return() -> u16 {
-    0x0D
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_tab() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_TAB
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_tab() -> u16 {
-    0x09
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_space() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_SPACE
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_space() -> u16 {
-    0x20
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_back() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_BACK
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_back() -> u16 {
-    0x08
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_delete() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_DELETE
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_delete() -> u16 {
-    0x2E
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_insert() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_INSERT
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_insert() -> u16 {
-    0x2D
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_escape() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_escape() -> u16 {
-    0x1B
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_home() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_HOME
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_home() -> u16 {
-    0x24
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_end() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_END
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_end() -> u16 {
-    0x23
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_prior() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_PRIOR
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_prior() -> u16 {
-    0x21
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_next() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_NEXT
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_next() -> u16 {
-    0x22
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_left() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LEFT
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_left() -> u16 {
-    0x25
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_right() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_RIGHT
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_right() -> u16 {
-    0x27
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_up() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_UP
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_up() -> u16 {
-    0x26
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_down() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_DOWN
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_down() -> u16 {
-    0x28
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_capital() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_CAPITAL
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_capital() -> u16 {
-    0x14
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_numlock() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_NUMLOCK
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_numlock() -> u16 {
-    0x90
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_snapshot() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_SNAPSHOT
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_snapshot() -> u16 {
-    0x2C
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_scroll() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_SCROLL
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_scroll() -> u16 {
-    0x91
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_pause() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_PAUSE
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_pause() -> u16 {
-    0x13
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_apps() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_APPS
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_apps() -> u16 {
-    0x5D
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_lcontrol() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LCONTROL
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_lcontrol() -> u16 {
-    0xA2
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_lshift() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LSHIFT
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_lshift() -> u16 {
-    0xA0
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_lmenu() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LMENU
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_lmenu() -> u16 {
-    0xA4
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_lwin() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LWIN
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_lwin() -> u16 {
-    0x5B
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_minus() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_MINUS
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_minus() -> u16 {
-    0xBD
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_plus() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_PLUS
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_plus() -> u16 {
-    0xBB
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_comma() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_COMMA
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_comma() -> u16 {
-    0xBC
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_period() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_PERIOD
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_period() -> u16 {
-    0xBE
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_1() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_1
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_1() -> u16 {
-    0xBA
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_2() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_2
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_2() -> u16 {
-    0xBF
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_3() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_3
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_3() -> u16 {
-    0xC0
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_4() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_4
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_4() -> u16 {
-    0xDB
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_5() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_5
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_5() -> u16 {
-    0xDC
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_6() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_6
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_6() -> u16 {
-    0xDD
-}
-
-#[cfg(target_os = "windows")]
-const fn vk_oem_7() -> u16 {
-    windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_OEM_7
-}
-
-#[cfg(not(target_os = "windows"))]
-const fn vk_oem_7() -> u16 {
-    0xDE
-}
+// Virtual key codes — platform-independent hex literals identical to the
+// windows_sys VK_* constants.  Replaces 36 paired cfg accessor functions.
+const VK_RETURN: u16 = 0x0D;
+const VK_TAB: u16 = 0x09;
+const VK_SPACE: u16 = 0x20;
+const VK_BACK: u16 = 0x08;
+const VK_DELETE: u16 = 0x2E;
+const VK_INSERT: u16 = 0x2D;
+const VK_ESCAPE: u16 = 0x1B;
+const VK_HOME: u16 = 0x24;
+const VK_END: u16 = 0x23;
+const VK_PRIOR: u16 = 0x21;
+const VK_NEXT: u16 = 0x22;
+const VK_LEFT: u16 = 0x25;
+const VK_RIGHT: u16 = 0x27;
+const VK_UP: u16 = 0x26;
+const VK_DOWN: u16 = 0x28;
+const VK_CAPITAL: u16 = 0x14;
+const VK_NUMLOCK: u16 = 0x90;
+const VK_SNAPSHOT: u16 = 0x2C;
+const VK_SCROLL: u16 = 0x91;
+const VK_PAUSE: u16 = 0x13;
+const VK_APPS: u16 = 0x5D;
+const VK_LCONTROL: u16 = 0xA2;
+const VK_LSHIFT: u16 = 0xA0;
+const VK_LMENU: u16 = 0xA4;
+const VK_LWIN: u16 = 0x5B;
+const VK_OEM_MINUS: u16 = 0xBD;
+const VK_OEM_PLUS: u16 = 0xBB;
+const VK_OEM_COMMA: u16 = 0xBC;
+const VK_OEM_PERIOD: u16 = 0xBE;
+const VK_OEM_1: u16 = 0xBA;
+const VK_OEM_2: u16 = 0xBF;
+const VK_OEM_3: u16 = 0xC0;
+const VK_OEM_4: u16 = 0xDB;
+const VK_OEM_5: u16 = 0xDC;
+const VK_OEM_6: u16 = 0xDD;
+const VK_OEM_7: u16 = 0xDE;
 
 /// Send a single virtual key tap (down + up) via SendInput.
 ///
@@ -1561,22 +1240,22 @@ mod tests {
             plan,
             vec![
                 KeyboardInputSpec::VirtualKey {
-                    code: vk_lcontrol(),
+                    code: VK_LCONTROL,
                     extended: false,
                     key_up: false,
                 },
                 KeyboardInputSpec::VirtualKey {
-                    code: vk_lmenu(),
+                    code: VK_LMENU,
                     extended: false,
                     key_up: false,
                 },
                 KeyboardInputSpec::VirtualKey {
-                    code: vk_lmenu(),
+                    code: VK_LMENU,
                     extended: false,
                     key_up: true,
                 },
                 KeyboardInputSpec::VirtualKey {
-                    code: vk_lcontrol(),
+                    code: VK_LCONTROL,
                     extended: false,
                     key_up: true,
                 },
@@ -1642,12 +1321,12 @@ mod tests {
                     key_up: true,
                 },
                 KeyboardInputSpec::VirtualKey {
-                    code: vk_return(),
+                    code: VK_RETURN,
                     extended: false,
                     key_up: false,
                 },
                 KeyboardInputSpec::VirtualKey {
-                    code: vk_return(),
+                    code: VK_RETURN,
                     extended: false,
                     key_up: true,
                 },
@@ -1694,7 +1373,7 @@ mod tests {
         assert!(reused.is_empty(), "Shift should not be reused");
         assert_eq!(plan.len(), 2, "only Backspace down + up");
         assert!(plan.iter().all(|i| match i {
-            KeyboardInputSpec::VirtualKey { code, .. } => *code == vk_back(),
+            KeyboardInputSpec::VirtualKey { code, .. } => *code == VK_BACK,
             _ => false,
         }));
     }
@@ -1733,7 +1412,7 @@ mod tests {
                 code,
                 key_up: false,
                 ..
-            } if code == vk_lcontrol()
+            } if code == VK_LCONTROL
         ));
     }
 

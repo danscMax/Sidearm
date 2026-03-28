@@ -126,18 +126,22 @@ fn should_ignore_window(foreground_pid: u32) -> bool {
 fn capture_foreground_window() -> Result<RawWindowCapture, String> {
     #[cfg(target_os = "windows")]
     return crate::platform::window::capture_foreground_window();
-    #[cfg(not(target_os = "windows"))]
-    return Err("Foreground window capture is only implemented for Windows.".into());
+    #[cfg(target_os = "linux")]
+    return crate::platform::window::capture_foreground_window();
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    return Err("Foreground window capture is not implemented for this platform.".into());
 }
 
-/// Check whether the current process itself is running elevated (admin).
+/// Check whether the current process itself is running elevated (admin/root).
 ///
 /// Used at startup to log the privilege level — helps diagnose UIPI issues
-/// where `RegisterHotKey` or `SendInput` silently fail against elevated targets.
+/// on Windows or permission issues on Linux.
 pub fn is_current_process_elevated() -> bool {
     #[cfg(target_os = "windows")]
     return crate::platform::window::is_current_process_elevated();
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    return crate::platform::window::is_current_process_elevated();
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     return false;
 }
 

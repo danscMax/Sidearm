@@ -58,3 +58,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_UI_Shell",
   "Win32_UI_WindowsAndMessaging",
 ] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+evdev = { version = "0.13", features = ["tokio"] }
+arboard = { version = "3.6", features = ["wayland-data-control"] }
+active-win-pos-rs = "0.9"

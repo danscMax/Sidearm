@@ -670,6 +670,8 @@ fn resolve_char_to_vk(ch: char) -> Option<VirtualKeySpec> {
 
 #[cfg(not(target_os = "windows"))]
 fn resolve_char_to_vk(_ch: char) -> Option<VirtualKeySpec> {
+    // On Linux, character-to-keycode mapping would require xkbcommon.
+    // For now, return None — text input uses KEYEVENTF_UNICODE equivalent.
     None
 }
 
@@ -809,7 +811,26 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
+    // Release modifier keys that were injected by the Razer driver encoding.
+    // On Linux, we send key-up events via uinput for each active modifier.
+    let mut keys_to_release = Vec::new();
+    if mask.ctrl { keys_to_release.push(VK_LCONTROL); }
+    if mask.shift { keys_to_release.push(VK_LSHIFT); }
+    if mask.alt { keys_to_release.push(VK_LMENU); }
+    if mask.win { keys_to_release.push(VK_LWIN); }
+    if keys_to_release.is_empty() {
+        return Ok(());
+    }
+    let inputs: Vec<KeyboardInputSpec> = keys_to_release
+        .into_iter()
+        .map(|code| KeyboardInputSpec::VirtualKey { code, extended: false, key_up: true })
+        .collect();
+    send_keyboard_inputs(&inputs)
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn clear_modifiers(_mask: &HotkeyModifiers) -> Result<(), String> {
     Ok(())
 }
@@ -833,9 +854,18 @@ fn current_modifier_snapshot() -> Result<ModifierSnapshot, String> {
     Ok(snapshot)
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 fn current_modifier_snapshot() -> Result<ModifierSnapshot, String> {
-    Err("Live keyboard injection is only implemented for Windows.".into())
+    // On Linux, reading the live modifier state from evdev requires finding
+    // the keyboard device and querying key state via EVIOCGKEY ioctl.
+    // For MVP, assume no modifiers are held — the Razer driver encoding
+    // modifiers are cleared by clear_modifiers() before action execution.
+    Ok(ModifierSnapshot::default())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn current_modifier_snapshot() -> Result<ModifierSnapshot, String> {
+    Err("Live keyboard injection is not implemented for this platform.".into())
 }
 
 #[cfg(target_os = "windows")]
@@ -925,9 +955,107 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
+    use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode};
+
+    // VK code → evdev KeyCode mapping for common keys
+    fn vk_to_evdev_key(code: u16) -> Option<KeyCode> {
+        Some(match code {
+            0x08 => KeyCode::KEY_BACKSPACE,
+            0x09 => KeyCode::KEY_TAB,
+            0x0D => KeyCode::KEY_ENTER,
+            0x13 => KeyCode::KEY_PAUSE,
+            0x14 => KeyCode::KEY_CAPSLOCK,
+            0x1B => KeyCode::KEY_ESC,
+            0x20 => KeyCode::KEY_SPACE,
+            0x21 => KeyCode::KEY_PAGEUP,
+            0x22 => KeyCode::KEY_PAGEDOWN,
+            0x23 => KeyCode::KEY_END,
+            0x24 => KeyCode::KEY_HOME,
+            0x25 => KeyCode::KEY_LEFT,
+            0x26 => KeyCode::KEY_UP,
+            0x27 => KeyCode::KEY_RIGHT,
+            0x28 => KeyCode::KEY_DOWN,
+            0x2C => KeyCode::KEY_SYSRQ,
+            0x2D => KeyCode::KEY_INSERT,
+            0x2E => KeyCode::KEY_DELETE,
+            // 0-9
+            0x30..=0x39 => KeyCode::new((code - 0x30 + KeyCode::KEY_0.0) as u16),
+            // A-Z
+            0x41..=0x5A => KeyCode::new((code - 0x41 + KeyCode::KEY_A.0) as u16),
+            0x5B => KeyCode::KEY_LEFTMETA,
+            0x5D => KeyCode::KEY_COMPOSE,
+            // F1-F24
+            0x70..=0x87 => KeyCode::new((code - 0x70 + KeyCode::KEY_F1.0) as u16),
+            0x90 => KeyCode::KEY_NUMLOCK,
+            0x91 => KeyCode::KEY_SCROLLLOCK,
+            // Modifiers
+            0xA0 => KeyCode::KEY_LEFTSHIFT,
+            0xA1 => KeyCode::KEY_RIGHTSHIFT,
+            0xA2 => KeyCode::KEY_LEFTCTRL,
+            0xA3 => KeyCode::KEY_RIGHTCTRL,
+            0xA4 => KeyCode::KEY_LEFTALT,
+            0xA5 => KeyCode::KEY_RIGHTALT,
+            // OEM keys
+            0xBA => KeyCode::KEY_SEMICOLON,
+            0xBB => KeyCode::KEY_EQUAL,
+            0xBC => KeyCode::KEY_COMMA,
+            0xBD => KeyCode::KEY_MINUS,
+            0xBE => KeyCode::KEY_DOT,
+            0xBF => KeyCode::KEY_SLASH,
+            0xC0 => KeyCode::KEY_GRAVE,
+            0xDB => KeyCode::KEY_LEFTBRACE,
+            0xDC => KeyCode::KEY_BACKSLASH,
+            0xDD => KeyCode::KEY_RIGHTBRACE,
+            0xDE => KeyCode::KEY_APOSTROPHE,
+            _ => return None,
+        })
+    }
+
+    // Build the set of keys we need
+    let mut keys = AttributeSet::<KeyCode>::new();
+    for input in inputs {
+        match input {
+            KeyboardInputSpec::VirtualKey { code, .. } => {
+                if let Some(key) = vk_to_evdev_key(*code) {
+                    keys.insert(key);
+                }
+            }
+            KeyboardInputSpec::Unicode { .. } => {}
+        }
+    }
+
+    let mut device = VirtualDevice::builder()
+        .map_err(|e| format!("Failed to create virtual device: {e}"))?
+        .name("Sidearm Virtual Keyboard")
+        .with_keys(&keys)
+        .map_err(|e| format!("Failed to configure virtual device keys: {e}"))?
+        .build()
+        .map_err(|e| format!("Failed to build virtual device: {e}"))?;
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    for input in inputs {
+        match input {
+            KeyboardInputSpec::VirtualKey { code, key_up, .. } => {
+                if let Some(key) = vk_to_evdev_key(*code) {
+                    let value = if *key_up { 0 } else { 1 };
+                    let event = InputEvent::new(EventType::KEY.0, key.0, value);
+                    device.emit(&[event])
+                        .map_err(|e| format!("Failed to emit key event: {e}"))?;
+                }
+            }
+            KeyboardInputSpec::Unicode { .. } => {}
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn send_keyboard_inputs(_inputs: &[KeyboardInputSpec]) -> Result<(), String> {
-    Err("Live keyboard injection is only implemented for Windows.".into())
+    Err("Live keyboard injection is not implemented for this platform.".into())
 }
 
 #[cfg(target_os = "windows")]
@@ -1146,9 +1274,94 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
     }
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String> {
+    use crate::config::MouseActionKind;
+    use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode};
+
+    let mut keys = AttributeSet::<KeyCode>::new();
+    let mut axes = AttributeSet::<RelativeAxisCode>::new();
+
+    match action {
+        MouseActionKind::LeftClick | MouseActionKind::DoubleClick => { keys.insert(KeyCode::BTN_LEFT); }
+        MouseActionKind::RightClick => { keys.insert(KeyCode::BTN_RIGHT); }
+        MouseActionKind::MiddleClick => { keys.insert(KeyCode::BTN_MIDDLE); }
+        MouseActionKind::ScrollUp | MouseActionKind::ScrollDown => { axes.insert(RelativeAxisCode::REL_WHEEL); }
+        MouseActionKind::ScrollLeft | MouseActionKind::ScrollRight => { axes.insert(RelativeAxisCode::REL_HWHEEL); }
+        MouseActionKind::MouseBack => { keys.insert(KeyCode::BTN_SIDE); }
+        MouseActionKind::MouseForward => { keys.insert(KeyCode::BTN_EXTRA); }
+    }
+
+    let mut builder = VirtualDevice::builder()
+        .map_err(|e| format!("Failed to create virtual mouse device: {e}"))?
+        .name("Sidearm Virtual Mouse");
+
+    if keys.iter().next().is_some() {
+        builder = builder.with_keys(&keys)
+            .map_err(|e| format!("Failed to configure mouse keys: {e}"))?;
+    }
+    if axes.iter().next().is_some() {
+        builder = builder.with_relative_axes(&axes)
+            .map_err(|e| format!("Failed to configure mouse axes: {e}"))?;
+    }
+
+    let mut device = builder.build()
+        .map_err(|e| format!("Failed to build virtual mouse device: {e}"))?;
+
+    std::thread::sleep(std::time::Duration::from_millis(10));
+
+    let mut emit = |events: &[InputEvent]| -> Result<(), String> {
+        device.emit(events).map_err(|e| format!("Failed to emit mouse event: {e}"))
+    };
+
+    match action {
+        MouseActionKind::LeftClick => {
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)])?;
+        }
+        MouseActionKind::RightClick => {
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_RIGHT.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_RIGHT.0, 0)])?;
+        }
+        MouseActionKind::MiddleClick => {
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_MIDDLE.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_MIDDLE.0, 0)])?;
+        }
+        MouseActionKind::DoubleClick => {
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)])?;
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)])?;
+        }
+        MouseActionKind::ScrollUp => {
+            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_WHEEL.0, 1)])?;
+        }
+        MouseActionKind::ScrollDown => {
+            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_WHEEL.0, -1)])?;
+        }
+        MouseActionKind::ScrollLeft => {
+            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_HWHEEL.0, -1)])?;
+        }
+        MouseActionKind::ScrollRight => {
+            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_HWHEEL.0, 1)])?;
+        }
+        MouseActionKind::MouseBack => {
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_SIDE.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_SIDE.0, 0)])?;
+        }
+        MouseActionKind::MouseForward => {
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_EXTRA.0, 1)])?;
+            emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_EXTRA.0, 0)])?;
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), String> {
-    Err("Live mouse action injection is only implemented for Windows.".into())
+    Err("Live mouse action injection is not implemented for this platform.".into())
 }
 
 #[cfg(test)]

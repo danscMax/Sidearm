@@ -21,9 +21,17 @@ use windows::CaptureBackendHandle;
 #[cfg(target_os = "windows")]
 pub use windows::capture_helper_main;
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
+mod linux;
+#[cfg(target_os = "linux")]
+use linux::CaptureBackendHandle;
+
+#[cfg(target_os = "linux")]
+pub use linux::capture_helper_main;
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
 pub fn capture_helper_main() {
-    log::error!("[capture-helper] Only supported on Windows.");
+    log::error!("[capture-helper] Only supported on Windows and Linux.");
 }
 
 pub const CAPTURE_BACKEND_NAME: &str = "windows-hotkey";
@@ -41,6 +49,8 @@ pub struct EncodedKeyEvent {
 #[derive(Default)]
 pub struct RuntimeController {
     #[cfg(target_os = "windows")]
+    backend: Option<CaptureBackendHandle>,
+    #[cfg(target_os = "linux")]
     backend: Option<CaptureBackendHandle>,
 }
 
@@ -68,10 +78,18 @@ impl RuntimeController {
             Ok(())
         }
 
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            self.stop()?;
+            let backend = CaptureBackendHandle::start(app, runtime_store, config, app_name)?;
+            self.backend = Some(backend);
+            Ok(())
+        }
+
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             let _ = (app, runtime_store, config, app_name);
-            Err("Global capture backend is only implemented for Windows.".into())
+            Err("Global capture backend is only implemented for Windows and Linux.".into())
         }
     }
 
@@ -90,11 +108,16 @@ impl RuntimeController {
         if let Some(backend) = self.backend.take() {
             backend.stop()?;
         }
+        #[cfg(target_os = "linux")]
+        if let Some(backend) = self.backend.take() {
+            backend.stop()?;
+        }
         Ok(())
     }
 
     /// Send a REHOOK command to the capture helper, causing it to reinstall
     /// its WH_KEYBOARD_LL hook without restarting the entire runtime.
+    /// On Linux, evdev capture does not need rehooking.
     pub fn rehook(&mut self) -> Result<(), String> {
         #[cfg(target_os = "windows")]
         {
@@ -103,7 +126,14 @@ impl RuntimeController {
                 None => Err("Runtime is not running.".to_owned()),
             }
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        {
+            match &mut self.backend {
+                Some(backend) => backend.rehook(),
+                None => Err("Runtime is not running.".to_owned()),
+            }
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         Err("Runtime is not running.".to_owned())
     }
 }

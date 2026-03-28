@@ -1,4 +1,6 @@
-use std::{ptr, thread, time::Duration};
+#[cfg(target_os = "windows")]
+use std::ptr;
+use std::{thread, time::Duration};
 
 use crate::input_synthesis;
 
@@ -19,10 +21,64 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
     let char_count = text.chars().count();
     log::info!("[clipboard] paste_text: staging {char_count} chars");
 
-    // OleInitialize requires STA (Single-Threaded Apartment), but Tauri's
-    // async runtime initializes threads as MTA. Calling OleInitialize on an
-    // MTA thread causes RPC_E_CHANGED_MODE or a COM crash. The fix: run the
-    // entire clipboard operation on a dedicated STA thread.
+    #[cfg(target_os = "windows")]
+    return paste_text_windows(text);
+
+    #[cfg(target_os = "linux")]
+    return paste_text_linux(text);
+
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        let _ = text;
+        Err("clipboardPaste is not implemented for this platform.".into())
+    }
+}
+
+/// Linux clipboard paste: save → stage → Ctrl+V → restore using arboard.
+#[cfg(target_os = "linux")]
+fn paste_text_linux(text: &str) -> Result<ClipboardPasteReport, String> {
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("Failed to open clipboard: {e}"))?;
+
+    // Save current clipboard text (best-effort)
+    let saved = clipboard.get_text().ok();
+
+    // Stage our text
+    clipboard.set_text(text)
+        .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
+
+    // Inject Ctrl+V
+    let all_mods = crate::hotkeys::HotkeyModifiers {
+        ctrl: true,
+        shift: true,
+        alt: true,
+        win: true,
+    };
+    if let Err(error) = input_synthesis::send_hotkey_string("Ctrl+V", &all_mods) {
+        // Restore on failure
+        if let Some(original) = &saved {
+            let _ = clipboard.set_text(original);
+        }
+        return Err(format!("Failed to inject Ctrl+V: {error}"));
+    }
+
+    // Wait for target app to consume
+    thread::sleep(Duration::from_millis(CLIPBOARD_RESTORE_DELAY_MS));
+
+    // Restore original clipboard
+    let mut warnings = Vec::new();
+    if let Some(original) = saved {
+        if let Err(e) = clipboard.set_text(&original) {
+            warnings.push(format!("Failed to restore clipboard: {e}"));
+        }
+    }
+
+    Ok(ClipboardPasteReport { warnings })
+}
+
+/// Windows clipboard paste: runs on dedicated STA thread for OLE/COM.
+#[cfg(target_os = "windows")]
+fn paste_text_windows(text: &str) -> Result<ClipboardPasteReport, String> {
     log::info!("[clipboard] Spawning STA thread for clipboard operation");
     let text_owned = text.to_owned();
     let handle = thread::Builder::new()
@@ -56,6 +112,7 @@ pub fn paste_text(text: &str) -> Result<ClipboardPasteReport, String> {
 }
 
 /// Runs on a dedicated STA thread where OleInitialize succeeds.
+#[cfg(target_os = "windows")]
 fn paste_text_sta(text: &str) -> Result<ClipboardPasteReport, String> {
     let _ole = OleScope::initialize()?;
     log::debug!("[clipboard] STA thread: OLE initialized, saving clipboard snapshot");
@@ -104,6 +161,7 @@ fn paste_text_sta(text: &str) -> Result<ClipboardPasteReport, String> {
     Ok(ClipboardPasteReport { warnings })
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug)]
 enum ClipboardSnapshot {
     Empty,
@@ -113,12 +171,13 @@ enum ClipboardSnapshot {
     },
 }
 
+#[cfg(target_os = "windows")]
 // HGLOBAL pointers are Send-safe — they point to process-local heap memory.
 unsafe impl Send for ClipboardSnapshot {}
 
+#[cfg(target_os = "windows")]
 impl ClipboardSnapshot {
     fn capture() -> Result<Self, String> {
-        #[cfg(target_os = "windows")]
         unsafe {
             use windows_sys::Win32::{
                 Foundation::GlobalFree,
@@ -185,15 +244,9 @@ impl ClipboardSnapshot {
             log::debug!("[clipboard] Captured {} clipboard formats", formats.len());
             Ok(Self::RawFormats { formats })
         }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err("clipboardPaste is only implemented for Windows.".into())
-        }
     }
 
     fn restore_if_unchanged(&self, expected_sequence_number: u32) -> Result<Vec<String>, String> {
-        #[cfg(target_os = "windows")]
         unsafe {
             use windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
@@ -211,7 +264,6 @@ impl ClipboardSnapshot {
     fn restore_force(&self) -> Result<Vec<String>, String> {
         match self {
             Self::Empty => clear_clipboard().map(|()| Vec::new()),
-            #[cfg(target_os = "windows")]
             Self::RawFormats { formats } => restore_raw_formats(formats),
         }
     }
@@ -309,13 +361,14 @@ fn restore_raw_formats(
     }
 }
 
+#[cfg(target_os = "windows")]
 #[derive(Debug)]
 struct ClipboardWriteResult {
     sequence_number: u32,
 }
 
+#[cfg(target_os = "windows")]
 fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
-    #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::{
             Foundation::GlobalFree,
@@ -379,16 +432,10 @@ fn set_clipboard_text(text: &str) -> Result<ClipboardWriteResult, String> {
             sequence_number: GetClipboardSequenceNumber(),
         })
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let _ = text;
-        Err("clipboardPaste is only implemented for Windows.".into())
-    }
 }
 
+#[cfg(target_os = "windows")]
 fn clear_clipboard() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::System::DataExchange::EmptyClipboard;
 
@@ -400,15 +447,10 @@ fn clear_clipboard() -> Result<(), String> {
         drop(close_guard);
         Ok(())
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err("clipboardPaste is only implemented for Windows.".into())
-    }
 }
 
+#[cfg(target_os = "windows")]
 fn open_clipboard_with_retry() -> Result<(), String> {
-    #[cfg(target_os = "windows")]
     unsafe {
         use windows_sys::Win32::System::DataExchange::{GetOpenClipboardWindow, OpenClipboard};
 
@@ -431,24 +473,21 @@ fn open_clipboard_with_retry() -> Result<(), String> {
         log::warn!("[clipboard] {msg}");
         Err(msg)
     }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err("clipboardPaste is only implemented for Windows.".into())
-    }
 }
 
+#[cfg(target_os = "windows")]
 fn utf16_null_terminated(text: &str) -> Vec<u16> {
     let mut encoded: Vec<u16> = text.encode_utf16().collect();
     encoded.push(0);
     encoded
 }
 
+#[cfg(target_os = "windows")]
 struct ClipboardOpenGuard;
 
+#[cfg(target_os = "windows")]
 impl Drop for ClipboardOpenGuard {
     fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
         unsafe {
             use windows_sys::Win32::System::DataExchange::CloseClipboard;
             let _ = CloseClipboard();
@@ -456,13 +495,14 @@ impl Drop for ClipboardOpenGuard {
     }
 }
 
+#[cfg(target_os = "windows")]
 struct OleScope {
     should_uninitialize: bool,
 }
 
+#[cfg(target_os = "windows")]
 impl OleScope {
     fn initialize() -> Result<Self, String> {
-        #[cfg(target_os = "windows")]
         unsafe {
             use windows_sys::Win32::{
                 Foundation::{RPC_E_CHANGED_MODE, S_FALSE, S_OK},
@@ -487,17 +527,12 @@ impl OleScope {
                 format_hresult(hr)
             ))
         }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            Err("clipboardPaste is only implemented for Windows.".into())
-        }
     }
 }
 
+#[cfg(target_os = "windows")]
 impl Drop for OleScope {
     fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
         unsafe {
             if self.should_uninitialize {
                 use windows_sys::Win32::System::Ole::OleUninitialize;
@@ -507,6 +542,7 @@ impl Drop for OleScope {
     }
 }
 
+#[cfg(target_os = "windows")]
 fn format_hresult(hr: windows_sys::core::HRESULT) -> String {
     format!("HRESULT 0x{:08X}", hr as u32)
 }
@@ -516,6 +552,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "windows")]
     fn utf16_helper_appends_nul() {
         let encoded = utf16_null_terminated("Hi");
         assert_eq!(encoded, vec![72, 105, 0]);

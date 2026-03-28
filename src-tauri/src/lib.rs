@@ -59,7 +59,9 @@ static OSD_GENERATION: AtomicU64 = AtomicU64::new(0);
 fn is_foreground_fullscreen() -> bool {
     #[cfg(target_os = "windows")]
     return crate::platform::window::is_foreground_fullscreen();
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    return crate::platform::window::is_foreground_fullscreen();
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     return false;
 }
 
@@ -92,7 +94,9 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     let dpi_scale = {
         #[cfg(target_os = "windows")]
         { crate::platform::display::get_dpi_scale() }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        { crate::platform::display::get_dpi_scale() }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         { 1.0_f64 }
     };
 
@@ -134,7 +138,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     let ow = outer.width as i32;
     let oh = outer.height as i32;
 
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
     {
         let (x, y) = crate::platform::display::position_osd_on_monitor(
             &settings.osd_position,
@@ -182,7 +186,9 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
 fn measure_text_width(text: &str, font_family: &str, font_size_px: i32, font_weight: i32) -> i32 {
     #[cfg(target_os = "windows")]
     return crate::platform::display::measure_text_width(text, font_family, font_size_px, font_weight);
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    return crate::platform::display::measure_text_width(text, font_family, font_size_px, font_weight);
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     { let _ = (text, font_family, font_weight); return font_size_px * 8; }
 }
 
@@ -680,7 +686,10 @@ async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
         #[cfg(target_os = "windows")]
         crate::platform::shell::open_in_explorer(&log_dir)
             .map_err(CommandError::internal)?;
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(target_os = "linux")]
+        crate::platform::shell::open_in_explorer(&log_dir)
+            .map_err(CommandError::internal)?;
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             std::process::Command::new("xdg-open")
                 .arg(log_dir.as_os_str())
@@ -1152,7 +1161,9 @@ fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
 fn find_running_process_path(exe_name: &str) -> Option<String> {
     #[cfg(target_os = "windows")]
     return crate::platform::shell::find_running_process_path(exe_name);
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
+    return crate::platform::shell::find_running_process_path(exe_name);
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     { let _ = exe_name; return None; }
 }
 

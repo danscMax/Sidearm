@@ -278,11 +278,27 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::Sender<Enc
     let device_paths = find_razer_naga_devices();
 
     if device_paths.is_empty() {
-        log::error!(
-            "[capture] No Razer Naga evdev devices found. \
-             Ensure the device is connected and the user has read access to /dev/input/."
+        log::info!(
+            "[capture] No Razer Naga evdev devices found — waiting for hotplug."
         );
-        return;
+
+        // Poll for device connection every 2 seconds until found or stopped.
+        loop {
+            if stop_flag.load(Ordering::SeqCst) {
+                log::info!("[capture] Capture loop stopped while waiting for device.");
+                return;
+            }
+            thread::sleep(std::time::Duration::from_secs(2));
+            let paths = find_razer_naga_devices();
+            if !paths.is_empty() {
+                log::info!(
+                    "[capture] Razer Naga device(s) detected via hotplug: {:?}",
+                    paths
+                );
+                // Restart capture with found devices — tail-call into the main loop.
+                return run_evdev_capture_loop(stop_flag, event_tx);
+            }
+        }
     }
 
     log::info!(

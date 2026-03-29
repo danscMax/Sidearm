@@ -50,13 +50,21 @@ if [ ${#missing[@]} -gt 0 ]; then
 fi
 
 # Check system libraries for Tauri v2
-TAURI_LIBS=(libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev)
+# libappindicator3-dev conflicts with ayatana on Ubuntu 22.04+; accept either
+TAURI_LIBS=(libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev)
+APPINDICATOR_OK=false
+dpkg -s libappindicator3-dev &>/dev/null 2>&1 && APPINDICATOR_OK=true
+dpkg -s libayatana-appindicator3-dev &>/dev/null 2>&1 && APPINDICATOR_OK=true
+
 missing_libs=()
 for lib in "${TAURI_LIBS[@]}"; do
     if ! dpkg -s "$lib" &>/dev/null 2>&1; then
         missing_libs+=("$lib")
     fi
 done
+if ! $APPINDICATOR_OK; then
+    missing_libs+=("libayatana-appindicator3-dev (or libappindicator3-dev)")
+fi
 
 if [ ${#missing_libs[@]} -gt 0 ]; then
     warn "Missing system libraries: ${missing_libs[*]}"

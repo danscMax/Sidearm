@@ -4,7 +4,9 @@ use std::{thread, time::Duration};
 
 use crate::input_synthesis;
 
+#[cfg(target_os = "windows")]
 const CLIPBOARD_OPEN_RETRIES: usize = 10;
+#[cfg(target_os = "windows")]
 const CLIPBOARD_OPEN_RETRY_DELAY_MS: u64 = 20;
 const CLIPBOARD_RESTORE_DELAY_MS: u64 = 150;
 

@@ -143,6 +143,176 @@ pub fn send_hotkey_string(
     send_shortcut(&payload, encoding_mods)
 }
 
+/// Lightweight clipboard-paste: save CF_UNICODETEXT → set text → Ctrl+V → restore.
+///
+/// Intentionally does NOT call OleInitialize and only touches CF_UNICODETEXT.
+/// The full COM/OLE path (`clipboard::paste_text`) enumerated every clipboard
+/// format, calling `GlobalLock` on non-HGLOBAL handles (CF_BITMAP,
+/// CF_ENHMETAFILE) and loading shell extensions via OleInitialize — both of
+/// which caused unrecoverable access-violation crashes.
+///
+/// Trade-off: non-text clipboard content (images, files) is lost during the
+/// brief paste window.  The original text is restored after 150 ms.
+#[cfg(target_os = "windows")]
+fn paste_via_clipboard(text: &str) -> Result<(), String> {
+    use std::{ptr, thread, time::Duration};
+    use windows_sys::Win32::{
+        Foundation::GlobalFree,
+        System::{
+            DataExchange::{
+                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+                OpenClipboard, SetClipboardData,
+            },
+            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            Ole::CF_UNICODETEXT,
+        },
+    };
+
+    const RESTORE_DELAY: Duration = Duration::from_millis(150);
+
+    // --- helper: open clipboard with retry ---
+    let open = || -> Result<(), String> {
+        for attempt in 0..10u32 {
+            if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+                return Ok(());
+            }
+            if attempt + 1 < 10 {
+                thread::sleep(Duration::from_millis(20));
+            }
+        }
+        Err("OpenClipboard failed after 10 retries".into())
+    };
+
+    // --- helper: read CF_UNICODETEXT from an already-open clipboard ---
+    let read_text = || -> Option<String> {
+        unsafe {
+            let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
+            if handle.is_null() {
+                return None;
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                return None;
+            }
+            let mut len = 0usize;
+            let wide = locked as *const u16;
+            while *wide.add(len) != 0 {
+                len += 1;
+            }
+            let t = String::from_utf16_lossy(std::slice::from_raw_parts(wide, len));
+            let _ = GlobalUnlock(handle);
+            Some(t)
+        }
+    };
+
+    // --- helper: write CF_UNICODETEXT to an already-open, emptied clipboard ---
+    let write_text = |t: &str| -> Result<(), String> {
+        unsafe {
+            let encoded: Vec<u16> = t.encode_utf16().chain(std::iter::once(0)).collect();
+            let byte_len = encoded.len() * std::mem::size_of::<u16>();
+
+            let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
+            if handle.is_null() {
+                return Err("GlobalAlloc failed".into());
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                let _ = GlobalFree(handle);
+                return Err("GlobalLock failed".into());
+            }
+            ptr::copy_nonoverlapping(encoded.as_ptr() as *const u8, locked as *mut u8, byte_len);
+            let _ = GlobalUnlock(handle);
+
+            if SetClipboardData(u32::from(CF_UNICODETEXT), handle).is_null() {
+                let _ = GlobalFree(handle);
+                return Err("SetClipboardData failed".into());
+            }
+            Ok(())
+        }
+    };
+
+    // --- helper: best-effort restore ---
+    let restore = |original: &str| {
+        if open().is_ok() {
+            unsafe { EmptyClipboard() };
+            let _ = write_text(original);
+            unsafe { CloseClipboard() };
+        }
+    };
+
+    // 1. Open clipboard and save current text
+    open()?;
+    let saved_text = read_text();
+    unsafe { CloseClipboard() };
+
+    // 2. Stage our text
+    open()?;
+    unsafe { EmptyClipboard() };
+    if let Err(e) = write_text(text) {
+        unsafe { CloseClipboard() };
+        if let Some(ref original) = saved_text {
+            restore(original);
+        }
+        return Err(e);
+    }
+    let seq = unsafe { GetClipboardSequenceNumber() };
+    unsafe { CloseClipboard() };
+
+    // 3. Inject Ctrl+V (clears encoding modifiers first)
+    if let Err(e) = send_hotkey_string("Ctrl+V", &ALL_MODIFIERS) {
+        if let Some(ref original) = saved_text {
+            restore(original);
+        }
+        return Err(format!("Failed to inject Ctrl+V: {e:?}"));
+    }
+
+    // 4. Wait for target app to consume the paste
+    thread::sleep(RESTORE_DELAY);
+
+    // 5. Restore original clipboard text (only if no one else changed it)
+    if unsafe { GetClipboardSequenceNumber() } != seq {
+        log::debug!("[input] Clipboard changed externally, skipping restore");
+        return Ok(());
+    }
+    if let Some(ref original) = saved_text {
+        restore(original);
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn paste_via_clipboard(text: &str) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Failed to open clipboard: {e}"))?;
+
+    let saved = clipboard.get_text().ok();
+
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Failed to set clipboard text: {e}"))?;
+
+    if let Err(e) = send_hotkey_string("Ctrl+V", &ALL_MODIFIERS) {
+        if let Some(ref original) = saved {
+            let _ = clipboard.set_text(original);
+        }
+        return Err(format!("Failed to inject Ctrl+V: {e:?}"));
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(150));
+
+    if let Some(original) = saved {
+        let _ = clipboard.set_text(&original);
+    }
+
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn paste_via_clipboard(_text: &str) -> Result<(), String> {
+    Err("Clipboard paste is not implemented for this platform".into())
+}
+
 /// All modifiers must be cleared for text injection — held Ctrl/Alt corrupts
 /// Unicode/VK_PACKET output.
 const ALL_MODIFIERS: HotkeyModifiers = HotkeyModifiers {
@@ -152,11 +322,12 @@ const ALL_MODIFIERS: HotkeyModifiers = HotkeyModifiers {
     win: true,
 };
 
-/// Text length threshold (in characters): above this, `send_text_with_delay`
-/// uses clipboard-paste (Ctrl+V) instead of per-character `KEYEVENTF_UNICODE`
-/// injection, because `SendInput` is slow and unreliable for long strings.
-/// If the clipboard-paste attempt fails, the function falls back to the
-/// per-character path transparently.
+/// Text length threshold: above this, `send_text_with_delay` attempts a
+/// lightweight clipboard-paste (Ctrl+V) before falling back to per-character
+/// `KEYEVENTF_UNICODE`.  Clipboard-paste preserves newlines as the target
+/// app expects (no extra paragraph breaks), while per-character SendInput
+/// sends literal VK_RETURN which many apps interpret as "new paragraph" or
+/// "send message".
 const CLIPBOARD_PASTE_THRESHOLD: usize = 100;
 
 /// Send text with an optional inter-character delay (milliseconds).
@@ -166,11 +337,11 @@ const CLIPBOARD_PASTE_THRESHOLD: usize = 100;
 /// Unicode input bursts.  Pattern from AHK's `SetKeyDelay` / Kanata's
 /// `rapid-event-delay`.
 ///
-/// For text longer than [`CLIPBOARD_PASTE_THRESHOLD`] characters, the function
-/// first attempts a clipboard-paste (save clipboard, set text, Ctrl+V, restore).
-/// This is significantly faster and more reliable for large snippets.  If the
-/// clipboard path fails for any reason, it silently falls back to per-character
-/// `KEYEVENTF_UNICODE` injection.
+/// For text longer than [`CLIPBOARD_PASTE_THRESHOLD`] characters, attempts a
+/// lightweight clipboard-paste (save CF_UNICODETEXT → set → Ctrl+V → restore).
+/// Unlike the full COM/OLE clipboard module, this path does NOT call
+/// OleInitialize and only touches CF_UNICODETEXT, avoiding the shell-extension
+/// access-violation crashes that plagued the original implementation.
 pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
@@ -178,15 +349,14 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
 
     log::debug!("[input] Text input: {} chars", text.chars().count());
 
-    // For long text, attempt clipboard-paste first (much faster than per-char SendInput).
+    // For long text, attempt lightweight clipboard-paste (preserves newlines correctly).
     if text.chars().count() > CLIPBOARD_PASTE_THRESHOLD {
-        match crate::clipboard::paste_text(text) {
-            Ok(_report) => return Ok(()),
-            Err(clipboard_error) => {
-                // Clipboard-paste failed — fall through to per-character injection.
+        match paste_via_clipboard(text) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
                 log::warn!(
-                    "[input] Clipboard-paste fallback failed for long text ({} chars), \
-                     falling back to KEYEVENTF_UNICODE: {clipboard_error}",
+                    "[input] Lightweight clipboard-paste failed ({} chars), \
+                     falling back to KEYEVENTF_UNICODE: {e}",
                     text.chars().count()
                 );
             }
@@ -1194,6 +1364,7 @@ pub fn send_mouse_action(
 }
 
 /// Wheel scroll amount — one notch (standard WHEEL_DELTA = 120).
+#[cfg(target_os = "windows")]
 const WHEEL_DELTA: i32 = 120;
 
 #[cfg(target_os = "windows")]

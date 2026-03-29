@@ -1,5 +1,6 @@
 mod capture_backend;
 mod chord;
+#[cfg(test)]
 mod clipboard;
 mod command_error;
 mod config;
@@ -1158,6 +1159,7 @@ fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
     paths
 }
 
+#[allow(dead_code)]
 fn find_running_process_path(exe_name: &str) -> Option<String> {
     #[cfg(target_os = "windows")]
     return crate::platform::shell::find_running_process_path(exe_name);

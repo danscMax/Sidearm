@@ -4,6 +4,7 @@
 //! enumeration via `/proc`, plus opening paths with `xdg-open`.
 
 #![allow(unused_imports)]
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 

@@ -921,6 +921,33 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
         GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
 
+    // Diagnostic snapshot — distinguish L vs R variants for each modifier
+    // so we can confirm whether the Razer driver injects LMENU or RMENU.
+    let snapshot_state = || -> String {
+        unsafe {
+            format!(
+                "LCTRL={} RCTRL={} VK_CONTROL={} | LSHIFT={} RSHIFT={} VK_SHIFT={} | LMENU={} RMENU={} VK_MENU={} | LWIN={} RWIN={}",
+                key_is_down(GetAsyncKeyState(VK_LCONTROL as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_RCONTROL as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_CONTROL as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_LSHIFT as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_RSHIFT as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_SHIFT as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_LMENU as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_RMENU as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_MENU as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_LWIN as i32)) as u8,
+                key_is_down(GetAsyncKeyState(VK_RWIN as i32)) as u8,
+            )
+        }
+    };
+
+    let pre_state = snapshot_state();
+    log::info!(
+        "[clear-modifiers] mask: ctrl={} shift={} alt={} win={} | pre: {}",
+        mask.ctrl, mask.shift, mask.alt, mask.win, pre_state,
+    );
+
     let mut release_inputs = Vec::new();
 
     unsafe {
@@ -962,42 +989,37 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
             .iter()
             .filter_map(|input| match input {
                 KeyboardInputSpec::VirtualKey { code, .. } => match *code {
-                    c if c == VK_LCONTROL => Some("Ctrl"),
-                    c if c == VK_LSHIFT => Some("Shift"),
-                    c if c == VK_LMENU => Some("Alt"),
-                    c if c == VK_LWIN => Some("Win"),
+                    c if c == VK_LCONTROL => Some("VK_LCONTROL"),
+                    c if c == VK_LSHIFT => Some("VK_LSHIFT"),
+                    c if c == VK_LMENU => Some("VK_LMENU"),
+                    c if c == VK_LWIN => Some("VK_LWIN"),
                     _ => None,
                 },
                 _ => None,
             })
             .collect();
-        log::debug!(
-            "[modifier-passthrough] clear_modifiers: releasing [{}]",
+        log::info!(
+            "[clear-modifiers] releasing: [{}]",
             labels.join(", "),
         );
         send_keyboard_inputs(&release_inputs)?;
+        let post_state = snapshot_state();
+        log::info!("[clear-modifiers] post: {}", post_state);
+    } else {
+        log::info!("[clear-modifiers] nothing to release");
     }
 
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
-fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
-    // Release modifier keys that were injected by the Razer driver encoding.
-    // On Linux, we send key-up events via uinput for each active modifier.
-    let mut keys_to_release = Vec::new();
-    if mask.ctrl { keys_to_release.push(VK_LCONTROL); }
-    if mask.shift { keys_to_release.push(VK_LSHIFT); }
-    if mask.alt { keys_to_release.push(VK_LMENU); }
-    if mask.win { keys_to_release.push(VK_LWIN); }
-    if keys_to_release.is_empty() {
-        return Ok(());
-    }
-    let inputs: Vec<KeyboardInputSpec> = keys_to_release
-        .into_iter()
-        .map(|code| KeyboardInputSpec::VirtualKey { code, extended: false, key_up: true })
-        .collect();
-    send_keyboard_inputs(&inputs)
+fn clear_modifiers(_mask: &HotkeyModifiers) -> Result<(), String> {
+    // No-op on Linux. The Razer device is exclusively grabbed, so its
+    // encoding modifiers (Ctrl/Alt/Shift/Win) never reach the compositor.
+    // Sending spurious key-up events on the virtual keyboard for keys that
+    // were never pressed on it confuses the compositor and can cause stuck
+    // modifier keys.
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -1126,85 +1148,176 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
 }
 
 #[cfg(target_os = "linux")]
-fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
-    use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode};
+/// VK code → evdev KeyCode mapping for common keys.
+fn vk_to_evdev_key(code: u16) -> Option<evdev::KeyCode> {
+    use evdev::KeyCode;
+    Some(match code {
+        0x08 => KeyCode::KEY_BACKSPACE,
+        0x09 => KeyCode::KEY_TAB,
+        0x0D => KeyCode::KEY_ENTER,
+        0x13 => KeyCode::KEY_PAUSE,
+        0x14 => KeyCode::KEY_CAPSLOCK,
+        0x1B => KeyCode::KEY_ESC,
+        0x20 => KeyCode::KEY_SPACE,
+        0x21 => KeyCode::KEY_PAGEUP,
+        0x22 => KeyCode::KEY_PAGEDOWN,
+        0x23 => KeyCode::KEY_END,
+        0x24 => KeyCode::KEY_HOME,
+        0x25 => KeyCode::KEY_LEFT,
+        0x26 => KeyCode::KEY_UP,
+        0x27 => KeyCode::KEY_RIGHT,
+        0x28 => KeyCode::KEY_DOWN,
+        0x2C => KeyCode::KEY_SYSRQ,
+        0x2D => KeyCode::KEY_INSERT,
+        0x2E => KeyCode::KEY_DELETE,
+        // 0-9: evdev order is KEY_1(2)..KEY_9(10), KEY_0(11) — not contiguous
+        // with VK order 0x30('0')..0x39('9'), so map explicitly.
+        0x30 => KeyCode::KEY_0,
+        0x31 => KeyCode::KEY_1,
+        0x32 => KeyCode::KEY_2,
+        0x33 => KeyCode::KEY_3,
+        0x34 => KeyCode::KEY_4,
+        0x35 => KeyCode::KEY_5,
+        0x36 => KeyCode::KEY_6,
+        0x37 => KeyCode::KEY_7,
+        0x38 => KeyCode::KEY_8,
+        0x39 => KeyCode::KEY_9,
+        // A-Z: Windows VK codes are alphabetical, but evdev keycodes follow
+        // physical QWERTY layout — explicit mapping required.
+        0x41 => KeyCode::KEY_A,
+        0x42 => KeyCode::KEY_B,
+        0x43 => KeyCode::KEY_C,
+        0x44 => KeyCode::KEY_D,
+        0x45 => KeyCode::KEY_E,
+        0x46 => KeyCode::KEY_F,
+        0x47 => KeyCode::KEY_G,
+        0x48 => KeyCode::KEY_H,
+        0x49 => KeyCode::KEY_I,
+        0x4A => KeyCode::KEY_J,
+        0x4B => KeyCode::KEY_K,
+        0x4C => KeyCode::KEY_L,
+        0x4D => KeyCode::KEY_M,
+        0x4E => KeyCode::KEY_N,
+        0x4F => KeyCode::KEY_O,
+        0x50 => KeyCode::KEY_P,
+        0x51 => KeyCode::KEY_Q,
+        0x52 => KeyCode::KEY_R,
+        0x53 => KeyCode::KEY_S,
+        0x54 => KeyCode::KEY_T,
+        0x55 => KeyCode::KEY_U,
+        0x56 => KeyCode::KEY_V,
+        0x57 => KeyCode::KEY_W,
+        0x58 => KeyCode::KEY_X,
+        0x59 => KeyCode::KEY_Y,
+        0x5A => KeyCode::KEY_Z,
+        0x5B => KeyCode::KEY_LEFTMETA,
+        0x5D => KeyCode::KEY_COMPOSE,
+        // F1-F10 (contiguous in evdev: KEY_F1=59..KEY_F10=68)
+        0x70..=0x79 => KeyCode::new((code - 0x70 + KeyCode::KEY_F1.0) as u16),
+        // F11-F12 (non-contiguous: KEY_F11=87, KEY_F12=88)
+        0x7A => KeyCode::KEY_F11,
+        0x7B => KeyCode::KEY_F12,
+        // F13-F24 (non-contiguous: KEY_F13=183..KEY_F24=194)
+        0x7C..=0x87 => KeyCode::new((code - 0x7C + KeyCode::KEY_F13.0) as u16),
+        0x90 => KeyCode::KEY_NUMLOCK,
+        0x91 => KeyCode::KEY_SCROLLLOCK,
+        // Modifiers
+        0xA0 => KeyCode::KEY_LEFTSHIFT,
+        0xA1 => KeyCode::KEY_RIGHTSHIFT,
+        0xA2 => KeyCode::KEY_LEFTCTRL,
+        0xA3 => KeyCode::KEY_RIGHTCTRL,
+        0xA4 => KeyCode::KEY_LEFTALT,
+        0xA5 => KeyCode::KEY_RIGHTALT,
+        // OEM keys
+        0xBA => KeyCode::KEY_SEMICOLON,
+        0xBB => KeyCode::KEY_EQUAL,
+        0xBC => KeyCode::KEY_COMMA,
+        0xBD => KeyCode::KEY_MINUS,
+        0xBE => KeyCode::KEY_DOT,
+        0xBF => KeyCode::KEY_SLASH,
+        0xC0 => KeyCode::KEY_GRAVE,
+        0xDB => KeyCode::KEY_LEFTBRACE,
+        0xDC => KeyCode::KEY_BACKSLASH,
+        0xDD => KeyCode::KEY_RIGHTBRACE,
+        0xDE => KeyCode::KEY_APOSTROPHE,
+        _ => return None,
+    })
+}
 
-    // VK code → evdev KeyCode mapping for common keys
-    fn vk_to_evdev_key(code: u16) -> Option<KeyCode> {
-        Some(match code {
-            0x08 => KeyCode::KEY_BACKSPACE,
-            0x09 => KeyCode::KEY_TAB,
-            0x0D => KeyCode::KEY_ENTER,
-            0x13 => KeyCode::KEY_PAUSE,
-            0x14 => KeyCode::KEY_CAPSLOCK,
-            0x1B => KeyCode::KEY_ESC,
-            0x20 => KeyCode::KEY_SPACE,
-            0x21 => KeyCode::KEY_PAGEUP,
-            0x22 => KeyCode::KEY_PAGEDOWN,
-            0x23 => KeyCode::KEY_END,
-            0x24 => KeyCode::KEY_HOME,
-            0x25 => KeyCode::KEY_LEFT,
-            0x26 => KeyCode::KEY_UP,
-            0x27 => KeyCode::KEY_RIGHT,
-            0x28 => KeyCode::KEY_DOWN,
-            0x2C => KeyCode::KEY_SYSRQ,
-            0x2D => KeyCode::KEY_INSERT,
-            0x2E => KeyCode::KEY_DELETE,
-            // 0-9
-            0x30..=0x39 => KeyCode::new((code - 0x30 + KeyCode::KEY_0.0) as u16),
-            // A-Z
-            0x41..=0x5A => KeyCode::new((code - 0x41 + KeyCode::KEY_A.0) as u16),
-            0x5B => KeyCode::KEY_LEFTMETA,
-            0x5D => KeyCode::KEY_COMPOSE,
-            // F1-F24
-            0x70..=0x87 => KeyCode::new((code - 0x70 + KeyCode::KEY_F1.0) as u16),
-            0x90 => KeyCode::KEY_NUMLOCK,
-            0x91 => KeyCode::KEY_SCROLLLOCK,
-            // Modifiers
-            0xA0 => KeyCode::KEY_LEFTSHIFT,
-            0xA1 => KeyCode::KEY_RIGHTSHIFT,
-            0xA2 => KeyCode::KEY_LEFTCTRL,
-            0xA3 => KeyCode::KEY_RIGHTCTRL,
-            0xA4 => KeyCode::KEY_LEFTALT,
-            0xA5 => KeyCode::KEY_RIGHTALT,
-            // OEM keys
-            0xBA => KeyCode::KEY_SEMICOLON,
-            0xBB => KeyCode::KEY_EQUAL,
-            0xBC => KeyCode::KEY_COMMA,
-            0xBD => KeyCode::KEY_MINUS,
-            0xBE => KeyCode::KEY_DOT,
-            0xBF => KeyCode::KEY_SLASH,
-            0xC0 => KeyCode::KEY_GRAVE,
-            0xDB => KeyCode::KEY_LEFTBRACE,
-            0xDC => KeyCode::KEY_BACKSLASH,
-            0xDD => KeyCode::KEY_RIGHTBRACE,
-            0xDE => KeyCode::KEY_APOSTROPHE,
-            _ => return None,
-        })
-    }
+#[cfg(target_os = "linux")]
+/// Persistent virtual keyboard device for uinput injection.
+///
+/// Created once on first use with all possible keys registered, so the
+/// Wayland compositor has time to detect and start reading from it.
+/// Reused for all subsequent key injections.
+fn get_virtual_keyboard() -> &'static std::sync::Mutex<evdev::uinput::VirtualDevice> {
+    use std::sync::{Mutex, OnceLock};
+    use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode};
 
-    // Build the set of keys we need
-    let mut keys = AttributeSet::<KeyCode>::new();
-    for input in inputs {
-        match input {
-            KeyboardInputSpec::VirtualKey { code, .. } => {
-                if let Some(key) = vk_to_evdev_key(*code) {
-                    keys.insert(key);
-                }
-            }
-            KeyboardInputSpec::Unicode { .. } => {}
+    static DEVICE: OnceLock<Mutex<VirtualDevice>> = OnceLock::new();
+
+    DEVICE.get_or_init(|| {
+        // Register all keys we might ever need so the device doesn't
+        // need to be recreated when different shortcuts are used.
+        let mut keys = AttributeSet::<KeyCode>::new();
+        // Letters A-Z
+        for code in 0x41u16..=0x5Au16 {
+            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
         }
-    }
+        // Digits 0-9
+        for code in 0x30u16..=0x39u16 {
+            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
+        }
+        // F1-F24
+        for code in 0x70u16..=0x87u16 {
+            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
+        }
+        // Modifiers
+        for code in [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B] {
+            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
+        }
+        // Common special keys
+        for code in [0x08, 0x09, 0x0D, 0x13, 0x14, 0x1B, 0x20, 0x21, 0x22,
+                     0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2C, 0x2D, 0x2E,
+                     0x5D, 0x90, 0x91] {
+            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
+        }
+        // OEM keys
+        for code in [0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE] {
+            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
+        }
 
-    let mut device = VirtualDevice::builder()
-        .map_err(|e| format!("Failed to create virtual device: {e}"))?
-        .name("Sidearm Virtual Keyboard")
-        .with_keys(&keys)
-        .map_err(|e| format!("Failed to configure virtual device keys: {e}"))?
-        .build()
-        .map_err(|e| format!("Failed to build virtual device: {e}"))?;
+        let device = VirtualDevice::builder()
+            .expect("Failed to create virtual keyboard builder")
+            .name("Sidearm Virtual Keyboard")
+            .with_keys(&keys)
+            .expect("Failed to configure virtual keyboard keys")
+            .build()
+            .expect("Failed to build virtual keyboard device");
 
-    std::thread::sleep(std::time::Duration::from_millis(10));
+        log::info!("[input] Persistent virtual keyboard device created.");
+
+        // Give the compositor time to detect the new device.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        Mutex::new(device)
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
+    use evdev::{EventType, InputEvent};
+
+    let mut device = get_virtual_keyboard()
+        .lock()
+        .map_err(|e| format!("Failed to lock virtual keyboard: {e}"))?;
+
+    // Send each event individually with a delay between them.
+    // Mutter (GNOME Wayland) has a known race condition where modifier
+    // key-up events arriving too fast (< ~8ms) from uinput devices are
+    // lost, causing stuck modifiers.  A 12ms delay matches ydotool's
+    // default and is well above the danger zone.
+    let delay = std::time::Duration::from_millis(12);
 
     for input in inputs {
         match input {
@@ -1214,6 +1327,7 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
                     let event = InputEvent::new(EventType::KEY.0, key.0, value);
                     device.emit(&[event])
                         .map_err(|e| format!("Failed to emit key event: {e}"))?;
+                    std::thread::sleep(delay);
                 }
             }
             KeyboardInputSpec::Unicode { .. } => {}
@@ -1257,8 +1371,11 @@ const VK_SCROLL: u16 = 0x91;
 const VK_PAUSE: u16 = 0x13;
 const VK_APPS: u16 = 0x5D;
 const VK_LCONTROL: u16 = 0xA2;
+const VK_RCONTROL: u16 = 0xA3;
 const VK_LSHIFT: u16 = 0xA0;
+const VK_RSHIFT: u16 = 0xA1;
 const VK_LMENU: u16 = 0xA4;
+const VK_RMENU: u16 = 0xA5;
 const VK_LWIN: u16 = 0x5B;
 const VK_OEM_MINUS: u16 = 0xBD;
 const VK_OEM_PLUS: u16 = 0xBB;
@@ -1446,40 +1563,50 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
 }
 
 #[cfg(target_os = "linux")]
+/// Persistent virtual mouse device for uinput injection.
+fn get_virtual_mouse() -> &'static std::sync::Mutex<evdev::uinput::VirtualDevice> {
+    use std::sync::{Mutex, OnceLock};
+    use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode, RelativeAxisCode};
+
+    static DEVICE: OnceLock<Mutex<VirtualDevice>> = OnceLock::new();
+
+    DEVICE.get_or_init(|| {
+        let mut keys = AttributeSet::<KeyCode>::new();
+        keys.insert(KeyCode::BTN_LEFT);
+        keys.insert(KeyCode::BTN_RIGHT);
+        keys.insert(KeyCode::BTN_MIDDLE);
+        keys.insert(KeyCode::BTN_SIDE);
+        keys.insert(KeyCode::BTN_EXTRA);
+
+        let mut axes = AttributeSet::<RelativeAxisCode>::new();
+        axes.insert(RelativeAxisCode::REL_WHEEL);
+        axes.insert(RelativeAxisCode::REL_HWHEEL);
+
+        let device = VirtualDevice::builder()
+            .expect("Failed to create virtual mouse builder")
+            .name("Sidearm Virtual Mouse")
+            .with_keys(&keys)
+            .expect("Failed to configure virtual mouse keys")
+            .with_relative_axes(&axes)
+            .expect("Failed to configure virtual mouse axes")
+            .build()
+            .expect("Failed to build virtual mouse device");
+
+        log::info!("[input] Persistent virtual mouse device created.");
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        Mutex::new(device)
+    })
+}
+
+#[cfg(target_os = "linux")]
 fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String> {
     use crate::config::MouseActionKind;
-    use evdev::{uinput::VirtualDevice, AttributeSet, EventType, InputEvent, KeyCode, RelativeAxisCode};
+    use evdev::{EventType, InputEvent, KeyCode, RelativeAxisCode};
 
-    let mut keys = AttributeSet::<KeyCode>::new();
-    let mut axes = AttributeSet::<RelativeAxisCode>::new();
-
-    match action {
-        MouseActionKind::LeftClick | MouseActionKind::DoubleClick => { keys.insert(KeyCode::BTN_LEFT); }
-        MouseActionKind::RightClick => { keys.insert(KeyCode::BTN_RIGHT); }
-        MouseActionKind::MiddleClick => { keys.insert(KeyCode::BTN_MIDDLE); }
-        MouseActionKind::ScrollUp | MouseActionKind::ScrollDown => { axes.insert(RelativeAxisCode::REL_WHEEL); }
-        MouseActionKind::ScrollLeft | MouseActionKind::ScrollRight => { axes.insert(RelativeAxisCode::REL_HWHEEL); }
-        MouseActionKind::MouseBack => { keys.insert(KeyCode::BTN_SIDE); }
-        MouseActionKind::MouseForward => { keys.insert(KeyCode::BTN_EXTRA); }
-    }
-
-    let mut builder = VirtualDevice::builder()
-        .map_err(|e| format!("Failed to create virtual mouse device: {e}"))?
-        .name("Sidearm Virtual Mouse");
-
-    if keys.iter().next().is_some() {
-        builder = builder.with_keys(&keys)
-            .map_err(|e| format!("Failed to configure mouse keys: {e}"))?;
-    }
-    if axes.iter().next().is_some() {
-        builder = builder.with_relative_axes(&axes)
-            .map_err(|e| format!("Failed to configure mouse axes: {e}"))?;
-    }
-
-    let mut device = builder.build()
-        .map_err(|e| format!("Failed to build virtual mouse device: {e}"))?;
-
-    std::thread::sleep(std::time::Duration::from_millis(10));
+    let mut device = get_virtual_mouse()
+        .lock()
+        .map_err(|e| format!("Failed to lock virtual mouse: {e}"))?;
 
     let mut emit = |events: &[InputEvent]| -> Result<(), String> {
         device.emit(events).map_err(|e| format!("Failed to emit mouse event: {e}"))

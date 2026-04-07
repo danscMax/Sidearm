@@ -163,9 +163,14 @@ fn process_encoded_key_event(
 
     // --- Key-up path: release any held shortcut ---
     if event.is_key_up {
+        log::info!("[capture] Key-up received for {}", event.encoded_key);
         if let Some(held) = held_actions.remove(&event.encoded_key) {
             match crate::input_synthesis::send_shortcut_hold_up(&held) {
                 Ok(()) => {
+                    log::info!(
+                        "[capture] Hold-shortcut released for {}",
+                        event.encoded_key
+                    );
                     log_entries.push((
                         "выполнение",
                         format!("Отпущен удерживаемый шорткат для `{}`.", event.encoded_key),
@@ -173,6 +178,10 @@ fn process_encoded_key_event(
                     ));
                 }
                 Err(e) => {
+                    log::error!(
+                        "[capture] Hold-shortcut release failed for {}: {e}",
+                        event.encoded_key
+                    );
                     log_entries.push((
                         "выполнение",
                         format!("Не удалось отпустить шорткат для `{}`: {e}", event.encoded_key),
@@ -181,6 +190,10 @@ fn process_encoded_key_event(
                 }
             }
         } else {
+            log::info!(
+                "[capture] Key-up for {} without active hold",
+                event.encoded_key
+            );
             log_entries.push((
                 "перехват",
                 format!("Отпускание `{}` без активного удержания.", event.encoded_key),
@@ -322,11 +335,20 @@ fn process_encoded_key_event(
             || is_modifier_only_shortcut);
 
     if is_hold_shortcut {
+        log::info!(
+            "[capture] Hold-shortcut dispatch for {} (action_pretty={:?})",
+            event.encoded_key,
+            preview.action_pretty,
+        );
         // Skip auto-repeat events — the shortcut is already held.
         // Re-calling hold_down would overwrite held_actions with an empty
         // state (modifiers already active → "reused" → nothing pressed)
         // and the eventual hold_up would fail to release.
         if held_actions.contains_key(&event.encoded_key) {
+            log::info!(
+                "[capture] Hold-shortcut already held for {}, skipping duplicate",
+                event.encoded_key
+            );
             flush_log_entries(runtime_store, log_entries);
             return;
         }
@@ -342,8 +364,17 @@ fn process_encoded_key_event(
         }) = action
         {
             let encoding_mods = hotkeys::extract_encoding_modifiers(&event.encoded_key);
+            log::info!(
+                "[capture] Hold-shortcut sending: ctrl={} shift={} alt={} win={} key={:?} | encoding_mods={:?}",
+                payload.ctrl, payload.shift, payload.alt, payload.win, payload.key, encoding_mods,
+            );
             match crate::input_synthesis::send_shortcut_hold_down(payload, &encoding_mods) {
                 Ok(held) => {
+                    log::info!(
+                        "[capture] Hold-shortcut hold-down OK for {} ({})",
+                        event.encoded_key,
+                        preview.action_pretty.as_deref().unwrap_or("?"),
+                    );
                     log_entries.push((
                         "выполнение",
                         format!(
@@ -385,6 +416,10 @@ fn process_encoded_key_event(
                     );
                 }
                 Err(e) => {
+                    log::error!(
+                        "[capture] Hold-shortcut hold-down FAILED for {}: {e}",
+                        event.encoded_key
+                    );
                     let error_event = executor::RuntimeErrorEvent {
                         category: "выполнение".into(),
                         message: e,
@@ -398,6 +433,10 @@ fn process_encoded_key_event(
             }
         } else {
             // Hold requested but action is not a shortcut — fall back to press
+            log::warn!(
+                "[capture] Hold requested but action is not a shortcut for {}; falling back",
+                event.encoded_key
+            );
             log_entries.push((
                 "выполнение",
                 "Запрошено удержание, но действие не шорткат; переключение на нажатие.".into(),

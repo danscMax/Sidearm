@@ -425,7 +425,8 @@ fn process_helper_key_event(
     match msg {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             if modifiers.apply_vk_event(vk, true) {
-                return (false, false, false);
+                // Modifier event — diagnostic logging is done by caller.
+                return (false, true, false);
             }
 
             // Collect all matching registrations for this VK, then pick
@@ -489,7 +490,8 @@ fn process_helper_key_event(
         }
         WM_KEYUP | WM_SYSKEYUP => {
             if modifiers.apply_vk_event(vk, false) {
-                (false, false, false)
+                // Modifier-up — diagnostic logging is done by caller.
+                (false, true, false)
             } else if let Some(encoded_key) = suppressions.remove(&vk) {
                 matches.push(format!("UP:{encoded_key}"));
                 (true, true, false)
@@ -606,7 +608,51 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         let internal_injection =
             kb.dwExtraInfo == crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO;
 
+        // Diagnostic: emit DEBUG lines for modifier and F-key events with raw
+        // KBDLLHOOKSTRUCT fields. Used to measure Razer Alt→F-key gap and
+        // leak window between Razer Alt-down and our SendInput Alt-up.
+        // Logged BEFORE the internal_injection bypass so we capture our own
+        // SendInput too — marked with prefix `int-` for distinction.
+        let is_modifier = matches!(
+            vk,
+            VK_CONTROL | VK_LCONTROL | VK_RCONTROL |
+            VK_SHIFT | VK_LSHIFT | VK_RSHIFT |
+            VK_MENU | VK_LMENU | VK_RMENU |
+            VK_LWIN | VK_RWIN
+        );
+        let is_fkey = (0x70..=0x87).contains(&vk);
+        let is_keydown = msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_KEYDOWN
+            || msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSKEYDOWN;
+        let is_keyup = msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_KEYUP
+            || msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSKEYUP;
+        if (is_modifier || is_fkey) && (is_keydown || is_keyup) {
+            let prefix = if internal_injection { "int-" } else { "" };
+            let kind = if is_modifier {
+                if is_keydown { "mod-down" } else { "mod-up" }
+            } else if is_keydown {
+                "fkey-down"
+            } else {
+                "fkey-up"
+            };
+            HELPER_MATCHES.with(|cell| {
+                cell.borrow_mut().push(format!(
+                    "DEBUG:{}{} vk=0x{:02X} scan=0x{:02X} flags=0x{:02X} extra=0x{:X} time={}",
+                    prefix, kind, vk, kb.scanCode, kb.flags, kb.dwExtraInfo, kb.time,
+                ));
+            });
+        }
+
         if internal_injection {
+            // For our own injections, only log (above) — skip state update and
+            // let the event pass through to the OS.
+            // Wake the message pump so the DEBUG line flushes promptly to parent.
+            const WM_APP: u32 = 0x8000;
+            HELPER_THREAD_ID.with(|cell| {
+                let tid = cell.get();
+                if tid != 0 {
+                    PostThreadMessageW(tid, WM_APP, 0, 0);
+                }
+            });
             return CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param);
         }
 
@@ -1044,6 +1090,12 @@ fn spawn_capture_helper(
         for line in reader.lines().map_while(Result::ok) {
             let trimmed = line.trim();
             if trimmed.is_empty() {
+                continue;
+            }
+            // Diagnostic lines from helper — route to log::info! so they
+            // appear in the Webview log panel via tauri-plugin-log.
+            if let Some(rest) = trimmed.strip_prefix("DEBUG:") {
+                log::info!("[helper] {rest}");
                 continue;
             }
             let (is_key_up, is_repeat, encoded_key) =

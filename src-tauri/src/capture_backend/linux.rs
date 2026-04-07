@@ -343,6 +343,8 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::Sender<Enc
 
     let mut modifier_state = ModifierState::default();
 
+    let mut device_lost = false;
+
     while !stop_flag.load(Ordering::SeqCst) {
         // fetch_events() blocks until events are available. We use a
         // non-blocking poll by reading with a short timeout via the
@@ -355,11 +357,21 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::Sender<Enc
                 if stop_flag.load(Ordering::SeqCst) {
                     break;
                 }
-                // EAGAIN or similar -- retry after brief sleep
                 let kind = e.kind();
+                // EAGAIN -- no events ready yet, retry quickly
                 if kind == std::io::ErrorKind::WouldBlock {
                     thread::sleep(Duration::from_millis(10));
                     continue;
+                }
+                // ENODEV (os error 19) -- device disconnected.
+                if e.raw_os_error() == Some(19) {
+                    log::warn!(
+                        "[capture] evdev device disconnected ({}). \
+                         Returning to hotplug polling.",
+                        e
+                    );
+                    device_lost = true;
+                    break;
                 }
                 log::error!("[capture] evdev fetch_events error: {e}");
                 thread::sleep(Duration::from_millis(100));
@@ -415,6 +427,12 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::Sender<Enc
 
     // Release grab on shutdown
     let _ = device.ungrab();
+
+    if device_lost {
+        // Device disconnected — restart hotplug polling to reconnect.
+        return run_evdev_capture_loop(stop_flag, event_tx);
+    }
+
     log::info!("[capture] evdev capture loop exited.");
 }
 
@@ -453,7 +471,10 @@ fn run_foreground_watcher(
             &config, &app_name, None,
         ) {
             Ok(result) => result,
-            Err(_) => continue,
+            Err(e) => {
+                log::debug!("[capture] Foreground watcher: window capture failed: {e}");
+                continue;
+            }
         };
 
         // Only emit when the foreground window actually changed

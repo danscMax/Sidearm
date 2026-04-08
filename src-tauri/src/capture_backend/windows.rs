@@ -804,26 +804,64 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             }
         }
 
-        // Case B: F-key matched (suppress=true from process_helper_key_event).
-        // Move all pending modifiers to consumed set — they were Razer encoding.
-        if suppress && is_fkey && is_keydown {
-            PENDING_MODIFIERS.with(|pend_cell| {
-                CONSUMED_MODIFIER_VKS.with(|cons_cell| {
-                    let mut pending = pend_cell.borrow_mut();
-                    if !pending.is_empty() {
-                        let mut consumed = cons_cell.borrow_mut();
-                        for pm in pending.drain(..) {
-                            consumed.insert(pm.vk);
-                        }
-                        HELPER_MATCHES.with(|mc| {
-                            mc.borrow_mut().push(format!(
-                                "DEBUG:mod-consumed vks={:?}",
-                                consumed.iter().collect::<Vec<_>>(),
-                            ));
-                        });
-                    }
-                });
+        // Case B+D: F-key matched OR non-modifier key-down while modifiers
+        // are pending.  Decide per-modifier: consume (Razer encoding) or
+        // replay (real keyboard).
+        if is_keydown && !is_modifier {
+            // Find the matched encoding's modifier mask (0 if not matched / not F-key)
+            let matched_mask = if suppress && is_fkey {
+                HELPER_SUPPRESSIONS.with(|sup_cell| {
+                    HELPER_REGISTRATIONS.with(|reg_cell| {
+                        let sup = sup_cell.borrow();
+                        let regs = reg_cell.borrow();
+                        sup.get(&vk)
+                            .and_then(|ek| regs.iter().find(|r| r.encoded_key == *ek))
+                            .map(|r| r.modifiers_mask)
+                            .unwrap_or(0)
+                    })
+                })
+            } else {
+                0 // non-F-key or unmatched F-key → no encoding modifiers
+            };
+
+            // Drain pending modifiers: consume those in the encoding mask,
+            // replay the rest (they're real keyboard modifiers).
+            // Collect first, then process — avoids holding RefCell borrow
+            // during SendInput (which triggers re-entrant LL hook callback).
+            let items: Vec<PendingModifier> = PENDING_MODIFIERS.with(|cell| {
+                cell.borrow_mut().drain(..).collect()
             });
+            if !items.is_empty() {
+                let mut consumed_vks = Vec::new();
+                let mut replayed_vks = Vec::new();
+                for pm in &items {
+                    let mask_bit = match pm.vk {
+                        VK_MENU | VK_LMENU | VK_RMENU => MOD_ALT,
+                        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => MOD_CONTROL,
+                        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => MOD_SHIFT,
+                        VK_LWIN | VK_RWIN => MOD_WIN,
+                        _ => 0,
+                    };
+                    if matched_mask & mask_bit != 0 {
+                        // Modifier IS in the encoding → consume (suppress its key-up too)
+                        CONSUMED_MODIFIER_VKS.with(|cell| {
+                            cell.borrow_mut().insert(pm.vk);
+                        });
+                        consumed_vks.push(pm.vk);
+                    } else {
+                        // Modifier NOT in the encoding → replay (real keyboard)
+                        unsafe { replay_modifier_down(pm.vk, pm.scan); }
+                        replayed_vks.push(pm.vk);
+                    }
+                }
+                HELPER_MATCHES.with(|mc| {
+                    mc.borrow_mut().push(format!(
+                        "DEBUG:mod-resolve mask=0x{:04X} consumed={consumed_vks:?} replayed={replayed_vks:?}",
+                        matched_mask,
+                    ));
+                });
+                wake = true;
+            }
         }
 
         // Case C: Modifier-up — check consumed and pending sets.

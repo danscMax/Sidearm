@@ -88,6 +88,17 @@ thread_local! {
     /// Consumed (replaced with `false`) by the health monitor each cycle.
     /// When `true`, the hook is demonstrably alive — no probe needed.
     static HOOK_HAD_CALLBACK: std::cell::Cell<bool> = std::cell::Cell::new(false);
+
+    /// Buffered modifier-down events waiting for an F-key match.
+    /// If an F-key match arrives within the timeout, these were Razer encoding
+    /// and should stay suppressed. If timeout expires, replay them via SendInput.
+    static PENDING_MODIFIERS: std::cell::RefCell<Vec<PendingModifier>> =
+        std::cell::RefCell::new(Vec::new());
+
+    /// VK codes of modifiers consumed by an F-key match. Their key-up events
+    /// must also be suppressed (they're Razer encoding release, not real user keys).
+    static CONSUMED_MODIFIER_VKS: std::cell::RefCell<std::collections::HashSet<u32>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
 pub(super) struct CaptureBackendHandle {
@@ -212,6 +223,84 @@ fn is_shift_vk(vk: u32) -> bool {
 
 fn is_win_vk(vk: u32) -> bool {
     matches!(vk, VK_LWIN | VK_RWIN)
+}
+
+#[derive(Clone, Copy)]
+struct PendingModifier {
+    vk: u32,
+    scan: u32,
+    #[allow(dead_code)] // stored for potential future use (e.g. extended-key flag replay)
+    flags: u32,
+    buffered_at: std::time::Instant,
+}
+
+/// Returns true if this modifier VK code appears in any registered hotkey's
+/// modifier mask. Only these modifiers should be buffered.
+fn modifier_in_any_encoding(vk: u32, regs: &[HelperRegistration]) -> bool {
+    let mask_bit = match vk {
+        VK_MENU | VK_LMENU | VK_RMENU => MOD_ALT,
+        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => MOD_CONTROL,
+        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => MOD_SHIFT,
+        VK_LWIN | VK_RWIN => MOD_WIN,
+        _ => return false,
+    };
+    regs.iter().any(|r| r.modifiers_mask & mask_bit != 0)
+}
+
+/// Replay a buffered modifier-down event via SendInput.
+/// Uses INTERNAL_SENDINPUT_EXTRA_INFO so our LL hook recognizes replayed
+/// events and passes them through without re-buffering.
+unsafe fn replay_modifier_down(vk: u32, scan: u32) {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    };
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk as u16,
+                wScan: scan as u16,
+                dwFlags: 0,
+                time: 0,
+                dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+            },
+        },
+    };
+    SendInput(1, &input, size_of::<INPUT>() as i32);
+}
+
+/// Check for pending modifiers that have timed out (>20ms) and replay them
+/// via SendInput. Called from the message pump loop.
+fn flush_expired_pending_modifiers() {
+    const MODIFIER_BUFFER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(20);
+
+    PENDING_MODIFIERS.with(|cell| {
+        let mut pending = cell.borrow_mut();
+        let now = std::time::Instant::now();
+
+        // Replay any modifiers that have been pending longer than timeout
+        let mut replayed = Vec::new();
+        pending.retain(|pm| {
+            if now.duration_since(pm.buffered_at) >= MODIFIER_BUFFER_TIMEOUT {
+                unsafe { replay_modifier_down(pm.vk, pm.scan); }
+                replayed.push(pm.vk);
+                false // remove from pending
+            } else {
+                true // keep
+            }
+        });
+
+        // Log replayed modifiers
+        if !replayed.is_empty() {
+            HELPER_MATCHES.with(|mc| {
+                mc.borrow_mut().push(format!(
+                    "DEBUG:mod-replay timeout vks={:?}",
+                    replayed,
+                ));
+            });
+        }
+    });
 }
 
 impl CaptureBackendHandle {
@@ -657,7 +746,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         }
 
         // Returns (suppress_key, new_match_added, inject_mask_key)
-        let (suppress, wake, inject_mask) = HELPER_MODIFIERS.with(|mods_cell| {
+        let (mut suppress, mut wake, inject_mask) = HELPER_MODIFIERS.with(|mods_cell| {
             HELPER_SUPPRESSIONS.with(|sup_cell| {
                 HELPER_REGISTRATIONS.with(|reg_cell| {
                     HELPER_MATCHES.with(|match_cell| {
@@ -678,6 +767,107 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 })
             })
         });
+
+        // --- Modifier buffering (delayed modifier / chord detection) ---
+        //
+        // Razer Naga sends modifier+F-key combos as real keyboard events.
+        // The modifier-down arrives first and leaks to apps before the F-key
+        // tells us this is a Razer encoding.  We buffer modifier-downs for
+        // up to 20ms; if an F-key match arrives in time we consume them,
+        // otherwise we replay them via SendInput.
+
+        // Case A: Modifier-down that should be buffered.
+        // process_helper_key_event already updated HELPER_MODIFIERS state,
+        // so F-key matching will work correctly when the F-key arrives.
+        if is_modifier && is_keydown && !suppress {
+            let should_buffer = HELPER_REGISTRATIONS.with(|reg_cell| {
+                let regs = reg_cell.borrow();
+                modifier_in_any_encoding(vk, &regs)
+            });
+            if should_buffer {
+                PENDING_MODIFIERS.with(|cell| {
+                    cell.borrow_mut().push(PendingModifier {
+                        vk,
+                        scan: kb.scanCode,
+                        flags: kb.flags,
+                        buffered_at: std::time::Instant::now(),
+                    });
+                });
+                HELPER_MATCHES.with(|cell| {
+                    cell.borrow_mut().push(format!(
+                        "DEBUG:mod-buffered vk=0x{:02X}",
+                        vk,
+                    ));
+                });
+                suppress = true;
+                wake = true;
+            }
+        }
+
+        // Case B: F-key matched (suppress=true from process_helper_key_event).
+        // Move all pending modifiers to consumed set — they were Razer encoding.
+        if suppress && is_fkey && is_keydown {
+            PENDING_MODIFIERS.with(|pend_cell| {
+                CONSUMED_MODIFIER_VKS.with(|cons_cell| {
+                    let mut pending = pend_cell.borrow_mut();
+                    if !pending.is_empty() {
+                        let mut consumed = cons_cell.borrow_mut();
+                        for pm in pending.drain(..) {
+                            consumed.insert(pm.vk);
+                        }
+                        HELPER_MATCHES.with(|mc| {
+                            mc.borrow_mut().push(format!(
+                                "DEBUG:mod-consumed vks={:?}",
+                                consumed.iter().collect::<Vec<_>>(),
+                            ));
+                        });
+                    }
+                });
+            });
+        }
+
+        // Case C: Modifier-up — check consumed and pending sets.
+        if is_modifier && is_keyup {
+            // C1: Was this modifier consumed by an F-key match?
+            // If so, suppress the up event too (it's Razer encoding release).
+            let was_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
+                cell.borrow_mut().remove(&vk)
+            });
+            if was_consumed {
+                HELPER_MATCHES.with(|cell| {
+                    cell.borrow_mut().push(format!(
+                        "DEBUG:mod-up-suppressed vk=0x{:02X}",
+                        vk,
+                    ));
+                });
+                suppress = true;
+                wake = true;
+            } else {
+                // C2: Was this modifier still pending (buffered but F-key never came)?
+                // This is a solo modifier tap — replay the down, let the up pass through.
+                let pending_entry = PENDING_MODIFIERS.with(|cell| {
+                    let mut pending = cell.borrow_mut();
+                    if let Some(pos) = pending.iter().position(|pm| pm.vk == vk) {
+                        Some(pending.remove(pos))
+                    } else {
+                        None
+                    }
+                });
+                if let Some(pm) = pending_entry {
+                    HELPER_MATCHES.with(|cell| {
+                        cell.borrow_mut().push(format!(
+                            "DEBUG:mod-replay solo-tap vk=0x{:02X}",
+                            vk,
+                        ));
+                    });
+                    replay_modifier_down(pm.vk, pm.scan);
+                    // Don't suppress the up — let it pass through naturally.
+                    wake = true;
+                }
+            }
+        }
+
+        // --- End modifier buffering ---
 
         // AHK-style "Menu Mask Key": inject VK 0xE8 (down+up) to prevent
         // Windows from interpreting bare Alt-up or Win-up as menu / Start
@@ -764,6 +954,8 @@ pub fn capture_helper_main() {
     HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
     HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
     HELPER_MATCHES.with(|cell| cell.borrow_mut().clear());
+    PENDING_MODIFIERS.with(|cell| cell.borrow_mut().clear());
+    CONSUMED_MODIFIER_VKS.with(|cell| cell.borrow_mut().clear());
 
     // 2b. Elevate thread priority — LL hook callbacks must return within the
     //     LowLevelHooksTimeout (~200-300ms) or Windows silently removes the
@@ -833,12 +1025,32 @@ pub fn capture_helper_main() {
     let mut hook_reinstall_count: u32 = 0;
 
     loop {
-        // Wait for messages OR timeout (health check interval).
+        // Compute wait timeout: if we have pending modifiers, wake up in
+        // time to replay them (20ms buffer).  Otherwise use the normal
+        // health check interval.
+        let wait_timeout = PENDING_MODIFIERS.with(|cell| {
+            let pending = cell.borrow();
+            if pending.is_empty() {
+                HOOK_HEALTH_CHECK_INTERVAL_MS
+            } else {
+                let oldest = pending.iter()
+                    .map(|pm| pm.buffered_at)
+                    .min()
+                    .unwrap();
+                let elapsed = std::time::Instant::now()
+                    .duration_since(oldest)
+                    .as_millis() as u32;
+                let remaining = 20u32.saturating_sub(elapsed);
+                remaining.max(1) // at least 1ms to avoid busy-wait
+            }
+        });
+
+        // Wait for messages OR timeout (health check / modifier replay).
         let wait_result = unsafe {
             MsgWaitForMultipleObjectsEx(
                 0,
                 std::ptr::null(),
-                HOOK_HEALTH_CHECK_INTERVAL_MS,
+                wait_timeout,
                 QS_ALLINPUT,
                 MWMO_INPUTAVAILABLE,
             )
@@ -854,6 +1066,12 @@ pub fn capture_helper_main() {
         }
 
         if wait_result == WAIT_TIMEOUT {
+            // Timeout fired — could be for modifier replay (20ms) or health
+            // check (5000ms).  Only run health check logic when the timeout
+            // was the full health check interval (no pending modifiers).
+            let was_health_timeout = wait_timeout == HOOK_HEALTH_CHECK_INTERVAL_MS;
+
+            if was_health_timeout {
             // No messages arrived within the interval — run health check.
 
             // Fast path: if ANY LL hook callback fired since the last check,
@@ -910,6 +1128,7 @@ pub fn capture_helper_main() {
                     HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
                 }
             }
+            } // was_health_timeout
             // Fall through to pump any messages that may have arrived.
         }
 
@@ -971,6 +1190,16 @@ pub fn capture_helper_main() {
                 unsafe { UnhookWindowsHookEx(hook); }
                 break;
             }
+        }
+
+        // Check for pending modifiers that have timed out and replay them.
+        flush_expired_pending_modifiers();
+
+        // Drain any DEBUG lines generated by flush_expired_pending_modifiers.
+        if drain_helper_matches(&mut stdout).is_err() {
+            log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
+            unsafe { UnhookWindowsHookEx(hook); }
+            break;
         }
 
         // If the probe was just received inline (during message pumping after

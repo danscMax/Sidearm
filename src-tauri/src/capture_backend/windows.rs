@@ -95,10 +95,12 @@ thread_local! {
     static PENDING_MODIFIERS: std::cell::RefCell<Vec<PendingModifier>> =
         std::cell::RefCell::new(Vec::new());
 
-    /// VK codes of modifiers consumed by an F-key match. Their key-up events
-    /// must also be suppressed (they're Razer encoding release, not real user keys).
-    static CONSUMED_MODIFIER_VKS: std::cell::RefCell<std::collections::HashSet<u32>> =
-        std::cell::RefCell::new(std::collections::HashSet::new());
+    /// VK codes of modifiers consumed by an F-key match, mapped to the time
+    /// they were consumed.  Their key-up events must be suppressed (Razer
+    /// encoding release, not real user keys).  Timestamp is used to GC stale
+    /// entries when the expected key-up never arrives (e.g. focus change).
+    static CONSUMED_MODIFIER_VKS: std::cell::RefCell<std::collections::HashMap<u32, std::time::Instant>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 pub(super) struct CaptureBackendHandle {
@@ -270,37 +272,97 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
     SendInput(1, &input, size_of::<INPUT>() as i32);
 }
 
+/// Maximum age of a pending modifier-down when an F-key match arrives for
+/// it to still be considered Razer encoding.  Razer Naga sends
+/// modifier→F-key within ~1-5 ms; anything older is likely a user's physical
+/// keyboard modifier that was merely buffered at the same time.  Consuming
+/// a user modifier here used to break "hold Ctrl + mouse-Delete → Ctrl+Delete".
+const RAZER_ENCODING_CHORD_WINDOW: std::time::Duration = std::time::Duration::from_millis(10);
+
+/// Maximum lifetime of a CONSUMED_MODIFIER_VKS entry before it is garbage
+/// collected.  Guards against a Razer modifier-up being lost (e.g. due to
+/// focus change / window switch) and leaving the set with a stale entry
+/// that suppresses a real subsequent Ctrl-up.
+const CONSUMED_MODIFIER_STALE_THRESHOLD: std::time::Duration =
+    std::time::Duration::from_secs(5);
+
 /// Check for pending modifiers that have timed out (>20ms) and replay them
 /// via SendInput. Called from the message pump loop.
+///
+/// IMPORTANT: `replay_modifier_down` invokes `SendInput`, which synchronously
+/// dispatches the event through the LL hook chain.  `CallNextHookEx` in turn
+/// lets other system hooks run, and Windows may deliver a *real* key event
+/// to our own hook re-entrantly during that call.  That re-entrant callback
+/// may try to buffer a new modifier via `PENDING_MODIFIERS.borrow_mut()`.
+///
+/// If we held the outer `borrow_mut()` during the replay, that would panic
+/// (`RefCell already borrowed`) and abort the capture helper.  So we drain
+/// expired entries into a local `Vec` FIRST, drop the borrow, THEN replay
+/// each entry outside of any RefCell borrow.
 fn flush_expired_pending_modifiers() {
     const MODIFIER_BUFFER_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(20);
 
-    PENDING_MODIFIERS.with(|cell| {
+    let expired: Vec<PendingModifier> = PENDING_MODIFIERS.with(|cell| {
         let mut pending = cell.borrow_mut();
         let now = std::time::Instant::now();
-
-        // Replay any modifiers that have been pending longer than timeout
-        let mut replayed = Vec::new();
+        let mut drained = Vec::new();
         pending.retain(|pm| {
             if now.duration_since(pm.buffered_at) >= MODIFIER_BUFFER_TIMEOUT {
-                unsafe { replay_modifier_down(pm.vk, pm.scan); }
-                replayed.push(pm.vk);
-                false // remove from pending
+                drained.push(*pm);
+                false
             } else {
-                true // keep
+                true
             }
         });
-
-        // Log replayed modifiers
-        if !replayed.is_empty() {
-            HELPER_MATCHES.with(|mc| {
-                mc.borrow_mut().push(format!(
-                    "DEBUG:mod-replay timeout vks={:?}",
-                    replayed,
-                ));
-            });
-        }
+        drained
     });
+
+    if expired.is_empty() {
+        return;
+    }
+
+    let replayed_vks: Vec<u32> = expired.iter().map(|pm| pm.vk).collect();
+    for pm in &expired {
+        unsafe { replay_modifier_down(pm.vk, pm.scan); }
+    }
+
+    HELPER_MATCHES.with(|mc| {
+        mc.borrow_mut().push(format!(
+            "DEBUG:mod-replay timeout vks={:?}",
+            replayed_vks,
+        ));
+    });
+}
+
+/// Remove `CONSUMED_MODIFIER_VKS` entries that have been sitting in the set
+/// longer than `CONSUMED_MODIFIER_STALE_THRESHOLD`.  Called from the message
+/// pump loop.  A stuck entry would cause a real subsequent Ctrl-up (from the
+/// user releasing the key after e.g. alt-tab ate Razer's Ctrl-up) to be
+/// suppressed, leaving the OS in a phantom "Ctrl held" state until restart.
+fn gc_stale_consumed_modifiers() {
+    let removed_vks = CONSUMED_MODIFIER_VKS.with(|cell| {
+        let now = std::time::Instant::now();
+        let mut consumed = cell.borrow_mut();
+        let mut removed = Vec::new();
+        consumed.retain(|vk, at| {
+            if now.duration_since(*at) >= CONSUMED_MODIFIER_STALE_THRESHOLD {
+                removed.push(*vk);
+                false
+            } else {
+                true
+            }
+        });
+        removed
+    });
+
+    if !removed_vks.is_empty() {
+        HELPER_MATCHES.with(|mc| {
+            mc.borrow_mut().push(format!(
+                "DEBUG:mod-consumed-gc stale-removed vks={:?}",
+                removed_vks,
+            ));
+        });
+    }
 }
 
 impl CaptureBackendHandle {
@@ -320,18 +382,68 @@ impl CaptureBackendHandle {
         let worker_config = config.clone();
         let worker_app_name = app_name.clone();
         let worker_thread = thread::spawn(move || {
+            use std::sync::mpsc::RecvTimeoutError;
+            use std::time::{Duration, Instant};
+
             let mut held_actions: std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState> =
                 std::collections::HashMap::new();
+            // Track when we last observed a capture event for each held
+            // encoding.  If we stop hearing from an encoding for this long
+            // while it is still marked held, the capture pipeline has lost
+            // the matching key-up (e.g. the helper subprocess crashed) and
+            // we force-release to recover.
+            let mut held_last_seen: std::collections::HashMap<String, Instant> =
+                std::collections::HashMap::new();
+            const HOLD_STALE_THRESHOLD: Duration = Duration::from_secs(2);
+            const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
-            while let Ok(event) = event_rx.recv() {
-                process_encoded_key_event(
-                    &worker_app,
-                    &worker_runtime_store,
-                    &worker_config,
-                    &worker_app_name,
-                    event,
-                    &mut held_actions,
-                );
+            loop {
+                match event_rx.recv_timeout(POLL_INTERVAL) {
+                    Ok(event) => {
+                        let encoded_key = event.encoded_key.clone();
+                        process_encoded_key_event(
+                            &worker_app,
+                            &worker_runtime_store,
+                            &worker_config,
+                            &worker_app_name,
+                            event,
+                            &mut held_actions,
+                        );
+                        if held_actions.contains_key(&encoded_key) {
+                            held_last_seen.insert(encoded_key, Instant::now());
+                        } else {
+                            held_last_seen.remove(&encoded_key);
+                        }
+                    }
+                    Err(RecvTimeoutError::Timeout) => {
+                        // Recover from stuck held_actions — happens when the
+                        // capture helper dies mid-hold and no key-up event
+                        // ever arrives.  Without this, subsequent presses of
+                        // the same hotkey skip as "already held" forever.
+                        let now = Instant::now();
+                        let stale_keys: Vec<String> = held_last_seen
+                            .iter()
+                            .filter(|(_, last)| now.duration_since(**last) >= HOLD_STALE_THRESHOLD)
+                            .map(|(k, _)| k.clone())
+                            .collect();
+                        for key in stale_keys {
+                            if let Some(held) = held_actions.remove(&key) {
+                                log::warn!(
+                                    "[capture] Force-releasing stale hold for `{key}` \
+                                     (no key-up within {:?})",
+                                    HOLD_STALE_THRESHOLD,
+                                );
+                                if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
+                                    log::warn!(
+                                        "[capture] Force-release failed for `{key}`: {e}"
+                                    );
+                                }
+                            }
+                            held_last_seen.remove(&key);
+                        }
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
             }
 
             // Channel closed (graceful shutdown) — release all held keys
@@ -824,8 +936,11 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 0 // non-F-key or unmatched F-key → no encoding modifiers
             };
 
-            // Drain pending modifiers: consume those in the encoding mask,
-            // replay the rest (they're real keyboard modifiers).
+            // Drain pending modifiers: consume those that are (a) in the
+            // encoding mask AND (b) were buffered within the Razer chord
+            // window.  Replay the rest — they're either a different modifier
+            // the user happened to press, or the user's physical modifier
+            // that was buffered long before this F-key.
             // Collect first, then process — avoids holding RefCell borrow
             // during SendInput (which triggers re-entrant LL hook callback).
             let items: Vec<PendingModifier> = PENDING_MODIFIERS.with(|cell| {
@@ -834,6 +949,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             if !items.is_empty() {
                 let mut consumed_vks = Vec::new();
                 let mut replayed_vks = Vec::new();
+                let now = std::time::Instant::now();
                 for pm in &items {
                     let mask_bit = match pm.vk {
                         VK_MENU | VK_LMENU | VK_RMENU => MOD_ALT,
@@ -842,14 +958,19 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                         VK_LWIN | VK_RWIN => MOD_WIN,
                         _ => 0,
                     };
-                    if matched_mask & mask_bit != 0 {
-                        // Modifier IS in the encoding → consume (suppress its key-up too)
+                    let in_encoding = matched_mask & mask_bit != 0;
+                    let recent = now.duration_since(pm.buffered_at)
+                        < RAZER_ENCODING_CHORD_WINDOW;
+                    if in_encoding && recent {
+                        // Razer encoding → consume (suppress its key-up too).
                         CONSUMED_MODIFIER_VKS.with(|cell| {
-                            cell.borrow_mut().insert(pm.vk);
+                            cell.borrow_mut().insert(pm.vk, now);
                         });
                         consumed_vks.push(pm.vk);
                     } else {
-                        // Modifier NOT in the encoding → replay (real keyboard)
+                        // Not in encoding, or older than Razer chord window
+                        // (→ user's physical modifier).  Replay so the OS
+                        // sees the key-down we buffered away.
                         unsafe { replay_modifier_down(pm.vk, pm.scan); }
                         replayed_vks.push(pm.vk);
                     }
@@ -869,7 +990,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             // C1: Was this modifier consumed by an F-key match?
             // If so, suppress the up event too (it's Razer encoding release).
             let was_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
-                cell.borrow_mut().remove(&vk)
+                cell.borrow_mut().remove(&vk).is_some()
             });
             if was_consumed {
                 HELPER_MATCHES.with(|cell| {
@@ -1233,7 +1354,12 @@ pub fn capture_helper_main() {
         // Check for pending modifiers that have timed out and replay them.
         flush_expired_pending_modifiers();
 
-        // Drain any DEBUG lines generated by flush_expired_pending_modifiers.
+        // Garbage-collect stale CONSUMED_MODIFIER_VKS entries.  Prevents a
+        // lost Razer modifier-up (e.g. from alt-tab focus change) from
+        // leaving a stuck entry that suppresses a real subsequent Ctrl-up.
+        gc_stale_consumed_modifiers();
+
+        // Drain any DEBUG lines generated by flush/gc above.
         if drain_helper_matches(&mut stdout).is_err() {
             log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
             unsafe { UnhookWindowsHookEx(hook); }

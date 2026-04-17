@@ -525,6 +525,20 @@ fn plan_shortcut_hold_down_inputs(
 
     if let Some(pk) = primary_key {
         push_virtual_key_down(&mut inputs, pk);
+    } else if payload.alt || payload.win {
+        // Modifier-only shortcut with Alt or Win: inject the mask key
+        // (VK 0xE8, down+up) so Windows sees a non-modifier event between
+        // modifier-down and the eventual modifier-up.  Without this the
+        // lone Alt-up activates the window menu and the lone Win-up opens
+        // the Start menu — both swallow the modifier combo the user was
+        // trying to express.
+        push_virtual_key_tap(
+            &mut inputs,
+            VirtualKeySpec {
+                code: VK_MASK_KEY,
+                extended: false,
+            },
+        );
     }
 
     Ok((
@@ -921,6 +935,25 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
         GetAsyncKeyState, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
     };
 
+    // The LL-hook modifier buffering in capture_backend/windows.rs already
+    // prevents Razer encoding modifiers from reaching the OS.  Anything
+    // GetAsyncKeyState reports as held at action-dispatch time is therefore
+    // the user's physical keyboard — releasing it here would break
+    // "hold Ctrl on keyboard + side button → Ctrl+Delete" (and similar).
+    //
+    // Exception: text injection passes ALL_MODIFIERS (all four bits set)
+    // because held Ctrl/Alt corrupts Unicode / VK_PACKET output.  Fall
+    // through to the legacy release-all path only for that case.
+    let is_all_modifiers = mask.ctrl && mask.shift && mask.alt && mask.win;
+    if !is_all_modifiers {
+        log::debug!(
+            "[clear-modifiers] skipped — buffering handles encoding mods \
+             (mask: ctrl={} shift={} alt={} win={})",
+            mask.ctrl, mask.shift, mask.alt, mask.win,
+        );
+        return Ok(());
+    }
+
     // Diagnostic snapshot — distinguish L vs R variants for each modifier
     // so we can confirm whether the Razer driver injects LMENU or RMENU.
     let snapshot_state = || -> String {
@@ -1312,22 +1345,35 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
         .lock()
         .map_err(|e| format!("Failed to lock virtual keyboard: {e}"))?;
 
-    // Send each event individually with a delay between them.
-    // Mutter (GNOME Wayland) has a known race condition where modifier
-    // key-up events arriving too fast (< ~8ms) from uinput devices are
-    // lost, causing stuck modifiers.  A 12ms delay matches ydotool's
-    // default and is well above the danger zone.
-    let delay = std::time::Duration::from_millis(12);
+    // Mutter < 49 (GNOME 46 and earlier) has a race condition where modifier
+    // key-up events arriving too fast from uinput devices are lost, causing
+    // stuck modifiers.  We use longer delays around modifier transitions and
+    // shorter delays between regular keys to keep total latency reasonable.
+    let modifier_delay = std::time::Duration::from_millis(25);
+    let key_delay = std::time::Duration::from_millis(5);
+
+    let mut prev_was_modifier = false;
 
     for input in inputs {
         match input {
             KeyboardInputSpec::VirtualKey { code, key_up, .. } => {
                 if let Some(key) = vk_to_evdev_key(*code) {
+                    let is_modifier = is_modifier_virtual_key(*code);
+
+                    // Extra delay at modifier↔key boundary (e.g. Ctrl↓ → V↓
+                    // or V↑ → Ctrl↑) to ensure Mutter processes the modifier
+                    // state change before/after the primary key.
+                    if prev_was_modifier != is_modifier && prev_was_modifier {
+                        std::thread::sleep(modifier_delay);
+                    }
+
                     let value = if *key_up { 0 } else { 1 };
                     let event = InputEvent::new(EventType::KEY.0, key.0, value);
                     device.emit(&[event])
                         .map_err(|e| format!("Failed to emit key event: {e}"))?;
-                    std::thread::sleep(delay);
+
+                    std::thread::sleep(if is_modifier { modifier_delay } else { key_delay });
+                    prev_was_modifier = is_modifier;
                 }
             }
             KeyboardInputSpec::Unicode { .. } => {}
@@ -1377,6 +1423,11 @@ const VK_RSHIFT: u16 = 0xA1;
 const VK_LMENU: u16 = 0xA4;
 const VK_RMENU: u16 = 0xA5;
 const VK_LWIN: u16 = 0x5B;
+/// AHK-style "menu mask key".  Injected between held Alt/Win modifiers of a
+/// modifier-only shortcut so Windows does not interpret the subsequent
+/// Alt-up / Win-up (with no primary key between) as a menu / Start-menu
+/// activation.  Same VK that capture_backend/windows.rs uses.
+const VK_MASK_KEY: u16 = 0xE8;
 const VK_OEM_MINUS: u16 = 0xBD;
 const VK_OEM_PLUS: u16 = 0xBB;
 const VK_OEM_COMMA: u16 = 0xBC;
@@ -1951,18 +2002,45 @@ mod tests {
         )
         .unwrap();
 
-        // Only Win should be injected (Shift is reused from physical state)
+        // Only Win should be tracked as pressed (Shift is reused from physical state).
         assert_eq!(held.pressed_modifier_vks.len(), 1, "only Win injected");
         assert_eq!(
             held.pressed_modifier_vks[0].code,
             ModifierKey::Win.virtual_key().code,
         );
-        assert_eq!(inputs.len(), 1, "only Win-down");
+        // Expected sequence: Win-down, MASK-down, MASK-up.  The mask key tap
+        // prevents lone Win-up from activating the Start menu.
+        assert_eq!(inputs.len(), 3, "Win-down + mask-down + mask-up");
+        assert!(matches!(
+            inputs[0],
+            KeyboardInputSpec::VirtualKey {
+                code,
+                key_up: false,
+                ..
+            } if code == ModifierKey::Win.virtual_key().code,
+        ));
+        assert!(matches!(
+            inputs[1],
+            KeyboardInputSpec::VirtualKey {
+                code: VK_MASK_KEY,
+                key_up: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            inputs[2],
+            KeyboardInputSpec::VirtualKey {
+                code: VK_MASK_KEY,
+                key_up: true,
+                ..
+            }
+        ));
     }
 
     #[test]
     fn hold_down_modifier_only_shortcut() {
-        // Modifier-only action (Shift+Win) with nothing held → both injected.
+        // Modifier-only action (Shift+Win) with nothing held → both injected,
+        // plus a VK 0xE8 mask tap to prevent Start-menu activation on release.
         let payload = ShortcutActionPayload {
             key: String::new(),
             ctrl: false,
@@ -1980,12 +2058,60 @@ mod tests {
 
         assert!(held.primary_key.is_none());
         assert_eq!(held.pressed_modifier_vks.len(), 2, "Win + Shift injected");
-        // All inputs should be key-down only
-        assert!(inputs.iter().all(|i| match i {
-            KeyboardInputSpec::VirtualKey { key_up, .. } => !key_up,
-            _ => false,
-        }));
-        assert_eq!(inputs.len(), 2);
+        // Expected: Win-down, Shift-down, MASK-down, MASK-up.
+        assert_eq!(inputs.len(), 4);
+        // First two events are modifier-downs.
+        for input in &inputs[..2] {
+            assert!(matches!(
+                input,
+                KeyboardInputSpec::VirtualKey { key_up: false, .. },
+            ));
+        }
+        // Last two events are mask-key tap.
+        assert!(matches!(
+            inputs[2],
+            KeyboardInputSpec::VirtualKey {
+                code: VK_MASK_KEY,
+                key_up: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            inputs[3],
+            KeyboardInputSpec::VirtualKey {
+                code: VK_MASK_KEY,
+                key_up: true,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn hold_down_modifier_only_ctrl_shift_skips_mask_key() {
+        // Modifier-only Ctrl+Shift — no Alt/Win — shouldn't inject mask key
+        // because lone Ctrl-up and Shift-up don't activate any system menu.
+        let payload = ShortcutActionPayload {
+            key: String::new(),
+            ctrl: true,
+            shift: true,
+            alt: false,
+            win: false,
+            raw: None,
+        };
+
+        let (inputs, _held) = plan_shortcut_hold_down_inputs(
+            &payload,
+            &ModifierSnapshot::default(),
+        )
+        .unwrap();
+
+        assert_eq!(inputs.len(), 2, "only Ctrl-down + Shift-down, no mask");
+        for input in &inputs {
+            assert!(matches!(
+                input,
+                KeyboardInputSpec::VirtualKey { key_up: false, .. },
+            ));
+        }
     }
 
     #[test]

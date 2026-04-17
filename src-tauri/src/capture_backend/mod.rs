@@ -164,7 +164,24 @@ fn process_encoded_key_event(
     // --- Key-up path: release any held shortcut ---
     if event.is_key_up {
         log::info!("[capture] Key-up received for {}", event.encoded_key);
-        if let Some(held) = held_actions.remove(&event.encoded_key) {
+
+        // On Linux/evdev, modifier state may change between key-down and
+        // key-up (e.g. Razer releases Alt before F24), so the encoded_key
+        // at key-up ("F24") won't match key-down ("Alt+F24").  Search by
+        // exact match first, then fall back to any held entry whose
+        // encoded_key ends with the base key name.
+        let held_key = if held_actions.contains_key(&event.encoded_key) {
+            Some(event.encoded_key.clone())
+        } else {
+            // Extract base key (part after last '+', or the whole string)
+            let base = event.encoded_key.rsplit('+').next().unwrap_or(&event.encoded_key);
+            held_actions
+                .keys()
+                .find(|k| k.ends_with(base))
+                .cloned()
+        };
+
+        if let Some(held) = held_key.and_then(|k| held_actions.remove(&k)) {
             match crate::input_synthesis::send_shortcut_hold_up(&held) {
                 Ok(()) => {
                     log::info!(

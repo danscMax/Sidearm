@@ -272,6 +272,34 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
     SendInput(1, &input, size_of::<INPUT>() as i32);
 }
 
+/// Replay a complete down+up tap for a modifier via SendInput.  Used by the
+/// solo-tap path (Case C2): the user's real key-up has already arrived but
+/// the original key-down is still buffered.  We can't just replay the down
+/// and let the real up pass through — SendInput queues the down at the END
+/// of the input queue, so the OS would process up first (no-op) then down
+/// (Ctrl held).  Replaying both keeps the events in the right order; the
+/// caller suppresses the real up event.
+unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    };
+    let make = |key_up: bool| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk as u16,
+                wScan: scan as u16,
+                dwFlags: if key_up { KEYEVENTF_KEYUP } else { 0 },
+                time: 0,
+                dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+            },
+        },
+    };
+    let inputs = [make(false), make(true)];
+    SendInput(2, inputs.as_ptr(), size_of::<INPUT>() as i32);
+}
+
 /// Maximum age of a pending modifier-down when an F-key match arrives for
 /// it to still be considered Razer encoding.  Razer Naga sends
 /// modifier→F-key within ~1-5 ms; anything older is likely a user's physical
@@ -897,6 +925,26 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 modifier_in_any_encoding(vk, &regs)
             });
             if should_buffer {
+                // Drop any stale CONSUMED entry for this VK before buffering
+                // a fresh down.  A new modifier-down means the previous Razer
+                // chord that consumed this VK either completed normally
+                // (entry already removed by C1) or its modifier-up was lost
+                // (focus change, alt-tab, helper rehook, etc.).  Without this
+                // clear, a stale entry suppresses the user's next real
+                // Ctrl-up via C1 → OS keeps Ctrl "held" until the user
+                // presses Ctrl a second time to recover.
+                let cleared_stale = CONSUMED_MODIFIER_VKS.with(|cell| {
+                    cell.borrow_mut().remove(&vk).is_some()
+                });
+                if cleared_stale {
+                    HELPER_MATCHES.with(|cell| {
+                        cell.borrow_mut().push(format!(
+                            "DEBUG:consumed-stale-cleared vk=0x{:02X}",
+                            vk,
+                        ));
+                    });
+                }
+
                 PENDING_MODIFIERS.with(|cell| {
                     cell.borrow_mut().push(PendingModifier {
                         vk,
@@ -1003,7 +1051,16 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 wake = true;
             } else {
                 // C2: Was this modifier still pending (buffered but F-key never came)?
-                // This is a solo modifier tap — replay the down, let the up pass through.
+                // This is a solo modifier tap.  We replay the entire tap
+                // (down+up) and SUPPRESS the user's real up event.
+                //
+                // Why not just replay-down + let real up pass through:
+                // SendInput queues the down at the END of the OS input
+                // queue, but the current real up event continues through
+                // the hook chain immediately.  The OS would then process:
+                // up first (no-op, key wasn't down at OS level), then down
+                // (key now stuck pressed).  This was the "tap Ctrl in
+                // terminal → Ctrl stays held until I press Ctrl again" bug.
                 let pending_entry = PENDING_MODIFIERS.with(|cell| {
                     let mut pending = cell.borrow_mut();
                     if let Some(pos) = pending.iter().position(|pm| pm.vk == vk) {
@@ -1019,8 +1076,10 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                             vk,
                         ));
                     });
-                    replay_modifier_down(pm.vk, pm.scan);
-                    // Don't suppress the up — let it pass through naturally.
+                    replay_modifier_tap(pm.vk, pm.scan);
+                    // Suppress the real up — replay_modifier_tap already
+                    // emitted both down and up in the correct order.
+                    suppress = true;
                     wake = true;
                 }
             }

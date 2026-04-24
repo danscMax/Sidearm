@@ -328,6 +328,41 @@ export function SettingsWorkspace({
         </div>
       </section>
 
+      {/* Advanced capture tuning */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.captureHeader")}</span>
+        </div>
+        <p className="panel__muted" style={{ fontSize: "0.78rem", marginBottom: 12 }}>
+          {t("settings.modifierStaleGcHelp")}
+        </p>
+        <div className="osd-settings-row">
+          <span className="osd-settings-row__label">
+            {t("settings.modifierStaleGcLabel")}
+          </span>
+          <div className="osd-settings-row__buttons">
+            {([1000, 3000, 5000, 10000] as const).map((ms) => {
+              const current = osd.modifierStaleGcMs ?? 5000;
+              const active = current === ms;
+              return (
+                <button
+                  key={ms}
+                  type="button"
+                  className={`action-button action-button--small${active ? "" : " action-button--ghost"}`}
+                  onClick={() =>
+                    updateSettings({
+                      modifierStaleGcMs: ms === 5000 ? undefined : ms,
+                    })
+                  }
+                >
+                  {t("settings.modifierStaleGcOption", { seconds: ms / 1000 })}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
       {/* Active profile editor */}
       {activeProfile ? (
         <section className="settings-section">

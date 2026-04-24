@@ -389,7 +389,11 @@
     "osdAnimSlideIn": "Выезжание",
     "osdAnimFadeIn": "Затухание",
     "osdAnimNone": "Без анимации",
-    "osdPreviewHint": "Предпросмотр уведомления"
+    "osdPreviewHint": "Предпросмотр уведомления",
+    "captureHeader": "ПЕРЕХВАТ (ТОНКАЯ НАСТРОЙКА)",
+    "modifierStaleGcLabel": "Окно очистки CONSUMED",
+    "modifierStaleGcHelp": "Как долго helper держит след о «съеденном» модификаторе от мыши, прежде чем его удалить. Слишком коротко — Sidearm теряет часть мышных комбо. Слишком долго — иногда «залипает» физический Ctrl. 5 сек — безопасный дефолт, совместимый со старым поведением.",
+    "modifierStaleGcOption": "{{seconds}} сек"
   },
   "command": {
     "undo": "Отменить",

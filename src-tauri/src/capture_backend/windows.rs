@@ -307,15 +307,34 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
 /// a user modifier here used to break "hold Ctrl + mouse-Delete → Ctrl+Delete".
 const RAZER_ENCODING_CHORD_WINDOW: std::time::Duration = std::time::Duration::from_millis(10);
 
-/// Maximum lifetime of a CONSUMED_MODIFIER_VKS entry before it is garbage
-/// collected.  Guards against a Razer modifier-up being lost (e.g. due to
-/// focus change / window switch) and leaving the set with a stale entry
-/// that suppresses a real subsequent Ctrl-up.  1 second is well above the
-/// duration of a typical Razer chord (even hold-mode) yet short enough to
-/// self-heal quickly — the user only loses the modifier for that long
-/// after a stuck scenario before it clears.
-const CONSUMED_MODIFIER_STALE_THRESHOLD: std::time::Duration =
-    std::time::Duration::from_secs(1);
+/// Default maximum lifetime of a CONSUMED_MODIFIER_VKS entry before it is
+/// garbage collected.  Guards against a Razer modifier-up being lost (e.g.
+/// focus change / window switch) leaving a stale entry that would suppress
+/// a real subsequent Ctrl-up.
+///
+/// The right value is device-dependent:
+///  - Too **short** and a slower Razer firmware loses its own modifier-up
+///    match (observed on some Naga V2 HyperSpeed units: 1 s dropped events).
+///  - Too **long** and a lost Razer up leaves Ctrl virtually held for the
+///    full window (the bug the 81807d9 fix targeted: 5 s was painful).
+///
+/// 5 s is the safest default (matches pre-81807d9 behaviour).  Users can
+/// tune via `Settings.modifierStaleGcMs`.
+const DEFAULT_CONSUMED_MODIFIER_STALE_MS: u64 = 5000;
+
+thread_local! {
+    /// Active threshold on the helper thread. Set once from the stdin init
+    /// payload; defaults to the compile-time default if unset.
+    static CONSUMED_MODIFIER_STALE_THRESHOLD: std::cell::Cell<std::time::Duration> =
+        std::cell::Cell::new(std::time::Duration::from_millis(
+            DEFAULT_CONSUMED_MODIFIER_STALE_MS,
+        ));
+}
+
+#[cfg(test)]
+fn stale_threshold() -> std::time::Duration {
+    CONSUMED_MODIFIER_STALE_THRESHOLD.with(|c| c.get())
+}
 
 /// Check for pending modifiers that have timed out (>20ms) and replay them
 /// via SendInput. Called from the message pump loop.
@@ -371,12 +390,13 @@ fn flush_expired_pending_modifiers() {
 /// user releasing the key after e.g. alt-tab ate Razer's Ctrl-up) to be
 /// suppressed, leaving the OS in a phantom "Ctrl held" state until restart.
 fn gc_stale_consumed_modifiers() {
+    let threshold = CONSUMED_MODIFIER_STALE_THRESHOLD.with(|c| c.get());
     let removed_vks = CONSUMED_MODIFIER_VKS.with(|cell| {
         let now = std::time::Instant::now();
         let mut consumed = cell.borrow_mut();
         let mut removed = Vec::new();
         consumed.retain(|vk, at| {
-            if now.duration_since(*at) >= CONSUMED_MODIFIER_STALE_THRESHOLD {
+            if now.duration_since(*at) >= threshold {
                 removed.push(*vk);
                 false
             } else {
@@ -511,7 +531,8 @@ impl CaptureBackendHandle {
         // Spawn helper process for LL hook (handles superset modifier matching
         // for all keys, not just modifier-combos).  Non-fatal if fails —
         // RegisterHotKey still handles bare keys with exact matching.
-        let helper = spawn_capture_helper(&registrations, helper_event_tx);
+        let modifier_stale_gc_ms = config.settings.modifier_stale_gc_ms;
+        let helper = spawn_capture_helper(&registrations, helper_event_tx, modifier_stale_gc_ms);
         if !registrations.is_empty() && helper.is_none() {
             if let Ok(mut store) = runtime_store.lock() {
                 store.record_warn(
@@ -1143,7 +1164,9 @@ pub fn capture_helper_main() {
         },
     };
 
-    // 1. Read registrations from stdin (one JSON line)
+    // 1. Read registrations from stdin (one JSON line).
+    // Accepts either a bare array (legacy protocol) or a wrapper object
+    // `{registrations: [...], modifierStaleGcMs: <u64>}`.
     let stdin = std::io::stdin();
     let mut line = String::new();
     if stdin.lock().read_line(&mut line).unwrap_or(0) == 0 {
@@ -1151,13 +1174,45 @@ pub fn capture_helper_main() {
         return;
     }
 
-    let registrations: Vec<HelperRegistration> = match serde_json::from_str(line.trim()) {
-        Ok(regs) => regs,
-        Err(e) => {
-            log::error!("[capture-helper] Failed to parse registrations: {e}");
-            return;
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct HelperInit {
+        registrations: Vec<HelperRegistration>,
+        #[serde(default)]
+        modifier_stale_gc_ms: Option<u64>,
+    }
+
+    let init: HelperInit = match serde_json::from_str::<HelperInit>(line.trim()) {
+        Ok(init) => init,
+        Err(_) => {
+            // Fallback: legacy bare-array payload.
+            match serde_json::from_str::<Vec<HelperRegistration>>(line.trim()) {
+                Ok(regs) => HelperInit {
+                    registrations: regs,
+                    modifier_stale_gc_ms: None,
+                },
+                Err(e) => {
+                    log::error!("[capture-helper] Failed to parse init payload: {e}");
+                    return;
+                }
+            }
         }
     };
+
+    let HelperInit {
+        registrations,
+        modifier_stale_gc_ms,
+    } = init;
+
+    if let Some(ms) = modifier_stale_gc_ms {
+        let clamped = ms.clamp(500, 30_000);
+        CONSUMED_MODIFIER_STALE_THRESHOLD.with(|c| {
+            c.set(std::time::Duration::from_millis(clamped));
+        });
+        log::info!(
+            "[capture-helper] CONSUMED stale threshold set to {clamped} ms."
+        );
+    }
 
     if registrations.is_empty() {
         log::warn!("[capture-helper] No registrations, exiting.");
@@ -1468,6 +1523,7 @@ fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) -> std::io::Result
 fn spawn_capture_helper(
     registrations: &[RegisteredHotkey],
     event_tx: mpsc::Sender<EncodedKeyEvent>,
+    modifier_stale_gc_ms: Option<u64>,
 ) -> Option<HelperHandle> {
     use std::io::Write;
     use std::os::windows::process::CommandExt;
@@ -1521,11 +1577,22 @@ fn spawn_capture_helper(
     let mut stdin_pipe = child.stdin.take().expect("stdin was piped");
     let stdout_pipe = child.stdout.take().expect("stdout was piped");
 
-    // Write registrations as a JSON line to the helper's stdin
-    let json = match serde_json::to_string(&helper_regs) {
+    // Write init payload as one JSON line to the helper's stdin.
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct HelperInit<'a> {
+        registrations: &'a [HelperRegistration],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        modifier_stale_gc_ms: Option<u64>,
+    }
+    let init = HelperInit {
+        registrations: &helper_regs,
+        modifier_stale_gc_ms,
+    };
+    let json = match serde_json::to_string(&init) {
         Ok(j) => j,
         Err(e) => {
-            log::warn!("[capture] Failed to serialize helper registrations: {e}");
+            log::warn!("[capture] Failed to serialize helper init: {e}");
             let _ = child.kill();
             return None;
         }

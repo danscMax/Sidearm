@@ -188,6 +188,13 @@ pub struct Settings {
     pub osd_font_size: OsdFontSize,
     #[serde(default)]
     pub osd_animation: OsdAnimation,
+    /// Optional override for how long the capture helper keeps a CONSUMED
+    /// modifier-VK entry before it is garbage-collected. Unit: milliseconds.
+    /// Clamped server-side to 500..=30000. Default 5000 (5 s). Shorten if
+    /// Ctrl/Shift/Alt occasionally stick; lengthen if mouse chords randomly
+    /// fail to trigger (the chord's modifier-up was lost to a focus change).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modifier_stale_gc_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1383,6 +1390,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             osd_position: OsdPosition::default(),
             osd_font_size: OsdFontSize::default(),
             osd_animation: OsdAnimation::default(),
+            modifier_stale_gc_ms: None,
         },
         profiles: seed_profiles(),
         physical_controls: seed_physical_controls(),

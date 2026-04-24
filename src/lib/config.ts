@@ -78,6 +78,7 @@ export interface Settings {
   osdPosition: OsdPosition;
   osdFontSize: OsdFontSize;
   osdAnimation: OsdAnimation;
+  modifierStaleGcMs?: number;
 }
 
 export interface Profile {

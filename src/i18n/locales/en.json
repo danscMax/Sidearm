@@ -389,7 +389,11 @@
     "osdAnimSlideIn": "Slide in",
     "osdAnimFadeIn": "Fade in",
     "osdAnimNone": "No animation",
-    "osdPreviewHint": "Notification preview"
+    "osdPreviewHint": "Notification preview",
+    "captureHeader": "CAPTURE (ADVANCED)",
+    "modifierStaleGcLabel": "CONSUMED GC window",
+    "modifierStaleGcHelp": "How long the helper keeps a trace of a 'consumed' mouse modifier before clearing it. Too short and some mouse chords get dropped. Too long and a physical Ctrl may get stuck for that window. 5 s is the safe default matching legacy behaviour.",
+    "modifierStaleGcOption": "{{seconds}} s"
   },
   "command": {
     "undo": "Undo",

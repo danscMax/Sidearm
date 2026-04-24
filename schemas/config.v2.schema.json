@@ -223,6 +223,12 @@
           "type": "string",
           "enum": ["slideIn", "fadeIn", "none"],
           "default": "slideIn"
+        },
+        "modifierStaleGcMs": {
+          "type": "integer",
+          "minimum": 500,
+          "maximum": 30000,
+          "description": "Capture helper CONSUMED modifier GC window in milliseconds. Leave unset for the default (5000)."
         }
       }
     },

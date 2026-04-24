@@ -374,6 +374,7 @@ mod tests {
                 osd_position: OsdPosition::default(),
                 osd_font_size: OsdFontSize::default(),
                 osd_animation: OsdAnimation::default(),
+                modifier_stale_gc_ms: None,
             },
             profiles: vec![
                 profile("default", "Default", 0),

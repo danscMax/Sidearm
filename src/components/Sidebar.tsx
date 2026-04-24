@@ -79,26 +79,18 @@ export function Sidebar({
             </button>
           </div>
         </div>
-        {profiles.length <= 3 ? (
-          <div
-            className="pill-track pill-track--sidebar"
-            style={{ "--pill-count": profiles.length } as React.CSSProperties}
-          >
-            {(() => {
-              const idx = profiles.findIndex((p) => p.id === effectiveProfileId);
-              return idx >= 0 ? (
-                <div
-                  className="pill-track__indicator"
-                  style={{ transform: `translateX(${idx * 100}%)` }}
-                />
-              ) : null;
-            })()}
-            {profiles.map((p) => (
+        <div className="sidebar__profile-list" role="listbox" aria-label={t("sidebar.profileHeader")}>
+          {profiles.map((p) => {
+            const active = p.id === effectiveProfileId;
+            const runtimeActive =
+              runtimeStatus === "running" && runtimeResolvedProfileName === p.name;
+            return (
               <button
                 key={p.id}
                 type="button"
-                className={`pill-track__pill${p.id === effectiveProfileId ? " pill-track__pill--active" : ""}`}
-                style={{ position: "relative" }}
+                role="option"
+                aria-selected={active}
+                className={`sidebar__profile-list-item${active ? " sidebar__profile-list-item--active" : ""}`}
                 onClick={() => {
                   startTransition(() => onSelectProfile(p.id));
                 }}
@@ -111,36 +103,17 @@ export function Sidebar({
                   setCtxMenu({ x: e.clientX, y: e.clientY, profileId: p.id });
                 }}
               >
-                {p.name}
-                {runtimeStatus === "running" && runtimeResolvedProfileName === p.name ? (
-                  <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
+                <span className="sidebar__profile-list-item__name">{p.name}</span>
+                {runtimeActive ? (
+                  <span
+                    className="sidebar__profile-list-item__dot"
+                    title={t("sidebar.activeRuntime")}
+                  />
                 ) : null}
               </button>
-            ))}
-          </div>
-        ) : (
-          <select
-            className="sidebar__profile-select"
-            value={effectiveProfileId ?? ""}
-            onChange={(event) => {
-              startTransition(() => {
-                onSelectProfile(event.target.value);
-              });
-            }}
-            onContextMenu={(e) => {
-              if (effectiveProfileId) {
-                e.preventDefault();
-                setCtxMenu({ x: e.clientX, y: e.clientY, profileId: effectiveProfileId });
-              }
-            }}
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        )}
+            );
+          })}
+        </div>
       </div>
       <button
         className={`sidebar__runtime sidebar__runtime--${runtimeStatus === "running" ? "running" : "stopped"}`}

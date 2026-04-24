@@ -2024,6 +2024,60 @@ select option:disabled {
   color: var(--c-text-muted, rgba(240, 242, 236, 0.5));
 }
 
+/* Profile list in the sidebar — replaces the native <select> which
+   couldn't be deeply styled on WebView2. Mirrors .btn-legend__cell so
+   profiles look like the button-legend entries on the right. */
+.sidebar__profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.sidebar__profile-list-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  font-size: var(--fs-body-sm);
+  font-weight: 500;
+  color: var(--c-text);
+  background: var(--c-card-bg, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--c-card-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-xs, 6px);
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.sidebar__profile-list-item:hover {
+  background: rgba(159, 202, 105, 0.08);
+  border-color: rgba(159, 202, 105, 0.4);
+  color: var(--c-text-bright, #f0f2ec);
+}
+.sidebar__profile-list-item--active {
+  background: rgba(159, 202, 105, 0.16);
+  border-color: var(--c-accent, #9fca69);
+  color: var(--c-accent, #9fca69);
+  font-weight: 600;
+}
+.sidebar__profile-list-item__name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar__profile-list-item__dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-ok, #75c268);
+  box-shadow: 0 0 4px rgba(117, 194, 104, 0.6);
+}
+
 .sidebar__profile-select-row {
   display: flex;
   gap: 6px;

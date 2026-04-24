@@ -316,6 +316,14 @@ select optgroup {
   background-color: var(--c-bg, #1a1f16);
   color: var(--c-text-bright, #f0f2ec);
 }
+select option:hover,
+select option:focus {
+  /* Subtle accent-tinted hover that still looks native on a dark popup.
+     Matching the tint used on .nav-item--active keeps the dropdown
+     consistent with the rest of the sidebar. */
+  background-color: rgba(125, 182, 73, 0.22);
+  color: var(--c-text-bright, #f0f2ec);
+}
 select option:checked {
   background-color: var(--c-bg, #1a1f16);
   color: var(--c-accent, #9fca69);

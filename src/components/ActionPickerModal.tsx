@@ -991,28 +991,60 @@ export function ActionPickerModal({
                 onChange={(e) => setTriggerModeDraft(e.target.value as TriggerMode)}
               >
                 <option value="press">{t("picker.triggerPress")}</option>
+                <option value="doublePress">{t("picker.triggerDoublePress")}</option>
+                <option value="triplePress">{t("picker.triggerTriplePress")}</option>
                 <option value="hold">{t("picker.triggerHold")}</option>
                 <option value="chord">{t("picker.triggerChord")}</option>
               </select>
             </label>
 
             {triggerModeDraft === "chord" && controlId ? (
-              <label className="field">
-                <span className="field__label">{t("picker.chordPartner")}</span>
-                <select
-                  value={chordPartnerDraft}
-                  onChange={(e) => setChordPartnerDraft(e.target.value as ControlId)}
-                >
-                  <option value="">{t("picker.chordPartnerEmpty")}</option>
-                  {config.physicalControls
-                    .filter((c) => c.id !== controlId && c.remappable)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.defaultName}
-                      </option>
-                    ))}
-                </select>
-              </label>
+              <div className="field">
+                <p className="panel__muted" style={{ margin: "4px 0", fontSize: "0.76rem" }}>
+                  {t("picker.chordExplainer")}
+                </p>
+                <div className="chord-preview">
+                  <span className="chord-preview__key">
+                    {config.physicalControls.find((c) => c.id === controlId)?.defaultName ?? controlId}
+                  </span>
+                  <span className="chord-preview__plus">+</span>
+                  <span className="chord-preview__key chord-preview__key--partner">
+                    {config.physicalControls.find((c) => c.id === chordPartnerDraft)?.defaultName ?? "…"}
+                  </span>
+                </div>
+                <label className="field">
+                  <span className="field__label">{t("picker.chordPartner")}</span>
+                  <select
+                    value={chordPartnerDraft}
+                    onChange={(e) => setChordPartnerDraft(e.target.value as ControlId)}
+                  >
+                    <option value="">{t("picker.chordPartnerEmpty")}</option>
+                    {config.physicalControls
+                      .filter((c) => c.id !== controlId && c.remappable)
+                      .map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.defaultName}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {chordPartnerDraft && selectedLayer ? (
+                  (() => {
+                    const partnerHasChord = config.bindings.some(
+                      (b) =>
+                        b.controlId === chordPartnerDraft &&
+                        b.layer === selectedLayer &&
+                        b.triggerMode === "chord" &&
+                        b.enabled,
+                    );
+                    return partnerHasChord ? null : (
+                      <p className="notice notice--warning" style={{ margin: 0, fontSize: "0.76rem" }}>
+                        {t("picker.chordWarnNoPartnerBinding")}
+                      </p>
+                    );
+                  })()
+                ) : null}
+              </div>
             ) : null}
           </div>
         </div>

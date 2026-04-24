@@ -4578,3 +4578,23 @@ input[type="number"] { -moz-appearance: textfield; }
   font-size: 0.75rem;
   color: #eab308;
 }
+
+/* ───────────────────────── M4: Chord preview ───────────────────────── */
+.chord-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.chord-preview__key {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.82rem;
+}
+.chord-preview__key--partner { border-style: dashed; color: var(--c-text-muted); }
+.chord-preview__plus { color: var(--c-text-muted); font-size: 0.9rem; }

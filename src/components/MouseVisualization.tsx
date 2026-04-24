@@ -30,9 +30,26 @@ type ViewTab = "top" | "side" | "combined";
 
 function actionLabel(entry: ControlSurfaceEntry): string {
   if (entry.action && entry.action.type !== "disabled" && entry.binding?.enabled) {
-    return entry.action.pretty;
+    const base = entry.action.pretty;
+    const badge = triggerBadge(entry.binding.triggerMode);
+    return badge ? `${base} ${badge}` : base;
   }
   return displayNameForControl(entry.control);
+}
+
+function triggerBadge(mode: string | undefined): string {
+  switch (mode) {
+    case "doublePress":
+      return "· 2×";
+    case "triplePress":
+      return "· 3×";
+    case "hold":
+      return "· Hold";
+    case "chord":
+      return "· Chord";
+    default:
+      return "";
+  }
 }
 
 function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {

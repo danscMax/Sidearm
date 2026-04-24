@@ -2015,8 +2015,10 @@ select optgroup {
   color: var(--c-text-bright, #f0f2ec);
 }
 select option:checked {
-  background-color: rgba(159, 202, 105, 0.25);
-  color: var(--c-text-bright, #f0f2ec);
+  /* Stronger accent on the selected option so it's more readable, not less. */
+  background-color: rgba(159, 202, 105, 0.32);
+  color: #ffffff;
+  font-weight: 600;
 }
 select option:disabled {
   color: var(--c-text-muted, rgba(240, 242, 236, 0.5));

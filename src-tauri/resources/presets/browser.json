@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "exportedAt": "2026-04-24T00:00:00.000Z",
+  "profile": {
+    "id": "preset-browser-profile",
+    "name": "🌐 Браузер",
+    "description": "Вкладки, история, DevTools — работает в Chrome, Edge, Firefox.",
+    "enabled": true,
+    "priority": 100
+  },
+  "actions": [
+    { "id": "preset-browser-action-01", "type": "shortcut", "payload": { "key": "T", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Новая вкладка" },
+    { "id": "preset-browser-action-02", "type": "shortcut", "payload": { "key": "W", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Закрыть вкладку" },
+    { "id": "preset-browser-action-03", "type": "shortcut", "payload": { "key": "T", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Вернуть закрытую" },
+    { "id": "preset-browser-action-04", "type": "shortcut", "payload": { "key": "Tab", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Следующая вкладка" },
+    { "id": "preset-browser-action-05", "type": "shortcut", "payload": { "key": "Tab", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Предыдущая вкладка" },
+    { "id": "preset-browser-action-06", "type": "shortcut", "payload": { "key": "L", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Адресная строка" },
+    { "id": "preset-browser-action-07", "type": "shortcut", "payload": { "key": "F", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Поиск на странице" },
+    { "id": "preset-browser-action-08", "type": "shortcut", "payload": { "key": "N", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Инкогнито" },
+    { "id": "preset-browser-action-09", "type": "shortcut", "payload": { "key": "F12", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "DevTools" },
+    { "id": "preset-browser-action-10", "type": "shortcut", "payload": { "key": "H", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "История" },
+    { "id": "preset-browser-action-11", "type": "shortcut", "payload": { "key": "D", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Закладка" },
+    { "id": "preset-browser-action-12", "type": "shortcut", "payload": { "key": "R", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Обновить" }
+  ],
+  "bindings": [
+    { "id": "preset-browser-binding-01", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_01", "label": "Новая вкладка", "actionRef": "preset-browser-action-01", "enabled": true },
+    { "id": "preset-browser-binding-02", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_02", "label": "Закрыть", "actionRef": "preset-browser-action-02", "enabled": true },
+    { "id": "preset-browser-binding-03", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_03", "label": "Восстановить", "actionRef": "preset-browser-action-03", "enabled": true },
+    { "id": "preset-browser-binding-04", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_04", "label": "След. вкл", "actionRef": "preset-browser-action-04", "enabled": true },
+    { "id": "preset-browser-binding-05", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_05", "label": "Пред. вкл", "actionRef": "preset-browser-action-05", "enabled": true },
+    { "id": "preset-browser-binding-06", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_06", "label": "Адрес", "actionRef": "preset-browser-action-06", "enabled": true },
+    { "id": "preset-browser-binding-07", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_07", "label": "Поиск", "actionRef": "preset-browser-action-07", "enabled": true },
+    { "id": "preset-browser-binding-08", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_08", "label": "Инкогнито", "actionRef": "preset-browser-action-08", "enabled": true },
+    { "id": "preset-browser-binding-09", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_09", "label": "DevTools", "actionRef": "preset-browser-action-09", "enabled": true },
+    { "id": "preset-browser-binding-10", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_10", "label": "История", "actionRef": "preset-browser-action-10", "enabled": true },
+    { "id": "preset-browser-binding-11", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_11", "label": "Закладка", "actionRef": "preset-browser-action-11", "enabled": true },
+    { "id": "preset-browser-binding-12", "profileId": "preset-browser-profile", "layer": "standard", "controlId": "thumb_12", "label": "Обновить", "actionRef": "preset-browser-action-12", "enabled": true }
+  ],
+  "appMappings": [
+    { "id": "preset-browser-mapping-chrome", "profileId": "preset-browser-profile", "exe": "chrome.exe", "titleIncludes": [], "priority": 100, "enabled": true },
+    { "id": "preset-browser-mapping-edge", "profileId": "preset-browser-profile", "exe": "msedge.exe", "titleIncludes": [], "priority": 100, "enabled": true },
+    { "id": "preset-browser-mapping-firefox", "profileId": "preset-browser-profile", "exe": "firefox.exe", "titleIncludes": [], "priority": 100, "enabled": true }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "exportedAt": "2026-04-24T00:00:00.000Z",
+  "profile": {
+    "id": "preset-media-profile",
+    "name": "🎬 Медиа / Видеозвонок",
+    "description": "YouTube/VLC + Teams. Важно: пробел и буквы печатаются в поле ввода — настрой appMapping на нужное приложение после импорта.",
+    "enabled": true,
+    "priority": 100
+  },
+  "actions": [
+    { "id": "preset-media-action-01", "type": "shortcut", "payload": { "key": "Space", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Пауза / Play" },
+    { "id": "preset-media-action-02", "type": "shortcut", "payload": { "key": "F", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Полный экран" },
+    { "id": "preset-media-action-03", "type": "shortcut", "payload": { "key": "M", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Mute (видео)" },
+    { "id": "preset-media-action-04", "type": "shortcut", "payload": { "key": "J", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Назад 10 сек" },
+    { "id": "preset-media-action-05", "type": "shortcut", "payload": { "key": "L", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Вперёд 10 сек" },
+    { "id": "preset-media-action-06", "type": "shortcut", "payload": { "key": ".", "ctrl": false, "shift": true, "alt": false, "win": false }, "pretty": "Быстрее" },
+    { "id": "preset-media-action-07", "type": "shortcut", "payload": { "key": ",", "ctrl": false, "shift": true, "alt": false, "win": false }, "pretty": "Медленнее" },
+    { "id": "preset-media-action-08", "type": "shortcut", "payload": { "key": "M", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Mic mute (Teams)" },
+    { "id": "preset-media-action-09", "type": "shortcut", "payload": { "key": "O", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Камера (Teams)" },
+    { "id": "preset-media-action-10", "type": "shortcut", "payload": { "key": "K", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Рука (Teams)" },
+    { "id": "preset-media-action-11", "type": "shortcut", "payload": { "key": "E", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Поделиться экраном (Teams)" },
+    { "id": "preset-media-action-12", "type": "shortcut", "payload": { "key": "H", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Завершить звонок (Teams)" }
+  ],
+  "bindings": [
+    { "id": "preset-media-binding-01", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_01", "label": "Play/Pause", "actionRef": "preset-media-action-01", "enabled": true },
+    { "id": "preset-media-binding-02", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_02", "label": "Full screen", "actionRef": "preset-media-action-02", "enabled": true },
+    { "id": "preset-media-binding-03", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_03", "label": "Mute видео", "actionRef": "preset-media-action-03", "enabled": true },
+    { "id": "preset-media-binding-04", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_04", "label": "−10 сек", "actionRef": "preset-media-action-04", "enabled": true },
+    { "id": "preset-media-binding-05", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_05", "label": "+10 сек", "actionRef": "preset-media-action-05", "enabled": true },
+    { "id": "preset-media-binding-06", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_06", "label": "Быстрее", "actionRef": "preset-media-action-06", "enabled": true },
+    { "id": "preset-media-binding-07", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_07", "label": "Медленнее", "actionRef": "preset-media-action-07", "enabled": true },
+    { "id": "preset-media-binding-08", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_08", "label": "Mic mute", "actionRef": "preset-media-action-08", "enabled": true },
+    { "id": "preset-media-binding-09", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_09", "label": "Камера", "actionRef": "preset-media-action-09", "enabled": true },
+    { "id": "preset-media-binding-10", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_10", "label": "Рука", "actionRef": "preset-media-action-10", "enabled": true },
+    { "id": "preset-media-binding-11", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_11", "label": "Экран", "actionRef": "preset-media-action-11", "enabled": true },
+    { "id": "preset-media-binding-12", "profileId": "preset-media-profile", "layer": "standard", "controlId": "thumb_12", "label": "Завершить", "actionRef": "preset-media-action-12", "enabled": true }
+  ],
+  "appMappings": []
+}

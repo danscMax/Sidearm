@@ -31,6 +31,7 @@ import {
 } from "../lib/backend";
 import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
+import { PresetsModal } from "./PresetsModal";
 import { Toggle } from "./shared";
 
 export interface SettingsWorkspaceProps {
@@ -64,6 +65,7 @@ export function SettingsWorkspace({
   const { t, i18n } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
   const [synapseLoading, setSynapseLoading] = useState(false);
+  const [showPresets, setShowPresets] = useState(false);
 
   const sortedProfiles = [...activeConfig.profiles].sort(
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
@@ -539,6 +541,13 @@ export function SettingsWorkspace({
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 10V1M5 4l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
             {t("settings.importProfileButton")}
           </button>
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={() => setShowPresets(true)}
+          >
+            {t("settings.presetsButton")}
+          </button>
         </div>
         {importError ? (
           <div className="notice notice--error" style={{ marginTop: 8 }}>
@@ -690,6 +699,14 @@ export function SettingsWorkspace({
           }
         />
       </section>
+
+      {showPresets ? (
+        <PresetsModal
+          onCancel={() => setShowPresets(false)}
+          updateDraft={updateDraft}
+          setError={setError}
+        />
+      ) : null}
     </div>
   );
 }

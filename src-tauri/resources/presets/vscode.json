@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "exportedAt": "2026-04-24T00:00:00.000Z",
+  "profile": {
+    "id": "preset-vscode-profile",
+    "name": "🖥️ VS Code / IDE",
+    "description": "Палитра команд, быстрый переход, терминал, отладка, refactor. Работает в VS Code и Cursor.",
+    "enabled": true,
+    "priority": 100
+  },
+  "actions": [
+    { "id": "preset-vscode-action-01", "type": "shortcut", "payload": { "key": "P", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Палитра команд" },
+    { "id": "preset-vscode-action-02", "type": "shortcut", "payload": { "key": "P", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Быстрый переход" },
+    { "id": "preset-vscode-action-03", "type": "shortcut", "payload": { "key": "`", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Терминал" },
+    { "id": "preset-vscode-action-04", "type": "shortcut", "payload": { "key": "F12", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Перейти к определению" },
+    { "id": "preset-vscode-action-05", "type": "shortcut", "payload": { "key": "F12", "ctrl": false, "shift": true, "alt": false, "win": false }, "pretty": "Найти все ссылки" },
+    { "id": "preset-vscode-action-06", "type": "shortcut", "payload": { "key": "F", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Поиск в файлах" },
+    { "id": "preset-vscode-action-07", "type": "shortcut", "payload": { "key": "F5", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Старт/Продолжить отладку" },
+    { "id": "preset-vscode-action-08", "type": "shortcut", "payload": { "key": "\\", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Разделить редактор" },
+    { "id": "preset-vscode-action-09", "type": "shortcut", "payload": { "key": "B", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Боковая панель" },
+    { "id": "preset-vscode-action-10", "type": "shortcut", "payload": { "key": "/", "ctrl": true, "shift": false, "alt": false, "win": false }, "pretty": "Комментарий" },
+    { "id": "preset-vscode-action-11", "type": "shortcut", "payload": { "key": "F", "ctrl": false, "shift": true, "alt": true, "win": false }, "pretty": "Форматировать" },
+    { "id": "preset-vscode-action-12", "type": "shortcut", "payload": { "key": "F2", "ctrl": false, "shift": false, "alt": false, "win": false }, "pretty": "Переименовать" }
+  ],
+  "bindings": [
+    { "id": "preset-vscode-binding-01", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_01", "label": "Палитра", "actionRef": "preset-vscode-action-01", "enabled": true },
+    { "id": "preset-vscode-binding-02", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_02", "label": "Переход", "actionRef": "preset-vscode-action-02", "enabled": true },
+    { "id": "preset-vscode-binding-03", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_03", "label": "Терминал", "actionRef": "preset-vscode-action-03", "enabled": true },
+    { "id": "preset-vscode-binding-04", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_04", "label": "Определение", "actionRef": "preset-vscode-action-04", "enabled": true },
+    { "id": "preset-vscode-binding-05", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_05", "label": "Ссылки", "actionRef": "preset-vscode-action-05", "enabled": true },
+    { "id": "preset-vscode-binding-06", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_06", "label": "Поиск в файлах", "actionRef": "preset-vscode-action-06", "enabled": true },
+    { "id": "preset-vscode-binding-07", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_07", "label": "Debug", "actionRef": "preset-vscode-action-07", "enabled": true },
+    { "id": "preset-vscode-binding-08", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_08", "label": "Split", "actionRef": "preset-vscode-action-08", "enabled": true },
+    { "id": "preset-vscode-binding-09", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_09", "label": "Sidebar", "actionRef": "preset-vscode-action-09", "enabled": true },
+    { "id": "preset-vscode-binding-10", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_10", "label": "Коммент", "actionRef": "preset-vscode-action-10", "enabled": true },
+    { "id": "preset-vscode-binding-11", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_11", "label": "Format", "actionRef": "preset-vscode-action-11", "enabled": true },
+    { "id": "preset-vscode-binding-12", "profileId": "preset-vscode-profile", "layer": "standard", "controlId": "thumb_12", "label": "Rename", "actionRef": "preset-vscode-action-12", "enabled": true }
+  ],
+  "appMappings": [
+    { "id": "preset-vscode-mapping-code", "profileId": "preset-vscode-profile", "exe": "code.exe", "titleIncludes": [], "priority": 100, "enabled": true },
+    { "id": "preset-vscode-mapping-cursor", "profileId": "preset-vscode-profile", "exe": "cursor.exe", "titleIncludes": [], "priority": 100, "enabled": true }
+  ]
+}

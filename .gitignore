@@ -34,6 +34,9 @@ src-tauri/target/
 
 # Resources (binary downloads, not source)
 resources/
+# Bundled preset JSON files are source — keep them tracked.
+!src-tauri/resources/
+!src-tauri/resources/**
 
 # Signing certificates (private keys)
 certs/

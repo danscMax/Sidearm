@@ -1,0 +1,40 @@
+{
+  "version": 2,
+  "exportedAt": "2026-04-24T00:00:00.000Z",
+  "profile": {
+    "id": "preset-windows-profile",
+    "name": "🪟 Windows",
+    "description": "Управление окнами, виртуальные рабочие столы, буфер обмена, скриншоты.",
+    "enabled": true,
+    "priority": 100
+  },
+  "actions": [
+    { "id": "preset-windows-action-01", "type": "shortcut", "payload": { "key": "Tab", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Task View" },
+    { "id": "preset-windows-action-02", "type": "shortcut", "payload": { "key": "D", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Показать рабочий стол" },
+    { "id": "preset-windows-action-03", "type": "shortcut", "payload": { "key": "Left", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Прикрепить влево" },
+    { "id": "preset-windows-action-04", "type": "shortcut", "payload": { "key": "Right", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Прикрепить вправо" },
+    { "id": "preset-windows-action-05", "type": "shortcut", "payload": { "key": "Up", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Развернуть" },
+    { "id": "preset-windows-action-06", "type": "shortcut", "payload": { "key": "Left", "ctrl": true, "shift": false, "alt": false, "win": true }, "pretty": "Предыдущий десктоп" },
+    { "id": "preset-windows-action-07", "type": "shortcut", "payload": { "key": "Right", "ctrl": true, "shift": false, "alt": false, "win": true }, "pretty": "Следующий десктоп" },
+    { "id": "preset-windows-action-08", "type": "shortcut", "payload": { "key": "V", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Буфер обмена" },
+    { "id": "preset-windows-action-09", "type": "shortcut", "payload": { "key": "S", "ctrl": false, "shift": true, "alt": false, "win": true }, "pretty": "Снимок экрана" },
+    { "id": "preset-windows-action-10", "type": "shortcut", "payload": { "key": "L", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Заблокировать" },
+    { "id": "preset-windows-action-11", "type": "shortcut", "payload": { "key": "Escape", "ctrl": true, "shift": true, "alt": false, "win": false }, "pretty": "Task Manager" },
+    { "id": "preset-windows-action-12", "type": "shortcut", "payload": { "key": ".", "ctrl": false, "shift": false, "alt": false, "win": true }, "pretty": "Эмодзи" }
+  ],
+  "bindings": [
+    { "id": "preset-windows-binding-01", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_01", "label": "Task View", "actionRef": "preset-windows-action-01", "enabled": true },
+    { "id": "preset-windows-binding-02", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_02", "label": "Рабочий стол", "actionRef": "preset-windows-action-02", "enabled": true },
+    { "id": "preset-windows-binding-03", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_03", "label": "← Snap", "actionRef": "preset-windows-action-03", "enabled": true },
+    { "id": "preset-windows-binding-04", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_04", "label": "Snap →", "actionRef": "preset-windows-action-04", "enabled": true },
+    { "id": "preset-windows-binding-05", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_05", "label": "Развернуть", "actionRef": "preset-windows-action-05", "enabled": true },
+    { "id": "preset-windows-binding-06", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_06", "label": "← Desktop", "actionRef": "preset-windows-action-06", "enabled": true },
+    { "id": "preset-windows-binding-07", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_07", "label": "Desktop →", "actionRef": "preset-windows-action-07", "enabled": true },
+    { "id": "preset-windows-binding-08", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_08", "label": "Clipboard", "actionRef": "preset-windows-action-08", "enabled": true },
+    { "id": "preset-windows-binding-09", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_09", "label": "Screenshot", "actionRef": "preset-windows-action-09", "enabled": true },
+    { "id": "preset-windows-binding-10", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_10", "label": "Lock", "actionRef": "preset-windows-action-10", "enabled": true },
+    { "id": "preset-windows-binding-11", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_11", "label": "Task Mgr", "actionRef": "preset-windows-action-11", "enabled": true },
+    { "id": "preset-windows-binding-12", "profileId": "preset-windows-profile", "layer": "standard", "controlId": "thumb_12", "label": "Emoji", "actionRef": "preset-windows-action-12", "enabled": true }
+  ],
+  "appMappings": []
+}

@@ -2183,6 +2183,65 @@ code {
 }
 
 /* ── Running-process picker modal ── */
+/* ── Presets modal ── */
+.presets-modal {
+  background: var(--c-panel, #1a1f16);
+  color: var(--c-text-bright);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md, 12px);
+  padding: 20px 22px;
+  width: min(720px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  position: relative;
+}
+.presets-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.presets-modal__header h3 { margin: 0; font-size: 1rem; }
+.presets-modal__subtitle { margin: 0 0 10px; color: var(--c-text-muted); font-size: 0.82rem; line-height: 1.45; }
+.presets-modal__body { flex: 1; overflow-y: auto; min-height: 220px; }
+.presets-modal__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+}
+.presets-modal__card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  color: var(--c-text-bright);
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.presets-modal__card:hover:not(:disabled) {
+  background: rgba(125, 182, 73, 0.08);
+  border-color: rgba(125, 182, 73, 0.45);
+}
+.presets-modal__card:disabled { opacity: 0.5; cursor: wait; }
+.presets-modal__card-name { font-weight: 600; font-size: 0.92rem; }
+.presets-modal__card-desc {
+  font-size: 0.76rem;
+  color: var(--c-text-muted);
+  line-height: 1.4;
+  flex: 1;
+}
+.presets-modal__card-cta {
+  align-self: flex-end;
+  font-size: 0.74rem;
+  color: var(--c-accent, #9fca69);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 4px;
+}
+
 .process-picker { width: min(560px, 92vw); max-height: 80vh; display: flex; flex-direction: column; }
 .process-picker h3 { margin: 0 0 8px; }
 .process-picker__search {

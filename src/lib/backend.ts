@@ -98,6 +98,20 @@ export async function listRunningProcesses(): Promise<RunningProcessInfo[]> {
   return invoke<RunningProcessInfo[]>("list_running_processes");
 }
 
+export interface PresetInfo {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export async function listBundledPresets(): Promise<PresetInfo[]> {
+  return invoke<PresetInfo[]>("list_bundled_presets");
+}
+
+export async function readBundledPreset(id: string): Promise<unknown> {
+  return invoke<unknown>("read_bundled_preset", { id });
+}
+
 export async function importSynapseIntoConfig(
   parsed: ParsedSynapseProfiles,
   options: SynapseImportOptions,

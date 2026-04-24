@@ -346,6 +346,15 @@
     "empty": "No matches.",
     "truncated": "Showing {{shown}} of {{total}}. Narrow your search."
   },
+  "presets": {
+    "title": "Presets",
+    "subtitle": "Ready-made binding sets for popular apps. Added as new profiles — existing ones are not overwritten.",
+    "loading": "Reading preset list…",
+    "empty": "No presets found.",
+    "apply": "Add",
+    "applying": "Adding…",
+    "invalidFile": "Preset file `{{id}}` is corrupt."
+  },
   "settings": {
     "newProfile": "New profile",
     "profileTitle": "Profile: {{name}}",
@@ -361,6 +370,7 @@
     "disabledMeta": "Disabled",
     "createProfile": "+ New profile",
     "importProfileButton": "Import profile",
+    "presetsButton": "Presets…",
     "deleteConfirmTitle": "Delete profile?",
     "deleteConfirmMessage": "Profile '{{name}}' will be deleted along with all assignments and rules.",
     "exportDialogTitle": "Export profile",

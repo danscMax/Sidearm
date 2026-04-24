@@ -38,7 +38,8 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../resources/sidearm-ca.cer"
+      "../resources/sidearm-ca.cer",
+      "resources/presets/*.json"
     ],
     "windows": {
       "nsis": {

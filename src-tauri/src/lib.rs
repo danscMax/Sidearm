@@ -1222,6 +1222,101 @@ async fn list_running_processes() -> Result<Vec<RunningProcessInfo>, CommandErro
     .map_err(|e| CommandError::internal(format!("list_running_processes task failed: {e}")))
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetInfo {
+    id: String,
+    name: String,
+    description: String,
+}
+
+#[derive(serde::Deserialize)]
+struct PresetFileMeta {
+    profile: PresetFileProfile,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PresetFileProfile {
+    name: String,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+fn presets_dir(app: &AppHandle) -> Result<std::path::PathBuf, CommandError> {
+    app.path()
+        .resolve("resources/presets", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| CommandError::internal(format!("failed to resolve presets dir: {e}")))
+}
+
+#[tauri::command]
+async fn list_bundled_presets(app: AppHandle) -> Result<Vec<PresetInfo>, CommandError> {
+    let dir = presets_dir(&app)?;
+    let entries = std::fs::read_dir(&dir).map_err(|e| {
+        CommandError::new(
+            "io_error",
+            format!("cannot read presets dir `{}`: {e}", dir.display()),
+            None,
+        )
+    })?;
+
+    let mut out: Vec<PresetInfo> = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let id = match path.file_stem().and_then(|s| s.to_str()) {
+            Some(stem) => stem.to_string(),
+            None => continue,
+        };
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        let meta: PresetFileMeta = match serde_json::from_slice(&bytes) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        out.push(PresetInfo {
+            id,
+            name: meta.profile.name,
+            description: meta.profile.description.unwrap_or_default(),
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+#[tauri::command]
+async fn read_bundled_preset(
+    app: AppHandle,
+    id: String,
+) -> Result<serde_json::Value, CommandError> {
+    if id.contains('/') || id.contains('\\') || id.contains("..") || id.is_empty() {
+        return Err(CommandError::new(
+            "invalid_input",
+            format!("invalid preset id `{id}`"),
+            None,
+        ));
+    }
+    let path = presets_dir(&app)?.join(format!("{id}.json"));
+    let bytes = std::fs::read(&path).map_err(|e| {
+        CommandError::new(
+            "io_error",
+            format!("cannot read preset `{}`: {e}", path.display()),
+            None,
+        )
+    })?;
+    serde_json::from_slice::<serde_json::Value>(&bytes).map_err(|e| {
+        CommandError::new(
+            "parse_error",
+            format!("preset `{id}` is not valid JSON: {e}"),
+            None,
+        )
+    })
+}
+
 #[tauri::command]
 async fn preview_resolution(
     app: AppHandle,
@@ -1957,6 +2052,8 @@ pub fn run() {
             open_log_directory,
             capture_active_window,
             list_running_processes,
+            list_bundled_presets,
+            read_bundled_preset,
             preview_resolution,
             execute_preview_action,
             run_preview_action,

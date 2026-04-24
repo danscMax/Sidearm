@@ -586,6 +586,21 @@
     "undone": "Change undone",
     "redone": "Change redone"
   },
+  "synapseImport": {
+    "button": "Import from Razer Synapse…",
+    "parsing": "Parsing…",
+    "pickFileTitle": "Pick a .synapse4 file",
+    "title": "Import from Razer Synapse",
+    "sourceLabel": "Source: {{path}}",
+    "noProfiles": "The file contains no profiles.",
+    "unnamedProfile": "Unnamed profile",
+    "profileMeta": "{{bindings}} bindings, {{macros}} macros",
+    "warningsHeader": "Warnings ({{count}})",
+    "warningsMore": "…and {{count}} more",
+    "submit": "Import {{profiles}} profile(s) ({{bindings}} bindings)",
+    "submitting": "Importing…",
+    "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros"
+  },
   "portable": {
     "badge": {
       "portable": "Portable",

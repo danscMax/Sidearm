@@ -15,6 +15,7 @@ mod platform;
 mod recorder;
 mod resolver;
 mod runtime;
+mod synapse_import;
 mod window_capture;
 
 use std::{
@@ -844,6 +845,57 @@ async fn accept_portable_migration(
         .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
 
     Ok(response)
+}
+
+// ============================================================================
+// M3 — Razer Synapse import
+// ============================================================================
+
+#[tauri::command]
+async fn parse_synapse_source(
+    path: String,
+) -> Result<synapse_import::ParsedSynapseProfiles, CommandError> {
+    let validated = validate_user_file_path(&path)?;
+    tauri::async_runtime::spawn_blocking(
+        move || -> Result<synapse_import::ParsedSynapseProfiles, CommandError> {
+            synapse_import::parse_synapse_v4_file(&validated).map_err(|e| {
+                CommandError::new(
+                    "synapse_parse_failed",
+                    format!("{e}"),
+                    Some(vec![validated.to_string_lossy().into_owned()]),
+                )
+            })
+        },
+    )
+    .await
+    .map_err(|e| CommandError::internal(format!("parse_synapse_source task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn import_synapse_into_config(
+    parsed: synapse_import::ParsedSynapseProfiles,
+    options: synapse_import::ImportOptions,
+    base: AppConfig,
+) -> Result<synapse_import::ImportedConfig, CommandError> {
+    tauri::async_runtime::spawn_blocking(
+        move || -> Result<synapse_import::ImportedConfig, CommandError> {
+            let result = synapse_import::apply_parsed_into_config(base, parsed, &options);
+            // Schema-validate to guarantee the merged config is loadable.
+            let value = serde_json::to_value(&result.config)
+                .map_err(|e| CommandError::internal(format!("serialize failed: {e}")))?;
+            let schema_errors = config::collect_schema_errors(&value);
+            if !schema_errors.is_empty() {
+                return Err(CommandError::new(
+                    "schema_violation",
+                    "Imported config does not match the expected schema.",
+                    Some(schema_errors),
+                ));
+            }
+            Ok(result)
+        },
+    )
+    .await
+    .map_err(|e| CommandError::internal(format!("import_synapse_into_config task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -1859,6 +1911,8 @@ pub fn run() {
             import_full_config_apply,
             open_config_folder,
             accept_portable_migration,
+            parse_synapse_source,
+            import_synapse_into_config,
             start_runtime,
             stop_runtime,
             reload_runtime,

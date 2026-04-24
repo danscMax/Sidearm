@@ -38,6 +38,9 @@ thiserror = "2"
 png = "0.17"
 base64 = "0.22"
 regex = "1"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
+quick-xml = { version = "0.31", features = ["serialize"] }
+once_cell = "1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.61", features = [

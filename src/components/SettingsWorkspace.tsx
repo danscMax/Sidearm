@@ -25,10 +25,13 @@ import {
   importFullConfigPreview,
   normalizeCommandError,
   openConfigFolder,
+  parseSynapseSource,
   readTextFile,
   writeTextFile,
 } from "../lib/backend";
+import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
+import { SynapseImportModal } from "./SynapseImportModal";
 import { Toggle } from "./shared";
 
 export interface SettingsWorkspaceProps {
@@ -59,6 +62,8 @@ export function SettingsWorkspace({
 }: SettingsWorkspaceProps) {
   const { t, i18n } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
+  const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
+  const [synapseLoading, setSynapseLoading] = useState(false);
 
   const sortedProfiles = [...activeConfig.profiles].sort(
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
@@ -592,8 +597,48 @@ export function SettingsWorkspace({
           >
             {t("settings.openConfigFolder")}
           </button>
+          <button
+            type="button"
+            className="action-button action-button--accent"
+            disabled={synapseLoading}
+            onClick={async () => {
+              const path = await open({
+                title: t("synapseImport.pickFileTitle"),
+                filters: [
+                  { name: "Razer Synapse v4", extensions: ["synapse4"] },
+                  { name: "All files", extensions: ["*"] },
+                ],
+                multiple: false,
+              });
+              if (typeof path !== "string") return;
+              setSynapseLoading(true);
+              try {
+                const parsed = await parseSynapseSource(path);
+                setSynapseParsed(parsed);
+              } catch (unknownError) {
+                setError(normalizeCommandError(unknownError));
+              } finally {
+                setSynapseLoading(false);
+              }
+            }}
+          >
+            {synapseLoading ? t("synapseImport.parsing") : t("synapseImport.button")}
+          </button>
         </div>
       </section>
+
+      {synapseParsed ? (
+        <SynapseImportModal
+          parsed={synapseParsed}
+          activeConfig={activeConfig}
+          onImported={(next) => {
+            updateDraft(() => next);
+            setSynapseParsed(null);
+          }}
+          onCancel={() => setSynapseParsed(null)}
+          setError={setError}
+        />
+      ) : null}
 
       {/* Local backups */}
       <section className="settings-section">

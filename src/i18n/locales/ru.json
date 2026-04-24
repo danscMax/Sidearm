@@ -586,6 +586,21 @@
     "undone": "Действие отменено",
     "redone": "Действие возвращено"
   },
+  "synapseImport": {
+    "button": "Импорт из Razer Synapse…",
+    "parsing": "Парсинг…",
+    "pickFileTitle": "Выберите файл .synapse4",
+    "title": "Импорт из Razer Synapse",
+    "sourceLabel": "Источник: {{path}}",
+    "noProfiles": "В файле нет профилей.",
+    "unnamedProfile": "Безымянный профиль",
+    "profileMeta": "{{bindings}} назначений, {{macros}} макросов",
+    "warningsHeader": "Предупреждения ({{count}})",
+    "warningsMore": "…и ещё {{count}}",
+    "submit": "Импортировать {{profiles}} профил. ({{bindings}} назн.)",
+    "submitting": "Импорт…",
+    "summaryToast": "Импортировано: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{macros}} макросов"
+  },
   "portable": {
     "badge": {
       "portable": "Portable",

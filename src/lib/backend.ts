@@ -13,6 +13,11 @@ import type {
   SequenceStep,
 } from "./config";
 import type {
+  ImportOptions as SynapseImportOptions,
+  ImportedConfig as SynapseImportedConfig,
+  ParsedSynapseProfiles,
+} from "./synapse-import";
+import type {
   ActionExecutionEvent,
   ActionExecutionEventName,
   ControlResolutionEventName,
@@ -79,6 +84,24 @@ export async function acceptPortableMigration(
 ): Promise<LoadConfigResponse> {
   return invoke<LoadConfigResponse>("accept_portable_migration", {
     copyFromRoaming,
+  });
+}
+
+export async function parseSynapseSource(
+  path: string,
+): Promise<ParsedSynapseProfiles> {
+  return invoke<ParsedSynapseProfiles>("parse_synapse_source", { path });
+}
+
+export async function importSynapseIntoConfig(
+  parsed: ParsedSynapseProfiles,
+  options: SynapseImportOptions,
+  base: AppConfig,
+): Promise<SynapseImportedConfig> {
+  return invoke<SynapseImportedConfig>("import_synapse_into_config", {
+    parsed,
+    options,
+    base,
   });
 }
 

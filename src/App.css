@@ -2025,6 +2025,109 @@ code {
    same dark popup look. */
 /* (select option dark-theme rules live near the root color-scheme block above) */
 
+/* ── Custom profile dropdown (replaces native <select> for >3 profiles) ──
+   WebView2 renders the native <select> popup via the Windows shell, which
+   ignores CSS :hover and always paints a system-grey highlight. Using a
+   pure button+listbox implementation keeps full style control. */
+.profile-dropdown {
+  position: relative;
+  width: 100%;
+}
+.profile-dropdown__trigger {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: rgba(255, 255, 255, 0.06);
+  color: var(--c-text-bright);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--fs-body-sm);
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.profile-dropdown__trigger:hover {
+  border-color: var(--c-border-hover, rgba(159, 202, 105, 0.4));
+}
+.profile-dropdown__trigger:focus-visible {
+  outline: 2px solid rgba(159, 202, 105, 0.35);
+  outline-offset: 1px;
+}
+.profile-dropdown__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-dropdown__chevron {
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 0.8rem;
+  transition: transform 120ms ease;
+  flex-shrink: 0;
+}
+.profile-dropdown__chevron--open {
+  transform: rotate(180deg);
+}
+.profile-dropdown__menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  list-style: none;
+  margin: 0;
+  padding: 4px;
+  background: var(--c-bg, #1a1f16);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  max-height: 260px;
+  overflow-y: auto;
+}
+.profile-dropdown__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs, 5px);
+  font-size: var(--fs-body-sm);
+  font-weight: 500;
+  color: var(--c-text);
+  cursor: pointer;
+  transition: background 100ms ease, color 100ms ease;
+}
+.profile-dropdown__item--focused {
+  background: rgba(125, 182, 73, 0.18);
+  color: var(--c-text-bright);
+}
+.profile-dropdown__item--active {
+  color: var(--c-accent, #9fca69);
+  font-weight: 600;
+}
+.profile-dropdown__item--active.profile-dropdown__item--focused {
+  background: rgba(125, 182, 73, 0.28);
+}
+.profile-dropdown__item-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.profile-dropdown__item-dot {
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-ok, #75c268);
+  box-shadow: 0 0 4px rgba(117, 194, 104, 0.6);
+}
+
 .sidebar__profile-select-row {
   display: flex;
   gap: 6px;

@@ -5,6 +5,7 @@ import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
+import { ProfileDropdown } from "./ProfileDropdown";
 
 export function Sidebar({
   workspaceMode,
@@ -119,27 +120,19 @@ export function Sidebar({
             ))}
           </div>
         ) : (
-          <select
-            className="sidebar__profile-select"
-            value={effectiveProfileId ?? ""}
-            onChange={(event) => {
-              startTransition(() => {
-                onSelectProfile(event.target.value);
-              });
+          <ProfileDropdown
+            profiles={profiles}
+            effectiveProfileId={effectiveProfileId}
+            runtimeResolvedProfileName={runtimeResolvedProfileName}
+            runtimeStatus={runtimeStatus}
+            onSelectProfile={(id) => {
+              startTransition(() => onSelectProfile(id));
             }}
-            onContextMenu={(e) => {
-              if (effectiveProfileId) {
-                e.preventDefault();
-                setCtxMenu({ x: e.clientX, y: e.clientY, profileId: effectiveProfileId });
-              }
-            }}
-          >
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            onSwitchMode={onSwitchMode}
+            onContextMenu={(x, y, profileId) =>
+              setCtxMenu({ x, y, profileId })
+            }
+          />
         )}
       </div>
       <button

@@ -1692,7 +1692,7 @@ pub fn run() {
                 app.package_info().version
             );
 
-            let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Включить перехват", true, None::<&str>)?;
+            let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Слушать мышь", true, None::<&str>)?;
             let tray_menu = Menu::with_items(
                 app,
                 &[
@@ -1743,7 +1743,7 @@ pub fn run() {
                                         Err(_) => return,
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
-                                    let _ = toggle_item.set_text("Включить перехват");
+                                    let _ = toggle_item.set_text("Слушать мышь");
                                 }
                             } else {
                                 let config_dir = resolve_app_paths(&app).config_dir.clone();
@@ -1780,7 +1780,7 @@ pub fn run() {
                                         Err(_) => return,
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STARTED, &summary);
-                                    let _ = toggle_item.set_text("Выключить перехват");
+                                    let _ = toggle_item.set_text("Приостановить");
                                 }
                             }
                         });

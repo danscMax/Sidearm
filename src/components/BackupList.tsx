@@ -87,7 +87,7 @@ export function BackupList({
             <td>
               <button
                 type="button"
-                className="btn btn--small"
+                className="action-button action-button--small"
                 onClick={() => handleRestore(entry)}
               >
                 {t("backup.restoreButton")}

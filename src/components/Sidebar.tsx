@@ -146,6 +146,7 @@ export function Sidebar({
         className={`sidebar__runtime sidebar__runtime--${runtimeStatus === "running" ? "running" : "stopped"}`}
         onClick={onToggleRuntime}
         type="button"
+        title={t("sidebar.runtimeTooltip")}
       >
         <span className={`sidebar__runtime-dot sidebar__runtime-dot--${runtimeStatus === "running" ? "running" : "stopped"}`} />
         <span className="sidebar__runtime-label">

@@ -34,8 +34,9 @@
     "settingsTooltip": "Настройки профилей",
     "addProfileTooltip": "Добавить профиль",
     "activeRuntime": "Активный в runtime",
-    "runtimeActive": "Перехват активен",
-    "runtimeStopped": "Перехват остановлен",
+    "runtimeActive": "Sidearm слушает мышь",
+    "runtimeStopped": "Sidearm не активен",
+    "runtimeTooltip": "Перехват кликов 12-кнопочной клавиатуры и горячих клавиш. Отключите, чтобы временно передать управление Razer Synapse.",
     "stop": "СТОП",
     "start": "СТАРТ"
   },
@@ -356,7 +357,7 @@
     "invalidProfileError": "Файл не содержит данных профиля.",
     "readProfileError": "Не удалось прочитать файл профиля.",
     "backupHeader": "РЕЗЕРВНОЕ КОПИРОВАНИЕ",
-    "backupHelp": "Экспортируйте всю конфигурацию (профили, правила, привязки, настройки) в файл для бэкапа или переноса на другой компьютер.",
+    "backupHelp": "Экспортируйте всю конфигурацию (профили, правила, назначения, настройки) в файл для бэкапа или переноса на другой компьютер.",
     "saveConfigTitle": "Сохранить конфигурацию",
     "exportConfig": "Экспорт конфигурации",
     "loadConfigTitle": "Загрузить конфигурацию",
@@ -368,7 +369,7 @@
     "importConfig": "Импорт конфигурации",
     "openConfigFolder": "Открыть папку с конфигом",
     "importHasWarnings": "⚠ Предупреждений: {{count}}",
-    "importSummary": "В файле: {{profiles}} профилей, {{bindings}} привязок, {{actions}} действий, {{appMappings}} правил, {{snippets}} сниппетов. {{warnings}} Текущая конфигурация будет полностью заменена. Продолжить?",
+    "importSummary": "В файле: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{appMappings}} правил, {{snippets}} сниппетов. {{warnings}} Текущая конфигурация будет полностью заменена. Продолжить?",
     "languageHeader": "ЯЗЫК ИНТЕРФЕЙСА",
     "osdHeader": "УВЕДОМЛЕНИЯ",
     "osdEnabled": "Показывать уведомления",
@@ -558,13 +559,13 @@
     "autoProfileFallback": "Профиль"
   },
   "assignments": {
-    "copyBinding": "Копировать привязку",
+    "copyBinding": "Копировать назначение",
     "copyToLayer": "Копировать на {{layer}}",
     "enable": "Включить",
     "disable": "Отключить",
     "clear": "Очистить",
     "assignAction": "Назначить действие",
-    "pasteBinding": "Вставить привязку"
+    "pasteBinding": "Вставить назначение"
   },
   "snippet": {
     "eyebrow": "Библиотека фрагментов",
@@ -580,6 +581,10 @@
     "empty": "Выберите действие типа textSnippet, чтобы редактировать библиотеку фрагментов.",
     "pasteModeClipboard": "Через буфер обмена",
     "pasteModeDirect": "Прямой ввод текста"
+  },
+  "toast": {
+    "undone": "Действие отменено",
+    "redone": "Действие возвращено"
   },
   "portable": {
     "badge": {

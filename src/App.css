@@ -4306,3 +4306,117 @@ input[type="number"] { -moz-appearance: textfield; }
 
 .badge--error { background: rgba(224, 85, 85, 0.7); color: #fff; }
 .badge--debug { background: rgba(255, 255, 255, 0.08); color: var(--c-text-muted); }
+
+/* ───────────────────────── M1: Toast ───────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 1100;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--c-surface, #1e2320);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  font-size: 0.85rem;
+  max-width: 360px;
+  animation: toast-in 160ms ease-out;
+}
+.toast--success { border-color: rgba(104, 197, 127, 0.5); }
+.toast--warning { border-color: rgba(234, 179, 8, 0.5); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ───────────────────────── M1: Portable badge ───────────────────────── */
+.portable-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 8px;
+  padding: 2px 10px;
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--c-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.portable-badge:hover { background: rgba(255, 255, 255, 0.08); }
+.portable-badge__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-text-muted);
+}
+.portable-badge--portable .portable-badge__dot { background: #68c57f; }
+.portable-badge--roaming .portable-badge__dot { background: var(--c-text-muted); }
+.portable-badge--portableFallback .portable-badge__dot { background: #eab308; }
+.portable-badge--portableFallback { border-color: rgba(234, 179, 8, 0.4); }
+.portable-badge__label { text-transform: uppercase; letter-spacing: 0.04em; }
+.portable-badge__path {
+  color: var(--c-text-subtle, rgba(255, 255, 255, 0.35));
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.65rem;
+}
+
+/* ───────────────────────── M1: Error modal extras ───────────────────────── */
+.error-modal {
+  width: min(560px, 90vw);
+}
+.error-modal__header h2 { margin: 0 0 8px; font-size: 1rem; font-weight: 600; }
+.error-modal__body { display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+.error-modal__message { margin: 0; color: var(--c-text); font-size: 0.9rem; line-height: 1.45; }
+.error-modal__hint { margin: 0; color: var(--c-text-muted); font-size: 0.82rem; line-height: 1.45; }
+.error-modal__details { margin-top: 4px; font-size: 0.78rem; color: var(--c-text-muted); }
+.error-modal__details summary { cursor: pointer; user-select: none; }
+.error-modal__details ul { margin: 8px 0 0; padding-left: 18px; }
+.error-modal__details code {
+  font-size: 0.72rem;
+  color: var(--c-text-subtle);
+  word-break: break-all;
+}
+.error-modal__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ───────────────────────── M1: Migration dialog ───────────────────────── */
+.migration-modal { width: min(480px, 90vw); }
+.migration-modal__body { margin-bottom: 16px; }
+.migration-modal__body p { margin: 0 0 8px; }
+.migration-modal__footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* ───────────────────────── M1: Backup list ───────────────────────── */
+.backup-list {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+.backup-list th,
+.backup-list td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+.backup-list th {
+  color: var(--c-text-muted);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.7rem;
+}
+.backup-list tbody tr:last-child td { border-bottom: none; }
+.backup-list td:last-child { text-align: right; }

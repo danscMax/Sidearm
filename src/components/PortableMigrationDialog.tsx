@@ -16,11 +16,13 @@ export function PortableMigrationDialog({
   }, []);
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
+    <div className="modal-backdrop">
       <div
         ref={dialogRef}
-        className="modal migration-modal"
+        className="confirm-modal migration-modal"
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
       >
         <header>
           <h2>{t("migration.title")}</h2>
@@ -34,7 +36,7 @@ export function PortableMigrationDialog({
         <footer className="migration-modal__footer">
           <button
             type="button"
-            className="btn btn--primary"
+            className="action-button action-button--primary"
             onClick={() => {
               void onChoose(true);
             }}
@@ -43,7 +45,7 @@ export function PortableMigrationDialog({
           </button>
           <button
             type="button"
-            className="btn"
+            className="action-button action-button--ghost"
             onClick={() => {
               void onChoose(false);
             }}

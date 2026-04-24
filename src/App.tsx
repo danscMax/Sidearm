@@ -20,6 +20,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ErrorModal } from "./components/ErrorModal";
 import { PortableMigrationDialog } from "./components/PortableMigrationDialog";
+import { Toast, type ToastState } from "./components/Toast";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
@@ -60,10 +61,12 @@ import {
   resolveInitialControlId,
   resolveInitialProfileId,
 } from "./lib/helpers";
+import { useTranslation } from "react-i18next";
 
 const ALL_HOTSPOT_IDS = [...Object.keys(sideViewHotspots), ...Object.keys(topViewHotspots)];
 
 function App() {
+  const { t } = useTranslation();
   const persistence = useAppPersistence();
   const {
     viewState,
@@ -76,6 +79,25 @@ function App() {
   } = persistence;
 
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+  const [toast, setToast] = useState<ToastState | null>(null);
+  const toastSeqRef = useRef(0);
+
+  const showToast = useCallback((message: string, kind?: ToastState["kind"]) => {
+    toastSeqRef.current += 1;
+    setToast({ id: toastSeqRef.current, message, kind });
+  }, []);
+
+  const handleUndoWithToast = useCallback(() => {
+    if (undoStack.length === 0) return;
+    handleUndo();
+    showToast(t("toast.undone"), "info");
+  }, [undoStack.length, handleUndo, showToast, t]);
+
+  const handleRedoWithToast = useCallback(() => {
+    if (redoStack.length === 0) return;
+    handleRedo();
+    showToast(t("toast.redone"), "info");
+  }, [redoStack.length, handleRedo, showToast, t]);
 
   useEffect(() => {
     let cancelled = false;
@@ -281,10 +303,10 @@ function App() {
 
     if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
       e.preventDefault();
-      handleUndo();
+      handleUndoWithToast();
     } else if (e.ctrlKey && (e.key === "y" || (e.shiftKey && e.key === "Z"))) {
       e.preventDefault();
-      handleRedo();
+      handleRedoWithToast();
     } else if (e.ctrlKey && e.key === "k") {
       e.preventDefault();
       setCommandPaletteOpen((open) => !open);
@@ -505,8 +527,8 @@ function App() {
           undoCount={undoStack.length}
           redoCount={redoStack.length}
           viewState={viewState}
-          onUndo={handleUndo}
-          onRedo={handleRedo}
+          onUndo={handleUndoWithToast}
+          onRedo={handleRedoWithToast}
         />
 
         <div className="content__scroll">
@@ -645,6 +667,7 @@ function App() {
       {showMigrationDialog ? (
         <PortableMigrationDialog onChoose={handleMigrationChoice} />
       ) : null}
+      <Toast toast={toast} onDismiss={() => setToast(null)} />
 
       {commandPaletteOpen ? (
         <CommandPalette
@@ -653,10 +676,10 @@ function App() {
             setCommandPaletteOpen(false);
             switch (commandId) {
               case "undo":
-                handleUndo();
+                handleUndoWithToast();
                 break;
               case "redo":
-                handleRedo();
+                handleRedoWithToast();
                 break;
               case "reload":
                 void refreshConfig();

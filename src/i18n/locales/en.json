@@ -34,8 +34,9 @@
     "settingsTooltip": "Profile settings",
     "addProfileTooltip": "Add profile",
     "activeRuntime": "Active in runtime",
-    "runtimeActive": "Interception active",
-    "runtimeStopped": "Interception stopped",
+    "runtimeActive": "Sidearm listening to mouse",
+    "runtimeStopped": "Sidearm idle",
+    "runtimeTooltip": "Intercepts clicks from the 12-button thumb grid and hotkeys. Disable to temporarily hand control back to Razer Synapse.",
     "stop": "STOP",
     "start": "START"
   },
@@ -580,6 +581,10 @@
     "empty": "Select a textSnippet action to edit the snippet library.",
     "pasteModeClipboard": "Via clipboard",
     "pasteModeDirect": "Direct text input"
+  },
+  "toast": {
+    "undone": "Change undone",
+    "redone": "Change redone"
   },
   "portable": {
     "badge": {

@@ -55,11 +55,14 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
   }
 
   return (
-    <div className="modal-overlay" role="dialog" aria-modal="true">
+    <div className="modal-backdrop" onClick={onDismiss}>
       <div
         ref={dialogRef}
-        className="modal error-modal"
+        className="confirm-modal error-modal"
         tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
       >
         <header className="error-modal__header">
           <h2>{translated.title}</h2>
@@ -92,10 +95,10 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
               type="button"
               className={
                 action.primary
-                  ? "btn btn--primary"
+                  ? "action-button action-button--primary"
                   : action.danger
-                  ? "btn btn--danger"
-                  : "btn"
+                  ? "action-button action-button--danger"
+                  : "action-button action-button--ghost"
               }
               onClick={() => handleAction(action)}
             >

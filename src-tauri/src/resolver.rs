@@ -73,15 +73,26 @@ pub fn resolve_profile_for_app_context(
         .profiles
         .iter()
         .find(|profile| profile.id == config.settings.fallback_profile_id);
+    let manual_profile = config
+        .settings
+        .last_selected_profile_id
+        .as_deref()
+        .and_then(|id| find_profile(config, id));
     let candidates = matching_app_mappings(config, exe, title);
     let winner = candidates.first().copied();
     let resolved_profile = winner
         .and_then(|mapping| find_profile(config, &mapping.profile_id))
+        .or(manual_profile)
         .or(fallback_profile);
 
-    let used_fallback_profile = winner.is_none();
+    let used_fallback_profile = winner.is_none() && manual_profile.is_none();
     let resolution_reason = if let Some(mapping) = winner {
         format!("Matched app mapping `{}`.", mapping.id)
+    } else if let Some(profile) = manual_profile {
+        format!(
+            "No matching app mapping. Using manual selection `{}`.",
+            profile.id,
+        )
     } else {
         format!(
             "No matching app mapping found. Using fallback profile `{}`.",
@@ -339,6 +350,50 @@ mod tests {
     }
 
     #[test]
+    fn resolve_picks_manual_profile_when_no_mapping_matches() {
+        let mut config = test_config(vec![]);
+        config.settings.last_selected_profile_id = Some("code".into());
+
+        let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs");
+
+        assert_eq!(summary.resolved_profile_id.as_deref(), Some("code"));
+        assert!(!summary.used_fallback_profile);
+        assert!(
+            summary.resolution_reason.contains("manual selection"),
+            "expected manual-selection reason, got `{}`",
+            summary.resolution_reason
+        );
+    }
+
+    #[test]
+    fn resolve_prefers_app_mapping_over_manual() {
+        let mut config = test_config(vec![app_mapping(
+            "app-code",
+            "code.exe",
+            "review",
+            200,
+            vec![],
+        )]);
+        config.settings.last_selected_profile_id = Some("code".into());
+
+        let summary = resolve_profile_for_app_context(&config, "code.exe", "Pull Request");
+
+        assert_eq!(summary.resolved_profile_id.as_deref(), Some("review"));
+        assert_eq!(summary.matched_app_mapping_id.as_deref(), Some("app-code"));
+    }
+
+    #[test]
+    fn resolve_ignores_stale_manual_profile_id() {
+        let mut config = test_config(vec![]);
+        config.settings.last_selected_profile_id = Some("ghost".into());
+
+        let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs");
+
+        assert_eq!(summary.resolved_profile_id.as_deref(), Some("default"));
+        assert!(summary.used_fallback_profile);
+    }
+
+    #[test]
     fn resolve_input_preview_picks_more_specific_app_mapping() {
         let config = test_config(vec![
             app_mapping("app-code", "code.exe", "code", 200, vec![]),
@@ -375,6 +430,7 @@ mod tests {
                 osd_font_size: OsdFontSize::default(),
                 osd_animation: OsdAnimation::default(),
                 modifier_stale_gc_ms: None,
+                last_selected_profile_id: None,
             },
             profiles: vec![
                 profile("default", "Default", 0),

@@ -229,6 +229,10 @@
           "minimum": 500,
           "maximum": 30000,
           "description": "Capture helper CONSUMED modifier GC window in milliseconds. Leave unset for the default (5000)."
+        },
+        "lastSelectedProfileId": {
+          "type": "string",
+          "description": "Profile the user last picked in the sidebar. Runtime uses it in place of fallbackProfileId when no appMapping matches."
         }
       }
     },

@@ -195,6 +195,11 @@ pub struct Settings {
     /// fail to trigger (the chord's modifier-up was lost to a focus change).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modifier_stale_gc_ms: Option<u64>,
+    /// Last profile the user explicitly picked in the sidebar. Runtime
+    /// resolver prefers this over `fallback_profile_id` when no appMapping
+    /// matches the foreground window; explicit mappings still win.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_selected_profile_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1391,6 +1396,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             osd_font_size: OsdFontSize::default(),
             osd_animation: OsdAnimation::default(),
             modifier_stale_gc_ms: None,
+            last_selected_profile_id: None,
         },
         profiles: seed_profiles(),
         physical_controls: seed_physical_controls(),

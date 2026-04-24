@@ -546,7 +546,13 @@ function App() {
         profiles={profiles}
         effectiveProfileId={effectiveProfileId}
         runtimeResolvedProfileName={lastCapture?.resolvedProfileName ?? null}
-        onSelectProfile={(id) => setSelectedProfileId(id)}
+        onSelectProfile={(id) => {
+          setSelectedProfileId(id);
+          updateDraft((c) => ({
+            ...c,
+            settings: { ...c.settings, lastSelectedProfileId: id },
+          }));
+        }}
         onCreateProfile={handleCreateProfile}
         onToggleRuntime={() => {
           if (runtimeSummary.status === "running") void handleStopRuntime();

@@ -335,7 +335,16 @@
     "moveProfileHelp": "Move the rule to a different profile.",
     "autosave": "Changes are saved automatically",
     "deleteConfirm": "Delete for sure?",
-    "deleteRule": "Delete rule"
+    "deleteRule": "Delete rule",
+    "pickRunning": "From running…",
+    "pickRunningTooltip": "Pick from the list of currently running processes"
+  },
+  "processPicker": {
+    "title": "Pick a running process",
+    "searchPlaceholder": "Filter by name or path…",
+    "loading": "Reading process list…",
+    "empty": "No matches.",
+    "truncated": "Showing {{shown}} of {{total}}. Narrow your search."
   },
   "settings": {
     "newProfile": "New profile",

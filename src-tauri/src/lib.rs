@@ -1188,6 +1188,40 @@ async fn capture_active_window(
     Ok(result)
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RunningProcessInfo {
+    exe: String,
+    path: String,
+    pid: u32,
+}
+
+#[tauri::command]
+async fn list_running_processes() -> Result<Vec<RunningProcessInfo>, CommandError> {
+    tauri::async_runtime::spawn_blocking(|| -> Vec<RunningProcessInfo> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::platform::shell::list_running_processes()
+                .into_iter()
+                .map(|p| RunningProcessInfo { exe: p.exe, path: p.path, pid: p.pid })
+                .collect();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            return crate::platform::shell::list_running_processes()
+                .into_iter()
+                .map(|p| RunningProcessInfo { exe: p.exe, path: p.path, pid: p.pid })
+                .collect();
+        }
+        #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+        {
+            Vec::new()
+        }
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("list_running_processes task failed: {e}")))
+}
+
 #[tauri::command]
 async fn preview_resolution(
     app: AppHandle,
@@ -1922,6 +1956,7 @@ pub fn run() {
             get_log_directory,
             open_log_directory,
             capture_active_window,
+            list_running_processes,
             preview_resolution,
             execute_preview_action,
             run_preview_action,

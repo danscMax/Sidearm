@@ -93,6 +93,51 @@ pub(crate) fn find_running_process_path(exe_name: &str) -> Option<String> {
     None
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunningProcess {
+    pub exe: String,
+    pub path: String,
+    pub pid: u32,
+}
+
+/// Enumerate all running processes by scanning `/proc/{pid}/comm` and
+/// resolving `/proc/{pid}/exe` where possible.
+pub(crate) fn list_running_processes() -> Vec<RunningProcess> {
+    let mut out: Vec<RunningProcess> = Vec::new();
+    let proc_dir = Path::new("/proc");
+    let entries = match std::fs::read_dir(proc_dir) {
+        Ok(e) => e,
+        Err(_) => return out,
+    };
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let name_str = file_name.to_string_lossy();
+        if !name_str.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(pid) = name_str.parse::<u32>() else { continue };
+        let comm_path = entry.path().join("comm");
+        let comm = std::fs::read_to_string(&comm_path)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+        if comm.is_empty() {
+            continue;
+        }
+        let exe_link = entry.path().join("exe");
+        let full_path = std::fs::read_link(&exe_link)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        out.push(RunningProcess {
+            exe: comm,
+            path: full_path,
+            pid,
+        });
+    }
+    out
+}
+
 /// Open a path in the system file manager using `xdg-open`.
 pub(crate) fn open_in_explorer(path: &Path) -> Result<(), String> {
     std::process::Command::new("xdg-open")

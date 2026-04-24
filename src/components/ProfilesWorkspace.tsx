@@ -20,9 +20,11 @@ import {
   bindingMatchesQuery,
   conflictingBindingIds,
 } from "../lib/conflict-detection";
-import { parseCommaSeparatedUniqueValues, sortAppMappings } from "../lib/helpers";
+import { sortAppMappings } from "../lib/helpers";
+import { ChipEditor } from "./ChipEditor";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
+import { RunningProcessPicker } from "./RunningProcessPicker";
 
 /** Module-level icon cache: exe name -> base64 PNG (or empty string for "no icon"). */
 const exeIconCache = new Map<string, string>();
@@ -126,6 +128,7 @@ function AppMappingModal({
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [showProcessPicker, setShowProcessPicker] = useState(false);
 
   // Escape key closes the modal
   useEffect(() => {
@@ -237,26 +240,46 @@ function AppMappingModal({
               >
                 {t("common.browse")}
               </button>
+              <button
+                type="button"
+                className="action-button action-button--small"
+                onClick={() => setShowProcessPicker(true)}
+                title={t("ruleModal.pickRunningTooltip")}
+              >
+                {t("ruleModal.pickRunning")}
+              </button>
             </div>
+            {mapping.processPath ? (
+              <p
+                className="field__description"
+                style={{
+                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
+                  fontSize: "0.72rem",
+                  opacity: 0.7,
+                  wordBreak: "break-all",
+                }}
+                title={mapping.processPath}
+              >
+                {mapping.processPath}
+              </p>
+            ) : null}
           </div>
 
           {/* Title filters */}
           <div className="field">
             <span className="field__label">{t("ruleModal.titleLabel")}</span>
-            <input
-              type="text"
-              defaultValue={(mapping.titleIncludes ?? []).join(", ")}
-              key={mapping.id}
-              placeholder={t("common.optional")}
-              onBlur={(e) => {
-                const vals = parseCommaSeparatedUniqueValues(e.target.value);
+            <ChipEditor
+              values={mapping.titleIncludes ?? []}
+              onChange={(vals) =>
                 updateDraft((c) =>
                   upsertAppMapping(c, {
                     ...mapping,
                     titleIncludes: vals.length > 0 ? vals : undefined,
                   }),
-                );
-              }}
+                )
+              }
+              placeholder={t("common.optional")}
+              ariaLabel={t("ruleModal.titleLabel")}
             />
             <p className="field__description">
               {t("ruleModal.titleHelp")}
@@ -367,6 +390,21 @@ function AppMappingModal({
           )}
         </div>
       </div>
+      {showProcessPicker ? (
+        <RunningProcessPicker
+          onCancel={() => setShowProcessPicker(false)}
+          onPick={(proc) => {
+            updateDraft((c) =>
+              upsertAppMapping(c, {
+                ...mapping,
+                exe: proc.exe.toLowerCase(),
+                processPath: proc.path || undefined,
+              }),
+            );
+            setShowProcessPicker(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

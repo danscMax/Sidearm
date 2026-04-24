@@ -161,6 +161,75 @@ pub(crate) fn find_running_process_path(exe_name: &str) -> Option<String> {
     }
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RunningProcess {
+    pub exe: String,
+    pub path: String,
+    pub pid: u32,
+}
+
+/// Enumerate all running processes. Best-effort: entries whose full path
+/// cannot be queried (permission denied, system processes) still return
+/// with an empty `path`.
+pub(crate) fn list_running_processes() -> Vec<RunningProcess> {
+    let mut out: Vec<RunningProcess> = Vec::new();
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot.is_null() {
+            return out;
+        }
+
+        let mut entry: PROCESSENTRY32W = std::mem::zeroed();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+        if Process32FirstW(snapshot, &mut entry) == 0 {
+            CloseHandle(snapshot);
+            return out;
+        }
+
+        loop {
+            let name_len = entry
+                .szExeFile
+                .iter()
+                .position(|&c| c == 0)
+                .unwrap_or(entry.szExeFile.len());
+            let exe = String::from_utf16_lossy(&entry.szExeFile[..name_len]);
+
+            let mut full_path = String::new();
+            let process =
+                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
+            if !process.is_null() {
+                let mut path_buf = vec![0u16; 512];
+                let mut path_len = path_buf.len() as u32;
+                let ok = QueryFullProcessImageNameW(
+                    process,
+                    0,
+                    path_buf.as_mut_ptr(),
+                    &mut path_len,
+                );
+                if ok != 0 {
+                    full_path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
+                }
+                CloseHandle(process);
+            }
+
+            out.push(RunningProcess {
+                exe,
+                path: full_path,
+                pid: entry.th32ProcessID,
+            });
+
+            if Process32NextW(snapshot, &mut entry) == 0 {
+                break;
+            }
+        }
+
+        CloseHandle(snapshot);
+    }
+    out
+}
+
 /// Open a path in Windows Explorer.
 pub(crate) fn open_in_explorer(path: &Path) -> Result<(), String> {
     std::process::Command::new(format!(

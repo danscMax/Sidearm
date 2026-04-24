@@ -9,6 +9,7 @@ import type {
   ImportMode,
   ImportPreview,
   LoadConfigResponse,
+  RunningProcessInfo,
   SaveConfigResponse,
   SequenceStep,
 } from "./config";
@@ -91,6 +92,10 @@ export async function parseSynapseSource(
   path: string,
 ): Promise<ParsedSynapseProfiles> {
   return invoke<ParsedSynapseProfiles>("parse_synapse_source", { path });
+}
+
+export async function listRunningProcesses(): Promise<RunningProcessInfo[]> {
+  return invoke<RunningProcessInfo[]>("list_running_processes");
 }
 
 export async function importSynapseIntoConfig(

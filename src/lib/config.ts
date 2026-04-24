@@ -345,3 +345,9 @@ export interface ImportPreview {
 }
 
 export type ImportMode = "replace" | "merge";
+
+export interface RunningProcessInfo {
+  exe: string;
+  path: string;
+  pid: number;
+}

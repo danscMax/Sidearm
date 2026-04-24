@@ -858,7 +858,7 @@ async fn parse_synapse_source(
     let validated = validate_user_file_path(&path)?;
     tauri::async_runtime::spawn_blocking(
         move || -> Result<synapse_import::ParsedSynapseProfiles, CommandError> {
-            synapse_import::parse_synapse_v4_file(&validated).map_err(|e| {
+            synapse_import::parse_synapse_source(&validated).map_err(|e| {
                 CommandError::new(
                     "synapse_parse_failed",
                     format!("{e}"),

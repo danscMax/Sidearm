@@ -927,7 +927,7 @@ mod tests {
             eprintln!("SIDEARM_SYNAPSE_SMOKE_FILE not set — skipping");
             return;
         };
-        let result = parse_synapse_v4_file(std::path::Path::new(&path))
+        let result = super::super::parse_synapse_source(std::path::Path::new(&path))
             .expect("parse real synapse file");
         eprintln!("profiles: {}", result.profiles.len());
         for prof in &result.profiles {

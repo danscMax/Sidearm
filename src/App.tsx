@@ -98,7 +98,8 @@ function App() {
     void listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
       const path = event.payload?.paths?.[0];
       if (typeof path !== "string") return;
-      if (!path.toLowerCase().endsWith(".synapse4")) return;
+      const lower = path.toLowerCase();
+      if (!lower.endsWith(".synapse4") && !lower.endsWith(".synapse3")) return;
       try {
         const parsed = await parseSynapseSource(path);
         setSynapseParsed(parsed);

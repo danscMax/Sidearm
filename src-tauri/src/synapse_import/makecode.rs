@@ -139,13 +139,27 @@ static EXTENDED_TABLE: Lazy<HashMap<u16, &'static str>> = Lazy::new(|| {
 /// Resolve a `(makecode, is_extended)` pair to a Sidearm key name.
 /// Returns `None` for unknown codes; caller emits a warning and falls back
 /// to a verbatim `Scancode(0xNN)` placeholder.
+///
+/// Fallback rule: if the base table has no entry for this code (and the
+/// extended-flag was off), try the extended table. This handles Synapse
+/// v3 macros that encode Windows-key etc. as base scancodes without the
+/// extended marker, since the base set has no meaning for those codes.
 pub fn makecode_to_key(makecode: u16, is_extended: bool) -> Option<&'static str> {
     if is_extended {
         if let Some(k) = EXTENDED_TABLE.get(&makecode) {
             return Some(*k);
         }
     }
-    BASE_TABLE.get(&makecode).copied()
+    if let Some(k) = BASE_TABLE.get(&makecode) {
+        return Some(*k);
+    }
+    // Fallback: extended-only keys that showed up as base scancodes.
+    if !is_extended {
+        if let Some(k) = EXTENDED_TABLE.get(&makecode) {
+            return Some(*k);
+        }
+    }
+    None
 }
 
 /// True if the key at this `(makecode, is_extended)` pair is a pure modifier.

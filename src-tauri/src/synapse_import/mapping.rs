@@ -47,14 +47,22 @@ pub static THUMB_GRID_DKM: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
     m
 });
 
-/// Mouse / scroll / top buttons appear in the v4 `mappings[]` array.
+/// Mouse / scroll / top buttons appear in the v4 `mappings[]` array and in
+/// v3 `<MouseInput>` payloads.
 pub static MOUSE_BUTTONS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     HashMap::from([
         ("LeftClick", "mouse_left"),
         ("RightClick", "mouse_right"),
         ("MiddleClick", "wheel_click"),
+        // v3 names for the same middle-click button.
+        ("ScrollButton", "wheel_click"),
         ("Mouse4", "mouse_4"),
         ("Mouse5", "mouse_5"),
+        // v3 uses Button4..Button7 for the side / top buttons.
+        ("Button4", "mouse_4"),
+        ("Button5", "mouse_5"),
+        ("Button6", "top_aux_01"),
+        ("Button7", "top_aux_02"),
         ("ScrollUp", "wheel_up"),
         ("ScrollDown", "wheel_down"),
         ("ScrollLeft", "wheel_left"),
@@ -251,17 +259,141 @@ pub fn parse_modifier_array(tokens: &[String]) -> ModifierFlags {
 // Mouse action mapping
 // ============================================================================
 
+// ============================================================================
+// Win32 VirtualKey code → Sidearm key name  (v3 <KeyAssignment><VirtualKey>)
+// ============================================================================
+
+pub static VK_TO_KEY: Lazy<HashMap<u16, &'static str>> = Lazy::new(|| {
+    let mut m = HashMap::new();
+    // Letter keys: VK_A (0x41) .. VK_Z (0x5A)
+    for i in 0..26u16 {
+        let ch = (b'A' + i as u8) as char;
+        let s: &'static str = Box::leak(ch.to_string().into_boxed_str());
+        m.insert(0x41 + i, s);
+    }
+    // Digit row: VK_0 (0x30) .. VK_9 (0x39)
+    for i in 0..10u16 {
+        let s: &'static str = Box::leak((i).to_string().into_boxed_str());
+        m.insert(0x30 + i, s);
+    }
+    // Function keys VK_F1 (0x70) .. VK_F24 (0x87)
+    for i in 0..24u16 {
+        let name: &'static str = Box::leak(format!("F{}", i + 1).into_boxed_str());
+        m.insert(0x70 + i, name);
+    }
+    // Common named keys
+    for (vk, name) in [
+        (0x08, "Backspace"),
+        (0x09, "Tab"),
+        (0x0D, "Enter"),
+        (0x10, "Shift"),
+        (0x11, "Ctrl"),
+        (0x12, "Alt"),
+        (0x13, "Pause"),
+        (0x14, "CapsLock"),
+        (0x1B, "Escape"),
+        (0x20, "Space"),
+        (0x21, "PageUp"),
+        (0x22, "PageDown"),
+        (0x23, "End"),
+        (0x24, "Home"),
+        (0x25, "Left"),
+        (0x26, "Up"),
+        (0x27, "Right"),
+        (0x28, "Down"),
+        (0x2C, "PrintScreen"),
+        (0x2D, "Insert"),
+        (0x2E, "Delete"),
+        (0x5B, "LeftWin"),
+        (0x5C, "RightWin"),
+        (0x5D, "Apps"),
+        (0x60, "Num0"),
+        (0x61, "Num1"),
+        (0x62, "Num2"),
+        (0x63, "Num3"),
+        (0x64, "Num4"),
+        (0x65, "Num5"),
+        (0x66, "Num6"),
+        (0x67, "Num7"),
+        (0x68, "Num8"),
+        (0x69, "Num9"),
+        (0x6A, "NumMultiply"),
+        (0x6B, "NumAdd"),
+        (0x6D, "NumSubtract"),
+        (0x6E, "NumDecimal"),
+        (0x6F, "NumDivide"),
+        (0x90, "NumLock"),
+        (0x91, "ScrollLock"),
+        (0xA0, "LeftShift"),
+        (0xA1, "RightShift"),
+        (0xA2, "LeftCtrl"),
+        (0xA3, "RightCtrl"),
+        (0xA4, "LeftAlt"),
+        (0xA5, "RightAlt"),
+        (0xBA, ";"),
+        (0xBB, "="),
+        (0xBC, ","),
+        (0xBD, "-"),
+        (0xBE, "."),
+        (0xBF, "/"),
+        (0xC0, "`"),
+        (0xDB, "["),
+        (0xDC, "\\"),
+        (0xDD, "]"),
+        (0xDE, "'"),
+    ] {
+        m.insert(vk, name);
+    }
+    m
+});
+
+/// Translate a Win32 VK code to a Sidearm key name. Returns None for
+/// unsupported codes.
+pub fn vk_to_key(vk: u16) -> Option<&'static str> {
+    VK_TO_KEY.get(&vk).copied()
+}
+
+/// Parse Synapse v3 `<Modifier>` string like "Left_Ctrl Left_Shift" (or
+/// "Left_Alt Extended_Key") into modifier flags. Unknown tokens are
+/// ignored.
+pub fn parse_modifier_string(raw: &str) -> ModifierFlags {
+    let mut flags = ModifierFlags::default();
+    for tok in raw.split_whitespace() {
+        let upper = tok.to_ascii_uppercase();
+        if upper.contains("CTRL") {
+            flags.ctrl = true;
+        } else if upper.contains("SHIFT") {
+            flags.shift = true;
+        } else if upper.contains("ALT") {
+            flags.alt = true;
+        } else if upper.contains("WIN") || upper.contains("GUI") {
+            flags.win = true;
+        }
+        // Extended_Key etc. are ignored — they're OS-level flags, not
+        // logical modifiers.
+    }
+    flags
+}
+
+// ============================================================================
+// Mouse action mapping
+// ============================================================================
+
 /// Translate Synapse `mouseGroup.mouseAssignment` to a Sidearm mouse action
 /// string that the runtime understands. Returns None for unsupported actions.
 pub fn translate_mouse_assignment(assignment: &str) -> Option<&'static str> {
     match assignment {
-        "Click" => Some("leftClick"),
-        "LeftClick" => Some("leftClick"),
+        "Click" | "LeftClick" => Some("leftClick"),
         "RightClick" => Some("rightClick"),
         "MiddleClick" => Some("middleClick"),
         "DoubleClick" => Some("doubleClick"),
         "ScrollUp" => Some("scrollUp"),
         "ScrollDown" => Some("scrollDown"),
+        "ScrollLeft" => Some("scrollLeft"),
+        "ScrollRight" => Some("scrollRight"),
+        // v3 browser-back / browser-forward conventions.
+        "Previous" => Some("mouseBack"),
+        "Next" => Some("mouseForward"),
         _ => None,
     }
 }

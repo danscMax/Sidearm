@@ -4,6 +4,7 @@
 //! profiles and macros. Later slices will add `.synapse3` ZIP+XML and
 //! standalone `.xml` macro folders.
 
+pub mod format_v3;
 pub mod format_v4;
 pub mod macro_xml;
 pub mod makecode;
@@ -11,16 +12,43 @@ pub mod mapping;
 pub mod merge;
 pub mod types;
 
+pub use format_v3::parse_synapse_v3_file;
 pub use format_v4::parse_synapse_v4_file;
 pub use merge::apply_parsed_into_config;
 pub use types::*;
 
+use std::io::Read;
 use std::path::Path;
 
-/// High-level entry point: parse a `.synapse4` file and, if a sibling
-/// `Макросы/` (or `Macros/`) folder exists, also pull its XML macros into
-/// the result so bindings that reference macros by GUID resolve end-to-end.
-pub fn parse_synapse_source(path: &Path) -> Result<ParsedSynapseProfiles, format_v4::SynapseParseError> {
+#[derive(Debug, thiserror::Error)]
+pub enum SynapseImportError {
+    #[error("{0}")]
+    V4(#[from] format_v4::SynapseParseError),
+    #[error("{0}")]
+    V3(#[from] format_v3::SynapseV3Error),
+    #[error("Failed to read `{0}`: {1}")]
+    Io(String, std::io::Error),
+}
+
+/// High-level entry point: detect Synapse export format from the file's
+/// first bytes and dispatch to the right parser.
+///  - `{`  (0x7B) → v4 JSON
+///  - `PK` (0x50 0x4B) → v3 ZIP archive
+/// For v4, if a sibling `Макросы/` (or `Macros/`) folder exists next to the
+/// file, its `.xml` macros are also pulled in so GUID-referenced macros
+/// resolve end-to-end.
+pub fn parse_synapse_source(path: &Path) -> Result<ParsedSynapseProfiles, SynapseImportError> {
+    let mut probe = [0u8; 2];
+    let mut file = std::fs::File::open(path)
+        .map_err(|e| SynapseImportError::Io(path.to_string_lossy().into_owned(), e))?;
+    let bytes = file.read(&mut probe)
+        .map_err(|e| SynapseImportError::Io(path.to_string_lossy().into_owned(), e))?;
+
+    if bytes >= 2 && probe == *b"PK" {
+        return Ok(parse_synapse_v3_file(path)?);
+    }
+
+    // Default to v4 JSON for anything else (covers `{`, BOM, whitespace…).
     let mut parsed = parse_synapse_v4_file(path)?;
     enrich_with_sibling_xml_macros(&mut parsed, path);
     Ok(parsed)

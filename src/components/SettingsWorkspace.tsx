@@ -640,7 +640,10 @@ export function SettingsWorkspace({
               const path = await open({
                 title: t("synapseImport.pickFileTitle"),
                 filters: [
-                  { name: "Razer Synapse v4", extensions: ["synapse4"] },
+                  {
+                    name: "Razer Synapse export",
+                    extensions: ["synapse4", "synapse3"],
+                  },
                   { name: "All files", extensions: ["*"] },
                 ],
                 multiple: false,

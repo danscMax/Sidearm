@@ -9,6 +9,7 @@ import {
 import type {
   ImportSummary,
   ImportWarning,
+  MergeStrategy,
   ParsedSynapseProfiles,
 } from "../lib/synapse-import";
 
@@ -34,6 +35,7 @@ export function SynapseImportModal({
   );
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
+  const [mergeStrategy, setMergeStrategy] = useState<MergeStrategy>("append");
 
   useEffect(() => {
     containerRef.current?.focus();
@@ -77,7 +79,10 @@ export function SynapseImportModal({
     try {
       const result = await importSynapseIntoConfig(
         parsed,
-        { selectedProfileGuids: Array.from(selected) },
+        {
+          selectedProfileGuids: Array.from(selected),
+          mergeStrategy,
+        },
         activeConfig,
       );
       onImported(result.config, result.summary);
@@ -182,6 +187,38 @@ export function SynapseImportModal({
               })}
             </ul>
           )}
+
+          <fieldset className="synapse-import-modal__strategy">
+            <legend>{t("synapseImport.strategy.legend")}</legend>
+            <label>
+              <input
+                type="radio"
+                name="merge-strategy"
+                value="append"
+                checked={mergeStrategy === "append"}
+                onChange={() => setMergeStrategy("append")}
+                disabled={submitting}
+              />
+              <span>{t("synapseImport.strategy.append")}</span>
+              <small className="panel__muted">
+                {t("synapseImport.strategy.appendHint")}
+              </small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="merge-strategy"
+                value="replaceByName"
+                checked={mergeStrategy === "replaceByName"}
+                onChange={() => setMergeStrategy("replaceByName")}
+                disabled={submitting}
+              />
+              <span>{t("synapseImport.strategy.replaceByName")}</span>
+              <small className="panel__muted">
+                {t("synapseImport.strategy.replaceByNameHint")}
+              </small>
+            </label>
+          </fieldset>
 
           {parsed.warnings.length > 0 ? (
             <details className="synapse-import-warnings">

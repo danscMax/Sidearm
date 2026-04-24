@@ -601,7 +601,14 @@
     "warningsMore": "…and {{count}} more",
     "submit": "Import {{profiles}} profile(s) ({{bindings}} bindings)",
     "submitting": "Importing…",
-    "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros"
+    "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros",
+    "strategy": {
+      "legend": "Merge strategy",
+      "append": "Append as new",
+      "appendHint": "Name collisions get an (импорт) suffix.",
+      "replaceByName": "Replace by name",
+      "replaceByNameHint": "Any existing profile with the same name is deleted along with its bindings."
+    }
   },
   "portable": {
     "badge": {

@@ -31,7 +31,6 @@ import {
 } from "../lib/backend";
 import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
-import { SynapseImportModal } from "./SynapseImportModal";
 import { Toggle } from "./shared";
 
 export interface SettingsWorkspaceProps {
@@ -48,6 +47,7 @@ export interface SettingsWorkspaceProps {
   } | null) => void;
   refreshConfig: () => void;
   setError: (error: CommandError | null) => void;
+  onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;
 }
 
 export function SettingsWorkspace({
@@ -59,10 +59,10 @@ export function SettingsWorkspace({
   setConfirmModal,
   refreshConfig,
   setError,
+  onRequestSynapseImport,
 }: SettingsWorkspaceProps) {
   const { t, i18n } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
-  const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
   const [synapseLoading, setSynapseLoading] = useState(false);
 
   const sortedProfiles = [...activeConfig.profiles].sort(
@@ -614,7 +614,7 @@ export function SettingsWorkspace({
               setSynapseLoading(true);
               try {
                 const parsed = await parseSynapseSource(path);
-                setSynapseParsed(parsed);
+                onRequestSynapseImport(parsed);
               } catch (unknownError) {
                 setError(normalizeCommandError(unknownError));
               } finally {
@@ -626,19 +626,6 @@ export function SettingsWorkspace({
           </button>
         </div>
       </section>
-
-      {synapseParsed ? (
-        <SynapseImportModal
-          parsed={synapseParsed}
-          activeConfig={activeConfig}
-          onImported={(next) => {
-            updateDraft(() => next);
-            setSynapseParsed(null);
-          }}
-          onCancel={() => setSynapseParsed(null)}
-          setError={setError}
-        />
-      ) : null}
 
       {/* Local backups */}
       <section className="settings-section">

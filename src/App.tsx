@@ -20,6 +20,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ErrorModal } from "./components/ErrorModal";
 import { PortableMigrationDialog } from "./components/PortableMigrationDialog";
+import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
@@ -33,9 +34,12 @@ import {
   listBackups,
   normalizeCommandError,
   openConfigFolder,
+  parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
 import type { ErrorActionKind } from "./lib/errors";
+import type { ParsedSynapseProfiles } from "./lib/synapse-import";
+import { listen } from "@tauri-apps/api/event";
 import {
   createProfile,
 } from "./lib/config-editing";
@@ -81,11 +85,33 @@ function App() {
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastSeqRef = useRef(0);
+  const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
 
   const showToast = useCallback((message: string, kind?: ToastState["kind"]) => {
     toastSeqRef.current += 1;
     setToast({ id: toastSeqRef.current, message, kind });
   }, []);
+
+  // Tauri v2 file-drop event; looks like a hint the user wants to import a Synapse file.
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    void listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
+      const path = event.payload?.paths?.[0];
+      if (typeof path !== "string") return;
+      if (!path.toLowerCase().endsWith(".synapse4")) return;
+      try {
+        const parsed = await parseSynapseSource(path);
+        setSynapseParsed(parsed);
+      } catch (unknownError) {
+        setError(normalizeCommandError(unknownError));
+      }
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [setError]);
 
   const handleUndoWithToast = useCallback(() => {
     if (undoStack.length === 0) return;
@@ -567,6 +593,7 @@ function App() {
                 setConfirmModal={setConfirmModal}
                 refreshConfig={refreshConfig}
                 setError={setError}
+                onRequestSynapseImport={setSynapseParsed}
               />
             ) : (
               <DebugWorkspace
@@ -666,6 +693,27 @@ function App() {
       />
       {showMigrationDialog ? (
         <PortableMigrationDialog onChoose={handleMigrationChoice} />
+      ) : null}
+      {synapseParsed && activeConfig ? (
+        <SynapseImportModal
+          parsed={synapseParsed}
+          activeConfig={activeConfig}
+          onImported={(next, summary) => {
+            updateDraft(() => next);
+            setSynapseParsed(null);
+            showToast(
+              t("synapseImport.summaryToast", {
+                profiles: summary.profilesAdded,
+                bindings: summary.bindingsAdded,
+                actions: summary.actionsAdded,
+                macros: summary.macrosAdded,
+              }),
+              "success",
+            );
+          }}
+          onCancel={() => setSynapseParsed(null)}
+          setError={setError}
+        />
       ) : null}
       <Toast toast={toast} onDismiss={() => setToast(null)} />
 

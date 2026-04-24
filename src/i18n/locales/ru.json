@@ -601,7 +601,14 @@
     "warningsMore": "…и ещё {{count}}",
     "submit": "Импортировать {{profiles}} профил. ({{bindings}} назн.)",
     "submitting": "Импорт…",
-    "summaryToast": "Импортировано: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{macros}} макросов"
+    "summaryToast": "Импортировано: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{macros}} макросов",
+    "strategy": {
+      "legend": "Стратегия слияния",
+      "append": "Добавить как новые",
+      "appendHint": "Имена-коллизии получат суффикс (импорт).",
+      "replaceByName": "Заменить по имени",
+      "replaceByNameHint": "Если профиль с таким именем уже есть — он будет удалён вместе со своими назначениями."
+    }
   },
   "portable": {
     "badge": {

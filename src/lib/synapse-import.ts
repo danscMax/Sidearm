@@ -55,8 +55,11 @@ export interface ImportWarning {
   context?: string;
 }
 
+export type MergeStrategy = "append" | "replaceByName";
+
 export interface ImportOptions {
   selectedProfileGuids?: string[];
+  mergeStrategy?: MergeStrategy;
 }
 
 export interface ImportSummary {

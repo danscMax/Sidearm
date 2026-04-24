@@ -97,11 +97,24 @@ pub struct ImportWarning {
     pub context: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MergeStrategy {
+    /// Append imported profiles as new entries. Name collisions get a
+    /// "(импорт)" suffix. (Default.)
+    #[default]
+    Append,
+    /// Delete any existing profile whose name matches the imported one
+    /// (along with its bindings/actions/appMappings), then append.
+    ReplaceByName,
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ImportOptions {
     /// If Some, only these profile GUIDs are imported. None = all.
     pub selected_profile_guids: Option<Vec<String>>,
+    pub merge_strategy: MergeStrategy,
 }
 
 #[derive(Clone, Debug, Serialize)]

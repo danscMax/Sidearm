@@ -16,8 +16,8 @@ use crate::config::{
 };
 
 use super::types::{
-    ImportOptions, ImportSummary, ImportWarning, ImportedConfig, ParsedAction, ParsedBinding,
-    ParsedMacro, ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles,
+    ImportOptions, ImportSummary, ImportWarning, ImportedConfig, MergeStrategy, ParsedAction,
+    ParsedBinding, ParsedMacro, ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles,
 };
 
 // ============================================================================
@@ -44,6 +44,9 @@ pub fn apply_parsed_into_config(
                 summary.skipped += 1;
                 continue;
             }
+        }
+        if options.merge_strategy == MergeStrategy::ReplaceByName {
+            remove_profile_by_name(&mut config, &profile.name);
         }
         match append_profile(&mut config, profile, &mut warnings) {
             Ok(ProfileAddition { bindings, actions }) => {
@@ -338,6 +341,53 @@ fn build_sequence_action(
 // Helpers
 // ============================================================================
 
+/// Remove any profile whose name matches `name`, along with all of its
+/// bindings, actions referenced only by those bindings, and appMappings.
+/// Used by `MergeStrategy::ReplaceByName`.
+fn remove_profile_by_name(config: &mut AppConfig, name: &str) {
+    let target_ids: Vec<String> = config
+        .profiles
+        .iter()
+        .filter(|p| p.name == name)
+        .map(|p| p.id.clone())
+        .collect();
+    if target_ids.is_empty() {
+        return;
+    }
+    let target_set: std::collections::HashSet<&str> =
+        target_ids.iter().map(String::as_str).collect();
+
+    let dropped_action_ids: std::collections::HashSet<String> = config
+        .bindings
+        .iter()
+        .filter(|b| target_set.contains(b.profile_id.as_str()))
+        .map(|b| b.action_ref.clone())
+        .collect();
+
+    config
+        .profiles
+        .retain(|p| !target_set.contains(p.id.as_str()));
+    config
+        .bindings
+        .retain(|b| !target_set.contains(b.profile_id.as_str()));
+    config
+        .app_mappings
+        .retain(|m| !target_set.contains(m.profile_id.as_str()));
+
+    // An action can be referenced by multiple bindings (e.g. macros shared
+    // within a profile). Only drop actions whose *remaining* bindings are
+    // all gone — play it safe and keep actions if any other binding still
+    // refers to them.
+    let still_referenced: std::collections::HashSet<String> = config
+        .bindings
+        .iter()
+        .map(|b| b.action_ref.clone())
+        .collect();
+    config.actions.retain(|a| {
+        !(dropped_action_ids.contains(&a.id) && !still_referenced.contains(&a.id))
+    });
+}
+
 fn unique_profile_name(base: &str, existing: &[Profile]) -> String {
     let base = if base.trim().is_empty() { "Imported" } else { base };
     let mut candidate = base.to_string();
@@ -543,6 +593,70 @@ mod tests {
             .find(|a| a.id == binding.action_ref)
             .expect("action referenced by binding");
         assert_eq!(action.action_type, ActionType::Sequence);
+    }
+
+    #[test]
+    fn replace_by_name_removes_existing_profile_and_its_bindings() {
+        let mut base = empty_config();
+        // Pre-seed base with a profile "Gaming" + 1 binding + 1 action.
+        base.profiles.push(serde_json::from_str(
+            r#"{"id": "old-gaming", "name": "Gaming", "enabled": true, "priority": 5}"#,
+        ).unwrap());
+        base.actions.push(serde_json::from_str(
+            r#"{"id": "a-old", "type": "shortcut", "pretty": "Old",
+                "payload": {"key": "Q", "ctrl": false, "shift": false, "alt": false, "win": false}}"#
+        ).unwrap());
+        base.bindings.push(serde_json::from_str(
+            r#"{"id": "b-old", "profileId": "old-gaming", "layer": "standard",
+                "controlId": "thumb_01", "label": "Old", "actionRef": "a-old", "enabled": true}"#
+        ).unwrap());
+
+        let parsed = ParsedSynapseProfiles {
+            source_kind: super::super::types::SourceKind::SynapseV4,
+            source_path: "t".into(),
+            profiles: vec![ParsedProfile {
+                synapse_guid: "g".into(),
+                name: "Gaming".into(),
+                bindings: vec![ParsedBinding {
+                    control_id: "thumb_01".into(),
+                    layer: "standard".into(),
+                    source_input_id: "KEY_1".into(),
+                    label: "New".into(),
+                    action: ParsedAction::Shortcut {
+                        key: "A".into(),
+                        ctrl: true,
+                        shift: false,
+                        alt: false,
+                        win: false,
+                    },
+                }],
+                macros: vec![],
+            }],
+            warnings: vec![],
+        };
+        let result = apply_parsed_into_config(
+            base,
+            parsed,
+            &ImportOptions {
+                selected_profile_guids: None,
+                merge_strategy: MergeStrategy::ReplaceByName,
+            },
+        );
+        // Profile "Gaming" exists exactly once (the new one), with the new name.
+        let gaming: Vec<_> = result
+            .config
+            .profiles
+            .iter()
+            .filter(|p| p.name == "Gaming")
+            .collect();
+        assert_eq!(gaming.len(), 1);
+        // Old profile, action, binding are gone
+        assert!(!result.config.profiles.iter().any(|p| p.id == "old-gaming"));
+        assert!(!result.config.bindings.iter().any(|b| b.id == "b-old"));
+        assert!(!result.config.actions.iter().any(|a| a.id == "a-old"));
+        // New binding + action present
+        assert_eq!(result.config.bindings.len(), 1);
+        assert_eq!(result.config.actions.len(), 1);
     }
 
     #[test]

@@ -137,20 +137,6 @@ function App() {
     };
   }, []);
 
-  const handleMigrationChoice = useCallback(
-    async (copyFromRoaming: boolean) => {
-      try {
-        await acceptPortableMigration(copyFromRoaming);
-        refreshConfig();
-      } catch (unknownError) {
-        setError(normalizeCommandError(unknownError));
-      } finally {
-        setShowMigrationDialog(false);
-      }
-    },
-    [refreshConfig, setError],
-  );
-
   const handleErrorAction = useCallback(
     async (kind: ErrorActionKind) => {
       if (kind === "openConfigFolder") {
@@ -212,10 +198,34 @@ function App() {
     lastCapture, lastEncodedKey,
     resolutionKeyInput, setResolutionKeyInput,
     lastResolutionPreview, lastExecution, lastRuntimeError,
-    handleStartRuntime, handleStopRuntime,
+    handleStartRuntime, handleStopRuntime, handleReloadRuntime,
     handleCaptureActiveWindow, handlePreviewResolution,
     handleExecutePreviewAction, handleRunPreviewAction,
   } = runtime;
+
+  const handleMigrationChoice = useCallback(
+    async (copyFromRoaming: boolean) => {
+      try {
+        await acceptPortableMigration(copyFromRoaming);
+        refreshConfig();
+        // The capture runtime was started with the default-seed config that
+        // load_config auto-created during startup, racing with our prompt.
+        // After the migration overwrites config.json with the roaming copy
+        // we must re-register hotkeys with the freshly-loaded config or the
+        // first post-migration session silently has stale registrations.
+        try {
+          await handleReloadRuntime();
+        } catch {
+          // Runtime may not be running yet — ignore.
+        }
+      } catch (unknownError) {
+        setError(normalizeCommandError(unknownError));
+      } finally {
+        setShowMigrationDialog(false);
+      }
+    },
+    [refreshConfig, setError, handleReloadRuntime],
+  );
 
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");

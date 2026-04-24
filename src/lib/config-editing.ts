@@ -591,7 +591,7 @@ export function duplicateProfile(
   );
   const newAppMappings = sourceAppMappings.map((m) => ({
     ...m,
-    id: crypto.randomUUID(),
+    id: makeRandomId("app"),
     profileId: newId,
   }));
 
@@ -606,7 +606,7 @@ export function duplicateProfile(
     if (!actionIdMap.has(binding.actionRef)) {
       const sourceAction = config.actions.find((a) => a.id === binding.actionRef);
       if (sourceAction) {
-        const newActionId = crypto.randomUUID();
+        const newActionId = makeRandomId("action");
         actionIdMap.set(binding.actionRef, newActionId);
         newActions.push({ ...structuredClone(sourceAction), id: newActionId });
       }
@@ -615,7 +615,7 @@ export function duplicateProfile(
 
   const newBindings = sourceBindings.map((b) => ({
     ...b,
-    id: crypto.randomUUID(),
+    id: makeRandomId("binding"),
     profileId: newId,
     actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
   }));
@@ -784,6 +784,13 @@ export function makeProfileId(name: string): string {
   return normalized || "profile";
 }
 
+// Generates a schema-compliant id matching ^[a-z][a-z0-9-]*$.
+// The prefix must start with a lowercase letter; the suffix is random hex.
+export function makeRandomId(prefix: string): string {
+  const hex = crypto.randomUUID().replace(/-/g, "");
+  return `${prefix}-${hex}`;
+}
+
 export function createDefaultActionMenuItem(
   existingIds: string[],
   actionRef: string,
@@ -912,10 +919,9 @@ export function mergeImportedProfile(
     ...config.appMappings.map((m) => m.id),
   ]);
 
-  function resolveId(id: string): string {
+  function resolveId(id: string, prefix: string): string {
     if (!existingIds.has(id)) return id;
-    const newId = crypto.randomUUID();
-    return newId;
+    return makeRandomId(prefix);
   }
 
   // Build ID maps (old -> new) for all entity types
@@ -925,24 +931,24 @@ export function mergeImportedProfile(
   const appMappingIdMap = new Map<string, string>();
 
   // Profile
-  const newProfileId = resolveId(data.profile.id);
+  const newProfileId = resolveId(data.profile.id, "profile");
   profileIdMap.set(data.profile.id, newProfileId);
 
   // Actions
   for (const action of data.actions) {
-    const newId = resolveId(action.id);
+    const newId = resolveId(action.id, "action");
     actionIdMap.set(action.id, newId);
   }
 
   // Bindings
   for (const binding of data.bindings) {
-    const newId = resolveId(binding.id);
+    const newId = resolveId(binding.id, "binding");
     bindingIdMap.set(binding.id, newId);
   }
 
   // AppMappings
   for (const appMapping of data.appMappings) {
-    const newId = resolveId(appMapping.id);
+    const newId = resolveId(appMapping.id, "app");
     appMappingIdMap.set(appMapping.id, newId);
   }
 
@@ -1023,21 +1029,21 @@ export function importProfile(
 
   const actionIdMap = new Map<string, string>();
   const newActions: Action[] = data.actions.map((a) => {
-    const id = crypto.randomUUID();
+    const id = makeRandomId("action");
     actionIdMap.set(a.id, id);
     return { ...structuredClone(a), id };
   });
 
   const newBindings: Binding[] = data.bindings.map((b) => ({
     ...b,
-    id: crypto.randomUUID(),
+    id: makeRandomId("binding"),
     profileId: newId,
     actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
   }));
 
   const newAppMappings: AppMapping[] = data.appMappings.map((m) => ({
     ...m,
-    id: crypto.randomUUID(),
+    id: makeRandomId("app"),
     profileId: newId,
   }));
 

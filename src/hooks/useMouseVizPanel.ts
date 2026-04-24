@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import type { AppConfig, Binding, ControlId, Layer } from "../lib/config";
-import { makeBindingId, upsertBinding } from "../lib/config-editing";
+import { makeBindingId, makeRandomId, upsertBinding } from "../lib/config-editing";
 
 export function useMouseVizPanel(deps: {
   effectiveProfileId: string | null;
@@ -17,7 +17,7 @@ export function useMouseVizPanel(deps: {
       updateDraft((config) => {
         const sourceAction = config.actions.find((a) => a.id === sourceActionId);
         if (!sourceAction) return config;
-        const newAction = { ...sourceAction, id: crypto.randomUUID() };
+        const newAction = { ...sourceAction, id: makeRandomId("action") };
         const bindingId = makeBindingId(effectiveProfileId, selectedLayer, targetControlId);
         const newBinding: Binding = {
           id: bindingId,

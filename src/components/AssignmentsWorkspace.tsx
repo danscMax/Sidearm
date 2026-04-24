@@ -11,7 +11,7 @@ import type {
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
-import { makeBindingId, removeBinding, upsertBinding } from "../lib/config-editing";
+import { makeBindingId, makeRandomId, removeBinding, upsertBinding } from "../lib/config-editing";
 import { MouseVisualization } from "./MouseVisualization";
 import { ContextMenu } from "./ContextMenu";
 import type { ContextMenuItem } from "./ContextMenu";
@@ -109,7 +109,7 @@ export function AssignmentsWorkspace({
         {
           label: t("assignments.copyToLayer", { layer: otherLayerLabel }),
           onClick: () => {
-            const newActionId = crypto.randomUUID();
+            const newActionId = makeRandomId("action");
             const newBindingId = makeBindingId(effectiveProfileId, otherLayer, controlId);
             updateDraft((config) => {
               const clonedAction = { ...action, id: newActionId };
@@ -153,7 +153,7 @@ export function AssignmentsWorkspace({
         disabled: !bindingClipboard,
         onClick: () => {
           if (!bindingClipboard) return;
-          const newActionId = crypto.randomUUID();
+          const newActionId = makeRandomId("action");
           const newBindingId = makeBindingId(effectiveProfileId, selectedLayer, controlId);
           updateDraft((config) => {
             const clonedAction = { ...bindingClipboard.action, id: newActionId };

@@ -2004,6 +2004,24 @@ code {
   outline-offset: 1px;
 }
 
+/* WebView2 / Chromium render the <select> popup with OS-native styling that
+   ignores the parent's `color`. Without explicit option colours the list
+   falls back to black text on a white popup, which is invisible against
+   our dark theme. Apply globally — all <option>s in the app share the
+   same dark popup look. */
+select option,
+select optgroup {
+  background-color: var(--c-bg, #1a1f16);
+  color: var(--c-text-bright, #f0f2ec);
+}
+select option:checked {
+  background-color: rgba(159, 202, 105, 0.25);
+  color: var(--c-text-bright, #f0f2ec);
+}
+select option:disabled {
+  color: var(--c-text-muted, rgba(240, 242, 236, 0.5));
+}
+
 .sidebar__profile-select-row {
   display: flex;
   gap: 6px;

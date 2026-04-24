@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { PortableBadge } from "./PortableBadge";
+
 export function TitleBar() {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
@@ -44,6 +46,7 @@ export function TitleBar() {
       <span className="titlebar__title" data-tauri-drag-region>
         {t("app.name")}
       </span>
+      <PortableBadge />
       <div className="titlebar__controls">
         <button
           type="button"

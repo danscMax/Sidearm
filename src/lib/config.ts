@@ -308,3 +308,39 @@ export interface CommandError {
   message: string;
   details?: string[];
 }
+
+export type PathMode = "portable" | "roaming" | "portableFallback";
+
+export interface AppPathsInfo {
+  mode: PathMode;
+  configDir: string;
+  logDir: string;
+  snapshotsDir: string;
+  portableMarkerPresent: boolean;
+  fallbackReason?: string;
+  needsPortableMigrationPrompt: boolean;
+}
+
+export type BackupKind =
+  | { kind: "rolling"; value: number }
+  | { kind: "snapshot"; value: string }
+  | { kind: "lastKnownGood" };
+
+export interface BackupEntry {
+  path: string;
+  kind: BackupKind;
+  bytes: number;
+  modifiedMs: number;
+}
+
+export interface ImportPreview {
+  version: number;
+  profileCount: number;
+  bindingCount: number;
+  actionCount: number;
+  appMappingCount: number;
+  snippetCount: number;
+  warnings: string[];
+}
+
+export type ImportMode = "replace" | "merge";

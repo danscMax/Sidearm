@@ -366,6 +366,9 @@
     "replaceConfigConfirm": "Replace",
     "readConfigError": "Could not read configuration file.",
     "importConfig": "Import configuration",
+    "openConfigFolder": "Open config folder",
+    "importHasWarnings": "⚠ Warnings: {{count}}",
+    "importSummary": "File contains: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{appMappings}} rules, {{snippets}} snippets. {{warnings}} The current config will be fully replaced. Continue?",
     "languageHeader": "INTERFACE LANGUAGE",
     "osdHeader": "NOTIFICATIONS",
     "osdEnabled": "Show notifications",
@@ -577,5 +580,90 @@
     "empty": "Select a textSnippet action to edit the snippet library.",
     "pasteModeClipboard": "Via clipboard",
     "pasteModeDirect": "Direct text input"
+  },
+  "portable": {
+    "badge": {
+      "portable": "Portable",
+      "roaming": "Roaming",
+      "fallback": "Portable (read-only)",
+      "tooltipPrefix": "Config is stored at:"
+    }
+  },
+  "migration": {
+    "title": "Migrate settings to Portable?",
+    "body": "Your existing profiles were found in %APPDATA%. Sidearm is running in Portable mode — the config will live in ./data next to the exe.",
+    "hint": "This dialog only appears once. You can always copy/import the config later via Settings.",
+    "copyFromRoaming": "Copy from %APPDATA%",
+    "startFresh": "Start fresh"
+  },
+  "backup": {
+    "header": "Local backups",
+    "help": "Sidearm keeps three rolling copies of config.json, a daily snapshot, and a last-known-good marker. Pick one to restore.",
+    "loading": "Loading backups…",
+    "empty": "No backups yet — they will appear after the first save.",
+    "restoreTitle": "Restore from backup?",
+    "restoreMessage": "The current config will be moved to a rolling backup, and {{label}} will become the active config.",
+    "restoreConfirm": "Restore",
+    "restoreButton": "Restore",
+    "kind": {
+      "rolling": "Backup #{{slot}}",
+      "snapshot": "Snapshot {{date}}",
+      "lastKnownGood": "Last known good"
+    },
+    "column": {
+      "type": "Type",
+      "modified": "Modified",
+      "size": "Size"
+    }
+  },
+  "errors": {
+    "technicalInfo": "Technical info",
+    "actions": {
+      "copyDetails": "Copy details",
+      "retry": "Try again",
+      "openLastBackup": "Restore from backup",
+      "openConfigFolder": "Open config folder",
+      "dismiss": "Dismiss"
+    },
+    "schema": {
+      "title": "Internal format error",
+      "hint": "The config file doesn't match the expected schema — likely an app bug. Copy the details and attach them to a report."
+    },
+    "io": {
+      "title": "File operation failed",
+      "hint": "Could not read or write a file. Check permissions and free space."
+    },
+    "parse": {
+      "title": "Config file is corrupted",
+      "hint": "The config could not be parsed as JSON. Try restoring from a backup."
+    },
+    "noConfigDir": {
+      "title": "Config directory unavailable",
+      "hint": "The system config directory for the app cannot be resolved."
+    },
+    "portableFallback": {
+      "title": "Portable data folder is read-only",
+      "hint": "Sidearm is temporarily falling back to %APPDATA% instead of ./data/. Check permissions on the folder next to the exe."
+    },
+    "invalidConfig": {
+      "title": "Config failed validation",
+      "hint": "The config is syntactically valid JSON but violates business rules."
+    },
+    "invalidBackupPath": {
+      "title": "Invalid backup path",
+      "hint": "The path must point to a file inside the config directory."
+    },
+    "invalidPath": {
+      "title": "Invalid file path",
+      "hint": "Only absolute paths inside the user's home directory are allowed, without '..' segments."
+    },
+    "runtimeReload": {
+      "title": "Could not reload the capture runtime",
+      "hint": "Changes were saved but Sidearm could not apply them live — a hotkey may be taken."
+    },
+    "unknown": {
+      "title": "An unexpected error occurred",
+      "hint": "Copy the details and attach them to a report if the error persists."
+    }
   }
 }

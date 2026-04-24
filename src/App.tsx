@@ -1,5 +1,6 @@
 import {
   startTransition,
+  useCallback,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -17,12 +18,23 @@ import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette } from "./components/CommandPalette";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
+import { ErrorModal } from "./components/ErrorModal";
+import { PortableMigrationDialog } from "./components/PortableMigrationDialog";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
 import { Toolbar } from "./components/Toolbar";
+import {
+  acceptPortableMigration,
+  getAppPaths,
+  listBackups,
+  normalizeCommandError,
+  openConfigFolder,
+  restoreConfigFromBackup,
+} from "./lib/backend";
+import type { ErrorActionKind } from "./lib/errors";
 import {
   createProfile,
 } from "./lib/config-editing";
@@ -62,6 +74,71 @@ function App() {
     activeConfig,
     refreshConfig, updateDraft, handleUndo, handleRedo,
   } = persistence;
+
+  const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getAppPaths().then((paths) => {
+      if (!cancelled && paths.needsPortableMigrationPrompt) {
+        setShowMigrationDialog(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleMigrationChoice = useCallback(
+    async (copyFromRoaming: boolean) => {
+      try {
+        await acceptPortableMigration(copyFromRoaming);
+        refreshConfig();
+      } catch (unknownError) {
+        setError(normalizeCommandError(unknownError));
+      } finally {
+        setShowMigrationDialog(false);
+      }
+    },
+    [refreshConfig, setError],
+  );
+
+  const handleErrorAction = useCallback(
+    async (kind: ErrorActionKind) => {
+      if (kind === "openConfigFolder") {
+        try {
+          await openConfigFolder();
+        } catch {
+          // swallow — modal stays visible for the user
+        }
+        return;
+      }
+      if (kind === "retry") {
+        setError(null);
+        refreshConfig();
+        return;
+      }
+      if (kind === "openLastBackup") {
+        try {
+          const backups = await listBackups();
+          const rolling1 = backups.find(
+            (b) => b.kind.kind === "rolling" && b.kind.value === 1,
+          );
+          const lastKnownGood = backups.find(
+            (b) => b.kind.kind === "lastKnownGood",
+          );
+          const target = rolling1 ?? lastKnownGood ?? backups[0];
+          if (!target) return;
+          await restoreConfigFromBackup(target.path);
+          setError(null);
+          refreshConfig();
+        } catch {
+          // swallow — modal stays visible for the user
+        }
+      }
+    },
+    [refreshConfig, setError],
+  );
 
   const logPanel = useLogPanel();
 
@@ -433,12 +510,6 @@ function App() {
         />
 
         <div className="content__scroll">
-        {error && viewState === "error" ? (
-          <div className="global-error-banner">
-            <ErrorPanel error={error} />
-          </div>
-        ) : null}
-
         {activeConfig ? (
           <section className={workspaceClass}>
             {isProfilesMode ? (
@@ -472,6 +543,8 @@ function App() {
                 updateDraft={updateDraft}
                 setSelectedProfileId={setSelectedProfileId}
                 setConfirmModal={setConfirmModal}
+                refreshConfig={refreshConfig}
+                setError={setError}
               />
             ) : (
               <DebugWorkspace
@@ -564,6 +637,15 @@ function App() {
           onCancel={() => setConfirmModal(null)}
         />
       ) : null}
+      <ErrorModal
+        error={viewState === "error" ? error : null}
+        onDismiss={() => setError(null)}
+        onAction={handleErrorAction}
+      />
+      {showMigrationDialog ? (
+        <PortableMigrationDialog onChoose={handleMigrationChoice} />
+      ) : null}
+
       {commandPaletteOpen ? (
         <CommandPalette
           onClose={() => setCommandPaletteOpen(false)}

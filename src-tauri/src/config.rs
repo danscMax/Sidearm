@@ -12,7 +12,6 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const BACKUP_FILE_NAME: &str = "config.last-known-good.json";
 const SCHEMA_VERSION: i32 = 2;
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -21,6 +20,9 @@ const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
 
 #[derive(Debug, Error)]
 pub enum ConfigStoreError {
+    // Retained for future readonly-fs scenarios; the public error code
+    // `config_directory_unavailable` is still exposed via `From<CommandError>`.
+    #[allow(dead_code)]
     #[error("{0}")]
     ConfigDirectoryUnavailable(String),
     #[error("{message}")]
@@ -722,6 +724,15 @@ pub fn load_or_initialize_config(
         migrate_paste_mode(&mut config);
         let warnings = validate_config(&config)?;
         config.compile_title_regexes();
+
+        // Mark the current config as last-known-good *after* it has loaded and
+        // validated cleanly. Failure is non-fatal — log and continue.
+        if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
+            log::warn!(
+                "[config] Failed to update last-known-good marker: {err}"
+            );
+        }
+
         return Ok(LoadConfigResponse {
             config,
             warnings,
@@ -787,22 +798,12 @@ fn write_config_to_path(
     config: &AppConfig,
 ) -> Result<Option<PathBuf>, ConfigStoreError> {
     let config_path = config_dir.join(CONFIG_FILE_NAME);
-    let backup_path = config_dir.join(BACKUP_FILE_NAME);
-    let had_existing_config = config_path.exists();
 
-    if had_existing_config {
-        let mut backup_tmp = NamedTempFile::new_in(config_path.parent().unwrap())
-            .map_err(|error| io_error(Some(&backup_path), error))?;
-        std::io::copy(
-            &mut fs::File::open(&config_path)
-                .map_err(|error| io_error(Some(&config_path), error))?,
-            backup_tmp.as_file_mut(),
-        )
-        .map_err(|error| io_error(Some(&backup_path), error))?;
-        backup_tmp
-            .persist(&backup_path)
-            .map_err(|error| io_error(Some(&backup_path), error.error))?;
-    }
+    // Rotate .bak.N → .bak.N+1 and copy current config.json → .bak.1 before
+    // overwriting. Returns the path to the just-created .bak.1 (or None if
+    // there was no existing config to back up).
+    let backup_path = crate::backup::rotate_rolling_backups(config_dir)
+        .map_err(|error| io_error(Some(config_dir), error))?;
 
     let serialized = serde_json::to_string_pretty(config)
         .map_err(|error| ConfigStoreError::Serialize(error.to_string()))?;
@@ -830,7 +831,12 @@ fn write_config_to_path(
             message: format!("Failed to replace config atomically: {}", error.error),
         })?;
 
-    Ok(had_existing_config.then_some(backup_path))
+    // Daily snapshot — best-effort, never fails the save.
+    if let Err(err) = crate::backup::write_daily_snapshot_and_prune(config_dir) {
+        log::warn!("[config] Failed to write daily snapshot: {err}");
+    }
+
+    Ok(backup_path)
 }
 
 fn config_schema_validator() -> Result<&'static Validator, ConfigStoreError> {
@@ -865,6 +871,17 @@ fn validate_config_schema_value(value: &Value) -> Result<(), ConfigStoreError> {
         Ok(())
     } else {
         Err(ConfigStoreError::SchemaViolation { errors })
+    }
+}
+
+/// Validate a raw JSON value against the bundled config schema and return a
+/// flat list of human-readable error strings. Non-fatal: callers decide what
+/// to do with the errors.
+pub fn collect_schema_errors(value: &Value) -> Vec<String> {
+    match validate_config_schema_value(value) {
+        Ok(()) => Vec::new(),
+        Err(ConfigStoreError::SchemaViolation { errors }) => errors,
+        Err(other) => vec![other.to_string()],
     }
 }
 
@@ -2715,17 +2732,45 @@ mod tests {
     }
 
     #[test]
-    fn save_creates_backup_when_config_exists() {
+    fn save_creates_rolling_backup_when_config_exists() {
         let temp_dir = tempdir().expect("temp dir");
         let first = load_or_initialize_config(temp_dir.path()).expect("seed load");
 
         let response = save_config(temp_dir.path(), first.config).expect("save should succeed");
 
-        assert_eq!(
-            response.backup_path,
-            Some(path_string(&temp_dir.path().join(BACKUP_FILE_NAME)))
+        let bak1 = temp_dir.path().join("config.bak.1");
+        assert_eq!(response.backup_path, Some(path_string(&bak1)));
+        assert!(bak1.exists(), "rolling backup .bak.1 should exist after save");
+    }
+
+    #[test]
+    fn load_updates_last_known_good_marker() {
+        let temp_dir = tempdir().expect("temp dir");
+        // First load seeds a default config (no lkg marker yet because the
+        // config file is created inside load, then loaded back on next call).
+        let _seed = load_or_initialize_config(temp_dir.path()).expect("seed");
+        // Second load reads the existing config → should update lkg.
+        let _second = load_or_initialize_config(temp_dir.path()).expect("reload");
+        assert!(
+            temp_dir.path().join("config.last-known-good.json").exists(),
+            "last-known-good marker should exist after successful load"
         );
-        assert!(temp_dir.path().join(BACKUP_FILE_NAME).exists());
+    }
+
+    #[test]
+    fn daily_snapshot_written_on_save() {
+        let temp_dir = tempdir().expect("temp dir");
+        let first = load_or_initialize_config(temp_dir.path()).expect("seed");
+        save_config(temp_dir.path(), first.config).expect("save");
+
+        let snapshots_dir = temp_dir.path().join("snapshots");
+        assert!(snapshots_dir.is_dir());
+        let count = fs::read_dir(&snapshots_dir)
+            .expect("read snapshots")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "json"))
+            .count();
+        assert_eq!(count, 1, "exactly one snapshot after one save within a day");
     }
 
     #[test]

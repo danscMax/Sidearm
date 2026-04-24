@@ -342,6 +342,13 @@ New-Item -ItemType Directory -Path $PORTABLE_DIR -Force | Out-Null
 Copy-Item -LiteralPath $TAURI_EXE -Destination (Join-Path $PORTABLE_DIR $EXE_NAME)
 Write-Ok "$EXE_NAME"
 
+# --- Portable mode marker ---
+# Presence of this empty file next to the exe tells Sidearm to store its
+# config, logs, and snapshots in ./data/ instead of %APPDATA%.
+$portableMarker = Join-Path $PORTABLE_DIR 'sidearm.portable'
+New-Item -ItemType File -Path $portableMarker -Force | Out-Null
+Write-Ok 'sidearm.portable (marker for portable mode)'
+
 # --- WebView2 bootstrapper ---
 $resOutDir = Join-Path $PORTABLE_DIR 'resources'
 New-Item -ItemType Directory -Path $resOutDir -Force | Out-Null
@@ -387,6 +394,15 @@ if (Test-Path -LiteralPath $wv2) {
 } else {
     Write-Warn "WebView2 bootstrapper missing (users without WebView2 won't be able to launch)"
     $warnings++
+}
+
+# Check portable marker
+$portableMarker = Join-Path $PORTABLE_DIR 'sidearm.portable'
+if (Test-Path -LiteralPath $portableMarker) {
+    Write-Ok 'sidearm.portable marker present'
+} else {
+    Write-Fail 'sidearm.portable marker missing -- app will use %APPDATA% instead of ./data'
+    $errors++
 }
 
 # Quick smoke: check EXE is not tiny (corrupt copy)

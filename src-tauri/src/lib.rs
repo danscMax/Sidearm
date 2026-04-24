@@ -1,3 +1,4 @@
+mod backup;
 mod capture_backend;
 mod chord;
 #[cfg(test)]
@@ -9,6 +10,7 @@ mod exe_icon;
 mod executor;
 mod hotkeys;
 mod input_synthesis;
+mod paths;
 mod platform;
 mod recorder;
 mod resolver;
@@ -217,12 +219,16 @@ fn create_osd_window(app: &AppHandle) {
     }
 }
 
+fn resolve_app_paths(app: &AppHandle) -> Arc<paths::AppPaths> {
+    app.state::<Arc<paths::AppPaths>>().inner().clone()
+}
+
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
-    app.path().app_config_dir().map_err(|error| {
-        CommandError::from(ConfigStoreError::ConfigDirectoryUnavailable(format!(
-            "Failed to resolve app config directory: {error}"
-        )))
-    })
+    Ok(resolve_app_paths(app).config_dir.clone())
+}
+
+fn resolve_log_dir(app: &AppHandle) -> PathBuf {
+    resolve_app_paths(app).log_dir.clone()
 }
 
 /// Validate that a user-supplied file path is within an allowed directory.
@@ -381,11 +387,10 @@ async fn export_verification_session(
         ));
     }
 
-    // Construct the export path under app_data_dir/exports/
-    let data_dir = app.path().app_data_dir().map_err(|error| {
-        CommandError::internal(format!("Failed to resolve app data directory: {error}"))
-    })?;
-    let export_dir = data_dir.join("exports");
+    // Construct the export path under config_dir/exports/ — this is under the
+    // portable `./data/` folder in portable mode, or the roaming config dir.
+    let config_dir = resolve_config_dir(&app)?;
+    let export_dir = config_dir.join("exports");
     let export_path = export_dir.join(&filename);
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -512,6 +517,333 @@ async fn save_config(
     }
 
     Ok(result)
+}
+
+// ============================================================================
+// M1 — Backup, export/import, portable migration commands
+// ============================================================================
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppPathsInfo {
+    mode: paths::PathMode,
+    config_dir: String,
+    log_dir: String,
+    snapshots_dir: String,
+    portable_marker_present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback_reason: Option<String>,
+    needs_portable_migration_prompt: bool,
+}
+
+#[tauri::command]
+async fn get_app_paths(app: AppHandle) -> Result<AppPathsInfo, CommandError> {
+    let paths = resolve_app_paths(&app);
+    Ok(AppPathsInfo {
+        mode: paths.mode,
+        config_dir: paths.config_dir.to_string_lossy().into_owned(),
+        log_dir: paths.log_dir.to_string_lossy().into_owned(),
+        snapshots_dir: paths.snapshots_dir.to_string_lossy().into_owned(),
+        portable_marker_present: paths.portable_marker_present,
+        fallback_reason: paths.fallback_reason.clone(),
+        needs_portable_migration_prompt: paths.needs_portable_migration_prompt(),
+    })
+}
+
+#[tauri::command]
+async fn list_backups(app: AppHandle) -> Result<Vec<backup::BackupEntry>, CommandError> {
+    let config_dir = resolve_config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        backup::list_backups(&config_dir)
+            .map_err(|e| CommandError::internal(format!("Failed to list backups: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("list_backups task failed: {e}")))?
+}
+
+#[tauri::command]
+async fn restore_config_from_backup(
+    app: AppHandle,
+    backup_path: String,
+) -> Result<LoadConfigResponse, CommandError> {
+    let config_dir = resolve_config_dir(&app)?;
+    let backup_pb = PathBuf::from(&backup_path);
+    if !backup::is_valid_backup_location(&config_dir, &backup_pb) {
+        return Err(CommandError::new(
+            "invalid_backup_path",
+            "Backup path must point to a file inside the config directory.",
+            Some(vec![backup_path]),
+        ));
+    }
+
+    let config_dir_for_task = config_dir.clone();
+    let response = tauri::async_runtime::spawn_blocking(
+        move || -> Result<LoadConfigResponse, CommandError> {
+            let raw = fs::read_to_string(&backup_pb).map_err(|e| {
+                CommandError::new(
+                    "io_error",
+                    format!("Failed to read backup file: {e}"),
+                    None,
+                )
+            })?;
+            let config: AppConfig = serde_json::from_str(&raw).map_err(|e| {
+                CommandError::new(
+                    "parse_error",
+                    format!("Failed to parse backup config: {e}"),
+                    None,
+                )
+            })?;
+            save_config_to_store(&config_dir_for_task, config).map_err(CommandError::from)?;
+            load_or_initialize_config(&config_dir_for_task).map_err(CommandError::from)
+        },
+    )
+    .await
+    .map_err(|e| CommandError::internal(format!("restore task failed: {e}")))??;
+
+    app.state::<MinimizeToTray>()
+        .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
+
+    Ok(response)
+}
+
+#[tauri::command]
+async fn export_full_config(
+    app: AppHandle,
+    target_path: String,
+) -> Result<String, CommandError> {
+    let validated = validate_user_file_path(&target_path)?;
+    let config_dir = resolve_config_dir(&app)?;
+    let source = config_dir.join("config.json");
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
+        if !source.is_file() {
+            return Err(CommandError::new(
+                "io_error",
+                "No config.json to export — save the app at least once first.",
+                None,
+            ));
+        }
+        if let Some(parent) = validated.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                CommandError::internal(format!("Failed to create export directory: {e}"))
+            })?;
+        }
+        fs::copy(&source, &validated)
+            .map_err(|e| CommandError::internal(format!("Failed to copy config: {e}")))?;
+        Ok(validated.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("export task failed: {e}")))?
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportPreview {
+    version: i32,
+    profile_count: usize,
+    binding_count: usize,
+    action_count: usize,
+    app_mapping_count: usize,
+    snippet_count: usize,
+    warnings: Vec<String>,
+}
+
+#[tauri::command]
+async fn import_full_config_preview(
+    source_path: String,
+) -> Result<ImportPreview, CommandError> {
+    let validated = validate_user_file_path(&source_path)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<ImportPreview, CommandError> {
+        let raw = fs::read_to_string(&validated).map_err(|e| {
+            CommandError::new(
+                "io_error",
+                format!("Failed to read import file: {e}"),
+                Some(vec![validated.to_string_lossy().into_owned()]),
+            )
+        })?;
+        let raw_value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
+            CommandError::new(
+                "parse_error",
+                format!("Failed to parse import JSON: {e}"),
+                None,
+            )
+        })?;
+
+        let version = raw_value
+            .get("version")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let count = |key: &str| {
+            raw_value
+                .get(key)
+                .and_then(|v| v.as_array())
+                .map(|a| a.len())
+                .unwrap_or(0)
+        };
+
+        let warnings = config::collect_schema_errors(&raw_value);
+
+        Ok(ImportPreview {
+            version,
+            profile_count: count("profiles"),
+            binding_count: count("bindings"),
+            action_count: count("actions"),
+            app_mapping_count: count("appMappings"),
+            snippet_count: count("snippetLibrary"),
+            warnings,
+        })
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("import preview task failed: {e}")))?
+}
+
+#[derive(Clone, Copy, Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+enum ImportMode {
+    Replace,
+    Merge,
+}
+
+#[tauri::command]
+async fn import_full_config_apply(
+    app: AppHandle,
+    source_path: String,
+    mode: ImportMode,
+) -> Result<SaveConfigResponse, CommandError> {
+    let validated = validate_user_file_path(&source_path)?;
+    let config_dir = resolve_config_dir(&app)?;
+    let config_dir_for_task = config_dir.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(
+        move || -> Result<SaveConfigResponse, CommandError> {
+            let raw = fs::read_to_string(&validated).map_err(|e| {
+                CommandError::new(
+                    "io_error",
+                    format!("Failed to read import file: {e}"),
+                    Some(vec![validated.to_string_lossy().into_owned()]),
+                )
+            })?;
+            let imported: AppConfig = serde_json::from_str(&raw).map_err(|e| {
+                CommandError::new(
+                    "parse_error",
+                    format!("Failed to parse import config: {e}"),
+                    None,
+                )
+            })?;
+            let final_config = match mode {
+                ImportMode::Replace => imported,
+                ImportMode::Merge => {
+                    let base = load_or_initialize_config(&config_dir_for_task)
+                        .map_err(CommandError::from)?
+                        .config;
+                    merge_configs_by_id(base, imported)
+                }
+            };
+            save_config_to_store(&config_dir_for_task, final_config).map_err(CommandError::from)
+        },
+    )
+    .await
+    .map_err(|e| CommandError::internal(format!("import apply task failed: {e}")))??;
+
+    app.state::<MinimizeToTray>()
+        .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
+
+    Ok(result)
+}
+
+/// Merge two configs by ID (incoming wins on ID conflicts). Non-array fields
+/// (version, settings, physicalControls, encoderMappings) are taken from
+/// `incoming`. Suitable for merging same-user configs where IDs are unique
+/// random tokens (see `makeRandomId` in the frontend).
+fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
+    use std::collections::HashMap;
+
+    fn merge_by<K: Eq + std::hash::Hash + Clone, T, F: Fn(&T) -> K>(
+        base: Vec<T>,
+        incoming: Vec<T>,
+        key: F,
+    ) -> Vec<T> {
+        let mut map: HashMap<K, T> = HashMap::new();
+        for item in base {
+            map.insert(key(&item), item);
+        }
+        for item in incoming {
+            map.insert(key(&item), item);
+        }
+        map.into_values().collect()
+    }
+
+    AppConfig {
+        version: incoming.version,
+        settings: incoming.settings,
+        profiles: merge_by(base.profiles, incoming.profiles, |p| p.id.clone()),
+        physical_controls: incoming.physical_controls,
+        encoder_mappings: incoming.encoder_mappings,
+        app_mappings: merge_by(base.app_mappings, incoming.app_mappings, |m| m.id.clone()),
+        bindings: merge_by(base.bindings, incoming.bindings, |b| b.id.clone()),
+        actions: merge_by(base.actions, incoming.actions, |a| a.id.clone()),
+        snippet_library: merge_by(base.snippet_library, incoming.snippet_library, |s| s.id.clone()),
+    }
+}
+
+#[tauri::command]
+async fn open_config_folder(app: AppHandle) -> Result<(), CommandError> {
+    let config_dir = resolve_config_dir(&app)?;
+    let _ = fs::create_dir_all(&config_dir);
+    #[cfg(target_os = "windows")]
+    crate::platform::shell::open_in_explorer(&config_dir)
+        .map_err(CommandError::internal)?;
+    #[cfg(target_os = "linux")]
+    crate::platform::shell::open_in_explorer(&config_dir)
+        .map_err(CommandError::internal)?;
+    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(config_dir.as_os_str())
+            .spawn()
+            .map_err(|e| {
+                CommandError::internal(format!("Failed to open config folder: {e}"))
+            })?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn accept_portable_migration(
+    app: AppHandle,
+    copy_from_roaming: bool,
+) -> Result<LoadConfigResponse, CommandError> {
+    let paths_state = resolve_app_paths(&app);
+    let config_dir = paths_state.config_dir.clone();
+    let roaming_config = paths::AppPaths::roaming_config_file();
+
+    let response = tauri::async_runtime::spawn_blocking(
+        move || -> Result<LoadConfigResponse, CommandError> {
+            if copy_from_roaming && roaming_config.is_file() {
+                fs::create_dir_all(&config_dir).map_err(|e| {
+                    CommandError::internal(format!("Failed to create portable config dir: {e}"))
+                })?;
+                let target = config_dir.join("config.json");
+                if !target.exists() {
+                    fs::copy(&roaming_config, &target).map_err(|e| {
+                        CommandError::internal(format!(
+                            "Failed to copy roaming config into portable dir: {e}"
+                        ))
+                    })?;
+                }
+            }
+            if let Err(err) = paths_state.mark_migration_declined() {
+                log::warn!("[portable] Failed to write migration marker: {err}");
+            }
+            load_or_initialize_config(&config_dir).map_err(CommandError::from)
+        },
+    )
+    .await
+    .map_err(|e| CommandError::internal(format!("migration task failed: {e}")))??;
+
+    app.state::<MinimizeToTray>()
+        .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
+
+    Ok(response)
 }
 
 #[tauri::command]
@@ -672,17 +1004,13 @@ async fn get_debug_log(
 
 #[tauri::command]
 async fn get_log_directory(app: AppHandle) -> Result<String, CommandError> {
-    let log_dir = app.path().app_log_dir().map_err(|error| {
-        CommandError::internal(format!("Failed to resolve log directory: {error}"))
-    })?;
+    let log_dir = resolve_log_dir(&app);
     Ok(log_dir.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
 async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
-    let log_dir = app.path().app_log_dir().map_err(|error| {
-        CommandError::internal(format!("Failed to resolve log directory: {error}"))
-    })?;
+    let log_dir = resolve_log_dir(&app);
     if log_dir.exists() {
         #[cfg(target_os = "windows")]
         crate::platform::shell::open_in_explorer(&log_dir)
@@ -1174,7 +1502,13 @@ fn find_running_process_path(exe_name: &str) -> Option<String> {
 /// Overwrites the new config if the old one is larger (has real user data
 /// vs a freshly-generated default).
 fn migrate_old_config(app: &AppHandle) {
-    let Ok(new_config_dir) = app.path().app_config_dir() else { return };
+    // Skip in portable mode — users opting into portable explicitly don't want
+    // old %APPDATA% data silently copied into their ./data/ folder.
+    let app_paths = resolve_app_paths(app);
+    if app_paths.mode != paths::PathMode::Roaming {
+        return;
+    }
+    let new_config_dir = app_paths.config_dir.clone();
     let Some(roaming) = dirs_fallback_roaming() else { return };
 
     let old_dir = roaming.join("com.nagaworkflowstudio.desktop");
@@ -1215,7 +1549,7 @@ fn dirs_fallback_roaming() -> Option<PathBuf> {
 /// a new sentinel. The sentinel is deleted on clean shutdown. If it exists at
 /// startup, the previous session crashed without a clean exit.
 fn check_crash_sentinel(app: &AppHandle) {
-    let Ok(log_dir) = app.path().app_log_dir() else { return };
+    let log_dir = resolve_log_dir(app);
     let sentinel = log_dir.join(".running");
 
     if sentinel.exists() {
@@ -1236,7 +1570,7 @@ fn check_crash_sentinel(app: &AppHandle) {
 
 /// Remove the crash sentinel on clean shutdown.
 fn remove_crash_sentinel(app: &AppHandle) {
-    let Ok(log_dir) = app.path().app_log_dir() else { return };
+    let log_dir = resolve_log_dir(app);
     let sentinel = log_dir.join(".running");
     let _ = fs::remove_file(sentinel);
 }
@@ -1253,9 +1587,7 @@ fn chrono_like_timestamp() -> String {
 
 /// Delete log files older than 30 days from the log directory.
 fn cleanup_old_logs(app: &AppHandle) {
-    let Ok(log_dir) = app.path().app_log_dir() else {
-        return;
-    };
+    let log_dir = resolve_log_dir(app);
     if !log_dir.exists() {
         return;
     }
@@ -1297,11 +1629,22 @@ pub fn run() {
         default_hook(info);
     }));
 
+    // Resolve portable-vs-roaming paths once before any plugin initialisation.
+    // This must happen before `tauri_plugin_log` so the log target can point at
+    // our portable `./data/logs/` when a marker file is present.
+    let app_paths = Arc::new(paths::AppPaths::resolve());
+    let _ = std::fs::create_dir_all(&app_paths.log_dir);
+    let log_target_path = app_paths.log_dir.clone();
+    let app_paths_for_setup = app_paths.clone();
+
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
                 .clear_targets()
-                .target(Target::new(TargetKind::LogDir { file_name: None }))
+                .target(Target::new(TargetKind::Folder {
+                    path: log_target_path,
+                    file_name: None,
+                }))
                 .target(Target::new(TargetKind::Stdout))
                 .target(Target::new(TargetKind::Webview))
                 .max_file_size(10_000_000)
@@ -1403,10 +1746,7 @@ pub fn run() {
                                     let _ = toggle_item.set_text("Включить перехват");
                                 }
                             } else {
-                                let config_dir = match app.path().app_config_dir() {
-                                    Ok(dir) => dir,
-                                    Err(_) => return,
-                                };
+                                let config_dir = resolve_app_paths(&app).config_dir.clone();
                                 let load_result =
                                     tauri::async_runtime::spawn_blocking(move || {
                                         load_or_initialize_config(&config_dir)
@@ -1502,6 +1842,7 @@ pub fn run() {
                 }
             }
         })
+        .manage(app_paths_for_setup)
         .manage(Arc::new(AtomicBool::new(false)) as MinimizeToTray)
         .manage(Arc::new(Mutex::new(RuntimeStore::default())))
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
@@ -1510,6 +1851,14 @@ pub fn run() {
             export_verification_session,
             load_config,
             save_config,
+            get_app_paths,
+            list_backups,
+            restore_config_from_backup,
+            export_full_config,
+            import_full_config_preview,
+            import_full_config_apply,
+            open_config_folder,
+            accept_portable_migration,
             start_runtime,
             stop_runtime,
             reload_runtime,

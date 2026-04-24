@@ -3,7 +3,11 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   AppConfig,
+  AppPathsInfo,
+  BackupEntry,
   CommandError,
+  ImportMode,
+  ImportPreview,
   LoadConfigResponse,
   SaveConfigResponse,
   SequenceStep,
@@ -30,6 +34,52 @@ export async function loadConfig(): Promise<LoadConfigResponse> {
 
 export async function saveConfig(config: AppConfig): Promise<SaveConfigResponse> {
   return invoke<SaveConfigResponse>("save_config", { config });
+}
+
+export async function getAppPaths(): Promise<AppPathsInfo> {
+  return invoke<AppPathsInfo>("get_app_paths");
+}
+
+export async function listBackups(): Promise<BackupEntry[]> {
+  return invoke<BackupEntry[]>("list_backups");
+}
+
+export async function restoreConfigFromBackup(
+  backupPath: string,
+): Promise<LoadConfigResponse> {
+  return invoke<LoadConfigResponse>("restore_config_from_backup", { backupPath });
+}
+
+export async function exportFullConfig(targetPath: string): Promise<string> {
+  return invoke<string>("export_full_config", { targetPath });
+}
+
+export async function importFullConfigPreview(
+  sourcePath: string,
+): Promise<ImportPreview> {
+  return invoke<ImportPreview>("import_full_config_preview", { sourcePath });
+}
+
+export async function importFullConfigApply(
+  sourcePath: string,
+  mode: ImportMode,
+): Promise<SaveConfigResponse> {
+  return invoke<SaveConfigResponse>("import_full_config_apply", {
+    sourcePath,
+    mode,
+  });
+}
+
+export async function openConfigFolder(): Promise<void> {
+  return invoke<void>("open_config_folder");
+}
+
+export async function acceptPortableMigration(
+  copyFromRoaming: boolean,
+): Promise<LoadConfigResponse> {
+  return invoke<LoadConfigResponse>("accept_portable_migration", {
+    copyFromRoaming,
+  });
 }
 
 export async function startRuntime(): Promise<RuntimeStateSummary> {

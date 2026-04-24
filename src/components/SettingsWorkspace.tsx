@@ -4,6 +4,7 @@ import { changeLanguage } from "../i18n";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   AppConfig,
+  CommandError,
   Profile,
   Settings,
   OsdPosition,
@@ -18,7 +19,16 @@ import {
   extractProfileForExport,
   importProfile,
 } from "../lib/config-editing";
-import { readTextFile, writeTextFile } from "../lib/backend";
+import {
+  exportFullConfig,
+  importFullConfigApply,
+  importFullConfigPreview,
+  normalizeCommandError,
+  openConfigFolder,
+  readTextFile,
+  writeTextFile,
+} from "../lib/backend";
+import { BackupList } from "./BackupList";
 import { Toggle } from "./shared";
 
 export interface SettingsWorkspaceProps {
@@ -33,6 +43,8 @@ export interface SettingsWorkspaceProps {
     confirmLabel?: string;
     onConfirm: () => void;
   } | null) => void;
+  refreshConfig: () => void;
+  setError: (error: CommandError | null) => void;
 }
 
 export function SettingsWorkspace({
@@ -42,6 +54,8 @@ export function SettingsWorkspace({
   updateDraft,
   setSelectedProfileId,
   setConfirmModal,
+  refreshConfig,
+  setError,
 }: SettingsWorkspaceProps) {
   const { t, i18n } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
@@ -508,12 +522,15 @@ export function SettingsWorkspace({
             onClick={async () => {
               const path = await save({
                 title: t("settings.saveConfigTitle"),
-                defaultPath: `sidearm-backup-${new Date().toISOString().slice(0, 10)}.json`,
-                filters: [{ name: "JSON", extensions: ["json"] }],
+                defaultPath: `sidearm-backup-${new Date().toISOString().slice(0, 10)}.sidearm-config.json`,
+                filters: [{ name: "Sidearm Config", extensions: ["json"] }],
               });
               if (path) {
-                const json = JSON.stringify(activeConfig, null, 2);
-                await writeTextFile(path, json);
+                try {
+                  await exportFullConfig(path);
+                } catch (unknownError) {
+                  setError(normalizeCommandError(unknownError));
+                }
               }
             }}
           >
@@ -525,35 +542,83 @@ export function SettingsWorkspace({
             onClick={async () => {
               const path = await open({
                 title: t("settings.loadConfigTitle"),
-                filters: [{ name: "JSON", extensions: ["json"] }],
+                filters: [{ name: "Sidearm Config", extensions: ["json"] }],
                 multiple: false,
               });
-              if (typeof path === "string") {
-                try {
-                  const text = await readTextFile(path);
-                  const imported = JSON.parse(text) as AppConfig;
-                  if (!imported.profiles || !imported.bindings || !imported.settings) {
-                    setImportError(t("settings.invalidConfigError"));
-                    return;
-                  }
-                  setConfirmModal({
-                    title: t("settings.replaceConfigTitle"),
-                    message: t("settings.replaceConfigMessage"),
-                    confirmLabel: t("settings.replaceConfigConfirm"),
-                    onConfirm: () => {
-                      updateDraft(() => imported);
+              if (typeof path !== "string") return;
+              try {
+                const preview = await importFullConfigPreview(path);
+                const warningsSummary = preview.warnings.length > 0
+                  ? t("settings.importHasWarnings", { count: preview.warnings.length })
+                  : "";
+                setConfirmModal({
+                  title: t("settings.replaceConfigTitle"),
+                  message: t("settings.importSummary", {
+                    profiles: preview.profileCount,
+                    bindings: preview.bindingCount,
+                    actions: preview.actionCount,
+                    appMappings: preview.appMappingCount,
+                    snippets: preview.snippetCount,
+                    warnings: warningsSummary,
+                  }),
+                  confirmLabel: t("settings.replaceConfigConfirm"),
+                  onConfirm: async () => {
+                    try {
+                      await importFullConfigApply(path, "replace");
+                      refreshConfig();
                       setImportError(null);
-                    },
-                  });
-                } catch {
-                  setImportError(t("settings.readConfigError"));
-                }
+                    } catch (unknownError) {
+                      setError(normalizeCommandError(unknownError));
+                    }
+                  },
+                });
+              } catch (unknownError) {
+                setError(normalizeCommandError(unknownError));
               }
             }}
           >
             {t("settings.importConfig")}
           </button>
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={async () => {
+              try {
+                await openConfigFolder();
+              } catch (unknownError) {
+                setError(normalizeCommandError(unknownError));
+              }
+            }}
+          >
+            {t("settings.openConfigFolder")}
+          </button>
         </div>
+      </section>
+
+      {/* Local backups */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("backup.header")}</span>
+        </div>
+        <p className="panel__muted" style={{ fontSize: "0.78rem", marginBottom: 12 }}>
+          {t("backup.help")}
+        </p>
+        <BackupList
+          onRestored={refreshConfig}
+          setError={setError}
+          setConfirmModal={(modal) =>
+            setConfirmModal(
+              modal
+                ? {
+                    title: modal.title,
+                    message: modal.message,
+                    confirmLabel: modal.confirmLabel,
+                    onConfirm: modal.onConfirm,
+                  }
+                : null,
+            )
+          }
+        />
       </section>
     </div>
   );

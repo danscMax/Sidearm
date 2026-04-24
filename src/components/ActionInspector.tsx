@@ -3,14 +3,11 @@ import type {
   Action,
   ActionType,
   AppConfig,
-  MenuItem,
   SequenceStep,
   SnippetLibraryItem,
 } from "../lib/config";
 import {
   coerceActionType,
-  createDefaultActionMenuItem,
-  createDefaultSubmenuItem,
   promoteInlineSnippetActionToLibrary,
   upsertAction,
 } from "../lib/config-editing";
@@ -32,12 +29,7 @@ import {
   withShortcutPayload,
   withTextSnippetPayload,
 } from "../lib/action-helpers";
-import {
-  appendMenuItem,
-  collectMenuItemIds,
-  removeMenuItem,
-  updateMenuItem,
-} from "../lib/menu-helpers";
+import { MenuItemsEditor } from "./MenuItemsEditor";
 
 export interface ActionInspectorProps {
   activeConfig: AppConfig;
@@ -84,185 +76,6 @@ export function ActionInspector({
     });
   }
 
-  function updateSelectedMenuItems(updateItems: (items: MenuItem[]) => MenuItem[]) {
-    updateSelectedActionDraft((action) =>
-      withMenuPayload(action, (payload) => ({
-        ...payload,
-        items: updateItems(payload.items),
-      })),
-    );
-  }
-
-  function addMenuActionItem(parentId?: string) {
-    const fallbackAction = menuActionOptions[0];
-    if (!selectedAction || !fallbackAction) {
-      return;
-    }
-
-    const existingIds =
-      selectedMenuPayload ? collectMenuItemIds(selectedMenuPayload.items) : [];
-    const nextItem = createDefaultActionMenuItem(
-      existingIds,
-      fallbackAction.id,
-      fallbackAction.pretty,
-    );
-
-    updateSelectedMenuItems((items) => appendMenuItem(items, parentId ?? null, nextItem));
-  }
-
-  function addSubmenuItem(parentId?: string) {
-    const fallbackAction = menuActionOptions[0];
-    if (!selectedAction || !fallbackAction) {
-      return;
-    }
-
-    const existingIds =
-      selectedMenuPayload ? collectMenuItemIds(selectedMenuPayload.items) : [];
-    const nextItem = createDefaultSubmenuItem(
-      existingIds,
-      fallbackAction.id,
-      fallbackAction.pretty,
-    );
-
-    updateSelectedMenuItems((items) => appendMenuItem(items, parentId ?? null, nextItem));
-  }
-
-  function renderMenuItemEditor(
-    item: MenuItem,
-    depth: number,
-    canRemove: boolean,
-  ) {
-    return (
-      <div
-        className="compound-card compound-card--menu"
-        key={item.id}
-        style={{ marginLeft: `${depth * 18}px` }}
-      >
-        <div className="compound-card__header">
-          <div>
-            <strong>{item.label}</strong>
-            <span className="compound-card__meta">
-              {item.kind === "action" ? t("inspector.menuItemAction") : t("inspector.menuItemSubmenu")}
-            </span>
-          </div>
-          <button
-            type="button"
-            className="action-button action-button--secondary action-button--small"
-            disabled={!canRemove}
-            onClick={() => {
-              updateSelectedMenuItems((items) => removeMenuItem(items, item.id));
-            }}
-          >
-            {t("common.delete")}
-          </button>
-        </div>
-
-        <div className="editor-grid">
-          <div className="field">
-            <span className="field__label">{t("inspector.menuItemId")}</span>
-            <code className="field__static">{item.id}</code>
-          </div>
-
-          <label className="field">
-            <span className="field__label">{t("inspector.menuItemLabel")}</span>
-            <input
-              type="text"
-              value={item.label}
-              onChange={(event) => {
-                updateSelectedMenuItems((items) =>
-                  updateMenuItem(items, item.id, (currentItem) => ({
-                    ...currentItem,
-                    label: event.target.value,
-                  })),
-                );
-              }}
-            />
-          </label>
-
-          <label className="field field--inline">
-            <span className="field__label">{t("inspector.menuItemEnabled")}</span>
-            <input
-              type="checkbox"
-              checked={item.enabled}
-              onChange={(event) => {
-                updateSelectedMenuItems((items) =>
-                  updateMenuItem(items, item.id, (currentItem) => ({
-                    ...currentItem,
-                    enabled: event.target.checked,
-                  })),
-                );
-              }}
-            />
-          </label>
-
-          {item.kind === "action" ? (
-            <label className="field">
-              <span className="field__label">{t("inspector.menuItemActionRef")}</span>
-              <select
-                value={item.actionRef}
-                onChange={(event) => {
-                  updateSelectedMenuItems((items) =>
-                    updateMenuItem(items, item.id, (currentItem) =>
-                      currentItem.kind === "action"
-                        ? {
-                            ...currentItem,
-                            actionRef: event.target.value,
-                          }
-                        : currentItem,
-                    ),
-                  );
-                }}
-              >
-                {menuActionOptions.map((action) => (
-                  <option key={action.id} value={action.id}>
-                    {action.pretty} ({action.type})
-                  </option>
-                ))}
-              </select>
-            </label>
-          ) : (
-            <>
-              <div className="field__header">
-                <span className="field__label">{t("inspector.menuItemNested")}</span>
-                <div className="editor-actions">
-                  <button
-                    type="button"
-                    className="action-button action-button--secondary action-button--small"
-                    onClick={() => {
-                      addMenuActionItem(item.id);
-                    }}
-                    disabled={menuActionOptions.length === 0}
-                  >
-                    {t("inspector.addActionItem")}
-                  </button>
-                  <button
-                    type="button"
-                    className="action-button action-button--secondary action-button--small"
-                    onClick={() => {
-                      addSubmenuItem(item.id);
-                    }}
-                    disabled={menuActionOptions.length === 0}
-                  >
-                    {t("inspector.addSubmenu")}
-                  </button>
-                </div>
-              </div>
-
-              <div className="stack-list">
-                {item.items.map((childItem) =>
-                  renderMenuItemEditor(
-                    childItem,
-                    depth + 1,
-                    item.items.length > 1,
-                  ),
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
 
   return (
     <section className="panel">
@@ -815,52 +628,15 @@ export function ActionInspector({
           ) : null}
 
           {selectedMenuPayload ? (
-            <div className="field">
-              <div className="field__header">
-                <span className="field__label">{t("inspector.menuHeader")}</span>
-                <div className="editor-actions">
-                  <button
-                    type="button"
-                    className="action-button action-button--secondary action-button--small"
-                    onClick={() => {
-                      addMenuActionItem();
-                    }}
-                    disabled={menuActionOptions.length === 0}
-                  >
-                    {t("inspector.addActionItem")}
-                  </button>
-                  <button
-                    type="button"
-                    className="action-button action-button--secondary action-button--small"
-                    onClick={() => {
-                      addSubmenuItem();
-                    }}
-                    disabled={menuActionOptions.length === 0}
-                  >
-                    {t("inspector.addSubmenu")}
-                  </button>
-                </div>
-              </div>
-
-              {menuActionOptions.length === 0 ? (
-                <div className="notice notice--warning">
-                  <strong>{t("inspector.noActions")}</strong>
-                  <p>
-                    {t("inspector.noActionsBody")}
-                  </p>
-                </div>
-              ) : null}
-
-              <div className="stack-list">
-                {selectedMenuPayload.items.map((item) =>
-                  renderMenuItemEditor(
-                    item,
-                    0,
-                    selectedMenuPayload.items.length > 1,
-                  ),
-                )}
-              </div>
-            </div>
+            <MenuItemsEditor
+              items={selectedMenuPayload.items}
+              onChange={(items) =>
+                updateSelectedActionDraft((action) =>
+                  withMenuPayload(action, (payload) => ({ ...payload, items })),
+                )
+              }
+              availableActions={menuActionOptions}
+            />
           ) : null}
 
           <p className="panel__muted">

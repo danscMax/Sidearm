@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useMemo, useRef, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   Action,
   ActionCondition,
@@ -8,6 +9,7 @@ import type {
   ControlId,
   Layer,
   MediaKeyKind,
+  MenuItem,
   MouseActionKind,
   PasteMode,
   SequenceStep,
@@ -37,6 +39,8 @@ import {
   upsertBinding,
   upsertEncoderMapping,
 } from "../lib/config-editing";
+import { ChipEditor } from "./ChipEditor";
+import { MenuItemsEditor } from "./MenuItemsEditor";
 import { Toggle } from "./shared";
 
 /* ─────────────────────────────────────────────────────────
@@ -240,7 +244,7 @@ export function SequenceStepEditor({
                 </select>
               </label>
 
-              {step.type !== "sleep" ? (
+              {step.type === "send" || step.type === "text" ? (
                 <label className="field">
                   <span className="field__label">{t("picker.stepValue")}</span>
                   <input
@@ -251,6 +255,87 @@ export function SequenceStepEditor({
                     }
                   />
                 </label>
+              ) : null}
+
+              {step.type === "launch" ? (
+                <>
+                  <label className="field">
+                    <span className="field__label">{t("picker.programLabel")}</span>
+                    <div className="field__row">
+                      <input
+                        type="text"
+                        value={step.value}
+                        onChange={(e) =>
+                          updateStep(index, { ...step, value: e.target.value } as SequenceStep)
+                        }
+                        placeholder="C:\Program Files\app.exe"
+                      />
+                      <button
+                        type="button"
+                        className="action-button action-button--small"
+                        onClick={async () => {
+                          const selected = await open({
+                            title: t("picker.launchBrowseProgram"),
+                            filters: [{ name: t("picker.launchBrowseFilter"), extensions: ["exe", "lnk", "bat", "cmd"] }],
+                            multiple: false,
+                          });
+                          if (typeof selected === "string") {
+                            updateStep(index, { ...step, value: selected } as SequenceStep);
+                          }
+                        }}
+                      >
+                        {t("picker.launchBrowseBtn")}
+                      </button>
+                    </div>
+                  </label>
+                  <div className="field">
+                    <span className="field__label">{t("picker.launchArgsLabel")}</span>
+                    <ChipEditor
+                      values={step.args ?? []}
+                      onChange={(vals) =>
+                        updateStep(index, {
+                          ...step,
+                          args: vals.length > 0 ? vals : undefined,
+                        } as SequenceStep)
+                      }
+                      placeholder={t("picker.launchArgsPlaceholder")}
+                      ariaLabel={t("picker.launchArgsLabel")}
+                    />
+                  </div>
+                  <label className="field">
+                    <span className="field__label">{t("picker.launchWorkingDirLabel")}</span>
+                    <div className="field__row">
+                      <input
+                        type="text"
+                        value={step.workingDir ?? ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          updateStep(index, {
+                            ...step,
+                            workingDir: v.trim() ? v : undefined,
+                          } as SequenceStep);
+                        }}
+                        placeholder={t("picker.launchWorkingDirPlaceholder")}
+                      />
+                      <button
+                        type="button"
+                        className="action-button action-button--small"
+                        onClick={async () => {
+                          const selected = await open({
+                            title: t("picker.launchBrowseDir"),
+                            directory: true,
+                            multiple: false,
+                          });
+                          if (typeof selected === "string") {
+                            updateStep(index, { ...step, workingDir: selected } as SequenceStep);
+                          }
+                        }}
+                      >
+                        {t("picker.launchBrowseDirBtn")}
+                      </button>
+                    </div>
+                  </label>
+                </>
               ) : null}
 
               <label className="field">
@@ -434,10 +519,14 @@ export function ActionPickerModal({
       ? { text: existingAction.payload.text, pasteMode: existingAction.payload.pasteMode }
       : { text: "", pasteMode: "sendText" },
   );
-  const [launchDraft, setLaunchDraft] = useState<{ target: string; args: string }>(() =>
+  const [launchDraft, setLaunchDraft] = useState<{ target: string; args: string[]; workingDir: string }>(() =>
     existingAction?.type === "launch"
-      ? { target: existingAction.payload.target, args: existingAction.payload.args?.join(" ") ?? "" }
-      : { target: "", args: "" },
+      ? {
+          target: existingAction.payload.target,
+          args: existingAction.payload.args ?? [],
+          workingDir: existingAction.payload.workingDir ?? "",
+        }
+      : { target: "", args: [], workingDir: "" },
   );
   const [mediaDraft, setMediaDraft] = useState<MediaKeyKind>(() =>
     existingAction?.type === "mediaKey"
@@ -465,6 +554,17 @@ export function ActionPickerModal({
   );
   const [conditionsDraft, setConditionsDraft] = useState<ActionCondition[]>(
     () => existingAction?.conditions ?? [],
+  );
+  const [menuItemsDraft, setMenuItemsDraft] = useState<MenuItem[]>(() =>
+    existingAction?.type === "menu" ? existingAction.payload.items : [],
+  );
+
+  const menuActionOptions = useMemo(
+    () =>
+      existingAction
+        ? config.actions.filter((a) => a.id !== existingAction.id)
+        : config.actions,
+    [config.actions, existingAction],
   );
 
   function handleKeyCapture(event: React.KeyboardEvent) {
@@ -540,7 +640,11 @@ export function ActionPickerModal({
           return {
             id: actionId,
             type: "launch" as const,
-            payload: { target: launchDraft.target, args: launchDraft.args.trim() ? launchDraft.args.trim().split(/\s+/) : undefined },
+            payload: {
+              target: launchDraft.target,
+              args: launchDraft.args.length > 0 ? launchDraft.args : undefined,
+              workingDir: launchDraft.workingDir.trim() ? launchDraft.workingDir.trim() : undefined,
+            },
             pretty,
           };
         case "mediaKey":
@@ -548,7 +652,7 @@ export function ActionPickerModal({
         case "profileSwitch":
           return { id: actionId, type: "profileSwitch" as const, payload: { targetProfileId: profileDraft }, pretty };
         case "menu":
-          return { id: actionId, type: "menu" as const, payload: { items: [] }, pretty: pretty || t("picker.defaultMenu") };
+          return { id: actionId, type: "menu" as const, payload: { items: menuItemsDraft }, pretty: pretty || t("picker.defaultMenu") };
         case "disabled":
           return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || t("picker.defaultDisabled") };
         default:
@@ -781,22 +885,77 @@ export function ActionPickerModal({
               <div className="editor-grid">
                 <label className="field">
                   <span className="field__label">{t("picker.programLabel")}</span>
-                  <input
-                    type="text"
-                    value={launchDraft.target}
-                    onChange={(e) => setLaunchDraft({ ...launchDraft, target: e.target.value })}
-                    placeholder="C:\Program Files\app.exe"
-                  />
+                  <div className="field__row">
+                    <input
+                      type="text"
+                      value={launchDraft.target}
+                      onChange={(e) => setLaunchDraft({ ...launchDraft, target: e.target.value })}
+                      placeholder="C:\Program Files\app.exe"
+                    />
+                    <button
+                      type="button"
+                      className="action-button action-button--small"
+                      onClick={async () => {
+                        const selected = await open({
+                          title: t("picker.launchBrowseProgram"),
+                          filters: [{ name: t("picker.launchBrowseFilter"), extensions: ["exe", "lnk", "bat", "cmd"] }],
+                          multiple: false,
+                        });
+                        if (typeof selected === "string") {
+                          setLaunchDraft({ ...launchDraft, target: selected });
+                        }
+                      }}
+                    >
+                      {t("picker.launchBrowseBtn")}
+                    </button>
+                  </div>
                 </label>
+                <div className="field">
+                  <span className="field__label">{t("picker.launchArgsLabel")}</span>
+                  <ChipEditor
+                    values={launchDraft.args}
+                    onChange={(vals) => setLaunchDraft({ ...launchDraft, args: vals })}
+                    placeholder={t("picker.launchArgsPlaceholder")}
+                    ariaLabel={t("picker.launchArgsLabel")}
+                  />
+                </div>
                 <label className="field">
-                  <span className="field__label">{t("picker.argumentsLabel")}</span>
-                  <input
-                    type="text"
-                    value={launchDraft.args}
-                    onChange={(e) => setLaunchDraft({ ...launchDraft, args: e.target.value })}
-                    placeholder="--flag value"
-                  />
+                  <span className="field__label">{t("picker.launchWorkingDirLabel")}</span>
+                  <div className="field__row">
+                    <input
+                      type="text"
+                      value={launchDraft.workingDir}
+                      onChange={(e) => setLaunchDraft({ ...launchDraft, workingDir: e.target.value })}
+                      placeholder={t("picker.launchWorkingDirPlaceholder")}
+                    />
+                    <button
+                      type="button"
+                      className="action-button action-button--small"
+                      onClick={async () => {
+                        const selected = await open({
+                          title: t("picker.launchBrowseDir"),
+                          directory: true,
+                          multiple: false,
+                        });
+                        if (typeof selected === "string") {
+                          setLaunchDraft({ ...launchDraft, workingDir: selected });
+                        }
+                      }}
+                    >
+                      {t("picker.launchBrowseDirBtn")}
+                    </button>
+                  </div>
                 </label>
+              </div>
+            ) : null}
+
+            {effectiveCategory === "menu" ? (
+              <div className="editor-grid">
+                <MenuItemsEditor
+                  items={menuItemsDraft}
+                  onChange={setMenuItemsDraft}
+                  availableActions={menuActionOptions}
+                />
               </div>
             ) : null}
 

@@ -304,15 +304,21 @@ select::picker(select) {
    that ignores the parent `color`. Without explicit option colours the
    list falls back to black text on a white popup, invisible against our
    dark theme. Force explicit dark-theme colours so the popup stays
-   readable. */
+   readable.
+
+   The selected row matches the rest of the app's "active" convention:
+   same dark background as other options, distinguished by accent green
+   text + bold. We intentionally avoid a tinted background — WebView2's
+   native popup renders CSS alpha against its own white base and produces
+   a washed-out light-green stripe with unreadable white text on it. */
 select option,
 select optgroup {
   background-color: var(--c-bg, #1a1f16);
   color: var(--c-text-bright, #f0f2ec);
 }
 select option:checked {
-  background-color: rgba(159, 202, 105, 0.32);
-  color: #ffffff;
+  background-color: var(--c-bg, #1a1f16);
+  color: var(--c-accent, #9fca69);
   font-weight: 600;
 }
 select option:disabled {

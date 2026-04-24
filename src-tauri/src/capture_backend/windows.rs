@@ -310,12 +310,9 @@ const RAZER_ENCODING_CHORD_WINDOW: std::time::Duration = std::time::Duration::fr
 /// Maximum lifetime of a CONSUMED_MODIFIER_VKS entry before it is garbage
 /// collected.  Guards against a Razer modifier-up being lost (e.g. due to
 /// focus change / window switch) and leaving the set with a stale entry
-/// that suppresses a real subsequent Ctrl-up.  1 second is well above the
-/// duration of a typical Razer chord (even hold-mode) yet short enough to
-/// self-heal quickly — the user only loses the modifier for that long
-/// after a stuck scenario before it clears.
+/// that suppresses a real subsequent Ctrl-up.
 const CONSUMED_MODIFIER_STALE_THRESHOLD: std::time::Duration =
-    std::time::Duration::from_secs(1);
+    std::time::Duration::from_secs(5);
 
 /// Check for pending modifiers that have timed out (>20ms) and replay them
 /// via SendInput. Called from the message pump loop.
@@ -919,25 +916,6 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         // up to 20ms; if an F-key match arrives in time we consume them,
         // otherwise we replay them via SendInput.
 
-        // Any real modifier-down makes any prior CONSUMED entry for this
-        // VK invalid: either the matching Razer chord already released (C1
-        // already removed it) or its modifier-up got lost (focus change,
-        // alt-tab, config change, helper rehook).  Clear unconditionally so
-        // a stale entry never suppresses the user's next real modifier-up.
-        if is_modifier && is_keydown {
-            let cleared_stale = CONSUMED_MODIFIER_VKS.with(|cell| {
-                cell.borrow_mut().remove(&vk).is_some()
-            });
-            if cleared_stale {
-                HELPER_MATCHES.with(|cell| {
-                    cell.borrow_mut().push(format!(
-                        "DEBUG:consumed-stale-cleared vk=0x{:02X}",
-                        vk,
-                    ));
-                });
-            }
-        }
-
         // Case A: Modifier-down that should be buffered.
         // process_helper_key_event already updated HELPER_MODIFIERS state,
         // so F-key matching will work correctly when the F-key arrives.
@@ -947,6 +925,26 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 modifier_in_any_encoding(vk, &regs)
             });
             if should_buffer {
+                // Drop any stale CONSUMED entry for this VK before buffering
+                // a fresh down.  A new modifier-down means the previous Razer
+                // chord that consumed this VK either completed normally
+                // (entry already removed by C1) or its modifier-up was lost
+                // (focus change, alt-tab, helper rehook, etc.).  Without this
+                // clear, a stale entry suppresses the user's next real
+                // Ctrl-up via C1 → OS keeps Ctrl "held" until the user
+                // presses Ctrl a second time to recover.
+                let cleared_stale = CONSUMED_MODIFIER_VKS.with(|cell| {
+                    cell.borrow_mut().remove(&vk).is_some()
+                });
+                if cleared_stale {
+                    HELPER_MATCHES.with(|cell| {
+                        cell.borrow_mut().push(format!(
+                            "DEBUG:consumed-stale-cleared vk=0x{:02X}",
+                            vk,
+                        ));
+                    });
+                }
+
                 PENDING_MODIFIERS.with(|cell| {
                     cell.borrow_mut().push(PendingModifier {
                         vk,
@@ -1372,14 +1370,6 @@ pub fn capture_helper_main() {
             if m.message == WM_REHOOK {
                 log::info!("[capture-helper] REHOOK: reinstalling WH_KEYBOARD_LL...");
                 unsafe { UnhookWindowsHookEx(hook); }
-                // Reset all modifier-tracking state.  Any events in flight
-                // when the old hook was uninstalled are stale — their
-                // matching up/down may have been dropped.  Better to start
-                // clean than to leak a stuck modifier.
-                PENDING_MODIFIERS.with(|cell| cell.borrow_mut().clear());
-                CONSUMED_MODIFIER_VKS.with(|cell| cell.borrow_mut().clear());
-                HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
-                HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
                 let new_hook = unsafe {
                     SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
                 };

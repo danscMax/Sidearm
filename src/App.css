@@ -300,23 +300,23 @@ select::picker(select) {
   color-scheme: dark;
 }
 
-select option {
-  background: transparent;
-  color: var(--c-text);
-  padding: 7px 10px;
-  border-radius: var(--radius-xs);
-  transition: background 80ms ease;
+/* WebView2 / Chromium render the <select> popup with OS-native styling
+   that ignores the parent `color`. Without explicit option colours the
+   list falls back to black text on a white popup, invisible against our
+   dark theme. Force explicit dark-theme colours so the popup stays
+   readable. */
+select option,
+select optgroup {
+  background-color: var(--c-bg, #1a1f16);
+  color: var(--c-text-bright, #f0f2ec);
 }
-
-select option:hover {
-  background: rgba(159, 202, 105, 0.1);
-  color: var(--c-text-bright);
-}
-
 select option:checked {
-  background: rgba(159, 202, 105, 0.18);
-  color: var(--c-accent);
+  background-color: rgba(159, 202, 105, 0.32);
+  color: #ffffff;
   font-weight: 600;
+}
+select option:disabled {
+  color: var(--c-text-muted, rgba(240, 242, 236, 0.5));
 }
 
 select::picker-icon {
@@ -2009,20 +2009,7 @@ code {
    falls back to black text on a white popup, which is invisible against
    our dark theme. Apply globally — all <option>s in the app share the
    same dark popup look. */
-select option,
-select optgroup {
-  background-color: var(--c-bg, #1a1f16);
-  color: var(--c-text-bright, #f0f2ec);
-}
-select option:checked {
-  /* Stronger accent on the selected option so it's more readable, not less. */
-  background-color: rgba(159, 202, 105, 0.32);
-  color: #ffffff;
-  font-weight: 600;
-}
-select option:disabled {
-  color: var(--c-text-muted, rgba(240, 242, 236, 0.5));
-}
+/* (select option dark-theme rules live near the root color-scheme block above) */
 
 .sidebar__profile-select-row {
   display: flex;

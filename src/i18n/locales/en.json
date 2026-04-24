@@ -305,7 +305,9 @@
     "heatmapOn": "Heatmap: on",
     "heatmapOff": "Heatmap: off",
     "heatmapEnable": "Enable heatmap",
-    "heatmapDisable": "Disable heatmap"
+    "heatmapDisable": "Disable heatmap",
+    "searchPlaceholder": "Search bindings…",
+    "searchMeta": "Found: {{count}}"
   },
   "newRule": {
     "title": "New rule",

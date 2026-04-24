@@ -12,6 +12,10 @@ interface MouseVisualizationProps {
   entries: ControlSurfaceEntry[];
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
+  /** If set, controls not in the set are visually dimmed. Null = no filter. */
+  matchedControlIds?: Set<ControlId> | null;
+  /** Binding IDs that conflict with another binding on the same layer. */
+  conflictBindingIds?: Set<string>;
   onSelectControl: (id: ControlId) => void;
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
@@ -73,6 +77,8 @@ export function MouseVisualization({
   entries,
   selectedLayer,
   multiSelectedControlIds,
+  matchedControlIds,
+  conflictBindingIds,
   onSelectControl,
   onToggleMultiSelect,
   onOpenActionPicker,
@@ -177,6 +183,10 @@ export function MouseVisualization({
       const isHovered = hoveredId === entry.control.id;
 
       const isDragOver = dragOverId === entry.control.id;
+      const isDimmed =
+        matchedControlIds != null && !matchedControlIds.has(entry.control.id);
+      const hasConflict =
+        !!entry.binding && conflictBindingIds?.has(entry.binding.id);
 
       return (
         <button
@@ -188,6 +198,8 @@ export function MouseVisualization({
             pos.size === "lg" ? " mouse-visual__hotspot--lg" : ""
           }${isHovered ? " mouse-visual__hotspot--hovered" : ""}${
             isDragOver ? " mouse-visual__hotspot--dragover" : ""
+          }${isDimmed ? " mouse-visual__hotspot--dimmed" : ""}${
+            hasConflict ? " mouse-visual__hotspot--conflict" : ""
           }`}
           style={{ left: `${pos.left}%`, top: `${pos.top}%`, ...heatStyle(entry.control.id) }}
           onClick={(e) => handleClick(entry.control.id, e)}
@@ -241,11 +253,13 @@ export function MouseVisualization({
           const isSelected = entry.isSelected || multiSelectedControlIds.has(controlId);
           const isHovered = hoveredId === controlId;
           const isDragOver = dragOverId === controlId;
+          const isDimmed = matchedControlIds != null && !matchedControlIds.has(controlId);
+          const hasConflict = !!entry.binding && conflictBindingIds?.has(entry.binding.id);
           return (
             <button
               type="button"
               key={controlId}
-              className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
+              className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}${isDimmed ? " btn-legend__cell--dimmed" : ""}${hasConflict ? " btn-legend__cell--conflict" : ""}`}
               data-action-type={entry.action?.type ?? ""}
               data-tooltip={tooltipText(entry, t("visualization.unassigned"))}
               style={heatStyle(controlId)}
@@ -303,11 +317,13 @@ export function MouseVisualization({
               const isSelected = entry.isSelected || multiSelectedControlIds.has(controlId);
               const isHovered = hoveredId === controlId;
               const isDragOver = dragOverId === controlId;
+              const isDimmed = matchedControlIds != null && !matchedControlIds.has(controlId);
+              const hasConflict = !!entry.binding && conflictBindingIds?.has(entry.binding.id);
               return (
                 <button
                   type="button"
                   key={controlId}
-                  className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
+                  className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}${isDimmed ? " btn-legend__cell--dimmed" : ""}${hasConflict ? " btn-legend__cell--conflict" : ""}`}
                   data-action-type={entry.action?.type ?? ""}
                   style={heatStyle(controlId)}
                   onClick={(e) => handleClick(controlId, e)}

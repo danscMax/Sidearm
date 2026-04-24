@@ -4485,3 +4485,96 @@ input[type="number"] { -moz-appearance: textfield; }
   font-size: 0.7rem;
   color: var(--c-text-subtle);
 }
+
+/* ───────────────────────── M2: layer indicator, search, conflicts ───────────────────────── */
+.profiles-workspace--layer-standard { box-shadow: inset 4px 0 0 0 #68c57f; }
+.profiles-workspace--layer-hypershift { box-shadow: inset 4px 0 0 0 #a78bfa; }
+
+.profiles-workspace__toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.layer-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.layer-badge--standard {
+  color: #68c57f;
+  background: rgba(104, 197, 127, 0.1);
+  border: 1px solid rgba(104, 197, 127, 0.35);
+}
+.layer-badge--hypershift {
+  color: #a78bfa;
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.35);
+}
+
+.profiles-workspace__search {
+  flex: 1;
+  max-width: 320px;
+  padding: 5px 10px;
+  font-size: 0.82rem;
+  background: var(--c-surface, #1e2320);
+  color: var(--c-text);
+  border: 1px solid var(--c-border);
+  border-radius: 6px;
+}
+.profiles-workspace__search:focus {
+  outline: none;
+  border-color: var(--c-accent, #68c57f);
+}
+.profiles-workspace__search-meta {
+  font-size: 0.72rem;
+  color: var(--c-text-muted);
+}
+
+.mouse-visual__hotspot--dimmed {
+  opacity: 0.25;
+  filter: grayscale(60%);
+}
+.mouse-visual__hotspot--conflict {
+  box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7);
+}
+.mouse-visual__hotspot--conflict::after {
+  content: "⚠";
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.72rem;
+  color: #eab308;
+  background: var(--c-bg, #1a1f16);
+  border-radius: 50%;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-legend__cell--dimmed {
+  opacity: 0.3;
+  filter: grayscale(60%);
+}
+.btn-legend__cell--conflict {
+  border-color: rgba(234, 179, 8, 0.6);
+  position: relative;
+}
+.btn-legend__cell--conflict::after {
+  content: "⚠";
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  font-size: 0.75rem;
+  color: #eab308;
+}

@@ -16,6 +16,10 @@ import {
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
 import { getExeIcon, readTextFile, writeTextFile } from "../lib/backend";
+import {
+  bindingMatchesQuery,
+  conflictingBindingIds,
+} from "../lib/conflict-detection";
 import { parseCommaSeparatedUniqueValues, sortAppMappings } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
@@ -419,6 +423,26 @@ export function ProfilesWorkspace({
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
+  const [bindingSearch, setBindingSearch] = useState("");
+
+  const conflictIds = useMemo(
+    () => (activeConfig ? conflictingBindingIds(activeConfig) : new Set<string>()),
+    [activeConfig],
+  );
+
+  const searchQuery = bindingSearch.trim();
+  const matchedControlIds = useMemo(() => {
+    if (!searchQuery) return null;
+    const ids = new Set<ControlId>();
+    for (const section of familySections) {
+      for (const entry of section.entries) {
+        if (bindingMatchesQuery(entry.binding, entry.action, searchQuery)) {
+          ids.add(entry.control.id);
+        }
+      }
+    }
+    return ids;
+  }, [familySections, searchQuery]);
 
   const selectedAppMappings = useMemo(
     () =>
@@ -556,13 +580,38 @@ export function ProfilesWorkspace({
 
 
   return (
-    <div className="profiles-workspace">
+    <div
+      className={`profiles-workspace profiles-workspace--layer-${selectedLayer}`}
+    >
+      {/* ── Layer indicator + search ── */}
+      <div className="profiles-workspace__toolbar">
+        <span className={`layer-badge layer-badge--${selectedLayer}`}>
+          {selectedLayer === "hypershift"
+            ? t("layer.hypershift")
+            : t("layer.standard")}
+        </span>
+        <input
+          type="search"
+          className="profiles-workspace__search"
+          placeholder={t("profile.searchPlaceholder")}
+          value={bindingSearch}
+          onChange={(e) => setBindingSearch(e.target.value)}
+        />
+        {searchQuery && matchedControlIds ? (
+          <span className="profiles-workspace__search-meta">
+            {t("profile.searchMeta", { count: matchedControlIds.size })}
+          </span>
+        ) : null}
+      </div>
+
       {/* ── Mouse visualization ── */}
       <div className="profiles__mouse-viz">
         <MouseVisualization
           entries={familySections.flatMap((section) => section.entries)}
           selectedLayer={selectedLayer}
           multiSelectedControlIds={multiSelectedControlIds}
+          matchedControlIds={matchedControlIds}
+          conflictBindingIds={conflictIds}
           onSelectControl={(id) => {
             startTransition(() => {
               setSelectedControlId(id);

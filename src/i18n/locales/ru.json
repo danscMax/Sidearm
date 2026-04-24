@@ -305,7 +305,9 @@
     "heatmapOn": "Тепловая карта: вкл",
     "heatmapOff": "Тепловая карта: выкл",
     "heatmapEnable": "Включить тепловую карту",
-    "heatmapDisable": "Выключить тепловую карту"
+    "heatmapDisable": "Выключить тепловую карту",
+    "searchPlaceholder": "Поиск назначений…",
+    "searchMeta": "Найдено: {{count}}"
   },
   "newRule": {
     "title": "Новое правило",

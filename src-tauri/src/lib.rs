@@ -824,13 +824,14 @@ async fn accept_portable_migration(
                     CommandError::internal(format!("Failed to create portable config dir: {e}"))
                 })?;
                 let target = config_dir.join("config.json");
-                if !target.exists() {
-                    fs::copy(&roaming_config, &target).map_err(|e| {
-                        CommandError::internal(format!(
-                            "Failed to copy roaming config into portable dir: {e}"
-                        ))
-                    })?;
-                }
+                // Always overwrite on explicit user-initiated migration, even
+                // if the target exists — it was likely auto-created by an
+                // earlier `load_config` as a default seed.
+                fs::copy(&roaming_config, &target).map_err(|e| {
+                    CommandError::internal(format!(
+                        "Failed to copy roaming config into portable dir: {e}"
+                    ))
+                })?;
             }
             if let Err(err) = paths_state.mark_migration_declined() {
                 log::warn!("[portable] Failed to write migration marker: {err}");

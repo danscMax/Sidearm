@@ -586,6 +586,8 @@
     "addLaunch": "Launch",
     "recordingNotice": "Recording macro...",
     "recordingHint": "Press keys. Each keystroke will be recorded as a sequence step.",
+    "recordingCount": "({{count}} / {{max}})",
+    "recordLimitReached": "Recording limit of {{max}} steps reached — stopped automatically. Remove unwanted steps or save as-is.",
     "stepTitle": "Step {{index}}",
     "stepType": "Type",
     "stepSend": "Send shortcut",

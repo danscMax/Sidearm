@@ -100,6 +100,11 @@ export function SequenceStepEditor({
 }) {
   const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
+  const [recordedCount, setRecordedCount] = useState(0);
+  const [limitReached, setLimitReached] = useState(false);
+
+  /** Hard cap on recorded steps to protect against runaway sequences. */
+  const RECORD_LIMIT = 1000;
 
   // Capture keystrokes during recording and forward to Rust
   useEffect(() => {
@@ -121,14 +126,25 @@ export function SequenceStepEditor({
       const formatted = parts.join("+");
 
       void recordKeystroke(formatted);
+      setRecordedCount((c) => c + 1);
     }
 
     window.addEventListener("keydown", handleRecordKey, true);
     return () => window.removeEventListener("keydown", handleRecordKey, true);
   }, [isRecording]);
 
+  // Auto-stop when the hard cap is reached.
+  useEffect(() => {
+    if (isRecording && recordedCount >= RECORD_LIMIT) {
+      setLimitReached(true);
+      void handleStopRecording();
+    }
+  }, [recordedCount, isRecording]);
+
   async function handleStartRecording() {
     try {
+      setRecordedCount(0);
+      setLimitReached(false);
       await startMacroRecording();
       setIsRecording(true);
     } catch {
@@ -207,8 +223,18 @@ export function SequenceStepEditor({
 
       {isRecording ? (
         <div className="notice notice--warning" style={{ marginBottom: 8 }}>
-          <strong>{t("picker.recordingNotice")}</strong>
+          <strong>
+            {t("picker.recordingNotice")}{" "}
+            <span style={{ opacity: 0.7 }}>
+              {t("picker.recordingCount", { count: recordedCount, max: RECORD_LIMIT })}
+            </span>
+          </strong>
           <p>{t("picker.recordingHint")}</p>
+        </div>
+      ) : null}
+      {limitReached ? (
+        <div className="notice notice--warning" style={{ marginBottom: 8 }}>
+          <strong>{t("picker.recordLimitReached", { max: RECORD_LIMIT })}</strong>
         </div>
       ) : null}
 

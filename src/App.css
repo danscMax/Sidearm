@@ -4054,11 +4054,30 @@ code {
   font-size: 0.72rem;
   font-weight: 500;
   white-space: nowrap;
-  margin-left: auto;
+  flex-shrink: 0;
+  max-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Overview cards are wider than profile-mode cards so the exe name + profile
+   pill + toggle fit on one row without character-by-character wrapping. */
+.profiles__overview .profiles__card-grid {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
+.profiles__app-card--overview .profiles__app-card-name {
+  flex: 1;
+  min-width: 0;
+  word-break: normal;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .profiles__app-card--overview > .profiles__toggle {
-  margin-left: 8px;
+  margin-left: 0;
+  flex-shrink: 0;
 }
 
 .profiles__overview {

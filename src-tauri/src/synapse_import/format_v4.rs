@@ -105,8 +105,6 @@ struct TextBlockGroup {
 
 #[derive(Debug, Deserialize)]
 struct MacroGroupRef {
-    #[serde(default)]
-    name: String,
     guid: String,
 }
 

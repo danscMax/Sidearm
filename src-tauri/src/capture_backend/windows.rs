@@ -331,11 +331,6 @@ thread_local! {
         ));
 }
 
-#[cfg(test)]
-fn stale_threshold() -> std::time::Duration {
-    CONSUMED_MODIFIER_STALE_THRESHOLD.with(|c| c.get())
-}
-
 /// Check for pending modifiers that have timed out (>20ms) and replay them
 /// via SendInput. Called from the message pump loop.
 ///

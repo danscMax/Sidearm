@@ -17,7 +17,7 @@ use crate::config::{
 
 use super::types::{
     ImportOptions, ImportSummary, ImportWarning, ImportedConfig, MergeStrategy, ParsedAction,
-    ParsedBinding, ParsedMacro, ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles,
+    ParsedMacro, ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles,
 };
 
 // ============================================================================

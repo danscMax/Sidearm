@@ -22,17 +22,6 @@ pub enum MacroXmlError {
     Shape,
 }
 
-/// Parse a single `.xml` macro file into a `ParsedMacro`.
-pub fn parse_macro_xml_file(path: &Path) -> Result<ParsedMacro, MacroXmlError> {
-    let raw = std::fs::read_to_string(path)?;
-    let name = path
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("macro")
-        .to_string();
-    parse_macro_xml_str(&raw, name, &mut Vec::new())
-}
-
 /// Parse a macro XML string. Warnings for scancode/mouse-event handling are
 /// appended to `warnings`; the parse itself only errors on malformed XML.
 pub fn parse_macro_xml_str(

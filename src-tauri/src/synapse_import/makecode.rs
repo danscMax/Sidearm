@@ -162,19 +162,6 @@ pub fn makecode_to_key(makecode: u16, is_extended: bool) -> Option<&'static str>
     None
 }
 
-/// True if the key at this `(makecode, is_extended)` pair is a pure modifier.
-/// Used by the sequence builder to fold held modifiers into keyboard-group
-/// shortcut flags instead of emitting them as separate Send steps.
-pub fn is_modifier(makecode: u16, is_extended: bool) -> bool {
-    matches!(
-        makecode_to_key(makecode, is_extended),
-        Some("LeftCtrl") | Some("RightCtrl")
-            | Some("LeftShift") | Some("RightShift")
-            | Some("LeftAlt") | Some("RightAlt")
-            | Some("LeftWin") | Some("RightWin")
-    )
-}
-
 /// Canonical name for the modifier side-pair — folds Left* / Right* to
 /// "Ctrl", "Shift", "Alt", "Win" so shortcut-payload flags compose correctly.
 pub fn modifier_canonical(makecode: u16, is_extended: bool) -> Option<&'static str> {
@@ -228,18 +215,6 @@ mod tests {
     fn unknown_code_returns_none() {
         assert_eq!(makecode_to_key(0xFF, false), None);
         assert_eq!(makecode_to_key(0xAA, true), None);
-    }
-
-    #[test]
-    fn is_modifier_recognises_all_sides() {
-        assert!(is_modifier(0x1D, false)); // LeftCtrl
-        assert!(is_modifier(0x1D, true));  // RightCtrl
-        assert!(is_modifier(0x2A, false)); // LeftShift
-        assert!(is_modifier(0x36, false)); // RightShift
-        assert!(is_modifier(0x38, false)); // LeftAlt
-        assert!(is_modifier(0x38, true));  // RightAlt
-        assert!(is_modifier(0x5B, true));  // LeftWin
-        assert!(!is_modifier(0x1E, false)); // A
     }
 
     #[test]

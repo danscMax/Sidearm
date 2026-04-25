@@ -307,7 +307,14 @@
     "heatmapEnable": "Enable heatmap",
     "heatmapDisable": "Disable heatmap",
     "searchPlaceholder": "Search bindings…",
-    "searchMeta": "Found: {{count}}"
+    "searchMeta": "Found: {{count}}",
+    "viewModeLabel": "Rule view mode",
+    "viewModeProfile": "By profile",
+    "viewModeOverview": "All rules ({{count}})",
+    "overviewSearchPlaceholder": "Search by exe or window title…",
+    "overviewFilterAll": "All profiles",
+    "overviewEmpty": "No rules match the filter.",
+    "overviewProfileTooltip": "Profile: {{name}}"
   },
   "newRule": {
     "title": "New rule",

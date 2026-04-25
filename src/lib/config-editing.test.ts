@@ -21,6 +21,7 @@ import {
   upsertProfile,
   upsertPhysicalControl,
   upsertAppMapping,
+  reorderAppMappingPriority,
   upsertSnippetLibraryItem,
   upsertEncoderMapping,
   coerceActionType,
@@ -374,6 +375,83 @@ describe("upsertAppMapping", () => {
     const config = createMinimalConfig();
     upsertAppMapping(config, makeAppMapping());
     expect(config.appMappings).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reorderAppMappingPriority
+// ---------------------------------------------------------------------------
+
+describe("reorderAppMappingPriority", () => {
+  function threeMappings(): AppConfig {
+    return {
+      ...createMinimalConfig(),
+      appMappings: [
+        makeAppMapping({ id: "a", exe: "chrome.exe", priority: 30 }),
+        makeAppMapping({ id: "b", exe: "firefox.exe", priority: 20 }),
+        makeAppMapping({ id: "c", exe: "edge.exe", priority: 10 }),
+      ],
+    };
+  }
+
+  it("reassigns priorities so dragged card lands at target position", () => {
+    const config = threeMappings();
+    // Move "c" (lowest, edge.exe) to where "a" sits (top, chrome.exe).
+    const result = reorderAppMappingPriority(config, "c", "a");
+    const ordered = [...result.appMappings].sort((x, y) => y.priority - x.priority);
+    expect(ordered.map((m) => m.id)).toEqual(["c", "a", "b"]);
+  });
+
+  it("rebalances priorities to descending step-10 sequence", () => {
+    const config = threeMappings();
+    const result = reorderAppMappingPriority(config, "c", "a");
+    const priorities = result.appMappings.map((m) => m.priority).sort((x, y) => y - x);
+    expect(priorities).toEqual([30, 20, 10]);
+  });
+
+  it("is a no-op when dragged === target", () => {
+    const config = threeMappings();
+    const result = reorderAppMappingPriority(config, "a", "a");
+    expect(result).toBe(config);
+  });
+
+  it("is a no-op when dragged and target are in different profiles", () => {
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      appMappings: [
+        makeAppMapping({ id: "a", profileId: "p1", priority: 10 }),
+        makeAppMapping({ id: "b", profileId: "p2", priority: 10 }),
+      ],
+    };
+    const result = reorderAppMappingPriority(config, "a", "b");
+    expect(result).toBe(config);
+  });
+
+  it("is a no-op when an id does not exist", () => {
+    const config = threeMappings();
+    const result = reorderAppMappingPriority(config, "missing", "a");
+    expect(result).toBe(config);
+  });
+
+  it("does not touch mappings in other profiles", () => {
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      appMappings: [
+        makeAppMapping({ id: "a", profileId: "p1", priority: 30 }),
+        makeAppMapping({ id: "b", profileId: "p1", priority: 20 }),
+        makeAppMapping({ id: "x", profileId: "p2", priority: 7 }),
+      ],
+    };
+    const result = reorderAppMappingPriority(config, "b", "a");
+    const x = result.appMappings.find((m) => m.id === "x")!;
+    expect(x.priority).toBe(7);
+  });
+
+  it("does not mutate the original config", () => {
+    const config = threeMappings();
+    const before = config.appMappings.map((m) => ({ ...m }));
+    reorderAppMappingPriority(config, "c", "a");
+    expect(config.appMappings).toEqual(before);
   });
 });
 

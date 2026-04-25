@@ -307,7 +307,14 @@
     "heatmapEnable": "Включить тепловую карту",
     "heatmapDisable": "Выключить тепловую карту",
     "searchPlaceholder": "Поиск назначений…",
-    "searchMeta": "Найдено: {{count}}"
+    "searchMeta": "Найдено: {{count}}",
+    "viewModeLabel": "Режим просмотра правил",
+    "viewModeProfile": "По профилю",
+    "viewModeOverview": "Все правила ({{count}})",
+    "overviewSearchPlaceholder": "Поиск по exe или заголовку окна…",
+    "overviewFilterAll": "Все профили",
+    "overviewEmpty": "Нет правил, удовлетворяющих фильтру.",
+    "overviewProfileTooltip": "Профиль: {{name}}"
   },
   "newRule": {
     "title": "Новое правило",

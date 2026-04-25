@@ -4028,7 +4028,64 @@ code {
   opacity: 0.45;
 }
 
+.profiles__app-card--dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+.profiles__app-card--drag-over {
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 2px rgba(159, 202, 105, 0.35);
+  transform: translateY(-1px);
+}
+
 .profiles__app-card > .profiles__toggle {
+  margin-left: auto;
+}
+
+.profiles__app-card-profile-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(159, 202, 105, 0.12);
+  border: 1px solid rgba(159, 202, 105, 0.28);
+  color: var(--c-text-muted);
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  margin-left: auto;
+}
+
+.profiles__app-card--overview > .profiles__toggle {
+  margin-left: 8px;
+}
+
+.profiles__overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profiles__overview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.profiles__overview-filter {
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+}
+
+.profiles-workspace__viewmode {
+  display: inline-flex;
+  gap: 4px;
   margin-left: auto;
 }
 

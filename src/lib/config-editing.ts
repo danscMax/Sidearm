@@ -169,6 +169,54 @@ export function deleteAppMapping(config: AppConfig, appMappingId: string): AppCo
   };
 }
 
+/**
+ * Reorder appMappings within a profile by moving `draggedId` to the position
+ * currently held by `targetId`. Rebalances priority for that profile to a
+ * descending sequence (length*10, ..., 20, 10, 0) so visually-higher cards
+ * have higher priority. Mappings in other profiles are untouched.
+ *
+ * No-op if the IDs are missing or belong to different profiles.
+ */
+export function reorderAppMappingPriority(
+  config: AppConfig,
+  draggedId: string,
+  targetId: string,
+): AppConfig {
+  if (draggedId === targetId) return config;
+
+  const dragged = config.appMappings.find((m) => m.id === draggedId);
+  const target = config.appMappings.find((m) => m.id === targetId);
+  if (!dragged || !target || dragged.profileId !== target.profileId) {
+    return config;
+  }
+
+  const profileId = dragged.profileId;
+  const same = config.appMappings
+    .filter((m) => m.profileId === profileId)
+    .sort((a, b) => b.priority - a.priority || a.exe.localeCompare(b.exe));
+
+  const fromIdx = same.findIndex((m) => m.id === draggedId);
+  const toIdx = same.findIndex((m) => m.id === targetId);
+  if (fromIdx === -1 || toIdx === -1) return config;
+
+  const reordered = [...same];
+  const [moved] = reordered.splice(fromIdx, 1);
+  reordered.splice(toIdx, 0, moved);
+
+  const total = reordered.length;
+  const priorityById = new Map<string, number>();
+  reordered.forEach((m, i) => priorityById.set(m.id, (total - i) * 10));
+
+  return {
+    ...config,
+    appMappings: config.appMappings.map((m) =>
+      m.profileId === profileId
+        ? { ...m, priority: priorityById.get(m.id) ?? m.priority }
+        : m,
+    ),
+  };
+}
+
 export function upsertAppMapping(config: AppConfig, nextAppMapping: AppMapping): AppConfig {
   const appMappingIndex = config.appMappings.findIndex(
     (mapping) => mapping.id === nextAppMapping.id,

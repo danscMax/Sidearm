@@ -11,6 +11,7 @@ import {
   extractProfileExport,
   findDuplicateAppMapping,
   mergeImportedProfile,
+  reorderAppMappingPriority,
   upsertAppMapping,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
@@ -463,6 +464,42 @@ export function ProfilesWorkspace({
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
   const [bindingSearch, setBindingSearch] = useState("");
 
+  // Overview tab state — flat list of all appMappings across profiles.
+  const [viewMode, setViewMode] = useState<"profile" | "overview">("profile");
+  const [overviewSearch, setOverviewSearch] = useState("");
+  const [overviewProfileFilter, setOverviewProfileFilter] = useState<string>("all");
+
+  // Drag-reorder state — shared between profile-card-grid and overview list.
+  const [draggingMappingId, setDraggingMappingId] = useState<string | null>(null);
+  const [dragOverMappingId, setDragOverMappingId] = useState<string | null>(null);
+
+  const overviewMappings = useMemo(() => {
+    const q = overviewSearch.trim().toLowerCase();
+    return [...activeConfig.appMappings]
+      .filter((m) => {
+        if (overviewProfileFilter !== "all" && m.profileId !== overviewProfileFilter) {
+          return false;
+        }
+        if (!q) return true;
+        if (m.exe.toLowerCase().includes(q)) return true;
+        return (m.titleIncludes ?? []).some((t) => t.toLowerCase().includes(q));
+      })
+      // Sort by profile name, then priority desc, then exe.
+      .sort((a, b) => {
+        const profA = activeConfig.profiles.find((p) => p.id === a.profileId)?.name ?? "";
+        const profB = activeConfig.profiles.find((p) => p.id === b.profileId)?.name ?? "";
+        const byProfile = profA.localeCompare(profB);
+        if (byProfile !== 0) return byProfile;
+        return b.priority - a.priority || a.exe.localeCompare(b.exe);
+      });
+  }, [activeConfig.appMappings, activeConfig.profiles, overviewSearch, overviewProfileFilter]);
+
+  const profileNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of activeConfig.profiles) m.set(p.id, p.name);
+    return m;
+  }, [activeConfig.profiles]);
+
   const conflictIds = useMemo(
     () => (activeConfig ? conflictingBindingIds(activeConfig) : new Set<string>()),
     [activeConfig],
@@ -621,7 +658,7 @@ export function ProfilesWorkspace({
     <div
       className={`profiles-workspace profiles-workspace--layer-${selectedLayer}`}
     >
-      {/* ── Layer indicator + search ── */}
+      {/* ── Layer indicator + search + view-mode switch ── */}
       <div className="profiles-workspace__toolbar">
         <span className={`layer-badge layer-badge--${selectedLayer}`}>
           {selectedLayer === "hypershift"
@@ -640,8 +677,30 @@ export function ProfilesWorkspace({
             {t("profile.searchMeta", { count: matchedControlIds.size })}
           </span>
         ) : null}
+        <div className="profiles-workspace__viewmode" role="tablist" aria-label={t("profile.viewModeLabel")}>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === "profile"}
+            className={`action-button action-button--small${viewMode === "profile" ? "" : " action-button--ghost"}`}
+            onClick={() => setViewMode("profile")}
+          >
+            {t("profile.viewModeProfile")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={viewMode === "overview"}
+            className={`action-button action-button--small${viewMode === "overview" ? "" : " action-button--ghost"}`}
+            onClick={() => setViewMode("overview")}
+          >
+            {t("profile.viewModeOverview", { count: activeConfig.appMappings.length })}
+          </button>
+        </div>
       </div>
 
+      {viewMode === "profile" ? (
+      <>
       {/* ── Mouse visualization ── */}
       <div className="profiles__mouse-viz">
         <MouseVisualization
@@ -741,15 +800,45 @@ export function ProfilesWorkspace({
         {selectedAppMappings.map((mapping) => {
           const isActive = editingMapping?.id === mapping.id;
           const isDisabled = !mapping.enabled;
+          const isDragging = draggingMappingId === mapping.id;
+          const isDragOver = dragOverMappingId === mapping.id && draggingMappingId !== mapping.id;
           return (
             <button
               key={mapping.id}
               type="button"
-              className={`profiles__app-card${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}`}
+              draggable
+              className={`profiles__app-card${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}${isDragging ? " profiles__app-card--dragging" : ""}${isDragOver ? " profiles__app-card--drag-over" : ""}`}
               onClick={() => setEditingMappingId(mapping.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
+              }}
+              onDragStart={(e) => {
+                setDraggingMappingId(mapping.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                if (!draggingMappingId || draggingMappingId === mapping.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverMappingId !== mapping.id) setDragOverMappingId(mapping.id);
+              }}
+              onDragLeave={() => {
+                if (dragOverMappingId === mapping.id) setDragOverMappingId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                if (draggingMappingId && draggingMappingId !== mapping.id) {
+                  updateDraft((c) =>
+                    reorderAppMappingPriority(c, draggingMappingId, mapping.id),
+                  );
+                }
+                setDraggingMappingId(null);
+                setDragOverMappingId(null);
+              }}
+              onDragEnd={() => {
+                setDraggingMappingId(null);
+                setDragOverMappingId(null);
               }}
             >
               <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
@@ -787,6 +876,106 @@ export function ProfilesWorkspace({
           {t("profile.emptyHint")}
         </p>
       ) : null}
+      </>
+      ) : (
+        // ── Overview: flat list of all appMappings across profiles ──
+        <div className="profiles__overview">
+          <div className="profiles__overview-toolbar">
+            <input
+              type="search"
+              className="profiles-workspace__search"
+              placeholder={t("profile.overviewSearchPlaceholder")}
+              value={overviewSearch}
+              onChange={(e) => setOverviewSearch(e.target.value)}
+            />
+            <select
+              className="profiles__overview-filter"
+              value={overviewProfileFilter}
+              onChange={(e) => setOverviewProfileFilter(e.target.value)}
+            >
+              <option value="all">{t("profile.overviewFilterAll")}</option>
+              {activeConfig.profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            <span className="profiles__section-count">{overviewMappings.length}</span>
+          </div>
+          {overviewMappings.length === 0 ? (
+            <p className="profiles__empty-hint">{t("profile.overviewEmpty")}</p>
+          ) : (
+            <div className="profiles__card-grid">
+              {overviewMappings.map((mapping) => {
+                const isActive = editingMappingId === mapping.id;
+                const isDisabled = !mapping.enabled;
+                const isDragging = draggingMappingId === mapping.id;
+                const isDragOver = dragOverMappingId === mapping.id && draggingMappingId !== mapping.id;
+                const profileName = profileNameById.get(mapping.profileId) ?? mapping.profileId;
+                return (
+                  <button
+                    key={mapping.id}
+                    type="button"
+                    draggable
+                    className={`profiles__app-card profiles__app-card--overview${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}${isDragging ? " profiles__app-card--dragging" : ""}${isDragOver ? " profiles__app-card--drag-over" : ""}`}
+                    onClick={() => setEditingMappingId(mapping.id)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
+                    }}
+                    onDragStart={(e) => {
+                      setDraggingMappingId(mapping.id);
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    onDragOver={(e) => {
+                      // Only allow reorder within the same profile.
+                      if (!draggingMappingId || draggingMappingId === mapping.id) return;
+                      const dragged = activeConfig.appMappings.find((m) => m.id === draggingMappingId);
+                      if (!dragged || dragged.profileId !== mapping.profileId) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      if (dragOverMappingId !== mapping.id) setDragOverMappingId(mapping.id);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverMappingId === mapping.id) setDragOverMappingId(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (draggingMappingId && draggingMappingId !== mapping.id) {
+                        updateDraft((c) =>
+                          reorderAppMappingPriority(c, draggingMappingId, mapping.id),
+                        );
+                      }
+                      setDraggingMappingId(null);
+                      setDragOverMappingId(null);
+                    }}
+                    onDragEnd={() => {
+                      setDraggingMappingId(null);
+                      setDragOverMappingId(null);
+                    }}
+                  >
+                    <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
+                    <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
+                    <span className="profiles__app-card-profile-pill" title={t("profile.overviewProfileTooltip", { name: profileName })}>
+                      {profileName}
+                    </span>
+                    <input
+                      className="profiles__toggle"
+                      type="checkbox"
+                      checked={mapping.enabled}
+                      title={mapping.enabled ? t("common.disabled") : t("common.enabled")}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) =>
+                        updateDraft((c) =>
+                          upsertAppMapping(c, { ...mapping, enabled: e.target.checked }),
+                        )
+                      }
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── New rule dialog ── */}
       {newRuleOpen ? (

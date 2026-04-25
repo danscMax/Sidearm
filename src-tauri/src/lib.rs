@@ -1742,6 +1742,13 @@ fn check_crash_sentinel(app: &AppHandle) {
         if let Ok(contents) = fs::read_to_string(&sentinel) {
             log::error!("[system] Crashed session started at: {}", contents.trim());
         }
+
+        // Recover OS-level keyboard state: a crashed session may have left a
+        // modifier in "down" state from an unbalanced SendInput (panic="abort"
+        // skips our panic hook; force-kill bypasses it entirely). Blast key-ups
+        // for all modifier variants — KeyUp for a non-held VK is an OS no-op.
+        log::info!("[system] mod-startup-release-all reason=crash-sentinel");
+        input_synthesis::release_all_modifiers();
     }
 
     // Write new sentinel with current timestamp

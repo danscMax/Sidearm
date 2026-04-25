@@ -195,6 +195,16 @@ pub struct Settings {
     /// fail to trigger (the chord's modifier-up was lost to a focus change).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub modifier_stale_gc_ms: Option<u64>,
+    /// Optional override for how long the capture helper keeps a REPLAYED
+    /// modifier-VK entry awaiting its real key-up before force-releasing the
+    /// injected modifier via SendInput. Covers the "physical Ctrl-up was
+    /// lost (alt-tab / RDP / Razer firmware drop)" case for replays from
+    /// `flush_expired_pending_modifiers` / Case B/D non-encoding drain.
+    /// Unit: milliseconds. Clamped server-side to 1000..=60000. Default
+    /// 30000 (30 s) — large enough to not break "user holds Ctrl 5+ s and
+    /// presses a Sidearm action" use case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replayed_modifier_force_release_ms: Option<u64>,
     /// Last profile the user explicitly picked in the sidebar. Runtime
     /// resolver prefers this over `fallback_profile_id` when no appMapping
     /// matches the foreground window; explicit mappings still win.
@@ -1396,6 +1406,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             osd_font_size: OsdFontSize::default(),
             osd_animation: OsdAnimation::default(),
             modifier_stale_gc_ms: None,
+            replayed_modifier_force_release_ms: None,
             last_selected_profile_id: None,
         },
         profiles: seed_profiles(),

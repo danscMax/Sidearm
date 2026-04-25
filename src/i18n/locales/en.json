@@ -412,7 +412,10 @@
     "captureHeader": "CAPTURE (ADVANCED)",
     "modifierStaleGcLabel": "CONSUMED GC window",
     "modifierStaleGcHelp": "How long the helper keeps a trace of a 'consumed' mouse modifier before clearing it. Too short and some mouse chords get dropped. Too long and a physical Ctrl may get stuck for that window. 5 s is the safe default matching legacy behaviour.",
-    "modifierStaleGcOption": "{{seconds}} s"
+    "modifierStaleGcOption": "{{seconds}} s",
+    "replayedForceReleaseLabel": "REPLAYED force-release window",
+    "replayedForceReleaseHelp": "If Sidearm injected a Ctrl-down (e.g. after buffering a physical Ctrl) but the matching real key-up was lost (alt-tab/RDP/driver), the helper force-releases the modifier via SendInput after this window. Too short and a physically-held Ctrl gets released, breaking 'hold Ctrl + mouse button'. Too long and the stuck window stretches. 30 s is the safe default.",
+    "replayedForceReleaseOption": "{{seconds}} s"
   },
   "command": {
     "undo": "Undo",

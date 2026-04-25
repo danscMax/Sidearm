@@ -363,6 +363,34 @@ export function SettingsWorkspace({
             })}
           </div>
         </div>
+        <p className="panel__muted" style={{ fontSize: "0.78rem", margin: "12px 0" }}>
+          {t("settings.replayedForceReleaseHelp")}
+        </p>
+        <div className="osd-settings-row">
+          <span className="osd-settings-row__label">
+            {t("settings.replayedForceReleaseLabel")}
+          </span>
+          <div className="osd-settings-row__buttons">
+            {([5000, 15000, 30000, 60000] as const).map((ms) => {
+              const current = osd.replayedModifierForceReleaseMs ?? 30000;
+              const active = current === ms;
+              return (
+                <button
+                  key={ms}
+                  type="button"
+                  className={`action-button action-button--small${active ? "" : " action-button--ghost"}`}
+                  onClick={() =>
+                    updateSettings({
+                      replayedModifierForceReleaseMs: ms === 30000 ? undefined : ms,
+                    })
+                  }
+                >
+                  {t("settings.replayedForceReleaseOption", { seconds: ms / 1000 })}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </section>
 
       {/* Active profile editor */}

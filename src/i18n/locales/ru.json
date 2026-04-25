@@ -412,7 +412,10 @@
     "captureHeader": "ПЕРЕХВАТ (ТОНКАЯ НАСТРОЙКА)",
     "modifierStaleGcLabel": "Окно очистки CONSUMED",
     "modifierStaleGcHelp": "Как долго helper держит след о «съеденном» модификаторе от мыши, прежде чем его удалить. Слишком коротко — Sidearm теряет часть мышных комбо. Слишком долго — иногда «залипает» физический Ctrl. 5 сек — безопасный дефолт, совместимый со старым поведением.",
-    "modifierStaleGcOption": "{{seconds}} сек"
+    "modifierStaleGcOption": "{{seconds}} сек",
+    "replayedForceReleaseLabel": "Окно force-release REPLAYED",
+    "replayedForceReleaseHelp": "Если Sidearm заинжектил Ctrl-down (например, после буферизации физического Ctrl), но реальный key-up был потерян (alt-tab/RDP/драйвер), helper через это окно сам отпустит модификатор через SendInput. Слишком коротко — отжимает физически удерживаемый Ctrl, ломая «удерживаю Ctrl + кнопка мыши». Слишком долго — окно «залипания» затягивается. 30 сек — безопасный дефолт.",
+    "replayedForceReleaseOption": "{{seconds}} сек"
   },
   "command": {
     "undo": "Отменить",

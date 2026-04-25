@@ -257,6 +257,7 @@ mod tests {
                 osd_font_size: OsdFontSize::default(),
                 osd_animation: OsdAnimation::default(),
                 modifier_stale_gc_ms: None,
+                replayed_modifier_force_release_ms: None,
                 last_selected_profile_id: None,
             },
             profiles: vec![

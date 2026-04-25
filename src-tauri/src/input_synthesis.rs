@@ -413,17 +413,35 @@ pub fn send_shortcut_hold_up(held: &HeldShortcutState) -> Result<(), String> {
     send_keyboard_inputs(&plan)
 }
 
+/// Build the set of key-up inputs used by `release_all_modifiers`.
+/// Covers L+R variants AND generic VK_CONTROL/SHIFT/MENU per AHK community
+/// best practice — when the exact held state is unknown, KeyUp for an
+/// unpressed VK is a no-op for the OS, so the blast is safe.  Split out so
+/// unit tests can assert the spec list without invoking SendInput.
+#[cfg(target_os = "windows")]
+fn build_release_all_modifier_inputs() -> Vec<KeyboardInputSpec> {
+    vec![
+        KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_RCONTROL, extended: true,  key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_CONTROL,  extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_LSHIFT,   extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_RSHIFT,   extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_SHIFT,    extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_LMENU,    extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_RMENU,    extended: true,  key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_MENU,     extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_LWIN,     extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey { code: VK_RWIN,     extended: false, key_up: true },
+    ]
+}
+
 /// Emergency release: blast key-up for all standard modifiers.
-/// Used by panic hooks when exact held state is unknown.
+/// Used by panic hooks, crash-sentinel recovery (`lib.rs:check_crash_sentinel`)
+/// and helper teardown.
 pub fn release_all_modifiers() {
     #[cfg(target_os = "windows")]
     {
-        let inputs = vec![
-            KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
-            KeyboardInputSpec::VirtualKey { code: VK_LSHIFT, extended: false, key_up: true },
-            KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up: true },
-            KeyboardInputSpec::VirtualKey { code: VK_LWIN, extended: false, key_up: true },
-        ];
+        let inputs = build_release_all_modifier_inputs();
         let _ = send_keyboard_inputs(&inputs);
     }
 }
@@ -1423,6 +1441,10 @@ const VK_RSHIFT: u16 = 0xA1;
 const VK_LMENU: u16 = 0xA4;
 const VK_RMENU: u16 = 0xA5;
 const VK_LWIN: u16 = 0x5B;
+const VK_RWIN: u16 = 0x5C;
+const VK_CONTROL: u16 = 0x11;
+const VK_SHIFT: u16 = 0x10;
+const VK_MENU: u16 = 0x12;
 /// AHK-style "menu mask key".  Injected between held Alt/Win modifiers of a
 /// modifier-only shortcut so Windows does not interpret the subsequent
 /// Alt-up / Win-up (with no primary key between) as a menu / Start-menu
@@ -1716,6 +1738,30 @@ fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn release_all_modifiers_emits_left_right_and_generic_variants() {
+        let inputs = build_release_all_modifier_inputs();
+        let codes: Vec<u16> = inputs
+            .iter()
+            .filter_map(|i| match i {
+                KeyboardInputSpec::VirtualKey { code, key_up: true, .. } => Some(*code),
+                _ => None,
+            })
+            .collect();
+
+        // All 11 modifier VKs covered, all key-ups.
+        for vk in [
+            VK_LCONTROL, VK_RCONTROL, VK_CONTROL,
+            VK_LSHIFT, VK_RSHIFT, VK_SHIFT,
+            VK_LMENU, VK_RMENU, VK_MENU,
+            VK_LWIN, VK_RWIN,
+        ] {
+            assert!(codes.contains(&vk), "missing VK 0x{:02X} in release-all blast", vk);
+        }
+        assert_eq!(codes.len(), 11, "should emit exactly 11 modifier VKs");
+    }
 
     #[test]
     fn parses_seed_shortcut_keys() {

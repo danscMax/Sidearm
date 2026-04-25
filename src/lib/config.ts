@@ -79,6 +79,7 @@ export interface Settings {
   osdFontSize: OsdFontSize;
   osdAnimation: OsdAnimation;
   modifierStaleGcMs?: number;
+  replayedModifierForceReleaseMs?: number;
   lastSelectedProfileId?: string;
 }
 

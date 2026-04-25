@@ -101,6 +101,22 @@ thread_local! {
     /// entries when the expected key-up never arrives (e.g. focus change).
     static CONSUMED_MODIFIER_VKS: std::cell::RefCell<std::collections::HashMap<u32, std::time::Instant>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
+
+    /// VK codes of modifiers that were *replayed* via `replay_modifier_down`
+    /// (injected key-down through SendInput because pending-buffer timed out
+    /// without an F-key match, or because the F-key didn't match the encoding
+    /// mask).  Each entry is awaiting its real key-up — when the user actually
+    /// releases the modifier, we remove the entry and let the up flow through.
+    ///
+    /// If the real up is lost (alt-tab steals focus, RDP disconnect, Razer
+    /// firmware drops the up), the entry stays.  After
+    /// `REPLAYED_AWAITING_UP_THRESHOLD` we force-release the modifier via
+    /// SendInput key-up — bounded recovery for the orphan-replay scenario
+    /// (otherwise OS sees ctrl-down without ever receiving its up, and Ctrl
+    /// is virtually held until the user manually presses Ctrl again, which
+    /// triggers the fresh-down clear path).
+    static REPLAYED_AWAITING_UP: std::cell::RefCell<std::collections::HashMap<u32, std::time::Instant>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
 }
 
 pub(super) struct CaptureBackendHandle {
@@ -300,6 +316,32 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
     SendInput(2, inputs.as_ptr(), size_of::<INPUT>() as i32);
 }
 
+/// Force-release a modifier via SendInput key-up.  Used by orphan-replay GC
+/// and by teardown/REHOOK/health-reinstall to balance any prior
+/// `replay_modifier_down` whose matching real-up was lost.
+///
+/// Carries `INTERNAL_SENDINPUT_EXTRA_INFO` so our own LL hook recognises
+/// the event and passes it through without buffering.
+unsafe fn replay_modifier_up(vk: u32, scan: u32) {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+    };
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk as u16,
+                wScan: scan as u16,
+                dwFlags: KEYEVENTF_KEYUP,
+                time: 0,
+                dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+            },
+        },
+    };
+    SendInput(1, &input, size_of::<INPUT>() as i32);
+}
+
 /// Maximum age of a pending modifier-down when an F-key match arrives for
 /// it to still be considered Razer encoding.  Razer Naga sends
 /// modifier→F-key within ~1-5 ms; anything older is likely a user's physical
@@ -322,12 +364,34 @@ const RAZER_ENCODING_CHORD_WINDOW: std::time::Duration = std::time::Duration::fr
 /// tune via `Settings.modifierStaleGcMs`.
 const DEFAULT_CONSUMED_MODIFIER_STALE_MS: u64 = 5000;
 
+/// Default maximum age of a `REPLAYED_AWAITING_UP` entry before we
+/// force-release the modifier via SendInput key-up.  Guards against
+/// orphan-replays where the user's physical modifier-up was lost (alt-tab,
+/// focus change, RDP, slow Razer firmware drop).
+///
+/// 30 s is intentionally large: a typical user holds Ctrl for 1-5 s during
+/// a normal shortcut, so 30 s gives plenty of slack.  The trade-off:
+///  - Too **short** and a force-release fires while the user is still
+///    physically holding the modifier — OS thinks it is up, the next
+///    Sidearm action that depends on the held modifier sees no Ctrl.
+///  - Too **long** and the orphan-stuck window stretches uncomfortably.
+///
+/// Users can tune via `Settings.replayedModifierForceReleaseMs`.
+const DEFAULT_REPLAYED_AWAITING_UP_MS: u64 = 30_000;
+
 thread_local! {
     /// Active threshold on the helper thread. Set once from the stdin init
     /// payload; defaults to the compile-time default if unset.
     static CONSUMED_MODIFIER_STALE_THRESHOLD: std::cell::Cell<std::time::Duration> =
         std::cell::Cell::new(std::time::Duration::from_millis(
             DEFAULT_CONSUMED_MODIFIER_STALE_MS,
+        ));
+
+    /// Active threshold for force-releasing orphan replayed modifiers.
+    /// Set from stdin init payload; defaults to compile-time default.
+    static REPLAYED_AWAITING_UP_THRESHOLD: std::cell::Cell<std::time::Duration> =
+        std::cell::Cell::new(std::time::Duration::from_millis(
+            DEFAULT_REPLAYED_AWAITING_UP_MS,
         ));
 }
 
@@ -367,15 +431,35 @@ fn flush_expired_pending_modifiers() {
     }
 
     let replayed_vks: Vec<u32> = expired.iter().map(|pm| pm.vk).collect();
+
+    // Track replayed modifiers awaiting their real key-up.  Insert BEFORE
+    // SendInput so any re-entrant LL hook callback during SendInput's
+    // synchronous chain delivery (real Ctrl-up arriving mid-replay — see
+    // `replay_modifier_down` doc) can find and remove the entry.
+    let now = std::time::Instant::now();
+    REPLAYED_AWAITING_UP.with(|cell| {
+        let mut map = cell.borrow_mut();
+        for pm in &expired {
+            map.insert(pm.vk, now);
+        }
+    });
+
     for pm in &expired {
         unsafe { replay_modifier_down(pm.vk, pm.scan); }
     }
 
     HELPER_MATCHES.with(|mc| {
-        mc.borrow_mut().push(format!(
+        let mut buf = mc.borrow_mut();
+        buf.push(format!(
             "DEBUG:mod-replay timeout vks={:?}",
             replayed_vks,
         ));
+        for vk in &replayed_vks {
+            buf.push(format!(
+                "DEBUG:mod-replayed-tracked vk=0x{:02X} reason=flush-timeout",
+                vk,
+            ));
+        }
     });
 }
 
@@ -409,6 +493,91 @@ fn gc_stale_consumed_modifiers() {
             ));
         });
     }
+}
+
+/// Drain `REPLAYED_AWAITING_UP` entries that have outlived their threshold.
+/// Returns `(vk, age_ms)` pairs for each removed entry.  Pure state
+/// manipulation — no SendInput.  Split out so unit tests can exercise the
+/// expiry logic without injecting key events into the running OS.
+fn drain_expired_replayed_modifiers() -> Vec<(u32, u128)> {
+    let threshold = REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.get());
+    REPLAYED_AWAITING_UP.with(|cell| {
+        let now = std::time::Instant::now();
+        let mut map = cell.borrow_mut();
+        let mut out: Vec<(u32, u128)> = Vec::new();
+        map.retain(|vk, at| {
+            let age = now.duration_since(*at);
+            if age >= threshold {
+                out.push((*vk, age.as_millis()));
+                false
+            } else {
+                true
+            }
+        });
+        out
+    })
+}
+
+/// Force-release `REPLAYED_AWAITING_UP` entries that have outlived their
+/// expected real-up.  After `replay_modifier_down` we expect the user to
+/// physically release the modifier (sending the up through the LL hook
+/// chain → Case C0/C1/C2 removes the entry).  If that up is lost (alt-tab
+/// focus change, RDP, slow Razer firmware), the entry stays and OS sees
+/// ctrl-down without a balancing up — virtually held until force-release.
+///
+/// Called from the message pump loop alongside `gc_stale_consumed_modifiers`.
+fn gc_orphan_replayed_modifiers() {
+    let expired = drain_expired_replayed_modifiers();
+
+    for (vk, _) in &expired {
+        // scan=0 — we don't have the original buffered scan code at this
+        // point, and Windows accepts wVk-only key-up for modifier VKs.
+        unsafe { replay_modifier_up(*vk, 0); }
+    }
+
+    if !expired.is_empty() {
+        HELPER_MATCHES.with(|mc| {
+            let mut buf = mc.borrow_mut();
+            for (vk, age_ms) in &expired {
+                buf.push(format!(
+                    "DEBUG:mod-replayed-force-release vk=0x{:02X} age={}ms reason=orphan-gc",
+                    vk, age_ms,
+                ));
+            }
+        });
+    }
+}
+
+/// Drain ALL entries from `REPLAYED_AWAITING_UP`, returning the VKs.  Pure
+/// state manipulation — no SendInput.  Split out for unit tests.
+fn take_all_replayed_modifiers() -> Vec<u32> {
+    REPLAYED_AWAITING_UP.with(|cell| {
+        cell.borrow_mut().drain().map(|(vk, _)| vk).collect()
+    })
+}
+
+/// Force-release ALL entries in `REPLAYED_AWAITING_UP` via SendInput key-up.
+/// Used at helper teardown (WM_QUIT), REHOOK, and health-reinstall — any
+/// in-flight injected modifier-down without a matching real-up would leave
+/// the OS in a stuck state if we tear down without releasing.
+///
+/// Pushes a DEBUG line into HELPER_MATCHES; caller is responsible for
+/// `drain_helper_matches` to flush it through stdout.
+fn force_release_all_replayed_modifiers(reason: &str) {
+    let entries = take_all_replayed_modifiers();
+    if entries.is_empty() {
+        return;
+    }
+    for vk in &entries {
+        unsafe { replay_modifier_up(*vk, 0); }
+    }
+    HELPER_MATCHES.with(|mc| {
+        mc.borrow_mut().push(format!(
+            "DEBUG:mod-replayed-force-release-all reason={reason} count={} vks={:?}",
+            entries.len(),
+            entries,
+        ));
+    });
 }
 
 impl CaptureBackendHandle {
@@ -527,7 +696,13 @@ impl CaptureBackendHandle {
         // for all keys, not just modifier-combos).  Non-fatal if fails —
         // RegisterHotKey still handles bare keys with exact matching.
         let modifier_stale_gc_ms = config.settings.modifier_stale_gc_ms;
-        let helper = spawn_capture_helper(&registrations, helper_event_tx, modifier_stale_gc_ms);
+        let replayed_modifier_force_release_ms = config.settings.replayed_modifier_force_release_ms;
+        let helper = spawn_capture_helper(
+            &registrations,
+            helper_event_tx,
+            modifier_stale_gc_ms,
+            replayed_modifier_force_release_ms,
+        );
         if !registrations.is_empty() && helper.is_none() {
             if let Ok(mut store) = runtime_store.lock() {
                 store.record_warn(
@@ -935,19 +1110,31 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         // up to 20ms; if an F-key match arrives in time we consume them,
         // otherwise we replay them via SendInput.
 
-        // Any real modifier-down makes any prior CONSUMED entry for this
-        // VK invalid: either the matching Razer chord already released (C1
-        // already removed it) or its modifier-up got lost (focus change,
-        // alt-tab, config change, helper rehook).  Clear unconditionally so
-        // a stale entry never suppresses the user's next real modifier-up.
+        // Any real modifier-down makes any prior CONSUMED or REPLAYED entry
+        // for this VK invalid: either the matching Razer chord / replay
+        // already released (C0/C1 already removed it) or its modifier-up
+        // got lost (focus change, alt-tab, config change, helper rehook).
+        // Clear unconditionally so a stale entry never suppresses the user's
+        // next real modifier-up nor leaves an orphan injected-down stuck.
         if is_modifier && is_keydown {
-            let cleared_stale = CONSUMED_MODIFIER_VKS.with(|cell| {
+            let cleared_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
                 cell.borrow_mut().remove(&vk).is_some()
             });
-            if cleared_stale {
+            if cleared_consumed {
                 HELPER_MATCHES.with(|cell| {
                     cell.borrow_mut().push(format!(
                         "DEBUG:consumed-stale-cleared vk=0x{:02X}",
+                        vk,
+                    ));
+                });
+            }
+            let cleared_replayed = REPLAYED_AWAITING_UP.with(|cell| {
+                cell.borrow_mut().remove(&vk).is_some()
+            });
+            if cleared_replayed {
+                HELPER_MATCHES.with(|cell| {
+                    cell.borrow_mut().push(format!(
+                        "DEBUG:mod-replayed-cleared vk=0x{:02X} reason=fresh-down",
                         vk,
                     ));
                 });
@@ -1037,22 +1224,54 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                         // Not in encoding, or older than Razer chord window
                         // (→ user's physical modifier).  Replay so the OS
                         // sees the key-down we buffered away.
+                        //
+                        // Track in REPLAYED_AWAITING_UP BEFORE SendInput so a
+                        // re-entrant callback for the matching real-up (or
+                        // any other lifecycle event during the synchronous
+                        // SendInput hook chain) can find and remove it.
+                        REPLAYED_AWAITING_UP.with(|cell| {
+                            cell.borrow_mut().insert(pm.vk, now);
+                        });
                         unsafe { replay_modifier_down(pm.vk, pm.scan); }
                         replayed_vks.push(pm.vk);
                     }
                 }
                 HELPER_MATCHES.with(|mc| {
-                    mc.borrow_mut().push(format!(
+                    let mut buf = mc.borrow_mut();
+                    buf.push(format!(
                         "DEBUG:mod-resolve mask=0x{:04X} consumed={consumed_vks:?} replayed={replayed_vks:?}",
                         matched_mask,
                     ));
+                    for vk in &replayed_vks {
+                        buf.push(format!(
+                            "DEBUG:mod-replayed-tracked vk=0x{:02X} reason=non-encoding",
+                            vk,
+                        ));
+                    }
                 });
                 wake = true;
             }
         }
 
-        // Case C: Modifier-up — check consumed and pending sets.
+        // Case C: Modifier-up — check consumed, pending, and replayed sets.
         if is_modifier && is_keyup {
+            // C0: Was this modifier replayed earlier (injected key-down via
+            // SendInput because pending-buffer timed out, or because the
+            // F-key didn't match the encoding mask)?  If so, the real up is
+            // the expected balancing event — remove the tracker and let the
+            // up flow through to the OS (do NOT suppress).
+            let replayed_cleared = REPLAYED_AWAITING_UP.with(|cell| {
+                cell.borrow_mut().remove(&vk).is_some()
+            });
+            if replayed_cleared {
+                HELPER_MATCHES.with(|cell| {
+                    cell.borrow_mut().push(format!(
+                        "DEBUG:mod-replayed-cleared vk=0x{:02X} reason=real-up",
+                        vk,
+                    ));
+                });
+            }
+
             // C1: Was this modifier consumed by an F-key match?
             // If so, suppress the up event too (it's Razer encoding release).
             let was_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
@@ -1175,6 +1394,8 @@ pub fn capture_helper_main() {
         registrations: Vec<HelperRegistration>,
         #[serde(default)]
         modifier_stale_gc_ms: Option<u64>,
+        #[serde(default)]
+        replayed_modifier_force_release_ms: Option<u64>,
     }
 
     let init: HelperInit = match serde_json::from_str::<HelperInit>(line.trim()) {
@@ -1185,6 +1406,7 @@ pub fn capture_helper_main() {
                 Ok(regs) => HelperInit {
                     registrations: regs,
                     modifier_stale_gc_ms: None,
+                    replayed_modifier_force_release_ms: None,
                 },
                 Err(e) => {
                     log::error!("[capture-helper] Failed to parse init payload: {e}");
@@ -1197,6 +1419,7 @@ pub fn capture_helper_main() {
     let HelperInit {
         registrations,
         modifier_stale_gc_ms,
+        replayed_modifier_force_release_ms,
     } = init;
 
     if let Some(ms) = modifier_stale_gc_ms {
@@ -1206,6 +1429,16 @@ pub fn capture_helper_main() {
         });
         log::info!(
             "[capture-helper] CONSUMED stale threshold set to {clamped} ms."
+        );
+    }
+
+    if let Some(ms) = replayed_modifier_force_release_ms {
+        let clamped = ms.clamp(1_000, 60_000);
+        REPLAYED_AWAITING_UP_THRESHOLD.with(|c| {
+            c.set(std::time::Duration::from_millis(clamped));
+        });
+        log::info!(
+            "[capture-helper] REPLAYED awaiting-up threshold set to {clamped} ms."
         );
     }
 
@@ -1226,6 +1459,7 @@ pub fn capture_helper_main() {
     HELPER_MATCHES.with(|cell| cell.borrow_mut().clear());
     PENDING_MODIFIERS.with(|cell| cell.borrow_mut().clear());
     CONSUMED_MODIFIER_VKS.with(|cell| cell.borrow_mut().clear());
+    REPLAYED_AWAITING_UP.with(|cell| cell.borrow_mut().clear());
 
     // 2b. Elevate thread priority — LL hook callbacks must return within the
     //     LowLevelHooksTimeout (~200-300ms) or Windows silently removes the
@@ -1366,6 +1600,32 @@ pub fn capture_helper_main() {
                              ({consecutive_probe_failures} consecutive failures) — \
                              hook appears dead.  Reinstalling WH_KEYBOARD_LL..."
                         );
+                        // Force-release any orphan replayed modifiers BEFORE
+                        // tearing down the hook — otherwise the injected
+                        // modifier-downs we sent stay applied at OS level
+                        // with no balancing up.
+                        force_release_all_replayed_modifiers("health-reinstall");
+                        // Reset modifier-tracking state symmetrically with
+                        // the REHOOK path below.  Any in-flight events when
+                        // the old hook is uninstalled are stale.
+                        let cleared_pending = PENDING_MODIFIERS.with(|cell| {
+                            let n = cell.borrow().len();
+                            cell.borrow_mut().clear();
+                            n
+                        });
+                        let cleared_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
+                            let n = cell.borrow().len();
+                            cell.borrow_mut().clear();
+                            n
+                        });
+                        HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
+                        HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
+                        HELPER_MATCHES.with(|cell| {
+                            cell.borrow_mut().push(format!(
+                                "DEBUG:mod-clear-on-health-reinstall pending={} consumed={}",
+                                cleared_pending, cleared_consumed,
+                            ));
+                        });
                         unsafe { UnhookWindowsHookEx(hook); }
                         let new_hook = unsafe {
                             SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
@@ -1413,6 +1673,9 @@ pub fn capture_helper_main() {
 
             let m = unsafe { msg.assume_init() };
             if m.message == WM_QUIT {
+                // Force-release any orphan replayed modifiers BEFORE drain so
+                // the DEBUG: line is included in the final flush.
+                force_release_all_replayed_modifiers("wm-quit");
                 // Drain any remaining matches before exiting.
                 let _ = drain_helper_matches(&mut stdout);
                 unsafe { UnhookWindowsHookEx(hook); }
@@ -1421,6 +1684,9 @@ pub fn capture_helper_main() {
             }
             if m.message == WM_REHOOK {
                 log::info!("[capture-helper] REHOOK: reinstalling WH_KEYBOARD_LL...");
+                // Force-release injected-modifier orphans first so their up
+                // events are queued before the hook tears down.
+                force_release_all_replayed_modifiers("rehook");
                 unsafe { UnhookWindowsHookEx(hook); }
                 // Reset all modifier-tracking state.  Any events in flight
                 // when the old hook was uninstalled are stale — their
@@ -1478,6 +1744,12 @@ pub fn capture_helper_main() {
         // leaving a stuck entry that suppresses a real subsequent Ctrl-up.
         gc_stale_consumed_modifiers();
 
+        // Force-release REPLAYED_AWAITING_UP entries whose real-up never
+        // arrived (alt-tab/RDP/firmware drop).  Bounded recovery for the
+        // orphan-replay scenario — without this, OS sees ctrl-down without
+        // its balancing up and Ctrl is virtually held.
+        gc_orphan_replayed_modifiers();
+
         // Drain any DEBUG lines generated by flush/gc above.
         if drain_helper_matches(&mut stdout).is_err() {
             log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
@@ -1519,6 +1791,7 @@ fn spawn_capture_helper(
     registrations: &[RegisteredHotkey],
     event_tx: mpsc::Sender<EncodedKeyEvent>,
     modifier_stale_gc_ms: Option<u64>,
+    replayed_modifier_force_release_ms: Option<u64>,
 ) -> Option<HelperHandle> {
     use std::io::Write;
     use std::os::windows::process::CommandExt;
@@ -1579,10 +1852,13 @@ fn spawn_capture_helper(
         registrations: &'a [HelperRegistration],
         #[serde(skip_serializing_if = "Option::is_none")]
         modifier_stale_gc_ms: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        replayed_modifier_force_release_ms: Option<u64>,
     }
     let init = HelperInit {
         registrations: &helper_regs,
         modifier_stale_gc_ms,
+        replayed_modifier_force_release_ms,
     };
     let json = match serde_json::to_string(&init) {
         Ok(j) => j,
@@ -1958,6 +2234,106 @@ mod helper_modifier_state_tests {
             win: false,
         };
         assert_eq!(state.as_modifier_flags(), MOD_CONTROL | MOD_ALT);
+    }
+}
+
+#[cfg(test)]
+mod replayed_awaiting_up_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    /// Reset thread-local state at the start of each test so order is
+    /// independent. (Cargo runs tests in parallel by default; thread_local
+    /// keeps state per-thread, so state can leak between tests scheduled
+    /// onto the same worker thread.)
+    fn reset_state() {
+        REPLAYED_AWAITING_UP.with(|cell| cell.borrow_mut().clear());
+        REPLAYED_AWAITING_UP_THRESHOLD.with(|c| {
+            c.set(Duration::from_millis(DEFAULT_REPLAYED_AWAITING_UP_MS));
+        });
+    }
+
+    #[test]
+    fn drain_expired_drains_old_skips_recent() {
+        reset_state();
+        REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.set(Duration::from_millis(100)));
+        let now = Instant::now();
+        REPLAYED_AWAITING_UP.with(|cell| {
+            let mut map = cell.borrow_mut();
+            // Old entry: should be drained.
+            map.insert(0xA2, now - Duration::from_millis(500)); // VK_LCONTROL
+            // Recent entry: should remain.
+            map.insert(0xA0, now); // VK_LSHIFT
+        });
+
+        let expired = drain_expired_replayed_modifiers();
+        let expired_vks: Vec<u32> = expired.iter().map(|(vk, _)| *vk).collect();
+        assert!(expired_vks.contains(&0xA2));
+        assert!(!expired_vks.contains(&0xA0));
+
+        REPLAYED_AWAITING_UP.with(|cell| {
+            let map = cell.borrow();
+            assert!(!map.contains_key(&0xA2), "old should be drained");
+            assert!(map.contains_key(&0xA0), "recent should remain");
+        });
+    }
+
+    #[test]
+    fn drain_expired_returns_empty_when_no_entries() {
+        reset_state();
+        let expired = drain_expired_replayed_modifiers();
+        assert!(expired.is_empty());
+    }
+
+    #[test]
+    fn drain_expired_keeps_all_when_threshold_huge() {
+        reset_state();
+        REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.set(Duration::from_secs(3600)));
+        REPLAYED_AWAITING_UP.with(|cell| {
+            let mut map = cell.borrow_mut();
+            map.insert(0xA2, Instant::now() - Duration::from_secs(1));
+            map.insert(0xA0, Instant::now() - Duration::from_secs(10));
+        });
+        let expired = drain_expired_replayed_modifiers();
+        assert!(expired.is_empty(), "no entries should expire under 1 h threshold");
+        REPLAYED_AWAITING_UP.with(|cell| {
+            assert_eq!(cell.borrow().len(), 2);
+        });
+    }
+
+    #[test]
+    fn take_all_replayed_drains_map() {
+        reset_state();
+        REPLAYED_AWAITING_UP.with(|cell| {
+            let mut map = cell.borrow_mut();
+            map.insert(0xA2, Instant::now());
+            map.insert(0xA0, Instant::now());
+            map.insert(0xA4, Instant::now());
+        });
+        let drained = take_all_replayed_modifiers();
+        assert_eq!(drained.len(), 3);
+        REPLAYED_AWAITING_UP.with(|cell| {
+            assert!(cell.borrow().is_empty());
+        });
+    }
+
+    #[test]
+    fn take_all_replayed_returns_empty_when_no_entries() {
+        reset_state();
+        let drained = take_all_replayed_modifiers();
+        assert!(drained.is_empty());
+    }
+
+    #[test]
+    fn drain_expired_at_exact_threshold_drains() {
+        reset_state();
+        REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.set(Duration::from_millis(50)));
+        REPLAYED_AWAITING_UP.with(|cell| {
+            cell.borrow_mut().insert(0xA2, Instant::now() - Duration::from_millis(60));
+        });
+        let expired = drain_expired_replayed_modifiers();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].0, 0xA2);
     }
 }
 

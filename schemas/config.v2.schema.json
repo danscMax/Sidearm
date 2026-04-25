@@ -230,6 +230,12 @@
           "maximum": 30000,
           "description": "Capture helper CONSUMED modifier GC window in milliseconds. Leave unset for the default (5000)."
         },
+        "replayedModifierForceReleaseMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 60000,
+          "description": "Capture helper REPLAYED modifier force-release window in milliseconds. Force-releases an injected modifier-down via SendInput key-up if its expected real-up never arrives (alt-tab/RDP/firmware drop). Leave unset for the default (30000)."
+        },
         "lastSelectedProfileId": {
           "type": "string",
           "description": "Profile the user last picked in the sidebar. Runtime uses it in place of fallbackProfileId when no appMapping matches."

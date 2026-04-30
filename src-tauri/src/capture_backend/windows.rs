@@ -243,6 +243,25 @@ fn is_win_vk(vk: u32) -> bool {
     matches!(vk, VK_LWIN | VK_RWIN)
 }
 
+/// Returns true if this modifier VK requires `KEYEVENTF_EXTENDEDKEY` when
+/// injected via SendInput.  By the MSDN extended-key list, only the right
+/// CTRL and right ALT have the 0xE0 prefix among modifiers — without the
+/// flag, `wVk=VK_RCONTROL`/`VK_RMENU` with `wScan=0x1D`/`0x38` lands as a
+/// LEFT-side variant in the OS input queue (same scan code, missing prefix).
+/// That mismatch leaves the matching real key-up (which DOES carry
+/// LLKHF_EXTENDED) unable to balance the prior injection — root cause of
+/// the "RCtrl-only stuck" symptom.
+///
+/// Right SHIFT and Win keys are NOT in the MSDN extended list:
+///  - VK_RSHIFT has its own scan code (0x36) without 0xE0 prefix.
+///  - VK_LWIN/VK_RWIN behaviour varies by keyboard firmware (logs on the
+///    test machine show real Win-down with no LLKHF_EXTENDED bit) — the
+///    safer default is to leave them flagless and let `wVk` carry the
+///    distinction.
+fn is_extended_modifier_vk(vk: u32) -> bool {
+    matches!(vk, VK_RCONTROL | VK_RMENU)
+}
+
 #[derive(Clone, Copy)]
 struct PendingModifier {
     vk: u32,
@@ -268,10 +287,21 @@ fn modifier_in_any_encoding(vk: u32, regs: &[HelperRegistration]) -> bool {
 /// Replay a buffered modifier-down event via SendInput.
 /// Uses INTERNAL_SENDINPUT_EXTRA_INFO so our LL hook recognizes replayed
 /// events and passes them through without re-buffering.
+///
+/// For extended-key modifiers (VK_RCONTROL/VK_RMENU) the
+/// `KEYEVENTF_EXTENDEDKEY` flag is required — without it, the OS treats the
+/// injection as the LEFT-side variant (same scan code) and the matching
+/// real key-up (which carries LLKHF_EXTENDED) cannot balance it, leaving
+/// the modifier virtually held.
 unsafe fn replay_modifier_down(vk: u32, scan: u32) {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+    };
+    let flags = if is_extended_modifier_vk(vk) {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        0
     };
     let input = INPUT {
         r#type: INPUT_KEYBOARD,
@@ -279,7 +309,7 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
             ki: KEYBDINPUT {
                 wVk: vk as u16,
                 wScan: scan as u16,
-                dwFlags: 0,
+                dwFlags: flags,
                 time: 0,
                 dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
             },
@@ -295,10 +325,19 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
 /// of the input queue, so the OS would process up first (no-op) then down
 /// (Ctrl held).  Replaying both keeps the events in the right order; the
 /// caller suppresses the real up event.
+///
+/// Both the down and up events carry `KEYEVENTF_EXTENDEDKEY` for right-side
+/// modifiers; see `replay_modifier_down` rationale.
 unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+        KEYEVENTF_KEYUP,
+    };
+    let extended_bit = if is_extended_modifier_vk(vk) {
+        KEYEVENTF_EXTENDEDKEY
+    } else {
+        0
     };
     let make = |key_up: bool| INPUT {
         r#type: INPUT_KEYBOARD,
@@ -306,7 +345,7 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
             ki: KEYBDINPUT {
                 wVk: vk as u16,
                 wScan: scan as u16,
-                dwFlags: if key_up { KEYEVENTF_KEYUP } else { 0 },
+                dwFlags: extended_bit | if key_up { KEYEVENTF_KEYUP } else { 0 },
                 time: 0,
                 dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
             },
@@ -321,19 +360,26 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
 /// `replay_modifier_down` whose matching real-up was lost.
 ///
 /// Carries `INTERNAL_SENDINPUT_EXTRA_INFO` so our own LL hook recognises
-/// the event and passes it through without buffering.
+/// the event and passes it through without buffering.  Right-side modifiers
+/// receive `KEYEVENTF_EXTENDEDKEY` so the up matches a prior extended-key
+/// down (same key, not the L-variant with the same scan code).
 unsafe fn replay_modifier_up(vk: u32, scan: u32) {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
+        KEYEVENTF_KEYUP,
     };
+    let mut flags = KEYEVENTF_KEYUP;
+    if is_extended_modifier_vk(vk) {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
     let input = INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
                 wVk: vk as u16,
                 wScan: scan as u16,
-                dwFlags: KEYEVENTF_KEYUP,
+                dwFlags: flags,
                 time: 0,
                 dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
             },
@@ -2681,6 +2727,49 @@ mod replayed_awaiting_up_tests {
         flush_expired_pending_modifiers();
         assert!(!FLUSHING_REPLAYED.with(|c| c.get()),
             "empty flush must leave flag clear");
+    }
+
+    // ------------------------------------------------------------------
+    // Tests for `is_extended_modifier_vk` (KEYEVENTF_EXTENDEDKEY gating)
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn extended_modifier_vk_true_for_rcontrol_rmenu() {
+        assert!(is_extended_modifier_vk(VK_RCONTROL));
+        assert!(is_extended_modifier_vk(VK_RMENU));
+    }
+
+    #[test]
+    fn extended_modifier_vk_false_for_left_modifiers() {
+        // Left-side variants share the same scan code as their right
+        // counterparts but do NOT carry the 0xE0 prefix — flag must be off.
+        assert!(!is_extended_modifier_vk(VK_LCONTROL));
+        assert!(!is_extended_modifier_vk(VK_LSHIFT));
+        assert!(!is_extended_modifier_vk(VK_LMENU));
+    }
+
+    #[test]
+    fn extended_modifier_vk_false_for_rshift_and_win() {
+        // Per MSDN extended-key list: RSHIFT and Win keys are NOT extended.
+        // RSHIFT has its own scan code (0x36) without the 0xE0 prefix.
+        // LWIN/RWIN are absent from the official extended list.
+        assert!(!is_extended_modifier_vk(VK_RSHIFT));
+        assert!(!is_extended_modifier_vk(VK_LWIN));
+        assert!(!is_extended_modifier_vk(VK_RWIN));
+    }
+
+    #[test]
+    fn extended_modifier_vk_false_for_generic_and_non_modifiers() {
+        // The generic VK_CONTROL / VK_SHIFT / VK_MENU codes are sentinel
+        // virtual keys (used for state queries) — they should never be
+        // injected directly, but if they are, they aren't extended.
+        assert!(!is_extended_modifier_vk(VK_CONTROL));
+        assert!(!is_extended_modifier_vk(VK_SHIFT));
+        assert!(!is_extended_modifier_vk(VK_MENU));
+        // Letters / arrows / F-keys: not modifiers at all.
+        assert!(!is_extended_modifier_vk(0x41)); // 'A'
+        assert!(!is_extended_modifier_vk(0x25)); // VK_LEFT (extended key but not modifier)
+        assert!(!is_extended_modifier_vk(0x70)); // VK_F1
     }
 
     #[test]

@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sidearm visual redesign mockup</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #101312;
+      --shell: #131816;
+      --panel: #171d1b;
+      --panel-2: #1b2220;
+      --panel-3: #202825;
+      --border: rgba(226, 236, 230, 0.1);
+      --border-strong: rgba(226, 236, 230, 0.18);
+      --text: #edf4ef;
+      --muted: rgba(237, 244, 239, 0.64);
+      --subtle: rgba(237, 244, 239, 0.42);
+      --accent: #95cf65;
+      --accent-2: #5bbfd8;
+      --warn: #e0b75a;
+      --danger: #ef6969;
+      --radius: 8px;
+      --radius-sm: 6px;
+      --shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+      font-family: "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; background: var(--bg); }
+    button, input { font: inherit; }
+
+    .window {
+      height: 100vh;
+      display: grid;
+      grid-template-rows: 32px 1fr;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 30%),
+        var(--bg);
+      overflow: hidden;
+    }
+
+    .titlebar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 12px;
+      background: #0c100f;
+      border-bottom: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .titlebar strong { color: var(--text); font-weight: 650; }
+    .titlebar__spacer { flex: 1; }
+    .titlebar__control {
+      width: 38px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      color: var(--subtle);
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: 232px 1fr;
+      min-height: 0;
+    }
+
+    .sidebar {
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      padding: 16px 12px;
+      background: #0f1413;
+      border-right: 1px solid var(--border);
+    }
+
+    .brand {
+      padding: 6px 10px 18px;
+    }
+
+    .brand__eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.11em;
+      text-transform: uppercase;
+      color: var(--subtle);
+      font-weight: 750;
+    }
+
+    .brand__title {
+      margin-top: 8px;
+      font-size: 18px;
+      line-height: 1.22;
+      font-weight: 760;
+    }
+
+    .nav {
+      display: grid;
+      gap: 4px;
+    }
+
+    .nav button,
+    .profile-row,
+    .runtime {
+      width: 100%;
+      border: 0;
+      border-radius: var(--radius);
+      color: var(--muted);
+      background: transparent;
+    }
+
+    .nav button {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      text-align: left;
+      cursor: default;
+      font-weight: 650;
+    }
+
+    .nav button.active {
+      background: rgba(149, 207, 101, 0.14);
+      color: var(--text);
+    }
+
+    .ico {
+      width: 18px;
+      height: 18px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 5px;
+      border: 1px solid var(--border-strong);
+      color: var(--subtle);
+      font-size: 11px;
+      flex: 0 0 auto;
+    }
+
+    .nav button.active .ico {
+      border-color: rgba(149, 207, 101, 0.42);
+      color: var(--accent);
+      background: rgba(149, 207, 101, 0.1);
+    }
+
+    .side-section {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .section-label {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      padding: 0 10px;
+      color: var(--subtle);
+      font-size: 11px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      font-weight: 780;
+    }
+
+    .profile-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+    }
+
+    .profile-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      background: rgba(149, 207, 101, 0.16);
+      color: var(--accent);
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    .profile-row strong { display: block; font-size: 13px; }
+    .profile-row span { display: block; color: var(--subtle); font-size: 11px; }
+
+    .profile-actions {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .mini-btn {
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #141a18;
+      color: var(--muted);
+      padding: 7px 8px;
+      font-weight: 650;
+      font-size: 12px;
+    }
+
+    .runtime {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      border: 1px solid rgba(149, 207, 101, 0.28);
+      background: rgba(149, 207, 101, 0.08);
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 10px rgba(149, 207, 101, 0.6);
+    }
+
+    .runtime strong { flex: 1; text-align: left; font-size: 13px; }
+    .runtime span:last-child { color: var(--muted); font-size: 11px; font-weight: 800; }
+
+    .content {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: 56px 1fr;
+      background: var(--shell);
+      overflow: hidden;
+    }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(15, 20, 19, 0.94);
+    }
+
+    .toolbar h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+
+    .command {
+      margin-left: 12px;
+      width: min(430px, 34vw);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--border);
+      background: #111614;
+      color: var(--muted);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+
+    .command kbd {
+      margin-left: auto;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--subtle);
+      font: 11px "Cascadia Code", monospace;
+    }
+
+    .toolbar__spacer { flex: 1; }
+    .icon-btn {
+      width: 32px;
+      height: 32px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #141a18;
+      color: var(--muted);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+    }
+
+    .workspace {
+      min-height: 0;
+      padding: 18px 22px 22px;
+      overflow: auto;
+    }
+
+    .workspace-tabs {
+      display: inline-grid;
+      grid-template-columns: repeat(3, auto);
+      gap: 2px;
+      padding: 3px;
+      margin-bottom: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #111614;
+    }
+
+    .workspace-tabs button {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 8px 14px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .workspace-tabs button.active {
+      background: var(--panel-3);
+      color: var(--text);
+      box-shadow: inset 0 0 0 1px var(--border);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+
+    .device-panel {
+      padding: 14px;
+    }
+
+    .device-topbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .layer {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border: 1px solid rgba(149, 207, 101, 0.34);
+      border-radius: var(--radius-sm);
+      background: rgba(149, 207, 101, 0.09);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 760;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+
+    .find-binding {
+      flex: 1;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: #111614;
+      color: var(--muted);
+      padding: 8px 10px;
+      font-size: 13px;
+    }
+
+    .view-toggle {
+      display: flex;
+      gap: 2px;
+      padding: 3px;
+      background: #111614;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+    }
+
+    .view-toggle span {
+      padding: 6px 10px;
+      border-radius: 5px;
+      color: var(--subtle);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .view-toggle span.active {
+      background: var(--panel-3);
+      color: var(--text);
+    }
+
+    .device-stage {
+      display: grid;
+      grid-template-columns: minmax(150px, 0.58fr) minmax(300px, 1fr) minmax(150px, 0.58fr);
+      gap: 12px;
+      align-items: start;
+    }
+
+    .button-list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .button-cell {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      min-height: 38px;
+      padding: 7px 9px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.026);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .button-cell.active {
+      border-color: rgba(149, 207, 101, 0.7);
+      background: rgba(149, 207, 101, 0.12);
+      color: var(--text);
+    }
+
+    .button-cell.warn {
+      border-color: rgba(224, 183, 90, 0.36);
+      background: rgba(224, 183, 90, 0.08);
+    }
+
+    .badge {
+      width: 25px;
+      height: 23px;
+      flex: 0 0 auto;
+      display: grid;
+      place-items: center;
+      border-radius: 6px;
+      background: rgba(149, 207, 101, 0.14);
+      color: var(--accent);
+      font-weight: 800;
+      font-size: 12px;
+    }
+
+    .badge.blue { color: var(--accent-2); background: rgba(91, 191, 216, 0.12); }
+    .badge.warn { color: var(--warn); background: rgba(224, 183, 90, 0.14); }
+    .button-cell strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+
+    .mouse-card {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      border-radius: 10px;
+      background:
+        radial-gradient(ellipse at 50% 38%, rgba(36, 44, 41, 0.95), rgba(12, 16, 15, 1) 68%);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      overflow: hidden;
+      display: grid;
+      place-items: center;
+    }
+
+    .mouse-card img {
+      width: 86%;
+      height: 86%;
+      object-fit: contain;
+      opacity: 0.96;
+      filter: drop-shadow(0 22px 34px rgba(0, 0, 0, 0.44));
+    }
+
+    .hotspot {
+      position: absolute;
+      width: 27px;
+      height: 27px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      border: 2px solid rgba(91, 191, 216, 0.68);
+      background: rgba(91, 191, 216, 0.14);
+      color: #eafaff;
+      font-size: 11px;
+      font-weight: 850;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+    }
+
+    .hotspot.green {
+      border-color: rgba(149, 207, 101, 0.82);
+      background: rgba(149, 207, 101, 0.2);
+      color: var(--text);
+    }
+
+    .hotspot.selected {
+      width: 34px;
+      height: 34px;
+      border-color: var(--accent);
+      background: rgba(149, 207, 101, 0.78);
+      color: #111510;
+      box-shadow:
+        0 0 0 5px rgba(149, 207, 101, 0.18),
+        0 0 28px rgba(149, 207, 101, 0.42);
+    }
+
+    .hotspot.warn {
+      border-color: var(--warn);
+      background: rgba(224, 183, 90, 0.18);
+    }
+
+    .layer-switch {
+      margin: 12px auto 0;
+      width: fit-content;
+      display: flex;
+      gap: 3px;
+      padding: 3px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #111614;
+    }
+
+    .layer-switch span {
+      padding: 8px 18px;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--subtle);
+    }
+
+    .layer-switch span.active {
+      color: #111510;
+      background: var(--accent);
+    }
+
+    .inspector {
+      padding: 16px;
+      position: sticky;
+      top: 0;
+    }
+
+    .inspector__eyebrow,
+    .rules__eyebrow {
+      color: var(--subtle);
+      font-size: 11px;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      font-weight: 800;
+    }
+
+    .inspector h2 {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 10px 0 6px;
+      font-size: 22px;
+      line-height: 1.2;
+    }
+
+    .selected-key {
+      width: 38px;
+      height: 34px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #111510;
+      font-weight: 900;
+    }
+
+    .inspector p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+      font-size: 13px;
+    }
+
+    .action-preview {
+      margin: 16px 0;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: #121716;
+    }
+
+    .action-preview__row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    .action-preview__row:last-child { border-bottom: 0; }
+    .action-preview__row span { color: var(--subtle); }
+    .action-preview__row strong { color: var(--text); font-weight: 680; text-align: right; }
+
+    .primary {
+      width: 100%;
+      border: 0;
+      border-radius: var(--radius);
+      background: var(--accent);
+      color: #111510;
+      padding: 11px 14px;
+      font-weight: 850;
+    }
+
+    .secondary-actions {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .notice {
+      margin-top: 14px;
+      border: 1px solid rgba(224, 183, 90, 0.28);
+      border-radius: var(--radius);
+      background: rgba(224, 183, 90, 0.08);
+      color: #f3ddb0;
+      padding: 10px 12px;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .rules {
+      margin-top: 16px;
+      padding: 14px;
+    }
+
+    .rules__head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+
+    .rules h3 {
+      margin: 3px 0 0;
+      font-size: 16px;
+    }
+
+    .rules-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .rule-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: rgba(255, 255, 255, 0.026);
+    }
+
+    .app-icon {
+      width: 38px;
+      height: 38px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      font-weight: 900;
+      color: white;
+      background: linear-gradient(135deg, #1c9f5f, #0d6cbd);
+    }
+
+    .app-icon.word { background: linear-gradient(135deg, #2868d8, #163a80); }
+    .app-icon.add { background: transparent; color: var(--muted); border: 1px dashed var(--border-strong); }
+    .rule-card strong { display: block; font-size: 14px; }
+    .rule-card span { display: block; margin-top: 2px; color: var(--subtle); font-size: 12px; }
+
+    @media (max-width: 1180px) {
+      .main-grid { grid-template-columns: 1fr; }
+      .inspector { position: static; }
+      .device-stage { grid-template-columns: 1fr; }
+      .button-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <div class="window">
+    <div class="titlebar">
+      <strong>Sidearm</strong>
+      <span>Portable</span>
+      <span class="titlebar__spacer"></span>
+      <span class="titlebar__control">_</span>
+      <span class="titlebar__control">□</span>
+      <span class="titlebar__control">×</span>
+    </div>
+
+    <div class="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand__eyebrow">Sidearm</div>
+          <div class="brand__title">Razer Naga V2<br />HyperSpeed</div>
+        </div>
+
+        <nav class="nav">
+          <button class="active"><span class="ico">A</span>Назначения</button>
+          <button><span class="ico">D</span>Диагностика</button>
+          <button><span class="ico">S</span>Настройки</button>
+        </nav>
+
+        <div class="side-section">
+          <div class="section-label">
+            <span>Профиль</span>
+            <span>+  ⚙</span>
+          </div>
+          <div class="profile-row">
+            <span class="profile-avatar">M</span>
+            <div>
+              <strong>Main</strong>
+              <span>Активен в runtime</span>
+            </div>
+          </div>
+          <div class="profile-actions">
+            <button class="mini-btn">Code</button>
+            <button class="mini-btn">Work</button>
+          </div>
+        </div>
+
+        <button class="runtime">
+          <span class="dot"></span>
+          <strong>Перехват активен</strong>
+          <span>СТОП</span>
+        </button>
+      </aside>
+
+      <main class="content">
+        <header class="toolbar">
+          <h1>Назначения</h1>
+          <div class="command">
+            <span>Поиск команд и действий</span>
+            <kbd>Ctrl K</kbd>
+          </div>
+          <span class="toolbar__spacer"></span>
+          <button class="icon-btn">↶</button>
+          <button class="icon-btn">↷</button>
+          <button class="icon-btn">RU</button>
+        </header>
+
+        <section class="workspace">
+          <div class="workspace-tabs">
+            <button class="active">Кнопки</button>
+            <button>Правила приложений</button>
+            <button>Сигналы</button>
+          </div>
+
+          <div class="main-grid">
+            <div>
+              <section class="panel device-panel">
+                <div class="device-topbar">
+                  <span class="layer">Стандартный слой</span>
+                  <input class="find-binding" value="" placeholder="Найти назначение: Delete, Ctrl + S, Excel..." />
+                  <div class="view-toggle">
+                    <span class="active">Все</span>
+                    <span>Верх</span>
+                    <span>Бок</span>
+                  </div>
+                </div>
+
+                <div class="device-stage">
+                  <div class="button-list">
+                    <div class="button-cell"><span class="badge">ЛКМ</span><strong>ЛКМ</strong></div>
+                    <div class="button-cell"><span class="badge blue">D+</span><strong>Ctrl + Shift + H</strong></div>
+                    <div class="button-cell"><span class="badge blue">D-</span><strong>Ctrl + Alt</strong></div>
+                    <div class="button-cell"><span class="badge">←</span><strong>Назад</strong></div>
+                    <div class="button-cell active"><span class="badge">1</span><strong>Delete</strong></div>
+                    <div class="button-cell"><span class="badge">2</span><strong>Backspace</strong></div>
+                    <div class="button-cell"><span class="badge">3</span><strong>Shift + F3</strong></div>
+                    <div class="button-cell"><span class="badge">4</span><strong>Ctrl + F</strong></div>
+                  </div>
+
+                  <div>
+                    <div class="mouse-card">
+                      <img src="../public/assets/naga-combined.png" alt="Razer Naga V2 HyperSpeed" />
+                      <span class="hotspot green" style="left: 43%; top: 18%;">ЛКМ</span>
+                      <span class="hotspot blue" style="left: 35%; top: 20%;">D+</span>
+                      <span class="hotspot blue" style="left: 35%; top: 30%;">D-</span>
+                      <span class="hotspot green" style="left: 50%; top: 30%;">←</span>
+                      <span class="hotspot selected" style="left: 26%; top: 48%;">1</span>
+                      <span class="hotspot green" style="left: 31%; top: 46%;">2</span>
+                      <span class="hotspot blue" style="left: 36%; top: 43%;">3</span>
+                      <span class="hotspot blue" style="left: 27%; top: 57%;">4</span>
+                      <span class="hotspot blue" style="left: 32%; top: 56%;">5</span>
+                      <span class="hotspot warn" style="left: 37%; top: 55%;">6</span>
+                      <span class="hotspot green" style="left: 65%; top: 31%;">→</span>
+                      <span class="hotspot green" style="left: 65%; top: 20%;">HS</span>
+                    </div>
+                    <div class="layer-switch">
+                      <span class="active">Стандартный</span>
+                      <span>Hypershift</span>
+                    </div>
+                  </div>
+
+                  <div class="button-list">
+                    <div class="button-cell"><span class="badge">HS</span><strong>Razer Hypershift</strong></div>
+                    <div class="button-cell"><span class="badge">▲</span><strong>Прокрутка вверх</strong></div>
+                    <div class="button-cell"><span class="badge">•</span><strong>Клик колесом</strong></div>
+                    <div class="button-cell"><span class="badge">▼</span><strong>Прокрутка вниз</strong></div>
+                    <div class="button-cell"><span class="badge">→</span><strong>Вперёд</strong></div>
+                    <div class="button-cell"><span class="badge">7</span><strong>Alt + F4</strong></div>
+                    <div class="button-cell"><span class="badge">8</span><strong>Enter</strong></div>
+                    <div class="button-cell"><span class="badge">9</span><strong>Копировать</strong></div>
+                  </div>
+                </div>
+              </section>
+
+              <section class="panel rules">
+                <div class="rules__head">
+                  <div>
+                    <div class="rules__eyebrow">Правила приложений</div>
+                    <h3>Профиль Main включается для 2 приложений</h3>
+                  </div>
+                  <button class="mini-btn">+ Добавить правило</button>
+                </div>
+                <div class="rules-grid">
+                  <div class="rule-card">
+                    <span class="app-icon">X</span>
+                    <div><strong>excel.exe</strong><span>Приоритет 80, включено</span></div>
+                  </div>
+                  <div class="rule-card">
+                    <span class="app-icon word">W</span>
+                    <div><strong>winword.exe</strong><span>Приоритет 70, включено</span></div>
+                  </div>
+                  <div class="rule-card">
+                    <span class="app-icon add">+</span>
+                    <div><strong>Новое правило</strong><span>По активному окну или .exe</span></div>
+                  </div>
+                </div>
+              </section>
+            </div>
+
+            <aside class="panel inspector">
+              <div class="inspector__eyebrow">Выбранная кнопка</div>
+              <h2><span class="selected-key">1</span>Thumb 1</h2>
+              <p>Основное действие видно сразу. Double-click и контекстное меню остаются быстрыми путями, но больше не являются единственным способом редактирования.</p>
+
+              <div class="action-preview">
+                <div class="action-preview__row"><span>Назначение</span><strong>Delete</strong></div>
+                <div class="action-preview__row"><span>Тип</span><strong>Shortcut</strong></div>
+                <div class="action-preview__row"><span>Слой</span><strong>Стандартный</strong></div>
+                <div class="action-preview__row"><span>Сигнал</span><strong>BTN_01, verified</strong></div>
+              </div>
+
+              <button class="primary">Изменить назначение</button>
+              <div class="secondary-actions">
+                <button class="mini-btn">Дублировать</button>
+                <button class="mini-btn">Очистить</button>
+              </div>
+
+              <div class="notice">
+                Кнопка 6 конфликтует с другим действием на этом слое. Предупреждение видно рядом с картой и в инспекторе, а не только через цвет.
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

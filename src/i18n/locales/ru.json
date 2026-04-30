@@ -61,7 +61,7 @@
     }
   },
   "toolbar": {
-    "commandPalette": "Палитра команд (Ctrl+K)",
+    "commandPalette": "Палитра команд",
     "shortcut": "Ctrl+K",
     "undo": "Отменить (Ctrl+Z)",
     "redo": "Повторить (Ctrl+Y)",
@@ -307,14 +307,7 @@
     "heatmapEnable": "Включить тепловую карту",
     "heatmapDisable": "Выключить тепловую карту",
     "searchPlaceholder": "Поиск назначений…",
-    "searchMeta": "Найдено: {{count}}",
-    "viewModeLabel": "Режим просмотра правил",
-    "viewModeProfile": "По профилю",
-    "viewModeOverview": "Все правила ({{count}})",
-    "overviewSearchPlaceholder": "Поиск по exe или заголовку окна…",
-    "overviewFilterAll": "Все профили",
-    "overviewEmpty": "Нет правил, удовлетворяющих фильтру.",
-    "overviewProfileTooltip": "Профиль: {{name}}"
+    "searchMeta": "Найдено: {{count}}"
   },
   "newRule": {
     "title": "Новое правило",

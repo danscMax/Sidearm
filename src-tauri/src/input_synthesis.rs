@@ -56,17 +56,30 @@ pub fn send_shortcut(
     payload: &ShortcutActionPayload,
     encoding_mods: &HotkeyModifiers,
 ) -> Result<ShortcutDispatchReport, String> {
-    log::debug!(
-        "[input] Shortcut: {}{}{}{}{}",
+    log::info!(
+        "[send-shortcut] enter: {}{}{}{}{} (encoding_mods: ctrl={} shift={} alt={} win={})",
         if payload.ctrl { "Ctrl+" } else { "" },
         if payload.shift { "Shift+" } else { "" },
         if payload.alt { "Alt+" } else { "" },
         if payload.win { "Win+" } else { "" },
-        payload.key
+        payload.key,
+        encoding_mods.ctrl, encoding_mods.shift, encoding_mods.alt, encoding_mods.win,
     );
     clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
+    log::info!(
+        "[send-shortcut] post-clear snapshot: ctrl={} shift={} alt={} win={}",
+        snapshot.is_active(ModifierKey::Ctrl),
+        snapshot.is_active(ModifierKey::Shift),
+        snapshot.is_active(ModifierKey::Alt),
+        snapshot.is_active(ModifierKey::Win),
+    );
     let (plan, reused_modifiers) = plan_shortcut_inputs(payload, &snapshot)?;
+    log::info!(
+        "[send-shortcut] plan: {} inputs, reused-modifiers={:?}",
+        plan.len(),
+        reused_modifiers.iter().map(|m| m.label()).collect::<Vec<_>>(),
+    );
 
     if let Err(send_error) = send_keyboard_inputs(&plan) {
         // Best-effort cleanup: release any modifiers we pressed to prevent stuck keys.
@@ -1123,7 +1136,23 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
         return Ok(());
     }
 
-    log::debug!("[input] Sending {} inputs", inputs.len());
+    let summary: Vec<String> = inputs
+        .iter()
+        .map(|i| match i {
+            KeyboardInputSpec::VirtualKey { code, extended, key_up } => format!(
+                "VK(0x{:02X},{}{})",
+                code,
+                if *extended { "ext," } else { "" },
+                if *key_up { "up" } else { "down" },
+            ),
+            KeyboardInputSpec::Unicode { code_unit, key_up } => format!(
+                "U(0x{:04X},{})",
+                code_unit,
+                if *key_up { "up" } else { "down" },
+            ),
+        })
+        .collect();
+    log::info!("[send-keyboard-inputs] sending {} inputs: [{}]", inputs.len(), summary.join(", "));
 
     let windows_inputs: Vec<INPUT> = inputs
         .iter()
@@ -1503,12 +1532,25 @@ pub fn send_mouse_action(
     payload: &MouseActionPayload,
     encoding_mods: &HotkeyModifiers,
 ) -> Result<MouseDispatchReport, String> {
-    log::debug!("[input] Mouse action: {:?}", payload.action);
+    log::info!(
+        "[send-mouse] enter: action={:?} mods=(ctrl={} shift={} alt={} win={}) \
+         (encoding_mods: ctrl={} shift={} alt={} win={})",
+        payload.action,
+        payload.ctrl, payload.shift, payload.alt, payload.win,
+        encoding_mods.ctrl, encoding_mods.shift, encoding_mods.alt, encoding_mods.win,
+    );
     clear_modifiers(encoding_mods)?;
 
     let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
     let pressed_modifiers = if has_modifier {
         let snapshot = current_modifier_snapshot()?;
+        log::info!(
+            "[send-mouse] post-clear snapshot: ctrl={} shift={} alt={} win={}",
+            snapshot.is_active(ModifierKey::Ctrl),
+            snapshot.is_active(ModifierKey::Shift),
+            snapshot.is_active(ModifierKey::Alt),
+            snapshot.is_active(ModifierKey::Win),
+        );
         let mods_to_press: Vec<ModifierKey> = [
             (ModifierKey::Win, payload.win),
             (ModifierKey::Ctrl, payload.ctrl),
@@ -1520,6 +1562,10 @@ pub fn send_mouse_action(
         .filter(|(modifier, _)| !snapshot.is_active(*modifier))
         .map(|(modifier, _)| *modifier)
         .collect();
+        log::info!(
+            "[send-mouse] pressing modifiers: {:?}",
+            mods_to_press.iter().map(|m| m.label()).collect::<Vec<_>>(),
+        );
 
         // Press modifiers down
         let press_inputs: Vec<KeyboardInputSpec> = mods_to_press
@@ -1543,10 +1589,17 @@ pub fn send_mouse_action(
 
     // Release modifiers in reverse order (LIFO)
     if !pressed_modifiers.is_empty() {
+        log::info!(
+            "[send-mouse] releasing modifiers (LIFO): {:?}",
+            pressed_modifiers.iter().rev().map(|m| m.label()).collect::<Vec<_>>(),
+        );
         let release = build_modifier_release_inputs(&pressed_modifiers);
         let _ = send_keyboard_inputs(&release);
+    } else {
+        log::info!("[send-mouse] no modifiers to release");
     }
 
+    log::info!("[send-mouse] exit: result={:?}", result.as_ref().map(|_| "ok"));
     result?;
     Ok(MouseDispatchReport {
         warnings: Vec::new(),

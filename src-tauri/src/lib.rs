@@ -1868,6 +1868,29 @@ pub fn run() {
             // decorations enabled (from before we set decorations:false in config).
             if let Some(main_window) = app.get_webview_window("main") {
                 let _ = main_window.set_decorations(false);
+
+                // Clamp restored size against the config minimums.  The
+                // window-state plugin restores raw saved dimensions and does
+                // NOT re-validate against `minWidth/minHeight` from
+                // tauri.conf.json, so a tiny saved state (e.g. from a crash
+                // mid-resize, or from a frame-dropped close-during-drag) would
+                // otherwise leave the user with an unusable title-bar-only
+                // window on next start.  Keep these in sync with tauri.conf.json.
+                const MIN_W: u32 = 900;
+                const MIN_H: u32 = 600;
+                if let Ok(size) = main_window.inner_size() {
+                    if size.width < MIN_W || size.height < MIN_H {
+                        let new_w = size.width.max(MIN_W);
+                        let new_h = size.height.max(MIN_H);
+                        log::warn!(
+                            "[window] restored main size {}x{} below minimum {}x{} — clamping to {}x{}",
+                            size.width, size.height, MIN_W, MIN_H, new_w, new_h,
+                        );
+                        let _ = main_window.set_size(tauri::Size::Physical(
+                            tauri::PhysicalSize { width: new_w, height: new_h },
+                        ));
+                    }
+                }
             }
 
             // OSD window is created lazily on first profile switch (see show_osd).

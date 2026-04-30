@@ -61,7 +61,7 @@
     }
   },
   "toolbar": {
-    "commandPalette": "Command Palette (Ctrl+K)",
+    "commandPalette": "Command Palette",
     "shortcut": "Ctrl+K",
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Y)",
@@ -307,14 +307,7 @@
     "heatmapEnable": "Enable heatmap",
     "heatmapDisable": "Disable heatmap",
     "searchPlaceholder": "Search bindings…",
-    "searchMeta": "Found: {{count}}",
-    "viewModeLabel": "Rule view mode",
-    "viewModeProfile": "By profile",
-    "viewModeOverview": "All rules ({{count}})",
-    "overviewSearchPlaceholder": "Search by exe or window title…",
-    "overviewFilterAll": "All profiles",
-    "overviewEmpty": "No rules match the filter.",
-    "overviewProfileTooltip": "Profile: {{name}}"
+    "searchMeta": "Found: {{count}}"
   },
   "newRule": {
     "title": "New rule",

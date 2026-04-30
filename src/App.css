@@ -30,9 +30,9 @@
   --c-warning: #c49934;
   --c-warning-light: #e7c46f;
   --radius-xs: 6px;
-  --radius-sm: 14px;
-  --radius-md: 18px;
-  --radius-lg: 24px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
   --radius-modal: 12px;
   --radius-pill: 999px;
 
@@ -43,6 +43,7 @@
   /* Font-size scale (6 steps) */
   --fs-micro: 0.7rem;
   --fs-caption: 0.8rem;
+  --fs-small: 0.82rem;
   --fs-body-sm: 0.875rem;
   --fs-body: 1rem;
   --fs-heading-sm: 1.125rem;
@@ -490,7 +491,7 @@ select::checkmark {
   font-size: var(--fs-body);
   font-weight: 700;
   color: var(--c-text-bright);
-  margin-right: auto;
+  margin-right: 0;
 }
 
 .toolbar__btn {
@@ -945,7 +946,7 @@ select::checkmark {
 /* ── Action Button ── */
 .action-button {
   border: 0;
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   padding: 10px 16px;
   background: var(--gradient-primary);
   color: var(--c-text-on-accent);
@@ -4040,71 +4041,6 @@ code {
 }
 
 .profiles__app-card > .profiles__toggle {
-  margin-left: auto;
-}
-
-.profiles__app-card-profile-pill {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: rgba(159, 202, 105, 0.12);
-  border: 1px solid rgba(159, 202, 105, 0.28);
-  color: var(--c-text-muted);
-  font-size: 0.72rem;
-  font-weight: 500;
-  white-space: nowrap;
-  flex-shrink: 0;
-  max-width: 90px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Overview cards are wider than profile-mode cards so the exe name + profile
-   pill + toggle fit on one row without character-by-character wrapping. */
-.profiles__overview .profiles__card-grid {
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-}
-
-.profiles__app-card--overview .profiles__app-card-name {
-  flex: 1;
-  min-width: 0;
-  word-break: normal;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.profiles__app-card--overview > .profiles__toggle {
-  margin-left: 0;
-  flex-shrink: 0;
-}
-
-.profiles__overview {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.profiles__overview-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.profiles__overview-filter {
-  background: var(--c-card-bg);
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-sm);
-  color: inherit;
-  padding: 6px 10px;
-  font-size: 0.85rem;
-}
-
-.profiles-workspace__viewmode {
-  display: inline-flex;
-  gap: 4px;
   margin-left: auto;
 }
 

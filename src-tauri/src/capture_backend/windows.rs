@@ -266,8 +266,6 @@ fn is_extended_modifier_vk(vk: u32) -> bool {
 struct PendingModifier {
     vk: u32,
     scan: u32,
-    #[allow(dead_code)] // stored for potential future use (e.g. extended-key flag replay)
-    flags: u32,
     buffered_at: std::time::Instant,
 }
 
@@ -1420,7 +1418,6 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                     cell.borrow_mut().push(PendingModifier {
                         vk,
                         scan: kb.scanCode,
-                        flags: kb.flags,
                         buffered_at: std::time::Instant::now(),
                     });
                 });
@@ -2785,7 +2782,6 @@ mod replayed_awaiting_up_tests {
             cell.borrow_mut().push(PendingModifier {
                 vk: 0xA0,
                 scan: 0x2A,
-                flags: 0x00,
                 buffered_at: Instant::now() - Duration::from_millis(50),
             });
         });

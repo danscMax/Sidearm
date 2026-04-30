@@ -36,7 +36,6 @@ pub struct RuntimeStateSummary {
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
-#[allow(dead_code)]
 pub enum DebugLogLevel {
     Debug,
     Info,

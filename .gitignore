@@ -53,3 +53,6 @@ docs/mockups/
 # Portable build output
 Sidearm-Portable/
 CODEX_REVIEW_*.md
+
+# Playwright / smoke-test artifacts
+output/

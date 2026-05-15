@@ -530,7 +530,7 @@ function App() {
   );
 
   const isProfilesMode = workspaceMode === "profiles";
-  const activeModeCopy = workspaceModeCopy.find((mode) => mode.value === workspaceMode)!;
+  const activeModeHeading = t(`workspace.${workspaceMode}.heading`);
   const isDebugMode = workspaceMode === "debug";
   const workspaceClass = isDebugMode
     ? "workspace workspace--expert"
@@ -566,7 +566,7 @@ function App() {
 
       <div className="content">
         <Toolbar
-          heading={activeModeCopy.heading}
+          heading={activeModeHeading}
           undoCount={undoStack.length}
           redoCount={redoStack.length}
           viewState={viewState}

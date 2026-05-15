@@ -1,12 +1,3 @@
-import { useEffect, useOptimistic, useState } from "react";
-import { enable as enableAutostart, disable as disableAutostart } from "@tauri-apps/plugin-autostart";
-
-import {
-  getAdminAutostartStatus,
-  normalizeCommandError,
-  setAdminAutostart,
-  type AdminAutostartStatus,
-} from "../lib/backend";
 import type {
   AppConfig,
   CommandError,
@@ -85,61 +76,7 @@ export function ServiceToolsPanel({
   handleExecutePreviewAction,
   handleRunPreviewAction,
   updateDraft,
-  setError,
 }: ServiceToolsPanelProps) {
-  const [optimisticAutostart, setOptimisticAutostart] = useOptimistic(
-    activeConfig.settings.startWithWindows,
-  );
-  const [adminAutostart, setAdminAutostartState] = useState<AdminAutostartStatus | null>(null);
-  const [adminAutostartBusy, setAdminAutostartBusy] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    getAdminAutostartStatus()
-      .then((status) => {
-        if (!cancelled) setAdminAutostartState(status);
-      })
-      .catch(() => {
-        // Non-Windows or query failure — leave as null; UI just won't render.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  async function handleAdminAutostartToggle(checked: boolean) {
-    setAdminAutostartBusy(true);
-    try {
-      const next = await setAdminAutostart(checked);
-      setAdminAutostartState(next);
-      // When admin autostart is enabled, also disable the regular plugin-autostart
-      // entry so we don't end up with two competing launchers at logon.
-      if (checked && next.enabled) {
-        try {
-          await disableAutostart();
-        } catch {
-          // Plugin-autostart may already be disabled; ignore.
-        }
-        setOptimisticAutostart(false);
-        updateDraft((config) => ({
-          ...config,
-          settings: { ...config.settings, startWithWindows: false },
-        }));
-      }
-    } catch (unknownError) {
-      setError(normalizeCommandError(unknownError));
-    } finally {
-      setAdminAutostartBusy(false);
-    }
-  }
-
-  async function handleReregisterAdminAutostart() {
-    // Re-enabling overwrites the existing task definition with the current
-    // exe path (schtasks /create /f).  This is the fix for "I moved the
-    // portable folder, task still points at the old path".
-    await handleAdminAutostartToggle(true);
-  }
-
   const resolvedLiveRunnable =
     lastResolutionPreview?.actionId
       ? isActionLiveRunnable(activeConfig, lastResolutionPreview.actionId)
@@ -425,81 +362,6 @@ export function ServiceToolsPanel({
               <option value="razer">Razer Green</option>
             </select>
           </label>
-
-          <label className="field field--inline">
-            <span className="field__label">Запускать вместе с Windows</span>
-            <input
-              type="checkbox"
-              checked={optimisticAutostart}
-              disabled={adminAutostart?.enabled === true}
-              onChange={(event) => {
-                const enabled = event.target.checked;
-                setOptimisticAutostart(enabled);
-                (enabled ? enableAutostart() : disableAutostart())
-                  .then(() => {
-                    updateDraft((config) => ({
-                      ...config,
-                      settings: {
-                        ...config.settings,
-                        startWithWindows: enabled,
-                      },
-                    }));
-                  })
-                  .catch((unknownError: unknown) => {
-                    setError(normalizeCommandError(unknownError));
-                  });
-              }}
-            />
-          </label>
-
-          {adminAutostart?.supported && (
-            <>
-              <label className="field field--inline">
-                <span className="field__label">
-                  Запускать от администратора при входе
-                </span>
-                <input
-                  type="checkbox"
-                  checked={adminAutostart.enabled}
-                  disabled={adminAutostartBusy}
-                  onChange={(event) => {
-                    void handleAdminAutostartToggle(event.target.checked);
-                  }}
-                />
-              </label>
-              <p className="panel__muted" style={{ marginTop: -4 }}>
-                Через Планировщик задач Windows с правами Highest. UAC появится
-                один раз при включении — дальше каждый старт системы будет
-                запускать Sidearm от админа без UAC. Это нужно, чтобы ввод
-                доходил до окон с правами администратора (Диспетчер задач и т.п.).
-              </p>
-              {adminAutostart.enabled && adminAutostart.pathMismatch && (
-                <div className="panel__warning">
-                  <p>
-                    Запланированная задача указывает на другой путь к Sidearm.exe:
-                  </p>
-                  <p style={{ fontFamily: "monospace", fontSize: "0.85em" }}>
-                    {adminAutostart.registeredPath ?? "(неизвестно)"}
-                  </p>
-                  <p>
-                    Текущий путь:
-                  </p>
-                  <p style={{ fontFamily: "monospace", fontSize: "0.85em" }}>
-                    {adminAutostart.currentExe}
-                  </p>
-                  <button
-                    type="button"
-                    className="action-button"
-                    style={{ marginTop: 8 }}
-                    onClick={() => void handleReregisterAdminAutostart()}
-                    disabled={adminAutostartBusy}
-                  >
-                    Перерегистрировать на текущий путь
-                  </button>
-                </div>
-              )}
-            </>
-          )}
 
           <label className="field field--inline">
             <span className="field__label">Сворачивать в трей</span>

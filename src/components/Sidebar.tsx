@@ -54,7 +54,7 @@ export function Sidebar({
           className={`nav-item${workspaceMode === mode.value ? " nav-item--active" : ""}`}
           onClick={() => { onSwitchMode(mode.value); }}
         >
-          {mode.label}
+          {t(`workspace.${mode.value}.label`)}
         </button>
       ))}
       <div className="sidebar__sep" />

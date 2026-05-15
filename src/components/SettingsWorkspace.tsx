@@ -1,7 +1,12 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../i18n";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import {
+  enable as enableAutostart,
+  disable as disableAutostart,
+  isEnabled as isAutostartEnabled,
+} from "@tauri-apps/plugin-autostart";
 import type {
   AppConfig,
   CommandError,
@@ -21,13 +26,16 @@ import {
 } from "../lib/config-editing";
 import {
   exportFullConfig,
+  getAdminAutostartStatus,
   importFullConfigApply,
   importFullConfigPreview,
   normalizeCommandError,
   openConfigFolder,
   parseSynapseSource,
   readTextFile,
+  setAdminAutostart,
   writeTextFile,
+  type AdminAutostartStatus,
 } from "../lib/backend";
 import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
@@ -66,6 +74,82 @@ export function SettingsWorkspace({
   const [importError, setImportError] = useState<string | null>(null);
   const [synapseLoading, setSynapseLoading] = useState(false);
   const [showPresets, setShowPresets] = useState(false);
+
+  // Autostart state: regular (registry/startup folder via tauri-plugin-autostart)
+  // and elevated (Task Scheduler with /rl highest).  We query both at mount
+  // because the config flag and the OS state can drift (e.g. user disabled
+  // autostart via Task Manager → Startup but the config still says enabled).
+  const [regularAutostart, setRegularAutostart] = useState<boolean | null>(null);
+  const [adminAutostart, setAdminAutostartState] = useState<AdminAutostartStatus | null>(null);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.all([
+      isAutostartEnabled().catch(() => false),
+      getAdminAutostartStatus().catch(() => null),
+    ]).then(([regular, admin]) => {
+      if (cancelled) return;
+      setRegularAutostart(regular);
+      setAdminAutostartState(admin);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleRegularAutostartToggle(checked: boolean) {
+    setAutostartBusy(true);
+    try {
+      if (checked) {
+        await enableAutostart();
+        // Mirror in config for legacy code that still reads startWithWindows.
+        updateDraft((c) => ({
+          ...c,
+          settings: { ...c.settings, startWithWindows: true },
+        }));
+        setRegularAutostart(true);
+      } else {
+        await disableAutostart();
+        updateDraft((c) => ({
+          ...c,
+          settings: { ...c.settings, startWithWindows: false },
+        }));
+        setRegularAutostart(false);
+      }
+    } catch (unknownError) {
+      setError(normalizeCommandError(unknownError));
+    } finally {
+      setAutostartBusy(false);
+    }
+  }
+
+  async function handleAdminAutostartToggle(checked: boolean) {
+    setAutostartBusy(true);
+    try {
+      const next = await setAdminAutostart(checked);
+      setAdminAutostartState(next);
+      // Avoid two launchers competing at logon: when admin autostart turns on,
+      // disable the regular one (and vice versa is not symmetric — turning
+      // admin off does not auto-enable regular; that's the user's choice).
+      if (checked && next.enabled && regularAutostart) {
+        try {
+          await disableAutostart();
+        } catch {
+          // already disabled
+        }
+        setRegularAutostart(false);
+        updateDraft((c) => ({
+          ...c,
+          settings: { ...c.settings, startWithWindows: false },
+        }));
+      }
+    } catch (unknownError) {
+      setError(normalizeCommandError(unknownError));
+    } finally {
+      setAutostartBusy(false);
+    }
+  }
 
   const sortedProfiles = [...activeConfig.profiles].sort(
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
@@ -187,6 +271,70 @@ export function SettingsWorkspace({
 
   return (
     <div className="settings-workspace">
+      {/* Autostart */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">Автозапуск</span>
+        </div>
+
+        <label className="field field--inline">
+          <span className="field__label">Запускать вместе с Windows</span>
+          <Toggle
+            checked={regularAutostart ?? false}
+            onChange={(checked) => void handleRegularAutostartToggle(checked)}
+            disabled={autostartBusy || adminAutostart?.enabled === true}
+          />
+        </label>
+        {adminAutostart?.enabled === true && (
+          <p className="panel__muted" style={{ fontSize: "0.78rem", marginTop: -4 }}>
+            Отключено, потому что включён запуск от администратора (ниже) —
+            он автоматически запускает Sidearm при входе.
+          </p>
+        )}
+
+        {adminAutostart?.supported && (
+          <>
+            <label className="field field--inline" style={{ marginTop: 12 }}>
+              <span className="field__label">Запускать от администратора при входе</span>
+              <Toggle
+                checked={adminAutostart.enabled}
+                onChange={(checked) => void handleAdminAutostartToggle(checked)}
+                disabled={autostartBusy}
+              />
+            </label>
+            <p className="panel__muted" style={{ fontSize: "0.78rem", marginTop: -4 }}>
+              Через Планировщик задач Windows с правами Highest. UAC появится
+              один раз при включении — дальше каждый старт системы будет
+              запускать Sidearm от админа без UAC. Это нужно, чтобы ввод
+              доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.).
+            </p>
+            {adminAutostart.enabled && adminAutostart.pathMismatch && (
+              <div className="notice notice--error" style={{ marginTop: 12 }}>
+                <p>
+                  Запланированная задача указывает на другой путь к Sidearm.exe:
+                </p>
+                <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+                  {adminAutostart.registeredPath ?? "(неизвестно)"}
+                </p>
+                <p>Текущий путь:</p>
+                <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+                  {adminAutostart.currentExe}
+                </p>
+                <button
+                  type="button"
+                  className="action-button"
+                  style={{ marginTop: 8 }}
+                  onClick={() => void handleAdminAutostartToggle(true)}
+                  disabled={autostartBusy}
+                >
+                  Перерегистрировать на текущий путь
+                </button>
+              </div>
+            )}
+          </>
+        )}
+      </section>
+
       {/* Language selector */}
       <section className="settings-section">
         <div className="settings-section__header">

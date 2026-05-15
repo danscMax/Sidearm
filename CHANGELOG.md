@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] — 2026-05-15
+
+### Fixed
+- Autostart toggles ("Запускать вместе с Windows" and the new "Запускать от
+  администратора при входе") now live in Settings → Автозапуск, where users
+  actually look. v0.1.8 mistakenly attached them to ServiceToolsPanel inside
+  Diagnostics.
+- Left sidebar items ("Назначения", "Диагностика", "Настройки") now switch
+  language when the UI locale changes. They were sourced from a hard-coded
+  Russian constants table in `lib/constants/ui-copy.ts` and ignored i18n;
+  Sidebar and the Toolbar heading now read the same strings through `t()`.
+
 ## [0.1.8] — 2026-05-15
 
 ### Added

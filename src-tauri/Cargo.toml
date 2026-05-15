@@ -1,6 +1,6 @@
 [package]
 name = "sidearm"
-version = "0.1.12"
+version = "0.1.13"
 description = "Desktop workflow studio for multi-button mice"
 authors = ["User"]
 edition = "2021"

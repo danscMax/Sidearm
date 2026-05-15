@@ -3224,7 +3224,17 @@ mod capture_diag {
         }
     }
 
+    // The `diag_*` tests are exploratory diagnostics, not unit tests.  They
+    // register global hotkeys (F13, Ctrl+Shift+F23) and install LL keyboard
+    // hooks on the current process.  Both fail noisily when another instance
+    // of Sidearm is running (it already holds those hotkeys), and they don't
+    // verify a stable contract — they verify Windows itself.  Keep them in
+    // tree for future investigation but mark `#[ignore]` so `cargo test`
+    // doesn't run them by default.  Run explicitly with:
+    //   cargo test -- --ignored diag_
+
     #[test]
+    #[ignore]
     fn diag_register_hotkey_simple_f13() {
         log::debug!("\n=== TEST: RegisterHotKey + SendInput(F13) ===");
         let id = 8001;
@@ -3253,6 +3263,7 @@ mod capture_diag {
     }
 
     #[test]
+    #[ignore]
     fn diag_register_hotkey_ctrl_shift_f23() {
         log::debug!("\n=== TEST: RegisterHotKey + SendInput(Ctrl+Shift+F23) ===");
         let id = 8002;
@@ -3294,6 +3305,7 @@ mod capture_diag {
     }
 
     #[test]
+    #[ignore]
     fn diag_ll_hook_ctrl_shift_f23() {
         use std::cell::RefCell;
         use windows_sys::Win32::{
@@ -3409,6 +3421,7 @@ mod capture_diag {
     }
 
     #[test]
+    #[ignore]
     fn diag_ll_hook_simple_f13() {
         use std::cell::RefCell;
         use windows_sys::Win32::{

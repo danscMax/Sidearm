@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.13] — 2026-05-15
+
+### Fixed
+- Diagnostic `diag_*` tests in `capture_backend::windows` are now marked
+  `#[ignore]`. They register global hotkeys (F13, Ctrl+Shift+F23) and install
+  LL keyboard hooks on the current process, both of which fail when another
+  Sidearm instance is running. They're exploratory diagnostics rather than
+  contract tests — keep them in tree but don't run by default. Use
+  `cargo test -- --ignored diag_` to invoke manually.
+
+### Changed
+- CHANGELOG cleanup: the stale "Unreleased" bucket that had accumulated
+  features now lives under `[0.1.0]` (initial public release, 2026-03-16) so
+  the file lines up with the GitHub release history.
+
 ## [0.1.12] — 2026-05-15
 
 ### Fixed
@@ -123,7 +138,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Slim dev cargo profile: `split-debuginfo = "packed"` + `debug = "line-tables-only"`
   for dependencies, cutting `target/debug/` size roughly in half.
 
-## [Released earlier]
+## [0.1.1] — [0.1.5]
+
+See the [GitHub releases page](https://github.com/danscMax/Sidearm/releases) for
+the changelog of these versions — primarily stuck-modifier hardening (RCtrl/RAlt,
+buffered Ctrl recovery, hook health probes, REHOOK state reset).
+
+## [0.1.0] — 2026-03-16
+
+Initial public release.
 
 ### Added
 - Structured logging system (tauri-plugin-log v2) with file rotation, real-time viewer, level/category/search filters

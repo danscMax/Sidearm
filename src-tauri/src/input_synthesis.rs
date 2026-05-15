@@ -1007,7 +1007,7 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     };
 
     let pre_state = snapshot_state();
-    log::info!(
+    log::debug!(
         "[clear-modifiers] mask: ctrl={} shift={} alt={} win={} | pre: {}",
         mask.ctrl, mask.shift, mask.alt, mask.win, pre_state,
     );
@@ -1062,15 +1062,15 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
                 _ => None,
             })
             .collect();
-        log::info!(
+        log::debug!(
             "[clear-modifiers] releasing: [{}]",
             labels.join(", "),
         );
         send_keyboard_inputs(&release_inputs)?;
         let post_state = snapshot_state();
-        log::info!("[clear-modifiers] post: {}", post_state);
+        log::debug!("[clear-modifiers] post: {}", post_state);
     } else {
-        log::info!("[clear-modifiers] nothing to release");
+        log::debug!("[clear-modifiers] nothing to release");
     }
 
     Ok(())
@@ -1152,7 +1152,7 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
             ),
         })
         .collect();
-    log::info!("[send-keyboard-inputs] sending {} inputs: [{}]", inputs.len(), summary.join(", "));
+    log::debug!("[send-keyboard-inputs] sending {} inputs: [{}]", inputs.len(), summary.join(", "));
 
     let windows_inputs: Vec<INPUT> = inputs
         .iter()
@@ -1532,7 +1532,7 @@ pub fn send_mouse_action(
     payload: &MouseActionPayload,
     encoding_mods: &HotkeyModifiers,
 ) -> Result<MouseDispatchReport, String> {
-    log::info!(
+    log::debug!(
         "[send-mouse] enter: action={:?} mods=(ctrl={} shift={} alt={} win={}) \
          (encoding_mods: ctrl={} shift={} alt={} win={})",
         payload.action,
@@ -1544,7 +1544,7 @@ pub fn send_mouse_action(
     let has_modifier = payload.ctrl || payload.shift || payload.alt || payload.win;
     let pressed_modifiers = if has_modifier {
         let snapshot = current_modifier_snapshot()?;
-        log::info!(
+        log::debug!(
             "[send-mouse] post-clear snapshot: ctrl={} shift={} alt={} win={}",
             snapshot.is_active(ModifierKey::Ctrl),
             snapshot.is_active(ModifierKey::Shift),
@@ -1562,7 +1562,7 @@ pub fn send_mouse_action(
         .filter(|(modifier, _)| !snapshot.is_active(*modifier))
         .map(|(modifier, _)| *modifier)
         .collect();
-        log::info!(
+        log::debug!(
             "[send-mouse] pressing modifiers: {:?}",
             mods_to_press.iter().map(|m| m.label()).collect::<Vec<_>>(),
         );
@@ -1589,17 +1589,17 @@ pub fn send_mouse_action(
 
     // Release modifiers in reverse order (LIFO)
     if !pressed_modifiers.is_empty() {
-        log::info!(
+        log::debug!(
             "[send-mouse] releasing modifiers (LIFO): {:?}",
             pressed_modifiers.iter().rev().map(|m| m.label()).collect::<Vec<_>>(),
         );
         let release = build_modifier_release_inputs(&pressed_modifiers);
         let _ = send_keyboard_inputs(&release);
     } else {
-        log::info!("[send-mouse] no modifiers to release");
+        log::debug!("[send-mouse] no modifiers to release");
     }
 
-    log::info!("[send-mouse] exit: result={:?}", result.as_ref().map(|_| "ok"));
+    log::debug!("[send-mouse] exit: result={:?}", result.as_ref().map(|_| "ok"));
     result?;
     Ok(MouseDispatchReport {
         warnings: Vec::new(),

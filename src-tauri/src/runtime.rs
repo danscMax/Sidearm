@@ -1,6 +1,7 @@
 use serde::Serialize;
 use std::{
     collections::VecDeque,
+    sync::mpsc::Sender,
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -12,6 +13,7 @@ pub const EVENT_PROFILE_RESOLVED: &str = "profile_resolved";
 pub const EVENT_CONTROL_RESOLVED: &str = "control_resolved";
 pub const EVENT_ACTION_EXECUTED: &str = "action_executed";
 pub const EVENT_RUNTIME_ERROR: &str = "runtime_error";
+pub const EVENT_DEBUG_LOG_APPENDED: &str = "debug_log_appended";
 
 const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;
@@ -64,6 +66,11 @@ pub struct RuntimeStore {
     capture_in_progress: bool,
     logs: VecDeque<DebugLogEntry>,
     next_log_id: u64,
+    /// Push channel for appended log entries. When set, every `push_log` call
+    /// forwards the new entry to a background thread that emits a single
+    /// `debug_log_appended` Tauri event. This avoids the previous poll-storm
+    /// where each capture event made the frontend re-fetch all 1000 entries.
+    log_sender: Option<Sender<DebugLogEntry>>,
 }
 
 impl Default for RuntimeStore {
@@ -78,11 +85,19 @@ impl Default for RuntimeStore {
             capture_in_progress: false,
             logs: VecDeque::new(),
             next_log_id: 1,
+            log_sender: None,
         }
     }
 }
 
 impl RuntimeStore {
+    /// Attach a sender that receives each newly-appended log entry. Intended
+    /// to be called once at startup with the sender side of a channel whose
+    /// receiver thread re-emits the entries as `debug_log_appended` events.
+    pub fn set_log_sender(&mut self, sender: Sender<DebugLogEntry>) {
+        self.log_sender = Some(sender);
+    }
+
     pub fn summary(&self) -> RuntimeStateSummary {
         RuntimeStateSummary {
             status: self.status,
@@ -221,14 +236,19 @@ impl RuntimeStore {
             self.logs.pop_front();
         }
 
-        self.logs.push_back(DebugLogEntry {
+        let entry = DebugLogEntry {
             id: self.next_log_id,
             level,
             category,
             message,
             created_at: timestamp_millis(),
-        });
+        };
         self.next_log_id += 1;
+
+        if let Some(sender) = &self.log_sender {
+            let _ = sender.send(entry.clone());
+        }
+        self.logs.push_back(entry);
     }
 }
 

@@ -12,6 +12,7 @@ import {
   getDebugLog,
   listenActionExecutionEvent,
   listenControlResolutionEvent,
+  listenDebugLogAppendedEvent,
   listenEncodedKeyEvent,
   listenRuntimeErrorEvent,
   listenRuntimeEvent,
@@ -95,14 +96,12 @@ export function useRuntime(deps: {
     startTransition(() => {
       setRuntimeSummary(summary);
     });
-    void refreshDebugLog();
   });
 
   const handleWindowResolutionEvent = useEffectEvent((result: WindowCaptureResult) => {
     startTransition(() => {
       setLastCapture(result);
     });
-    void refreshDebugLog();
   });
 
   const handleEncodedKeyEvent = useEffectEvent((event: EncodedKeyEvent) => {
@@ -110,7 +109,6 @@ export function useRuntime(deps: {
       setLastEncodedKey(event);
     });
     deps.onEncodedKeyEvent?.(event);
-    void refreshDebugLog();
   });
 
   const handleControlResolutionEvent = useEffectEvent((result: ResolvedInputPreview) => {
@@ -118,7 +116,6 @@ export function useRuntime(deps: {
       setLastResolutionPreview(result);
     });
     deps.onControlResolutionEvent?.(result);
-    void refreshDebugLog();
   });
 
   const handleActionExecutionEvent = useEffectEvent((event: ActionExecutionEvent) => {
@@ -134,14 +131,26 @@ export function useRuntime(deps: {
         });
       }
     });
-    void refreshDebugLog();
   });
 
   const handleRuntimeErrorEvent = useEffectEvent((event: RuntimeErrorEvent) => {
     startTransition(() => {
       setLastRuntimeError(event);
     });
-    void refreshDebugLog();
+  });
+
+  // Push-based debug log: backend emits a `debug_log_appended` event for
+  // each new entry, so we append locally instead of polling the full buffer.
+  // Cap matches DEBUG_LOG_LIMIT on the Rust side (1000).
+  const DEBUG_LOG_CAP = 1000;
+  const handleDebugLogAppended = useEffectEvent((entry: DebugLogEntry) => {
+    startTransition(() => {
+      setDebugLog((prev) => {
+        const next = prev.length >= DEBUG_LOG_CAP ? prev.slice(prev.length - DEBUG_LOG_CAP + 1) : prev.slice();
+        next.push(entry);
+        return next;
+      });
+    });
   });
 
   // --- Tauri event listeners ---
@@ -162,6 +171,7 @@ export function useRuntime(deps: {
         listenControlResolutionEvent("control_resolved", handleControlResolutionEvent),
         listenActionExecutionEvent("action_executed", handleActionExecutionEvent),
         listenRuntimeErrorEvent("runtime_error", handleRuntimeErrorEvent),
+        listenDebugLogAppendedEvent(handleDebugLogAppended),
       ]);
 
       if (disposed) {

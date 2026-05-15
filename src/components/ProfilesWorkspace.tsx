@@ -519,7 +519,11 @@ export function ProfilesWorkspace({
     };
   }, []);
 
-  // Fill new-rule dialog fields after capture completes
+  // Fill new-rule dialog fields after capture completes.
+  // Depends only on lastCapture; captureForNewRule is the consumer flag we
+  // read inside.  Previously this effect had NO dependency array and ran on
+  // every render — cheap on its own, but it amplified the cost of the
+  // upstream debug-log poll-storm.
   useEffect(() => {
     if (
       captureForNewRule &&
@@ -533,7 +537,7 @@ export function ProfilesWorkspace({
       setNewRuleCapturedProcessPath(lastCapture.processPath);
     }
     prevCaptureRef.current = lastCapture;
-  });
+  }, [lastCapture, captureForNewRule]);
 
   async function handleCaptureWithCountdown() {
     const totalMs = captureDelayMs;

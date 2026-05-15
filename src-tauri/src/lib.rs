@@ -10,6 +10,7 @@ mod exe_icon;
 mod executor;
 mod hotkeys;
 mod input_synthesis;
+mod log_cleanup;
 mod paths;
 mod platform;
 mod recorder;
@@ -44,8 +45,8 @@ use executor::{ActionExecutionEvent, RuntimeErrorEvent};
 use resolver::ResolvedInputPreview;
 use runtime::{
     DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
-    EVENT_CONTROL_RESOLVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR, EVENT_RUNTIME_STARTED,
-    EVENT_RUNTIME_STOPPED,
+    EVENT_CONTROL_RESOLVED, EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
+    EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
 };
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -1825,6 +1826,25 @@ pub fn run() {
     let log_target_path = app_paths.log_dir.clone();
     let app_paths_for_setup = app_paths.clone();
 
+    // Hybrid retention: 7 days OR 50 files, whichever is stricter.
+    // Runs before the plugin opens any file so the deletes can't race with the writer.
+    const LOG_RETENTION_DAYS: u64 = 7;
+    const LOG_RETENTION_MAX_FILES: usize = 50;
+    let (deleted, kept) =
+        log_cleanup::sweep(&log_target_path, LOG_RETENTION_DAYS, LOG_RETENTION_MAX_FILES);
+
+    // Push-based debug log: RuntimeStore::push_log sends each new entry on
+    // `log_tx`; a worker thread re-emits it as a single `debug_log_appended`
+    // tauri event. Replaces the old poll-storm pattern where every capture
+    // event made the frontend re-fetch all 1000 entries.
+    let (log_tx, log_rx) = std::sync::mpsc::channel::<DebugLogEntry>();
+    let runtime_store = {
+        let mut store = RuntimeStore::default();
+        store.set_log_sender(log_tx);
+        Arc::new(Mutex::new(store))
+    };
+    let log_rx_for_setup = Mutex::new(Some(log_rx));
+
     tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -1835,7 +1855,7 @@ pub fn run() {
                 }))
                 .target(Target::new(TargetKind::Stdout))
                 .target(Target::new(TargetKind::Webview))
-                .max_file_size(10_000_000)
+                .max_file_size(2_000_000)
                 .rotation_strategy(RotationStrategy::KeepAll)
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(log::LevelFilter::Info)
@@ -1849,9 +1869,29 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .setup(|app| {
+        .setup(move |app| {
             // One-time migration from old "com.nagaworkflowstudio.desktop" config dir.
             migrate_old_config(&app.handle());
+
+            log::info!(
+                "[log-retention] sweep: deleted {deleted}, kept {kept} \
+                 (max {LOG_RETENTION_DAYS}d / {LOG_RETENTION_MAX_FILES} files)"
+            );
+
+            // Drain the push-based debug-log channel into tauri events on
+            // a dedicated thread. recv() blocks until a sender is available,
+            // so this thread is idle when no logs are being appended.
+            if let Some(rx) = log_rx_for_setup.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                let app_handle = app.handle().clone();
+                std::thread::Builder::new()
+                    .name("debug-log-bridge".into())
+                    .spawn(move || {
+                        while let Ok(entry) = rx.recv() {
+                            let _ = app_handle.emit(EVENT_DEBUG_LOG_APPENDED, &entry);
+                        }
+                    })
+                    .ok();
+            }
 
             // Log whether the process is running with elevated (admin) privileges.
             // This is informational — helps diagnose UIPI issues where hotkey
@@ -2055,7 +2095,7 @@ pub fn run() {
         })
         .manage(app_paths_for_setup)
         .manage(Arc::new(AtomicBool::new(false)) as MinimizeToTray)
-        .manage(Arc::new(Mutex::new(RuntimeStore::default())))
+        .manage(runtime_store.clone())
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .manage(Arc::new(Mutex::new(MacroRecorder::new())))
         .invoke_handler(tauri::generate_handler![

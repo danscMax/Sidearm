@@ -233,6 +233,14 @@ export async function listenRuntimeEvent(
   });
 }
 
+export async function listenDebugLogAppendedEvent(
+  onPayload: (payload: DebugLogEntry) => void,
+): Promise<UnlistenFn> {
+  return listen<DebugLogEntry>("debug_log_appended", (event) => {
+    onPayload(event.payload);
+  });
+}
+
 export async function listenWindowResolutionEvent(
   eventName: WindowResolutionEventName,
   onPayload: (payload: WindowCaptureResult) => void,

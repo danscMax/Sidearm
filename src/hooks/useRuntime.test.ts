@@ -33,6 +33,7 @@ vi.mock("../lib/backend", () => ({
   listenControlResolutionEvent: vi.fn().mockResolvedValue(() => {}),
   listenActionExecutionEvent: vi.fn().mockResolvedValue(() => {}),
   listenRuntimeErrorEvent: vi.fn().mockResolvedValue(() => {}),
+  listenDebugLogAppendedEvent: vi.fn().mockResolvedValue(() => {}),
 }));
 
 // Import AFTER vi.mock so the mock is in place

@@ -1,3 +1,4 @@
+mod admin_autostart;
 mod backup;
 mod capture_backend;
 mod chord;
@@ -1068,6 +1069,28 @@ async fn get_log_directory(app: AppHandle) -> Result<String, CommandError> {
 #[tauri::command]
 async fn is_running_as_admin() -> Result<bool, CommandError> {
     Ok(window_capture::is_current_process_elevated())
+}
+
+#[tauri::command]
+async fn get_admin_autostart_status() -> Result<admin_autostart::AdminAutostartStatus, CommandError> {
+    Ok(admin_autostart::query())
+}
+
+/// Enable or disable the elevated autostart-at-logon scheduled task.
+/// Enabling triggers a UAC prompt (schtasks needs admin to create a task
+/// with RunLevel=Highest).  After enabling, the frontend should disable the
+/// regular tauri-plugin-autostart entry to avoid two launchers competing.
+#[tauri::command]
+async fn set_admin_autostart(enabled: bool) -> Result<admin_autostart::AdminAutostartStatus, CommandError> {
+    let result = if enabled {
+        admin_autostart::enable()
+    } else {
+        admin_autostart::disable()
+    };
+    if let Err(message) = result {
+        return Err(CommandError::new("admin_autostart_failed", message, None));
+    }
+    Ok(admin_autostart::query())
 }
 
 /// Re-launch Sidearm with administrator privileges and exit the current
@@ -2235,6 +2258,8 @@ pub fn run() {
             open_log_directory,
             is_running_as_admin,
             relaunch_as_admin,
+            get_admin_autostart_status,
+            set_admin_autostart,
             capture_active_window,
             list_running_processes,
             list_bundled_presets,

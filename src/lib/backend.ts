@@ -148,6 +148,29 @@ export async function isRunningAsAdmin(): Promise<boolean> {
   return invoke<boolean>("is_running_as_admin");
 }
 
+export interface AdminAutostartStatus {
+  enabled: boolean;
+  registeredPath: string | null;
+  currentExe: string;
+  pathMismatch: boolean;
+  supported: boolean;
+}
+
+export async function getAdminAutostartStatus(): Promise<AdminAutostartStatus> {
+  return invoke<AdminAutostartStatus>("get_admin_autostart_status");
+}
+
+/**
+ * Enable or disable the Windows Task Scheduler entry that launches Sidearm
+ * with administrator privileges at user logon (`RunLevel=Highest`,
+ * `Trigger=OnLogon`).  Enabling triggers a UAC prompt — this is the only
+ * elevation cost; subsequent system starts launch Sidearm elevated without
+ * any further prompt, the canonical Windows pattern (used by PowerToys etc.).
+ */
+export async function setAdminAutostart(enabled: boolean): Promise<AdminAutostartStatus> {
+  return invoke<AdminAutostartStatus>("set_admin_autostart", { enabled });
+}
+
 /**
  * Re-launch Sidearm with administrator privileges (UAC prompt) and exit the
  * current process.  Required to inject input into elevated foreground windows

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] — 2026-05-15
+
+### Added
+- Elevated autostart-at-logon via Windows Task Scheduler. New toggle in
+  Settings → "Запускать от администратора при входе". When enabled, Sidearm
+  registers a `RunLevel=Highest` / `OnLogon` task (single UAC prompt at toggle
+  time). Subsequent system starts launch Sidearm elevated without any further
+  UAC. Canonical Windows pattern (also used by PowerToys, EarTrumpet).
+- Path-mismatch detection: if the portable folder was moved after the task
+  was registered, the UI shows the registered vs current path and offers a
+  "Re-register on current path" button.
+- New module `admin_autostart` with 4 unit tests; new Tauri commands
+  `get_admin_autostart_status` and `set_admin_autostart`.
+
+### Changed
+- When admin autostart is enabled, the regular `tauri-plugin-autostart` entry
+  is disabled automatically to avoid two launchers competing at logon.
+
 ## [0.1.7] — 2026-05-15
 
 ### Added

@@ -1301,6 +1301,11 @@ select::checkmark {
   padding-top: 2px;
 }
 
+.autostart-row--sub {
+  padding-left: 16px;
+  border-left: 2px solid var(--c-accent-dim, #335);
+}
+
 
 /* ── Context menu ── */
 .context-menu {

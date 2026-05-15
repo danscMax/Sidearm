@@ -98,24 +98,47 @@ export function SettingsWorkspace({
     };
   }, []);
 
-  async function handleRegularAutostartToggle(checked: boolean) {
+  // Master toggle: is Sidearm set to launch automatically at logon at all?
+  const runAtLogon = (regularAutostart ?? false) || (adminAutostart?.enabled ?? false);
+
+  async function setRegularEnabled(enable: boolean) {
+    if (enable) {
+      await enableAutostart();
+      setRegularAutostart(true);
+      updateDraft((c) => ({ ...c, settings: { ...c.settings, startWithWindows: true } }));
+    } else {
+      try {
+        await disableAutostart();
+      } catch {
+        // already disabled; tauri-plugin-autostart raises if state matches.
+      }
+      setRegularAutostart(false);
+      updateDraft((c) => ({ ...c, settings: { ...c.settings, startWithWindows: false } }));
+    }
+  }
+
+  async function setAdminEnabled(enable: boolean) {
+    const next = await setAdminAutostart(enable);
+    setAdminAutostartState(next);
+    return next;
+  }
+
+  /** Master toggle handler: turn ALL logon launchers on or off. */
+  async function handleRunAtLogonToggle(enable: boolean) {
     setAutostartBusy(true);
     try {
-      if (checked) {
-        await enableAutostart();
-        // Mirror in config for legacy code that still reads startWithWindows.
-        updateDraft((c) => ({
-          ...c,
-          settings: { ...c.settings, startWithWindows: true },
-        }));
-        setRegularAutostart(true);
+      if (enable) {
+        // Turning ON: default to the regular (non-admin) launcher.  The user
+        // can flip the sub-toggle to upgrade to admin afterwards.
+        await setRegularEnabled(true);
       } else {
-        await disableAutostart();
-        updateDraft((c) => ({
-          ...c,
-          settings: { ...c.settings, startWithWindows: false },
-        }));
-        setRegularAutostart(false);
+        // Turning OFF: kill both launchers.
+        if (adminAutostart?.enabled) {
+          await setAdminEnabled(false);
+        }
+        if (regularAutostart) {
+          await setRegularEnabled(false);
+        }
       }
     } catch (unknownError) {
       setError(normalizeCommandError(unknownError));
@@ -124,25 +147,25 @@ export function SettingsWorkspace({
     }
   }
 
-  async function handleAdminAutostartToggle(checked: boolean) {
+  /** Sub-toggle handler: switch between regular and admin launcher. */
+  async function handleRunAsAdminToggle(enable: boolean) {
     setAutostartBusy(true);
     try {
-      const next = await setAdminAutostart(checked);
-      setAdminAutostartState(next);
-      // Avoid two launchers competing at logon: when admin autostart turns on,
-      // disable the regular one (and vice versa is not symmetric — turning
-      // admin off does not auto-enable regular; that's the user's choice).
-      if (checked && next.enabled && regularAutostart) {
-        try {
-          await disableAutostart();
-        } catch {
-          // already disabled
+      if (enable) {
+        // Switching regular → admin.  Enable admin first (UAC prompt here),
+        // then drop the regular entry so only one launcher fires at logon.
+        const next = await setAdminEnabled(true);
+        if (next.enabled && regularAutostart) {
+          await setRegularEnabled(false);
         }
-        setRegularAutostart(false);
-        updateDraft((c) => ({
-          ...c,
-          settings: { ...c.settings, startWithWindows: false },
-        }));
+      } else {
+        // Switching admin → regular.  Make sure the regular launcher is on
+        // before removing the admin one; otherwise we'd be silently turning
+        // autostart off entirely.
+        if (!regularAutostart) {
+          await setRegularEnabled(true);
+        }
+        await setAdminEnabled(false);
       }
     } catch (unknownError) {
       setError(normalizeCommandError(unknownError));
@@ -279,66 +302,63 @@ export function SettingsWorkspace({
 
         <div className="autostart-row">
           <div className="autostart-row__main">
-            <div className="autostart-row__title">Запускать вместе с Windows</div>
-            {adminAutostart?.enabled === true && (
-              <div className="autostart-row__hint">
-                Отключено, потому что включён запуск от администратора (ниже) —
-                он автоматически запускает Sidearm при входе.
-              </div>
-            )}
+            <div className="autostart-row__title">Запускать при входе в систему</div>
+            <div className="autostart-row__hint">
+              Sidearm стартует автоматически после входа в Windows.
+            </div>
           </div>
           <div className="autostart-row__control">
             <Toggle
-              checked={regularAutostart ?? false}
-              onChange={(checked) => void handleRegularAutostartToggle(checked)}
-              disabled={autostartBusy || adminAutostart?.enabled === true}
+              checked={runAtLogon}
+              onChange={(checked) => void handleRunAtLogonToggle(checked)}
+              disabled={autostartBusy}
             />
           </div>
         </div>
 
         {adminAutostart?.supported && (
-          <>
-            <div className="autostart-row">
-              <div className="autostart-row__main">
-                <div className="autostart-row__title">Запускать от администратора при входе</div>
-                <div className="autostart-row__hint">
-                  Через Планировщик задач Windows с правами Highest. UAC появится
-                  один раз при включении — дальше каждый старт системы будет
-                  запускать Sidearm от админа без UAC. Это нужно, чтобы ввод
-                  доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.).
-                </div>
-              </div>
-              <div className="autostart-row__control">
-                <Toggle
-                  checked={adminAutostart.enabled}
-                  onChange={(checked) => void handleAdminAutostartToggle(checked)}
-                  disabled={autostartBusy}
-                />
+          <div
+            className="autostart-row autostart-row--sub"
+            style={runAtLogon ? undefined : { opacity: 0.5 }}
+          >
+            <div className="autostart-row__main">
+              <div className="autostart-row__title">Запускать от администратора</div>
+              <div className="autostart-row__hint">
+                {runAtLogon
+                  ? "Через Планировщик задач Windows с правами Highest. UAC появится один раз при включении — дальше каждый старт системы будет запускать Sidearm от админа без UAC. Это нужно, чтобы ввод доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.)."
+                  : "Доступно только если включён автозапуск выше."}
               </div>
             </div>
+            <div className="autostart-row__control">
+              <Toggle
+                checked={adminAutostart.enabled}
+                onChange={(checked) => void handleRunAsAdminToggle(checked)}
+                disabled={autostartBusy || !runAtLogon}
+              />
+            </div>
+          </div>
+        )}
 
-            {adminAutostart.enabled && adminAutostart.pathMismatch && (
-              <div className="notice notice--error" style={{ marginTop: 12 }}>
-                <p>Запланированная задача указывает на другой путь к Sidearm.exe:</p>
-                <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-                  {adminAutostart.registeredPath ?? "(неизвестно)"}
-                </p>
-                <p>Текущий путь:</p>
-                <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-                  {adminAutostart.currentExe}
-                </p>
-                <button
-                  type="button"
-                  className="action-button"
-                  style={{ marginTop: 8 }}
-                  onClick={() => void handleAdminAutostartToggle(true)}
-                  disabled={autostartBusy}
-                >
-                  Перерегистрировать на текущий путь
-                </button>
-              </div>
-            )}
-          </>
+        {adminAutostart?.enabled && adminAutostart.pathMismatch && (
+          <div className="notice notice--error" style={{ marginTop: 12 }}>
+            <p>Запланированная задача указывает на другой путь к Sidearm.exe:</p>
+            <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+              {adminAutostart.registeredPath ?? "(неизвестно)"}
+            </p>
+            <p>Текущий путь:</p>
+            <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+              {adminAutostart.currentExe}
+            </p>
+            <button
+              type="button"
+              className="action-button"
+              style={{ marginTop: 8 }}
+              onClick={() => void handleRunAsAdminToggle(true)}
+              disabled={autostartBusy}
+            >
+              Перерегистрировать на текущий путь
+            </button>
+          </div>
         )}
       </section>
 

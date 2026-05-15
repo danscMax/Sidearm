@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] — 2026-05-15
+
+### Changed
+- Autostart settings reworked from two confusing toggles into a clearer
+  master / sub-toggle pair. **"Запускать при входе в систему"** is the master
+  switch (does Sidearm launch automatically at logon?); **"Запускать от
+  администратора"** is a sub-toggle, indented and disabled when the master
+  is off, that upgrades the launcher from regular to elevated. The previous
+  two-toggle design left a confusing case where "Запускать вместе с Windows"
+  was visibly off but the app still launched at logon via Task Scheduler.
+
+### Fixed
+- No console-window flash when toggling admin autostart. The previous
+  approach used `schtasks.exe` (which spawns a console host) or a
+  self-elevated GUI child running schtasks, both of which produced a brief
+  black window. v0.1.11 talks to Task Scheduler **directly** through its
+  COM API via the standard Windows COM elevation moniker
+  (`Elevation:Administrator!new:{CLSID}`). Single UAC prompt at toggle time,
+  zero external processes spawned, zero console flashes.
+
+### Removed
+- `--admin-autostart` CLI flag and self-elevation child branch from
+  `main.rs`. Superseded by COM-based registration.
+
 ## [0.1.10] — 2026-05-15
 
 ### Fixed

@@ -1,14 +1,19 @@
-//! Elevated autostart-at-logon via Windows Task Scheduler.
+//! Elevated autostart-at-logon via Windows Task Scheduler COM API.
 //!
-//! The canonical Windows approach for "auto-launch with admin privileges
-//! without a UAC prompt every time" is a scheduled task with `RunLevel=Highest`
-//! and a logon trigger.  PowerToys, EarTrumpet and most production-grade
-//! tools that need admin at startup use this pattern.
+//! Earlier versions shelled out to `schtasks.exe`, which flashes a console
+//! window on every toggle even when launched with `SW_HIDE` (schtasks is a
+//! console application — Windows attaches a fresh console to it on launch).
 //!
-//! We shell out to `schtasks.exe` for create/delete (cleaner than ITaskService
-//! COM) and for query.  Create/delete need elevation, so they go through
-//! `ShellExecuteW` with verb `runas` (one UAC prompt at enable/disable time).
-//! Query needs no elevation and runs synchronously so we can read stdout.
+//! This implementation talks to Task Scheduler directly through COM, using
+//! the higher-level `windows` crate for safer interface dispatch:
+//!   - **Query** (no UAC): in-proc `ITaskService` via `CoCreateInstance` →
+//!     `GetFolder("\\")` → `GetTask` → read `IRegisteredTask::Xml`.
+//!   - **Create / delete** (UAC once per toggle): elevated `ITaskService`
+//!     via the `Elevation:Administrator!new:{CLSID}` COM moniker, then
+//!     normal `ITaskFolder::RegisterTask` / `DeleteTask`.
+//!
+//! Result: a single UAC prompt at toggle time, **zero** external processes
+//! spawned, zero console flashes.
 
 use std::path::Path;
 
@@ -17,16 +22,10 @@ const TASK_NAME: &str = "SidearmAutostartAdmin";
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AdminAutostartStatus {
-    /// Whether the scheduled task currently exists on this machine.
     pub enabled: bool,
-    /// Path the task is registered to launch.  Empty when not enabled.
     pub registered_path: Option<String>,
-    /// Current Sidearm executable path.
     pub current_exe: String,
-    /// True when enabled and the registered path differs from `current_exe`
-    /// (e.g. portable folder was moved since registration).
     pub path_mismatch: bool,
-    /// Platform-level support — false on non-Windows.
     pub supported: bool,
 }
 
@@ -35,7 +34,7 @@ pub fn query() -> AdminAutostartStatus {
     let current_exe = std::env::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
-    let registered_path = query_registered_path();
+    let registered_path = win::query_registered_path().ok().flatten();
     let path_mismatch = match &registered_path {
         Some(p) => !paths_equal(Path::new(p), Path::new(&current_exe)),
         None => false,
@@ -51,13 +50,10 @@ pub fn query() -> AdminAutostartStatus {
 
 #[cfg(not(target_os = "windows"))]
 pub fn query() -> AdminAutostartStatus {
-    let current_exe = std::env::current_exe()
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
     AdminAutostartStatus {
         enabled: false,
         registered_path: None,
-        current_exe,
+        current_exe: String::new(),
         path_mismatch: false,
         supported: false,
     }
@@ -65,58 +61,14 @@ pub fn query() -> AdminAutostartStatus {
 
 #[cfg(target_os = "windows")]
 pub fn enable() -> Result<(), String> {
-    // Self-elevation: re-launch the current Sidearm exe with verb "runas" and
-    // a CLI flag, then have the elevated child run schtasks via
-    // CREATE_NO_WINDOW.  This is the canonical way to avoid the console-window
-    // flash that ShellExecuteW(runas, schtasks.exe) produces.
-    self_elevate_admin_autostart("enable")
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let xml = task_definition_xml(&exe.to_string_lossy());
+    win::register_task_elevated(TASK_NAME, &xml)
 }
 
 #[cfg(target_os = "windows")]
 pub fn disable() -> Result<(), String> {
-    self_elevate_admin_autostart("disable")
-}
-
-/// Run synchronously inside the elevated child process to actually create
-/// the scheduled task.  Returns process exit code (0 on success).
-#[cfg(target_os = "windows")]
-pub fn run_silent_enable_from_elevated_child() -> i32 {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let exe = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(_) => return 2,
-    };
-    let tr = format!("\"{}\"", exe.to_string_lossy());
-    let status = std::process::Command::new("schtasks")
-        .args([
-            "/create", "/tn", TASK_NAME, "/tr", &tr, "/sc", "onlogon", "/rl",
-            "highest", "/f",
-        ])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
-    match status {
-        Ok(s) if s.success() => 0,
-        Ok(s) => s.code().unwrap_or(1),
-        Err(_) => 3,
-    }
-}
-
-#[cfg(target_os = "windows")]
-pub fn run_silent_disable_from_elevated_child() -> i32 {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-    let status = std::process::Command::new("schtasks")
-        .args(["/delete", "/tn", TASK_NAME, "/f"])
-        .creation_flags(CREATE_NO_WINDOW)
-        .status();
-    match status {
-        Ok(s) if s.success() => 0,
-        Ok(s) => s.code().unwrap_or(1),
-        Err(_) => 3,
-    }
+    win::delete_task_elevated(TASK_NAME)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -129,134 +81,241 @@ pub fn disable() -> Result<(), String> {
     Err("Admin autostart is supported only on Windows.".into())
 }
 
-#[cfg(target_os = "windows")]
-fn query_registered_path() -> Option<String> {
-    use std::process::Command;
-    // /xml output is locale-independent and easy to parse.  schtasks emits
-    // UTF-16 LE with BOM on stdout when /xml is used.
-    let output = Command::new("schtasks")
-        .args(["/query", "/tn", TASK_NAME, "/xml"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let xml = decode_utf16_or_utf8(&output.stdout);
-    extract_command_from_xml(&xml).map(|p| p.trim_matches('"').to_string())
+/// Task XML definition.  Logon trigger + Exec action + RunLevel=HighestAvailable.
+/// `DisallowStartIfOnBatteries=false` and `StopIfGoingOnBatteries=false` keep
+/// the task active on laptops; default Task Scheduler settings would prevent
+/// startup when not plugged in.
+fn task_definition_xml(exe_path: &str) -> String {
+    let escaped_exe = xml_escape(exe_path);
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Sidearm autostart at logon with administrator privileges.</Description>
+    <Author>Sidearm</Author>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>{escaped_exe}</Command>
+    </Exec>
+  </Actions>
+</Task>"#
+    )
 }
 
-/// Launch the current Sidearm exe elevated with `--admin-autostart <action>`,
-/// wait for the elevated child to finish, and return its exit code as Ok/Err.
-///
-/// Why self-elevate instead of running schtasks.exe directly:
-/// `ShellExecuteW("runas", "schtasks.exe", ...)` flashes a console window even
-/// with SW_HIDE because schtasks is a console application and Windows attaches
-/// a fresh console to it on launch.  Sidearm.exe is a GUI subsystem binary, so
-/// when the elevated child runs `schtasks` via `Command + CREATE_NO_WINDOW`
-/// no console ever materialises — zero UI flash.
-#[cfg(target_os = "windows")]
-fn self_elevate_admin_autostart(action: &str) -> Result<(), String> {
-    use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{
-        GetExitCodeProcess, WaitForSingleObject, INFINITE,
-    };
-    use windows_sys::Win32::UI::Shell::{
-        ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
-    };
-    use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
-
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("current_exe failed: {e}"))?;
-    let exe_w: Vec<u16> = exe
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let verb_w: Vec<u16> = "runas\0".encode_utf16().collect();
-    let params = format!("--admin-autostart {action}");
-    let params_w: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
-
-    let mut sei = SHELLEXECUTEINFOW {
-        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
-        fMask: SEE_MASK_NOCLOSEPROCESS,
-        hwnd: std::ptr::null_mut(),
-        lpVerb: verb_w.as_ptr(),
-        lpFile: exe_w.as_ptr(),
-        lpParameters: params_w.as_ptr(),
-        lpDirectory: std::ptr::null(),
-        nShow: SW_HIDE as i32,
-        hInstApp: std::ptr::null_mut(),
-        lpIDList: std::ptr::null_mut(),
-        lpClass: std::ptr::null(),
-        hkeyClass: std::ptr::null_mut(),
-        dwHotKey: 0,
-        Anonymous: unsafe { std::mem::zeroed() },
-        hProcess: std::ptr::null_mut(),
-    };
-
-    let ok = unsafe { ShellExecuteExW(&mut sei) };
-    if ok == 0 {
-        // GetLastError == 1223 (ERROR_CANCELLED) when the user clicks "No" on UAC.
-        let err = std::io::Error::last_os_error();
-        return Err(if err.raw_os_error() == Some(1223) {
-            "Запуск от администратора отменён в UAC.".into()
-        } else {
-            format!("ShellExecuteExW failed: {err}")
-        });
-    }
-
-    if sei.hProcess.is_null() {
-        return Err("ShellExecuteExW did not return a process handle.".into());
-    }
-
-    let wait = unsafe { WaitForSingleObject(sei.hProcess, INFINITE) };
-    if wait != WAIT_OBJECT_0 {
-        unsafe { CloseHandle(sei.hProcess) };
-        return Err("Wait on elevated child failed.".into());
-    }
-    let mut exit_code: u32 = 1;
-    let got = unsafe { GetExitCodeProcess(sei.hProcess, &mut exit_code) };
-    unsafe { CloseHandle(sei.hProcess) };
-    if got == 0 {
-        return Err("GetExitCodeProcess failed.".into());
-    }
-    if exit_code != 0 {
-        return Err(format!("schtasks exited with code {exit_code}"));
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn decode_utf16_or_utf8(bytes: &[u8]) -> String {
-    // schtasks /xml emits UTF-16 LE with BOM (FF FE).  Fall back to UTF-8
-    // for safety on unusual locales.
-    if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
-        let mut units = Vec::with_capacity((bytes.len() - 2) / 2);
-        for chunk in bytes[2..].chunks_exact(2) {
-            units.push(u16::from_le_bytes([chunk[0], chunk[1]]));
-        }
-        String::from_utf16_lossy(&units)
-    } else {
-        String::from_utf8_lossy(bytes).into_owned()
-    }
-}
-
-fn extract_command_from_xml(xml: &str) -> Option<String> {
-    // <Exec><Command>C:\path\to\Sidearm.exe</Command>...</Exec>
-    let start = xml.find("<Command>")?;
-    let after = &xml[start + "<Command>".len()..];
-    let end = after.find("</Command>")?;
-    Some(after[..end].trim().to_string())
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn paths_equal(a: &Path, b: &Path) -> bool {
     if let (Ok(ca), Ok(cb)) = (a.canonicalize(), b.canonicalize()) {
         return ca == cb;
     }
-    // Fallback when one of the paths no longer exists (e.g. portable folder
-    // was moved): compare case-insensitive lossy strings.
     a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
+}
+
+fn extract_command_from_xml(xml: &str) -> Option<String> {
+    let start = xml.find("<Command>")?;
+    let after = &xml[start + "<Command>".len()..];
+    let end = after.find("</Command>")?;
+    Some(after[..end].trim().to_string())
+}
+
+#[cfg(target_os = "windows")]
+mod win {
+    use super::{extract_command_from_xml, TASK_NAME};
+    use windows::core::{BSTR, GUID, PCWSTR};
+    use windows::Win32::System::Com::{
+        CoCreateInstance, CoGetObject, CoInitializeEx, CoUninitialize, BIND_OPTS, BIND_OPTS3,
+        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+    };
+    use windows::Win32::System::TaskScheduler::{
+        ITaskService, TaskScheduler, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
+    };
+    use windows::Win32::System::Variant::VARIANT;
+
+    const HR_ERROR_CANCELLED: u32 = 0x8007_04C7; // user clicked No on UAC
+    const HR_FILE_NOT_FOUND: u32 = 0x8007_0002; // task doesn't exist
+    const HR_RPC_E_CHANGED_MODE: u32 = 0x8001_0106;
+
+    /// RAII guard for CoInitializeEx / CoUninitialize.
+    struct ComGuard;
+    impl ComGuard {
+        fn init() -> Result<Self, String> {
+            let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+            // RPC_E_CHANGED_MODE — already initialised in another mode by
+            // Tauri's main thread; that's expected and harmless on this
+            // worker thread because we don't reinit, we just proceed.
+            if hr.is_err() && hr.0 as u32 != HR_RPC_E_CHANGED_MODE {
+                return Err(format!("CoInitializeEx: 0x{:08X}", hr.0));
+            }
+            Ok(ComGuard)
+        }
+    }
+    impl Drop for ComGuard {
+        fn drop(&mut self) {
+            unsafe { CoUninitialize() };
+        }
+    }
+
+    /// Get a non-elevated ITaskService (for queries that don't need admin).
+    fn create_local_service() -> windows::core::Result<ITaskService> {
+        unsafe { CoCreateInstance(&TaskScheduler, None, CLSCTX_INPROC_SERVER) }
+    }
+
+    /// Get an elevated ITaskService via Windows' COM elevation moniker.
+    /// Triggers a UAC prompt; the rest of the Sidearm process stays Medium-IL.
+    fn create_elevated_service() -> Result<ITaskService, String> {
+        let moniker_str = format!(
+            "Elevation:Administrator!new:{{{}}}",
+            guid_to_string(&TaskScheduler)
+        );
+        let moniker: Vec<u16> = moniker_str.encode_utf16().chain(std::iter::once(0)).collect();
+
+        // BIND_OPTS3 -> BIND_OPTS2 -> BIND_OPTS is the layout windows-rs exposes.
+        let mut bind_opts3 = BIND_OPTS3::default();
+        bind_opts3.Base.Base.cbStruct = std::mem::size_of::<BIND_OPTS3>() as u32;
+        bind_opts3.Base.dwClassContext = CLSCTX_INPROC_SERVER.0 as u32;
+
+        let result: windows::core::Result<ITaskService> = unsafe {
+            CoGetObject(
+                PCWSTR(moniker.as_ptr()),
+                Some(&bind_opts3 as *const _ as *const BIND_OPTS),
+            )
+        };
+        result.map_err(|e| {
+            if e.code().0 as u32 == HR_ERROR_CANCELLED {
+                "Запуск от администратора отменён в UAC.".into()
+            } else {
+                format!("CoGetObject(elevation): 0x{:08X}", e.code().0)
+            }
+        })
+    }
+
+    fn guid_to_string(g: &GUID) -> String {
+        format!(
+            "{:08X}-{:04X}-{:04X}-{:02X}{:02X}-{:02X}{:02X}{:02X}{:02X}{:02X}{:02X}",
+            g.data1,
+            g.data2,
+            g.data3,
+            g.data4[0],
+            g.data4[1],
+            g.data4[2],
+            g.data4[3],
+            g.data4[4],
+            g.data4[5],
+            g.data4[6],
+            g.data4[7],
+        )
+    }
+
+    pub fn register_task_elevated(name: &str, xml: &str) -> Result<(), String> {
+        let _guard = ComGuard::init()?;
+        let service = create_elevated_service()?;
+        unsafe {
+            service
+                .Connect(
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                )
+                .map_err(|e| format!("ITaskService::Connect: {e}"))?;
+            let root = service
+                .GetFolder(&BSTR::from("\\"))
+                .map_err(|e| format!("GetFolder: {e}"))?;
+            root.RegisterTask(
+                &BSTR::from(name),
+                &BSTR::from(xml),
+                TASK_CREATE_OR_UPDATE.0,
+                &VARIANT::default(),
+                &VARIANT::default(),
+                TASK_LOGON_INTERACTIVE_TOKEN,
+                &VARIANT::default(),
+            )
+            .map_err(|e| format!("RegisterTask: {e}"))?;
+        }
+        Ok(())
+    }
+
+    pub fn delete_task_elevated(name: &str) -> Result<(), String> {
+        let _guard = ComGuard::init()?;
+        let service = create_elevated_service()?;
+        unsafe {
+            service
+                .Connect(
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                )
+                .map_err(|e| format!("Connect: {e}"))?;
+            let root = service
+                .GetFolder(&BSTR::from("\\"))
+                .map_err(|e| format!("GetFolder: {e}"))?;
+            match root.DeleteTask(&BSTR::from(name), 0) {
+                Ok(()) => Ok(()),
+                Err(e) if e.code().0 as u32 == HR_FILE_NOT_FOUND => Ok(()),
+                Err(e) => Err(format!("DeleteTask: {e}")),
+            }
+        }
+    }
+
+    pub fn query_registered_path() -> Result<Option<String>, String> {
+        let _guard = ComGuard::init()?;
+        let service = create_local_service().map_err(|e| format!("create service: {e}"))?;
+        unsafe {
+            service
+                .Connect(
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                    &VARIANT::default(),
+                )
+                .map_err(|e| format!("Connect: {e}"))?;
+            let root = service
+                .GetFolder(&BSTR::from("\\"))
+                .map_err(|e| format!("GetFolder: {e}"))?;
+            match root.GetTask(&BSTR::from(TASK_NAME)) {
+                Ok(task) => {
+                    let xml: BSTR = task.Xml().map_err(|e| format!("IRegisteredTask::Xml: {e}"))?;
+                    Ok(extract_command_from_xml(&xml.to_string()))
+                }
+                Err(e) if e.code().0 as u32 == HR_FILE_NOT_FOUND => Ok(None),
+                Err(e) => Err(format!("GetTask: {e}")),
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -273,13 +332,11 @@ mod tests {
     }
 
     #[test]
-    fn extracts_command_with_quoted_path() {
-        let xml = r#"<Exec><Command>"C:\Program Files\Sidearm\Sidearm.exe"</Command></Exec>"#;
-        // We return the raw inner text including quotes; the caller trims them
-        // because schtasks /xml stores them when /tr was quoted.
+    fn extracts_command_with_spaces_path() {
+        let xml = r#"<Exec><Command>C:\Program Files\Sidearm\Sidearm.exe</Command></Exec>"#;
         assert_eq!(
             extract_command_from_xml(xml).as_deref(),
-            Some(r#""C:\Program Files\Sidearm\Sidearm.exe""#)
+            Some(r#"C:\Program Files\Sidearm\Sidearm.exe"#)
         );
     }
 
@@ -290,10 +347,27 @@ mod tests {
     }
 
     #[test]
-    fn paths_equal_handles_case_difference_on_windows() {
-        // Even when both paths don't exist, the lowercase fallback should match.
-        let a = Path::new("C:\\NoSuchFolder\\Sidearm.exe");
-        let b = Path::new("c:\\NoSuchFolder\\sidearm.exe");
-        assert!(paths_equal(a, b));
+    fn xml_escape_handles_special_chars() {
+        let s = r#"a & b < c > d " e ' f"#;
+        let escaped = xml_escape(s);
+        assert_eq!(escaped, "a &amp; b &lt; c &gt; d &quot; e &apos; f");
+    }
+
+    #[test]
+    fn task_xml_contains_run_level_highest() {
+        let xml = task_definition_xml(r"C:\Sidearm.exe");
+        assert!(xml.contains("<RunLevel>HighestAvailable</RunLevel>"));
+        assert!(xml.contains("<LogonTrigger>"));
+        assert!(xml.contains(r"C:\Sidearm.exe"));
+    }
+
+    #[test]
+    fn task_xml_escapes_ampersands_in_paths() {
+        let xml = task_definition_xml(r"C:\path & with & amps\Sidearm.exe");
+        assert!(xml.contains("path &amp; with &amp; amps"));
+        let cmd_start = xml.find("<Command>").unwrap() + "<Command>".len();
+        let cmd_end = xml.find("</Command>").unwrap();
+        let cmd = &xml[cmd_start..cmd_end];
+        assert!(!cmd.contains(" & "));
     }
 }

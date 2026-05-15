@@ -4429,7 +4429,7 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "sidearm"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "active-win-pos-rs",
  "arboard",
@@ -4454,6 +4454,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "thiserror 2.0.18",
+ "windows 0.61.3",
  "windows-sys 0.61.2",
  "zip",
 ]

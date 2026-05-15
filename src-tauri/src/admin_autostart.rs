@@ -65,24 +65,58 @@ pub fn query() -> AdminAutostartStatus {
 
 #[cfg(target_os = "windows")]
 pub fn enable() -> Result<(), String> {
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("current_exe failed: {e}"))?;
-    let exe_str = exe.to_string_lossy();
-    // /tr expects a single quoted string. To keep the exe path intact when it
-    // contains spaces, we wrap it in escaped quotes inside the outer pair.
-    // The resulting argument that schtasks parses is:  "\"C:\Path\Sidearm.exe\""
-    let args = format!(
-        "/create /tn {task} /tr \"\\\"{exe}\\\"\" /sc onlogon /rl highest /f",
-        task = TASK_NAME,
-        exe = exe_str,
-    );
-    elevated_schtasks(&args)
+    // Self-elevation: re-launch the current Sidearm exe with verb "runas" and
+    // a CLI flag, then have the elevated child run schtasks via
+    // CREATE_NO_WINDOW.  This is the canonical way to avoid the console-window
+    // flash that ShellExecuteW(runas, schtasks.exe) produces.
+    self_elevate_admin_autostart("enable")
 }
 
 #[cfg(target_os = "windows")]
 pub fn disable() -> Result<(), String> {
-    let args = format!("/delete /tn {} /f", TASK_NAME);
-    elevated_schtasks(&args)
+    self_elevate_admin_autostart("disable")
+}
+
+/// Run synchronously inside the elevated child process to actually create
+/// the scheduled task.  Returns process exit code (0 on success).
+#[cfg(target_os = "windows")]
+pub fn run_silent_enable_from_elevated_child() -> i32 {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return 2,
+    };
+    let tr = format!("\"{}\"", exe.to_string_lossy());
+    let status = std::process::Command::new("schtasks")
+        .args([
+            "/create", "/tn", TASK_NAME, "/tr", &tr, "/sc", "onlogon", "/rl",
+            "highest", "/f",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+    match status {
+        Ok(s) if s.success() => 0,
+        Ok(s) => s.code().unwrap_or(1),
+        Err(_) => 3,
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn run_silent_disable_from_elevated_child() -> i32 {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let status = std::process::Command::new("schtasks")
+        .args(["/delete", "/tn", TASK_NAME, "/f"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .status();
+    match status {
+        Ok(s) if s.success() => 0,
+        Ok(s) => s.code().unwrap_or(1),
+        Err(_) => 3,
+    }
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -111,39 +145,85 @@ fn query_registered_path() -> Option<String> {
     extract_command_from_xml(&xml).map(|p| p.trim_matches('"').to_string())
 }
 
+/// Launch the current Sidearm exe elevated with `--admin-autostart <action>`,
+/// wait for the elevated child to finish, and return its exit code as Ok/Err.
+///
+/// Why self-elevate instead of running schtasks.exe directly:
+/// `ShellExecuteW("runas", "schtasks.exe", ...)` flashes a console window even
+/// with SW_HIDE because schtasks is a console application and Windows attaches
+/// a fresh console to it on launch.  Sidearm.exe is a GUI subsystem binary, so
+/// when the elevated child runs `schtasks` via `Command + CREATE_NO_WINDOW`
+/// no console ever materialises — zero UI flash.
 #[cfg(target_os = "windows")]
-fn elevated_schtasks(args: &str) -> Result<(), String> {
+fn self_elevate_admin_autostart(action: &str) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, WaitForSingleObject, INFINITE,
+    };
+    use windows_sys::Win32::UI::Shell::{
+        ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
+    };
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_HIDE;
 
-    let file = std::ffi::OsStr::new("schtasks.exe");
-    let file_w: Vec<u16> = file.encode_wide().chain(std::iter::once(0)).collect();
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("current_exe failed: {e}"))?;
+    let exe_w: Vec<u16> = exe
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     let verb_w: Vec<u16> = "runas\0".encode_utf16().collect();
-    let args_w: Vec<u16> = args.encode_utf16().chain(std::iter::once(0)).collect();
+    let params = format!("--admin-autostart {action}");
+    let params_w: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
 
-    let result = unsafe {
-        ShellExecuteW(
-            std::ptr::null_mut(),
-            verb_w.as_ptr(),
-            file_w.as_ptr(),
-            args_w.as_ptr(),
-            std::ptr::null(),
-            SW_HIDE,
-        )
+    let mut sei = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_NOCLOSEPROCESS,
+        hwnd: std::ptr::null_mut(),
+        lpVerb: verb_w.as_ptr(),
+        lpFile: exe_w.as_ptr(),
+        lpParameters: params_w.as_ptr(),
+        lpDirectory: std::ptr::null(),
+        nShow: SW_HIDE as i32,
+        hInstApp: std::ptr::null_mut(),
+        lpIDList: std::ptr::null_mut(),
+        lpClass: std::ptr::null(),
+        hkeyClass: std::ptr::null_mut(),
+        dwHotKey: 0,
+        Anonymous: unsafe { std::mem::zeroed() },
+        hProcess: std::ptr::null_mut(),
     };
-    let code = result as isize;
-    if code <= 32 {
-        // SE_ERR_ACCESSDENIED (5) is what we get when the user cancels UAC.
-        return Err(if code == 5 {
-            "Запуск schtasks от администратора отменён в UAC.".into()
+
+    let ok = unsafe { ShellExecuteExW(&mut sei) };
+    if ok == 0 {
+        // GetLastError == 1223 (ERROR_CANCELLED) when the user clicks "No" on UAC.
+        let err = std::io::Error::last_os_error();
+        return Err(if err.raw_os_error() == Some(1223) {
+            "Запуск от администратора отменён в UAC.".into()
         } else {
-            format!("ShellExecuteW(schtasks.exe) failed with code {code}")
+            format!("ShellExecuteExW failed: {err}")
         });
     }
-    // ShellExecuteW returns immediately — give schtasks a moment to actually
-    // create/delete the task before the caller re-queries status.
-    std::thread::sleep(std::time::Duration::from_millis(800));
+
+    if sei.hProcess.is_null() {
+        return Err("ShellExecuteExW did not return a process handle.".into());
+    }
+
+    let wait = unsafe { WaitForSingleObject(sei.hProcess, INFINITE) };
+    if wait != WAIT_OBJECT_0 {
+        unsafe { CloseHandle(sei.hProcess) };
+        return Err("Wait on elevated child failed.".into());
+    }
+    let mut exit_code: u32 = 1;
+    let got = unsafe { GetExitCodeProcess(sei.hProcess, &mut exit_code) };
+    unsafe { CloseHandle(sei.hProcess) };
+    if got == 0 {
+        return Err("GetExitCodeProcess failed.".into());
+    }
+    if exit_code != 0 {
+        return Err(format!("schtasks exited with code {exit_code}"));
+    }
     Ok(())
 }
 

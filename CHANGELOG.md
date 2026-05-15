@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] — 2026-05-15
+
+### Fixed
+- No more flashing console windows when toggling admin autostart. The earlier
+  approach (`ShellExecuteW("runas", "schtasks.exe", ...)`) showed a brief
+  console flash even with SW_HIDE because schtasks is a console app and
+  Windows attaches a fresh console to it on launch. Replaced with
+  self-elevation: Sidearm re-launches itself elevated with
+  `--admin-autostart enable|disable`; the elevated child (GUI subsystem) runs
+  schtasks through `Command + CREATE_NO_WINDOW`, so no console ever appears.
+- Autostart row layout: long hint texts (e.g. "Отключено, потому что включён
+  запуск от администратора...") no longer overlap the Toggle switch. Two-pane
+  row: title + hint on the left, toggle pinned right with proper flex sizing.
+- Toggle component honours its new `disabled` prop visually (opacity + no
+  pointer events), so the greyed-out "Запускать вместе с Windows" toggle is
+  now clearly distinguishable from an active one.
+
 ## [0.1.9] — 2026-05-15
 
 ### Fixed

@@ -1257,6 +1257,50 @@ select::checkmark {
   color: var(--c-accent);
 }
 
+.toggle-switch--disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toggle-switch--disabled input {
+  pointer-events: none;
+}
+
+/* ── Autostart rows in Settings ── */
+.autostart-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 8px 0;
+}
+
+.autostart-row + .autostart-row {
+  border-top: 1px solid var(--c-border);
+  margin-top: 4px;
+  padding-top: 12px;
+}
+
+.autostart-row__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.autostart-row__title {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.autostart-row__hint {
+  font-size: 0.78rem;
+  color: var(--c-muted, #888);
+  line-height: 1.4;
+}
+
+.autostart-row__control {
+  flex: 0 0 auto;
+  padding-top: 2px;
+}
+
 
 /* ── Context menu ── */
 .context-menu {

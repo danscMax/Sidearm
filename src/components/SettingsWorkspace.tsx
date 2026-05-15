@@ -277,42 +277,49 @@ export function SettingsWorkspace({
           <span className="settings-section__title">Автозапуск</span>
         </div>
 
-        <label className="field field--inline">
-          <span className="field__label">Запускать вместе с Windows</span>
-          <Toggle
-            checked={regularAutostart ?? false}
-            onChange={(checked) => void handleRegularAutostartToggle(checked)}
-            disabled={autostartBusy || adminAutostart?.enabled === true}
-          />
-        </label>
-        {adminAutostart?.enabled === true && (
-          <p className="panel__muted" style={{ fontSize: "0.78rem", marginTop: -4 }}>
-            Отключено, потому что включён запуск от администратора (ниже) —
-            он автоматически запускает Sidearm при входе.
-          </p>
-        )}
+        <div className="autostart-row">
+          <div className="autostart-row__main">
+            <div className="autostart-row__title">Запускать вместе с Windows</div>
+            {adminAutostart?.enabled === true && (
+              <div className="autostart-row__hint">
+                Отключено, потому что включён запуск от администратора (ниже) —
+                он автоматически запускает Sidearm при входе.
+              </div>
+            )}
+          </div>
+          <div className="autostart-row__control">
+            <Toggle
+              checked={regularAutostart ?? false}
+              onChange={(checked) => void handleRegularAutostartToggle(checked)}
+              disabled={autostartBusy || adminAutostart?.enabled === true}
+            />
+          </div>
+        </div>
 
         {adminAutostart?.supported && (
           <>
-            <label className="field field--inline" style={{ marginTop: 12 }}>
-              <span className="field__label">Запускать от администратора при входе</span>
-              <Toggle
-                checked={adminAutostart.enabled}
-                onChange={(checked) => void handleAdminAutostartToggle(checked)}
-                disabled={autostartBusy}
-              />
-            </label>
-            <p className="panel__muted" style={{ fontSize: "0.78rem", marginTop: -4 }}>
-              Через Планировщик задач Windows с правами Highest. UAC появится
-              один раз при включении — дальше каждый старт системы будет
-              запускать Sidearm от админа без UAC. Это нужно, чтобы ввод
-              доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.).
-            </p>
+            <div className="autostart-row">
+              <div className="autostart-row__main">
+                <div className="autostart-row__title">Запускать от администратора при входе</div>
+                <div className="autostart-row__hint">
+                  Через Планировщик задач Windows с правами Highest. UAC появится
+                  один раз при включении — дальше каждый старт системы будет
+                  запускать Sidearm от админа без UAC. Это нужно, чтобы ввод
+                  доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.).
+                </div>
+              </div>
+              <div className="autostart-row__control">
+                <Toggle
+                  checked={adminAutostart.enabled}
+                  onChange={(checked) => void handleAdminAutostartToggle(checked)}
+                  disabled={autostartBusy}
+                />
+              </div>
+            </div>
+
             {adminAutostart.enabled && adminAutostart.pathMismatch && (
               <div className="notice notice--error" style={{ marginTop: 12 }}>
-                <p>
-                  Запланированная задача указывает на другой путь к Sidearm.exe:
-                </p>
+                <p>Запланированная задача указывает на другой путь к Sidearm.exe:</p>
                 <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
                   {adminAutostart.registeredPath ?? "(неизвестно)"}
                 </p>

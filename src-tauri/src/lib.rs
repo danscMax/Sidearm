@@ -1,5 +1,17 @@
 mod admin_autostart;
 mod backup;
+
+// Public hooks for `main.rs` self-elevation branch.  Kept thin — they only
+// dispatch into the platform-specific implementation in `admin_autostart`.
+#[cfg(target_os = "windows")]
+pub fn admin_autostart_silent_enable() -> i32 {
+    admin_autostart::run_silent_enable_from_elevated_child()
+}
+
+#[cfg(target_os = "windows")]
+pub fn admin_autostart_silent_disable() -> i32 {
+    admin_autostart::run_silent_disable_from_elevated_child()
+}
 mod capture_backend;
 mod chord;
 #[cfg(test)]

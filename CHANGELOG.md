@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.12] — 2026-05-15
+
+### Fixed
+- False-positive path mismatch warning for admin-autostart tasks created
+  by pre-v0.1.11 builds. Those used `schtasks /tr "\"<exe>\""`, which
+  stores the path with surrounding quotes inside the task's `<Command>`
+  XML element. The new COM-based registrar does not quote the path,
+  so a legacy task showed up as `"E:\…\Sidearm.exe"` while the running
+  process reported `E:\…\Sidearm.exe` — visibly identical but
+  string-unequal. `extract_command_from_xml` now strips wrapping quotes.
+
 ## [0.1.11] — 2026-05-15
 
 ### Changed

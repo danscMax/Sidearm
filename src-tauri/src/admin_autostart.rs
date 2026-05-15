@@ -148,7 +148,11 @@ fn extract_command_from_xml(xml: &str) -> Option<String> {
     let start = xml.find("<Command>")?;
     let after = &xml[start + "<Command>".len()..];
     let end = after.find("</Command>")?;
-    Some(after[..end].trim().to_string())
+    // schtasks-registered tasks (pre-v0.1.11) wrapped the path in quotes
+    // inside the <Command> element to handle spaces; the COM API does not.
+    // Strip surrounding quotes so path comparison works regardless of which
+    // version registered the task.
+    Some(after[..end].trim().trim_matches('"').to_string())
 }
 
 #[cfg(target_os = "windows")]
@@ -337,6 +341,18 @@ mod tests {
         assert_eq!(
             extract_command_from_xml(xml).as_deref(),
             Some(r#"C:\Program Files\Sidearm\Sidearm.exe"#)
+        );
+    }
+
+    #[test]
+    fn strips_surrounding_quotes_from_legacy_schtasks_path() {
+        // Tasks registered by pre-v0.1.11 via schtasks /tr "\"...\"" store
+        // the quoted path inside <Command>.  We must compare against the
+        // unquoted current exe path, so trim the wrapping quotes.
+        let xml = r#"<Exec><Command>"E:\Scripts\Sidearm-Portable\Sidearm.exe"</Command></Exec>"#;
+        assert_eq!(
+            extract_command_from_xml(xml).as_deref(),
+            Some(r#"E:\Scripts\Sidearm-Portable\Sidearm.exe"#)
         );
     }
 

@@ -1,7 +1,9 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { RuntimeStateSummary } from "../lib/runtime";
 import type { ViewState } from "../lib/constants";
 import { formatTimestamp, labelForRuntimeStatus } from "../lib/labels";
+import { isRunningAsAdmin, relaunchAsAdmin } from "../lib/backend";
 import { Fact } from "./shared";
 
 export interface RuntimePanelProps {
@@ -22,6 +24,35 @@ export function RuntimePanel({
   handleRehookCapture,
 }: RuntimePanelProps) {
   const { t } = useTranslation();
+  // null = unknown (initial), false = standard user, true = admin
+  const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
+  const [relaunchError, setRelaunchError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    isRunningAsAdmin()
+      .then((v) => {
+        if (!cancelled) setIsAdmin(v);
+      })
+      .catch(() => {
+        if (!cancelled) setIsAdmin(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleRelaunchAsAdmin() {
+    setRelaunchError(null);
+    try {
+      await relaunchAsAdmin();
+      // On success the process exits before this point.
+    } catch (e) {
+      const msg = e && typeof e === "object" && "message" in e ? String((e as { message: unknown }).message) : String(e);
+      setRelaunchError(msg);
+    }
+  }
+
   return (
     <section className="panel">
       <p className="panel__eyebrow">{t("runtime.panelTitle")}</p>
@@ -105,7 +136,35 @@ export function RuntimePanel({
           label={t("runtime.lastReload")}
           value={formatTimestamp(runtimeSummary.lastReloadAt)}
         />
+        <Fact
+          label="Привилегии"
+          value={isAdmin === null ? "..." : isAdmin ? "Администратор" : "Обычный пользователь"}
+        />
       </div>
+
+      {isAdmin === false && (
+        <div className="panel__warning" style={{ marginTop: 12 }}>
+          <p>
+            Sidearm запущен от обычного пользователя. Ввод не будет доходить до
+            окон с правами администратора (Диспетчер задач, regedit, диалоги UAC) —
+            Windows блокирует SendInput через UIPI.
+          </p>
+          <button
+            type="button"
+            className="action-button"
+            style={{ marginTop: 8 }}
+            onClick={() => void handleRelaunchAsAdmin()}
+            disabled={viewState === "loading" || viewState === "saving"}
+          >
+            Перезапустить от администратора
+          </button>
+          {relaunchError && (
+            <p className="panel__muted" style={{ marginTop: 8 }}>
+              {relaunchError}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

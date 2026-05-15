@@ -1062,6 +1062,88 @@ async fn get_log_directory(app: AppHandle) -> Result<String, CommandError> {
     Ok(log_dir.to_string_lossy().into_owned())
 }
 
+/// Whether the Sidearm process is itself running with elevated (administrator
+/// on Windows, root on Linux) privileges. The frontend uses this to decide
+/// whether to show the "Restart as administrator" affordance.
+#[tauri::command]
+async fn is_running_as_admin() -> Result<bool, CommandError> {
+    Ok(window_capture::is_current_process_elevated())
+}
+
+/// Re-launch Sidearm with administrator privileges and exit the current
+/// process. On Windows this goes through `ShellExecuteW` with verb `runas`,
+/// which triggers the UAC prompt. If the user cancels the prompt the new
+/// process never starts and we report the failure without exiting.
+///
+/// Why this matters: `SendInput` from a Medium-IL process is silently dropped
+/// by Windows UIPI when the foreground window is High-IL (Task Manager,
+/// regedit, UAC dialogs). Running elevated is the only way to inject input
+/// into those windows.
+#[tauri::command]
+async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
+    if window_capture::is_current_process_elevated() {
+        return Err(CommandError::new(
+            "already_elevated",
+            "Sidearm уже запущен с правами администратора.",
+            None,
+        ));
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        let exe = std::env::current_exe()
+            .map_err(|e| CommandError::internal(format!("current_exe failed: {e}")))?;
+        let exe_w: Vec<u16> = exe
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let verb_w: Vec<u16> = "runas\0".encode_utf16().collect();
+
+        // ShellExecuteW returns an HINSTANCE; values <= 32 indicate failure.
+        // SE_ERR_ACCESSDENIED (5) is the code we get when the user cancels UAC.
+        let result = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb_w.as_ptr(),
+                exe_w.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        };
+        let code = result as isize;
+        if code <= 32 {
+            let message = if code == 5 {
+                "Запуск от администратора отменён в окне UAC."
+            } else {
+                "Не удалось перезапустить от администратора."
+            };
+            return Err(CommandError::new("relaunch_cancelled", message, None));
+        }
+
+        // New elevated process launched successfully — release modifiers and
+        // exit the current one. The new process has its own keyboard hook.
+        let _ = std::panic::catch_unwind(input_synthesis::release_all_modifiers);
+        app.exit(0);
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = app;
+        Err(CommandError::new(
+            "unsupported_platform",
+            "Перезапуск от администратора поддерживается только в Windows.",
+            None,
+        ))
+    }
+}
+
 #[tauri::command]
 async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
     let log_dir = resolve_log_dir(&app);
@@ -1944,14 +2026,38 @@ pub fn run() {
             );
 
             let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Слушать мышь", true, None::<&str>)?;
-            let tray_menu = Menu::with_items(
-                app,
-                &[
-                    &toggle_item,
-                    &PredefinedMenuItem::separator(app)?,
-                    &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
-                ],
-            )?;
+            let is_elevated = window_capture::is_current_process_elevated();
+            // Build the tray menu. The "Restart as administrator" entry is
+            // shown only when Sidearm itself is non-elevated — that's the
+            // case where UIPI blocks SendInput into elevated foreground
+            // windows (Task Manager, regedit, UAC dialogs).
+            let tray_menu = if is_elevated {
+                Menu::with_items(
+                    app,
+                    &[
+                        &toggle_item,
+                        &PredefinedMenuItem::separator(app)?,
+                        &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
+                    ],
+                )?
+            } else {
+                Menu::with_items(
+                    app,
+                    &[
+                        &toggle_item,
+                        &PredefinedMenuItem::separator(app)?,
+                        &MenuItem::with_id(
+                            app,
+                            "relaunch_as_admin",
+                            "Перезапустить от администратора",
+                            true,
+                            None::<&str>,
+                        )?,
+                        &PredefinedMenuItem::separator(app)?,
+                        &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
+                    ],
+                )?
+            };
 
             // Store the toggle menu item handle so we can update its text
             let toggle_item_handle = toggle_item.clone();
@@ -2037,6 +2143,14 @@ pub fn run() {
                         });
                     }
                     "quit" => app.exit(0),
+                    "relaunch_as_admin" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            if let Err(e) = relaunch_as_admin(app).await {
+                                log::warn!("[tray] relaunch_as_admin failed: {}", e.message);
+                            }
+                        });
+                    }
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
@@ -2119,6 +2233,8 @@ pub fn run() {
             get_debug_log,
             get_log_directory,
             open_log_directory,
+            is_running_as_admin,
+            relaunch_as_admin,
             capture_active_window,
             list_running_processes,
             list_bundled_presets,

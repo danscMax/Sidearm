@@ -144,6 +144,20 @@ export async function getDebugLog(): Promise<DebugLogEntry[]> {
   return invoke<DebugLogEntry[]>("get_debug_log");
 }
 
+export async function isRunningAsAdmin(): Promise<boolean> {
+  return invoke<boolean>("is_running_as_admin");
+}
+
+/**
+ * Re-launch Sidearm with administrator privileges (UAC prompt) and exit the
+ * current process.  Required to inject input into elevated foreground windows
+ * (Task Manager, regedit, UAC dialogs) — Windows UIPI silently blocks
+ * `SendInput` from a Medium-IL process to a High-IL one.
+ */
+export async function relaunchAsAdmin(): Promise<void> {
+  return invoke<void>("relaunch_as_admin");
+}
+
 export async function getLogDirectory(): Promise<string> {
   return invoke<string>("get_log_directory");
 }

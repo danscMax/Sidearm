@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] — 2026-05-15
+
+### Added
+- "Перезапустить от администратора" / "Restart as administrator" in the tray
+  menu and in `RuntimePanel`. Triggers a UAC prompt and re-launches Sidearm
+  elevated so `SendInput` reaches High-IL foreground windows (Task Manager,
+  regedit, UAC dialogs) — Windows UIPI blocks input from a Medium-IL process
+  to a High-IL one.
+- `is_running_as_admin` / `relaunch_as_admin` Tauri commands.
+
 ## [0.1.6] — 2026-05-15
 
 ### Fixed

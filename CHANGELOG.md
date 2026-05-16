@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14] — 2026-05-16
+
+### Fixed
+- Portable mode is now actually portable for WebView2 state.  Previously the
+  WebView2 user-data folder (cookies, IndexedDB, service workers — ~111 MB
+  per machine) lived at the default `%LOCALAPPDATA%\com.sidearm.desktop\
+  EBWebView`, surviving deletion of the portable folder.  Now lives in
+  `./data/EBWebView/` next to the exe when the portable marker is present.
+  Implementation: `WEBVIEW2_USER_DATA_FOLDER` env var is set before
+  `tauri::Builder` initialises.
+- Roaming-mode logs orphaned by previous non-portable runs (107 MB on the
+  audit machine) are now swept by the same retention policy.  When portable
+  mode is active, `log_cleanup::sweep` runs a second pass against
+  `%LOCALAPPDATA%\com.sidearm.desktop\logs\` to drain anything stranded
+  there before the user switched to portable.
+
+### Removed
+- Pre-rebrand orphan directories (`com.nagaworkflowstudio.app/.desktop` in
+  both `%APPDATA%` and `%LOCALAPPDATA%`) are now deleted on startup.  On the
+  audit machine these held ~274 MB of dead data from the era when the
+  project was called "Naga Workflow Studio".
+
+### Added
+- `build_portable.ps1 -CleanCargo` switch: runs `cargo clean -p sidearm`
+  before the build.  Useful periodically — `target/release/` accumulates
+  dep build artefacts across releases (4.2 GB after a dozen rapid releases
+  in this session).
+
 ## [0.1.13] — 2026-05-15
 
 ### Fixed

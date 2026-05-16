@@ -11,6 +11,11 @@
 //! 1. Delete any log older than `max_age_days`.
 //! 2. If more than `max_files` remain, delete the oldest until at most
 //!    `max_files` are left.
+//!
+//! Orphan sweeps: when running in portable mode, the previous runs of Sidearm
+//! that happened in roaming mode left logs accumulating in `%LOCALAPPDATA%\
+//! com.sidearm.desktop\logs\`.  `sweep_orphan_log_dir` handles that case by
+//! running the same retention against an unrelated directory.
 
 use std::{
     fs,

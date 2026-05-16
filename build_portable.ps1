@@ -10,13 +10,20 @@
 #   .\build_portable.ps1                - Full build
 #   .\build_portable.ps1 -SkipBuild     - Skip cargo build, just assemble
 #   .\build_portable.ps1 -Verify        - Verify existing build only
-#   .\build_portable.ps1 -Clean         - Clean build artifacts
+#   .\build_portable.ps1 -Clean         - Clean Sidearm-Portable output dir
+#   .\build_portable.ps1 -CleanCargo    - Run `cargo clean -p sidearm` before
+#                                         building. target/release accumulates
+#                                         dep artefacts across releases (4+ GB
+#                                         after a dozen builds); use this when
+#                                         that bloat starts to matter. Adds
+#                                         ~1–2 min to the build.
 #
 # Output: ..\Sidearm-Portable\ folder ready for distribution
 # ============================================================================
 
 param(
     [switch]$Clean,
+    [switch]$CleanCargo,
     [switch]$Verify,
     [switch]$SkipBuild
 )
@@ -217,6 +224,15 @@ if (-not $SkipBuild) {
     Write-Host ""
 
     $script:buildStartTime = Get-Date
+
+    if ($CleanCargo) {
+        Write-Host "    $([char]0x25B6) cargo clean -p sidearm (-CleanCargo requested)..." -ForegroundColor White
+        Set-Location -LiteralPath $TAURI_DIR
+        & cargo clean -p sidearm 2>&1 | Out-Null
+        Set-Location -LiteralPath $PROJECT_ROOT
+        Write-Ok "Cargo artefacts for sidearm cleaned"
+        Write-Host ""
+    }
 
     $oldEAP = $ErrorActionPreference
     $ErrorActionPreference = 'SilentlyContinue'

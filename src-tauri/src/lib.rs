@@ -22,7 +22,7 @@ mod window_capture;
 
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -1832,6 +1832,54 @@ fn dirs_fallback_roaming() -> Option<PathBuf> {
     std::env::var("APPDATA").ok().map(PathBuf::from)
 }
 
+/// Get %LOCALAPPDATA% (where Tauri puts the default log dir for our app).
+fn dirs_fallback_local() -> Option<PathBuf> {
+    std::env::var("LOCALAPPDATA").ok().map(PathBuf::from)
+}
+
+/// The log directory Sidearm uses when running in roaming (non-portable) mode.
+/// Equivalent to what `paths::AppPaths::resolve()` would return for that mode;
+/// we recompute it here so portable runs can sweep any orphan logs left in
+/// the standard location by previous non-portable invocations.
+fn legacy_local_app_data_log_dir() -> Option<PathBuf> {
+    dirs_fallback_local().map(|p| p.join("com.sidearm.desktop").join("logs"))
+}
+
+/// Delete the pre-rebrand `com.nagaworkflowstudio.*` directories.  Returns
+/// total bytes freed (best-effort metric; not reported on failure).
+fn cleanup_pre_rebrand_orphans() -> u64 {
+    const LEGACY_IDENTIFIERS: &[&str] = &[
+        "com.nagaworkflowstudio.app",
+        "com.nagaworkflowstudio.desktop",
+    ];
+    let mut total_bytes = 0u64;
+    for base in [dirs_fallback_local(), dirs_fallback_roaming()].into_iter().flatten() {
+        for id in LEGACY_IDENTIFIERS {
+            let path = base.join(id);
+            if path.is_dir() {
+                total_bytes += dir_size_best_effort(&path);
+                let _ = fs::remove_dir_all(&path);
+            }
+        }
+    }
+    total_bytes
+}
+
+fn dir_size_best_effort(dir: &Path) -> u64 {
+    let mut total = 0u64;
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                total += dir_size_best_effort(&path);
+            } else if let Ok(meta) = entry.metadata() {
+                total += meta.len();
+            }
+        }
+    }
+    total
+}
+
 /// Check for a crash sentinel from the previous run and log it, then create
 /// a new sentinel. The sentinel is deleted on clean shutdown. If it exists at
 /// startup, the previous session crashed without a clean exit.
@@ -1938,6 +1986,42 @@ pub fn run() {
     let (deleted, kept) =
         log_cleanup::sweep(&log_target_path, LOG_RETENTION_DAYS, LOG_RETENTION_MAX_FILES);
 
+    // Orphan sweep: when running in portable mode, also sweep any logs left
+    // behind by previous roaming-mode runs in %LOCALAPPDATA%\com.sidearm.desktop\logs.
+    // Symmetric: a switch back to roaming-only would similarly orphan
+    // ./data/logs, but in practice the portable folder gets deleted manually.
+    let mut orphan_deleted = 0;
+    if app_paths.mode == paths::PathMode::Portable {
+        if let Some(roaming_log_dir) = legacy_local_app_data_log_dir() {
+            if roaming_log_dir.is_dir() && roaming_log_dir != log_target_path {
+                let (d, _) = log_cleanup::sweep(
+                    &roaming_log_dir,
+                    LOG_RETENTION_DAYS,
+                    LOG_RETENTION_MAX_FILES,
+                );
+                orphan_deleted = d;
+            }
+        }
+    }
+
+    // True portable: redirect WebView2 user-data folder into ./data/EBWebView
+    // instead of the default %LOCALAPPDATA%\com.sidearm.desktop\EBWebView.
+    // Without this, "portable" cookies/IndexedDB/service workers stay on the
+    // host machine and survive removal of the portable folder.  The env var
+    // is read by webview2-com when the WebView2 environment is created.
+    if app_paths.mode == paths::PathMode::Portable {
+        let webview_dir = app_paths.config_dir.join("EBWebView");
+        let _ = std::fs::create_dir_all(&webview_dir);
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir);
+    }
+
+    // Best-effort removal of pre-rebrand orphan directories
+    // (com.nagaworkflowstudio.app / .desktop) from %APPDATA% and
+    // %LOCALAPPDATA%.  Done unconditionally — by v0.1.14 the rebrand is two
+    // years old and any user still on a Naga-era install would have already
+    // run a Sidearm release that copied their config over.
+    let legacy_freed = cleanup_pre_rebrand_orphans();
+
     // Push-based debug log: RuntimeStore::push_log sends each new entry on
     // `log_tx`; a worker thread re-emits it as a single `debug_log_appended`
     // tauri event. Replaces the old poll-storm pattern where every capture
@@ -1982,6 +2066,15 @@ pub fn run() {
                 "[log-retention] sweep: deleted {deleted}, kept {kept} \
                  (max {LOG_RETENTION_DAYS}d / {LOG_RETENTION_MAX_FILES} files)"
             );
+            if orphan_deleted > 0 {
+                log::info!("[log-retention] orphan sweep (roaming logs): deleted {orphan_deleted}");
+            }
+            if legacy_freed > 0 {
+                log::info!(
+                    "[system] Removed pre-rebrand orphans (com.nagaworkflowstudio.*): {} MB freed",
+                    legacy_freed / 1_048_576
+                );
+            }
 
             // Drain the push-based debug-log channel into tauri events on
             // a dedicated thread. recv() blocks until a sender is available,

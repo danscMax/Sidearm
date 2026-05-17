@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.15] — 2026-05-17
+
+### Fixed
+- **Critical: runaway disk + memory leak** that filled 230 GB across 117 000
+  log files and 16 GB of RAM in a few hours. Root cause was a feedback loop
+  introduced by the v0.1.6 push-based debug log: when the webview window
+  closed unexpectedly, `app.emit()` for the `debug_log_appended` event
+  triggered an `HRESULT(0x8007139F)` error inside `tauri_runtime_wry`,
+  which `log::error!()`'d it. tauri-plugin-log captured that error and
+  wrote it to the log file; the runtime store also pushed it into the
+  bridge channel, which tried to emit it, which errored again — snowballing
+  at ~5 000 entries/s.
+
+  Three defenses, applied as belt-and-suspenders:
+  1. **tauri-plugin-log filter** drops `tauri_runtime_wry` Error-level
+     messages. Those messages were the engine of the loop and carry no
+     actionable info.
+  2. **Bridge thread skips `emit()` when no webview is registered**
+     (`app.webview_windows().is_empty()`). Without a listener there's
+     nothing to emit to anyway.
+  3. **Bounded channel via pending counter**: `push_log` skips the send
+     when in-flight entries exceed 1024 (~256 KB max channel memory).
+     The bridge thread decrements as it drains. If the bridge stalls,
+     drops kick in immediately — no unbounded growth possible.
+
 ## [0.1.14] — 2026-05-16
 
 ### Fixed

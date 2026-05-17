@@ -1,9 +1,16 @@
 use serde::Serialize;
 use std::{
     collections::VecDeque,
-    sync::mpsc::Sender,
+    sync::{atomic::{AtomicUsize, Ordering}, mpsc::Sender, Arc},
     time::{SystemTime, UNIX_EPOCH},
 };
+
+/// Hard cap on in-flight `debug_log_appended` entries before push_log starts
+/// dropping silently. Sized to bound channel memory at ~256 KB worst case
+/// (1024 entries × ~256 bytes/entry).  In healthy operation the bridge
+/// drains in milliseconds; the cap only kicks in when the bridge stalls
+/// (e.g. webview closed and emit() is errorring), preventing OOM.
+const LOG_SEND_PENDING_CAP: usize = 1024;
 
 pub const EVENT_RUNTIME_STARTED: &str = "runtime_started";
 pub const EVENT_RUNTIME_STOPPED: &str = "runtime_stopped";
@@ -71,6 +78,10 @@ pub struct RuntimeStore {
     /// `debug_log_appended` Tauri event. This avoids the previous poll-storm
     /// where each capture event made the frontend re-fetch all 1000 entries.
     log_sender: Option<Sender<DebugLogEntry>>,
+    /// Counter of in-flight channel entries. push_log skips the send when
+    /// this exceeds LOG_SEND_PENDING_CAP. Shared with the bridge thread,
+    /// which decrements on each successful drain.
+    log_send_pending: Option<Arc<AtomicUsize>>,
 }
 
 impl Default for RuntimeStore {
@@ -86,6 +97,7 @@ impl Default for RuntimeStore {
             logs: VecDeque::new(),
             next_log_id: 1,
             log_sender: None,
+            log_send_pending: None,
         }
     }
 }
@@ -94,8 +106,15 @@ impl RuntimeStore {
     /// Attach a sender that receives each newly-appended log entry. Intended
     /// to be called once at startup with the sender side of a channel whose
     /// receiver thread re-emits the entries as `debug_log_appended` events.
-    pub fn set_log_sender(&mut self, sender: Sender<DebugLogEntry>) {
+    /// The pending counter is shared with the bridge thread to enforce the
+    /// in-flight cap.
+    pub fn set_log_sender(
+        &mut self,
+        sender: Sender<DebugLogEntry>,
+        pending: Arc<AtomicUsize>,
+    ) {
         self.log_sender = Some(sender);
+        self.log_send_pending = Some(pending);
     }
 
     pub fn summary(&self) -> RuntimeStateSummary {
@@ -245,8 +264,15 @@ impl RuntimeStore {
         };
         self.next_log_id += 1;
 
-        if let Some(sender) = &self.log_sender {
-            let _ = sender.send(entry.clone());
+        if let (Some(sender), Some(pending)) = (&self.log_sender, &self.log_send_pending) {
+            // Bounded fan-out: skip when the bridge thread can't keep up
+            // (e.g. webview unresponsive, emit() spinning on errors).
+            // Dropping a few log entries is far better than OOM-ing.
+            if pending.load(Ordering::Relaxed) < LOG_SEND_PENDING_CAP
+                && sender.send(entry.clone()).is_ok()
+            {
+                pending.fetch_add(1, Ordering::Relaxed);
+            }
         }
         self.logs.push_back(entry);
     }

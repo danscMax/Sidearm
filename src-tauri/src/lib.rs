@@ -2026,13 +2026,21 @@ pub fn run() {
     // `log_tx`; a worker thread re-emits it as a single `debug_log_appended`
     // tauri event. Replaces the old poll-storm pattern where every capture
     // event made the frontend re-fetch all 1000 entries.
+    //
+    // SAFETY CAP: an unbounded mpsc would grow without limit when the bridge
+    // thread can't drain it as fast as push_log produces. v0.1.14 exhibited
+    // this: WebView2 errors triggered by emit() got captured by tauri-plugin-
+    // log and snowballed into a 230 GB disk meltdown. `log_send_pending`
+    // tracks in-flight entries; push_log drops silently when over the cap.
     let (log_tx, log_rx) = std::sync::mpsc::channel::<DebugLogEntry>();
+    let log_send_pending = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let log_send_pending_for_bridge = log_send_pending.clone();
     let runtime_store = {
         let mut store = RuntimeStore::default();
-        store.set_log_sender(log_tx);
+        store.set_log_sender(log_tx, log_send_pending);
         Arc::new(Mutex::new(store))
     };
-    let log_rx_for_setup = Mutex::new(Some(log_rx));
+    let log_rx_for_setup = Mutex::new(Some((log_rx, log_send_pending_for_bridge)));
 
     tauri::Builder::default()
         .plugin(
@@ -2048,6 +2056,17 @@ pub fn run() {
                 .rotation_strategy(RotationStrategy::KeepAll)
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .level(log::LevelFilter::Info)
+                // Drop tauri_runtime_wry Error spam. WebView2 emits a generic
+                // "group or resource not in correct state" error (HRESULT
+                // 0x8007139F) whenever app.emit() is called while the webview
+                // is mid-tear-down. In v0.1.14 this produced 53 MB/s of disk
+                // writes and 16 GB of RAM growth via the push_log channel.
+                // The errors carry no actionable info — silencing them
+                // doesn't hide real bugs.
+                .filter(|metadata| {
+                    !(metadata.target() == "tauri_runtime_wry"
+                        && metadata.level() == log::Level::Error)
+                })
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
@@ -2079,12 +2098,25 @@ pub fn run() {
             // Drain the push-based debug-log channel into tauri events on
             // a dedicated thread. recv() blocks until a sender is available,
             // so this thread is idle when no logs are being appended.
-            if let Some(rx) = log_rx_for_setup.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            //
+            // CRITICAL: skip emit() when no webview window is registered.
+            // Without this guard, a closed/dying webview makes emit() return
+            // an HRESULT(0x8007139F) error which tauri_runtime_wry then
+            // log::error!()'s — captured by tauri-plugin-log → written to
+            // disk → push_log fires another channel entry → snowball. This
+            // exact loop caused v0.1.14's 230 GB disk meltdown (53 MB/s).
+            if let Some((rx, pending)) =
+                log_rx_for_setup.lock().unwrap_or_else(|e| e.into_inner()).take()
+            {
                 let app_handle = app.handle().clone();
                 std::thread::Builder::new()
                     .name("debug-log-bridge".into())
                     .spawn(move || {
                         while let Ok(entry) = rx.recv() {
+                            pending.fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                            if app_handle.webview_windows().is_empty() {
+                                continue;
+                            }
                             let _ = app_handle.emit(EVENT_DEBUG_LOG_APPENDED, &entry);
                         }
                     })

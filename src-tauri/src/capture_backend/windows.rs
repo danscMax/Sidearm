@@ -779,7 +779,16 @@ impl CaptureBackendHandle {
         app_name: String,
     ) -> Result<Self, String> {
         let registrations = build_hotkey_registrations(&config)?;
-        let (event_tx, event_rx) = mpsc::channel::<EncodedKeyEvent>();
+        // Bounded keyboard event channel. Producer (LL hook thread + helper
+        // subprocess stdout reader) writes from the hot path; consumer
+        // (worker_thread) can be stalled by a slow executor (e.g. SendInput
+        // blocked on a hung target).  An unbounded channel here would let
+        // events accumulate to OOM during such a stall — same failure mode
+        // as the v0.1.15 log_tx incident.  10 000 events ≈ 1–2 MB max,
+        // covering ~100 ms of typing on the fastest mechanical keyboards.
+        const CAPTURE_EVENT_CAPACITY: usize = 10_000;
+        let (event_tx, event_rx) =
+            mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
         let helper_event_tx = event_tx.clone();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
 
@@ -2076,7 +2085,7 @@ fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) -> std::io::Result
 /// Returns None if there are no modifier combos or if spawning fails (non-fatal).
 fn spawn_capture_helper(
     registrations: &[RegisteredHotkey],
-    event_tx: mpsc::Sender<EncodedKeyEvent>,
+    event_tx: mpsc::SyncSender<EncodedKeyEvent>,
     modifier_stale_gc_ms: Option<u64>,
     replayed_modifier_force_release_ms: Option<u64>,
 ) -> Option<HelperHandle> {
@@ -2193,7 +2202,10 @@ fn spawn_capture_helper(
                 } else {
                     (false, false, trimmed.to_owned())
                 };
-            let _ = event_tx.send(EncodedKeyEvent {
+            // try_send instead of send: when the bounded channel is full
+            // (consumer stalled), drop the event rather than block this hot
+            // path.  See CAPTURE_EVENT_CAPACITY for rationale.
+            let _ = event_tx.try_send(EncodedKeyEvent {
                 encoded_key,
                 backend: BACKEND_LL_HOOK.into(),
                 received_at: runtime::timestamp_millis(),
@@ -2216,7 +2228,7 @@ fn spawn_capture_helper(
 
 fn run_hotkey_message_loop(
     registrations: Vec<RegisteredHotkey>,
-    event_tx: mpsc::Sender<EncodedKeyEvent>,
+    event_tx: mpsc::SyncSender<EncodedKeyEvent>,
     ready_tx: mpsc::Sender<Result<u32, String>>,
 ) {
     use std::mem::MaybeUninit;
@@ -2289,7 +2301,7 @@ fn run_hotkey_message_loop(
             let index = (hotkey_id as usize).checked_sub(1);
             let registration = index.and_then(|i| registrations.get(i));
             if let Some(registration) = registration {
-                let _ = event_tx.send(EncodedKeyEvent {
+                let _ = event_tx.try_send(EncodedKeyEvent {
                     encoded_key: registration.encoded_key.clone(),
                     backend: CAPTURE_BACKEND_NAME.into(),
                     received_at: runtime::timestamp_millis(),

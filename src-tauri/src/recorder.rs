@@ -6,6 +6,12 @@ use crate::config::SequenceStep;
 
 const MAX_STEP_DELAY_MS: u32 = 30_000;
 
+/// Hard cap on recorded steps.  The frontend enforces the same limit and shows
+/// a live count badge, but a Rust-side cap is a safety net: if the UI cap is
+/// bypassed or broken, a stuck recorder could otherwise grow `steps` until
+/// process OOM. Same defence-in-depth pattern as the v0.1.15 log channel cap.
+const MAX_RECORDED_STEPS: usize = 1000;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MacroRecording {
@@ -67,6 +73,8 @@ impl MacroRecorder {
     }
 
     /// Record a keystroke. The `key` is a formatted string like "Ctrl+C" or "F13".
+    /// Silently drops events once `MAX_RECORDED_STEPS` is reached so a runaway
+    /// recording can't grow unboundedly (defence-in-depth alongside the UI cap).
     pub fn record_keystroke(&mut self, key: String, now: u64) {
         if let Some(RecorderState::Recording {
             last_event_at,
@@ -74,6 +82,9 @@ impl MacroRecorder {
             ..
         }) = &mut self.state
         {
+            if steps.len() >= MAX_RECORDED_STEPS {
+                return;
+            }
             steps.push(RecordedEvent {
                 key,
                 timestamp: now,

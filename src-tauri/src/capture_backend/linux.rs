@@ -181,7 +181,10 @@ impl CaptureBackendHandle {
     ) -> Result<Self, String> {
         let stop_flag = Arc::new(AtomicBool::new(false));
 
-        let (event_tx, event_rx) = mpsc::channel::<EncodedKeyEvent>();
+        // Bounded keyboard event channel — see Windows backend for rationale.
+        const CAPTURE_EVENT_CAPACITY: usize = 10_000;
+        let (event_tx, event_rx) =
+            mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
 
         // --- Worker thread: processes EncodedKeyEvents (same pattern as Windows) ---
         let worker_app = app.clone();
@@ -274,7 +277,7 @@ impl CaptureBackendHandle {
 /// Finds Razer Naga devices, opens them, and reads key events in a loop.
 /// When F13-F24 are detected (with optional modifier tracking), sends
 /// EncodedKeyEvent through the channel.
-fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::Sender<EncodedKeyEvent>) {
+fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender<EncodedKeyEvent>) {
     let device_paths = find_razer_naga_devices();
 
     if device_paths.is_empty() {
@@ -418,9 +421,13 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::Sender<Enc
                 is_key_up: is_up,
             };
 
-            if event_tx.send(event).is_err() {
-                // Receiver dropped -- shutting down
-                break;
+            // try_send: drop on full bounded channel rather than block evdev reader.
+            // Distinguish between "queue full" (drop event, keep capturing) and
+            // "receiver dropped" (real shutdown, break the loop).
+            match event_tx.try_send(event) {
+                Ok(()) => {}
+                Err(std::sync::mpsc::TrySendError::Full(_)) => continue,
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
             }
         }
     }

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.16] — 2026-05-17
+
+### Changed
+Preventive sweep of the remaining unbounded-growth points found during the
+post-v0.1.15 audit — same failure pattern as v0.1.15 (hot-path producer +
+stallable consumer + no cap = OOM under the wrong conditions).
+
+- **Keyboard event channel** (`capture_backend::start`) switched from
+  `mpsc::channel` (unbounded) to `mpsc::sync_channel(10_000)` with
+  `try_send` at every producer call site (LL hook callback, WM_HOTKEY
+  handler, evdev reader). When the worker_thread stalls — e.g. the
+  executor is waiting on a hung SendInput against an unresponsive target —
+  events drop at the boundary instead of accumulating until OOM. 10 000
+  events ≈ 1–2 MB max, covering ~100 ms of typing on the fastest keyboards.
+- **MacroRecorder** gained a Rust-side `MAX_RECORDED_STEPS = 1000` cap
+  mirroring the existing frontend cap. Defence-in-depth: if the UI cap
+  ever fails or is bypassed, `record_keystroke` silently drops further
+  events instead of growing `Vec<RecordedEvent>` to OOM.
+
+No behavioural change for normal use; only failure modes covered.
+
 ## [0.1.15] — 2026-05-17
 
 ### Fixed

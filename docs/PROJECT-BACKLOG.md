@@ -1,26 +1,32 @@
 # Project Backlog
 
 - Project: `Sidearm`
-- Date: `2026-03-08`
+- Original: `2026-03-08`
+- Rebuilt: `2026-05-23`
+- Current version: `0.1.16`
 - Status: canonical backlog and execution source of truth
 
-## Purpose
+## Reconciliation note (2026-05-23)
 
-This file is the primary planning document for the project.
+This document was rebuilt after a ~2.5-month drift. The previous revision was
+dated `2026-03-08` and predated an entire development era: the rebrand to
+Sidearm, full i18n, a Linux backend, the M1–M5 milestone system, the
+modifier-leak/stuck-key reliability work, autostart, and the v0.1.6–v0.1.16
+disk/memory-leak fixes. None of that was reflected here, and the milestone
+roadmap (M1–M5) that actually drove April–May work was never persisted to any
+canonical document — it is reconstructed below so it is not lost again.
 
-Use it as the source of truth for:
-
-- what the project is trying to achieve
-- what is already complete
-- what is still open
-- what should be worked on next
-- how work is prioritized
-
-Secondary docs may summarize or expand on parts of this backlog, but they should not contradict it.
+Every status change in this rebuild was verified directly against the current
+source (not inferred from commit messages). Code citations use `file:line`.
+The raw evidence is recorded in the **Verification Log** at the end. One earlier
+assumption was actively disproved during verification (clipboard-paste was
+*not* removed — see WIN-002), which is why claims here are tied to lines.
 
 ## Product Goal
 
-Build a Windows desktop application for the Razer Naga V2 HyperSpeed that is easier to understand and faster to use than Razer Synapse for profile-aware mouse workflows.
+Build a desktop application for the Razer Naga V2 HyperSpeed (and similar
+multi-button mice) that is easier to understand and faster to use than Razer
+Synapse for profile-aware mouse workflows.
 
 The user should be able to:
 
@@ -30,64 +36,44 @@ The user should be able to:
 4. change the action quickly
 5. verify that the real hardware signal matches the intended mapping
 
-The product should not blindly copy Synapse.
+It should be: more focused, more understandable, more mouse-centric, more
+explicit about verification, and better at separating simple use from expert
+tools. It should not blindly copy Synapse.
 
-It should be:
-
-- more focused
-- more understandable
-- more mouse-centric
-- more explicit about verification
-- better at separating simple use from expert tools
+**Platform:** Windows is the primary, fully-featured target (autostart, UIPI
+handling, OSD via GDI). A Linux backend (evdev + arboard + active-win-pos-rs)
+exists behind a platform-abstraction layer — see `src-tauri/src/platform/`.
+Cross-platform parity is not a stated goal; Linux is best-effort.
 
 ## Current Snapshot
 
-### Completed foundation
+### Architecture (verified)
 
-- Tauri v2 + React + TypeScript + Rust app is implemented
-- config v2 storage, schema validation, semantic validation, atomic save, and backup are implemented
-- editor shell exists for:
-  - profiles
-  - layers
-  - controls
-  - bindings
-  - actions
-  - snippets
-  - app mappings
-  - encoder mappings
-- runtime exists for:
-  - start / reload / stop
-  - debug log
-  - active window capture
-  - resolution preview
-  - dry-run execution
-  - supported live execution
-  - verification workflow
+- Tauri v2 + React + TypeScript + Rust, in-process (see ADR 0002).
+- Config v2 storage with schema + semantic validation, atomic save, rotating
+  backups (see ADR 0003, `src-tauri/src/backup.rs`).
+- Platform abstraction layer: `src-tauri/src/platform/{windows,linux}/`
+  (window capture, elevation probe, input synthesis differ per OS).
+- Backend modules: `admin_autostart`, `backup`, `chord`, `clipboard`,
+  `config`, `exe_icon`, `executor`, `hotkeys`, `input_synthesis`,
+  `log_cleanup`, `paths`, `recorder`, `resolver`, `runtime`, `window_capture`.
+- Test coverage: **199 Rust `#[test]`/`#[tokio::test]` functions**, 13
+  TypeScript `*.test.ts(x)` files.
 
-### Current UI state
+### UI state
 
-- second-pass shell rewrite is implemented
-- the app now has modes:
-  - `Назначения`
-  - `Профили`
-  - `Проверка`
-  - `Эксперт`
-- the new shell now separates the main workflows more clearly:
-  - `Назначения` keeps the device surface and fast assignment editing
-  - `Профили` centers profile editing and app rules
-  - `Проверка` centers verification session, signal checks, and runtime state
-  - `Эксперт` contains heavy editing, snippets, diagnostics, and persistence
-- `Проверка` now includes an MVP verification session with step-by-step evidence capture and JSON export
-- the static UI is mostly Russian, but not fully normalized yet
-- duplication was reduced again, but not fully resolved
-- the thumb-grid view is more mouse-centric than before, but still not the final visual model
+- Mode-based shell: `Назначения`, `Профили`, `Проверка`, `Эксперт`.
+- Russian-first, mode-based, mouse-centric direction (i18n via react-i18next,
+  RU + EN).
+- Central mouse visualization: `MouseVisualization.tsx` +
+  `MouseVisualizationSvg.tsx` (SVG schematic now exists — see VIS-003).
 
 ### Main unresolved areas
 
-- final UX / visual design
-- real-device validation
-- Windows edge-case validation
-- product hardening and release hygiene
+- Windows edge-case validation against elevated / protected targets (manual).
+- Production code-signing (enables the UIPI-bypass path; see WIN-001).
+- Clipboard-paste restore validation across apps (see WIN-002).
+- Final original mouse illustration set (design call; see VIS-003).
 
 ## Working Rules
 
@@ -100,474 +86,251 @@ It should be:
 
 ### Status values
 
-- `todo`
-- `in_progress`
-- `blocked`
-- `done`
-- `deferred`
+- `todo`, `in_progress`, `blocked`, `done`, `deferred`, `obsolete`
 
-### Recommended execution order
+### Recommended execution order (current)
 
-1. finish second-pass redesign cleanup
-2. finalize Russian-first UX language
-3. improve mouse-centric visual model
-4. validate on the real device
-5. validate Windows edge cases
-6. harden packaging and repo hygiene
+1. WIN-002 — validate clipboard restore for long snippets (Office/terminals/browsers)
+2. WIN-003 — finish Windows protected-window validation + docs
+3. WIN-001 Phase 3 — production OV cert when distribution is in scope
+4. ACT-001 — automated live-injection E2E harness (optional, P3)
+5. VIS-003 — original illustration set (design-led, deferred)
 
-## Backlog
+(Done 2026-05-23: UI-CLEAN-001 — removed the no-op clipboardPaste selector + dead clipboard.rs.)
 
-### UX / IA
+## Open Backlog
 
-#### UX-001
+### WIN-001
 
-- Title: Finish Russian translation of static UI
+- Title: Behavior in elevated windows (UIPI)
 - Priority: `P1`
-- Status: `done`
-- Why it exists: mixed-language UI still hurts clarity and perceived quality
-- Dependencies: none
-- Target files:
-  - `src/App.tsx`
-- Acceptance criteria:
-  - all static section titles are Russian
-  - all static button labels are Russian
-  - all static helper text and empty states are Russian
-  - user data stored inside config may remain unchanged
+- Status: `done` (code) — residual is release-only (see below)
+- Why it existed: `SendInput` silently fails against High-IL targets (Task
+  Manager, regedit, admin CMD) because of Windows UIPI.
+- What shipped (verified):
+  - Real elevation probe — `platform/windows/window.rs:94-110`
+    (`OpenProcessToken(TOKEN_QUERY)` → `GetTokenInformation(TokenElevation)`;
+    `ERROR_ACCESS_DENIED` treated as elevated at `:100`, which is correct
+    because UIPI blocks token access exactly when it would block SendInput).
+  - Target-window detection wired end-to-end: `window.rs:30` foreground HWND →
+    `:67` `is_elevated` → struct field `window_capture.rs:29` → propagated
+    `:58/:116` → consumed `capture_backend/mod.rs:260` → Russian UIPI warning
+    `mod.rs:261-266, 426-427, 484-486`. **Not dead code.**
+  - Own-process detection + remediation: `window.rs:117` →
+    `is_running_as_admin` command `lib.rs:1070` → status + warning + relaunch
+    button `RuntimePanel.tsx:141-156`; tray "Restart as administrator" shown
+    only when non-elevated `lib.rs:2177-2199`; `relaunch_as_admin` `lib.rs:1106`.
+  - uiAccess-bypass infrastructure: dual manifest (`manifest.xml` uiAccess
+    false / `manifest-uiaccess.xml` uiAccess true) selected by `SIDEARM_UIACCESS`
+    env at `build.rs:14-25`; research in `docs/research/UIPI-BYPASS-RESEARCH.md`.
+- Residual (not code):
+  - Phase 3: production OV/EV code-signing + perMachine install so the
+    `uiAccess="true"` no-elevation path actually activates. Until then, the
+    user remediation is "Restart as administrator" (which works today).
+  - Manual confirmation against a live elevated target (e.g. Task Manager) if
+    not already done on hardware.
 
-#### UX-002
+### WIN-002
 
-- Title: Remove remaining internal-engineering jargon from user-facing sections
-- Priority: `P1`
-- Status: `done`
-- Why it exists: terms like `config`, `runtime`, `mapping`, `actionRef`, and similar internal wording still leak into the normal UI
-- Dependencies:
-  - `UX-001`
-- Target files:
-  - `src/App.tsx`
-  - `docs/UI-REDESIGN-TODO.md`
-- Acceptance criteria:
-  - primary UI paths use user language
-  - advanced-only technical wording is kept only where it adds real diagnostic value
-  - terminology is consistent across sections
-
-#### UX-003
-
-- Title: Reduce duplication between surface, control properties, verification, and preview
-- Priority: `P1`
-- Status: `done`
-- Why it exists: the same meaning is still shown in multiple places
-- Dependencies:
-  - `UX-001`
-  - `UX-002`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-- Acceptance criteria:
-  - the main surface shows only the minimum needed summary
-  - `Свойства кнопки` does not repeat the same data shown on the surface unless detail is truly added
-  - `Проверка` shows verification-specific data only
-  - `Проверка срабатывания` does not restate surface data unless needed for debugging
-
-#### UX-004
-
-- Title: Tighten the right-column hierarchy in `Назначения` mode
-- Priority: `P1`
-- Status: `done`
-- Why it exists: the right side still feels dense and visually flat
-- Dependencies:
-  - `UX-003`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-- Acceptance criteria:
-  - clear primary panel for the selected control
-  - secondary panels are visually quieter
-  - spacing and grouping are improved
-  - the mode feels understandable without reading every panel
-
-#### UX-005
-
-- Title: Make `Профили` mode truly profile-centered
-- Priority: `P1`
-- Status: `done`
-- Why it exists: `Профили` should not feel like a slightly modified surface screen
-- Dependencies:
-  - `UX-004`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-- Acceptance criteria:
-  - the main focus in `Профили` mode is profile management and app rules
-  - surface-centric panels are minimized or removed in this mode
-  - profile editing and app routing feel like one workflow
-
-#### UX-006
-
-- Title: Make `Проверка` mode verification-centered
-- Priority: `P1`
-- Status: `done`
-- Why it exists: verification should be a clean, focused workflow
-- Dependencies:
-  - `UX-003`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-- Acceptance criteria:
-  - `Проверка` mode focuses on:
-    - selected control
-    - expected signal
-    - observed signal
-    - runtime state
-    - verification actions
-  - non-verification editors are minimized or removed
-
-#### UX-007
-
-- Title: Make `Эксперт` mode the only home for heavy debug and advanced editing
-- Priority: `P1`
-- Status: `done`
-- Why it exists: advanced tools should not leak into simple workflows
-- Dependencies:
-  - `UX-004`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-- Acceptance criteria:
-  - debug log lives only in `Эксперт`
-  - persistence diagnostics live only in `Эксперт` or where justified
-  - heavy action details and snippet library are clearly advanced-oriented
-
-#### UX-008
-
-- Title: Replace weak free-form settings with stronger controls or better placement
-- Priority: `P2`
-- Status: `done`
-- Why it exists: settings like `Тема` are currently vague and not product-ready
-- Dependencies:
-  - `UX-005`
-- Target files:
-  - `src/App.tsx`
-- Acceptance criteria:
-  - either the setting is removed from the normal UI
-  - or it becomes a constrained, understandable control
-
-### Visual design
-
-#### VIS-001
-
-- Title: Reduce green noise and normalize visual emphasis
-- Priority: `P1`
-- Status: `done`
-- Why it exists: the interface still overuses green accents
-- Dependencies: none
-- Target files:
-  - `src/App.css`
-- Acceptance criteria:
-  - one clear primary accent remains
-  - neutral surfaces carry most of the UI
-  - badges and active states no longer compete with primary actions
-
-#### VIS-002
-
-- Title: Make the mouse the visual center of `Назначения` mode
-- Priority: `P1`
-- Status: `done`
-- Why it exists: the product should feel built around the real device
-- Dependencies:
-  - `UX-004`
-  - `VIS-001`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-- Acceptance criteria:
-  - the central device visualization dominates the workflow
-  - selected control is visually obvious
-  - the user can understand the current control without reading multiple panels
-
-#### VIS-003
-
-- Title: Design an original mouse illustration set
-- Priority: `P2`
-- Status: `deferred`
-- Why it exists: current thumb scene is still a transitional solution
-- Dependencies:
-  - `VIS-002`
-- Target files:
-  - `src/App.tsx`
-  - `src/App.css`
-  - optional future assets directory
-- Acceptance criteria:
-  - original mouse illustration or schematic exists
-  - side keypad, top controls, wheel, and Hypershift are represented clearly
-  - the design uses Razer geometry as reference, not as a direct copy
-
-#### VIS-004
-
-- Title: Normalize panel density, spacing, and vertical rhythm
-- Priority: `P2`
-- Status: `done`
-- Why it exists: spacing still varies across heavy editor sections
-- Dependencies:
-  - `VIS-001`
-- Target files:
-  - `src/App.css`
-- Acceptance criteria:
-  - panel spacing is consistent
-  - form spacing is consistent
-  - the right column no longer feels visually compressed
-
-### Runtime and verification
-
-#### VERIFY-001
-
-- Title: Validate top-panel controls on the real device
-- Priority: `P1`
-- Status: `done`
-- Why it exists: top-panel control behavior is not fully trusted yet
-- Dependencies:
-  - a physical mouse session
-- Target files:
-  - `docs/DEVICE-VERIFICATION-MATRIX.md`
-  - `docs/DEVICE-CATALOG.md`
-  - seed config/status docs as needed
-- Acceptance criteria:
-  - top-panel controls are tested on hardware
-  - statuses are updated to match observed reality
-  - disagreements with the current seed are documented
-
-#### VERIFY-002
-
-- Title: Validate wheel controls on the real device
-- Priority: `P1`
-- Status: `done`
-- Why it exists: wheel remapping confidence is still incomplete
-- Dependencies:
-  - a physical mouse session
-- Target files:
-  - `docs/DEVICE-VERIFICATION-MATRIX.md`
-  - `docs/DEVICE-CATALOG.md`
-- Acceptance criteria:
-  - wheel up/down/click/left/right behavior is documented from live observation
-  - seed statuses and notes are updated
-
-#### VERIFY-003
-
-- Title: Validate Hypershift edge cases on the real device
-- Priority: `P1`
-- Status: `done`
-- Why it exists: Hypershift is one of the most important ambiguity zones
-- Dependencies:
-  - a physical mouse session
-- Target files:
-  - `docs/DEVICE-VERIFICATION-MATRIX.md`
-  - `docs/DEVICE-CATALOG.md`
-- Acceptance criteria:
-  - Hypershift button behavior is documented from live testing
-  - any ambiguous control interactions are recorded
-
-#### VERIFY-004
-
-- Title: Confirm final policy for reserved and risky controls
-- Priority: `P2`
-- Status: `done`
-- Why it exists: some controls may need to remain reserved for safety
-- Dependencies:
-  - `VERIFY-001`
-  - `VERIFY-002`
-  - `VERIFY-003`
-- Target files:
-  - `docs/DEVICE-CATALOG.md`
-  - `docs/CONFIG-SCHEMA-V2.md`
-  - seed config/status docs as needed
-- Acceptance criteria:
-  - each risky control has a clear policy
-  - reserved controls are documented as intentionally reserved, not “unknown”
-
-#### VERIFY-005
-
-- Title: Improve wording of verification UX based on live hardware evidence
-- Priority: `P2`
-- Status: `done`
-- Why it exists: real-device testing should refine how the UI talks about confidence and evidence
-- Dependencies:
-  - `VERIFY-001`
-  - `VERIFY-002`
-  - `VERIFY-003`
-- Target files:
-  - `src/App.tsx`
-  - `docs/RUNTIME-PIPELINE.md`
-  - `docs/DEVICE-VERIFICATION-MATRIX.md`
-- Acceptance criteria:
-  - verification language matches real operational limits
-  - user guidance is based on actual observed behavior, not only assumptions
-
-### Windows/platform hardening
-
-#### WIN-001
-
-- Title: Validate behavior in elevated windows
-- Priority: `P1`
-- Status: `todo`
-- Why it exists: UIPI may block input synthesis in higher-privilege targets
-- Dependencies:
-  - working runtime
-- Target files:
-  - `docs/RUNTIME-PIPELINE.md`
-  - `docs/OPEN-ISSUES.md`
-- Acceptance criteria:
-  - elevated-window behavior is tested
-  - limitations are documented clearly
-
-#### WIN-002
-
-- Title: Validate clipboard restore behavior across target applications
+- Title: Validate clipboard-paste restore across target applications
 - Priority: `P2`
 - Status: `todo`
-- Why it exists: clipboard-preserving paste may still have edge cases
-- Dependencies:
-  - `WIN-001`
-- Target files:
-  - `docs/RUNTIME-PIPELINE.md`
-  - `docs/OPEN-ISSUES.md`
-- Acceptance criteria:
-  - expected clipboard behavior is documented
-  - failure modes are documented if they exist
+- Why it exists: for text snippets longer than 100 chars, the live execution
+  path uses a clipboard paste (save CF_UNICODETEXT → Ctrl+V → restore), which
+  can fail or corrupt the clipboard in some target apps.
+- **Where it actually lives (verified):** NOT the user-facing paste-mode option
+  (that was a no-op, removed in UI-CLEAN-001), but inside `send_text`:
+  - `send_text` (`input_synthesis.rs:399`) → `send_text_with_delay(text, 0)`.
+  - `input_synthesis.rs:344` `CLIPBOARD_PASTE_THRESHOLD = 100`; `:358-377`
+    `send_text_with_delay` calls `paste_via_clipboard(text)` for text over the
+    threshold, falling back to per-char `KEYEVENTF_UNICODE` on failure.
+  - `paste_via_clipboard` (`input_synthesis.rs:170` Win32 / `:298` Linux) saves
+    the original, stages text, injects Ctrl+V, restores — with a
+    `GetClipboardSequenceNumber` race-guard (`:286`) that skips restore if the
+    clipboard changed meanwhile. This is the *lightweight* path; the heavy
+    COM/OLE `clipboard.rs` was dead and is deleted (UI-CLEAN-001).
+- Note: corrected during UI-CLEAN-001. An earlier pass wrongly marked this
+  `obsolete` ("clipboard never runs in prod") — that was true only of the
+  removed option/module, not of `send_text`'s length-based path. Clipboard
+  paste IS reachable in production for long snippets; the trigger is text
+  length, not a user setting.
+- Dependencies: WIN-001 (done)
+- Acceptance: clipboard restore behavior documented across representative apps
+  (Office, terminals, browsers); failure/abort modes recorded.
 
-#### WIN-003
+### UI-CLEAN-001
+
+- Title: Remove the no-op clipboardPaste selector from the UI; delete dead clipboard.rs
+- Priority: `P3`
+- Status: `done` (2026-05-23)
+- Why it existed: `clipboardPaste` was a no-op user choice — the executor
+  ignores `paste_mode` (`executor.rs:720`) and the COM/OLE `clipboard.rs` was
+  `#[cfg(test)]`-only, yet the UI offered (and defaulted to) the option in three
+  places.
+- What was done (verified: tsc clean, 590 vitest pass, cargo check + --tests
+  clean, portable release build OK — sidearm.exe 19.6 MB):
+  - Removed the paste-mode `<select>` from `ActionPickerModal.tsx`,
+    `ActionInspector.tsx`, `SnippetLibraryEditor.tsx`.
+  - Defaulted new inline snippets to `sendText` (`config-editing.ts:321`).
+  - Removed the 9 selector-only i18n keys from `en.json` / `ru.json`.
+  - Deleted `clipboard.rs` and its `#[cfg(test)] mod clipboard;` line in
+    `lib.rs`.
+  - Kept the data model for back-compat: `PasteMode` enum/type,
+    `migrate_paste_mode`, `paste_mode_name`, and `labelForPasteMode` (still used
+    by `action-helpers.ts:65` for action descriptions).
+- Note: clipboard paste for long text still happens automatically via
+  `input_synthesis::paste_via_clipboard` — that is WIN-002, unaffected by this.
+
+### WIN-003
 
 - Title: Validate protected-window and security-boundary behavior
 - Priority: `P2`
 - Status: `todo`
-- Why it exists: some targets may block input or behave differently
-- Dependencies:
-  - `WIN-001`
-- Target files:
-  - `docs/RUNTIME-PIPELINE.md`
-  - `docs/OPEN-ISSUES.md`
-- Acceptance criteria:
-  - protected-window behavior is described
-  - user-visible limitations are known
+- Why it exists: UAC prompts, lock screen, and the secure desktop may block or
+  alter input; behavior is undocumented.
+- Note: partially covered by WIN-001's elevation detection (the warning fires
+  for High-IL foreground windows). The secure-desktop / lock-screen cases are
+  separate and inherently manual.
+- Dependencies: WIN-001 (done)
+- Acceptance: protected-window behavior described; user-visible limitations known.
 
-### Documentation and planning hygiene
+### VIS-003
 
-#### DOC-001
-
-- Title: Keep backlog as the single planning source of truth
-- Priority: `P0`
-- Status: `done`
-- Why it exists: planning drift across documents wastes time
-- Dependencies: none
-- Target files:
-  - `docs/PROJECT-BACKLOG.md`
-  - `docs/PROJECT-HANDOFF-2026-03-08.md`
-  - `README.md`
-- Acceptance criteria:
-  - `PROJECT-BACKLOG.md` is clearly identified as canonical
-  - summary docs point back to it
-  - no summary doc contradicts the backlog
-
-#### DOC-002
-
-- Title: Maintain a concrete open-issues list
-- Priority: `P1`
-- Status: `done`
-- Why it exists: unresolved risks should not be scattered only through prose
-- Dependencies: none
-- Target files:
-  - `docs/OPEN-ISSUES.md`
-- Acceptance criteria:
-  - open issues are listed with severity, impact, and next action
-  - the list is easy to scan in a new chat
-
-#### DOC-003
-
-- Title: Maintain a detailed UI redesign todo
-- Priority: `P1`
-- Status: `done`
-- Why it exists: UI backlog needs screen-level specificity
-- Dependencies:
-  - `DOC-001`
-- Target files:
-  - `docs/UI-REDESIGN-TODO.md`
-- Acceptance criteria:
-  - UI tasks are grouped by mode and component
-  - each task names the likely target files
-
-### Packaging and repo hardening
-
-#### PACK-001
-
-- Title: Fix Tauri bundle identifier ending with `.app`
-- Priority: `P1`
-- Status: `done`
-- Why it exists: Tauri warns about the current identifier, and the current value is not ideal
-- Dependencies: none
-- Target files:
-  - `src-tauri/tauri.conf.json`
-  - docs that mention packaging identity
-- Acceptance criteria:
-  - bundle identifier no longer ends with `.app`
-  - build warning disappears
-
-#### PACK-002
-
-- Title: Document repeatable release steps
+- Title: Original mouse illustration set
 - Priority: `P2`
-- Status: `done`
-- Why it exists: local builds work, but release procedure is not normalized
-- Dependencies:
-  - `PACK-001`
-- Target files:
-  - `README.md`
-  - packaging docs if added later
-- Acceptance criteria:
-  - release build steps are documented
-  - process-lock caveat is documented
-  - output artifacts are named in docs
+- Status: `deferred`
+- Why it exists: the transitional thumb scene was a placeholder.
+- Note: an SVG visualization now exists (`MouseVisualizationSvg.tsx`). Whether
+  it already satisfies "original illustration" or is still transitional is a
+  design call. Re-confirm intent before investing.
+- Acceptance: original schematic represents side keypad, top controls, wheel,
+  and Hypershift clearly, using Razer geometry as reference, not a copy.
 
-#### PACK-003
+### ACT-001 (new)
 
-- Title: Decide whether to initialize git in this folder
-- Priority: `P2`
-- Status: `done`
-- Why it exists: long-term project tracking is weaker without a repo
-- Dependencies: none
-- Target files:
-  - docs only for now
-- Acceptance criteria:
-  - explicit decision is recorded
-  - if yes, repo bootstrap steps are documented
+- Title: Automated live-injection E2E harness for action execution
+- Priority: `P3`
+- Status: `todo`
+- Why it exists: all four action types are dispatched (`executor.rs:204-219`:
+  Shortcut/TextSnippet/Launch/Sequence) and the **preview/dry-run** layer is
+  unit-tested (`executor.rs:1037+`, e.g. `:1038` shortcut sim, `:1050` blocked
+  unresolved, `:1109` menu-not-live, `:1137/:1150` launch validation). But live
+  `SendInput` injection reaching a real target is not (and cannot be) covered by
+  unit tests — it is validated only by manual/real use today.
+- Acceptance: a documented, repeatable way to validate live injection of each
+  action type end-to-end (even if semi-manual).
+
+## Completed since 2026-03-08 (reconstructed from git + spot-verified)
+
+Grouped by epic. Citations are existence/where-verified, not exhaustive proof.
+
+- **Rebrand → Sidearm**: crate, identifier, config migration (tags around
+  `e1bbe3f`); identifier `com.sidearm.desktop` (`paths.rs:20`).
+- **i18n RU/EN**: react-i18next; labels via `src/lib/labels.ts`, `i18n.t(...)`.
+- **WIN-001 elevated-window handling** — see Open Backlog (done in code).
+- **Cross-platform / platform abstraction**: `src-tauri/src/platform/` with a
+  real Linux window+elevation path (`platform/linux/window.rs:68/:114`).
+- **M1 — portable mode + rotating backups + friendly errors**:
+  `paths.rs:14` (`sidearm.portable` marker, Portable/Roaming/Fallback),
+  `backup.rs`.
+- **M2 — undo/redo toasts, search, layer indicator, conflict badges,
+  terminology pass** (frontend; conflict-detection tests present).
+- **M3 — Razer Synapse import** (.synapse4 / .synapse3 ZIP, sibling `Макросы/`
+  `.xml` macros, merge strategy + drag-drop): `src/components/SynapseImportModal.tsx`,
+  `src/lib/synapse-import.ts`.
+- **M4 — multi-press (double/triple) + chords + app-mapping picker + launch
+  args/workingDir + inline menu builder**: `src-tauri/src/chord.rs`; launch
+  validation `executor.rs:1137`.
+- **M5 — bundled preset profiles, runtime profile switch from sidebar,
+  drag-reorder appMapping priority + overview tab, 1000-step macro-recorder cap**:
+  `src-tauri/src/recorder.rs`.
+- **Reliability — modifier-leak / stuck-Ctrl/Alt saga**: extended capture-backend
+  work (phantom-Alt buffering, REPLAYED orphan tracking, extended-key injection).
+- **Autostart (incl. elevated via Task Scheduler COM)**:
+  `src-tauri/src/admin_autostart.rs` (`register_task_elevated` `:246`,
+  COM elevation moniker `:202-224`); commands `lib.rs:1075-1093`.
+- **Perf / leak fixes (v0.1.6, v0.1.14–0.1.16)**: push-based debug log +
+  retention, portable WebView2 state isolation, the runaway disk/memory-leak
+  fix (bounded channels + emit-skip + log filter), and the audit follow-up
+  capping remaining unbounded growth (`runtime.rs`, `log_cleanup.rs`,
+  `recorder.rs`, capture backends). See `CHANGELOG.md`.
+
+### Earlier items already marked done (2026-03-08 revision)
+
+Preserved for ID continuity; all `done` unless noted:
+
+- UX-001…UX-008 — Russian-first UX, jargon removal, de-duplication, per-mode
+  hierarchy (`Назначения`/`Профили`/`Проверка`/`Эксперт`), settings hardening.
+- VIS-001 (green-noise reduction), VIS-002 (mouse as visual center),
+  VIS-004 (panel density). VIS-003 — see Open Backlog (`deferred`).
+- VERIFY-001…VERIFY-005 — real-device validation of top-panel/wheel/Hypershift
+  controls, reserved-control policy, verification wording.
+- PACK-001…PACK-003 — bundle identifier, release steps, git repo.
+- DOC-001…DOC-003 — backlog as source of truth, open-issues list, UI todo.
+  **Note:** DOC-001/DOC-003 referenced `docs/PROJECT-HANDOFF-2026-03-08.md` and
+  `docs/UI-REDESIGN-TODO.md`, which **no longer exist** (verified absent
+  2026-05-23). Those references must be removed where they still appear (e.g.
+  `docs/OPEN-ISSUES.md`, README).
 
 ## Active Focus
 
-Completed: `UX-001` through `UX-008`, `VIS-001`, `VIS-002`, `VIS-004`, `PACK-001` through `PACK-003`, `VERIFY-001` through `VERIFY-005`.
+Open, in priority order:
 
-Remaining items:
+1. **WIN-002** (P2) — validate clipboard restore for long snippets (`input_synthesis::paste_via_clipboard`)
+2. **WIN-003** (P2) — protected-window / secure-desktop validation
+3. **WIN-001 Phase 3** (P1-residual, release-gated) — production code-signing
+4. **ACT-001** (P3) — live-injection E2E harness
+5. **VIS-003** (P2, deferred) — original illustration, design-led
 
-1. End-to-end action execution testing (shortcut, text snippet, sequence, launch)
-2. `WIN-001` through `WIN-003` — Windows platform hardening
+Done 2026-05-23: **UI-CLEAN-001** — removed the no-op clipboardPaste selector + dead `clipboard.rs`.
 
 ## Immediate Blockers
 
-- none for code editing
-- real-device validation tasks require the physical mouse
-- `tauri build` can be blocked by the running exe until the process is stopped
+- None for code editing.
+- WIN-001 Phase 3 is blocked on a code-signing certificate (cost/decision).
+- Real-device / elevated-target validation requires the physical machine.
+- `tauri build` can be blocked by the running exe until the process is stopped.
 
 ## Related Documents
 
 - summary: `README.md`
-- current handoff: `docs/PROJECT-HANDOFF-2026-03-08.md`
-- detailed UI tasks: `docs/UI-REDESIGN-TODO.md`
-- unresolved issues: `docs/OPEN-ISSUES.md`
+- unresolved issues: `docs/OPEN-ISSUES.md` (stale — still lists WIN-001 as P1;
+  sync to this rebuild)
+- UIPI research: `docs/research/UIPI-BYPASS-RESEARCH.md`
+- runtime pipeline: `docs/RUNTIME-PIPELINE.md`
+- config schema: `docs/CONFIG-SCHEMA-V2.md`
+- device catalog / verification: `docs/DEVICE-CATALOG.md`,
+  `docs/DEVICE-VERIFICATION-MATRIX.md`
+- ADRs: `docs/adr/0001…0004`
+- changelog: `CHANGELOG.md`
+- *(removed dead refs: `PROJECT-HANDOFF-2026-03-08.md`, `UI-REDESIGN-TODO.md` —
+  do not exist)*
 
-## Next Chat Prompt
+## Verification Log (2026-05-23)
 
-```text
-Open and use `docs/PROJECT-BACKLOG.md` as the canonical source of truth.
-We are continuing Sidearm in `E:\Scripts\Razer Naga Studio`.
-Read `docs/PROJECT-HANDOFF-2026-03-08.md`, `docs/UI-REDESIGN-TODO.md`, and `docs/OPEN-ISSUES.md` after that.
-Start with the highest-priority open items unless I redirect you.
-Before changing code, inspect the current `src/App.tsx` and `src/App.css`.
-Keep the Russian-first, mode-based, mouse-centric direction.
-Do not revert existing work.
-```
+Raw evidence gathered for this rebuild (read personally, not summarized):
+
+- WIN-001 elevation probe is real Win32: `platform/windows/window.rs:94-110`
+  (`OpenProcessToken`/`GetTokenInformation(TokenElevation)`), access-denied →
+  elevated at `:100`; own-process `:117-118`.
+- Target-window flag flows probe → struct → warning:
+  `window.rs:67/:83` → `window_capture.rs:29/:58/:116` →
+  `capture_backend/mod.rs:260-266/:426-427/:484-486`.
+- UI surfacing: `RuntimePanel.tsx:6/:28/:33/:141/:145-156`; tray `lib.rs:2177-2199`;
+  relaunch `lib.rs:1106-1152`; startup log `lib.rs:2126-2132`.
+- Manifest/build switch: `build.rs:14-25`; `manifest.xml:6` (uiAccess false),
+  `manifest-uiaccess.xml:6` (uiAccess true).
+- `input_synthesis.rs` only emits UIPI-hint strings (`:1217/:1219`); the
+  detection is NOT here (corrected an earlier wrong assumption).
+- clipboardPaste *option/module* dead, but clipboard paste IS reachable for long
+  text: executor always `send_text` (`executor.rs:720`); `send_text`
+  (`input_synthesis.rs:399`) → `send_text_with_delay` → `paste_via_clipboard`
+  for text >100 chars (`:344`, `:358-377`; restore race-guard `:286`). COM/OLE
+  `clipboard.rs` was `#[cfg(test)]`-only and is deleted (UI-CLEAN-001). The
+  earlier "obsolete" verdict on WIN-002 was wrong — corrected.
+- Executor dispatch `executor.rs:204-219`; preview tests `:1037-1156`.
+- Portable mode `paths.rs:14-28`; autostart `admin_autostart.rs:202-277`.
+- Cross-platform Linux real: `platform/linux/window.rs:68/:114`.
+- Dead docs absent: `docs/PROJECT-HANDOFF-2026-03-08.md`,
+  `docs/UI-REDESIGN-TODO.md` (ls → No such file).
+- Test counts: 199 Rust test fns, 13 TS test files.

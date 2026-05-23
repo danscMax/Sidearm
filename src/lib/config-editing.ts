@@ -318,7 +318,7 @@ export function coerceActionType(
           payload: {
             source: "inline",
             text: action.pretty || "New snippet",
-            pasteMode: "clipboardPaste",
+            pasteMode: "sendText",
             tags: [],
           },
         };

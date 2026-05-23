@@ -99,24 +99,6 @@ export function SnippetLibraryEditor({
               </label>
 
               <label className="field">
-                <span className="field__label">{t("snippet.pasteMode")}</span>
-                <select
-                  value={selectedSnippet.pasteMode}
-                  onChange={(event) => {
-                    updateSelectedSnippetDraft((snippet) => ({
-                      ...snippet,
-                      pasteMode: event.target.value as
-                        | "clipboardPaste"
-                        | "sendText",
-                    }));
-                  }}
-                >
-                  <option value="clipboardPaste">{t("snippet.pasteModeClipboard")}</option>
-                  <option value="sendText">{t("snippet.pasteModeDirect")}</option>
-                </select>
-              </label>
-
-              <label className="field">
                 <span className="field__label">{t("inspector.tags")}</span>
                 <input
                   type="text"

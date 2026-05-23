@@ -2,8 +2,6 @@ mod admin_autostart;
 mod backup;
 mod capture_backend;
 mod chord;
-#[cfg(test)]
-mod clipboard;
 mod command_error;
 mod config;
 #[cfg(target_os = "windows")]

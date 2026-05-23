@@ -887,16 +887,6 @@ export function ActionPickerModal({
                     placeholder={t("picker.textPlaceholder")}
                   />
                 </label>
-                <label className="field">
-                  <span className="field__label">{t("picker.inputMethod")}</span>
-                  <select
-                    value={textDraft.pasteMode}
-                    onChange={(e) => setTextDraft({ ...textDraft, pasteMode: e.target.value as PasteMode })}
-                  >
-                    <option value="clipboardPaste">{t("picker.inputClipboard")}</option>
-                    <option value="sendText">{t("picker.inputDirect")}</option>
-                  </select>
-                </label>
               </div>
             ) : null}
 

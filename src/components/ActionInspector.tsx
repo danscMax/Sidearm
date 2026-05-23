@@ -254,30 +254,6 @@ export function ActionInspector({
                   </label>
 
                   <label className="field">
-                    <span className="field__label">{t("inspector.pasteMode")}</span>
-                    <select
-                      value={selectedAction.payload.pasteMode}
-                      onChange={(event) => {
-                        updateSelectedActionDraft((action) =>
-                          withTextSnippetPayload(action, (payload) =>
-                            payload.source === "inline"
-                              ? {
-                                  ...payload,
-                                  pasteMode: event.target.value as
-                                    | "clipboardPaste"
-                                    | "sendText",
-                                }
-                              : payload,
-                          ),
-                        );
-                      }}
-                    >
-                      <option value="clipboardPaste">{t("inspector.pasteModeClipboard")}</option>
-                      <option value="sendText">{t("inspector.pasteModeDirect")}</option>
-                    </select>
-                  </label>
-
-                  <label className="field">
                     <span className="field__label">{t("inspector.tags")}</span>
                     <input
                       type="text"

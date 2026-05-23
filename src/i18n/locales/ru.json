@@ -175,7 +175,8 @@
   "preview": {
     "resolved": "Найдено",
     "unresolved": "Не найдено",
-    "ambiguous": "Неоднозначно"
+    "ambiguous": "Неоднозначно",
+    "conditionUnmet": "Условие не выполнено"
   },
   "execution": {
     "spawned": "Запущено",

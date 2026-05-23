@@ -1482,6 +1482,13 @@ async fn preview_resolution(
                     preview.encoded_key, preview.reason
                 ),
             ),
+            resolver::ResolutionStatus::ConditionUnmet => store.record_info(
+                "разрешение",
+                format!(
+                    "Условия не выполнены для `{}`: {}",
+                    preview.encoded_key, preview.reason
+                ),
+            ),
         }
     }
 

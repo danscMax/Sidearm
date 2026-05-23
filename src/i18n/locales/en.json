@@ -175,7 +175,8 @@
   "preview": {
     "resolved": "Resolved",
     "unresolved": "Not found",
-    "ambiguous": "Ambiguous"
+    "ambiguous": "Ambiguous",
+    "conditionUnmet": "Condition not met"
   },
   "execution": {
     "spawned": "Spawned",

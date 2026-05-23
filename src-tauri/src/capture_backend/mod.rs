@@ -316,6 +316,16 @@ fn process_encoded_key_event(
                 true,
             ));
         }
+        resolver::ResolutionStatus::ConditionUnmet => {
+            log_entries.push((
+                "разрешение",
+                format!(
+                    "Сигнал `{}` разрешён, но условия действия не выполнены: {}",
+                    preview.encoded_key, preview.reason
+                ),
+                false,
+            ));
+        }
     }
 
     let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);

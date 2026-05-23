@@ -79,6 +79,8 @@ export function labelForPreviewStatus(status: ResolvedInputPreview["status"]): s
       return i18n.t("preview.unresolved");
     case "ambiguous":
       return i18n.t("preview.ambiguous");
+    case "conditionUnmet":
+      return i18n.t("preview.conditionUnmet");
     default:
       return status;
   }

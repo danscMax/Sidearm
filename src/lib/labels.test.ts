@@ -200,8 +200,9 @@ describe("labelForPreviewStatus", () => {
     ["resolved", "Найдено"],
     ["unresolved", "Не найдено"],
     ["ambiguous", "Неоднозначно"],
+    ["conditionUnmet", "Условие не выполнено"],
   ])("returns correct label for %s", (status, expected) => {
-    expect(labelForPreviewStatus(status as "resolved" | "unresolved" | "ambiguous")).toBe(expected);
+    expect(labelForPreviewStatus(status as "resolved" | "unresolved" | "ambiguous" | "conditionUnmet")).toBe(expected);
   });
 
   it("returns status as-is for unknown status", () => {

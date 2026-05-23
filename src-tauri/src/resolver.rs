@@ -11,6 +11,11 @@ pub enum ResolutionStatus {
     Resolved,
     Unresolved,
     Ambiguous,
+    /// Mapping, binding, and action all resolved, but the action's conditions
+    /// (active exe / window title) are not met for the current context — so it
+    /// must not fire. Distinct from Unresolved for clear diagnostics.
+    #[serde(rename = "conditionUnmet")]
+    ConditionUnmet,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -201,15 +206,25 @@ pub fn resolve_input_preview(
             .find(|action| action.id == binding.action_ref)
     });
 
-    let (status, reason) = if binding.is_some() && action.is_some() {
-        (
-            ResolutionStatus::Resolved,
-            format!(
-                "Resolved `{normalized_key}` to `{}` / `{}`.",
-                mapping.control_id.as_str(),
-                mapping.layer.as_str()
-            ),
-        )
+    let (status, reason) = if let Some(action) = action {
+        if crate::executor::evaluate_conditions(&action.conditions, exe, title) {
+            (
+                ResolutionStatus::Resolved,
+                format!(
+                    "Resolved `{normalized_key}` to `{}` / `{}`.",
+                    mapping.control_id.as_str(),
+                    mapping.layer.as_str()
+                ),
+            )
+        } else {
+            (
+                ResolutionStatus::ConditionUnmet,
+                format!(
+                    "`{normalized_key}` is bound to `{}`, but its conditions are not met for the active window (exe `{exe}`).",
+                    action.pretty
+                ),
+            )
+        }
     } else if binding.is_some() {
         (
             ResolutionStatus::Unresolved,
@@ -323,9 +338,9 @@ fn normalized_encoded_key(raw: &str) -> String {
 mod tests {
     use super::*;
     use crate::config::{
-        Action, ActionPayload, ActionType, Binding, CapabilityStatus, ControlFamily, ControlId,
-        Layer, MappingSource, OsdAnimation, OsdFontSize, OsdPosition, PhysicalControl, Settings,
-        SnippetLibraryItem, TriggerMode,
+        Action, ActionCondition, ActionPayload, ActionType, Binding, CapabilityStatus,
+        ControlFamily, ControlId, Layer, MappingSource, OsdAnimation, OsdFontSize, OsdPosition,
+        PhysicalControl, Settings, SnippetLibraryItem, TriggerMode,
     };
 
     #[test]
@@ -523,5 +538,90 @@ mod tests {
             priority,
             compiled_title_regexes: Vec::new(),
         }
+    }
+
+    /// Attach the given conditions to every action in the test config.
+    fn with_action_conditions(mut config: AppConfig, conditions: Vec<ActionCondition>) -> AppConfig {
+        for action in &mut config.actions {
+            action.conditions = conditions.clone();
+        }
+        config
+    }
+
+    #[test]
+    fn resolve_exe_equals_met_resolves() {
+        let config = with_action_conditions(
+            test_config(vec![]),
+            vec![ActionCondition::ExeEquals { value: "excel.exe".into() }],
+        );
+        let result = resolve_input_preview(&config, "F13", "EXCEL.EXE", "Book1");
+        assert_eq!(result.status, ResolutionStatus::Resolved);
+    }
+
+    #[test]
+    fn resolve_exe_equals_unmet_is_condition_unmet() {
+        let config = with_action_conditions(
+            test_config(vec![]),
+            vec![ActionCondition::ExeEquals { value: "excel.exe".into() }],
+        );
+        let result = resolve_input_preview(&config, "F13", "notepad.exe", "Untitled");
+        assert_eq!(result.status, ResolutionStatus::ConditionUnmet);
+    }
+
+    #[test]
+    fn resolve_exe_not_equals_gates_on_active_exe() {
+        let config = with_action_conditions(
+            test_config(vec![]),
+            vec![ActionCondition::ExeNotEquals { value: "notepad.exe".into() }],
+        );
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "notepad.exe", "x").status,
+            ResolutionStatus::ConditionUnmet
+        );
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "chrome.exe", "x").status,
+            ResolutionStatus::Resolved
+        );
+    }
+
+    #[test]
+    fn resolve_window_title_contains_gates() {
+        let config = with_action_conditions(
+            test_config(vec![]),
+            vec![ActionCondition::WindowTitleContains { value: "Inbox".into() }],
+        );
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "chrome.exe", "Gmail - Inbox (3)").status,
+            ResolutionStatus::Resolved
+        );
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "chrome.exe", "Settings").status,
+            ResolutionStatus::ConditionUnmet
+        );
+    }
+
+    #[test]
+    fn resolve_window_title_not_contains_gates() {
+        let config = with_action_conditions(
+            test_config(vec![]),
+            vec![ActionCondition::WindowTitleNotContains { value: "Private".into() }],
+        );
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "chrome.exe", "Public Doc").status,
+            ResolutionStatus::Resolved
+        );
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "chrome.exe", "Private Doc").status,
+            ResolutionStatus::ConditionUnmet
+        );
+    }
+
+    #[test]
+    fn resolve_empty_conditions_resolves_anywhere() {
+        let config = test_config(vec![]);
+        assert_eq!(
+            resolve_input_preview(&config, "F13", "anything.exe", "x").status,
+            ResolutionStatus::Resolved
+        );
     }
 }

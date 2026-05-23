@@ -987,8 +987,8 @@ fn paste_mode_name(paste_mode: PasteMode) -> &'static str {
 }
 
 /// Evaluate whether all conditions on an action are satisfied.
-/// `exe` and `title` are the active window context at time of execution.
-#[allow(dead_code)]
+/// `exe` and `title` are the active window context. Used by the resolver to
+/// gate a binding's action by context (ConditionUnmet when not satisfied).
 pub fn evaluate_conditions(conditions: &[ActionCondition], exe: &str, title: &str) -> bool {
     // Empty conditions = always pass
     if conditions.is_empty() {

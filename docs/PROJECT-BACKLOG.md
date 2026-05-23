@@ -234,6 +234,18 @@ Cross-platform parity is not a stated goal; Linux is best-effort.
   P0 cert-signing security issue and P1-1 (action `conditions` never enforced =
   the contextual-bindings work), among others.
 
+### CTX-001
+
+- Title: Enforce action conditions (contextual bindings)
+- Priority: `P1`
+- Status: `done` (2026-05-23)
+- What: wired the previously dead-code `evaluate_conditions` into the resolver.
+  Actions with `conditions` (ExeEquals/NotEquals, WindowTitleContains/NotContains)
+  now fire only when the active window matches; otherwise the resolver returns a
+  new `ConditionUnmet` status and execution skips (live + dry-run paths).
+  Diagnostics distinguish it from Unresolved; 6 resolver tests added.
+  Implements FIXES_2026-05-23 P1-1.
+
 ### WIN-003
 
 - Title: Validate protected-window and security-boundary behavior

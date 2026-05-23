@@ -349,8 +349,12 @@ Write-Step $stepNum $totalSteps "Assembling portable package"
 
 if (Test-Path -LiteralPath $PORTABLE_DIR) {
     Stop-AppProcessIfRunning
-    # Clean everything (no user data to preserve in this project)
-    Remove-Item -Recurse -Force -LiteralPath $PORTABLE_DIR
+    # Preserve ./data (config, profiles, snapshots, WebView2 state) across
+    # rebuilds -- wipe only the executable + bundled resources, never user data.
+    # (The release zip excludes ./data separately; see the release workflow.)
+    Get-ChildItem -LiteralPath $PORTABLE_DIR -Force |
+        Where-Object { $_.Name -ne 'data' } |
+        Remove-Item -Recurse -Force
 }
 New-Item -ItemType Directory -Path $PORTABLE_DIR -Force | Out-Null
 

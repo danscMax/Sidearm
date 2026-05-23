@@ -181,6 +181,59 @@ Cross-platform parity is not a stated goal; Linux is best-effort.
 - Note: clipboard paste for long text still happens automatically via
   `input_synthesis::paste_via_clipboard` — that is WIN-002, unaffected by this.
 
+### PKG-001
+
+- Title: build_portable.ps1 wiped ./data on every rebuild
+- Priority: `P1`
+- Status: `done` (2026-05-23)
+- Why it existed: the assemble step ran `Remove-Item -Recurse -Force` on the
+  whole `Sidearm-Portable` dir ("no user data to preserve in this project"),
+  deleting `./data` (config, profiles, snapshots) on every rebuild. Surfaced
+  when a HUD rebuild reset the dev's portable profiles to the default seed.
+- Fix: the script now preserves `./data` and wipes only exe + resources. The
+  release zip still excludes `./data` separately.
+
+### MIG-001 (new)
+
+- Title: Portable migration prompt suppressed by default-seed creation
+- Priority: `P2`
+- Status: `todo`
+- Why it exists: on a fresh portable launch with a roaming config present, the
+  app should offer "import your existing config?" (`PortableMigrationDialog`).
+  But `needs_portable_migration_prompt` (`paths.rs:108-119`) returns false once
+  a portable `config.json` exists, and startup creates the default seed config
+  first — so the prompt never fires and the user silently gets the seed.
+- Impact: also affects GitHub users who had an installed (roaming) Sidearm —
+  the portable build won't offer to import their real profiles.
+- Acceptance: migration prompt fires before/instead-of seeding default when a
+  roaming config exists and the portable config is still the untouched seed.
+
+### SEED-001 (new)
+
+- Title: Verify the default seed doesn't ship personal mappings to all users
+- Priority: `P2`
+- Status: `todo`
+- Why it exists: `seed_bindings` (`config.rs:2435`) gives Main=25 / Code=24
+  bindings to every fresh install. Confirm these are generic sensible defaults,
+  not the developer's personal assignments shipped to GitHub downloaders.
+- Acceptance: seed bindings are intentional, neutral defaults (or the seed
+  ships with empty/minimal profiles).
+
+### HUD-001
+
+- Title: On-screen cheat-sheet overlay (hold-key HUD)
+- Priority: `P3`
+- Status: `dropped` (2026-05-23)
+- Why dropped: explored a hold-key transparent overlay showing the active
+  profile's layout over other apps (separate webview window reusing the editor's
+  mouse view). It duplicated the main window's `Назначения` view and only added
+  value as a fullscreen-gaming overlay — not a need here. Code reverted; the
+  build-script fix (PKG-001) and the read-only/shared-builder refactors were the
+  only salvageable parts (refactors also reverted as unused).
+- Note: external review `FIXES_2026-05-23.md` is in the repo root — it lists a
+  P0 cert-signing security issue and P1-1 (action `conditions` never enforced =
+  the contextual-bindings work), among others.
+
 ### WIN-003
 
 - Title: Validate protected-window and security-boundary behavior

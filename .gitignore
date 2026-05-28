@@ -57,3 +57,6 @@ CODEX_REVIEW_*.md
 # Playwright / smoke-test artifacts
 output/
 Sidearm-Portable-v*.zip
+
+# Serena MCP — per-machine cache + memories
+.serena/

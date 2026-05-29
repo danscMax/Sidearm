@@ -71,16 +71,6 @@ const ALL_HOTSPOT_IDS = [...Object.keys(sideViewHotspots), ...Object.keys(topVie
 
 function App() {
   const { t } = useTranslation();
-  const persistence = useAppPersistence();
-  const {
-    viewState,
-    workingConfig,
-    error, setError,
-    undoStack,
-    redoStack,
-    activeConfig,
-    refreshConfig, updateDraft, handleUndo, handleRedo,
-  } = persistence;
 
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -91,6 +81,24 @@ function App() {
     toastSeqRef.current += 1;
     setToast({ id: toastSeqRef.current, message, kind });
   }, []);
+
+  const handleAutoSaveFailed = useCallback(
+    (reason: string) => {
+      showToast(t("toast.saveFailedRollback", { reason }), "warning");
+    },
+    [showToast, t],
+  );
+
+  const persistence = useAppPersistence(undefined, handleAutoSaveFailed);
+  const {
+    viewState,
+    workingConfig,
+    error, setError,
+    undoStack,
+    redoStack,
+    activeConfig,
+    refreshConfig, updateDraft, handleUndo, handleRedo,
+  } = persistence;
 
   // Tauri v2 file-drop event; looks like a hint the user wants to import a Synapse file.
   useEffect(() => {
@@ -397,7 +405,7 @@ function App() {
           (currentProfile) => currentProfile.id === profile.id,
         ),
     );
-    updateDraft(() => nextConfig);
+    updateDraft(() => nextConfig, { immediate: true });
     if (nextProfile) {
       startTransition(() => {
         setSelectedProfileId(nextProfile.id);
@@ -662,12 +670,10 @@ function App() {
         ) : (
           <section className="workspace workspace--1col">
             <section className="panel">
-              <p className="panel__eyebrow">Ожидание конфигурации</p>
-              <h2>Интерфейс ещё не загружен.</h2>
-              <p>
-                Как только конфигурация будет загружена, здесь появятся профили,
-                карта мыши и редакторы.
-              </p>
+              <p className="panel__eyebrow">{t("configWaiting.eyebrow")}</p>
+              <div className="loading-spinner" aria-hidden="true" />
+              <h2>{t("configWaiting.heading")}</h2>
+              <p>{t("configWaiting.body")}</p>
               {error ? <ErrorPanel error={error} /> : null}
             </section>
           </section>
@@ -683,7 +689,10 @@ function App() {
           controlId={selectedControlId ?? undefined}
           selectedLayer={selectedLayer}
           onSave={(nextConfig) => {
-            updateDraft(() => nextConfig);
+            // Explicit user commit from picker — bypass 500 ms debounce so
+            // closing the modal (or any rapid follow-up action) cannot drop
+            // the change before it reaches disk.
+            updateDraft(() => nextConfig, { immediate: true });
             startTransition(() => {
               setActionPickerOpen(false);
               setActionPickerBindingId(null);
@@ -717,7 +726,7 @@ function App() {
           parsed={synapseParsed}
           activeConfig={activeConfig}
           onImported={(next, summary) => {
-            updateDraft(() => next);
+            updateDraft(() => next, { immediate: true });
             setSynapseParsed(null);
             showToast(
               t("synapseImport.summaryToast", {

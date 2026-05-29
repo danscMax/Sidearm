@@ -978,16 +978,30 @@ impl CaptureBackendHandle {
             let _ = reader_thread.join();
         }
 
-        self.hook_thread
-            .join()
-            .map_err(|_| "Capture hook thread panicked.".to_owned())?;
-        self.worker_thread
-            .join()
-            .map_err(|_| "Capture worker thread panicked.".to_owned())?;
-        if let Some(fg_thread) = self.foreground_watcher_thread {
-            let _ = fg_thread.join();
+        // Join in a reaper thread with a bounded wait, so a wedged hook/worker
+        // thread (e.g. SendInput blocked on a hung target window, so the thread
+        // never pumps WM_QUIT) cannot freeze stop() — and with it the whole
+        // Tauri async runtime, since stop() is awaited from the stop_runtime
+        // command. A stuck thread is left as a zombie; it is torn down when the
+        // process exits (the low-level hook is released with it).
+        let hook_thread = self.hook_thread;
+        let worker_thread = self.worker_thread;
+        let foreground_watcher_thread = self.foreground_watcher_thread;
+        let (done_tx, done_rx) = mpsc::channel::<()>();
+        thread::spawn(move || {
+            let _ = hook_thread.join();
+            let _ = worker_thread.join();
+            if let Some(fg_thread) = foreground_watcher_thread {
+                let _ = fg_thread.join();
+            }
+            let _ = done_tx.send(());
+        });
+        match done_rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                Err("Capture threads did not exit within 5s; forcing shutdown.".to_owned())
+            }
         }
-        Ok(())
     }
 
     pub(super) fn rehook(&mut self) -> Result<(), String> {
@@ -2138,8 +2152,22 @@ fn spawn_capture_helper(
         }
     };
 
-    let mut stdin_pipe = child.stdin.take().expect("stdin was piped");
-    let stdout_pipe = child.stdout.take().expect("stdout was piped");
+    let mut stdin_pipe = match child.stdin.take() {
+        Some(pipe) => pipe,
+        None => {
+            log::warn!("[capture] Capture helper stdin pipe missing");
+            let _ = child.kill();
+            return None;
+        }
+    };
+    let stdout_pipe = match child.stdout.take() {
+        Some(pipe) => pipe,
+        None => {
+            log::warn!("[capture] Capture helper stdout pipe missing");
+            let _ = child.kill();
+            return None;
+        }
+    };
 
     // Write init payload as one JSON line to the helper's stdin.
     #[derive(serde::Serialize)]

@@ -183,7 +183,7 @@
     "injected": "Отправлено",
     "simulated": "Смоделировано",
     "noop": "Без действия",
-    "modeLive": "Живой",
+    "modeLive": "Вживую",
     "modeTest": "Пробный"
   },
   "paste": {
@@ -202,6 +202,11 @@
     "ready": "Готово",
     "saving": "Сохранение",
     "error": "Ошибка"
+  },
+  "configWaiting": {
+    "eyebrow": "Ожидание конфигурации",
+    "heading": "Интерфейс ещё не загружен.",
+    "body": "Как только конфигурация будет загружена, здесь появятся профили, карта мыши и редакторы."
   },
   "binding": {
     "notAssigned": "Не назначено",
@@ -308,7 +313,8 @@
     "heatmapEnable": "Включить тепловую карту",
     "heatmapDisable": "Выключить тепловую карту",
     "searchPlaceholder": "Поиск назначений…",
-    "searchMeta": "Найдено: {{count}}"
+    "searchMeta": "Найдено: {{count}}",
+    "dblClickSettings": "Двойной клик — открыть настройки профилей"
   },
   "newRule": {
     "title": "Новое правило",
@@ -416,14 +422,25 @@
     "modifierStaleGcOption": "{{seconds}} сек",
     "replayedForceReleaseLabel": "Окно force-release REPLAYED",
     "replayedForceReleaseHelp": "Если Sidearm заинжектил Ctrl-down (например, после буферизации физического Ctrl), но реальный key-up был потерян (alt-tab/RDP/драйвер), helper через это окно сам отпустит модификатор через SendInput. Слишком коротко — отжимает физически удерживаемый Ctrl, ломая «удерживаю Ctrl + кнопка мыши». Слишком долго — окно «залипания» затягивается. 30 сек — безопасный дефолт.",
-    "replayedForceReleaseOption": "{{seconds}} сек"
+    "replayedForceReleaseOption": "{{seconds}} сек",
+    "autostartHeader": "Автозапуск",
+    "autostartRunAtLogonTitle": "Запускать при входе в систему",
+    "autostartRunAtLogonHint": "Sidearm стартует автоматически после входа в Windows.",
+    "autostartAdminTitle": "Запускать от администратора",
+    "autostartAdminHintEnabled": "Через Планировщик задач Windows с правами Highest. UAC появится один раз при включении — дальше каждый старт системы будет запускать Sidearm от админа без UAC. Это нужно, чтобы ввод доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.).",
+    "autostartAdminHintDisabled": "Доступно только если включён автозапуск выше.",
+    "autostartPathMismatchMsg": "Запланированная задача указывает на другой путь к Sidearm.exe:",
+    "autostartPathUnknown": "(неизвестно)",
+    "autostartCurrentPath": "Текущий путь:",
+    "autostartReregisterButton": "Перерегистрировать на текущий путь",
+    "osdPreviewProfileLabel": "Профиль:"
   },
   "command": {
     "undo": "Отменить",
     "redo": "Повторить",
     "reload": "Загрузить с диска",
     "gotoProfiles": "Перейти: Профили",
-    "gotoDebug": "Перейти: Отладка",
+    "gotoDebug": "Перейти: Диагностика",
     "gotoSettings": "Перейти: Настройки",
     "layerStandard": "Слой: Стандартный",
     "layerHypershift": "Слой: Hypershift",
@@ -442,6 +459,7 @@
     "unassigned": "Не назначено",
     "switchPhoto": "Переключить на фото",
     "switchSchematic": "Переключить на схему",
+    "schematicAlt": "Razer Naga V2 HyperSpeed — схематический вид",
     "tabAll": "Все кнопки",
     "tabTop": "Верхняя панель",
     "tabSide": "Боковая клавиатура"
@@ -511,6 +529,52 @@
   },
   "shared": {
     "warnings": "Предупреждения проверки"
+  },
+  "serviceTools": {
+    "panelTitle": "Служебные инструменты",
+    "captureTitle": "Захват активного окна",
+    "delayLabel": "Задержка",
+    "delayNone": "Без задержки",
+    "delay1500": "1,5 секунды",
+    "delay3000": "3 секунды",
+    "delay5000": "5 секунд",
+    "captureButton": "Захватить активное окно",
+    "hwndLabel": "HWND",
+    "resolvedProfileLabel": "Выбранный профиль",
+    "appMappingLabel": "Правило приложения",
+    "defaultProfileFallback": "профиль по умолчанию",
+    "windowTitleLabel": "Заголовок",
+    "emptyValue": "(пусто)",
+    "resolutionReasonLabel": "Причина",
+    "elevatedWarning": "Процесс запущен от имени администратора. SendInput будет заблокирован UIPI — действия не дойдут до этого окна.",
+    "captureHint": "Поставьте небольшую задержку, переключитесь в другое окно и затем захватите его, чтобы проверить выбор профиля.",
+    "resolutionTitle": "Проверка срабатывания",
+    "signalCodeLabel": "Код сигнала",
+    "dryRunButton": "Пробный прогон",
+    "runLiveButton": "⚠ Выполнить вживую",
+    "signalLabel": "Сигнал",
+    "receivedAtLabel": "Получен",
+    "statusLabel": "Статус",
+    "layerLabel": "Слой",
+    "bindingLabel": "Назначение",
+    "resolutionHint": "Проверьте сигнал вроде F13 или Ctrl+Alt+Shift+F13 на текущей конфигурации.",
+    "executionTitle": "Выполнение действия",
+    "pidLabel": "PID",
+    "executedAtLabel": "Когда",
+    "executionName": "Название: {{name}} ({{type}}).",
+    "warningPrefix": "Предупреждение: {{text}}",
+    "executionHint": "Запустите проверку действия, чтобы увидеть результат выполнения.",
+    "actionIdLabel": "ID действия",
+    "lastBackupLabel": "Последняя резервная копия:",
+    "noWarningsTitle": "Предупреждений нет",
+    "noWarningsBody": "Текущая сохранённая конфигурация прошла загрузку и сохранение без предупреждений.",
+    "appSettingsTitle": "Настройки приложения",
+    "fallbackProfileLabel": "Профиль по умолчанию",
+    "themeLabel": "Тема",
+    "themeDark": "Тёмная",
+    "themeRazer": "Razer Green",
+    "minimizeToTray": "Сворачивать в трей",
+    "debugLogging": "Отладочное логирование"
   },
   "picker": {
     "title": "Назначить действие",
@@ -618,7 +682,8 @@
   },
   "toast": {
     "undone": "Действие отменено",
-    "redone": "Действие возвращено"
+    "redone": "Действие возвращено",
+    "saveFailedRollback": "Изменение отменено: {{reason}}"
   },
   "synapseImport": {
     "button": "Импорт из Razer Synapse…",

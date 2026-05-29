@@ -48,6 +48,11 @@
   --fs-body: 1rem;
   --fs-heading-sm: 1.125rem;
   --fs-heading: 1.25rem;
+
+  --c-accent-dim: rgba(159, 202, 105, 0.12);
+  --c-text-subtle: rgba(226, 236, 218, 0.45);
+  --space-xs: 4px;
+  --space-sm: 8px;
 }
 
 * { box-sizing: border-box; }
@@ -187,7 +192,9 @@ button, input, textarea, select {
 }
 
 .nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 10px 12px;
   border: 0;
@@ -201,6 +208,15 @@ button, input, textarea, select {
   transition: background 100ms ease;
 }
 
+.nav-item__icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.nav-item--active .nav-item__icon {
+  opacity: 1;
+}
+
 .nav-item:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -208,6 +224,8 @@ button, input, textarea, select {
 .nav-item--active {
   background: rgba(125, 182, 73, 0.14);
   color: var(--c-text-bright);
+  border-left: 2px solid var(--c-accent);
+  padding-left: 10px;
 }
 
 .sidebar__sep {
@@ -908,6 +926,7 @@ select::checkmark {
   background: rgba(255, 255, 255, 0.06);
   color: var(--c-text-bright);
   resize: vertical;
+  transition: outline-color 150ms ease, border-color 150ms ease;
 }
 
 .field input[type="checkbox"] {
@@ -953,6 +972,7 @@ select::checkmark {
   font-weight: 700;
   cursor: pointer;
   font-size: var(--fs-caption);
+  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
 }
 
 .action-button:disabled {
@@ -1073,6 +1093,20 @@ select::checkmark {
 @keyframes dot-pulse {
   0%, 100% { box-shadow: 0 0 6px rgba(159, 202, 105, 0.4); }
   50% { box-shadow: 0 0 14px rgba(159, 202, 105, 0.7); }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.loading-spinner {
+  width: 32px;
+  height: 32px;
+  margin: 8px 0 4px;
+  border: 3px solid var(--c-border);
+  border-top-color: var(--c-accent);
+  border-radius: var(--radius-pill);
+  animation: spin 700ms linear infinite;
 }
 
 /* ── Verification instruction ── */
@@ -4056,7 +4090,7 @@ code {
   background: var(--c-card-bg);
   border: 1px solid var(--c-card-border);
   border-radius: var(--radius-md);
-  cursor: pointer;
+  cursor: grab;
   transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
   text-align: left;
   color: inherit;
@@ -4702,6 +4736,7 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 .toast--success { border-color: rgba(104, 197, 127, 0.5); }
 .toast--warning { border-color: rgba(234, 179, 8, 0.5); }
+.toast--info    { border-color: rgba(99, 179, 237, 0.5); }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }

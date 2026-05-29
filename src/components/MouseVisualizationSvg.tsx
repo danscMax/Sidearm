@@ -543,7 +543,7 @@ export function MouseVisualizationSvg({
         xmlns="http://www.w3.org/2000/svg"
         style={{ width: "100%", height: "100%", display: "block" }}
         role="img"
-        aria-label="Razer Naga V2 HyperSpeed — schematic view"
+        aria-label={t("visualization.schematicAlt")}
       >
         <defs>
           <linearGradient id="bodyGradient" x1="0" y1="0" x2="0" y2="1">

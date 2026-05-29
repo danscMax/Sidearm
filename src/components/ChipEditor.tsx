@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 
 export interface ChipEditorProps {
   values: string[];
@@ -20,6 +21,7 @@ export function ChipEditor({
   ariaLabel,
   disabled,
 }: ChipEditorProps) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -55,7 +57,7 @@ export function ChipEditor({
               e.stopPropagation();
               removeAt(i);
             }}
-            aria-label="Remove"
+            aria-label={t("common.delete")}
             disabled={disabled}
           >
             ×

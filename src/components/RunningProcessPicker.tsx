@@ -84,10 +84,11 @@ export function RunningProcessPicker({
         className="confirm-modal process-picker"
         role="dialog"
         aria-modal="true"
+        aria-labelledby="process-picker-title"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
-        <h3>{t("processPicker.title")}</h3>
+        <h3 id="process-picker-title">{t("processPicker.title")}</h3>
         <input
           ref={inputRef}
           type="search"

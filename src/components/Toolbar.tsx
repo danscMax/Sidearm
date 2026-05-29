@@ -28,7 +28,7 @@ export function Toolbar({
         type="button"
         className="toolbar__btn--search"
         onClick={onOpenCommandPalette}
-        title={t("toolbar.commandPalette")}
+        title={`${t("toolbar.commandPalette")} (${t("toolbar.shortcut")})`}
       >
         <span className="toolbar__icon">⌘</span>
         <span>{t("toolbar.commandPalette")}</span>
@@ -54,6 +54,7 @@ export function Toolbar({
           onClick={onUndo}
           disabled={undoCount === 0}
           title={t("toolbar.undo")}
+          aria-label={t("toolbar.undo")}
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <path d="M3 7h7a3 3 0 010 6H8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -69,6 +70,7 @@ export function Toolbar({
           onClick={onRedo}
           disabled={redoCount === 0}
           title={t("toolbar.redo")}
+          aria-label={t("toolbar.redo")}
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
             <path d="M13 7H6a3 3 0 000 6h2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>

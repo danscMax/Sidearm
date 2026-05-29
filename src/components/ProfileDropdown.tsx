@@ -134,6 +134,7 @@ export function ProfileDropdown({
                 role="option"
                 aria-selected={active}
                 className={`profile-dropdown__item${active ? " profile-dropdown__item--active" : ""}${focused ? " profile-dropdown__item--focused" : ""}`}
+                title={t("profile.dblClickSettings")}
                 onMouseEnter={() => setFocusIndex(idx)}
                 onClick={() => {
                   onSelectProfile(p.id);

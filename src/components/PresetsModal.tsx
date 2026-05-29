@@ -56,6 +56,10 @@ export function PresetsModal({
     return () => window.removeEventListener("keydown", handleEsc);
   }, [onCancel]);
 
+  useEffect(() => {
+    containerRef.current?.focus();
+  }, []);
+
   async function applyPreset(preset: PresetInfo) {
     setApplying(preset.id);
     try {
@@ -84,10 +88,12 @@ export function PresetsModal({
         className="presets-modal"
         role="dialog"
         aria-modal="true"
+        aria-labelledby="presets-modal-title"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="presets-modal__header">
-          <h3>{t("presets.title")}</h3>
+          <h3 id="presets-modal-title">{t("presets.title")}</h3>
           <button
             type="button"
             className="rule-modal__close"

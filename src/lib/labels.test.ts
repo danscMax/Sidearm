@@ -229,7 +229,7 @@ describe("labelForExecutionOutcome", () => {
 
 describe("labelForExecutionMode", () => {
   it("returns live label", () => {
-    expect(labelForExecutionMode("live")).toBe("Живой");
+    expect(labelForExecutionMode("live")).toBe("Вживую");
   });
 
   it("returns dry run label", () => {

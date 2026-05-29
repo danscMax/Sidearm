@@ -297,14 +297,14 @@ export function SettingsWorkspace({
       {/* Autostart */}
       <section className="settings-section">
         <div className="settings-section__header">
-          <span className="settings-section__title">Автозапуск</span>
+          <span className="settings-section__title">{t("settings.autostartHeader")}</span>
         </div>
 
         <div className="autostart-row">
           <div className="autostart-row__main">
-            <div className="autostart-row__title">Запускать при входе в систему</div>
+            <div className="autostart-row__title">{t("settings.autostartRunAtLogonTitle")}</div>
             <div className="autostart-row__hint">
-              Sidearm стартует автоматически после входа в Windows.
+              {t("settings.autostartRunAtLogonHint")}
             </div>
           </div>
           <div className="autostart-row__control">
@@ -322,11 +322,11 @@ export function SettingsWorkspace({
             style={runAtLogon ? undefined : { opacity: 0.5 }}
           >
             <div className="autostart-row__main">
-              <div className="autostart-row__title">Запускать от администратора</div>
+              <div className="autostart-row__title">{t("settings.autostartAdminTitle")}</div>
               <div className="autostart-row__hint">
                 {runAtLogon
-                  ? "Через Планировщик задач Windows с правами Highest. UAC появится один раз при включении — дальше каждый старт системы будет запускать Sidearm от админа без UAC. Это нужно, чтобы ввод доходил до окон с правами администратора (Диспетчер задач, regedit и т.п.)."
-                  : "Доступно только если включён автозапуск выше."}
+                  ? t("settings.autostartAdminHintEnabled")
+                  : t("settings.autostartAdminHintDisabled")}
               </div>
             </div>
             <div className="autostart-row__control">
@@ -341,11 +341,11 @@ export function SettingsWorkspace({
 
         {adminAutostart?.enabled && adminAutostart.pathMismatch && (
           <div className="notice notice--error" style={{ marginTop: 12 }}>
-            <p>Запланированная задача указывает на другой путь к Sidearm.exe:</p>
+            <p>{t("settings.autostartPathMismatchMsg")}</p>
             <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-              {adminAutostart.registeredPath ?? "(неизвестно)"}
+              {adminAutostart.registeredPath ?? t("settings.autostartPathUnknown")}
             </p>
-            <p>Текущий путь:</p>
+            <p>{t("settings.autostartCurrentPath")}</p>
             <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
               {adminAutostart.currentExe}
             </p>
@@ -356,7 +356,7 @@ export function SettingsWorkspace({
               onClick={() => void handleRunAsAdminToggle(true)}
               disabled={autostartBusy}
             >
-              Перерегистрировать на текущий путь
+              {t("settings.autostartReregisterButton")}
             </button>
           </div>
         )}
@@ -410,7 +410,7 @@ export function SettingsWorkspace({
               className={`osd-preview-bubble ${previewAnimClass}`}
               style={{ fontSize: previewFontPx }}
             >
-              <span className="osd-preview-bubble__label">Профиль:</span>
+              <span className="osd-preview-bubble__label">{t("settings.osdPreviewProfileLabel")}</span>
               <span className="osd-preview-bubble__name">{activeProfile?.name ?? "Main"}</span>
             </div>
           </div>

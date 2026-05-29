@@ -20,6 +20,7 @@ export function ConfirmModal({
 }) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
+  const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
   // Escape key closes the modal
   useEffect(() => {
@@ -30,9 +31,9 @@ export function ConfirmModal({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onCancel]);
 
-  // Auto-focus the modal container on mount
+  // Auto-focus the confirm button on mount so Enter confirms immediately
   useEffect(() => {
-    containerRef.current?.focus();
+    confirmButtonRef.current?.focus();
   }, []);
 
   // Focus trap: keep Tab within the modal
@@ -85,6 +86,7 @@ export function ConfirmModal({
             {t("common.cancel")}
           </button>
           <button
+            ref={confirmButtonRef}
             type="button"
             className="action-button action-button--primary"
             onClick={onConfirm}

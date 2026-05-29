@@ -203,6 +203,11 @@
     "saving": "Saving",
     "error": "Error"
   },
+  "configWaiting": {
+    "eyebrow": "Waiting for config",
+    "heading": "Interface not loaded yet.",
+    "body": "Once the configuration is loaded, profiles, the mouse map, and editors will appear here."
+  },
   "binding": {
     "notAssigned": "Not assigned",
     "disabledSuffix": "disabled",
@@ -308,7 +313,8 @@
     "heatmapEnable": "Enable heatmap",
     "heatmapDisable": "Disable heatmap",
     "searchPlaceholder": "Search bindings…",
-    "searchMeta": "Found: {{count}}"
+    "searchMeta": "Found: {{count}}",
+    "dblClickSettings": "Double-click to open profile settings"
   },
   "newRule": {
     "title": "New rule",
@@ -416,7 +422,18 @@
     "modifierStaleGcOption": "{{seconds}} s",
     "replayedForceReleaseLabel": "REPLAYED force-release window",
     "replayedForceReleaseHelp": "If Sidearm injected a Ctrl-down (e.g. after buffering a physical Ctrl) but the matching real key-up was lost (alt-tab/RDP/driver), the helper force-releases the modifier via SendInput after this window. Too short and a physically-held Ctrl gets released, breaking 'hold Ctrl + mouse button'. Too long and the stuck window stretches. 30 s is the safe default.",
-    "replayedForceReleaseOption": "{{seconds}} s"
+    "replayedForceReleaseOption": "{{seconds}} s",
+    "autostartHeader": "Autostart",
+    "autostartRunAtLogonTitle": "Run at logon",
+    "autostartRunAtLogonHint": "Sidearm starts automatically after Windows logon.",
+    "autostartAdminTitle": "Run as administrator",
+    "autostartAdminHintEnabled": "Via Windows Task Scheduler with Highest privileges. UAC appears once on enable — after that every logon starts Sidearm as admin without UAC. Required for input to reach windows with admin rights (Task Manager, regedit, etc.).",
+    "autostartAdminHintDisabled": "Available only when autostart above is enabled.",
+    "autostartPathMismatchMsg": "The scheduled task points to a different Sidearm.exe path:",
+    "autostartPathUnknown": "(unknown)",
+    "autostartCurrentPath": "Current path:",
+    "autostartReregisterButton": "Re-register for current path",
+    "osdPreviewProfileLabel": "Profile:"
   },
   "command": {
     "undo": "Undo",
@@ -442,6 +459,7 @@
     "unassigned": "Not assigned",
     "switchPhoto": "Switch to photo",
     "switchSchematic": "Switch to schematic",
+    "schematicAlt": "Razer Naga V2 HyperSpeed — schematic view",
     "tabAll": "All buttons",
     "tabTop": "Top panel",
     "tabSide": "Thumb grid"
@@ -511,6 +529,52 @@
   },
   "shared": {
     "warnings": "Validation warnings"
+  },
+  "serviceTools": {
+    "panelTitle": "Service Tools",
+    "captureTitle": "Active window capture",
+    "delayLabel": "Delay",
+    "delayNone": "No delay",
+    "delay1500": "1.5 seconds",
+    "delay3000": "3 seconds",
+    "delay5000": "5 seconds",
+    "captureButton": "Capture active window",
+    "hwndLabel": "HWND",
+    "resolvedProfileLabel": "Resolved profile",
+    "appMappingLabel": "Application rule",
+    "defaultProfileFallback": "default profile",
+    "windowTitleLabel": "Title",
+    "emptyValue": "(empty)",
+    "resolutionReasonLabel": "Reason",
+    "elevatedWarning": "Process is running as administrator. SendInput will be blocked by UIPI — actions will not reach this window.",
+    "captureHint": "Set a short delay, switch to another window, then capture it to verify profile selection.",
+    "resolutionTitle": "Resolution check",
+    "signalCodeLabel": "Signal code",
+    "dryRunButton": "Dry run",
+    "runLiveButton": "⚠ Execute live",
+    "signalLabel": "Signal",
+    "receivedAtLabel": "Received",
+    "statusLabel": "Status",
+    "layerLabel": "Layer",
+    "bindingLabel": "Binding",
+    "resolutionHint": "Test a signal like F13 or Ctrl+Alt+Shift+F13 against the current configuration.",
+    "executionTitle": "Action execution",
+    "pidLabel": "PID",
+    "executedAtLabel": "When",
+    "executionName": "Name: {{name}} ({{type}}).",
+    "warningPrefix": "Warning: {{text}}",
+    "executionHint": "Run a resolution check to see the execution result.",
+    "actionIdLabel": "Action ID",
+    "lastBackupLabel": "Last backup:",
+    "noWarningsTitle": "No warnings",
+    "noWarningsBody": "The current saved configuration passed loading and saving without warnings.",
+    "appSettingsTitle": "Application settings",
+    "fallbackProfileLabel": "Default profile",
+    "themeLabel": "Theme",
+    "themeDark": "Dark",
+    "themeRazer": "Razer Green",
+    "minimizeToTray": "Minimize to tray",
+    "debugLogging": "Debug logging"
   },
   "picker": {
     "title": "Assign action",
@@ -618,7 +682,8 @@
   },
   "toast": {
     "undone": "Change undone",
-    "redone": "Change redone"
+    "redone": "Change redone",
+    "saveFailedRollback": "Change reverted: {{reason}}"
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",
@@ -637,7 +702,7 @@
     "strategy": {
       "legend": "Merge strategy",
       "append": "Append as new",
-      "appendHint": "Name collisions get an (импорт) suffix.",
+      "appendHint": "Name collisions get an (import) suffix.",
       "replaceByName": "Replace by name",
       "replaceByNameHint": "Any existing profile with the same name is deleted along with its bindings."
     }

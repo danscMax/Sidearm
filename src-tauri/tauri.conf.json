@@ -38,13 +38,11 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "../resources/sidearm-ca.cer",
       "resources/presets/*.json"
     ],
     "windows": {
       "nsis": {
-        "installMode": "perMachine",
-        "installerHooks": "./nsis-hooks.nsh"
+        "installMode": "perMachine"
       }
     }
   }

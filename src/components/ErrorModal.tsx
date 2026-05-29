@@ -62,10 +62,11 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="error-modal-title"
         onClick={(e) => e.stopPropagation()}
       >
         <header className="error-modal__header">
-          <h2>{translated.title}</h2>
+          <h2 id="error-modal-title">{translated.title}</h2>
         </header>
 
         <div className="error-modal__body">

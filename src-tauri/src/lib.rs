@@ -2215,8 +2215,12 @@ pub fn run() {
             // Store the toggle menu item handle so we can update its text
             let toggle_item_handle = toggle_item.clone();
 
-            TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+            let mut tray_builder = TrayIconBuilder::new();
+            match app.default_window_icon() {
+                Some(icon) => tray_builder = tray_builder.icon(icon.clone()),
+                None => log::warn!("[system] No default window icon available for tray"),
+            }
+            tray_builder
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {
@@ -2325,8 +2329,16 @@ pub fn run() {
                 })
                 .build(app)?;
 
-            let shortcut: Shortcut = "ctrl+alt+n".parse()
-                .expect("Failed to parse global shortcut Ctrl+Alt+N");
+            // Optional global shortcut; never panic in setup if parsing ever
+            // regresses. This is the tail of setup, so skipping registration on
+            // a parse error is safe.
+            let shortcut: Shortcut = match "ctrl+alt+n".parse() {
+                Ok(s) => s,
+                Err(e) => {
+                    log::warn!("[system] Could not parse Ctrl+Alt+N shortcut: {e}");
+                    return Ok(());
+                }
+            };
 
             // Non-fatal: if the shortcut is already registered (e.g. previous
             // instance didn't clean up yet), log a warning and continue.

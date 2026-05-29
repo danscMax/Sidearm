@@ -23,9 +23,10 @@ export function PortableMigrationDialog({
         tabIndex={-1}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="migration-title"
       >
         <header>
-          <h2>{t("migration.title")}</h2>
+          <h2 id="migration-title">{t("migration.title")}</h2>
         </header>
 
         <div className="migration-modal__body">

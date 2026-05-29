@@ -653,13 +653,27 @@ export function ActionPickerModal({
             },
             pretty,
           };
-        case "textSnippet":
+        case "textSnippet": {
+          // Preserve tags from existing inline payload so editing the text
+          // through this picker doesn't silently drop tag metadata that was
+          // set elsewhere (e.g. ActionInspector).
+          const preservedTags =
+            existingAction?.type === "textSnippet" &&
+            existingAction.payload.source === "inline"
+              ? existingAction.payload.tags
+              : [];
           return {
             id: actionId,
             type: "textSnippet" as const,
-            payload: { source: "inline" as const, text: textDraft.text, pasteMode: textDraft.pasteMode, tags: [] },
+            payload: {
+              source: "inline" as const,
+              text: textDraft.text,
+              pasteMode: textDraft.pasteMode,
+              tags: preservedTags,
+            },
             pretty,
           };
+        }
         case "sequence":
           return { id: actionId, type: "sequence" as const, payload: { steps: sequenceDraft }, pretty };
         case "launch":
@@ -765,15 +779,15 @@ export function ActionPickerModal({
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal action-picker" ref={modalRef} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()} onKeyDown={handleFocusTrap}>
+      <div className="modal action-picker" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="action-picker-title" onClick={(e) => e.stopPropagation()} onKeyDown={handleFocusTrap}>
         <div className="action-picker__header">
           <div>
-            <h2>{t("picker.title")}</h2>
+            <h2 id="action-picker-title">{t("picker.title")}</h2>
             {controlLabel ? (
               <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
             ) : null}
           </div>
-          <button type="button" className="action-picker__close" onClick={onCancel}>×</button>
+          <button type="button" className="action-picker__close" onClick={onCancel} aria-label={t("common.close")}>×</button>
         </div>
 
         <div className="action-picker__body">
@@ -1232,7 +1246,16 @@ export function ActionPickerModal({
             type="button"
             className="action-button action-button--primary"
             onClick={handleSave}
-            disabled={effectiveCategory === "shortcut" && !shortcutDraft.key && !shortcutDraft.ctrl && !shortcutDraft.shift && !shortcutDraft.alt && !shortcutDraft.win}
+            disabled={
+              (effectiveCategory === "shortcut" &&
+                !shortcutDraft.key &&
+                !shortcutDraft.ctrl &&
+                !shortcutDraft.shift &&
+                !shortcutDraft.alt &&
+                !shortcutDraft.win) ||
+              (effectiveCategory === "textSnippet" && !textDraft.text.trim()) ||
+              (effectiveCategory === "launch" && !launchDraft.target.trim())
+            }
           >
             {t("common.save")}
           </button>

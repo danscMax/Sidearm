@@ -24,6 +24,7 @@ import { isActionLiveRunnable } from "../lib/action-helpers";
 import { LogPanel } from "./LogPanel";
 import { Fact, PanelGroup, WarningsPanel, ErrorPanel } from "./shared";
 import type { LogPanelControl } from "../hooks/useLogPanel";
+import { useTranslation } from "react-i18next";
 
 export interface ServiceToolsPanelProps {
   activeConfig: AppConfig;
@@ -77,6 +78,7 @@ export function ServiceToolsPanel({
   handleRunPreviewAction,
   updateDraft,
 }: ServiceToolsPanelProps) {
+  const { t } = useTranslation();
   const resolvedLiveRunnable =
     lastResolutionPreview?.actionId
       ? isActionLiveRunnable(activeConfig, lastResolutionPreview.actionId)
@@ -86,22 +88,22 @@ export function ServiceToolsPanel({
     resolvedLiveRunnable;
 
   return (
-    <PanelGroup title="Служебные инструменты" defaultOpen>
+    <PanelGroup title={t("serviceTools.panelTitle")} defaultOpen>
       <section className="panel">
-        <p className="panel__eyebrow">Захват активного окна</p>
+        <p className="panel__eyebrow">{t("serviceTools.captureTitle")}</p>
         <div className="editor-grid">
           <label className="field">
-            <span className="field__label">Задержка</span>
+            <span className="field__label">{t("serviceTools.delayLabel")}</span>
             <select
               value={captureDelayMs}
               onChange={(event) => {
                 setCaptureDelayMs(Number(event.target.value));
               }}
             >
-              <option value={0}>Без задержки</option>
-              <option value={1500}>1,5 секунды</option>
-              <option value={3000}>3 секунды</option>
-              <option value={5000}>5 секунд</option>
+              <option value={0}>{t("serviceTools.delayNone")}</option>
+              <option value={1500}>{t("serviceTools.delay1500")}</option>
+              <option value={3000}>{t("serviceTools.delay3000")}</option>
+              <option value={5000}>{t("serviceTools.delay5000")}</option>
             </select>
           </label>
 
@@ -113,44 +115,42 @@ export function ServiceToolsPanel({
             }}
             disabled={viewState === "loading" || viewState === "saving"}
           >
-            Захватить активное окно
+            {t("serviceTools.captureButton")}
           </button>
 
           {lastCapture ? (
             <div className="fact-grid">
-              <Fact label="Исполняемый файл" value={lastCapture.exe} mono />
-              <Fact label="HWND" value={lastCapture.hwnd} mono />
+              <Fact label={t("newRule.exe")} value={lastCapture.exe} mono />
+              <Fact label={t("serviceTools.hwndLabel")} value={lastCapture.hwnd} mono />
               <Fact
-                label="Выбранный профиль"
-                value={lastCapture.resolvedProfileId ?? "н/д"}
+                label={t("serviceTools.resolvedProfileLabel")}
+                value={lastCapture.resolvedProfileId ?? t("common.na")}
               />
               <Fact
-                label="Правило приложения"
-                value={lastCapture.matchedAppMappingId ?? "профиль по умолчанию"}
+                label={t("serviceTools.appMappingLabel")}
+                value={lastCapture.matchedAppMappingId ?? t("serviceTools.defaultProfileFallback")}
               />
-              <Fact label="Заголовок" value={lastCapture.title || "(пусто)"} />
-              <Fact label="Причина" value={lastCapture.resolutionReason} />
+              <Fact label={t("serviceTools.windowTitleLabel")} value={lastCapture.title || t("serviceTools.emptyValue")} />
+              <Fact label={t("serviceTools.resolutionReasonLabel")} value={lastCapture.resolutionReason} />
               {lastCapture.isElevated && (
                 <p className="panel__warning">
-                  Процесс запущен от имени администратора. SendInput будет
-                  заблокирован UIPI — действия не дойдут до этого окна.
+                  {t("serviceTools.elevatedWarning")}
                 </p>
               )}
             </div>
           ) : (
             <p className="panel__muted">
-              Поставьте небольшую задержку, переключитесь в другое окно и
-              затем захватите его, чтобы проверить выбор профиля.
+              {t("serviceTools.captureHint")}
             </p>
           )}
         </div>
       </section>
 
       <section className="panel">
-        <p className="panel__eyebrow">Проверка срабатывания</p>
+        <p className="panel__eyebrow">{t("serviceTools.resolutionTitle")}</p>
         <div className="editor-grid">
           <label className="field">
-            <span className="field__label">Код сигнала</span>
+            <span className="field__label">{t("serviceTools.signalCodeLabel")}</span>
             <input
               type="text"
               value={resolutionKeyInput}
@@ -168,7 +168,7 @@ export function ServiceToolsPanel({
             }}
             disabled={!resolutionKeyInput.trim()}
           >
-            Проверить
+            {t("debug.check")}
           </button>
 
           <button
@@ -179,7 +179,7 @@ export function ServiceToolsPanel({
             }}
             disabled={!resolutionKeyInput.trim()}
           >
-            Пробный прогон
+            {t("serviceTools.dryRunButton")}
           </button>
 
           <button
@@ -190,90 +190,89 @@ export function ServiceToolsPanel({
             }}
             disabled={!canRunLiveAction}
           >
-            ⚠ Выполнить вживую
+            {t("serviceTools.runLiveButton")}
           </button>
 
           {lastEncodedKey ? (
             <div className="fact-grid">
-              <Fact label="Сигнал" value={lastEncodedKey.encodedKey} mono />
-              <Fact label="Бэкенд" value={lastEncodedKey.backend} mono />
-              <Fact label="Получен" value={formatTimestamp(lastEncodedKey.receivedAt)} />
+              <Fact label={t("serviceTools.signalLabel")} value={lastEncodedKey.encodedKey} mono />
+              <Fact label={t("runtime.backend")} value={lastEncodedKey.backend} mono />
+              <Fact label={t("serviceTools.receivedAtLabel")} value={formatTimestamp(lastEncodedKey.receivedAt)} />
             </div>
           ) : null}
 
           {lastResolutionPreview ? (
             <div className="fact-grid">
-              <Fact label="Статус" value={labelForPreviewStatus(lastResolutionPreview.status)} />
+              <Fact label={t("serviceTools.statusLabel")} value={labelForPreviewStatus(lastResolutionPreview.status)} />
               <Fact
-                label="Профиль"
+                label={t("debug.profile")}
                 value={
                   lastResolutionPreview.resolvedProfileId
                     ? (profiles.find((p) => p.id === lastResolutionPreview.resolvedProfileId)?.name ??
                         lastResolutionPreview.resolvedProfileId)
-                    : "н/д"
+                    : t("common.na")
                 }
               />
               <Fact
-                label="Кнопка"
+                label={t("debug.control")}
                 value={
                   lastResolutionPreview.controlId
                     ? controlName(activeConfig.physicalControls, lastResolutionPreview.controlId)
-                    : "н/д"
+                    : t("common.na")
                 }
               />
               <Fact
-                label="Слой"
-                value={lastResolutionPreview.layer ?? "н/д"}
+                label={t("serviceTools.layerLabel")}
+                value={lastResolutionPreview.layer ?? t("common.na")}
                 mono
               />
               <Fact
-                label="Назначение"
-                value={lastResolutionPreview.bindingId ?? "н/д"}
+                label={t("serviceTools.bindingLabel")}
+                value={lastResolutionPreview.bindingId ?? t("common.na")}
                 mono
               />
               <Fact
-                label="Действие"
-                value={lastResolutionPreview.actionId ?? "н/д"}
+                label={t("debug.action")}
+                value={lastResolutionPreview.actionId ?? t("common.na")}
                 mono
               />
             </div>
           ) : (
             <p className="panel__muted">
-              Проверьте сигнал вроде <code>F13</code> или
-              <code> Ctrl+Alt+Shift+F13</code> на текущей конфигурации.
+              {t("serviceTools.resolutionHint")}
             </p>
           )}
         </div>
       </section>
 
       <section className="panel">
-        <p className="panel__eyebrow">Выполнение действия</p>
+        <p className="panel__eyebrow">{t("serviceTools.executionTitle")}</p>
         {lastExecution ? (
           <div className="editor-grid">
             <div className="fact-grid">
-              <Fact label="Результат" value={labelForExecutionOutcome(lastExecution.outcome)} />
-              <Fact label="Режим" value={labelForExecutionMode(lastExecution.mode)} />
-              <Fact label="Действие" value={lastExecution.actionId} />
-              <Fact label="Профиль" value={lastExecution.resolvedProfileId ?? "н/д"} />
-              <Fact label="Кнопка" value={lastExecution.controlId ?? "н/д"} />
-              <Fact label="PID" value={String(lastExecution.processId ?? "н/д")} />
-              <Fact label="Когда" value={formatTimestamp(lastExecution.executedAt)} />
+              <Fact label={t("debug.result")} value={labelForExecutionOutcome(lastExecution.outcome)} />
+              <Fact label={t("debug.mode")} value={labelForExecutionMode(lastExecution.mode)} />
+              <Fact label={t("debug.action")} value={lastExecution.actionId} />
+              <Fact label={t("debug.profile")} value={lastExecution.resolvedProfileId ?? t("common.na")} />
+              <Fact label={t("debug.control")} value={lastExecution.controlId ?? t("common.na")} />
+              <Fact label={t("serviceTools.pidLabel")} value={String(lastExecution.processId ?? t("common.na"))} />
+              <Fact label={t("serviceTools.executedAtLabel")} value={formatTimestamp(lastExecution.executedAt)} />
             </div>
 
             <p className="panel__muted">
               {lastExecution.summary}
-              {" "}Название: {lastExecution.actionPretty} ({lastExecution.actionType}).
+              {" "}{t("serviceTools.executionName", { name: lastExecution.actionPretty, type: lastExecution.actionType })}
             </p>
 
             {lastExecution.warnings.map((warning) => (
               <p className="panel__muted" key={warning}>
-                Предупреждение: {warning}
+                {t("serviceTools.warningPrefix", { text: warning })}
               </p>
             ))}
           </div>
         ) : (
           <p className="panel__muted">
-            Запустите проверку действия, чтобы увидеть результат выполнения.
+            {t("serviceTools.executionHint")}
           </p>
         )}
 
@@ -282,26 +281,26 @@ export function ServiceToolsPanel({
             <strong>{lastRuntimeError.category}</strong>
             <p>{lastRuntimeError.message}</p>
             <p className="notice__meta">
-              Код сигнала: {lastRuntimeError.encodedKey ?? "н/д"}
+              {t("serviceTools.signalCodeLabel")}: {lastRuntimeError.encodedKey ?? t("common.na")}
             </p>
             <p className="notice__meta">
-              ID действия: {lastRuntimeError.actionId ?? "н/д"}
+              {t("serviceTools.actionIdLabel")}: {lastRuntimeError.actionId ?? t("common.na")}
             </p>
           </div>
         ) : null}
       </section>
 
       <section className="panel">
-        <p className="panel__eyebrow">Журнал событий</p>
+        <p className="panel__eyebrow">{t("debug.logTitle")}</p>
         <LogPanel logPanel={logPanel} />
       </section>
 
       <section className="panel">
-        <p className="panel__eyebrow">Сохранение</p>
+        <p className="panel__eyebrow">{t("viewState.saving")}</p>
         <p className="panel__path">{activePath}</p>
         {lastSave?.backupPath ? (
           <p className="panel__muted">
-            Последняя резервная копия: <code>{lastSave.backupPath}</code>
+            {t("serviceTools.lastBackupLabel")} <code>{lastSave.backupPath}</code>
           </p>
         ) : null}
         {error ? <ErrorPanel error={error} /> : null}
@@ -310,20 +309,19 @@ export function ServiceToolsPanel({
         ) : null}
         {!error && activeWarnings.length === 0 ? (
           <div className="notice notice--ok">
-            <strong>Предупреждений нет</strong>
+            <strong>{t("serviceTools.noWarningsTitle")}</strong>
             <p>
-              Текущая сохранённая конфигурация прошла загрузку и
-              сохранение без предупреждений.
+              {t("serviceTools.noWarningsBody")}
             </p>
           </div>
         ) : null}
       </section>
 
       <section className="panel panel--compact">
-        <p className="panel__eyebrow">Настройки приложения</p>
+        <p className="panel__eyebrow">{t("serviceTools.appSettingsTitle")}</p>
         <div className="editor-grid">
           <label className="field">
-            <span className="field__label">Профиль по умолчанию</span>
+            <span className="field__label">{t("serviceTools.fallbackProfileLabel")}</span>
             <select
               value={activeConfig.settings.fallbackProfileId}
               onChange={(event) => {
@@ -345,7 +343,7 @@ export function ServiceToolsPanel({
           </label>
 
           <label className="field">
-            <span className="field__label">Тема</span>
+            <span className="field__label">{t("serviceTools.themeLabel")}</span>
             <select
               value={activeConfig.settings.theme}
               onChange={(event) => {
@@ -358,13 +356,13 @@ export function ServiceToolsPanel({
                 }));
               }}
             >
-              <option value="dark">Тёмная</option>
-              <option value="razer">Razer Green</option>
+              <option value="dark">{t("serviceTools.themeDark")}</option>
+              <option value="razer">{t("serviceTools.themeRazer")}</option>
             </select>
           </label>
 
           <label className="field field--inline">
-            <span className="field__label">Сворачивать в трей</span>
+            <span className="field__label">{t("serviceTools.minimizeToTray")}</span>
             <input
               type="checkbox"
               checked={activeConfig.settings.minimizeToTray}
@@ -381,7 +379,7 @@ export function ServiceToolsPanel({
           </label>
 
           <label className="field field--inline">
-            <span className="field__label">Отладочное логирование</span>
+            <span className="field__label">{t("serviceTools.debugLogging")}</span>
             <input
               type="checkbox"
               checked={activeConfig.settings.debugLogging}

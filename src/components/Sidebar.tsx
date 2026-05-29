@@ -1,4 +1,4 @@
-import { startTransition, useState } from "react";
+import { startTransition, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceMode } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
@@ -6,6 +6,30 @@ import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
 import { ProfileDropdown } from "./ProfileDropdown";
+
+const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
+  profiles: (
+    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  ),
+  debug: (
+    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M1 8h3l2-5 3 10 2-5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  settings: (
+    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <line x1="2" y1="5" x2="14" y2="5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <line x1="2" y1="11" x2="14" y2="11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="6" cy="5" r="2.1" fill="var(--c-bg)" stroke="currentColor" strokeWidth="1.4" />
+      <circle cx="10" cy="11" r="2.1" fill="var(--c-bg)" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  ),
+};
 
 export function Sidebar({
   workspaceMode,
@@ -54,6 +78,7 @@ export function Sidebar({
           className={`nav-item${workspaceMode === mode.value ? " nav-item--active" : ""}`}
           onClick={() => { onSwitchMode(mode.value); }}
         >
+          {NAV_ICONS[mode.value]}
           {t(`workspace.${mode.value}.label`)}
         </button>
       ))}

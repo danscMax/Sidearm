@@ -12,6 +12,16 @@ import type { ViewState } from "../lib/constants";
 const MAX_UNDO = 15;
 const AUTO_SAVE_DELAY_MS = 500;
 
+export interface UpdateDraftOptions {
+  /**
+   * Skip the 500 ms debounce and flush the save immediately. Use for explicit
+   * commit moments (Save button in a modal, import, profile switch) where
+   * losing the change to a subsequent rapid action or app close would surprise
+   * the user. Default false — interactive typing should remain debounced.
+   */
+  immediate?: boolean;
+}
+
 export interface AppPersistence {
   // State (read-only for consumers)
   viewState: ViewState;
@@ -30,12 +40,18 @@ export interface AppPersistence {
 
   // Functions
   refreshConfig: () => Promise<boolean>;
-  updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
+  updateDraft: (
+    updateConfig: (config: AppConfig) => AppConfig,
+    options?: UpdateDraftOptions,
+  ) => void;
   handleUndo: () => void;
   handleRedo: () => void;
 }
 
-export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
+export function useAppPersistence(
+  onAutoSaved?: () => void,
+  onAutoSaveFailed?: (reason: string) => void,
+): AppPersistence {
   const [viewState, setViewState] = useState<ViewState>("idle");
   const [snapshot, setSnapshot] = useState<LoadConfigResponse | null>(null);
   const [workingConfig, setWorkingConfig] = useState<AppConfig | null>(null);
@@ -51,24 +67,56 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
   const disposedRef = useRef(false);
   const onAutoSavedRef = useRef(onAutoSaved);
   onAutoSavedRef.current = onAutoSaved;
+  const onAutoSaveFailedRef = useRef(onAutoSaveFailed);
+  onAutoSaveFailedRef.current = onAutoSaveFailed;
+  // Mirror of the last successfully-persisted config. Used to roll back the
+  // in-memory working config when an auto-save fails (schema rejection,
+  // backend error, etc.) so the UI cannot diverge from disk.
+  const lastPersistedConfigRef = useRef<AppConfig | null>(null);
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
   const activePath = lastSave?.path ?? snapshot?.path ?? "Пока не загружен";
 
-  // Cleanup timer on unmount and prevent post-dispose scheduling
+  // Best-effort flush on unmount / window close. Previously this cleanup
+  // wiped the pending queue without writing — if the user closed the app
+  // within 500 ms of an edit, the change was silently lost. We now kick a
+  // synchronous-from-caller-perspective flush so the in-flight save reaches
+  // disk before React tears the hook down. (saveConfig is async but the
+  // backend persists atomically; tauri keeps the runtime alive until the
+  // command completes.)
   useEffect(() => {
     return () => {
       disposedRef.current = true;
       clearTimeout(saveTimerRef.current);
-      saveQueueRef.current = null;
+      if (saveQueueRef.current) {
+        void flushSave();
+      }
     };
   }, []);
 
-  function scheduleSave(config: AppConfig) {
+  // Same idea for hard browser/window unload — beforeunload fires when the
+  // user closes the Tauri window. Sending the save request before unmount
+  // gives Tauri a chance to drain it.
+  useEffect(() => {
+    function handleBeforeUnload() {
+      if (saveQueueRef.current) {
+        clearTimeout(saveTimerRef.current);
+        void flushSave();
+      }
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  function scheduleSave(config: AppConfig, immediate: boolean) {
     saveQueueRef.current = config;
     clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(flushSave, AUTO_SAVE_DELAY_MS);
+    if (immediate) {
+      void flushSave();
+    } else {
+      saveTimerRef.current = setTimeout(flushSave, AUTO_SAVE_DELAY_MS);
+    }
   }
 
   async function flushSave() {
@@ -81,6 +129,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
 
     try {
       const result = await saveConfig(config);
+      lastPersistedConfigRef.current = result.config;
       startTransition(() => {
         setSnapshot({
           config: result.config,
@@ -94,10 +143,20 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
       });
       onAutoSavedRef.current?.();
     } catch (unknownError) {
+      const normalized = normalizeCommandError(unknownError);
+      const rollbackTarget = lastPersistedConfigRef.current;
       startTransition(() => {
-        setError(normalizeCommandError(unknownError));
+        setError(normalized);
         setViewState("error");
+        // Roll back in-memory draft to the last persisted snapshot to keep
+        // UI and disk consistent. Without this, the working config holds the
+        // rejected payload forever — modals reopen with empty/wrong fields
+        // and runtime keeps using the older on-disk config.
+        if (rollbackTarget) {
+          setWorkingConfig(rollbackTarget);
+        }
       });
+      onAutoSaveFailedRef.current?.(normalized.message);
     } finally {
       isSavingRef.current = false;
       // If new changes queued during save, save again promptly (skip if unmounted)
@@ -117,6 +176,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
 
     try {
       const result = await loadConfig();
+      lastPersistedConfigRef.current = result.config;
       startTransition(() => {
         setSnapshot(result);
         setWorkingConfig(result.config);
@@ -134,7 +194,10 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
     }
   }
 
-  function updateDraft(updateConfig: (config: AppConfig) => AppConfig) {
+  function updateDraft(
+    updateConfig: (config: AppConfig) => AppConfig,
+    options?: UpdateDraftOptions,
+  ) {
     const current = workingConfig;
     if (!current) return;
     const next = updateConfig(current);
@@ -143,7 +206,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
     setError(null);
     setViewState("ready");
     setWorkingConfig(next);
-    scheduleSave(next);
+    scheduleSave(next, options?.immediate ?? false);
   }
 
   function handleUndo() {
@@ -155,7 +218,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
       setRedoStack((redo) => [...redo, current]);
     }
     setWorkingConfig(previous);
-    scheduleSave(previous);
+    scheduleSave(previous, false);
   }
 
   function handleRedo() {
@@ -167,7 +230,7 @@ export function useAppPersistence(onAutoSaved?: () => void): AppPersistence {
       setUndoStack((undo) => [...undo, current]);
     }
     setWorkingConfig(next);
-    scheduleSave(next);
+    scheduleSave(next, false);
   }
 
   return {

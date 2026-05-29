@@ -6,6 +6,7 @@
 
 pub mod format_v3;
 pub mod format_v4;
+pub mod macro_steps;
 pub mod macro_xml;
 pub mod makecode;
 pub mod mapping;

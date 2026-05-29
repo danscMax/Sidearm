@@ -73,6 +73,54 @@ pub enum ParsedAction {
     },
 }
 
+/// Build a human-readable label for a parsed action, used as the binding's
+/// default name in the import preview. Shared by the v3 and v4 parsers (canon).
+pub fn default_label_for(control_id: &str, action: &ParsedAction) -> String {
+    match action {
+        ParsedAction::Shortcut {
+            key,
+            ctrl,
+            shift,
+            alt,
+            win,
+        } => {
+            let mut parts = Vec::new();
+            if *ctrl {
+                parts.push("Ctrl");
+            }
+            if *shift {
+                parts.push("Shift");
+            }
+            if *alt {
+                parts.push("Alt");
+            }
+            if *win {
+                parts.push("Win");
+            }
+            let mut s = parts.join("+");
+            if !key.is_empty() {
+                if !s.is_empty() {
+                    s.push('+');
+                }
+                s.push_str(key);
+            }
+            if s.is_empty() {
+                control_id.to_string()
+            } else {
+                s
+            }
+        }
+        ParsedAction::TextSnippet { text } => {
+            let snippet: String = text.chars().take(24).collect();
+            format!("«{snippet}»")
+        }
+        ParsedAction::Sequence { .. } => "Macro".to_string(),
+        ParsedAction::MouseAction { action } => action.clone(),
+        ParsedAction::Disabled => "—".to_string(),
+        ParsedAction::Unmappable { .. } => format!("? {control_id}"),
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParsedMacro {

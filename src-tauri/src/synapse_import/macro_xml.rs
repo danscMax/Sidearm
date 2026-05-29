@@ -8,8 +8,7 @@
 
 use std::path::Path;
 
-use super::makecode;
-use super::mapping::ModifierFlags;
+use super::macro_steps::{self, NormalizedEvent};
 use super::types::{ImportWarning, ParsedMacro, ParsedSequenceStep};
 
 #[derive(Debug, thiserror::Error)]
@@ -102,6 +101,10 @@ struct RawEvent {
     ty: String,
     makecode: Option<u16>,
     state: Option<u8>,
+    /// Inter-event delay in milliseconds (`<Delay>` child of `<MacroEvent>`,
+    /// same element the v3 macro parser reads). Previously dropped, which lost
+    /// macro timing on import.
+    delay_ms: Option<u32>,
 }
 
 fn assign_text(
@@ -123,9 +126,18 @@ fn assign_text(
             }
         }
         if stack.len() == 4 {
-            // Inside <Macro><MacroEvents><MacroEvent><X>
+            // Inside <Macro><MacroEvents><MacroEvent><X>. Inter-event delays
+            // appear as `<Delay>` (milliseconds, like the v3 macro XML) or
+            // `<Number>` (seconds, like the v4 JSON payload); accept both.
             match tag {
                 "Type" => current_event.ty = text.to_string(),
+                "Delay" => current_event.delay_ms = text.parse::<u32>().ok(),
+                "Number" => {
+                    current_event.delay_ms = text
+                        .parse::<f64>()
+                        .ok()
+                        .map(|secs| (secs * 1000.0).round().max(0.0) as u32);
+                }
                 _ => {}
             }
         }
@@ -149,89 +161,25 @@ fn build_steps(
     events: &[RawEvent],
     warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedSequenceStep> {
-    let mut steps: Vec<ParsedSequenceStep> = Vec::new();
-    let mut mods = ModifierFlags::default();
-    let mut pending_down: Option<(u16, bool)> = None;
-
+    let mut normalized: Vec<NormalizedEvent> = Vec::new();
     for ev in events {
+        if let Some(delay_ms) = ev.delay_ms {
+            if delay_ms > 0 {
+                normalized.push(NormalizedEvent::Delay(delay_ms));
+            }
+        }
         if ev.ty != "1" {
             continue;
         }
         let Some(makecode_val) = ev.makecode else { continue };
         let state = ev.state.unwrap_or(0);
-        let is_extended = state >= 2;
-        let is_down = state % 2 == 0;
-
-        if is_down {
-            if let Some(canon) = makecode::modifier_canonical(makecode_val, is_extended) {
-                match canon {
-                    "Ctrl" => mods.ctrl = true,
-                    "Shift" => mods.shift = true,
-                    "Alt" => mods.alt = true,
-                    "Win" => mods.win = true,
-                    _ => {}
-                }
-            } else if pending_down.is_none() {
-                pending_down = Some((makecode_val, is_extended));
-            } else {
-                let (pc, pe) = pending_down.take().unwrap();
-                emit_send(&mut steps, pc, pe, mods, macro_name, warnings);
-                pending_down = Some((makecode_val, is_extended));
-                warnings.push(ImportWarning::new(
-                    "macro_hold_flattened",
-                    format!("Macro `{macro_name}` had overlapping key-holds."),
-                ));
-            }
-        } else {
-            if let Some(canon) = makecode::modifier_canonical(makecode_val, is_extended) {
-                match canon {
-                    "Ctrl" => mods.ctrl = false,
-                    "Shift" => mods.shift = false,
-                    "Alt" => mods.alt = false,
-                    "Win" => mods.win = false,
-                    _ => {}
-                }
-            } else if let Some((code, ext)) = pending_down.take() {
-                emit_send(&mut steps, code, ext, mods, macro_name, warnings);
-            }
-        }
+        normalized.push(NormalizedEvent::Key {
+            makecode: makecode_val,
+            is_extended: state >= 2,
+            is_down: state % 2 == 0,
+        });
     }
-
-    if let Some((code, ext)) = pending_down {
-        emit_send(&mut steps, code, ext, mods, macro_name, warnings);
-    }
-    steps
-}
-
-fn emit_send(
-    steps: &mut Vec<ParsedSequenceStep>,
-    makecode_val: u16,
-    is_extended: bool,
-    mods: ModifierFlags,
-    macro_name: &str,
-    warnings: &mut Vec<ImportWarning>,
-) {
-    let key_name = match makecode::makecode_to_key(makecode_val, is_extended) {
-        Some(k) => k.to_string(),
-        None => {
-            warnings.push(ImportWarning::new(
-                "unknown_scancode",
-                format!("Macro `{macro_name}` uses unknown scancode 0x{makecode_val:02X}."),
-            ));
-            format!("Scancode(0x{makecode_val:02X})")
-        }
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    if mods.ctrl { parts.push("Ctrl"); }
-    if mods.shift { parts.push("Shift"); }
-    if mods.alt { parts.push("Alt"); }
-    if mods.win { parts.push("Win"); }
-    let value = if parts.is_empty() {
-        key_name
-    } else {
-        format!("{}+{key_name}", parts.join("+"))
-    };
-    steps.push(ParsedSequenceStep::Send { value });
+    macro_steps::build(&normalized, macro_name, warnings)
 }
 
 /// Collect all `.xml` macro files under `dir` (one level) into a Vec.
@@ -373,5 +321,26 @@ mod tests {
             ParsedSequenceStep::Send { value } => assert_eq!(value, "A"),
             other => panic!("expected Send, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn preserves_inter_event_delays() {
+        // A `<Delay>` (ms) MacroEvent must surface as a Sleep step — these were
+        // dropped before, losing macro timing. Mirrors the v3 macro parser.
+        let xml = r#"<Macro><Name>D</Name><MacroEvents>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent></MacroEvent>
+            <MacroEvent><Type>0</Type><Delay>250</Delay></MacroEvent>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>1</State></KeyEvent></MacroEvent>
+        </MacroEvents><Guid>g-d</Guid></Macro>"#;
+        let mut warnings = Vec::new();
+        let parsed = parse_macro_xml_str(xml, "D".into(), &mut warnings).unwrap();
+        assert!(
+            parsed
+                .steps
+                .iter()
+                .any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms: 250 })),
+            "expected a 250ms Sleep step, got {:?}",
+            parsed.steps,
+        );
     }
 }

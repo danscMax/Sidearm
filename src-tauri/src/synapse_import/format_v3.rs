@@ -21,15 +21,15 @@ use std::path::Path;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
+use super::macro_steps::{self, NormalizedEvent};
 use super::makecode;
 use super::mapping::{
-    self, input_id_to_control_id, parse_modifier_array, parse_modifier_string,
-    translate_key_token, translate_mouse_assignment, vk_to_key, KeyTranslationError,
-    ModifierFlags,
+    input_id_to_control_id, mouse_action_from_assignment, parse_modifier_string,
+    translate_key_token, vk_to_key, KeyTranslationError,
 };
 use super::types::{
-    ImportWarning, ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile,
-    ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
+    default_label_for, ImportWarning, ParsedAction, ParsedBinding, ParsedMacro,
+    ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -569,49 +569,7 @@ fn build_mouse_action(
             reason: "<MouseAssignment> missing".into(),
         };
     }
-    match translate_mouse_assignment(&b.mouse_assignment) {
-        Some(action) => ParsedAction::MouseAction {
-            action: action.to_string(),
-        },
-        None => {
-            warnings.push(
-                ImportWarning::new(
-                    "v3_unsupported_mouse_assignment",
-                    format!(
-                        "Mouse assignment `{}` is not supported.",
-                        b.mouse_assignment
-                    ),
-                )
-                .with_context(profile_name.to_string()),
-            );
-            ParsedAction::Unmappable {
-                reason: format!("mouse assignment `{}`", b.mouse_assignment),
-            }
-        }
-    }
-}
-
-fn default_label_for(control_id: &str, action: &ParsedAction) -> String {
-    match action {
-        ParsedAction::Shortcut { key, ctrl, shift, alt, win } => {
-            let mut parts = Vec::new();
-            if *ctrl { parts.push("Ctrl"); }
-            if *shift { parts.push("Shift"); }
-            if *alt { parts.push("Alt"); }
-            if *win { parts.push("Win"); }
-            let mut s = parts.join("+");
-            if !key.is_empty() {
-                if !s.is_empty() { s.push('+'); }
-                s.push_str(key);
-            }
-            if s.is_empty() { control_id.to_string() } else { s }
-        }
-        ParsedAction::MouseAction { action } => action.clone(),
-        ParsedAction::Sequence { .. } => "Macro".to_string(),
-        ParsedAction::Disabled => "—".to_string(),
-        ParsedAction::Unmappable { .. } => format!("? {control_id}"),
-        ParsedAction::TextSnippet { .. } => "TextSnippet".to_string(),
-    }
+    mouse_action_from_assignment(&b.mouse_assignment, profile_name, warnings)
 }
 
 // ============================================================================
@@ -733,22 +691,18 @@ fn parse_v3_macro(
     })
 }
 
-/// Walk v3 macro events, emitting Sleep steps for inter-event delays and
-/// Send steps for paired key down/ups (modifier-folded via the same pairing
-/// logic as format_v4).
+/// Normalize v3 macro events into the shared [`macro_steps`] builder. Each event
+/// may carry an inter-event delay (emitted as a `Sleep`) plus a key down/up.
 fn build_macro_steps(
     macro_name: &str,
     events: &[V3MacroEvent],
     warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedSequenceStep> {
-    let mut steps: Vec<ParsedSequenceStep> = Vec::new();
-    let mut mods = ModifierFlags::default();
-    let mut pending_down: Option<(u16, bool)> = None;
-
+    let mut normalized: Vec<NormalizedEvent> = Vec::new();
     for ev in events {
         if let Some(delay_ms) = ev.delay_ms {
             if delay_ms > 0 {
-                steps.push(ParsedSequenceStep::Sleep { delay_ms });
+                normalized.push(NormalizedEvent::Delay(delay_ms));
             }
         }
         if ev.ty != "1" {
@@ -756,79 +710,13 @@ fn build_macro_steps(
         }
         let Some(makecode_val) = ev.makecode else { continue };
         let state = ev.state.unwrap_or(0);
-        let is_extended = state >= 2;
-        let is_down = state % 2 == 0;
-
-        if is_down {
-            if let Some(canon) = makecode::modifier_canonical(makecode_val, is_extended) {
-                match canon {
-                    "Ctrl" => mods.ctrl = true,
-                    "Shift" => mods.shift = true,
-                    "Alt" => mods.alt = true,
-                    "Win" => mods.win = true,
-                    _ => {}
-                }
-            } else if pending_down.is_none() {
-                pending_down = Some((makecode_val, is_extended));
-            } else {
-                let (pc, pe) = pending_down.take().unwrap();
-                emit_send(&mut steps, pc, pe, mods, macro_name, warnings);
-                pending_down = Some((makecode_val, is_extended));
-            }
-        } else if let Some(canon) = makecode::modifier_canonical(makecode_val, is_extended) {
-            match canon {
-                "Ctrl" => mods.ctrl = false,
-                "Shift" => mods.shift = false,
-                "Alt" => mods.alt = false,
-                "Win" => mods.win = false,
-                _ => {}
-            }
-        } else if let Some((code, ext)) = pending_down.take() {
-            emit_send(&mut steps, code, ext, mods, macro_name, warnings);
-        }
+        normalized.push(NormalizedEvent::Key {
+            makecode: makecode_val,
+            is_extended: state >= 2,
+            is_down: state % 2 == 0,
+        });
     }
-
-    if let Some((code, ext)) = pending_down {
-        emit_send(&mut steps, code, ext, mods, macro_name, warnings);
-    }
-    steps
-}
-
-fn emit_send(
-    steps: &mut Vec<ParsedSequenceStep>,
-    makecode_val: u16,
-    is_extended: bool,
-    mods: ModifierFlags,
-    macro_name: &str,
-    warnings: &mut Vec<ImportWarning>,
-) {
-    let key_name = match makecode::makecode_to_key(makecode_val, is_extended) {
-        Some(k) => k.to_string(),
-        None => {
-            warnings.push(ImportWarning::new(
-                "v3_unknown_scancode",
-                format!(
-                    "Macro `{macro_name}` uses unknown scancode 0x{makecode_val:02X}."
-                ),
-            ));
-            format!("Scancode(0x{makecode_val:02X})")
-        }
-    };
-    let mut parts: Vec<&str> = Vec::new();
-    if mods.ctrl { parts.push("Ctrl"); }
-    if mods.shift { parts.push("Shift"); }
-    if mods.alt { parts.push("Alt"); }
-    if mods.win { parts.push("Win"); }
-    let value = if parts.is_empty() {
-        key_name
-    } else {
-        format!("{}+{key_name}", parts.join("+"))
-    };
-    steps.push(ParsedSequenceStep::Send { value });
-    // Keep a reference so the linker doesn't strip `parse_modifier_array` in
-    // debug builds when format_v4 happens to be inlined away.
-    let _ = parse_modifier_array;
-    let _ = mapping::MODIFIER_TOKENS.len();
+    macro_steps::build(&normalized, macro_name, warnings)
 }
 
 // ============================================================================

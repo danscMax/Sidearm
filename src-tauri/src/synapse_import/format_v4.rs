@@ -12,14 +12,14 @@ use std::path::Path;
 use base64::Engine;
 use serde::Deserialize;
 
-use super::makecode;
+use super::macro_steps::{self, NormalizedEvent};
 use super::mapping::{
-    self, input_id_to_control_id, parse_modifier_array, translate_key_token,
-    translate_mouse_assignment, KeyTranslationError, ModifierFlags,
+    input_id_to_control_id, mouse_action_from_assignment, parse_modifier_array,
+    translate_key_token, KeyTranslationError,
 };
 use super::types::{
-    ImportWarning, ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile,
-    ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
+    default_label_for, ImportWarning, ParsedAction, ParsedBinding, ParsedMacro,
+    ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
 };
 
 // ============================================================================
@@ -539,52 +539,7 @@ fn build_mouse_action(
             reason: "mouseGroup payload missing".into(),
         };
     };
-    match translate_mouse_assignment(&group.mouse_assignment) {
-        Some(a) => ParsedAction::MouseAction {
-            action: a.to_string(),
-        },
-        None => {
-            warnings.push(
-                ImportWarning::new(
-                    "unsupported_mouse_assignment",
-                    format!(
-                        "Mouse assignment `{}` is not supported yet.",
-                        group.mouse_assignment
-                    ),
-                )
-                .with_context(profile_name.to_string()),
-            );
-            ParsedAction::Unmappable {
-                reason: format!("Mouse assignment `{}` not supported", group.mouse_assignment),
-            }
-        }
-    }
-}
-
-fn default_label_for(control_id: &str, action: &ParsedAction) -> String {
-    match action {
-        ParsedAction::Shortcut { key, ctrl, shift, alt, win } => {
-            let mut parts = Vec::new();
-            if *ctrl { parts.push("Ctrl"); }
-            if *shift { parts.push("Shift"); }
-            if *alt { parts.push("Alt"); }
-            if *win { parts.push("Win"); }
-            let mut s = parts.join("+");
-            if !key.is_empty() {
-                if !s.is_empty() { s.push('+'); }
-                s.push_str(key);
-            }
-            if s.is_empty() { control_id.to_string() } else { s }
-        }
-        ParsedAction::TextSnippet { text } => {
-            let snippet: String = text.chars().take(24).collect();
-            format!("«{snippet}»")
-        }
-        ParsedAction::Sequence { .. } => "Macro".to_string(),
-        ParsedAction::MouseAction { action } => action.clone(),
-        ParsedAction::Disabled => "—".to_string(),
-        ParsedAction::Unmappable { .. } => format!("? {control_id}"),
-    }
+    mouse_action_from_assignment(&group.mouse_assignment, profile_name, warnings)
 }
 
 // ============================================================================
@@ -609,26 +564,22 @@ fn decode_macro(
     })
 }
 
-/// Walk macro events, pairing key-down with the next matching key-up so the
-/// sequence emits discrete `Send` steps (Sidearm's sequence primitive is
-/// full keystrokes, not individual down/up events).
+/// Normalize v4 macro events into the shared [`macro_steps`] builder. Mouse
+/// events and UI markers are format-specific and handled here; key/delay events
+/// are forwarded for the common down/up pairing.
 fn build_macro_steps(
     macro_name: &str,
     events: &[MacroEvent],
     warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedSequenceStep> {
-    let mut steps: Vec<ParsedSequenceStep> = Vec::new();
-    let mut pending_modifiers = ModifierFlags::default();
-    let mut pending_down: Option<(u16, bool)> = None;
-
+    let mut normalized: Vec<NormalizedEvent> = Vec::new();
     for ev in events {
-        let ty = event_type(&ev.ty);
-        match ty {
+        match event_type(&ev.ty) {
             EventType::Delay => {
                 if let Some(secs) = ev.number {
                     let ms = (secs * 1000.0).round().max(0.0) as u32;
                     if ms > 0 {
-                        steps.push(ParsedSequenceStep::Sleep { delay_ms: ms });
+                        normalized.push(NormalizedEvent::Delay(ms));
                     }
                 }
             }
@@ -637,54 +588,11 @@ fn build_macro_steps(
                 let is_extended = key.is_extended.unwrap_or(false) || key.state >= 2;
                 // State 0/2 = down, 1/3 = up. The Type field only marks that
                 // this event is a key event, not its direction.
-                let is_down = key.state % 2 == 0;
-
-                if is_down {
-                    if let Some(canon) = makecode::modifier_canonical(key.makecode, is_extended) {
-                        match canon {
-                            "Ctrl" => pending_modifiers.ctrl = true,
-                            "Shift" => pending_modifiers.shift = true,
-                            "Alt" => pending_modifiers.alt = true,
-                            "Win" => pending_modifiers.win = true,
-                            _ => {}
-                        }
-                    } else if pending_down.is_none() {
-                        pending_down = Some((key.makecode, is_extended));
-                    } else {
-                        // Overlapping non-modifier downs — emit the first one
-                        // and warn that simultaneous holds will be flattened.
-                        let (prev_code, prev_ext) = pending_down.take().unwrap();
-                        emit_send(&mut steps, prev_code, prev_ext, pending_modifiers, macro_name, warnings);
-                        pending_down = Some((key.makecode, is_extended));
-                        warnings.push(
-                            ImportWarning::new(
-                                "macro_hold_flattened",
-                                format!(
-                                    "Macro `{macro_name}` had overlapping key-holds — they will fire as independent keystrokes."
-                                ),
-                            ),
-                        );
-                    }
-                } else {
-                    // Key-up: if it's the pending_down we emit, else ignore
-                    // (stray up for modifier = clear flag).
-                    if let Some(canon) = makecode::modifier_canonical(key.makecode, is_extended) {
-                        match canon {
-                            "Ctrl" => pending_modifiers.ctrl = false,
-                            "Shift" => pending_modifiers.shift = false,
-                            "Alt" => pending_modifiers.alt = false,
-                            "Win" => pending_modifiers.win = false,
-                            _ => {}
-                        }
-                    } else if let Some((code, ext)) = pending_down.take() {
-                        if code == key.makecode && ext == is_extended {
-                            emit_send(&mut steps, code, ext, pending_modifiers, macro_name, warnings);
-                        } else {
-                            // Mismatched up — still emit the pending down.
-                            emit_send(&mut steps, code, ext, pending_modifiers, macro_name, warnings);
-                        }
-                    }
-                }
+                normalized.push(NormalizedEvent::Key {
+                    makecode: key.makecode,
+                    is_extended,
+                    is_down: key.state % 2 == 0,
+                });
             }
             EventType::MouseEvent => {
                 // Mouse events in macros are rare and Sidearm's sequence model
@@ -707,52 +615,7 @@ fn build_macro_steps(
         }
     }
 
-    // Emit any pending key if the macro ended with a dangling down.
-    if let Some((code, ext)) = pending_down {
-        emit_send(&mut steps, code, ext, pending_modifiers, macro_name, warnings);
-    }
-
-    steps
-}
-
-fn emit_send(
-    steps: &mut Vec<ParsedSequenceStep>,
-    makecode_val: u16,
-    is_extended: bool,
-    mods: ModifierFlags,
-    macro_name: &str,
-    warnings: &mut Vec<ImportWarning>,
-) {
-    let key_name = match makecode::makecode_to_key(makecode_val, is_extended) {
-        Some(k) => k.to_string(),
-        None => {
-            warnings.push(
-                ImportWarning::new(
-                    "unknown_scancode",
-                    format!(
-                        "Macro `{macro_name}` uses unknown scancode 0x{makecode_val:02X} — emitted as a literal."
-                    ),
-                ),
-            );
-            format!("Scancode(0x{makecode_val:02X})")
-        }
-    };
-
-    let mut parts: Vec<&str> = Vec::new();
-    if mods.ctrl { parts.push("Ctrl"); }
-    if mods.shift { parts.push("Shift"); }
-    if mods.alt { parts.push("Alt"); }
-    if mods.win { parts.push("Win"); }
-    let value = if parts.is_empty() {
-        key_name
-    } else {
-        format!("{}+{key_name}", parts.join("+"))
-    };
-
-    steps.push(ParsedSequenceStep::Send { value });
-    // Keep `mapping::MODIFIER_TOKENS` referenced to avoid dead-code warnings
-    // when downstream refactors trim usage; the linker will elide it.
-    let _ = mapping::MODIFIER_TOKENS.len();
+    macro_steps::build(&normalized, macro_name, warnings)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

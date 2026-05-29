@@ -8,6 +8,8 @@
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 
+use super::types::{ImportWarning, ParsedAction};
+
 // ============================================================================
 // InputID → controlId
 // ============================================================================
@@ -395,6 +397,33 @@ pub fn translate_mouse_assignment(assignment: &str) -> Option<&'static str> {
         "Previous" => Some("mouseBack"),
         "Next" => Some("mouseForward"),
         _ => None,
+    }
+}
+
+/// Translate a Synapse mouse-assignment string into a `ParsedAction`, emitting
+/// an `unsupported_mouse_assignment` warning (scoped to `profile_name`) when the
+/// assignment has no Sidearm equivalent. Shared by the v3 and v4 builders.
+pub fn mouse_action_from_assignment(
+    assignment: &str,
+    profile_name: &str,
+    warnings: &mut Vec<ImportWarning>,
+) -> ParsedAction {
+    match translate_mouse_assignment(assignment) {
+        Some(action) => ParsedAction::MouseAction {
+            action: action.to_string(),
+        },
+        None => {
+            warnings.push(
+                ImportWarning::new(
+                    "unsupported_mouse_assignment",
+                    format!("Mouse assignment `{assignment}` is not supported."),
+                )
+                .with_context(profile_name.to_string()),
+            );
+            ParsedAction::Unmappable {
+                reason: format!("Mouse assignment `{assignment}` not supported"),
+            }
+        }
     }
 }
 

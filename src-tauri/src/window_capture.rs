@@ -80,7 +80,12 @@ fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> W
         .profiles
         .iter()
         .find(|profile| profile.id == config.settings.fallback_profile_id);
-    let candidates = matching_app_mappings(config, &raw_window.exe, &raw_window.title);
+    let candidates = matching_app_mappings(
+        config,
+        &raw_window.exe,
+        &raw_window.title,
+        Some(&raw_window.process_path),
+    );
     let winner = candidates.first().copied();
     let resolved_profile = winner
         .and_then(|mapping| find_profile(config, &mapping.profile_id))

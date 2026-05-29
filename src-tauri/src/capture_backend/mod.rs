@@ -280,10 +280,14 @@ fn process_encoded_key_event(
     }
 
     // Resolve action — use empty exe/title when ignored (forces fallback profile)
-    let (exe, title) = if capture_result.ignored {
-        (String::new(), String::new())
+    let (exe, title, process_path) = if capture_result.ignored {
+        (String::new(), String::new(), None)
     } else {
-        (capture_result.exe.clone(), capture_result.title.clone())
+        (
+            capture_result.exe.clone(),
+            capture_result.title.clone(),
+            Some(capture_result.process_path.clone()),
+        )
     };
 
     let preview = resolver::resolve_input_preview(
@@ -291,6 +295,7 @@ fn process_encoded_key_event(
         &event.encoded_key,
         &exe,
         &title,
+        process_path.as_deref(),
     );
 
     match preview.status {

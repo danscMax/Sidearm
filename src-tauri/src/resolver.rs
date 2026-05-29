@@ -73,6 +73,7 @@ pub fn resolve_profile_for_app_context(
     config: &AppConfig,
     exe: &str,
     title: &str,
+    process_path: Option<&str>,
 ) -> ProfileResolutionSummary {
     let fallback_profile = config
         .profiles
@@ -83,7 +84,7 @@ pub fn resolve_profile_for_app_context(
         .last_selected_profile_id
         .as_deref()
         .and_then(|id| find_profile(config, id));
-    let candidates = matching_app_mappings(config, exe, title);
+    let candidates = matching_app_mappings(config, exe, title, process_path);
     let winner = candidates.first().copied();
     let resolved_profile = winner
         .and_then(|mapping| find_profile(config, &mapping.profile_id))
@@ -123,9 +124,10 @@ pub fn resolve_input_preview(
     encoded_key: &str,
     exe: &str,
     title: &str,
+    process_path: Option<&str>,
 ) -> ResolvedInputPreview {
     let normalized_key = normalized_encoded_key(encoded_key);
-    let profile_resolution = resolve_profile_for_app_context(config, exe, title);
+    let profile_resolution = resolve_profile_for_app_context(config, exe, title, process_path);
     let matching_mappings: Vec<&EncoderMapping> = config
         .encoder_mappings
         .iter()
@@ -266,6 +268,7 @@ pub(crate) fn matching_app_mappings<'a>(
     config: &'a AppConfig,
     exe: &str,
     title: &str,
+    process_path: Option<&str>,
 ) -> Vec<&'a AppMapping> {
     let normalized_exe = exe.to_ascii_lowercase();
     let normalized_title = title.to_ascii_lowercase();
@@ -274,6 +277,16 @@ pub(crate) fn matching_app_mappings<'a>(
         .iter()
         .filter(|mapping| mapping.enabled)
         .filter(|mapping| mapping.exe.eq_ignore_ascii_case(&normalized_exe))
+        .filter(|mapping| match mapping.process_path.as_deref() {
+            // A mapping that pins a full process path only matches when the
+            // active process path matches it (case-insensitive). Mappings
+            // without a pinned path (the common case) are unaffected — this
+            // keeps the behaviour additive for existing configs.
+            Some(pinned) => {
+                process_path.is_some_and(|active| active.eq_ignore_ascii_case(pinned))
+            }
+            None => true,
+        })
         .filter(|mapping| {
             mapping.title_includes.is_empty()
                 || mapping
@@ -347,7 +360,7 @@ mod tests {
     fn resolve_input_preview_uses_fallback_profile() {
         let config = test_config(vec![]);
 
-        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs");
+        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs", None);
 
         assert_eq!(result.status, ResolutionStatus::Resolved);
         assert_eq!(result.resolved_profile_id.as_deref(), Some("default"));
@@ -358,7 +371,7 @@ mod tests {
     fn resolve_input_preview_reports_missing_mapping() {
         let config = test_config(vec![]);
 
-        let result = resolve_input_preview(&config, "F99", "chrome.exe", "Docs");
+        let result = resolve_input_preview(&config, "F99", "chrome.exe", "Docs", None);
 
         assert_eq!(result.status, ResolutionStatus::Unresolved);
         assert!(result.reason.contains("No encoder mapping exists"));
@@ -369,7 +382,7 @@ mod tests {
         let mut config = test_config(vec![]);
         config.settings.last_selected_profile_id = Some("code".into());
 
-        let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs");
+        let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs", None);
 
         assert_eq!(summary.resolved_profile_id.as_deref(), Some("code"));
         assert!(!summary.used_fallback_profile);
@@ -391,7 +404,7 @@ mod tests {
         )]);
         config.settings.last_selected_profile_id = Some("code".into());
 
-        let summary = resolve_profile_for_app_context(&config, "code.exe", "Pull Request");
+        let summary = resolve_profile_for_app_context(&config, "code.exe", "Pull Request", None);
 
         assert_eq!(summary.resolved_profile_id.as_deref(), Some("review"));
         assert_eq!(summary.matched_app_mapping_id.as_deref(), Some("app-code"));
@@ -402,7 +415,7 @@ mod tests {
         let mut config = test_config(vec![]);
         config.settings.last_selected_profile_id = Some("ghost".into());
 
-        let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs");
+        let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs", None);
 
         assert_eq!(summary.resolved_profile_id.as_deref(), Some("default"));
         assert!(summary.used_fallback_profile);
@@ -421,7 +434,7 @@ mod tests {
             ),
         ]);
 
-        let result = resolve_input_preview(&config, "F13", "code.exe", "Pull Request Review");
+        let result = resolve_input_preview(&config, "F13", "code.exe", "Pull Request Review", None);
 
         assert_eq!(result.resolved_profile_id.as_deref(), Some("review"));
         assert_eq!(
@@ -516,7 +529,7 @@ mod tests {
         let mut config = test_config(vec![]);
         config.bindings[0].trigger_mode = Some(TriggerMode::Hold);
 
-        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs");
+        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs", None);
 
         assert_eq!(result.trigger_mode, Some(TriggerMode::Hold));
     }
@@ -554,7 +567,7 @@ mod tests {
             test_config(vec![]),
             vec![ActionCondition::ExeEquals { value: "excel.exe".into() }],
         );
-        let result = resolve_input_preview(&config, "F13", "EXCEL.EXE", "Book1");
+        let result = resolve_input_preview(&config, "F13", "EXCEL.EXE", "Book1", None);
         assert_eq!(result.status, ResolutionStatus::Resolved);
     }
 
@@ -564,7 +577,7 @@ mod tests {
             test_config(vec![]),
             vec![ActionCondition::ExeEquals { value: "excel.exe".into() }],
         );
-        let result = resolve_input_preview(&config, "F13", "notepad.exe", "Untitled");
+        let result = resolve_input_preview(&config, "F13", "notepad.exe", "Untitled", None);
         assert_eq!(result.status, ResolutionStatus::ConditionUnmet);
     }
 
@@ -575,11 +588,11 @@ mod tests {
             vec![ActionCondition::ExeNotEquals { value: "notepad.exe".into() }],
         );
         assert_eq!(
-            resolve_input_preview(&config, "F13", "notepad.exe", "x").status,
+            resolve_input_preview(&config, "F13", "notepad.exe", "x", None).status,
             ResolutionStatus::ConditionUnmet
         );
         assert_eq!(
-            resolve_input_preview(&config, "F13", "chrome.exe", "x").status,
+            resolve_input_preview(&config, "F13", "chrome.exe", "x", None).status,
             ResolutionStatus::Resolved
         );
     }
@@ -591,11 +604,11 @@ mod tests {
             vec![ActionCondition::WindowTitleContains { value: "Inbox".into() }],
         );
         assert_eq!(
-            resolve_input_preview(&config, "F13", "chrome.exe", "Gmail - Inbox (3)").status,
+            resolve_input_preview(&config, "F13", "chrome.exe", "Gmail - Inbox (3)", None).status,
             ResolutionStatus::Resolved
         );
         assert_eq!(
-            resolve_input_preview(&config, "F13", "chrome.exe", "Settings").status,
+            resolve_input_preview(&config, "F13", "chrome.exe", "Settings", None).status,
             ResolutionStatus::ConditionUnmet
         );
     }
@@ -607,11 +620,11 @@ mod tests {
             vec![ActionCondition::WindowTitleNotContains { value: "Private".into() }],
         );
         assert_eq!(
-            resolve_input_preview(&config, "F13", "chrome.exe", "Public Doc").status,
+            resolve_input_preview(&config, "F13", "chrome.exe", "Public Doc", None).status,
             ResolutionStatus::Resolved
         );
         assert_eq!(
-            resolve_input_preview(&config, "F13", "chrome.exe", "Private Doc").status,
+            resolve_input_preview(&config, "F13", "chrome.exe", "Private Doc", None).status,
             ResolutionStatus::ConditionUnmet
         );
     }
@@ -620,8 +633,27 @@ mod tests {
     fn resolve_empty_conditions_resolves_anywhere() {
         let config = test_config(vec![]);
         assert_eq!(
-            resolve_input_preview(&config, "F13", "anything.exe", "x").status,
+            resolve_input_preview(&config, "F13", "anything.exe", "x", None).status,
             ResolutionStatus::Resolved
         );
+    }
+
+    #[test]
+    fn matching_respects_pinned_process_path() {
+        // Two mappings share the same exe but pin different full paths.
+        let mut env_a = app_mapping("env-a", "python.exe", "code", 100, vec![]);
+        env_a.process_path = Some("C:\\envA\\python.exe".into());
+        let mut env_b = app_mapping("env-b", "python.exe", "review", 100, vec![]);
+        env_b.process_path = Some("C:\\envB\\python.exe".into());
+        let config = test_config(vec![env_a, env_b]);
+
+        // Active process matches env-b's pinned path → only env-b matches.
+        let matches =
+            matching_app_mappings(&config, "python.exe", "", Some("C:\\envB\\python.exe"));
+        assert_eq!(matches.first().map(|m| m.id.as_str()), Some("env-b"));
+
+        // Without a known process path, pinned-path mappings do not match.
+        let none = matching_app_mappings(&config, "python.exe", "", None);
+        assert!(none.is_empty());
     }
 }

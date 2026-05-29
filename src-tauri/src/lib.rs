@@ -1448,6 +1448,7 @@ async fn preview_resolution(
             &normalized_key,
             &exe,
             &title,
+            None,
         ))
     })
     .await
@@ -1534,7 +1535,7 @@ async fn resolve_and_execute_action(
     let result = tauri::async_runtime::spawn_blocking(move || {
         let load_response = load_or_initialize_config(&config_dir)?;
         let preview =
-            resolver::resolve_input_preview(&load_response.config, &normalized_key, &exe, &title);
+            resolver::resolve_input_preview(&load_response.config, &normalized_key, &exe, &title, None);
         let execution = executor_fn(&load_response.config, &preview);
         Ok::<_, ConfigStoreError>((preview, execution))
     })

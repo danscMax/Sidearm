@@ -1037,7 +1037,7 @@ mod tests {
     #[test]
     fn execute_preview_action_simulates_shortcut() {
         let config = default_seed_config();
-        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document");
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
 
         let result = execute_preview_action(&config, &preview).expect("expected execution result");
 
@@ -1049,7 +1049,7 @@ mod tests {
     #[test]
     fn execute_preview_action_blocks_unresolved_preview() {
         let config = default_seed_config();
-        let preview = resolve_input_preview(&config, "UNKNOWN", "WINWORD.EXE", "Document");
+        let preview = resolve_input_preview(&config, "UNKNOWN", "WINWORD.EXE", "Document", None);
 
         let error = execute_preview_action(&config, &preview).expect_err("expected blocked");
 
@@ -1108,7 +1108,7 @@ mod tests {
     #[test]
     fn run_preview_action_rejects_unsupported_menu_actions() {
         let mut config = default_seed_config();
-        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document");
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
         let action_id = preview
             .action_id
             .clone()

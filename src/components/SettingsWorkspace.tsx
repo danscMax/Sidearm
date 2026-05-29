@@ -21,7 +21,7 @@ import {
   deleteProfile,
   duplicateProfile,
   createProfile,
-  extractProfileForExport,
+  extractProfileExport,
   importProfile,
 } from "../lib/config-editing";
 import {
@@ -229,10 +229,7 @@ export function SettingsWorkspace({
   }
 
   async function handleExport(profile: Profile) {
-    const data = extractProfileForExport(activeConfig, profile.id);
-    if (!data) return;
-
-    const exportPayload = { ...data, exportedAt: new Date().toISOString() };
+    const data = extractProfileExport(activeConfig, profile.id);
     const defaultName = `${profile.name.replace(/[^a-zA-Z0-9\u0430-\u044F\u0410-\u042F_-]/g, "_")}.profile.json`;
 
     const filePath = await save({
@@ -242,7 +239,7 @@ export function SettingsWorkspace({
     });
 
     if (typeof filePath === "string") {
-      await exportProfileBundle(filePath, JSON.stringify(exportPayload, null, 2));
+      await exportProfileBundle(filePath, JSON.stringify(data, null, 2));
     }
   }
 

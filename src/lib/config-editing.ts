@@ -927,6 +927,9 @@ export interface ProfileExportData {
   bindings: Binding[];
   actions: Action[];
   appMappings: AppMapping[];
+  /** Encoder (wheel/dial) mappings for the profile's controls. Optional for
+   *  backward compatibility with v2 files and bundled presets that predate it. */
+  encoderMappings?: EncoderMapping[];
 }
 
 /** Extract a single profile with its bindings, actions, and app mappings into an export envelope. */
@@ -943,6 +946,9 @@ export function extractProfileExport(
   const actionRefs = new Set(bindings.map((b) => b.actionRef));
   const actions = config.actions.filter((a) => actionRefs.has(a.id));
   const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
+  const encoderMappings = config.encoderMappings.filter((e) =>
+    bindings.some((b) => b.controlId === e.controlId && b.layer === e.layer),
+  );
 
   return {
     version: 2,
@@ -951,123 +957,14 @@ export function extractProfileExport(
     bindings,
     actions,
     appMappings,
+    encoderMappings,
   };
-}
-
-/** Merge an imported profile into an existing config, generating new IDs on collision. */
-export function mergeImportedProfile(
-  config: AppConfig,
-  data: ProfileExportData,
-): AppConfig {
-  // Collect all existing IDs into a single Set for collision detection
-  const existingIds = new Set<string>([
-    ...config.profiles.map((p) => p.id),
-    ...config.bindings.map((b) => b.id),
-    ...config.actions.map((a) => a.id),
-    ...config.appMappings.map((m) => m.id),
-  ]);
-
-  function resolveId(id: string, prefix: string): string {
-    if (!existingIds.has(id)) return id;
-    return makeRandomId(prefix);
-  }
-
-  // Build ID maps (old -> new) for all entity types
-  const profileIdMap = new Map<string, string>();
-  const actionIdMap = new Map<string, string>();
-  const bindingIdMap = new Map<string, string>();
-  const appMappingIdMap = new Map<string, string>();
-
-  // Profile
-  const newProfileId = resolveId(data.profile.id, "profile");
-  profileIdMap.set(data.profile.id, newProfileId);
-
-  // Actions
-  for (const action of data.actions) {
-    const newId = resolveId(action.id, "action");
-    actionIdMap.set(action.id, newId);
-  }
-
-  // Bindings
-  for (const binding of data.bindings) {
-    const newId = resolveId(binding.id, "binding");
-    bindingIdMap.set(binding.id, newId);
-  }
-
-  // AppMappings
-  for (const appMapping of data.appMappings) {
-    const newId = resolveId(appMapping.id, "app");
-    appMappingIdMap.set(appMapping.id, newId);
-  }
-
-  // Build remapped entities
-  const newProfile: Profile = {
-    ...data.profile,
-    id: profileIdMap.get(data.profile.id) ?? data.profile.id,
-  };
-
-  const newActions: Action[] = data.actions.map((a) => ({
-    ...structuredClone(a),
-    id: actionIdMap.get(a.id) ?? a.id,
-  }));
-
-  const newBindings: Binding[] = data.bindings.map((b) => ({
-    ...b,
-    id: bindingIdMap.get(b.id) ?? b.id,
-    profileId: profileIdMap.get(b.profileId) ?? b.profileId,
-    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
-  }));
-
-  const newAppMappings: AppMapping[] = data.appMappings.map((m) => ({
-    ...m,
-    id: appMappingIdMap.get(m.id) ?? m.id,
-    profileId: profileIdMap.get(m.profileId) ?? m.profileId,
-  }));
-
-  return {
-    ...config,
-    profiles: [...config.profiles, newProfile],
-    actions: [...config.actions, ...newActions],
-    bindings: [...config.bindings, ...newBindings],
-    appMappings: [...config.appMappings, ...newAppMappings],
-  };
-}
-
-/** Extract a single profile and all its related data for export. */
-export function extractProfileForExport(
-  config: AppConfig,
-  profileId: string,
-): {
-  profile: Profile;
-  appMappings: AppMapping[];
-  bindings: Binding[];
-  actions: Action[];
-  encoderMappings: EncoderMapping[];
-} | null {
-  const profile = config.profiles.find((p) => p.id === profileId);
-  if (!profile) return null;
-
-  const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
-  const bindings = config.bindings.filter((b) => b.profileId === profileId);
-  const actionRefs = new Set(bindings.map((b) => b.actionRef));
-  const actions = config.actions.filter((a) => actionRefs.has(a.id));
-  const encoderMappings = config.encoderMappings.filter(
-    (e) => bindings.some((b) => b.controlId === e.controlId && b.layer === e.layer),
-  );
-
-  return { profile, appMappings, bindings, actions, encoderMappings };
 }
 
 /** Import a profile from exported data, assigning new IDs to avoid conflicts. */
 export function importProfile(
   config: AppConfig,
-  data: {
-    profile: Profile;
-    appMappings: AppMapping[];
-    bindings: Binding[];
-    actions: Action[];
-    encoderMappings: EncoderMapping[];
-  },
+  data: ProfileExportData,
 ): AppConfig {
   const existingIds = config.profiles.map((p) => p.id);
   const newId = nextUniqueId(existingIds, makeProfileId(data.profile.name));
@@ -1103,7 +1000,7 @@ export function importProfile(
     actions: [...config.actions, ...newActions],
     encoderMappings: [
       ...config.encoderMappings,
-      ...data.encoderMappings.filter(
+      ...(data.encoderMappings ?? []).filter(
         (e) => !config.encoderMappings.some(
           (existing) => existing.controlId === e.controlId && existing.layer === e.layer,
         ),

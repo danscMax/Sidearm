@@ -42,7 +42,7 @@ import {
   makeSnippetId,
   makeAppMappingId,
   extractProfileExport,
-  mergeImportedProfile,
+  importProfile,
 } from "./config-editing";
 import type { ProfileExportData } from "./config-editing";
 
@@ -1964,10 +1964,35 @@ describe("extractProfileExport", () => {
       "Profile not found: nonexistent",
     );
   });
+
+  it("includes only encoder mappings for the profile's control-layer pairs", () => {
+    const profile = makeProfile({ id: "pE", name: "Enc" });
+    const binding = makeBinding({
+      id: "bE",
+      profileId: "pE",
+      controlId: "thumb_05",
+      layer: "standard",
+      actionRef: "act-e",
+    });
+    const action = makeAction({ id: "act-e", pretty: "E" });
+    const encoder = makeEncoderMapping({ controlId: "thumb_05", layer: "standard" });
+    const unrelated = makeEncoderMapping({ controlId: "thumb_09", layer: "standard" });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [profile],
+      bindings: [binding],
+      actions: [action],
+      encoderMappings: [encoder, unrelated],
+    };
+
+    const result = extractProfileExport(config, "pE");
+
+    expect(result.encoderMappings).toEqual([encoder]);
+  });
 });
 
 // ---------------------------------------------------------------------------
-// mergeImportedProfile
+// importProfile
 // ---------------------------------------------------------------------------
 
 function makeExportData(overrides: Partial<ProfileExportData> = {}): ProfileExportData {
@@ -1993,11 +2018,14 @@ function makeExportData(overrides: Partial<ProfileExportData> = {}): ProfileExpo
         exe: "imported.exe",
       }),
     ],
+    encoderMappings: [
+      makeEncoderMapping({ controlId: "thumb_01", layer: "standard" }),
+    ],
     ...overrides,
   };
 }
 
-describe("mergeImportedProfile", () => {
+describe("importProfile", () => {
   it("merges imported profile into existing config with no collisions", () => {
     const existingProfile = makeProfile({ id: "existing-profile", name: "Existing" });
     const existingAction = makeAction({ id: "existing-action", pretty: "Existing" });
@@ -2014,7 +2042,7 @@ describe("mergeImportedProfile", () => {
     };
     const exportData = makeExportData();
 
-    const result = mergeImportedProfile(config, exportData);
+    const result = importProfile(config, exportData);
 
     // Should have both profiles
     expect(result.profiles).toHaveLength(2);
@@ -2066,7 +2094,7 @@ describe("mergeImportedProfile", () => {
     };
     const exportData = makeExportData();
 
-    const result = mergeImportedProfile(config, exportData);
+    const result = importProfile(config, exportData);
 
     // Should have 2 profiles, 2 actions, 2 bindings, 2 appMappings
     expect(result.profiles).toHaveLength(2);
@@ -2077,7 +2105,7 @@ describe("mergeImportedProfile", () => {
     // New profile ID should differ from original
     const newProfile = result.profiles.find((p) => p.id !== "imported-profile");
     expect(newProfile).toBeDefined();
-    expect(newProfile!.name).toBe("Imported");
+    expect(newProfile!.name).toBe("Imported (импорт)");
 
     // New action ID should differ from original
     const newAction = result.actions.find((a) => a.id !== "imported-action-1");
@@ -2130,7 +2158,7 @@ describe("mergeImportedProfile", () => {
     };
     const exportData = makeExportData();
 
-    const result = mergeImportedProfile(config, exportData);
+    const result = importProfile(config, exportData);
 
     // Existing profile is preserved exactly
     expect(result.profiles.find((p) => p.id === "keep-me")).toEqual(existingProfile);
@@ -2149,5 +2177,28 @@ describe("mergeImportedProfile", () => {
     expect(config.actions).toHaveLength(1);
     expect(config.bindings).toHaveLength(1);
     expect(config.appMappings).toHaveLength(1);
+  });
+
+  it("preserves encoderMappings from the imported profile (regression: C3)", () => {
+    const config = createMinimalConfig();
+    const exportData = makeExportData({
+      encoderMappings: [
+        makeEncoderMapping({
+          controlId: "thumb_05",
+          layer: "hypershift",
+          encodedKey: "F17",
+        }),
+      ],
+    });
+
+    const result = importProfile(config, exportData);
+
+    expect(result.encoderMappings).toContainEqual(
+      makeEncoderMapping({
+        controlId: "thumb_05",
+        layer: "hypershift",
+        encodedKey: "F17",
+      }),
+    );
   });
 });

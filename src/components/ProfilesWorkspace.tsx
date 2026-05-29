@@ -10,7 +10,7 @@ import {
   deleteAppMapping,
   extractProfileExport,
   findDuplicateAppMapping,
-  mergeImportedProfile,
+  importProfile,
   reorderAppMappingPriority,
   upsertAppMapping,
 } from "../lib/config-editing";
@@ -59,6 +59,7 @@ export interface ProfilesWorkspaceProps {
   setActionPickerBindingId: (id: string | null) => void;
   setActionPickerOpen: (open: boolean) => void;
   executionCounts?: Map<string, number>;
+  showToast: (message: string, kind?: "info" | "success" | "warning") => void;
 }
 
 /** First 2 uppercase letters of exe name (sans extension) for monogram icon. */
@@ -429,6 +430,7 @@ export function ProfilesWorkspace({
   setActionPickerBindingId,
   setActionPickerOpen,
   executionCounts,
+  showToast,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
   const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVizPanel({
@@ -721,13 +723,17 @@ export function ProfilesWorkspace({
               try {
                 const json = await importProfileFile(path);
                 const data = JSON.parse(json) as ProfileExportData;
-                if (!data.profile || !data.version) {
-                  console.error("Invalid profile export file");
+                if (
+                  !data.profile ||
+                  !Array.isArray(data.bindings) ||
+                  !Array.isArray(data.actions)
+                ) {
+                  showToast(t("settings.invalidProfileError"), "warning");
                   return;
                 }
-                updateDraft((c) => mergeImportedProfile(c, data));
-              } catch (e) {
-                console.error("Failed to import profile:", e);
+                updateDraft((c) => importProfile(c, data));
+              } catch {
+                showToast(t("settings.readProfileError"), "warning");
               }
             }}
           >

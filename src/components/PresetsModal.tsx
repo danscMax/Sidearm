@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { listBundledPresets, normalizeCommandError, readBundledPreset } from "../lib/backend";
 import type { PresetInfo } from "../lib/backend";
-import { mergeImportedProfile } from "../lib/config-editing";
+import { importProfile } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
 
@@ -16,7 +16,7 @@ export interface PresetsModalProps {
 
 /**
  * Shows a grid of bundled profile presets. Clicking a preset reads the
- * bundled JSON file via the backend, passes it through `mergeImportedProfile`
+ * bundled JSON file via the backend, passes it through `importProfile`
  * (so all IDs are freshly assigned and refs rewired), and appends the new
  * profile to the current config.
  */
@@ -71,7 +71,7 @@ export function PresetsModal({
         });
         return;
       }
-      updateDraft((c) => mergeImportedProfile(c, raw));
+      updateDraft((c) => importProfile(c, raw));
       onApplied?.(preset);
       onCancel();
     } catch (err) {

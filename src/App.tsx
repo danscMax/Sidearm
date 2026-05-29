@@ -612,6 +612,7 @@ function App() {
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
                 executionCounts={runtime.executionCounts}
+                showToast={showToast}
               />
             ) : workspaceMode === "settings" ? (
               <SettingsWorkspace

@@ -12,7 +12,7 @@ import type {
 } from "./config";
 import {
   createAppMappingFromCapture,
-  extractProfileForExport,
+  extractProfileExport,
   importProfile,
 } from "./config-editing";
 import { parseCommaSeparatedUniqueValues } from "./helpers";
@@ -192,10 +192,10 @@ describe("createAppMappingFromCapture (PBT)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 2. extractProfileForExport / importProfile roundtrip
+// 2. extractProfileExport / importProfile roundtrip
 // ---------------------------------------------------------------------------
 
-describe("extractProfileForExport / importProfile roundtrip (PBT)", () => {
+describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
   // Build a config with a profile, bindings, and actions for roundtrip testing
   const arbConfigWithProfile = fc.record({
     profileName: fc.string({ minLength: 1, maxLength: 30 }),
@@ -266,7 +266,7 @@ describe("extractProfileForExport / importProfile roundtrip (PBT)", () => {
   it("action count is preserved through export/import roundtrip", () => {
     fc.assert(
       fc.property(arbConfigWithProfile, ({ config, profileId }) => {
-        const exported = extractProfileForExport(config, profileId);
+        const exported = extractProfileExport(config, profileId);
         expect(exported).not.toBeNull();
         if (!exported) return;
 
@@ -295,7 +295,7 @@ describe("extractProfileForExport / importProfile roundtrip (PBT)", () => {
   it("binding count is preserved through export/import roundtrip", () => {
     fc.assert(
       fc.property(arbConfigWithProfile, ({ config, profileId }) => {
-        const exported = extractProfileForExport(config, profileId);
+        const exported = extractProfileExport(config, profileId);
         expect(exported).not.toBeNull();
         if (!exported) return;
 
@@ -316,7 +316,7 @@ describe("extractProfileForExport / importProfile roundtrip (PBT)", () => {
   it("import never creates duplicate IDs across config", () => {
     fc.assert(
       fc.property(arbConfigWithProfile, ({ config, profileId }) => {
-        const exported = extractProfileForExport(config, profileId);
+        const exported = extractProfileExport(config, profileId);
         expect(exported).not.toBeNull();
         if (!exported) return;
 
@@ -343,7 +343,7 @@ describe("extractProfileForExport / importProfile roundtrip (PBT)", () => {
   it("import preserves all control-layer pairs from bindings", () => {
     fc.assert(
       fc.property(arbConfigWithProfile, ({ config, profileId }) => {
-        const exported = extractProfileForExport(config, profileId);
+        const exported = extractProfileExport(config, profileId);
         if (!exported) return;
 
         const emptyConfig = createMinimalConfig();
@@ -368,7 +368,7 @@ describe("extractProfileForExport / importProfile roundtrip (PBT)", () => {
   it("imported bindings all have valid actionRef pointing to existing actions", () => {
     fc.assert(
       fc.property(arbConfigWithProfile, ({ config, profileId }) => {
-        const exported = extractProfileForExport(config, profileId);
+        const exported = extractProfileExport(config, profileId);
         if (!exported) return;
 
         const imported = importProfile(config, exported);

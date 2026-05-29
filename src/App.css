@@ -224,8 +224,6 @@ button, input, textarea, select {
 .nav-item--active {
   background: rgba(125, 182, 73, 0.14);
   color: var(--c-text-bright);
-  border-left: 2px solid var(--c-accent);
-  padding-left: 10px;
 }
 
 .sidebar__sep {

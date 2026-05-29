@@ -136,11 +136,15 @@ function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void getAppPaths().then((paths) => {
-      if (!cancelled && paths.needsPortableMigrationPrompt) {
-        setShowMigrationDialog(true);
-      }
-    });
+    void getAppPaths()
+      .then((paths) => {
+        if (!cancelled && paths.needsPortableMigrationPrompt) {
+          setShowMigrationDialog(true);
+        }
+      })
+      .catch((error) => {
+        console.error("getAppPaths failed:", error);
+      });
     return () => {
       cancelled = true;
     };
@@ -158,7 +162,7 @@ function App() {
       }
       if (kind === "retry") {
         setError(null);
-        refreshConfig();
+        void refreshConfig();
         return;
       }
       if (kind === "openLastBackup") {

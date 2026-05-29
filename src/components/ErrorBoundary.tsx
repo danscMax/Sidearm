@@ -21,7 +21,9 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   handleReload = () => {
-    this.setState({ hasError: false, error: null });
+    // Full webview reload: resets React state and re-reads config from disk.
+    // Merely clearing hasError would re-render the same tree that just crashed.
+    window.location.reload();
   };
 
   render() {

@@ -10,9 +10,13 @@ export function PortableBadge() {
 
   useEffect(() => {
     let cancelled = false;
-    void getAppPaths().then((paths) => {
-      if (!cancelled) setInfo(paths);
-    });
+    void getAppPaths()
+      .then((paths) => {
+        if (!cancelled) setInfo(paths);
+      })
+      .catch((error) => {
+        console.error("getAppPaths failed:", error);
+      });
     return () => {
       cancelled = true;
     };

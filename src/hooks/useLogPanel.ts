@@ -100,9 +100,13 @@ export function useLogPanel(): LogPanelControl {
 
     void attachLogger(({ level, message }) => {
       ingest({ level, message });
-    }).then((fn) => {
-      detach = fn;
-    });
+    })
+      .then((fn) => {
+        detach = fn;
+      })
+      .catch((error) => {
+        console.error("Failed to attach logger:", error);
+      });
 
     return () => {
       detach?.();

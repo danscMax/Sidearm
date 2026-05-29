@@ -32,9 +32,9 @@ import {
   normalizeCommandError,
   openConfigFolder,
   parseSynapseSource,
-  readTextFile,
+  exportProfileBundle,
+  importProfileBundle,
   setAdminAutostart,
-  writeTextFile,
   type AdminAutostartStatus,
 } from "../lib/backend";
 import type { ParsedSynapseProfiles } from "../lib/synapse-import";
@@ -242,7 +242,7 @@ export function SettingsWorkspace({
     });
 
     if (typeof filePath === "string") {
-      await writeTextFile(filePath, JSON.stringify(exportPayload, null, 2));
+      await exportProfileBundle(filePath, JSON.stringify(exportPayload, null, 2));
     }
   }
 
@@ -258,7 +258,7 @@ export function SettingsWorkspace({
     if (typeof filePath !== "string") return;
 
     try {
-      const raw = await readTextFile(filePath);
+      const raw = await importProfileBundle(filePath);
       const data = JSON.parse(raw);
 
       if (!data.profile || !data.bindings || !data.actions) {
@@ -318,8 +318,7 @@ export function SettingsWorkspace({
 
         {adminAutostart?.supported && (
           <div
-            className="autostart-row autostart-row--sub"
-            style={runAtLogon ? undefined : { opacity: 0.5 }}
+            className={`autostart-row autostart-row--sub${runAtLogon ? "" : " autostart-row--disabled"}`}
           >
             <div className="autostart-row__main">
               <div className="autostart-row__title">{t("settings.autostartAdminTitle")}</div>
@@ -340,19 +339,18 @@ export function SettingsWorkspace({
         )}
 
         {adminAutostart?.enabled && adminAutostart.pathMismatch && (
-          <div className="notice notice--error" style={{ marginTop: 12 }}>
+          <div className="notice notice--error mt-12">
             <p>{t("settings.autostartPathMismatchMsg")}</p>
-            <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+            <p className="mono-sm">
               {adminAutostart.registeredPath ?? t("settings.autostartPathUnknown")}
             </p>
             <p>{t("settings.autostartCurrentPath")}</p>
-            <p style={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
+            <p className="mono-sm">
               {adminAutostart.currentExe}
             </p>
             <button
               type="button"
-              className="action-button"
-              style={{ marginTop: 8 }}
+              className="action-button mt-8"
               onClick={() => void handleRunAsAdminToggle(true)}
               disabled={autostartBusy}
             >
@@ -396,19 +394,21 @@ export function SettingsWorkspace({
         </div>
 
         <div
-          className="osd-settings-grid"
-          style={osd.osdEnabled ? undefined : { opacity: 0.4, pointerEvents: "none" }}
+          className={`osd-settings-grid${osd.osdEnabled ? "" : " osd-settings-grid--disabled"}`}
         >
           {/* Live preview area */}
           <div
             className="osd-preview-area"
-            style={{ justifyContent: posVert, alignItems: posHoriz }}
+            data-vert={posVert}
+            data-horiz={posHoriz}
             title={t("settings.osdPreviewHint")}
           >
             <div
               key={previewKey}
               className={`osd-preview-bubble ${previewAnimClass}`}
-              style={{ fontSize: previewFontPx }}
+              ref={(el) => {
+                if (el) el.style.setProperty("font-size", `${previewFontPx}px`);
+              }}
             >
               <span className="osd-preview-bubble__label">{t("settings.osdPreviewProfileLabel")}</span>
               <span className="osd-preview-bubble__name">{activeProfile?.name ?? "Main"}</span>
@@ -510,7 +510,7 @@ export function SettingsWorkspace({
         <div className="settings-section__header">
           <span className="settings-section__title">{t("settings.captureHeader")}</span>
         </div>
-        <p className="panel__muted" style={{ fontSize: "0.78rem", marginBottom: 12 }}>
+        <p className="panel__muted help-sm">
           {t("settings.modifierStaleGcHelp")}
         </p>
         <div className="osd-settings-row">
@@ -538,7 +538,7 @@ export function SettingsWorkspace({
             })}
           </div>
         </div>
-        <p className="panel__muted" style={{ fontSize: "0.78rem", margin: "12px 0" }}>
+        <p className="panel__muted help-sm-y">
           {t("settings.replayedForceReleaseHelp")}
         </p>
         <div className="osd-settings-row">
@@ -728,7 +728,7 @@ export function SettingsWorkspace({
             );
           })}
         </div>
-        <div className="settings-actions" style={{ marginTop: 12 }}>
+        <div className="settings-actions mt-12">
           <button
             type="button"
             className="action-button"
@@ -753,7 +753,7 @@ export function SettingsWorkspace({
           </button>
         </div>
         {importError ? (
-          <div className="notice notice--error" style={{ marginTop: 8 }}>
+          <div className="notice notice--error mt-8">
             <p>{importError}</p>
           </div>
         ) : null}
@@ -764,7 +764,7 @@ export function SettingsWorkspace({
         <div className="settings-section__header">
           <span className="settings-section__title">{t("settings.backupHeader")}</span>
         </div>
-        <p className="panel__muted" style={{ fontSize: "0.78rem", marginBottom: 12 }}>
+        <p className="panel__muted help-sm">
           {t("settings.backupHelp")}
         </p>
         <div className="settings-actions">
@@ -882,7 +882,7 @@ export function SettingsWorkspace({
         <div className="settings-section__header">
           <span className="settings-section__title">{t("backup.header")}</span>
         </div>
-        <p className="panel__muted" style={{ fontSize: "0.78rem", marginBottom: 12 }}>
+        <p className="panel__muted help-sm">
           {t("backup.help")}
         </p>
         <BackupList

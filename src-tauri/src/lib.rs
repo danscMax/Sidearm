@@ -235,6 +235,20 @@ fn resolve_log_dir(app: &AppHandle) -> PathBuf {
 /// Validate that a user-supplied file path is within an allowed directory.
 /// Paths must be under the user's home directory and must not contain `..` segments.
 fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
+    let home = dirs_next_home().ok_or_else(|| {
+        CommandError::new(
+            "invalid_path",
+            "Could not determine user home directory.",
+            None,
+        )
+    })?;
+    validate_user_file_path_with_home(path, &home)
+}
+
+/// Core of `validate_user_file_path` with the home directory injected, so it can
+/// be unit-tested against a temp dir without mutating the process-global
+/// HOME/USERPROFILE env var (which would race across parallel test threads).
+fn validate_user_file_path_with_home(path: &str, home: &Path) -> Result<PathBuf, CommandError> {
     let path = PathBuf::from(path);
 
     // Reject relative paths
@@ -247,14 +261,7 @@ fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
     }
 
     // Must be under the user's home directory (canonicalized for consistent comparison)
-    let home = dirs_next_home().ok_or_else(|| {
-        CommandError::new(
-            "invalid_path",
-            "Could not determine user home directory.",
-            None,
-        )
-    })?;
-    let home = std::fs::canonicalize(&home).map_err(|e| {
+    let home = std::fs::canonicalize(home).map_err(|e| {
         CommandError::new(
             "invalid_path",
             format!("Home directory canonicalization failed: {e}"),
@@ -324,37 +331,118 @@ fn dirs_next_home() -> Option<PathBuf> {
     }
 }
 
-/// Write text to a user-chosen file path (for profile export).
-/// Path must be absolute and within the user's home directory.
-#[tauri::command]
-async fn write_text_file(path: String, contents: String) -> Result<(), CommandError> {
-    let validated_path = validate_user_file_path(&path)?;
+/// Maximum size of a profile JSON file accepted on import. Generous vs. a
+/// realistic profile (a few KB–tens of KB) while preventing a renderer from
+/// asking the backend to slurp an arbitrarily large file into memory.
+const MAX_IMPORT_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
+
+/// Validate a user-chosen JSON file path: absolute + home-scoped (via
+/// `validate_user_file_path`) + a `.json` extension (case-insensitive). The
+/// extension whitelist keeps the narrow export/import commands from writing
+/// shell profiles, autostart scripts, or `.lnk`/`.ps1` files even though the
+/// path is already constrained to the home directory (FIXES P2-2).
+fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
+    let home = dirs_next_home().ok_or_else(|| {
+        CommandError::new(
+            "invalid_path",
+            "Could not determine user home directory.",
+            None,
+        )
+    })?;
+    validate_user_json_path_with_home(path, &home)
+}
+
+/// Core of `validate_user_json_path` with the home directory injected (testable;
+/// see `validate_user_file_path_with_home`).
+fn validate_user_json_path_with_home(path: &str, home: &Path) -> Result<PathBuf, CommandError> {
+    let validated = validate_user_file_path_with_home(path, home)?;
+    let is_json = validated
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+    if !is_json {
+        return Err(CommandError::new(
+            "invalid_path",
+            "File must have a .json extension.",
+            None,
+        ));
+    }
+    Ok(validated)
+}
+
+/// Shared body for the narrow profile-export commands: validate the JSON path,
+/// then write the caller-serialized contents.
+async fn write_user_json(
+    path: String,
+    contents: String,
+    op: &'static str,
+) -> Result<(), CommandError> {
+    let validated_path = validate_user_json_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = validated_path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
                 CommandError::internal(format!("Failed to create directory: {e}"))
             })?;
         }
-        fs::write(&validated_path, contents).map_err(|e| {
-            CommandError::internal(format!("Failed to write file: {e}"))
-        })
+        fs::write(&validated_path, contents)
+            .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))
     })
     .await
-    .map_err(|e| CommandError::internal(format!("write_text_file task failed: {e}")))?
+    .map_err(|e| CommandError::internal(format!("{op} task failed: {e}")))?
 }
 
-/// Read text from a user-chosen file path (for profile import).
-/// Path must be absolute and within the user's home directory.
-#[tauri::command]
-async fn read_text_file(path: String) -> Result<String, CommandError> {
-    let validated_path = validate_user_file_path(&path)?;
+/// Shared body for the narrow profile-import commands: validate the JSON path,
+/// enforce the size cap, then read the contents back as a string.
+async fn read_user_json(path: String, op: &'static str) -> Result<String, CommandError> {
+    let validated_path = validate_user_json_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
-        fs::read_to_string(&validated_path).map_err(|e| {
-            CommandError::internal(format!("Failed to read file: {e}"))
-        })
+        let len = fs::metadata(&validated_path)
+            .map_err(|e| CommandError::internal(format!("Failed to stat file: {e}")))?
+            .len();
+        if len > MAX_IMPORT_BYTES {
+            return Err(CommandError::new(
+                "file_too_large",
+                format!("File exceeds the {MAX_IMPORT_BYTES}-byte import limit."),
+                None,
+            ));
+        }
+        fs::read_to_string(&validated_path)
+            .map_err(|e| CommandError::internal(format!("Failed to read file: {e}")))
     })
     .await
-    .map_err(|e| CommandError::internal(format!("read_text_file task failed: {e}")))?
+    .map_err(|e| CommandError::internal(format!("{op} task failed: {e}")))?
+}
+
+// Narrow, purpose-named replacements for the removed generic write_text_file/
+// read_text_file (FIXES P2-2). Two pairs because the two export formats differ:
+// `ProfileExportData` (Profiles view) vs. the encoder-carrying bundle (Settings
+// view). Purpose-named commands keep the IPC surface self-documenting and let
+// each pair's limits evolve independently. The path is always chosen by the user
+// via the native save/open dialog; validation here defends against a renderer
+// calling the command directly with an arbitrary path.
+
+/// Export a single profile (`ProfileExportData`) to a user-chosen `.json` file.
+#[tauri::command]
+async fn export_profile(path: String, contents: String) -> Result<(), CommandError> {
+    write_user_json(path, contents, "export_profile").await
+}
+
+/// Import a single profile (`ProfileExportData`) from a user-chosen `.json` file.
+#[tauri::command]
+async fn import_profile(path: String) -> Result<String, CommandError> {
+    read_user_json(path, "import_profile").await
+}
+
+/// Export a profile bundle (with encoder mappings) to a user-chosen `.json` file.
+#[tauri::command]
+async fn export_profile_bundle(path: String, contents: String) -> Result<(), CommandError> {
+    write_user_json(path, contents, "export_profile_bundle").await
+}
+
+/// Import a profile bundle (with encoder mappings) from a user-chosen `.json` file.
+#[tauri::command]
+async fn import_profile_bundle(path: String) -> Result<String, CommandError> {
+    read_user_json(path, "import_profile_bundle").await
 }
 
 #[tauri::command]
@@ -2411,8 +2499,10 @@ pub fn run() {
             execute_preview_action,
             run_preview_action,
             get_exe_icon,
-            write_text_file,
-            read_text_file,
+            export_profile,
+            import_profile,
+            export_profile_bundle,
+            import_profile_bundle,
             start_macro_recording,
             record_keystroke,
             stop_macro_recording
@@ -2425,4 +2515,65 @@ pub fn run() {
                 remove_crash_sentinel(app);
             }
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn temp_home() -> TempDir {
+        TempDir::new().expect("create temp home dir")
+    }
+
+    #[test]
+    fn validate_path_accepts_absolute_under_home() {
+        let home = temp_home();
+        // A not-yet-existing file under home (the export/write case) must pass via
+        // the nearest-existing-ancestor walk.
+        let target = home.path().join("export.json");
+        let res = validate_user_file_path_with_home(&target.to_string_lossy(), home.path());
+        assert!(res.is_ok(), "absolute path under home should pass, got {res:?}");
+    }
+
+    #[test]
+    fn validate_path_rejects_relative() {
+        let home = temp_home();
+        let res = validate_user_file_path_with_home("relative/file.json", home.path());
+        assert!(res.is_err(), "relative path must be rejected");
+    }
+
+    #[test]
+    fn validate_path_rejects_outside_home() {
+        let home = temp_home();
+        let outside = temp_home();
+        let target = outside.path().join("evil.json");
+        let res = validate_user_file_path_with_home(&target.to_string_lossy(), home.path());
+        assert!(res.is_err(), "path outside home must be rejected");
+    }
+
+    #[test]
+    fn validate_path_rejects_traversal_escape() {
+        let home = temp_home();
+        // home/../escaped.json canonicalizes above home and must be rejected.
+        let escape = home.path().join("..").join("escaped.json");
+        let res = validate_user_file_path_with_home(&escape.to_string_lossy(), home.path());
+        assert!(res.is_err(), "..-escape above home must be rejected");
+    }
+
+    #[test]
+    fn json_path_requires_json_extension() {
+        let home = temp_home();
+        let json = home.path().join("a.json");
+        let json_upper = home.path().join("a.JSON");
+        let txt = home.path().join("a.txt");
+        let noext = home.path().join("noext");
+        assert!(validate_user_json_path_with_home(&json.to_string_lossy(), home.path()).is_ok());
+        assert!(
+            validate_user_json_path_with_home(&json_upper.to_string_lossy(), home.path()).is_ok(),
+            "extension check must be case-insensitive"
+        );
+        assert!(validate_user_json_path_with_home(&txt.to_string_lossy(), home.path()).is_err());
+        assert!(validate_user_json_path_with_home(&noext.to_string_lossy(), home.path()).is_err());
+    }
 }

@@ -42,6 +42,46 @@ pub enum SynapseV3Error {
     Xml(#[from] quick_xml::Error),
     #[error("Not a Razer Synapse v3 archive (no DeviceInfo.xml or Profiles/ folder).")]
     NotSynapseV3,
+    #[error("Archive has too many entries ({0}); refusing to read (possible zip bomb).")]
+    TooManyEntries(usize),
+    #[error("Archive entry `{0}` is too large ({1} bytes uncompressed); refusing to read (possible zip bomb).")]
+    EntryTooLarge(String, u64),
+    #[error("Archive total uncompressed size ({0} bytes) exceeds the limit; refusing to read (possible zip bomb).")]
+    ArchiveTooLarge(u64),
+}
+
+// ============================================================================
+// Zip-bomb defenses (FIXES P2-1)
+// ============================================================================
+
+/// Hard caps for untrusted Synapse `.synapse3` ZIP archives. Real exports are a
+/// few dozen small XML files, so these limits are generous for legitimate input
+/// while rejecting decompression bombs before any entry is read into memory.
+const MAX_ZIP_ENTRIES: usize = 4096;
+const MAX_ENTRY_UNCOMPRESSED: u64 = 16 * 1024 * 1024; // 16 MiB per entry
+const MAX_TOTAL_UNCOMPRESSED: u64 = 128 * 1024 * 1024; // 128 MiB total
+
+/// Validate the archive's declared shape (entry count + per-entry and total
+/// uncompressed sizes) before reading any entry. Pure and testable; the live
+/// `read_file` path additionally clamps the actual read in case a header lies.
+fn enforce_zip_budget<'a>(
+    entry_count: usize,
+    entries: impl Iterator<Item = (&'a str, u64)>,
+) -> Result<(), SynapseV3Error> {
+    if entry_count > MAX_ZIP_ENTRIES {
+        return Err(SynapseV3Error::TooManyEntries(entry_count));
+    }
+    let mut total: u64 = 0;
+    for (name, size) in entries {
+        if size > MAX_ENTRY_UNCOMPRESSED {
+            return Err(SynapseV3Error::EntryTooLarge(name.to_string(), size));
+        }
+        total = total.saturating_add(size);
+        if total > MAX_TOTAL_UNCOMPRESSED {
+            return Err(SynapseV3Error::ArchiveTooLarge(total));
+        }
+    }
+    Ok(())
 }
 
 pub fn parse_synapse_v3_file(path: &Path) -> Result<ParsedSynapseProfiles, SynapseV3Error> {
@@ -56,11 +96,25 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
     let mut archive = zip::ZipArchive::new(reader)?;
     let mut warnings: Vec<ImportWarning> = Vec::new();
 
-    // Collect ZIP entries up-front (names + indices) — we need random access
-    // by path pattern and ZipArchive borrows mutably on read.
-    let names: Vec<String> = (0..archive.len())
-        .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+    // Zip-bomb defense (FIXES P2-1): inspect the central directory (name + declared
+    // uncompressed size, no decompression yet) and reject oversized/over-count
+    // archives before reading any entry into memory.
+    let entry_meta: Vec<(String, u64)> = (0..archive.len())
+        .filter_map(|i| {
+            archive
+                .by_index(i)
+                .ok()
+                .map(|f| (f.name().to_string(), f.size()))
+        })
         .collect();
+    enforce_zip_budget(
+        archive.len(),
+        entry_meta.iter().map(|(n, s)| (n.as_str(), *s)),
+    )?;
+
+    // Collect ZIP entry names — we need random access by path pattern and
+    // ZipArchive borrows mutably on read.
+    let names: Vec<String> = entry_meta.into_iter().map(|(n, _)| n).collect();
 
     if !names.iter().any(|n| n.ends_with("DeviceInfo.xml"))
         && !names.iter().any(|n| n.starts_with("Profiles/"))
@@ -788,8 +842,19 @@ fn read_file<R: Read + std::io::Seek>(
     let mut entry = archive
         .by_name(name)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::NotFound, e.to_string()))?;
+    // Belt-and-suspenders against a lying header: clamp the actual read even
+    // though enforce_zip_budget already vetted the declared sizes (FIXES P2-1).
     let mut buf = String::new();
-    entry.read_to_string(&mut buf)?;
+    entry
+        .by_ref()
+        .take(MAX_ENTRY_UNCOMPRESSED + 1)
+        .read_to_string(&mut buf)?;
+    if buf.len() as u64 > MAX_ENTRY_UNCOMPRESSED {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("entry `{name}` exceeds {MAX_ENTRY_UNCOMPRESSED} bytes uncompressed"),
+        ));
+    }
     Ok(buf)
 }
 
@@ -899,5 +964,32 @@ mod tests {
         assert!(flags.shift);
         assert!(!flags.alt);
         assert!(!flags.win);
+    }
+
+    #[test]
+    fn zip_budget_rejects_bombs_but_allows_real_exports() {
+        // Too many entries.
+        assert!(matches!(
+            enforce_zip_budget(MAX_ZIP_ENTRIES + 1, std::iter::empty::<(&str, u64)>()),
+            Err(SynapseV3Error::TooManyEntries(_))
+        ));
+        // A single entry over the per-entry cap.
+        assert!(matches!(
+            enforce_zip_budget(1, [("big.xml", MAX_ENTRY_UNCOMPRESSED + 1)].into_iter()),
+            Err(SynapseV3Error::EntryTooLarge(_, _))
+        ));
+        // Many in-bounds entries whose total blows the budget.
+        let n = (MAX_TOTAL_UNCOMPRESSED / MAX_ENTRY_UNCOMPRESSED) as usize + 2;
+        assert!(matches!(
+            enforce_zip_budget(n, (0..n).map(|_| ("x.xml", MAX_ENTRY_UNCOMPRESSED))),
+            Err(SynapseV3Error::ArchiveTooLarge(_))
+        ));
+        // A realistic small export passes.
+        assert!(enforce_zip_budget(
+            3,
+            [("DeviceInfo.xml", 1_000u64), ("Profiles/p.xml", 2_000), ("Macros/m.xml", 3_000)]
+                .into_iter()
+        )
+        .is_ok());
     }
 }

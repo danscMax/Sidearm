@@ -380,6 +380,7 @@ select::checkmark {
   width: calc((100% - 6px) / var(--pill-count));
   background: var(--c-accent);
   border-radius: var(--radius-pill);
+  transform: translateX(var(--pill-offset, 0));
   transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
   opacity: 0.22;
 }
@@ -478,6 +479,97 @@ select::checkmark {
 /* ── Utility spacing ── */
 .mt-8 { margin-top: 8px; }
 .mt-12 { margin-top: 12px; }
+
+/* === FIXES P2-3: classes/utilities extracted from inline styles ===
+   Inline style={...} attributes are blocked by a strict CSP (style-src without
+   'unsafe-inline'); static styles live here as classes, dynamic ones are pushed
+   via the CSSOM (useCssVars) or data-attributes. */
+.mb-8 { margin-bottom: 8px; }
+.mb-12 { margin-bottom: 12px; }
+.text-dim { opacity: 0.7; }
+
+/* LogPanel empty state / RunningProcessPicker truncation row */
+.log__empty { padding: var(--space-sm) 16px; }
+.process-picker__truncated { padding: 6px 10px; }
+
+/* ProfilesWorkspace monospace process-path description */
+.field__description--mono {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  opacity: 0.7;
+  word-break: break-all;
+}
+
+/* ActionPickerModal chord hints */
+.chord-explainer { margin: 4px 0; font-size: 0.76rem; }
+.chord-warning { margin: 0; font-size: 0.76rem; }
+
+/* ErrorBoundary crash screen — kept in always-loaded global CSS so the crash
+   view styles even when the React tree has unmounted. Hex values are inlined
+   (not CSS vars) so the screen survives even if theming failed to load. */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 16px;
+  padding: 24px;
+  font-family: system-ui, sans-serif;
+  color: #c8d0b8;
+  background-color: #1a1f16;
+}
+.error-boundary__title { margin: 0; }
+.error-boundary__pre {
+  max-width: 600px;
+  max-height: 200px;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 6px;
+  background-color: #242a1e;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.error-boundary__reload {
+  padding: 8px 24px;
+  border-radius: 6px;
+  border: 1px solid #4a5240;
+  background-color: #2a3124;
+  color: #c8d0b8;
+  cursor: pointer;
+  font-size: 14px;
+}
+/* Sidebar section-header actions */
+.sidebar__section-actions { display: flex; gap: var(--space-xs); }
+
+/* DebugWorkspace static help/spacing */
+.mt-10 { margin-top: 10px; }
+.help-caption { font-size: 0.75rem; margin: 6px 0 0; }
+.section-help { font-size: 0.75rem; padding: 0 20px 8px; }
+
+/* SettingsWorkspace static help/mono + disabled states */
+.mono-sm { font-family: var(--font-mono); font-size: 0.78rem; }
+.help-sm { font-size: 0.78rem; margin-bottom: 12px; }
+.help-sm-y { font-size: 0.78rem; margin: 12px 0; }
+.autostart-row--disabled { opacity: 0.5; }
+.osd-settings-grid--disabled { opacity: 0.4; pointer-events: none; }
+
+/* OSD preview alignment (enumerated → data-attributes) */
+.osd-preview-area[data-vert="flex-start"] { justify-content: flex-start; }
+.osd-preview-area[data-vert="flex-end"] { justify-content: flex-end; }
+.osd-preview-area[data-horiz="flex-start"] { align-items: flex-start; }
+.osd-preview-area[data-horiz="flex-end"] { align-items: flex-end; }
+
+/* MouseVisualizationSvg: cursor, SVG glow (2 booleans → 3 states), root, no-select */
+.mouse-svg__btn { cursor: pointer; }
+.mouse-svg__btn--grab { cursor: grab; }
+.mouse-svg__glow { transition: filter 180ms ease; }
+.mouse-svg__glow--on { filter: drop-shadow(0 0 6px rgba(var(--layer-rgb, 159, 202, 105), 0.4)); }
+.mouse-svg__glow--selected { filter: drop-shadow(0 0 10px rgba(var(--layer-rgb, 159, 202, 105), 0.5)); }
+.mouse-svg__root { width: 100%; height: 100%; display: block; }
+.svg-no-select { user-select: none; }
+/* P2-3:END */
 
 /* ── Content ── */
 .content {
@@ -1344,6 +1436,8 @@ select::checkmark {
 /* ── Context menu ── */
 .context-menu {
   position: fixed;
+  left: var(--menu-left);
+  top: var(--menu-top);
   z-index: 2000;
   min-width: 160px;
   padding: 4px 0;
@@ -1405,6 +1499,7 @@ select::checkmark {
 
 .compound-card--menu {
   background: rgba(84, 117, 66, 0.12);
+  margin-left: var(--menu-depth-indent, 0);
 }
 
 .compound-card__header {
@@ -1486,6 +1581,7 @@ select::checkmark {
 
 .btn-legend__row {
   display: grid;
+  grid-template-columns: repeat(var(--col-count), 1fr);
   gap: 6px;
 }
 
@@ -1721,6 +1817,8 @@ select::checkmark {
 
 .mouse-visual__hotspot {
   position: absolute;
+  left: var(--hotspot-left);
+  top: var(--hotspot-top);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1823,6 +1921,7 @@ select::checkmark {
 /* Heatmap count indicator */
 .heat-count {
   position: absolute;
+  opacity: var(--heat-opacity, 1);
   right: 6px;
   top: 50%;
   transform: translateY(-50%);

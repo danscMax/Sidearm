@@ -89,3 +89,15 @@ split-debuginfo = "packed"
 
 [profile.dev.package."*"]
 debug = "line-tables-only"
+
+# Release profile (FIXES P2-4): smaller binary + less unwinding machinery, which
+# also shrinks the attack surface of an input-synthesis app.
+# NOTE: `panic = "abort"` is deliberately NOT set. On a hook/worker panic the app
+# runs `input_synthesis::release_all_modifiers` via `std::panic::catch_unwind`
+# (lib.rs) to free stuck Ctrl/Alt/Shift; "abort" skips unwinding and would leave
+# modifiers latched system-wide. `opt-level` is left at the default (3) so the
+# keyboard/mouse hot-path hook latency is not traded away for size.
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "debuginfo"

@@ -16,7 +16,7 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
-import { getExeIcon, readTextFile, writeTextFile } from "../lib/backend";
+import { exportProfileFile, getExeIcon, importProfileFile } from "../lib/backend";
 import {
   bindingMatchesQuery,
   conflictingBindingIds,
@@ -252,13 +252,7 @@ function AppMappingModal({
             </div>
             {mapping.processPath ? (
               <p
-                className="field__description"
-                style={{
-                  fontFamily: "var(--font-mono, ui-monospace, monospace)",
-                  fontSize: "0.72rem",
-                  opacity: 0.7,
-                  wordBreak: "break-all",
-                }}
+                className="field__description field__description--mono"
                 title={mapping.processPath}
               >
                 {mapping.processPath}
@@ -709,7 +703,7 @@ export function ProfilesWorkspace({
                 defaultPath: `${activeProfile.name}.json`,
                 filters: [{ name: "JSON", extensions: ["json"] }],
               });
-              if (path) await writeTextFile(path, json);
+              if (path) await exportProfileFile(path, json);
             }}
           >
             {t("profile.exportProfile")}
@@ -725,7 +719,7 @@ export function ProfilesWorkspace({
               });
               if (typeof path !== "string" || !activeConfig) return;
               try {
-                const json = await readTextFile(path);
+                const json = await importProfileFile(path);
                 const data = JSON.parse(json) as ProfileExportData;
                 if (!data.profile || !data.version) {
                   console.error("Invalid profile export file");

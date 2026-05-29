@@ -661,205 +661,42 @@ fn push_virtual_key_up(inputs: &mut Vec<KeyboardInputSpec>, key: VirtualKeySpec)
     });
 }
 
-/// Map Cyrillic characters to the QWERTY key at the same physical position
-/// on a standard ЙЦУКЕН keyboard layout.  Users often capture shortcuts with
-/// Russian layout active, producing 'С' (Cyrillic) instead of 'C' (Latin)
-/// for Ctrl+C — this function reverses that by physical key position.
-fn normalize_cyrillic_key(key: &str) -> String {
-    key.chars()
-        .map(|ch| match ch {
-            // Row 0: Ё → `
-            'ё' | 'Ё' => '`',
-            // Row 1: Й Ц У К Е Н Г Ш Щ З Х Ъ → Q W E R T Y U I O P [ ]
-            'й' | 'Й' => 'Q', 'ц' | 'Ц' => 'W', 'у' | 'У' => 'E',
-            'к' | 'К' => 'R', 'е' | 'Е' => 'T', 'н' | 'Н' => 'Y',
-            'г' | 'Г' => 'U', 'ш' | 'Ш' => 'I', 'щ' | 'Щ' => 'O',
-            'з' | 'З' => 'P', 'х' | 'Х' => '[', 'ъ' | 'Ъ' => ']',
-            // Row 2: Ф Ы В А П Р О Л Д Ж Э → A S D F G H J K L ; '
-            'ф' | 'Ф' => 'A', 'ы' | 'Ы' => 'S', 'в' | 'В' => 'D',
-            'а' | 'А' => 'F', 'п' | 'П' => 'G', 'р' | 'Р' => 'H',
-            'о' | 'О' => 'J', 'л' | 'Л' => 'K', 'д' | 'Д' => 'L',
-            'ж' | 'Ж' => ';', 'э' | 'Э' => '\'',
-            // Row 3: Я Ч С М И Т Ь Б Ю → Z X C V B N M , .
-            'я' | 'Я' => 'Z', 'ч' | 'Ч' => 'X', 'с' | 'С' => 'C',
-            'м' | 'М' => 'V', 'и' | 'И' => 'B', 'т' | 'Т' => 'N',
-            'ь' | 'Ь' => 'M', 'б' | 'Б' => ',', 'ю' | 'Ю' => '.',
-            _ => ch,
-        })
-        .collect()
+impl From<crate::hotkeys::HotkeyKey> for VirtualKeySpec {
+    fn from(key: crate::hotkeys::HotkeyKey) -> Self {
+        VirtualKeySpec {
+            code: key.code,
+            extended: key.extended,
+        }
+    }
 }
 
 fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
-    let trimmed = key.trim();
-    if trimmed.is_empty() {
-        return Err("Shortcut key must not be empty for live execution.".into());
+    // Canonical, layout-independent parsing lives in `hotkeys` (named keys,
+    // function keys, OEM punctuation, raw `VK_<n>` codes, and the static
+    // Cyrillic→Latin table).  Delegating here keeps a single source of truth and
+    // removes the historical double-parse drift (e.g. a `VK_232` step that
+    // validated via `hotkeys` but failed here).
+    match crate::hotkeys::parse_primary_key(key) {
+        Ok(hk) => Ok(hk.into()),
+        Err(err) => {
+            // Execution-only fallback: a single non-ASCII character the
+            // layout-independent parser cannot resolve may still map to a key on
+            // the *active* keyboard layout via `VkKeyScanW`.  This stays out of
+            // `hotkeys` (also used for validation), which must remain
+            // layout-independent.
+            let trimmed = key.trim();
+            if trimmed.chars().count() == 1 {
+                if let Some(ch) = trimmed.chars().next() {
+                    if !ch.is_ascii() {
+                        if let Some(spec) = resolve_char_to_vk(ch) {
+                            return Ok(spec);
+                        }
+                    }
+                }
+            }
+            Err(err)
+        }
     }
-
-    // Normalize Cyrillic → Latin (e.g. Ctrl+С → Ctrl+C)
-    let has_cyrillic = trimmed.chars().any(|c| matches!(c, '\u{0400}'..='\u{04FF}'));
-    if has_cyrillic {
-        let normalized = normalize_cyrillic_key(trimmed);
-        log::info!("[input] Normalized Cyrillic key: `{trimmed}` → `{normalized}`");
-        return parse_primary_key(&normalized);
-    }
-
-    if trimmed.chars().count() == 1 {
-        let ch = trimmed.chars().next().expect("single-character branch");
-        return match ch {
-            'a'..='z' | 'A'..='Z' => Ok(VirtualKeySpec {
-                code: ch.to_ascii_uppercase() as u16,
-                extended: false,
-            }),
-            '0'..='9' => Ok(VirtualKeySpec {
-                code: ch as u16,
-                extended: false,
-            }),
-            '-' => Ok(oem_key(VK_OEM_MINUS)),
-            '=' => Ok(oem_key(VK_OEM_PLUS)),
-            ',' => Ok(oem_key(VK_OEM_COMMA)),
-            '.' => Ok(oem_key(VK_OEM_PERIOD)),
-            '/' => Ok(oem_key(VK_OEM_2)),
-            ';' => Ok(oem_key(VK_OEM_1)),
-            '\'' => Ok(oem_key(VK_OEM_7)),
-            '[' => Ok(oem_key(VK_OEM_4)),
-            ']' => Ok(oem_key(VK_OEM_6)),
-            '\\' => Ok(oem_key(VK_OEM_5)),
-            '`' => Ok(oem_key(VK_OEM_3)),
-            '+' => Err(
-                "Shortcut key `+` is ambiguous for live execution. Use `=` with shift=true instead."
-                    .into(),
-            ),
-            '_' => Err(
-                "Shortcut key `_` is ambiguous for live execution. Use `-` with shift=true instead."
-                    .into(),
-            ),
-            other => match resolve_char_to_vk(other) {
-                Some(spec) => Ok(spec),
-                None => Err(format!("Unsupported shortcut key `{other}` for live execution.")),
-            },
-        };
-    }
-
-    let normalized = trimmed.to_ascii_uppercase();
-    let compact = normalized.replace(' ', "").replace('_', "");
-
-    if let Some(function_key) = parse_function_key(&compact) {
-        return Ok(function_key);
-    }
-
-    match compact.as_str() {
-        "ENTER" | "RETURN" => Ok(VirtualKeySpec {
-            code: VK_RETURN,
-            extended: false,
-        }),
-        "TAB" => Ok(VirtualKeySpec {
-            code: VK_TAB,
-            extended: false,
-        }),
-        "SPACE" | "SPACEBAR" => Ok(VirtualKeySpec {
-            code: VK_SPACE,
-            extended: false,
-        }),
-        "BACKSPACE" | "BKSP" => Ok(VirtualKeySpec {
-            code: VK_BACK,
-            extended: false,
-        }),
-        "DELETE" | "DEL" => Ok(VirtualKeySpec {
-            code: VK_DELETE,
-            extended: true,
-        }),
-        "INSERT" | "INS" => Ok(VirtualKeySpec {
-            code: VK_INSERT,
-            extended: true,
-        }),
-        "ESC" | "ESCAPE" => Ok(VirtualKeySpec {
-            code: VK_ESCAPE,
-            extended: false,
-        }),
-        "HOME" => Ok(VirtualKeySpec {
-            code: VK_HOME,
-            extended: true,
-        }),
-        "END" => Ok(VirtualKeySpec {
-            code: VK_END,
-            extended: true,
-        }),
-        "PAGEUP" | "PGUP" => Ok(VirtualKeySpec {
-            code: VK_PRIOR,
-            extended: true,
-        }),
-        "PAGEDOWN" | "PGDOWN" | "PGDN" => Ok(VirtualKeySpec {
-            code: VK_NEXT,
-            extended: true,
-        }),
-        "LEFT" | "LEFTARROW" => Ok(VirtualKeySpec {
-            code: VK_LEFT,
-            extended: true,
-        }),
-        "RIGHT" | "RIGHTARROW" => Ok(VirtualKeySpec {
-            code: VK_RIGHT,
-            extended: true,
-        }),
-        "UP" | "UPARROW" => Ok(VirtualKeySpec {
-            code: VK_UP,
-            extended: true,
-        }),
-        "DOWN" | "DOWNARROW" => Ok(VirtualKeySpec {
-            code: VK_DOWN,
-            extended: true,
-        }),
-        "CAPSLOCK" => Ok(VirtualKeySpec {
-            code: VK_CAPITAL,
-            extended: false,
-        }),
-        "NUMLOCK" => Ok(VirtualKeySpec {
-            code: VK_NUMLOCK,
-            extended: true,
-        }),
-        "PRINTSCREEN" | "PRTSC" | "PRTSCN" => Ok(VirtualKeySpec {
-            code: VK_SNAPSHOT,
-            extended: true,
-        }),
-        "SCROLLLOCK" => Ok(VirtualKeySpec {
-            code: VK_SCROLL,
-            extended: false,
-        }),
-        "PAUSE" => Ok(VirtualKeySpec {
-            code: VK_PAUSE,
-            extended: false,
-        }),
-        "APPS" | "APPLICATION" | "MENU" => Ok(VirtualKeySpec {
-            code: VK_APPS,
-            extended: false,
-        }),
-        "MINUS" | "HYPHEN" => Ok(oem_key(VK_OEM_MINUS)),
-        "EQUAL" | "EQUALS" | "PLUS" => Ok(oem_key(VK_OEM_PLUS)),
-        "COMMA" => Ok(oem_key(VK_OEM_COMMA)),
-        "PERIOD" | "DOT" => Ok(oem_key(VK_OEM_PERIOD)),
-        "SLASH" | "FORWARDSLASH" => Ok(oem_key(VK_OEM_2)),
-        "SEMICOLON" => Ok(oem_key(VK_OEM_1)),
-        "APOSTROPHE" | "QUOTE" => Ok(oem_key(VK_OEM_7)),
-        "LBRACKET" | "LEFTBRACKET" => Ok(oem_key(VK_OEM_4)),
-        "RBRACKET" | "RIGHTBRACKET" => Ok(oem_key(VK_OEM_6)),
-        "BACKSLASH" => Ok(oem_key(VK_OEM_5)),
-        "GRAVE" | "BACKTICK" => Ok(oem_key(VK_OEM_3)),
-        _ => Err(format!(
-            "Unsupported shortcut key `{trimmed}` for live execution."
-        )),
-    }
-}
-
-fn parse_function_key(compact: &str) -> Option<VirtualKeySpec> {
-    let digits = compact.strip_prefix('F')?;
-    let number: u16 = digits.parse().ok()?;
-    if !(1..=24).contains(&number) {
-        return None;
-    }
-
-    Some(VirtualKeySpec {
-        code: 0x70 + (number - 1),
-        extended: false,
-    })
 }
 
 /// Resolves a non-ASCII character (e.g. Cyrillic 'Г') to a virtual key code
@@ -895,13 +732,6 @@ fn is_modifier_virtual_key(code: u16) -> bool {
         code,
         0x10 | 0x11 | 0x12 | 0x5B | 0x5C | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5
     )
-}
-
-fn oem_key(code: u16) -> VirtualKeySpec {
-    VirtualKeySpec {
-        code,
-        extended: false,
-    }
 }
 
 impl ModifierSnapshot {
@@ -1443,26 +1273,6 @@ fn key_is_down(state: i16) -> bool {
 // Virtual key codes — platform-independent hex literals identical to the
 // windows_sys VK_* constants.  Replaces 36 paired cfg accessor functions.
 const VK_RETURN: u16 = 0x0D;
-const VK_TAB: u16 = 0x09;
-const VK_SPACE: u16 = 0x20;
-const VK_BACK: u16 = 0x08;
-const VK_DELETE: u16 = 0x2E;
-const VK_INSERT: u16 = 0x2D;
-const VK_ESCAPE: u16 = 0x1B;
-const VK_HOME: u16 = 0x24;
-const VK_END: u16 = 0x23;
-const VK_PRIOR: u16 = 0x21;
-const VK_NEXT: u16 = 0x22;
-const VK_LEFT: u16 = 0x25;
-const VK_RIGHT: u16 = 0x27;
-const VK_UP: u16 = 0x26;
-const VK_DOWN: u16 = 0x28;
-const VK_CAPITAL: u16 = 0x14;
-const VK_NUMLOCK: u16 = 0x90;
-const VK_SNAPSHOT: u16 = 0x2C;
-const VK_SCROLL: u16 = 0x91;
-const VK_PAUSE: u16 = 0x13;
-const VK_APPS: u16 = 0x5D;
 const VK_LCONTROL: u16 = 0xA2;
 const VK_RCONTROL: u16 = 0xA3;
 const VK_LSHIFT: u16 = 0xA0;
@@ -1479,17 +1289,6 @@ const VK_MENU: u16 = 0x12;
 /// Alt-up / Win-up (with no primary key between) as a menu / Start-menu
 /// activation.  Same VK that capture_backend/windows.rs uses.
 const VK_MASK_KEY: u16 = 0xE8;
-const VK_OEM_MINUS: u16 = 0xBD;
-const VK_OEM_PLUS: u16 = 0xBB;
-const VK_OEM_COMMA: u16 = 0xBC;
-const VK_OEM_PERIOD: u16 = 0xBE;
-const VK_OEM_1: u16 = 0xBA;
-const VK_OEM_2: u16 = 0xBF;
-const VK_OEM_3: u16 = 0xC0;
-const VK_OEM_4: u16 = 0xDB;
-const VK_OEM_5: u16 = 0xDC;
-const VK_OEM_6: u16 = 0xDD;
-const VK_OEM_7: u16 = 0xDE;
 
 /// Send a single virtual key tap (down + up) via SendInput.
 ///
@@ -1839,7 +1638,25 @@ mod tests {
     #[test]
     fn rejects_ambiguous_shifted_symbol_shortcut_keys() {
         let error = parse_primary_key("+").expect_err("expected ambiguous plus");
-        assert!(error.contains("Use `=` with shift=true"));
+        assert!(error.contains("ambiguous"));
+    }
+
+    #[test]
+    fn parse_primary_key_accepts_raw_vk_via_canonical_parser() {
+        // Regression for the double-parse bug: raw VK codes are parsed by
+        // `hotkeys` and must round-trip through the delegate.  Previously
+        // `input_synthesis` rejected them, so a Send step like "Ctrl+VK_232"
+        // validated via `hotkeys::parse_hotkey` but failed at live execution.
+        let spec = parse_primary_key("VK_232").expect("raw VK should parse");
+        assert_eq!(spec.code, 232);
+    }
+
+    #[test]
+    fn parse_primary_key_normalizes_cyrillic_via_canonical_parser() {
+        // Cyrillic 'С' (U+0421) maps to Latin 'C' through the static ЙЦУКЕН
+        // table now shared in `hotkeys`.
+        let spec = parse_primary_key("С").expect("cyrillic should parse");
+        assert_eq!(spec.code, u16::from(b'C'));
     }
 
     #[test]
@@ -2034,7 +1851,7 @@ mod tests {
         assert!(reused.is_empty(), "Shift should not be reused");
         assert_eq!(plan.len(), 2, "only Backspace down + up");
         assert!(plan.iter().all(|i| match i {
-            KeyboardInputSpec::VirtualKey { code, .. } => *code == VK_BACK,
+            KeyboardInputSpec::VirtualKey { code, .. } => *code == 0x08, // VK_BACK
             _ => false,
         }));
     }

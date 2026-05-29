@@ -26,6 +26,12 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
         return Err("Hotkey primary key must not be empty.".into());
     }
 
+    // Normalize Cyrillic letters to the Latin key at the same physical position
+    // (ЙЦУКЕН → QWERTY) so e.g. `Ctrl+С` (Cyrillic) parses as `Ctrl+C`.
+    if trimmed.chars().any(|c| matches!(c, '\u{0400}'..='\u{04FF}')) {
+        return parse_primary_key(&normalize_cyrillic_key(trimmed));
+    }
+
     if trimmed.chars().count() == 1 {
         let ch = trimmed.chars().next().expect("single-character branch");
         return match ch {
@@ -276,6 +282,35 @@ fn parse_vk_code(compact: &str) -> Option<u16> {
     Some(code)
 }
 
+/// Map Cyrillic characters to the QWERTY key at the same physical position on a
+/// standard ЙЦУКЕН keyboard layout.  Users often capture shortcuts with the
+/// Russian layout active, producing 'С' (Cyrillic) instead of 'C' (Latin) for
+/// Ctrl+C — this reverses that by physical key position.  The table is static
+/// and layout-independent, so it is safe to apply during validation.
+fn normalize_cyrillic_key(key: &str) -> String {
+    key.chars()
+        .map(|ch| match ch {
+            // Row 0: Ё → `
+            'ё' | 'Ё' => '`',
+            // Row 1: Й Ц У К Е Н Г Ш Щ З Х Ъ → Q W E R T Y U I O P [ ]
+            'й' | 'Й' => 'Q', 'ц' | 'Ц' => 'W', 'у' | 'У' => 'E',
+            'к' | 'К' => 'R', 'е' | 'Е' => 'T', 'н' | 'Н' => 'Y',
+            'г' | 'Г' => 'U', 'ш' | 'Ш' => 'I', 'щ' | 'Щ' => 'O',
+            'з' | 'З' => 'P', 'х' | 'Х' => '[', 'ъ' | 'Ъ' => ']',
+            // Row 2: Ф Ы В А П Р О Л Д Ж Э → A S D F G H J K L ; '
+            'ф' | 'Ф' => 'A', 'ы' | 'Ы' => 'S', 'в' | 'В' => 'D',
+            'а' | 'А' => 'F', 'п' | 'П' => 'G', 'р' | 'Р' => 'H',
+            'о' | 'О' => 'J', 'л' | 'Л' => 'K', 'д' | 'Д' => 'L',
+            'ж' | 'Ж' => ';', 'э' | 'Э' => '\'',
+            // Row 3: Я Ч С М И Т Ь Б Ю → Z X C V B N M , .
+            'я' | 'Я' => 'Z', 'ч' | 'Ч' => 'X', 'с' | 'С' => 'C',
+            'м' | 'М' => 'V', 'и' | 'И' => 'B', 'т' | 'Т' => 'N',
+            'ь' | 'Ь' => 'M', 'б' | 'Б' => ',', 'ю' | 'Ю' => '.',
+            _ => ch,
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,5 +376,14 @@ mod tests {
         let parsed = parse_hotkey("VK_128").expect("expected bare VK code");
         assert_eq!(parsed.canonical, "VK_128");
         assert_eq!(parsed.key.code, 128);
+    }
+
+    #[test]
+    fn parses_cyrillic_primary_key() {
+        // Cyrillic 'С' (U+0421) → Latin 'C' via the static ЙЦУКЕН table.
+        let parsed = parse_hotkey("Ctrl+С").expect("expected cyrillic hotkey");
+        assert!(parsed.modifiers.ctrl);
+        assert_eq!(parsed.key.display_name, "C");
+        assert_eq!(parsed.canonical, "Ctrl+C");
     }
 }

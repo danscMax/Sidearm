@@ -70,31 +70,46 @@ export const layerCopy: Array<{ value: Layer; label: string; body: string }> = [
   },
 ];
 
+/** Single source of truth for action-type display labels. Both
+ *  `editableActionTypes` and `ACTION_CATEGORIES` derive their labels from here
+ *  so the two lists cannot drift (previously "Меню" vs "Контекстное меню"). */
+export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
+  shortcut: "Клавиатура",
+  mouseAction: "Мышь",
+  textSnippet: "Текст",
+  sequence: "Макрос",
+  launch: "Запуск",
+  mediaKey: "Медиа",
+  profileSwitch: "Профиль",
+  menu: "Контекстное меню",
+  disabled: "Отключено",
+};
+
 export const editableActionTypes: Array<{
   value: ActionType;
   label: string;
 }> = [
-  { value: "shortcut", label: "Клавиатура" },
-  { value: "mouseAction", label: "Мышь" },
-  { value: "textSnippet", label: "Текст" },
-  { value: "sequence", label: "Макрос" },
-  { value: "launch", label: "Запуск" },
-  { value: "mediaKey", label: "Медиа" },
-  { value: "profileSwitch", label: "Профиль" },
-  { value: "menu", label: "Меню" },
-  { value: "disabled", label: "Отключено" },
+  { value: "shortcut", label: ACTION_TYPE_LABELS.shortcut },
+  { value: "mouseAction", label: ACTION_TYPE_LABELS.mouseAction },
+  { value: "textSnippet", label: ACTION_TYPE_LABELS.textSnippet },
+  { value: "sequence", label: ACTION_TYPE_LABELS.sequence },
+  { value: "launch", label: ACTION_TYPE_LABELS.launch },
+  { value: "mediaKey", label: ACTION_TYPE_LABELS.mediaKey },
+  { value: "profileSwitch", label: ACTION_TYPE_LABELS.profileSwitch },
+  { value: "menu", label: ACTION_TYPE_LABELS.menu },
+  { value: "disabled", label: ACTION_TYPE_LABELS.disabled },
 ];
 
 export const ACTION_CATEGORIES: ActionCategory[] = [
-  { id: "shortcut", icon: "KB", label: "Клавиатура", actionType: "shortcut" },
-  { id: "mouseAction", icon: "MS", label: "Мышь", actionType: "mouseAction" },
-  { id: "textSnippet", icon: "Tx", label: "Текст", actionType: "textSnippet" },
-  { id: "sequence", icon: "Sq", label: "Макрос", actionType: "sequence" },
-  { id: "launch", icon: "Ex", label: "Запуск", actionType: "launch" },
-  { id: "mediaKey", icon: "Md", label: "Медиа", actionType: "mediaKey" },
-  { id: "profileSwitch", icon: "Pf", label: "Профиль", actionType: "profileSwitch" },
-  { id: "menu", icon: "Mn", label: "Контекстное меню", actionType: "menu" },
-  { id: "disabled", icon: "—", label: "Отключено", actionType: "disabled" },
+  { id: "shortcut", icon: "KB", label: ACTION_TYPE_LABELS.shortcut, actionType: "shortcut" },
+  { id: "mouseAction", icon: "MS", label: ACTION_TYPE_LABELS.mouseAction, actionType: "mouseAction" },
+  { id: "textSnippet", icon: "Tx", label: ACTION_TYPE_LABELS.textSnippet, actionType: "textSnippet" },
+  { id: "sequence", icon: "Sq", label: ACTION_TYPE_LABELS.sequence, actionType: "sequence" },
+  { id: "launch", icon: "Ex", label: ACTION_TYPE_LABELS.launch, actionType: "launch" },
+  { id: "mediaKey", icon: "Md", label: ACTION_TYPE_LABELS.mediaKey, actionType: "mediaKey" },
+  { id: "profileSwitch", icon: "Pf", label: ACTION_TYPE_LABELS.profileSwitch, actionType: "profileSwitch" },
+  { id: "menu", icon: "Mn", label: ACTION_TYPE_LABELS.menu, actionType: "menu" },
+  { id: "disabled", icon: "—", label: ACTION_TYPE_LABELS.disabled, actionType: "disabled" },
 ];
 
 export const MOUSE_ACTION_OPTIONS: Array<{ value: MouseActionKind; label: string }> = [

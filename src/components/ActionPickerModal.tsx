@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useCallback, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
@@ -29,6 +29,7 @@ import {
   mouseActionLabel,
   setSequenceStepDelay,
 } from "../lib/action-helpers";
+import { useModalDismiss } from "../hooks/useModalDismiss";
 import {
   startMacroRecording,
   recordKeystroke,
@@ -437,32 +438,6 @@ export function ActionPickerModal({
     firstFocusable?.focus();
   }, []);
 
-  // Focus trap
-  const handleFocusTrap = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const container = modalRef.current;
-    if (!container) return;
-
-    const focusable = container.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    if (focusable.length === 0) return;
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
 
   const binding = bindingId ? config.bindings.find((b) => b.id === bindingId) ?? null : null;
   const existingAction = binding
@@ -511,13 +486,11 @@ export function ActionPickerModal({
 
   const [isCapturing, setIsCapturing] = useState(false);
 
-  useEffect(() => {
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape" && !isCapturing && !isCapturingSignal) onCancel();
-    }
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [onCancel, isCapturing, isCapturingSignal]);
+  // Escape-to-close (disabled during key capture) + Tab focus trap.
+  const handleFocusTrap = useModalDismiss(modalRef, {
+    onClose: onCancel,
+    escapeEnabled: !isCapturing && !isCapturingSignal,
+  });
 
   // Draft action state per category
   const [shortcutDraft, setShortcutDraft] = useState<ShortcutActionPayload>(() =>

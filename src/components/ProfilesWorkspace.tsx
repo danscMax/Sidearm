@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
@@ -16,6 +16,7 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
+import { useModalDismiss } from "../hooks/useModalDismiss";
 import { exportProfileFile, getExeIcon, importProfileFile } from "../lib/backend";
 import {
   bindingMatchesQuery,
@@ -132,46 +133,13 @@ function AppMappingModal({
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showProcessPicker, setShowProcessPicker] = useState(false);
 
-  // Escape key closes the modal
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
-
   // Auto-focus the modal container on mount
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
 
-  // Focus trap: keep Tab within the modal
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const container = containerRef.current;
-    if (!container) return;
-
-    const focusable = container.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    if (focusable.length === 0) return;
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
+  // Escape-to-close + Tab focus trap (shared modal behavior).
+  const handleKeyDown = useModalDismiss(containerRef, { onClose });
 
   return (
     <div className="modal-backdrop" onClick={onClose}>

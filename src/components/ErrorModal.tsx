@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useModalDismiss } from "../hooks/useModalDismiss";
 import type { CommandError } from "../lib/config";
 import {
   formatErrorForClipboard,
@@ -20,19 +21,16 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!error) return;
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onDismiss();
-    }
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [error, onDismiss]);
-
-  useEffect(() => {
     if (error) {
       dialogRef.current?.focus();
     }
   }, [error]);
+
+  // Escape-to-close (only while shown) + Tab focus trap (shared modal behavior).
+  const handleKeyDown = useModalDismiss(dialogRef, {
+    onClose: onDismiss,
+    escapeEnabled: !!error,
+  });
 
   if (!error) return null;
 
@@ -64,6 +62,7 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
         aria-modal="true"
         aria-labelledby="error-modal-title"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <header className="error-modal__header">
           <h2 id="error-modal-title">{translated.title}</h2>

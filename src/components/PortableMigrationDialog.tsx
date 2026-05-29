@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useModalDismiss } from "../hooks/useModalDismiss";
+
 export interface PortableMigrationDialogProps {
   onChoose: (copyFromRoaming: boolean) => void | Promise<void>;
 }
@@ -15,6 +17,13 @@ export function PortableMigrationDialog({
     dialogRef.current?.focus();
   }, []);
 
+  // Tab focus trap. Escape stays disabled — this one-time prompt requires a
+  // deliberate choice, so it must not be dismissable.
+  const handleKeyDown = useModalDismiss(dialogRef, {
+    onClose: () => {},
+    escapeEnabled: false,
+  });
+
   return (
     <div className="modal-backdrop">
       <div
@@ -24,6 +33,7 @@ export function PortableMigrationDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="migration-title"
+        onKeyDown={handleKeyDown}
       >
         <header>
           <h2 id="migration-title">{t("migration.title")}</h2>

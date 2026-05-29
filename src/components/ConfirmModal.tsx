@@ -1,5 +1,7 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+
+import { useModalDismiss } from "../hooks/useModalDismiss";
 
 /* ─────────────────────────────────────────────────────────
    Confirm Modal
@@ -22,46 +24,13 @@ export function ConfirmModal({
   const containerRef = useRef<HTMLDivElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
 
-  // Escape key closes the modal
-  useEffect(() => {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onCancel]);
-
   // Auto-focus the confirm button on mount so Enter confirms immediately
   useEffect(() => {
     confirmButtonRef.current?.focus();
   }, []);
 
-  // Focus trap: keep Tab within the modal
-  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key !== "Tab") return;
-    const container = containerRef.current;
-    if (!container) return;
-
-    const focusable = container.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    if (focusable.length === 0) return;
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-
-    if (e.shiftKey) {
-      if (document.activeElement === first) {
-        e.preventDefault();
-        last.focus();
-      }
-    } else {
-      if (document.activeElement === last) {
-        e.preventDefault();
-        first.focus();
-      }
-    }
-  }, []);
+  // Escape-to-close + Tab focus trap (shared modal behavior)
+  const handleKeyDown = useModalDismiss(containerRef, { onClose: onCancel });
 
   return (
     <div className="modal-backdrop" onClick={onCancel}>

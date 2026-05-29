@@ -6,6 +6,7 @@ import type { PresetInfo } from "../lib/backend";
 import { importProfile } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
+import { useModalDismiss } from "../hooks/useModalDismiss";
 
 export interface PresetsModalProps {
   onCancel: () => void;
@@ -49,16 +50,11 @@ export function PresetsModal({
   }, [setError]);
 
   useEffect(() => {
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape") onCancel();
-    }
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [onCancel]);
-
-  useEffect(() => {
     containerRef.current?.focus();
   }, []);
+
+  // Escape-to-close + Tab focus trap (shared modal behavior).
+  const handleKeyDown = useModalDismiss(containerRef, { onClose: onCancel });
 
   async function applyPreset(preset: PresetInfo) {
     setApplying(preset.id);
@@ -91,6 +87,7 @@ export function PresetsModal({
         aria-labelledby="presets-modal-title"
         tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <div className="presets-modal__header">
           <h3 id="presets-modal-title">{t("presets.title")}</h3>

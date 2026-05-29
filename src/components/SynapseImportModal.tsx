@@ -12,6 +12,7 @@ import type {
   MergeStrategy,
   ParsedSynapseProfiles,
 } from "../lib/synapse-import";
+import { useModalDismiss } from "../hooks/useModalDismiss";
 
 export interface SynapseImportModalProps {
   parsed: ParsedSynapseProfiles;
@@ -39,12 +40,13 @@ export function SynapseImportModal({
 
   useEffect(() => {
     containerRef.current?.focus();
-    function handleEsc(e: KeyboardEvent) {
-      if (e.key === "Escape" && !submitting) onCancel();
-    }
-    window.addEventListener("keydown", handleEsc);
-    return () => window.removeEventListener("keydown", handleEsc);
-  }, [onCancel, submitting]);
+  }, []);
+
+  // Escape-to-close (disabled mid-submit) + Tab focus trap.
+  const handleKeyDown = useModalDismiss(containerRef, {
+    onClose: onCancel,
+    escapeEnabled: !submitting,
+  });
 
   const selectedCount = selected.size;
   const totalBindings = useMemo(
@@ -102,6 +104,7 @@ export function SynapseImportModal({
         role="dialog"
         aria-modal="true"
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={handleKeyDown}
       >
         <header>
           <h3>{t("synapseImport.title")}</h3>

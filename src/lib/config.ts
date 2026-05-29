@@ -154,8 +154,8 @@ export type TextSnippetPayload =
     };
 
 export type SequenceStep =
-  | { type: "send"; value: string; delayMs?: number }
-  | { type: "text"; value: string; delayMs?: number }
+  | { type: "send"; value: string; delayMs?: number; repeat?: number }
+  | { type: "text"; value: string; delayMs?: number; repeat?: number }
   | { type: "sleep"; delayMs: number }
   | {
       type: "launch";

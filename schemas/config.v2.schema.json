@@ -791,6 +791,11 @@
         "delayMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
         }
       }
     },
@@ -811,6 +816,11 @@
         "delayMs": {
           "type": "integer",
           "minimum": 0
+        },
+        "repeat": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
         }
       }
     },

@@ -473,6 +473,41 @@ export function ActionInspector({
                         />
                       </label>
 
+                      {step.type === "send" || step.type === "text" ? (
+                        <label className="field">
+                          <span className="field__label">{t("inspector.repeat")}</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={100}
+                            placeholder="1"
+                            value={"repeat" in step ? step.repeat ?? "" : ""}
+                            onChange={(event) => {
+                              const raw = parseOptionalNumber(
+                                event.target.value,
+                              );
+                              const nextRepeat =
+                                raw !== undefined
+                                  ? Math.max(1, Math.min(100, Math.round(raw)))
+                                  : undefined;
+                              updateSelectedActionDraft((action) =>
+                                withSequencePayload(action, (payload) => ({
+                                  ...payload,
+                                  steps: payload.steps.map(
+                                    (currentStep, stepIndex) =>
+                                      stepIndex === index &&
+                                      (currentStep.type === "send" ||
+                                        currentStep.type === "text")
+                                        ? { ...currentStep, repeat: nextRepeat }
+                                        : currentStep,
+                                  ),
+                                })),
+                              );
+                            }}
+                          />
+                        </label>
+                      ) : null}
+
                       {step.type === "launch" ? (
                         <>
                           <label className="field">

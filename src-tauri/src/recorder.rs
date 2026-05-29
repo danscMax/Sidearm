@@ -147,6 +147,7 @@ fn convert_to_sequence_steps(events: &[RecordedEvent]) -> Vec<SequenceStep> {
             SequenceStep::Send {
                 value: event.key.clone(),
                 delay_ms,
+                repeat: None,
             }
         })
         .collect()
@@ -180,7 +181,7 @@ mod tests {
 
         assert_eq!(recording.steps.len(), 1);
         match &recording.steps[0] {
-            SequenceStep::Send { value, delay_ms } => {
+            SequenceStep::Send { value, delay_ms, .. } => {
                 assert_eq!(value, "F13");
                 assert_eq!(*delay_ms, None); // first step has no delay
             }
@@ -200,7 +201,7 @@ mod tests {
         assert_eq!(recording.steps.len(), 3);
         // First step: no delay
         match &recording.steps[0] {
-            SequenceStep::Send { value, delay_ms } => {
+            SequenceStep::Send { value, delay_ms, .. } => {
                 assert_eq!(value, "Ctrl+C");
                 assert_eq!(*delay_ms, None);
             }
@@ -208,7 +209,7 @@ mod tests {
         }
         // Second step: 250ms delay
         match &recording.steps[1] {
-            SequenceStep::Send { value, delay_ms } => {
+            SequenceStep::Send { value, delay_ms, .. } => {
                 assert_eq!(value, "Ctrl+V");
                 assert_eq!(*delay_ms, Some(250));
             }
@@ -216,7 +217,7 @@ mod tests {
         }
         // Third step: 250ms delay
         match &recording.steps[2] {
-            SequenceStep::Send { value, delay_ms } => {
+            SequenceStep::Send { value, delay_ms, .. } => {
                 assert_eq!(value, "Enter");
                 assert_eq!(*delay_ms, Some(250));
             }

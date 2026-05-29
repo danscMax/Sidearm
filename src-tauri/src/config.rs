@@ -591,12 +591,16 @@ pub enum SequenceStep {
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repeat: Option<u32>,
     },
     #[serde(rename_all = "camelCase")]
     Text {
         value: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        repeat: Option<u32>,
     },
     #[serde(rename_all = "camelCase")]
     Sleep { delay_ms: u32 },
@@ -2731,6 +2735,24 @@ fn binding_id(profile_id: &str, layer: Layer, control_id: ControlId) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn sequence_step_repeat_is_optional_and_roundtrips() {
+        // Backward compat: a step without `repeat` deserializes with repeat = None.
+        let legacy: SequenceStep =
+            serde_json::from_str(r#"{"type":"send","value":"Ctrl+C"}"#).expect("legacy send");
+        assert!(matches!(legacy, SequenceStep::Send { repeat: None, .. }));
+
+        // New `repeat` round-trips through serialization.
+        let step = SequenceStep::Send {
+            value: "Down".into(),
+            delay_ms: Some(10),
+            repeat: Some(5),
+        };
+        let json = serde_json::to_string(&step).expect("serialize");
+        let back: SequenceStep = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(step, back);
+    }
 
     #[test]
     fn default_seed_config_validates() {

@@ -313,6 +313,7 @@ fn build_sequence_action(
             ParsedSequenceStep::Send { value } => SequenceStep::Send {
                 value: value.clone(),
                 delay_ms: None,
+                repeat: None,
             },
             ParsedSequenceStep::Sleep { delay_ms } => SequenceStep::Sleep {
                 delay_ms: *delay_ms,

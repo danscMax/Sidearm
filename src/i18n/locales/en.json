@@ -487,6 +487,7 @@
     "stepType": "Step type",
     "value": "Value",
     "delay": "Delay (ms, max 30,000)",
+    "repeat": "Repeat (1–100)",
     "arguments": "Arguments",
     "workingDir": "Working directory",
     "launchTarget": "Launch target",

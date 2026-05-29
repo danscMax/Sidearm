@@ -9,6 +9,8 @@ use std::{
 /// Maximum delay (in milliseconds) allowed for a single sequence step sleep.
 /// Prevents unbounded thread blocking from malformed or malicious configs.
 const MAX_STEP_DELAY_MS: u64 = 30_000;
+/// Upper bound on how many times a single Send/Text sequence step may repeat.
+const MAX_STEP_REPEAT: u32 = 100;
 
 use crate::{
     config::{
@@ -427,38 +429,54 @@ fn run_live_sequence_action(
                     ));
                 }
             }
-            SequenceStep::Text { value, delay_ms } => {
-                input_synthesis::send_text(value).map_err(|message| {
-                    execution_error(
-                        "execution_failed",
-                        "выполнение",
-                        &message,
-                        Some(preview.encoded_key.clone()),
-                        action_id.clone(),
-                    )
-                })?;
-                injected_input_steps += 1;
-                if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(
-                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
-                    ));
+            SequenceStep::Text {
+                value,
+                delay_ms,
+                repeat,
+            } => {
+                let times = repeat.unwrap_or(1).clamp(1, MAX_STEP_REPEAT);
+                for _ in 0..times {
+                    input_synthesis::send_text(value).map_err(|message| {
+                        execution_error(
+                            "execution_failed",
+                            "выполнение",
+                            &message,
+                            Some(preview.encoded_key.clone()),
+                            action_id.clone(),
+                        )
+                    })?;
+                    injected_input_steps += 1;
+                    if let Some(delay_ms) = delay_ms {
+                        thread::sleep(Duration::from_millis(
+                            u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                        ));
+                    }
                 }
             }
-            SequenceStep::Send { value, delay_ms } => {
-                input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(|message| {
-                    execution_error(
-                        "execution_failed",
-                        "выполнение",
-                        &message,
-                        Some(preview.encoded_key.clone()),
-                        action_id.clone(),
-                    )
-                })?;
-                injected_input_steps += 1;
-                if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(
-                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
-                    ));
+            SequenceStep::Send {
+                value,
+                delay_ms,
+                repeat,
+            } => {
+                let times = repeat.unwrap_or(1).clamp(1, MAX_STEP_REPEAT);
+                for _ in 0..times {
+                    input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(
+                        |message| {
+                            execution_error(
+                                "execution_failed",
+                                "выполнение",
+                                &message,
+                                Some(preview.encoded_key.clone()),
+                                action_id.clone(),
+                            )
+                        },
+                    )?;
+                    injected_input_steps += 1;
+                    if let Some(delay_ms) = delay_ms {
+                        thread::sleep(Duration::from_millis(
+                            u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
+                        ));
+                    }
                 }
             }
         }
@@ -1174,6 +1192,7 @@ mod tests {
             steps: vec![SequenceStep::Send {
                 value: "Ctrl+F13+F14".into(),
                 delay_ms: None,
+                repeat: None,
             }],
         };
 
@@ -1188,6 +1207,7 @@ mod tests {
             steps: vec![SequenceStep::Send {
                 value: "Ctrl+C".into(),
                 delay_ms: Some(1),
+                repeat: None,
             }],
         };
 
@@ -1200,6 +1220,7 @@ mod tests {
             steps: vec![SequenceStep::Text {
                 value: "hello".into(),
                 delay_ms: Some(1),
+                repeat: None,
             }],
         };
 

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { attachLogger } from "@tauri-apps/plugin-log";
+import { appendToBoundedArray } from "../lib/helpers";
 
 export type LogLevelFilter = "all" | "error" | "warn" | "info" | "debug";
 
@@ -84,13 +85,7 @@ export function useLogPanel(): LogPanelControl {
         message: body,
         timestamp: Date.now(),
       };
-      setLogs((prev) => {
-        const next = [...prev, newEntry];
-        if (next.length > LOG_BUFFER_LIMIT) {
-          return next.slice(next.length - LOG_BUFFER_LIMIT);
-        }
-        return next;
-      });
+      setLogs((prev) => appendToBoundedArray(prev, newEntry, LOG_BUFFER_LIMIT));
     },
     [],
   );

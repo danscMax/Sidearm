@@ -25,6 +25,7 @@ import {
   startRuntime,
   stopRuntime,
 } from "../lib/backend";
+import { appendToBoundedArray } from "../lib/helpers";
 import type { CommandError } from "../lib/config";
 import type {
   ActionExecutionEvent,
@@ -145,11 +146,7 @@ export function useRuntime(deps: {
   const DEBUG_LOG_CAP = 1000;
   const handleDebugLogAppended = useEffectEvent((entry: DebugLogEntry) => {
     startTransition(() => {
-      setDebugLog((prev) => {
-        const next = prev.length >= DEBUG_LOG_CAP ? prev.slice(prev.length - DEBUG_LOG_CAP + 1) : prev.slice();
-        next.push(entry);
-        return next;
-      });
+      setDebugLog((prev) => appendToBoundedArray(prev, entry, DEBUG_LOG_CAP));
     });
   });
 

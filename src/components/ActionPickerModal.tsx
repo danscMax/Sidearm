@@ -25,6 +25,8 @@ import { labelForSequenceStep } from "../lib/labels";
 import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
+  mediaKeyLabel,
+  mouseActionLabel,
   setSequenceStepDelay,
 } from "../lib/action-helpers";
 import {
@@ -722,7 +724,7 @@ export function ActionPickerModal({
           mouseDraft.alt ? "Alt" : null,
           mouseDraft.win ? "Win" : null,
         ].filter(Boolean);
-        const actionLabel = MOUSE_ACTION_OPTIONS.find((o) => o.value === mouseDraft.action)?.label ?? t("picker.autoMouse");
+        const actionLabel = mouseActionLabel(mouseDraft.action) ?? t("picker.autoMouse");
         return mods.length > 0 ? `${mods.join(" + ")} + ${actionLabel}` : actionLabel;
       }
       case "textSnippet":
@@ -732,7 +734,7 @@ export function ActionPickerModal({
       case "launch":
         return launchDraft.target.split(/[/\\]/).pop() ?? t("sequence.launch");
       case "mediaKey":
-        return MEDIA_KEY_OPTIONS.find((o) => o.value === mediaDraft)?.label ?? t("action.type.mediaKey");
+        return mediaKeyLabel(mediaDraft) ?? t("action.type.mediaKey");
       case "profileSwitch": {
         const p = config.profiles.find((pr) => pr.id === profileDraft);
         return p ? t("picker.autoProfile", { name: p.name }) : t("picker.autoProfileFallback");

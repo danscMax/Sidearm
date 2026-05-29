@@ -29,20 +29,27 @@ export function sortAppMappings(mappings: AppMapping[]): AppMapping[] {
   );
 }
 
-export function parseCommaSeparatedUniqueValues(value: string): string[] {
+/** Deduplicate strings, dropping empties, preserving first-seen order. */
+export function uniqueStrings(items: string[]): string[] {
   const seen = new Set<string>();
+  return items.filter((item) => {
+    if (!item || seen.has(item)) {
+      return false;
+    }
+    seen.add(item);
+    return true;
+  });
+}
 
-  return value
-    .split(",")
-    .map((tag) => tag.trim())
-    .filter((tag) => {
-      if (!tag || seen.has(tag)) {
-        return false;
-      }
+export function parseCommaSeparatedUniqueValues(value: string): string[] {
+  return uniqueStrings(value.split(",").map((tag) => tag.trim()));
+}
 
-      seen.add(tag);
-      return true;
-    });
+/** Append `item` to `prev`, keeping at most `cap` most-recent elements (FIFO
+ *  eviction). Backs the capped in-memory log buffers. */
+export function appendToBoundedArray<T>(prev: readonly T[], item: T, cap: number): T[] {
+  const next = [...prev, item];
+  return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
 export function parseCommaSeparatedList(value: string): string[] {

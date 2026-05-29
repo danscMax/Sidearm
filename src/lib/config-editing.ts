@@ -13,6 +13,7 @@ import type {
   Profile,
   SnippetLibraryItem,
 } from "./config";
+import { uniqueStrings } from "./helpers";
 
 const PLACEHOLDER_ACTION_NOTE =
   "Created from the shell editor. Replace this placeholder before using it in runtime.";
@@ -414,7 +415,7 @@ export function promoteInlineSnippetActionToLibrary(
     name: snippetName,
     text: action.payload.text,
     pasteMode: action.payload.pasteMode,
-    tags: uniqueTags(action.payload.tags),
+    tags: uniqueStrings(action.payload.tags),
     notes: action.notes,
   };
 
@@ -892,18 +893,6 @@ function makePlaceholderEncodedKey(layer: Layer, controlId: ControlId): string {
   return `TODO_${layer.toUpperCase()}_${controlId.toUpperCase()}`;
 }
 
-function uniqueTags(tags: string[]): string[] {
-  const seen = new Set<string>();
-
-  return tags.filter((tag) => {
-    if (seen.has(tag)) {
-      return false;
-    }
-
-    seen.add(tag);
-    return true;
-  });
-}
 
 function nextUniqueId(existingIds: string[] | Set<string>, baseId: string): string {
   const idSet = existingIds instanceof Set ? existingIds : new Set(existingIds);

@@ -274,66 +274,64 @@ export async function exportVerificationSession(
   return invoke<string>("export_verification_session", { filename, contents });
 }
 
+/** Generic Tauri event subscription that forwards `event.payload` to
+ *  `onPayload`. The typed `listen*Event` wrappers below delegate to it so the
+ *  `listen<T>(name, e => cb(e.payload))` boilerplate lives in one place. */
+export async function listenEvent<T>(
+  eventName: string,
+  onPayload: (payload: T) => void,
+): Promise<UnlistenFn> {
+  return listen<T>(eventName, (event) => {
+    onPayload(event.payload);
+  });
+}
+
 export async function listenRuntimeEvent(
   eventName: RuntimeEventName,
   onPayload: (payload: RuntimeStateSummary) => void,
 ): Promise<UnlistenFn> {
-  return listen<RuntimeStateSummary>(eventName, (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent(eventName, onPayload);
 }
 
 export async function listenDebugLogAppendedEvent(
   onPayload: (payload: DebugLogEntry) => void,
 ): Promise<UnlistenFn> {
-  return listen<DebugLogEntry>("debug_log_appended", (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent("debug_log_appended", onPayload);
 }
 
 export async function listenWindowResolutionEvent(
   eventName: WindowResolutionEventName,
   onPayload: (payload: WindowCaptureResult) => void,
 ): Promise<UnlistenFn> {
-  return listen<WindowCaptureResult>(eventName, (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent(eventName, onPayload);
 }
 
 export async function listenEncodedKeyEvent(
   eventName: EncodedKeyEventName,
   onPayload: (payload: EncodedKeyEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<EncodedKeyEvent>(eventName, (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent(eventName, onPayload);
 }
 
 export async function listenControlResolutionEvent(
   eventName: ControlResolutionEventName,
   onPayload: (payload: ResolvedInputPreview) => void,
 ): Promise<UnlistenFn> {
-  return listen<ResolvedInputPreview>(eventName, (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent(eventName, onPayload);
 }
 
 export async function listenActionExecutionEvent(
   eventName: ActionExecutionEventName,
   onPayload: (payload: ActionExecutionEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<ActionExecutionEvent>(eventName, (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent(eventName, onPayload);
 }
 
 export async function listenRuntimeErrorEvent(
   eventName: RuntimeErrorEventName,
   onPayload: (payload: RuntimeErrorEvent) => void,
 ): Promise<UnlistenFn> {
-  return listen<RuntimeErrorEvent>(eventName, (event) => {
-    onPayload(event.payload);
-  });
+  return listenEvent(eventName, onPayload);
 }
 
 /* ─────────────────────────────────────────────────────────

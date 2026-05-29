@@ -40,13 +40,13 @@ export function describeActionSummary(
       payload.alt ? "Alt" : null,
       payload.win ? "Win" : null,
     ].filter(Boolean);
-    const actionLabel = MOUSE_ACTION_OPTIONS.find((o) => o.value === payload.action)?.label ?? payload.action;
+    const actionLabel = mouseActionLabel(payload.action) ?? payload.action;
     const prefix = mods.length > 0 ? `${mods.join(" + ")} + ` : "";
     return `Мышь: ${prefix}${actionLabel}`;
   }
 
   if (action.type === "mediaKey") {
-    const label = MEDIA_KEY_OPTIONS.find((o) => o.value === action.payload.key)?.label;
+    const label = mediaKeyLabel(action.payload.key);
     return `Медиа: ${label ?? action.payload.key}`;
   }
 
@@ -78,6 +78,18 @@ export function describeActionSummary(
   }
 
   return action.notes ?? "Отключённое действие-заглушка.";
+}
+
+/** Human label for a mouse-action value (from `MOUSE_ACTION_OPTIONS`), or
+ *  `undefined` if unknown — callers supply their own fallback. Shared by
+ *  `describeActionSummary` and the picker's `autoName`. */
+export function mouseActionLabel(value: string): string | undefined {
+  return MOUSE_ACTION_OPTIONS.find((o) => o.value === value)?.label;
+}
+
+/** Human label for a media-key value (from `MEDIA_KEY_OPTIONS`), or undefined. */
+export function mediaKeyLabel(value: string): string | undefined {
+  return MEDIA_KEY_OPTIONS.find((o) => o.value === value)?.label;
 }
 
 export function isActionLiveRunnable(config: AppConfig, actionId: string): boolean {
@@ -194,16 +206,22 @@ export function withMenuPayload(
   };
 }
 
+/** Default payloads for a new/converted sequence step (single source). */
+const SEQUENCE_STEP_DEFAULT_SEND = "Ctrl+C";
+const SEQUENCE_STEP_DEFAULT_TEXT = "Замените этот текст";
+const SEQUENCE_STEP_DEFAULT_SLEEP_MS = 100;
+const SEQUENCE_STEP_DEFAULT_LAUNCH = "C:\\Путь\\К\\Программе.exe";
+
 export function createDefaultSequenceStep(stepType: SequenceStep["type"]): SequenceStep {
   switch (stepType) {
     case "send":
-      return { type: "send", value: "Ctrl+C" };
+      return { type: "send", value: SEQUENCE_STEP_DEFAULT_SEND };
     case "text":
-      return { type: "text", value: "Замените этот текст" };
+      return { type: "text", value: SEQUENCE_STEP_DEFAULT_TEXT };
     case "sleep":
-      return { type: "sleep", delayMs: 100 };
+      return { type: "sleep", delayMs: SEQUENCE_STEP_DEFAULT_SLEEP_MS };
     case "launch":
-      return { type: "launch", value: "C:\\Путь\\К\\Программе.exe" };
+      return { type: "launch", value: SEQUENCE_STEP_DEFAULT_LAUNCH };
   }
 }
 
@@ -219,24 +237,24 @@ export function coerceSequenceStepType(
     case "send":
       return {
         type: "send",
-        value: "value" in step ? step.value : "Ctrl+C",
+        value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_SEND,
         delayMs: "delayMs" in step ? step.delayMs : undefined,
       };
     case "text":
       return {
         type: "text",
-        value: "value" in step ? step.value : "Замените этот текст",
+        value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_TEXT,
         delayMs: "delayMs" in step ? step.delayMs : undefined,
       };
     case "sleep":
       return {
         type: "sleep",
-        delayMs: "delayMs" in step ? step.delayMs ?? 100 : 100,
+        delayMs: "delayMs" in step ? step.delayMs ?? SEQUENCE_STEP_DEFAULT_SLEEP_MS : SEQUENCE_STEP_DEFAULT_SLEEP_MS,
       };
     case "launch":
       return {
         type: "launch",
-        value: "value" in step ? step.value : "C:\\Путь\\К\\Программе.exe",
+        value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_LAUNCH,
         args: step.type === "launch" ? step.args : undefined,
         workingDir: step.type === "launch" ? step.workingDir : undefined,
         delayMs: "delayMs" in step ? step.delayMs : undefined,

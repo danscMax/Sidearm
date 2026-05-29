@@ -6,6 +6,7 @@ import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
 import { ProfileDropdown } from "./ProfileDropdown";
+import { useCssVars } from "../hooks/useCssVars";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
   profiles: (
@@ -65,6 +66,8 @@ export function Sidebar({
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
+  // Sidebar profile pill-track count via CSSOM (CSP-safe; FIXES P2-3).
+  const pillTrackRef = useCssVars<HTMLDivElement>({ "--pill-count": profiles.length });
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -86,7 +89,7 @@ export function Sidebar({
       <div className="sidebar__section">
         <div className="sidebar__section-header">
           <span className="sidebar__section-label">{t("sidebar.profileHeader")}</span>
-          <div style={{ display: "flex", gap: 4 }}>
+          <div className="sidebar__section-actions">
             <button
               type="button"
               className="sidebar__add-profile-btn"
@@ -106,16 +109,15 @@ export function Sidebar({
           </div>
         </div>
         {profiles.length <= 3 ? (
-          <div
-            className="pill-track pill-track--sidebar"
-            style={{ "--pill-count": profiles.length } as React.CSSProperties}
-          >
+          <div className="pill-track pill-track--sidebar" ref={pillTrackRef}>
             {(() => {
               const idx = profiles.findIndex((p) => p.id === effectiveProfileId);
               return idx >= 0 ? (
                 <div
                   className="pill-track__indicator"
-                  style={{ transform: `translateX(${idx * 100}%)` }}
+                  ref={(el) => {
+                    if (el) el.style.setProperty("--pill-offset", `${idx * 100}%`);
+                  }}
                 />
               ) : null;
             })()}
@@ -124,7 +126,6 @@ export function Sidebar({
                 key={p.id}
                 type="button"
                 className={`pill-track__pill${p.id === effectiveProfileId ? " pill-track__pill--active" : ""}`}
-                style={{ position: "relative" }}
                 onClick={() => {
                   startTransition(() => onSelectProfile(p.id));
                 }}

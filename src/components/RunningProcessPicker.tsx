@@ -122,7 +122,7 @@ export function RunningProcessPicker({
                 </li>
               ))}
               {filtered.length > 200 ? (
-                <li className="panel__muted" style={{ padding: "6px 10px" }}>
+                <li className="panel__muted process-picker__truncated">
                   {t("processPicker.truncated", { shown: 200, total: filtered.length })}
                 </li>
               ) : null}

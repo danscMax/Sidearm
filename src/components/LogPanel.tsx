@@ -165,7 +165,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           ))}
         </ul>
       ) : (
-        <p className="panel__muted" style={{ padding: "8px 16px" }}>
+        <p className="panel__muted log__empty">
           {t("log.empty")}
         </p>
       )}

@@ -222,10 +222,10 @@ export function SequenceStepEditor({
       </div>
 
       {isRecording ? (
-        <div className="notice notice--warning" style={{ marginBottom: 8 }}>
+        <div className="notice notice--warning mb-8">
           <strong>
             {t("picker.recordingNotice")}{" "}
-            <span style={{ opacity: 0.7 }}>
+            <span className="text-dim">
               {t("picker.recordingCount", { count: recordedCount, max: RECORD_LIMIT })}
             </span>
           </strong>
@@ -233,7 +233,7 @@ export function SequenceStepEditor({
         </div>
       ) : null}
       {limitReached ? (
-        <div className="notice notice--warning" style={{ marginBottom: 8 }}>
+        <div className="notice notice--warning mb-8">
           <strong>{t("picker.recordLimitReached", { max: RECORD_LIMIT })}</strong>
         </div>
       ) : null}
@@ -1189,7 +1189,7 @@ export function ActionPickerModal({
 
             {triggerModeDraft === "chord" && controlId ? (
               <div className="field">
-                <p className="panel__muted" style={{ margin: "4px 0", fontSize: "0.76rem" }}>
+                <p className="panel__muted chord-explainer">
                   {t("picker.chordExplainer")}
                 </p>
                 <div className="chord-preview">
@@ -1227,7 +1227,7 @@ export function ActionPickerModal({
                         b.enabled,
                     );
                     return partnerHasChord ? null : (
-                      <p className="notice notice--warning" style={{ margin: 0, fontSize: "0.76rem" }}>
+                      <p className="notice notice--warning chord-warning">
                         {t("picker.chordWarnNoPartnerBinding")}
                       </p>
                     );

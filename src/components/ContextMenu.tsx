@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 
 export interface ContextMenuItem {
   label: string;
@@ -40,14 +40,20 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
     return () => window.removeEventListener("keydown", handleKeyDown, true);
   }, [onClose]);
 
-  // Clamp position to viewport bounds
-  const style: React.CSSProperties = {
-    left: Math.min(x, window.innerWidth - 200),
-    top: Math.min(y, window.innerHeight - items.length * 36 - 16),
-  };
+  // Clamp position to viewport bounds. Applied via the CSSOM (not an inline
+  // style attribute) so it survives a strict CSP without 'unsafe-inline' (P2-3).
+  useLayoutEffect(() => {
+    const el = menuRef.current;
+    if (!el) return;
+    el.style.setProperty("--menu-left", `${Math.min(x, window.innerWidth - 200)}px`);
+    el.style.setProperty(
+      "--menu-top",
+      `${Math.min(y, window.innerHeight - items.length * 36 - 16)}px`,
+    );
+  }, [x, y, items.length]);
 
   return (
-    <div className="context-menu" ref={menuRef} style={style}>
+    <div className="context-menu" ref={menuRef}>
       {items.map((item, i) => {
         if (item === null) {
           return <div key={`sep-${i}`} className="context-menu__sep" />;

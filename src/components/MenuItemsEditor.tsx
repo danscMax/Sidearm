@@ -65,7 +65,10 @@ export function MenuItemsEditor({
       <div
         className="compound-card compound-card--menu"
         key={item.id}
-        style={{ marginLeft: `${depth * 18}px` }}
+        ref={(el) => {
+          // CSP-safe depth indent via CSSOM (no inline style attribute; P2-3).
+          if (el) el.style.setProperty("--menu-depth-indent", `${depth * 18}px`);
+        }}
       >
         <div className="compound-card__header">
           <div>

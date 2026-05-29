@@ -322,7 +322,12 @@ export function MouseVisualizationSvg({
     const intensity = Math.min(count / maxCount, 1);
     const opacity = 0.35 + intensity * 0.65;
     return (
-      <span className="heat-count" style={{ opacity }}>
+      <span
+        className="heat-count"
+        ref={(el) => {
+          if (el) el.style.setProperty("--heat-opacity", String(opacity));
+        }}
+      >
         {count}x
       </span>
     );
@@ -425,9 +430,8 @@ export function MouseVisualizationSvg({
     return (
       <g
         key={id}
-        className="mouse-svg__btn"
+        className={`mouse-svg__btn${hasDragBinding ? " mouse-svg__btn--grab" : ""}`}
         data-control-id={id}
-        style={{ cursor: hasDragBinding ? "grab" : "pointer" }}
         onClick={(e) => handleClick(id, e)}
         onDoubleClick={(e) => handleDblClick(id, e)}
         onContextMenu={(e) => handleRightClick(id, e)}
@@ -454,12 +458,9 @@ export function MouseVisualizationSvg({
       >
         <title>{title}</title>
         <g
-          style={{
-            transition: "filter 180ms ease",
-            filter: hasGlow
-              ? `drop-shadow(0 0 ${isSelected ? "10px" : "6px"} rgba(var(--layer-rgb, 159,202,105), ${isSelected ? "0.5" : "0.4"}))`
-              : "none",
-          }}
+          className={`mouse-svg__glow${
+            hasGlow ? (isSelected ? " mouse-svg__glow--selected" : " mouse-svg__glow--on") : ""
+          }`}
         >
           {/* Hit area / visible shape */}
           <g
@@ -482,7 +483,7 @@ export function MouseVisualizationSvg({
           fontWeight={700}
           fontFamily="'Segoe UI Variable Display', 'Bahnschrift', sans-serif"
           pointerEvents="none"
-          style={{ userSelect: "none" }}
+          className="svg-no-select"
         >
           {label}
         </text>
@@ -498,7 +499,10 @@ export function MouseVisualizationSvg({
             fontWeight={600}
             fontFamily="'Segoe UI Variable Display', 'Bahnschrift', sans-serif"
             pointerEvents="none"
-            style={{ userSelect: "none", opacity: heatCountOpacity(id) }}
+            className="svg-no-select"
+            ref={(el) => {
+              if (el) el.style.setProperty("opacity", String(heatCountOpacity(id)));
+            }}
           >
             {heatCountText(id)}
           </text>
@@ -541,7 +545,7 @@ export function MouseVisualizationSvg({
       <svg
         viewBox={viewBox ?? `0 0 ${VB_W} ${VB_H}`}
         xmlns="http://www.w3.org/2000/svg"
-        style={{ width: "100%", height: "100%", display: "block" }}
+        className="mouse-svg__root"
         role="img"
         aria-label={t("visualization.schematicAlt")}
       >
@@ -573,7 +577,7 @@ export function MouseVisualizationSvg({
           letterSpacing="0.15em"
           fontFamily="'Segoe UI Variable Display', 'Bahnschrift', sans-serif"
           pointerEvents="none"
-          style={{ userSelect: "none" }}
+          className="svg-no-select"
         >
           NAGA V2
         </text>
@@ -603,9 +607,13 @@ export function MouseVisualizationSvg({
               className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}`}
               data-action-type={entry.action?.type ?? ""}
               data-tooltip={tooltipText(entry, t("visualization.unassigned"))}
-              style={heatmapEnabled && executionCounts && (executionCounts.get(controlId) ?? 0) > 0
-                ? { backgroundColor: "rgba(159, 202, 105, 0.07)" }
-                : undefined}
+              ref={(el) => {
+                if (!el) return;
+                const hot =
+                  !!heatmapEnabled && !!executionCounts && (executionCounts.get(controlId) ?? 0) > 0;
+                if (hot) el.style.setProperty("background-color", "rgba(159, 202, 105, 0.07)");
+                else el.style.removeProperty("background-color");
+              }}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
               onContextMenu={(e) => handleRightClick(controlId, e)}
@@ -656,11 +664,18 @@ export function MouseVisualizationSvg({
   return (
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
-        <div className="pill-track" style={{ "--pill-count": viewTabs.length } as React.CSSProperties}>
+        <div
+          className="pill-track"
+          ref={(el) => {
+            if (el) el.style.setProperty("--pill-count", String(viewTabs.length));
+          }}
+        >
           {viewIdx >= 0 ? (
             <div
               className="pill-track__indicator"
-              style={{ transform: `translateX(${viewIdx * 100}%)` }}
+              ref={(el) => {
+                if (el) el.style.setProperty("--pill-offset", `${viewIdx * 100}%`);
+              }}
             />
           ) : null}
           {viewTabs.map((tab) => (
@@ -707,11 +722,18 @@ export function MouseVisualizationSvg({
       </div>
 
       <div className="mouse-visual-tabs__footer">
-        <div className="pill-track pill-track--layer" style={{ "--pill-count": layerCopy.length } as React.CSSProperties}>
+        <div
+          className="pill-track pill-track--layer"
+          ref={(el) => {
+            if (el) el.style.setProperty("--pill-count", String(layerCopy.length));
+          }}
+        >
           {layerIdx >= 0 ? (
             <div
               className={`pill-track__indicator pill-track__indicator--${selectedLayer}`}
-              style={{ transform: `translateX(${layerIdx * 100}%)` }}
+              ref={(el) => {
+                if (el) el.style.setProperty("--pill-offset", `${layerIdx * 100}%`);
+              }}
             />
           ) : null}
           {layerCopy.map((layer) => (

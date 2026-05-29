@@ -200,12 +200,12 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             </button>
           </div>
         </div>
-        <p className="panel__muted" style={{ fontSize: "0.75rem", margin: "6px 0 0" }}>
+        <p className="panel__muted help-caption">
           {t("debug.helpTesting")}
         </p>
 
         {lastResolutionPreview ? (
-          <div className="fact-grid" style={{ marginTop: 10 }}>
+          <div className="fact-grid mt-10">
             <Fact
               label={t("debug.profile")}
               value={lastResolutionPreview.resolvedProfileId
@@ -227,7 +227,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
         ) : null}
 
         {lastExecution ? (
-          <div className="fact-grid" style={{ marginTop: 8 }}>
+          <div className="fact-grid mt-8">
             <Fact label={t("debug.outcome")} value={labelForExecutionOutcome(lastExecution.outcome)} />
             <Fact label={t("debug.mode")} value={labelForExecutionMode(lastExecution.mode)} />
             <Fact label={t("debug.action")} value={lastExecution.actionId} mono />
@@ -236,7 +236,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
         ) : null}
 
         {lastRuntimeError ? (
-          <div className="notice notice--error" style={{ margin: "10px 0 0" }} title={t("debug.lastRuntimeError")}>
+          <div className="notice notice--error mt-10" title={t("debug.lastRuntimeError")}>
             <strong>{lastRuntimeError.category}</strong>
             <p>{lastRuntimeError.message}</p>
           </div>
@@ -270,7 +270,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             </span>
           ) : null}
         </summary>
-        <p className="panel__muted" style={{ fontSize: "0.75rem", padding: "0 20px 8px" }}>
+        <p className="panel__muted section-help">
           {t("debug.sessionHelp")}
         </p>
         <div className="expert-section">
@@ -357,11 +357,17 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                 ? " verification-progress__dot--active"
                                 : ""
                             }`}
-                            style={{
-                              backgroundColor:
-                                index === verificationSession.activeStepIndex
-                                  ? undefined
-                                  : verificationResultColor(step.result),
+                            ref={(el) => {
+                              if (!el) return;
+                              // CSP-safe: result tint via CSSOM, not inline style (P2-3).
+                              if (index === verificationSession.activeStepIndex) {
+                                el.style.removeProperty("background-color");
+                              } else {
+                                el.style.setProperty(
+                                  "background-color",
+                                  verificationResultColor(step.result),
+                                );
+                              }
                             }}
                             title={`${step.controlLabel}: ${labelForVerificationResult(step.result)}`}
                             onClick={() => {
@@ -553,7 +559,13 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                 <td>
                                   <span
                                     className="verification-result-badge"
-                                    style={{ color: verificationResultColor(step.result) }}
+                                    ref={(el) => {
+                                      if (el)
+                                        el.style.setProperty(
+                                          "color",
+                                          verificationResultColor(step.result),
+                                        );
+                                    }}
                                   >
                                     {labelForVerificationResult(step.result)}
                                   </span>
@@ -615,7 +627,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             </span>
           ) : null}
         </summary>
-        <p className="panel__muted" style={{ fontSize: "0.75rem", padding: "0 20px 8px" }}>
+        <p className="panel__muted section-help">
           {t("debug.logHelp")}
         </p>
         <LogPanel logPanel={logPanel} />

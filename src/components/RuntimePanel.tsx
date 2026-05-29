@@ -143,7 +143,7 @@ export function RuntimePanel({
       </div>
 
       {isAdmin === false && (
-        <div className="panel__warning" style={{ marginTop: 12 }}>
+        <div className="panel__warning mt-12">
           <p>
             Sidearm запущен от обычного пользователя. Ввод не будет доходить до
             окон с правами администратора (Диспетчер задач, regedit, диалоги UAC) —
@@ -151,15 +151,14 @@ export function RuntimePanel({
           </p>
           <button
             type="button"
-            className="action-button"
-            style={{ marginTop: 8 }}
+            className="action-button mt-8"
             onClick={() => void handleRelaunchAsAdmin()}
             disabled={viewState === "loading" || viewState === "saving"}
           >
             Перезапустить от администратора
           </button>
           {relaunchError && (
-            <p className="panel__muted" style={{ marginTop: 8 }}>
+            <p className="panel__muted mt-8">
               {relaunchError}
             </p>
           )}

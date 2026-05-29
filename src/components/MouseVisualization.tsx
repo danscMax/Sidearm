@@ -111,11 +111,18 @@ export function MouseVisualization({
   const [visualMode, setVisualMode] = useState<VisualMode>("photo");
   const [dragOverId, setDragOverId] = useState<ControlId | null>(null);
 
-  function heatStyle(controlId: ControlId): React.CSSProperties | undefined {
-    if (!heatmapEnabled || !executionCounts) return undefined;
-    const count = executionCounts.get(controlId) ?? 0;
-    if (count === 0) return undefined;
-    return { backgroundColor: "rgba(159, 202, 105, 0.07)" };
+  // Apply the heat background tint via the CSSOM so it keeps overriding the
+  // hotspot/cell background classes exactly as the old inline style did, while
+  // staying CSP-safe (no inline style attribute; FIXES P2-3).
+  function applyHeatBg(el: HTMLElement | null, controlId: ControlId): void {
+    if (!el) return;
+    const hot =
+      !!heatmapEnabled && !!executionCounts && (executionCounts.get(controlId) ?? 0) > 0;
+    if (hot) {
+      el.style.setProperty("background-color", "rgba(159, 202, 105, 0.07)");
+    } else {
+      el.style.removeProperty("background-color");
+    }
   }
 
   function heatCount(controlId: ControlId): React.ReactNode {
@@ -126,7 +133,12 @@ export function MouseVisualization({
     const intensity = Math.min(count / maxCount, 1);
     const opacity = 0.35 + intensity * 0.65;
     return (
-      <span className="heat-count" style={{ opacity }}>
+      <span
+        className="heat-count"
+        ref={(el) => {
+          if (el) el.style.setProperty("--heat-opacity", String(opacity));
+        }}
+      >
         {count}x
       </span>
     );
@@ -218,7 +230,13 @@ export function MouseVisualization({
           }${isDimmed ? " mouse-visual__hotspot--dimmed" : ""}${
             hasConflict ? " mouse-visual__hotspot--conflict" : ""
           }`}
-          style={{ left: `${pos.left}%`, top: `${pos.top}%`, ...heatStyle(entry.control.id) }}
+          ref={(el) => {
+            if (el) {
+              el.style.setProperty("--hotspot-left", `${pos.left}%`);
+              el.style.setProperty("--hotspot-top", `${pos.top}%`);
+            }
+            applyHeatBg(el, entry.control.id);
+          }}
           onClick={(e) => handleClick(entry.control.id, e)}
           onDoubleClick={(e) => handleDblClick(entry.control.id, e)}
           onContextMenu={(e) => handleRightClick(entry.control.id, e)}
@@ -279,7 +297,7 @@ export function MouseVisualization({
               className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}${isDimmed ? " btn-legend__cell--dimmed" : ""}${hasConflict ? " btn-legend__cell--conflict" : ""}`}
               data-action-type={entry.action?.type ?? ""}
               data-tooltip={tooltipText(entry, t("visualization.unassigned"))}
-              style={heatStyle(controlId)}
+              ref={(el) => applyHeatBg(el, controlId)}
               onClick={(e) => handleClick(controlId, e)}
               onDoubleClick={(e) => handleDblClick(controlId, e)}
               onContextMenu={(e) => handleRightClick(controlId, e)}
@@ -325,7 +343,9 @@ export function MouseVisualization({
           <div
             key={rowIdx}
             className="btn-legend__row"
-            style={{ gridTemplateColumns: `repeat(${row.length}, 1fr)` }}
+            ref={(el) => {
+              if (el) el.style.setProperty("--col-count", String(row.length));
+            }}
           >
             {row.map((controlId) => {
               const entry = entryMap.get(controlId);
@@ -342,7 +362,7 @@ export function MouseVisualization({
                   key={controlId}
                   className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}${isDimmed ? " btn-legend__cell--dimmed" : ""}${hasConflict ? " btn-legend__cell--conflict" : ""}`}
                   data-action-type={entry.action?.type ?? ""}
-                  style={heatStyle(controlId)}
+                  ref={(el) => applyHeatBg(el, controlId)}
                   onClick={(e) => handleClick(controlId, e)}
                   onDoubleClick={(e) => handleDblClick(controlId, e)}
                   onMouseEnter={() => setHoveredId(controlId)}
@@ -395,11 +415,18 @@ export function MouseVisualization({
   return (
     <div className="mouse-visual-tabs">
       <div className="mouse-visual-tabs__nav">
-        <div className="pill-track" style={{ "--pill-count": viewTabs.length } as React.CSSProperties}>
+        <div
+          className="pill-track"
+          ref={(el) => {
+            if (el) el.style.setProperty("--pill-count", String(viewTabs.length));
+          }}
+        >
           {viewIdx >= 0 ? (
             <div
               className="pill-track__indicator"
-              style={{ transform: `translateX(${viewIdx * 100}%)` }}
+              ref={(el) => {
+                if (el) el.style.setProperty("--pill-offset", `${viewIdx * 100}%`);
+              }}
             />
           ) : null}
           {viewTabs.map((tab) => (
@@ -481,11 +508,18 @@ export function MouseVisualization({
       </div>
 
       <div className="mouse-visual-tabs__footer">
-        <div className="pill-track pill-track--layer" style={{ "--pill-count": layerCopy.length } as React.CSSProperties}>
+        <div
+          className="pill-track pill-track--layer"
+          ref={(el) => {
+            if (el) el.style.setProperty("--pill-count", String(layerCopy.length));
+          }}
+        >
           {layerIdx >= 0 ? (
             <div
               className={`pill-track__indicator pill-track__indicator--${selectedLayer}`}
-              style={{ transform: `translateX(${layerIdx * 100}%)` }}
+              ref={(el) => {
+                if (el) el.style.setProperty("--pill-offset", `${layerIdx * 100}%`);
+              }}
             />
           ) : null}
           {layerCopy.map((layer) => (

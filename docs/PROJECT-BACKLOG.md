@@ -4,6 +4,9 @@
 - Original: `2026-03-08`
 - Rebuilt: `2026-05-23`
 - Current version: `0.1.16`
+- Last update: `2026-05-29` — closed external-review items `FIXES_2026-05-23.md` §1:
+  P0-1, P1-1, P2-1, P2-2, P2-3, P2-4 (see that file's status block). Still open:
+  P1-2 (PR CI gate) and §2 donor integrations.
 - Status: canonical backlog and execution source of truth
 
 ## Reconciliation note (2026-05-23)

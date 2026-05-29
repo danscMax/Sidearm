@@ -7,6 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.17] — 2026-05-29
+
+### Security
+- **Removed the self-signed code-signing cert auto-install into the Trusted
+  Root store** and the hardcoded PFX password from the build scripts
+  (`sign.ps1` / `nsis-hooks.nsh` deleted, bundled `.cer` resource dropped).
+  Installing a custom root on every end-user machine is a high-value attack
+  surface for an input-synthesis app (FIXES P0-1).
+- **Hardened CSP**: `style-src` no longer allows `'unsafe-inline'`. All inline
+  styles moved to CSS classes / `data-*` attributes / CSSOM, closing the
+  CSS-injection surface in the renderer (FIXES P2-3).
+- **Narrowed file IPC**: the generic `write_text_file`/`read_text_file` commands
+  (any path under home) are replaced with purpose-named profile export/import
+  commands that validate the path (home-scoped + `.json` + 5 MiB import cap), so
+  a compromised renderer can no longer read/write arbitrary files (FIXES P2-2).
+- **Zip-bomb caps** on Razer Synapse `.synapse3` import: entry-count, per-entry
+  and total uncompressed-size limits reject decompression bombs before any entry
+  is read (FIXES P2-1).
+
+### Added
+- **Contextual action conditions are now enforced**: actions carrying
+  `ExeEquals` / `WindowTitleContains` (etc.) fire only when the active window
+  matches; a new `ConditionUnmet` diagnostics status explains skips (CTX-001).
+- **Diagnostics**: live-test for media/mouse actions, plus the resolution reason
+  shown in the panel.
+- **App mappings match by pinned `process_path`**, distinguishing two apps that
+  share the same executable name.
+- **Repeat-count** on Send/Text macro steps.
+- Broad UI / i18n / a11y pass (40-item audit): fully localized service/settings
+  panels, aria-labels and focus management on modals, transitions, loading
+  spinner, command-palette and drag affordance hints.
+
+### Changed
+- Added a release build profile (`lto`, `codegen-units=1`, `strip`): smaller
+  binary and less unwinding machinery for an input-synthesis app (FIXES P2-4).
+
+### Fixed
+- Reliability hardening (40-item audit): graceful handling of capture-helper
+  pipes and a reaper thread that joins wedged hook/worker threads on stop;
+  no-panic fallbacks for tray icon / global shortcut / setup; `ErrorBoundary`
+  "Reload" now performs a real `window.location.reload()`; the log panel no
+  longer leaks a dangling native listener on a failed attach; IPC failures
+  surface instead of vanishing silently.
+- `build_portable` no longer wipes `./data` (config / profiles / snapshots) on
+  rebuild (PKG-001).
+
+### Removed
+- The no-op `clipboardPaste` paste-mode selector from the UI and the dead
+  `#[cfg(test)]`-only `clipboard.rs` (long text still uses the clipboard-paste
+  path inside `input_synthesis`) (UI-CLEAN-001).
+
 ## [0.1.16] — 2026-05-17
 
 ### Changed

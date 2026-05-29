@@ -204,6 +204,9 @@ export function ServiceToolsPanel({
           {lastResolutionPreview ? (
             <div className="fact-grid">
               <Fact label={t("serviceTools.statusLabel")} value={labelForPreviewStatus(lastResolutionPreview.status)} />
+              {lastResolutionPreview.reason ? (
+                <Fact label={t("serviceTools.resolutionReasonLabel")} value={lastResolutionPreview.reason} />
+              ) : null}
               <Fact
                 label={t("debug.profile")}
                 value={

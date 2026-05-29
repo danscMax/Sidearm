@@ -114,6 +114,13 @@ export function isActionLiveRunnable(config: AppConfig, actionId: string): boole
     return true;
   }
 
+  // mediaKey and mouseAction are executed live by the backend
+  // (executor.rs run_live_mouse_action / run_live_media_key_action),
+  // so the "Execute live" button must be enabled for them too.
+  if (action.type === "mouseAction" || action.type === "mediaKey") {
+    return true;
+  }
+
   return false;
 }
 

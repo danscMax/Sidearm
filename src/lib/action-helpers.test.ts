@@ -336,7 +336,7 @@ describe("isActionLiveRunnable", () => {
     expect(isActionLiveRunnable(config, "a1")).toBe(true);
   });
 
-  it("returns false for mouseAction (not runnable)", () => {
+  it("returns true for mouseAction (backend executes it live)", () => {
     const config = makeConfig({
       actions: [
         makeAction({
@@ -346,10 +346,10 @@ describe("isActionLiveRunnable", () => {
         }),
       ],
     });
-    expect(isActionLiveRunnable(config, "a1")).toBe(false);
+    expect(isActionLiveRunnable(config, "a1")).toBe(true);
   });
 
-  it("returns false for mediaKey (not runnable)", () => {
+  it("returns true for mediaKey (backend executes it live)", () => {
     const config = makeConfig({
       actions: [
         makeAction({
@@ -359,7 +359,7 @@ describe("isActionLiveRunnable", () => {
         }),
       ],
     });
-    expect(isActionLiveRunnable(config, "a1")).toBe(false);
+    expect(isActionLiveRunnable(config, "a1")).toBe(true);
   });
 
   it("returns false for profileSwitch (not runnable)", () => {

@@ -3,15 +3,17 @@ use std::{
     sync::{mpsc, Arc, Mutex},
     thread::{self, JoinHandle},
 };
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use super::{process_encoded_key_event, EncodedKeyEvent, CAPTURE_BACKEND_NAME};
 use crate::{
     config::AppConfig,
     hotkeys,
-    runtime::{self, RuntimeStore, EVENT_PROFILE_RESOLVED},
+    runtime::{self, RuntimeStore},
     window_capture,
 };
+
+use crate::vk::{classify_modifier_vk, is_modifier_vk, ModifierKind};
 
 const BACKEND_LL_HOOK: &str = "windows-ll-hook";
 
@@ -36,24 +38,26 @@ fn register_hotkey_mask(mods: &hotkeys::HotkeyModifiers) -> u32 {
     mask
 }
 
-const VK_SHIFT: u32 = 0x10;
-const VK_CONTROL: u32 = 0x11;
-const VK_MENU: u32 = 0x12;
-const VK_LSHIFT: u32 = 0xA0;
-const VK_RSHIFT: u32 = 0xA1;
-const VK_LCONTROL: u32 = 0xA2;
-const VK_RCONTROL: u32 = 0xA3;
-const VK_LMENU: u32 = 0xA4;
-const VK_RMENU: u32 = 0xA5;
-const VK_LWIN: u32 = 0x5B;
-const VK_RWIN: u32 = 0x5C;
+// Modifier VK codes as u32 for the WinAPI hook boundary; the values come from
+// the shared `crate::vk` table (single source of truth).
+const VK_SHIFT: u32 = crate::vk::VK_SHIFT as u32;
+const VK_CONTROL: u32 = crate::vk::VK_CONTROL as u32;
+const VK_MENU: u32 = crate::vk::VK_MENU as u32;
+const VK_LSHIFT: u32 = crate::vk::VK_LSHIFT as u32;
+const VK_RSHIFT: u32 = crate::vk::VK_RSHIFT as u32;
+const VK_LCONTROL: u32 = crate::vk::VK_LCONTROL as u32;
+const VK_RCONTROL: u32 = crate::vk::VK_RCONTROL as u32;
+const VK_LMENU: u32 = crate::vk::VK_LMENU as u32;
+const VK_RMENU: u32 = crate::vk::VK_RMENU as u32;
+const VK_LWIN: u32 = crate::vk::VK_LWIN as u32;
+const VK_RWIN: u32 = crate::vk::VK_RWIN as u32;
 
 /// "Menu Mask Key" — an unassigned VK used to prevent Windows from activating
 /// menus/ribbon (SC_KEYMENU) or the Start menu when Alt or Win is released
 /// after a hotkey combo.  Injecting this between modifier-down and modifier-up
 /// makes DefWindowProc think a non-modifier key was pressed, suppressing the
 /// system activation.  Pattern borrowed from AutoHotkey v2.
-const VK_MASK_KEY: u16 = 0xE8;
+const VK_MASK_KEY: u16 = crate::vk::VK_MASK_KEY;
 
 /// dwExtraInfo marker for hook health probe events.  Distinct from
 /// `INTERNAL_SENDINPUT_EXTRA_INFO` so the hook callback can tell them apart.
@@ -243,6 +247,19 @@ fn is_win_vk(vk: u32) -> bool {
     matches!(vk, VK_LWIN | VK_RWIN)
 }
 
+/// RegisterHotKey modifier-mask bit for a modifier VK, or 0 if `vk` is not a
+/// modifier. Single source for the VK→MOD mapping, shared by
+/// `modifier_in_any_encoding` and the pending-modifier replay path.
+fn modifier_mask_bit(vk: u32) -> u32 {
+    match classify_modifier_vk(vk as u16) {
+        Some(ModifierKind::Alt) => MOD_ALT,
+        Some(ModifierKind::Ctrl) => MOD_CONTROL,
+        Some(ModifierKind::Shift) => MOD_SHIFT,
+        Some(ModifierKind::Win) => MOD_WIN,
+        None => 0,
+    }
+}
+
 /// Returns true if this modifier VK requires `KEYEVENTF_EXTENDEDKEY` when
 /// injected via SendInput.  By the MSDN extended-key list, only the right
 /// CTRL and right ALT have the 0xE0 prefix among modifiers — without the
@@ -272,13 +289,10 @@ struct PendingModifier {
 /// Returns true if this modifier VK code appears in any registered hotkey's
 /// modifier mask. Only these modifiers should be buffered.
 fn modifier_in_any_encoding(vk: u32, regs: &[HelperRegistration]) -> bool {
-    let mask_bit = match vk {
-        VK_MENU | VK_LMENU | VK_RMENU => MOD_ALT,
-        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => MOD_CONTROL,
-        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => MOD_SHIFT,
-        VK_LWIN | VK_RWIN => MOD_WIN,
-        _ => return false,
-    };
+    let mask_bit = modifier_mask_bit(vk);
+    if mask_bit == 0 {
+        return false;
+    }
     regs.iter().any(|r| r.modifiers_mask & mask_bit != 0)
 }
 
@@ -1250,13 +1264,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         // leak window between Razer Alt-down and our SendInput Alt-up.
         // Logged BEFORE the internal_injection bypass so we capture our own
         // SendInput too — marked with prefix `int-` for distinction.
-        let is_modifier = matches!(
-            vk,
-            VK_CONTROL | VK_LCONTROL | VK_RCONTROL |
-            VK_SHIFT | VK_LSHIFT | VK_RSHIFT |
-            VK_MENU | VK_LMENU | VK_RMENU |
-            VK_LWIN | VK_RWIN
-        );
+        let is_modifier = is_modifier_vk(vk as u16);
         let is_fkey = (0x70..=0x87).contains(&vk);
         let is_keydown = msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_KEYDOWN
             || msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSKEYDOWN;
@@ -1497,13 +1505,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 let mut replayed_vks = Vec::new();
                 let now = std::time::Instant::now();
                 for pm in &items {
-                    let mask_bit = match pm.vk {
-                        VK_MENU | VK_LMENU | VK_RMENU => MOD_ALT,
-                        VK_CONTROL | VK_LCONTROL | VK_RCONTROL => MOD_CONTROL,
-                        VK_SHIFT | VK_LSHIFT | VK_RSHIFT => MOD_SHIFT,
-                        VK_LWIN | VK_RWIN => MOD_WIN,
-                        _ => 0,
-                    };
+                    let mask_bit = modifier_mask_bit(pm.vk);
                     let in_encoding = matched_mask & mask_bit != 0;
                     let recent = now.duration_since(pm.buffered_at)
                         < RAZER_ENCODING_CHORD_WINDOW;
@@ -2425,25 +2427,12 @@ fn run_foreground_watcher(
                 Err(_) => return,
             };
 
-            let _ = ctx.app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
-
-            if !capture_result.ignored {
-                let should_notify = ctx
-                    .runtime_store
-                    .lock()
-                    .ok()
-                    .map(|mut store| {
-                        store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
-                    })
-                    .unwrap_or(false);
-                if should_notify {
-                    let profile_name = capture_result
-                        .resolved_profile_name
-                        .as_deref()
-                        .unwrap_or("Default");
-                    crate::show_osd(&ctx.app, profile_name, &ctx.config.settings);
-                }
-            }
+            super::emit_profile_resolved_and_notify(
+                &ctx.app,
+                &ctx.runtime_store,
+                &capture_result,
+                &ctx.config,
+            );
         });
     }
 

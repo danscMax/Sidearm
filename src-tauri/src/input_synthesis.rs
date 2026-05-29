@@ -1,5 +1,6 @@
 use crate::config::{MouseActionPayload, ShortcutActionPayload};
 use crate::hotkeys::HotkeyModifiers;
+use crate::vk::*;
 
 #[cfg(target_os = "windows")]
 pub(crate) const INTERNAL_SENDINPUT_EXTRA_INFO: usize = 0x4E41_4741_5354_5544usize;
@@ -466,7 +467,7 @@ fn plan_shortcut_inputs(
     let has_primary_key = !payload.key.trim().is_empty();
     let primary_key = if has_primary_key {
         let pk = parse_primary_key(&payload.key)?;
-        if is_modifier_virtual_key(pk.code) {
+        if is_modifier_vk(pk.code) {
             return Err(
                 "Shortcut primary key must not be a modifier key. Use ctrl/shift/alt/win flags plus a non-modifier key."
                     .into(),
@@ -528,7 +529,7 @@ fn plan_shortcut_hold_down_inputs(
 ) -> Result<(Vec<KeyboardInputSpec>, HeldShortcutState), String> {
     let primary_key = if !payload.key.trim().is_empty() {
         let pk = parse_primary_key(&payload.key)?;
-        if is_modifier_virtual_key(pk.code) {
+        if is_modifier_vk(pk.code) {
             return Err("Hold-mode primary key must not be a modifier.".into());
         }
         Some(pk)
@@ -711,7 +712,7 @@ fn resolve_char_to_vk(ch: char) -> Option<VirtualKeySpec> {
         return None;
     }
     let vk = (result as u16) & 0xFF;
-    if vk == 0 || is_modifier_virtual_key(vk) {
+    if vk == 0 || is_modifier_vk(vk) {
         return None;
     }
     Some(VirtualKeySpec {
@@ -725,13 +726,6 @@ fn resolve_char_to_vk(_ch: char) -> Option<VirtualKeySpec> {
     // On Linux, character-to-keycode mapping would require xkbcommon.
     // For now, return None — text input uses KEYEVENTF_UNICODE equivalent.
     None
-}
-
-fn is_modifier_virtual_key(code: u16) -> bool {
-    matches!(
-        code,
-        0x10 | 0x11 | 0x12 | 0x5B | 0x5C | 0xA0 | 0xA1 | 0xA2 | 0xA3 | 0xA4 | 0xA5
-    )
 }
 
 impl ModifierSnapshot {
@@ -1160,11 +1154,12 @@ fn vk_to_evdev_key(code: u16) -> Option<evdev::KeyCode> {
 /// Created once on first use with all possible keys registered, so the
 /// Wayland compositor has time to detect and start reading from it.
 /// Reused for all subsequent key injections.
-fn get_virtual_keyboard() -> &'static std::sync::Mutex<evdev::uinput::VirtualDevice> {
+fn get_virtual_keyboard() -> Result<&'static std::sync::Mutex<evdev::uinput::VirtualDevice>, String>
+{
     use std::sync::{Mutex, OnceLock};
     use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode};
 
-    static DEVICE: OnceLock<Mutex<VirtualDevice>> = OnceLock::new();
+    static DEVICE: OnceLock<Result<Mutex<VirtualDevice>, String>> = OnceLock::new();
 
     DEVICE.get_or_init(|| {
         // Register all keys we might ever need so the device doesn't
@@ -1198,27 +1193,29 @@ fn get_virtual_keyboard() -> &'static std::sync::Mutex<evdev::uinput::VirtualDev
         }
 
         let device = VirtualDevice::builder()
-            .expect("Failed to create virtual keyboard builder")
+            .map_err(|e| format!("Failed to create virtual keyboard builder: {e}"))?
             .name("Sidearm Virtual Keyboard")
             .with_keys(&keys)
-            .expect("Failed to configure virtual keyboard keys")
+            .map_err(|e| format!("Failed to configure virtual keyboard keys: {e}"))?
             .build()
-            .expect("Failed to build virtual keyboard device");
+            .map_err(|e| format!("Failed to build virtual keyboard device: {e}"))?;
 
         log::info!("[input] Persistent virtual keyboard device created.");
 
         // Give the compositor time to detect the new device.
         std::thread::sleep(std::time::Duration::from_millis(200));
 
-        Mutex::new(device)
+        Ok(Mutex::new(device))
     })
+    .as_ref()
+    .map_err(|e| e.clone())
 }
 
 #[cfg(target_os = "linux")]
 fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
     use evdev::{EventType, InputEvent};
 
-    let mut device = get_virtual_keyboard()
+    let mut device = get_virtual_keyboard()?
         .lock()
         .map_err(|e| format!("Failed to lock virtual keyboard: {e}"))?;
 
@@ -1235,7 +1232,7 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
         match input {
             KeyboardInputSpec::VirtualKey { code, key_up, .. } => {
                 if let Some(key) = vk_to_evdev_key(*code) {
-                    let is_modifier = is_modifier_virtual_key(*code);
+                    let is_modifier = is_modifier_vk(*code);
 
                     // Extra delay at modifier↔key boundary (e.g. Ctrl↓ → V↓
                     // or V↑ → Ctrl↑) to ensure Mutter processes the modifier
@@ -1269,26 +1266,6 @@ fn send_keyboard_inputs(_inputs: &[KeyboardInputSpec]) -> Result<(), String> {
 fn key_is_down(state: i16) -> bool {
     state < 0
 }
-
-// Virtual key codes — platform-independent hex literals identical to the
-// windows_sys VK_* constants.  Replaces 36 paired cfg accessor functions.
-const VK_RETURN: u16 = 0x0D;
-const VK_LCONTROL: u16 = 0xA2;
-const VK_RCONTROL: u16 = 0xA3;
-const VK_LSHIFT: u16 = 0xA0;
-const VK_RSHIFT: u16 = 0xA1;
-const VK_LMENU: u16 = 0xA4;
-const VK_RMENU: u16 = 0xA5;
-const VK_LWIN: u16 = 0x5B;
-const VK_RWIN: u16 = 0x5C;
-const VK_CONTROL: u16 = 0x11;
-const VK_SHIFT: u16 = 0x10;
-const VK_MENU: u16 = 0x12;
-/// AHK-style "menu mask key".  Injected between held Alt/Win modifiers of a
-/// modifier-only shortcut so Windows does not interpret the subsequent
-/// Alt-up / Win-up (with no primary key between) as a menu / Start-menu
-/// activation.  Same VK that capture_backend/windows.rs uses.
-const VK_MASK_KEY: u16 = 0xE8;
 
 /// Send a single virtual key tap (down + up) via SendInput.
 ///
@@ -1489,11 +1466,11 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
 
 #[cfg(target_os = "linux")]
 /// Persistent virtual mouse device for uinput injection.
-fn get_virtual_mouse() -> &'static std::sync::Mutex<evdev::uinput::VirtualDevice> {
+fn get_virtual_mouse() -> Result<&'static std::sync::Mutex<evdev::uinput::VirtualDevice>, String> {
     use std::sync::{Mutex, OnceLock};
     use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode, RelativeAxisCode};
 
-    static DEVICE: OnceLock<Mutex<VirtualDevice>> = OnceLock::new();
+    static DEVICE: OnceLock<Result<Mutex<VirtualDevice>, String>> = OnceLock::new();
 
     DEVICE.get_or_init(|| {
         let mut keys = AttributeSet::<KeyCode>::new();
@@ -1508,20 +1485,22 @@ fn get_virtual_mouse() -> &'static std::sync::Mutex<evdev::uinput::VirtualDevice
         axes.insert(RelativeAxisCode::REL_HWHEEL);
 
         let device = VirtualDevice::builder()
-            .expect("Failed to create virtual mouse builder")
+            .map_err(|e| format!("Failed to create virtual mouse builder: {e}"))?
             .name("Sidearm Virtual Mouse")
             .with_keys(&keys)
-            .expect("Failed to configure virtual mouse keys")
+            .map_err(|e| format!("Failed to configure virtual mouse keys: {e}"))?
             .with_relative_axes(&axes)
-            .expect("Failed to configure virtual mouse axes")
+            .map_err(|e| format!("Failed to configure virtual mouse axes: {e}"))?
             .build()
-            .expect("Failed to build virtual mouse device");
+            .map_err(|e| format!("Failed to build virtual mouse device: {e}"))?;
 
         log::info!("[input] Persistent virtual mouse device created.");
         std::thread::sleep(std::time::Duration::from_millis(200));
 
-        Mutex::new(device)
+        Ok(Mutex::new(device))
     })
+    .as_ref()
+    .map_err(|e| e.clone())
 }
 
 #[cfg(target_os = "linux")]
@@ -1529,7 +1508,7 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
     use crate::config::MouseActionKind;
     use evdev::{EventType, InputEvent, KeyCode, RelativeAxisCode};
 
-    let mut device = get_virtual_mouse()
+    let mut device = get_virtual_mouse()?
         .lock()
         .map_err(|e| format!("Failed to lock virtual mouse: {e}"))?;
 

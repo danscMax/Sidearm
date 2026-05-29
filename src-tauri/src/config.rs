@@ -819,6 +819,17 @@ fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreErr
     })
 }
 
+/// Read an `AppConfig` from `config_path`, applying the same schema validation,
+/// `paste_mode` migration, and title-regex compilation as the canonical loader.
+/// Use this anywhere a config file is loaded outside `load_or_initialize_config`
+/// (backup restore, full-config import) so those paths cannot skip migrations.
+pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, ConfigStoreError> {
+    let mut config = read_config_from_path(config_path)?;
+    migrate_paste_mode(&mut config);
+    config.compile_title_regexes();
+    Ok(config)
+}
+
 fn write_config_to_path(
     config_dir: &Path,
     config: &AppConfig,

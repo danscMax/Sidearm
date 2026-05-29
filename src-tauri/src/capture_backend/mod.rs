@@ -237,25 +237,7 @@ fn process_encoded_key_event(
             }
         };
 
-    let _ = app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
-
-    // Send OSD notification if active profile changed
-    if !capture_result.ignored {
-        let should_notify = runtime_store
-            .lock()
-            .ok()
-            .map(|mut store| {
-                store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
-            })
-            .unwrap_or(false);
-        if should_notify {
-            let profile_name = capture_result
-                .resolved_profile_name
-                .as_deref()
-                .unwrap_or("Default");
-            crate::show_osd(app, profile_name, &config.settings);
-        }
-    }
+    emit_profile_resolved_and_notify(app, runtime_store, &capture_result, config);
 
     let is_fg_elevated = capture_result.is_elevated;
     if is_fg_elevated {
@@ -528,6 +510,33 @@ fn run_fire_and_forget(
             );
             flush_log_entries(runtime_store, log_entries);
             emit_runtime_error(app, runtime_store, &error.event);
+        }
+    }
+}
+
+/// Emit the resolved-profile event and, when the active profile changed, show
+/// the OSD. Shared by the manual key-event path and the per-OS foreground
+/// watchers (the tail was previously copied in mod.rs, windows.rs, linux.rs).
+pub(crate) fn emit_profile_resolved_and_notify(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    capture_result: &window_capture::WindowCaptureResult,
+    config: &AppConfig,
+) {
+    let _ = app.emit(EVENT_PROFILE_RESOLVED, capture_result);
+
+    if !capture_result.ignored {
+        let should_notify = runtime_store
+            .lock()
+            .ok()
+            .map(|mut store| store.notify_profile_change(capture_result.resolved_profile_id.as_deref()))
+            .unwrap_or(false);
+        if should_notify {
+            let profile_name = capture_result
+                .resolved_profile_name
+                .as_deref()
+                .unwrap_or("Default");
+            crate::show_osd(app, profile_name, &config.settings);
         }
     }
 }

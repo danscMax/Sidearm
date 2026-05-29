@@ -1,3 +1,5 @@
+use crate::vk::*;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct HotkeyModifiers {
     pub ctrl: bool,
@@ -238,39 +240,6 @@ fn normalize_modifier_token(token: &str) -> Option<ModifierToken> {
         _ => None,
     }
 }
-
-const VK_BACK: u16 = 0x08;
-const VK_TAB: u16 = 0x09;
-const VK_RETURN: u16 = 0x0D;
-const VK_PAUSE: u16 = 0x13;
-const VK_CAPITAL: u16 = 0x14;
-const VK_ESCAPE: u16 = 0x1B;
-const VK_SPACE: u16 = 0x20;
-const VK_PRIOR: u16 = 0x21;
-const VK_NEXT: u16 = 0x22;
-const VK_END: u16 = 0x23;
-const VK_HOME: u16 = 0x24;
-const VK_LEFT: u16 = 0x25;
-const VK_UP: u16 = 0x26;
-const VK_RIGHT: u16 = 0x27;
-const VK_DOWN: u16 = 0x28;
-const VK_SNAPSHOT: u16 = 0x2C;
-const VK_INSERT: u16 = 0x2D;
-const VK_DELETE: u16 = 0x2E;
-const VK_APPS: u16 = 0x5D;
-const VK_NUMLOCK: u16 = 0x90;
-const VK_SCROLL: u16 = 0x91;
-const VK_OEM_1: u16 = 0xBA;
-const VK_OEM_PLUS: u16 = 0xBB;
-const VK_OEM_COMMA: u16 = 0xBC;
-const VK_OEM_MINUS: u16 = 0xBD;
-const VK_OEM_PERIOD: u16 = 0xBE;
-const VK_OEM_2: u16 = 0xBF;
-const VK_OEM_3: u16 = 0xC0;
-const VK_OEM_4: u16 = 0xDB;
-const VK_OEM_5: u16 = 0xDC;
-const VK_OEM_6: u16 = 0xDD;
-const VK_OEM_7: u16 = 0xDE;
 
 /// Parse raw VK code from format "VK232" or "VK_232" (after normalization removes underscores).
 fn parse_vk_code(compact: &str) -> Option<u16> {

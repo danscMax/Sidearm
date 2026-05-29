@@ -16,6 +16,7 @@ mod recorder;
 mod resolver;
 mod runtime;
 mod synapse_import;
+mod vk;
 mod window_capture;
 
 use std::{
@@ -37,8 +38,8 @@ use capture_backend::RuntimeController;
 use command_error::CommandError;
 use recorder::MacroRecorder;
 use config::{
-    load_or_initialize_config, save_config as save_config_to_store, AppConfig, ConfigStoreError,
-    LoadConfigResponse, SaveConfigResponse,
+    load_or_initialize_config, read_and_migrate_config_file, save_config as save_config_to_store,
+    AppConfig, ConfigStoreError, LoadConfigResponse, SaveConfigResponse,
 };
 use executor::{ActionExecutionEvent, RuntimeErrorEvent};
 use resolver::ResolvedInputPreview;
@@ -53,6 +54,21 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
 use window_capture::WindowCaptureResult;
+
+/// Lock a `Mutex`, recovering from poisoning (a panic in another thread while
+/// holding the lock) by taking the inner value. Sidearm's runtime state stays
+/// readable after such a panic — `release_all_modifiers` runs via
+/// `catch_unwind` — so recovering beats failing the command. Replaces the
+/// repeated `.lock().recover_poison()` idiom.
+trait RecoverPoison<'a, T> {
+    fn recover_poison(self) -> std::sync::MutexGuard<'a, T>;
+}
+
+impl<'a, T> RecoverPoison<'a, T> for std::sync::LockResult<std::sync::MutexGuard<'a, T>> {
+    fn recover_poison(self) -> std::sync::MutexGuard<'a, T> {
+        self.unwrap_or_else(|e| e.into_inner())
+    }
+}
 
 /// Generation counter for OSD hide timer cancellation.
 /// Each show_osd call increments this; the hide thread only hides if the
@@ -549,7 +565,7 @@ async fn save_config(
     let is_running = {
         let store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         store.is_running()
     };
 
@@ -563,7 +579,7 @@ async fn save_config(
             // The runtime may have been stopped between the initial check and lock acquisition.
             let still_running = runtime_store
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
+                .recover_poison()
                 .is_running();
             if !still_running {
                 None
@@ -581,7 +597,7 @@ async fn save_config(
                 let stopped_summary = {
                     let mut store = runtime_store
                         .lock()
-                        .unwrap_or_else(|e| e.into_inner());
+                        .recover_poison();
                     store.stop()
                 };
                 let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
@@ -590,7 +606,7 @@ async fn save_config(
             Some(Ok(())) => {
                 let mut store = runtime_store
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner());
+                    .recover_poison();
                 Some(store.reload(result.config.version, result.warnings.len()))
             }
             None => None,
@@ -668,20 +684,8 @@ async fn restore_config_from_backup(
     let config_dir_for_task = config_dir.clone();
     let response = tauri::async_runtime::spawn_blocking(
         move || -> Result<LoadConfigResponse, CommandError> {
-            let raw = fs::read_to_string(&backup_pb).map_err(|e| {
-                CommandError::new(
-                    "io_error",
-                    format!("Failed to read backup file: {e}"),
-                    None,
-                )
-            })?;
-            let config: AppConfig = serde_json::from_str(&raw).map_err(|e| {
-                CommandError::new(
-                    "parse_error",
-                    format!("Failed to parse backup config: {e}"),
-                    None,
-                )
-            })?;
+            let config =
+                read_and_migrate_config_file(&backup_pb).map_err(CommandError::from)?;
             save_config_to_store(&config_dir_for_task, config).map_err(CommandError::from)?;
             load_or_initialize_config(&config_dir_for_task).map_err(CommandError::from)
         },
@@ -804,20 +808,8 @@ async fn import_full_config_apply(
 
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<SaveConfigResponse, CommandError> {
-            let raw = fs::read_to_string(&validated).map_err(|e| {
-                CommandError::new(
-                    "io_error",
-                    format!("Failed to read import file: {e}"),
-                    Some(vec![validated.to_string_lossy().into_owned()]),
-                )
-            })?;
-            let imported: AppConfig = serde_json::from_str(&raw).map_err(|e| {
-                CommandError::new(
-                    "parse_error",
-                    format!("Failed to parse import config: {e}"),
-                    None,
-                )
-            })?;
+            let imported =
+                read_and_migrate_config_file(&validated).map_err(CommandError::from)?;
             let final_config = match mode {
                 ImportMode::Replace => imported,
                 ImportMode::Merge => {
@@ -998,7 +990,7 @@ async fn start_runtime(
     {
         let store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         if store.is_running() {
             log::info!("[system] start_runtime called but already running, skipping");
             return Ok(store.summary());
@@ -1029,7 +1021,7 @@ async fn start_runtime(
     let summary = {
         let mut store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         store.start(load_response.config.version, load_response.warnings.len())
     };
 
@@ -1058,7 +1050,7 @@ async fn stop_runtime(
     let summary = {
         let mut store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         store.stop()
     };
 
@@ -1099,7 +1091,7 @@ async fn reload_runtime(
         let stopped_summary = {
             let mut store = runtime_store
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .recover_poison();
             store.stop()
         };
         let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
@@ -1109,7 +1101,7 @@ async fn reload_runtime(
     let summary = {
         let mut store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         store.reload(load_response.config.version, load_response.warnings.len())
     };
 
@@ -1138,7 +1130,7 @@ async fn get_debug_log(
 ) -> Result<Vec<DebugLogEntry>, CommandError> {
     let store = runtime_store
         .lock()
-        .unwrap_or_else(|e| e.into_inner());
+        .recover_poison();
 
     Ok(store.logs())
 }
@@ -1288,7 +1280,7 @@ async fn capture_active_window(
     {
         let mut store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         store.set_capture_in_progress(true);
         log::info!("[system] capture_in_progress = true (v2 auto-switching suppressed)");
     }
@@ -1318,7 +1310,7 @@ async fn capture_active_window(
         {
             let mut store = runtime_store
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
+                .recover_poison();
             if result.ignored {
                 store.record_warn(
                     "захват окна",
@@ -1348,7 +1340,7 @@ async fn capture_active_window(
             let should_notify = {
                 let mut store = runtime_store
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner());
+                    .recover_poison();
                 store.notify_profile_change(result.resolved_profile_id.as_deref())
             };
             if should_notify {
@@ -1546,7 +1538,7 @@ async fn preview_resolution(
     {
         let mut store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         match preview.status {
             resolver::ResolutionStatus::Resolved => store.record_info(
                 "разрешение",
@@ -1643,7 +1635,7 @@ async fn resolve_and_execute_action(
             {
                 let mut store = runtime_store
                     .lock()
-                    .unwrap_or_else(|e| e.into_inner());
+                    .recover_poison();
                 match mode {
                     ActionRunMode::DryRun => {
                         let message = format!(
@@ -1747,7 +1739,7 @@ fn emit_runtime_error(
     {
         let mut store = runtime_store
             .lock()
-            .unwrap_or_else(|e| e.into_inner());
+            .recover_poison();
         store.record_warn(
             event.category.clone(),
             format!("{}{}", event.message, runtime_error_context(event)),
@@ -2200,7 +2192,7 @@ pub fn run() {
             // disk → push_log fires another channel entry → snowball. This
             // exact loop caused v0.1.14's 230 GB disk meltdown (53 MB/s).
             if let Some((rx, pending)) =
-                log_rx_for_setup.lock().unwrap_or_else(|e| e.into_inner()).take()
+                log_rx_for_setup.lock().recover_poison().take()
             {
                 let app_handle = app.handle().clone();
                 std::thread::Builder::new()

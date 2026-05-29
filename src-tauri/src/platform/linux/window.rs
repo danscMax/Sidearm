@@ -11,10 +11,10 @@ use std::path::Path;
 use crate::runtime::timestamp_millis;
 use crate::window_capture::RawWindowCapture;
 
-/// Try to get the focused window via the Sidearm GNOME Shell extension D-Bus
-/// interface (`com.sidearm.FocusedWindow`). Returns `None` if the extension is
-/// unavailable or the call fails.
-fn try_gnome_dbus() -> Option<RawWindowCapture> {
+/// Call the Sidearm GNOME Shell extension D-Bus `Get` method and parse the JSON
+/// payload it returns (gdbus wraps it as `('{...}',)`). Shared by
+/// `try_gnome_dbus` and `try_gnome_dbus_geometry`.
+fn fetch_focused_window_json() -> Option<serde_json::Value> {
     let output = std::process::Command::new("gdbus")
         .args([
             "call",
@@ -35,12 +35,15 @@ fn try_gnome_dbus() -> Option<RawWindowCapture> {
 
     // gdbus output format: ('{"pid":1234,"title":"...","wm_class":"...","x":0,"y":0,"width":800,"height":600}',)
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let json_str = stdout
-        .trim()
-        .strip_prefix("('")?
-        .strip_suffix("',)")?;
+    let json_str = stdout.trim().strip_prefix("('")?.strip_suffix("',)")?;
+    serde_json::from_str(json_str).ok()
+}
 
-    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+/// Try to get the focused window via the Sidearm GNOME Shell extension D-Bus
+/// interface (`com.sidearm.FocusedWindow`). Returns `None` if the extension is
+/// unavailable or the call fails.
+fn try_gnome_dbus() -> Option<RawWindowCapture> {
+    let v = fetch_focused_window_json()?;
     let pid = v.get("pid")?.as_u64()? as u32;
     if pid == 0 {
         return None;
@@ -194,27 +197,7 @@ pub(crate) fn is_foreground_fullscreen() -> bool {
 /// Query window geometry from the GNOME Shell D-Bus extension.
 /// Returns (x, y, width, height) or None.
 fn try_gnome_dbus_geometry() -> Option<(i64, i64, i64, i64)> {
-    let output = std::process::Command::new("gdbus")
-        .args([
-            "call",
-            "--session",
-            "--dest",
-            "com.sidearm.FocusedWindow",
-            "--object-path",
-            "/com/sidearm/FocusedWindow",
-            "--method",
-            "com.sidearm.FocusedWindow.Get",
-        ])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let json_str = stdout.trim().strip_prefix("('")?.strip_suffix("',)")?;
-    let v: serde_json::Value = serde_json::from_str(json_str).ok()?;
+    let v = fetch_focused_window_json()?;
 
     let x = v.get("x")?.as_i64()?;
     let y = v.get("y")?.as_i64()?;

@@ -17,12 +17,12 @@ use std::{
     time::Duration,
 };
 
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use super::{process_encoded_key_event, EncodedKeyEvent, CAPTURE_BACKEND_NAME};
 use crate::{
     config::AppConfig,
-    runtime::{self, RuntimeStore, EVENT_PROFILE_RESOLVED},
+    runtime::{self, RuntimeStore},
     window_capture,
 };
 
@@ -490,24 +490,7 @@ fn run_foreground_watcher(
         }
         last_window_id.clone_from(&capture_result.hwnd);
 
-        let _ = app.emit(EVENT_PROFILE_RESOLVED, &capture_result);
-
-        if !capture_result.ignored {
-            let should_notify = runtime_store
-                .lock()
-                .ok()
-                .map(|mut store| {
-                    store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
-                })
-                .unwrap_or(false);
-            if should_notify {
-                let profile_name = capture_result
-                    .resolved_profile_name
-                    .as_deref()
-                    .unwrap_or("Default");
-                crate::show_osd(&app, profile_name, &config.settings);
-            }
-        }
+        super::emit_profile_resolved_and_notify(&app, &runtime_store, &capture_result, &config);
     }
 
     log::info!("[capture] Foreground watcher exited.");

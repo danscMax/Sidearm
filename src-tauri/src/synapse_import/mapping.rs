@@ -234,8 +234,12 @@ pub fn translate_key_token(token: &str) -> Result<String, KeyTranslationError> {
         }
         if rest.starts_with('F') {
             let tail = &rest[1..];
-            if tail.chars().all(|c| c.is_ascii_digit()) && !tail.is_empty() {
-                return Ok(rest.to_string());
+            // Function keys exist only as F1..=F24. Reject F0, F25+ and absurd
+            // numbers instead of blindly accepting any digit tail.
+            if let Ok(n) = tail.parse::<u8>() {
+                if (1..=24).contains(&n) {
+                    return Ok(rest.to_string());
+                }
             }
         }
     }
@@ -530,4 +534,197 @@ mod tests {
         assert_eq!(translate_mouse_assignment("DoubleClick"), Some("doubleClick"));
         assert_eq!(translate_mouse_assignment("Menu"), None);
     }
+}
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Boundary: empty / single-char / very long token strings
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_empty_token_is_unknown() {
+        assert_eq!(
+            translate_key_token(""),
+            Err(KeyTranslationError::Unknown(String::new()))
+        );
+    }
+
+    #[test]
+    fn boundary_key_prefix_only_is_unknown() {
+        // "KEY_" with no suffix should not panic and returns Unknown.
+        assert!(matches!(
+            translate_key_token("KEY_"),
+            Err(KeyTranslationError::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn boundary_key_f0_is_unknown() {
+        // "KEY_F0" — the tail after 'F' is "0" which is a digit but F0 is not
+        // a real key.  It should NOT match the F-key arm because F0 is not
+        // in the special table, and the single-char arm only applies to
+        // alphanumeric chars.  Confirm it returns Unknown (not a panic).
+        assert!(matches!(
+            translate_key_token("KEY_F0"),
+            Err(KeyTranslationError::Unknown(_))
+        ));
+    }
+
+    #[test]
+    fn boundary_key_f25_is_unknown() {
+        // F25 does not exist in Synapse or PS/2; must be Unknown.
+        assert!(matches!(
+            translate_key_token("KEY_F25"),
+            Err(KeyTranslationError::Unknown(_))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: empty modifier array / modifier string
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_modifier_array_returns_all_false() {
+        let flags = parse_modifier_array(&[]);
+        assert_eq!(flags, ModifierFlags::default());
+    }
+
+    #[test]
+    fn null_empty_modifier_string_returns_all_false() {
+        let flags = parse_modifier_string("");
+        assert_eq!(flags, ModifierFlags::default());
+    }
+
+    #[test]
+    fn null_whitespace_only_modifier_string_returns_all_false() {
+        let flags = parse_modifier_string("   \t  ");
+        assert_eq!(flags, ModifierFlags::default());
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: translate_key_token never panics on arbitrary strings
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_translate_key_token_never_panics(s in ".*") {
+            let _ = translate_key_token(&s);
+        }
+
+        // Invariant: result for valid single-char alphanumeric KEY_X is exactly
+        // that character as an uppercase ASCII string.
+        #[test]
+        fn prop_key_single_char_alphanum_roundtrip(
+            ch in "[A-Z0-9]"
+        ) {
+            let token = format!("KEY_{ch}");
+            match translate_key_token(&token) {
+                Ok(name) => assert_eq!(name, ch),
+                Err(_) => panic!("Expected Ok for token {token}"),
+            }
+        }
+
+        // Invariant: parse_modifier_array never panics on arbitrary token lists.
+        #[test]
+        fn prop_parse_modifier_array_never_panics(
+            tokens in prop::collection::vec(".*", 0..50)
+        ) {
+            let _ = parse_modifier_array(&tokens);
+        }
+
+        // Invariant: parse_modifier_string never panics on arbitrary strings.
+        #[test]
+        fn prop_parse_modifier_string_never_panics(s in ".*") {
+            let _ = parse_modifier_string(&s);
+        }
+
+        // Invariant: translate_mouse_assignment never panics.
+        #[test]
+        fn prop_translate_mouse_assignment_never_panics(s in ".*") {
+            let _ = translate_mouse_assignment(&s);
+        }
+
+        // Invariant: input_id_to_control_id never panics.
+        #[test]
+        fn prop_input_id_to_control_id_never_panics(
+            input_type in ".*",
+            input_id in ".*",
+            is_side_panel in any::<bool>()
+        ) {
+            let _ = input_id_to_control_id(&input_type, &input_id, is_side_panel);
+        }
+
+        // Invariant: vk_to_key never panics for any u16.
+        #[test]
+        fn prop_vk_to_key_never_panics(vk in any::<u16>()) {
+            let _ = vk_to_key(vk);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: VK code range edges
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_vk_zero_and_max_return_none() {
+        assert!(vk_to_key(0).is_none());
+        assert!(vk_to_key(u16::MAX).is_none());
+    }
+
+    #[test]
+    fn boundary_vk_letter_range_coverage() {
+        // VK_A=0x41..VK_Z=0x5A — all should resolve to single uppercase letters.
+        for (i, expected) in (b'A'..=b'Z').enumerate() {
+            let vk = 0x41u16 + i as u16;
+            assert_eq!(
+                vk_to_key(vk),
+                Some(std::str::from_utf8(&[expected]).unwrap()),
+                "vk 0x{vk:02X} should map to {}",
+                expected as char
+            );
+        }
+    }
+
+    #[test]
+    fn boundary_vk_f1_to_f24_all_resolve() {
+        // VK_F1=0x70 .. VK_F24=0x87
+        for i in 0u16..24 {
+            let vk = 0x70 + i;
+            let name = vk_to_key(vk).expect(&format!("VK F{} (0x{vk:02X}) should resolve", i + 1));
+            assert_eq!(name, format!("F{}", i + 1));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: very long KEY_ token (no panic, just Unknown)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_very_long_key_token_is_unknown() {
+        let long = format!("KEY_{}", "A".repeat(10_000));
+        assert!(matches!(
+            translate_key_token(&long),
+            Err(KeyTranslationError::Unknown(_))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // ModifierFlags::add_token idempotency
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn modifier_add_token_idempotent() {
+        let mut flags = ModifierFlags::default();
+        flags.add_token("KEY_LEFT_CTRL");
+        flags.add_token("KEY_LEFT_CTRL");
+        assert!(flags.ctrl);
+        assert!(!flags.shift);
+    }
+
+    // Concurrency: N/A — all functions are pure; Lazy statics read-only after init.
+    // Temporal:    N/A — no durations in this module.
 }

@@ -31,7 +31,16 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
     // Normalize Cyrillic letters to the Latin key at the same physical position
     // (ЙЦУКЕН → QWERTY) so e.g. `Ctrl+С` (Cyrillic) parses as `Ctrl+C`.
     if trimmed.chars().any(|c| matches!(c, '\u{0400}'..='\u{04FF}')) {
-        return parse_primary_key(&normalize_cyrillic_key(trimmed));
+        let normalized = normalize_cyrillic_key(trimmed);
+        // Guard against infinite recursion: only re-parse if normalization made
+        // progress. Cyrillic letters outside the ЙЦУКЕН map are returned
+        // unchanged by normalize_cyrillic_key, so without this guard a key such
+        // as 'Ђ', 'Є' or 'Ї' would recurse forever → stack overflow.
+        if normalized.as_str() != trimmed {
+            return parse_primary_key(&normalized);
+        }
+        // Fall through: an unmapped Cyrillic key is unsupported and is reported
+        // as such by the logic below (returns Err).
     }
 
     if trimmed.chars().count() == 1 {

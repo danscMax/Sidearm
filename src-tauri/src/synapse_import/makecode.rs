@@ -228,3 +228,100 @@ mod tests {
         assert_eq!(modifier_canonical(0x1E, false), None); // A — not a modifier
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Boundary: min/max of u16 scancode range
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_scancode_zero_returns_none() {
+        // Code 0 has no PS/2 meaning and must not panic.
+        assert!(makecode_to_key(0x00, false).is_none());
+        assert!(makecode_to_key(0x00, true).is_none());
+    }
+
+    #[test]
+    fn boundary_scancode_u16_max_returns_none() {
+        assert!(makecode_to_key(u16::MAX, false).is_none());
+        assert!(makecode_to_key(u16::MAX, true).is_none());
+    }
+
+    #[test]
+    fn boundary_f_key_range_top() {
+        // F24 is the highest function key in the table (0x6F).
+        assert_eq!(makecode_to_key(0x6F, false), Some("F24"));
+        // 0x70 is beyond F24 — should return None (no panic).
+        assert!(makecode_to_key(0x70, false).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: makecode_to_key never panics on any (u16, bool) input
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_makecode_to_key_never_panics(code in any::<u16>(), extended in any::<bool>()) {
+            // Must complete without panic; return value is Option (Some or None).
+            let _ = makecode_to_key(code, extended);
+        }
+
+        #[test]
+        fn prop_modifier_canonical_never_panics(code in any::<u16>(), extended in any::<bool>()) {
+            let _ = modifier_canonical(code, extended);
+        }
+
+        // Invariant: if modifier_canonical returns Some, the result is one of the
+        // four canonical modifier names.
+        #[test]
+        fn prop_modifier_canonical_only_known_names(
+            code in any::<u16>(),
+            extended in any::<bool>()
+        ) {
+            if let Some(name) = modifier_canonical(code, extended) {
+                assert!(
+                    matches!(name, "Ctrl" | "Shift" | "Alt" | "Win"),
+                    "unexpected canonical modifier: {name}"
+                );
+            }
+        }
+
+        // Invariant: if extended=true resolves to X, then that X is always from
+        // the extended table or falls back to base — never an unknown value.
+        #[test]
+        fn prop_result_is_static_str_from_known_set(
+            code in 0x01u16..=0x6Fu16,
+            extended in any::<bool>()
+        ) {
+            // All results for codes in the defined range should be non-empty strings.
+            if let Some(name) = makecode_to_key(code, extended) {
+                assert!(!name.is_empty());
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow / null: extended-flag fallback path with gap codes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn gap_codes_between_f12_and_f13_return_none() {
+        // Only codes absent from BOTH tables return None. makecode_to_key falls
+        // back to EXTENDED_TABLE for non-extended codes (e.g. 0x5B → LeftWin), so
+        // a code present in either table is legitimately mapped — skip those.
+        for code in 0x59u16..=0x63 {
+            if BASE_TABLE.contains_key(&code) || EXTENDED_TABLE.contains_key(&code) {
+                continue;
+            }
+            assert!(makecode_to_key(code, false).is_none(), "code 0x{:02X} should be None", code);
+        }
+    }
+
+    // Concurrency: N/A — pure lookup functions with no shared mutable state;
+    //              Lazy statics are initialised once (read-only thereafter).
+    // Temporal:    N/A — no durations or timestamps in this module.
+}

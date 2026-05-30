@@ -79,6 +79,11 @@ evdev = { version = "0.13", features = ["tokio"] }
 arboard = { version = "3.6", features = ["wayland-data-control"] }
 active-win-pos-rs = "0.9"
 
+# Test-only: property-based testing harness (edge-case discovery). Compiled out
+# of release builds — does not affect the shipped binary.
+[dev-dependencies]
+proptest = "1"
+
 # Slim debug profile: keeps full debug info for our own code, but reduces
 # dependency debug info to line tables only. This cuts target/debug/ size
 # roughly in half without breaking backtraces or hampering debugging of

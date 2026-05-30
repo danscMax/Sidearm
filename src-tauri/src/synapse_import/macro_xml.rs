@@ -344,3 +344,269 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Boundary: empty XML → Shape error (not panic)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_empty_string_returns_shape_error() {
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str("", "fallback".into(), &mut w);
+        assert!(matches!(res, Err(MacroXmlError::Shape)), "empty XML must be Shape error, got {res:?}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: whitespace-only XML → Shape error (not panic)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_whitespace_xml_returns_shape_error() {
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str("   \n\t  ", "fallback".into(), &mut w);
+        assert!(matches!(res, Err(MacroXmlError::Shape | MacroXmlError::Xml(_))));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: valid Macro wrapper but no events and no Guid → Shape error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_macro_without_guid_or_events_is_shape_error() {
+        let xml = "<Macro><Name>Empty</Name><MacroEvents></MacroEvents></Macro>";
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str(xml, "x".into(), &mut w);
+        assert!(matches!(res, Err(MacroXmlError::Shape)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: valid Macro with Guid but empty MacroEvents → ok, 0 steps
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_macro_events_is_ok_with_zero_steps() {
+        let xml = "<Macro><Name>E</Name><MacroEvents></MacroEvents><Guid>guid-empty</Guid></Macro>";
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str(xml, "E".into(), &mut w);
+        let parsed = res.expect("should parse ok");
+        assert_eq!(parsed.synapse_guid, "guid-empty");
+        assert!(parsed.steps.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: missing Name falls back to fallback_name
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_missing_name_uses_fallback() {
+        let xml = "<Macro><MacroEvents></MacroEvents><Guid>g-noname</Guid></Macro>";
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str(xml, "fallback-name".into(), &mut w).unwrap();
+        assert_eq!(res.name, "fallback-name");
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: deeply nested XML (1000 levels) — iterative parser must not
+    //           stack-overflow; must return Xml error or Shape error, not panic.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_deep_nesting_no_stack_overflow() {
+        // Build 1000 levels of nesting inside <Macro>. quick-xml is iterative
+        // so this should not overflow the stack.
+        let open: String = (0..1000).map(|i| format!("<L{i}>")).collect();
+        let close: String = (0..1000).rev().map(|i| format!("</L{i}>")).collect();
+        let xml = format!("<Macro>{open}<Guid>deep</Guid>{close}</Macro>");
+        let mut w = Vec::new();
+        // Any result is acceptable as long as the thread does not panic/abort.
+        let _ = parse_macro_xml_str(&xml, "deep".into(), &mut w);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: <Number> field with extremely large float → delay_ms must
+    //           not overflow; it must clamp to u32::MAX via saturating cast.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_number_field_very_large_float_no_panic() {
+        // Inject a <Number> value larger than u32::MAX / 1000.0.
+        // The cast `(secs * 1000.0).round().max(0.0) as u32` wraps/saturates
+        // on overflow in Rust (well-defined for primitive casts: saturates for
+        // f64-to-u32 in edition 2021 with the saturating cast rules).
+        let big = f64::MAX.to_string(); // "1.7976931348623157e308"
+        let xml = format!(
+            r#"<Macro><Name>N</Name><MacroEvents>
+              <MacroEvent><Type>0</Type><Number>{big}</Number></MacroEvent>
+            </MacroEvents><Guid>g-big</Guid></Macro>"#
+        );
+        let mut w = Vec::new();
+        // Must not panic; result may be Ok or Err.
+        let _ = parse_macro_xml_str(&xml, "N".into(), &mut w);
+    }
+
+    #[test]
+    fn overflow_number_field_infinity_no_panic() {
+        // "inf" is not a valid f64 parse in std, but we guard against it anyway.
+        let xml = r#"<Macro><Name>N</Name><MacroEvents>
+            <MacroEvent><Type>0</Type><Number>inf</Number></MacroEvent>
+          </MacroEvents><Guid>g-inf</Guid></Macro>"#;
+        let mut w = Vec::new();
+        let _ = parse_macro_xml_str(xml, "N".into(), &mut w);
+    }
+
+    #[test]
+    fn overflow_number_field_negative_is_clamped_to_zero() {
+        // Negative seconds should produce delay_ms=None (parse::<f64> gives negative,
+        // .max(0.0) clamps, (0.0 as u32) == 0, and build() drops zero-delays).
+        let xml = r#"<Macro><Name>N</Name><MacroEvents>
+            <MacroEvent><Type>0</Type><Number>-999.9</Number></MacroEvent>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent></MacroEvent>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>1</State></KeyEvent></MacroEvent>
+          </MacroEvents><Guid>g-neg</Guid></Macro>"#;
+        let mut w = Vec::new();
+        let parsed = parse_macro_xml_str(xml, "N".into(), &mut w).unwrap();
+        // Negative delay should NOT appear as a Sleep step.
+        assert!(
+            parsed.steps.iter().all(|s| !matches!(s, ParsedSequenceStep::Sleep { .. })),
+            "negative delay must not produce a Sleep step; steps={:?}", parsed.steps
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: Delay field with u32::MAX value — must not panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_delay_u32_max_is_preserved() {
+        let xml = format!(
+            r#"<Macro><Name>D</Name><MacroEvents>
+              <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
+            </MacroEvents><Guid>g-dmax</Guid></Macro>"#,
+            u32::MAX
+        );
+        let mut w = Vec::new();
+        let parsed = parse_macro_xml_str(&xml, "D".into(), &mut w).unwrap();
+        assert!(
+            parsed.steps.iter().any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == u32::MAX)),
+            "u32::MAX delay must appear as Sleep; steps={:?}", parsed.steps
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: Delay field overflowing u32 (number too big) → parse fails,
+    //           event silently dropped (no panic)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_delay_beyond_u32_is_dropped_silently() {
+        let xml = format!(
+            r#"<Macro><Name>D</Name><MacroEvents>
+              <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
+            </MacroEvents><Guid>g-dover</Guid></Macro>"#,
+            u64::MAX  // too big for u32, text.parse::<u32>() will return Err → None
+        );
+        let mut w = Vec::new();
+        // Must not panic; the out-of-range delay is simply dropped.
+        let _ = parse_macro_xml_str(&xml, "D".into(), &mut w);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: Makecode field overflowing u16 → parse fails, event skipped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_makecode_beyond_u16_is_skipped() {
+        let xml = format!(
+            r#"<Macro><Name>M</Name><MacroEvents>
+              <MacroEvent><Type>1</Type><KeyEvent><Makecode>{}</Makecode><State>0</State></KeyEvent></MacroEvent>
+              <MacroEvent><Type>1</Type><KeyEvent><Makecode>{}</Makecode><State>1</State></KeyEvent></MacroEvent>
+            </MacroEvents><Guid>g-mover</Guid></Macro>"#,
+            u64::MAX, u64::MAX
+        );
+        let mut w = Vec::new();
+        // parse::<u16>() will fail → makecode=None → event skipped (no panic).
+        let _ = parse_macro_xml_str(&xml, "M".into(), &mut w);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: malformed UTF-8 in raw &str is impossible (Rust str is always
+    //           UTF-8). Test malformed XML entity instead.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_unknown_xml_entity_is_tolerated() {
+        let xml = "<Macro><Name>&invalid_entity;</Name><Guid>g</Guid></Macro>";
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str(xml, "m".into(), &mut w);
+        // quick-xml does NOT validate/resolve entities during streaming parse, so
+        // an unknown entity is tolerated (kept as raw text) rather than rejected.
+        // The contract here is "must not panic"; genuinely broken *structure* is
+        // covered by the unclosed-tag test below.
+        assert!(res.is_ok(), "unknown XML entity should be tolerated by quick-xml, not error");
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: unclosed tags — quick-xml will return an Xml error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_unclosed_tags_return_xml_error() {
+        let xml = "<Macro><Name>Unclosed<MacroEvents><MacroEvent><Type>1</Type>";
+        let mut w = Vec::new();
+        let res = parse_macro_xml_str(xml, "u".into(), &mut w);
+        assert!(matches!(res, Err(MacroXmlError::Xml(_) | MacroXmlError::Shape)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: parse_macro_xml_str never panics on arbitrary strings
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_parse_never_panics_on_arbitrary_str(s in ".*") {
+            let mut w = Vec::new();
+            let _ = parse_macro_xml_str(&s, "arb".into(), &mut w);
+        }
+
+        // Invariant: a valid macro always populates synapse_guid from <Guid>.
+        #[test]
+        fn prop_valid_macro_preserves_guid(
+            guid in "[a-zA-Z0-9-]{1,64}",
+            name in "[a-zA-Z0-9 ]{0,32}",
+        ) {
+            let xml = format!(
+                "<Macro><Name>{name}</Name><MacroEvents></MacroEvents><Guid>{guid}</Guid></Macro>"
+            );
+            let mut w = Vec::new();
+            if let Ok(parsed) = parse_macro_xml_str(&xml, "fb".into(), &mut w) {
+                assert_eq!(parsed.synapse_guid, guid);
+            }
+        }
+
+        // Invariant: output step count is bounded by twice the number of
+        // MacroEvent elements (each produces at most one Send + one Sleep).
+        #[test]
+        fn prop_output_bounded_by_event_count(n_events in 0usize..200) {
+            // Build n_events of type=1 key-down+up pairs.
+            let events: String = (0..n_events).map(|_| {
+                "<MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent></MacroEvent>\
+                 <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>1</State></KeyEvent></MacroEvent>"
+                    .to_string()
+            }).collect();
+            let xml = format!("<Macro><Name>B</Name><MacroEvents>{events}</MacroEvents><Guid>g-b</Guid></Macro>");
+            let mut w = Vec::new();
+            if let Ok(parsed) = parse_macro_xml_str(&xml, "B".into(), &mut w) {
+                // Each key-down + key-up pair produces exactly 1 Send step.
+                assert!(parsed.steps.len() <= n_events + 1);
+            }
+        }
+    }
+
+    // Concurrency: N/A — pure string→struct transformation, no shared state.
+    // Temporal: delay arithmetic is tested above (u32::MAX, negatives, f64::MAX).
+}

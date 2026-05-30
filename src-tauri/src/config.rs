@@ -2910,3 +2910,1171 @@ mod tests {
         assert_eq!(loaded.config.bindings[1].trigger_mode, None);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Property-based / edge-case tests
+//
+// Rules:
+//  * No real FS access — all tests operate on pure in-memory transforms.
+//  * Never edit production code or the `mod tests` above.
+//  * `proptest!` macros follow the standard `proptest = "1"` idiom.
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::HashMap;
+
+    // ─── Helpers ────────────────────────────────────────────────────────────
+
+    /// Build a minimal, self-consistent AppConfig that passes validate_config.
+    /// Every collection references the single profile "p1" and the single
+    /// physical-controls set that satisfies ALL 27 required controls.
+    fn minimal_valid_config() -> AppConfig {
+        let mut cfg = default_seed_config();
+        // Strip everything down to one profile so our helpers stay small.
+        // Keep the full physical_controls (required by validation) and
+        // encoder_mappings.  Clear user-data-heavy tables.
+        cfg.profiles = vec![Profile {
+            id: "p1".into(),
+            name: "Test".into(),
+            description: None,
+            enabled: true,
+            priority: 0,
+        }];
+        cfg.settings.fallback_profile_id = "p1".into();
+        cfg.app_mappings = vec![];
+        cfg.bindings = vec![];
+        cfg.actions = vec![];
+        cfg.snippet_library = vec![];
+        cfg
+    }
+
+    fn make_shortcut_action(id: &str) -> Action {
+        Action {
+            id: id.into(),
+            action_type: ActionType::Shortcut,
+            payload: ActionPayload::Shortcut(ShortcutActionPayload {
+                key: "A".into(),
+                ctrl: true,
+                shift: false,
+                alt: false,
+                win: false,
+                raw: None,
+            }),
+            pretty: id.into(),
+            notes: None,
+            conditions: vec![],
+        }
+    }
+
+    fn make_binding(id: &str, action_ref: &str) -> Binding {
+        Binding {
+            id: id.into(),
+            profile_id: "p1".into(),
+            layer: Layer::Standard,
+            control_id: ControlId::Thumb01,
+            label: "lbl".into(),
+            action_ref: action_ref.into(),
+            color_tag: None,
+            trigger_mode: None,
+            chord_partner: None,
+            enabled: true,
+        }
+    }
+
+    // ─── Serialization round-trips ──────────────────────────────────────────
+
+    /// Profile round-trips through JSON without any field loss.
+    #[test]
+    fn profile_json_roundtrip_deterministic() {
+        let p = Profile {
+            id: "x".into(),
+            name: "X".into(),
+            description: Some("desc".into()),
+            enabled: false,
+            priority: i32::MAX,
+        };
+        let json = serde_json::to_string(&p).unwrap();
+        let back: Profile = serde_json::from_str(&json).unwrap();
+        assert_eq!(p, back);
+    }
+
+    proptest! {
+        /// Shortcut payload with arbitrary modifier combos round-trips.
+        #[test]
+        fn shortcut_payload_roundtrip(
+            key in "[A-Za-z0-9]{1,8}",
+            ctrl in any::<bool>(),
+            shift in any::<bool>(),
+            alt in any::<bool>(),
+            win in any::<bool>(),
+        ) {
+            let p = ShortcutActionPayload { key, ctrl, shift, alt, win, raw: None };
+            let json = serde_json::to_string(&p).unwrap();
+            let back: ShortcutActionPayload = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(p, back);
+        }
+    }
+
+    proptest! {
+        /// Binding round-trips across all TriggerMode variants and all ControlIds.
+        #[test]
+        fn binding_roundtrip(
+            trigger_mode in prop_oneof![
+                Just(None::<TriggerMode>),
+                Just(Some(TriggerMode::Press)),
+                Just(Some(TriggerMode::DoublePress)),
+                Just(Some(TriggerMode::TriplePress)),
+                Just(Some(TriggerMode::Hold)),
+                Just(Some(TriggerMode::Chord)),
+            ],
+            layer in prop_oneof![Just(Layer::Standard), Just(Layer::Hypershift)],
+        ) {
+            let b = Binding {
+                id: "b1".into(),
+                profile_id: "p1".into(),
+                layer,
+                control_id: ControlId::Thumb01,
+                label: "lbl".into(),
+                action_ref: "a1".into(),
+                color_tag: None,
+                trigger_mode,
+                chord_partner: None,
+                enabled: true,
+            };
+            let json = serde_json::to_string(&b).unwrap();
+            let back: Binding = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(b, back);
+        }
+    }
+
+    proptest! {
+        /// TextSnippetPayload::Inline round-trips for both PasteMode variants.
+        #[test]
+        fn text_snippet_inline_roundtrip(
+            text in ".{1,200}",
+            paste_mode in prop_oneof![
+                Just(PasteMode::ClipboardPaste),
+                Just(PasteMode::SendText),
+            ],
+            tags in prop::collection::vec("[a-z]{1,10}", 0..5),
+        ) {
+            let p = TextSnippetPayload::Inline { text, paste_mode, tags };
+            let json = serde_json::to_string(&p).unwrap();
+            let back: TextSnippetPayload = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(p, back);
+        }
+    }
+
+    proptest! {
+        /// SequenceStep::Sleep delay_ms round-trips for full u32 range.
+        #[test]
+        fn sequence_sleep_delay_roundtrip(delay_ms in any::<u32>()) {
+            let step = SequenceStep::Sleep { delay_ms };
+            let json = serde_json::to_string(&step).unwrap();
+            let back: SequenceStep = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(step, back);
+        }
+    }
+
+    proptest! {
+        /// SequenceStep::Send with optional delay and repeat round-trips.
+        #[test]
+        fn sequence_send_roundtrip(
+            delay_ms in prop::option::of(any::<u32>()),
+            repeat in prop::option::of(any::<u32>()),
+        ) {
+            let step = SequenceStep::Send {
+                value: "Ctrl+C".into(),
+                delay_ms,
+                repeat,
+            };
+            let json = serde_json::to_string(&step).unwrap();
+            let back: SequenceStep = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(step, back);
+        }
+    }
+
+    proptest! {
+        /// Profile round-trips for a wide range of priority values including extremes.
+        #[test]
+        fn profile_priority_roundtrip(priority in any::<i32>()) {
+            let p = Profile {
+                id: "x".into(),
+                name: "X".into(),
+                description: None,
+                enabled: true,
+                priority,
+            };
+            let json = serde_json::to_string(&p).unwrap();
+            let back: Profile = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(p.priority, back.priority);
+        }
+    }
+
+    proptest! {
+        /// Settings optional u64 fields round-trip without clamping at the serde layer.
+        #[test]
+        fn settings_optional_u64_roundtrip(
+            stale_gc in prop::option::of(any::<u64>()),
+            force_release in prop::option::of(any::<u64>()),
+        ) {
+            let mut cfg = minimal_valid_config();
+            cfg.settings.modifier_stale_gc_ms = stale_gc;
+            cfg.settings.replayed_modifier_force_release_ms = force_release;
+            let json = serde_json::to_string(&cfg.settings).unwrap();
+            let back: Settings = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(back.modifier_stale_gc_ms, stale_gc);
+            prop_assert_eq!(back.replayed_modifier_force_release_ms, force_release);
+        }
+    }
+
+    // ─── Boundary: numeric limits ────────────────────────────────────────────
+
+    /// osd_duration_ms = 0 deserializes fine (serde does not clamp).
+    #[test]
+    fn osd_duration_zero_accepted_by_serde() {
+        let json = r#"{"fallbackProfileId":"p","theme":"t","startWithWindows":false,
+            "minimizeToTray":false,"debugLogging":false,"osdEnabled":false,
+            "osdDurationMs":0,"osdPosition":"bottomRight","osdFontSize":"medium",
+            "osdAnimation":"slideIn"}"#;
+        let s: Settings = serde_json::from_str(json).expect("parse settings");
+        assert_eq!(s.osd_duration_ms, 0);
+    }
+
+    /// osd_duration_ms = u32::MAX deserializes fine.
+    #[test]
+    fn osd_duration_max_accepted_by_serde() {
+        let v = u32::MAX;
+        let json = format!(
+            r#"{{"fallbackProfileId":"p","theme":"t","startWithWindows":false,
+            "minimizeToTray":false,"debugLogging":false,"osdEnabled":false,
+            "osdDurationMs":{v},"osdPosition":"bottomRight","osdFontSize":"medium",
+            "osdAnimation":"slideIn"}}"#
+        );
+        let s: Settings = serde_json::from_str(&json).expect("parse settings");
+        assert_eq!(s.osd_duration_ms, v);
+    }
+
+    // ─── Boundary: empty / missing collections ───────────────────────────────
+
+    /// validate_config with zero profiles → error (fallback profile missing).
+    #[test]
+    fn validation_empty_profiles_is_error() {
+        let mut cfg = minimal_valid_config();
+        cfg.profiles.clear();
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty profiles must fail validation");
+    }
+
+    /// validate_config with zero actions and zero bindings → valid (no cross-refs).
+    #[test]
+    fn validation_empty_actions_and_bindings_is_ok() {
+        let cfg = minimal_valid_config();
+        let result = validate_config(&cfg);
+        assert!(result.is_ok(), "minimal config (no actions/bindings) must be valid");
+    }
+
+    /// A single valid binding + action pair validates cleanly.
+    #[test]
+    fn validation_single_action_single_binding_ok() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_shortcut_action("a1")];
+        cfg.bindings = vec![make_binding("b1", "a1")];
+        assert!(validate_config(&cfg).is_ok());
+    }
+
+    // ─── Boundary: profile count ─────────────────────────────────────────────
+
+    proptest! {
+        /// N ≥ 1 distinct profiles all accepted by validation (fallback = first).
+        #[test]
+        fn validation_accepts_n_profiles(n in 1usize..=20) {
+            let mut cfg = minimal_valid_config();
+            cfg.profiles = (0..n)
+                .map(|i| Profile {
+                    id: format!("p{}", i),
+                    name: format!("Profile {}", i),
+                    description: None,
+                    enabled: true,
+                    priority: i as i32,
+                })
+                .collect();
+            cfg.settings.fallback_profile_id = "p0".into();
+            prop_assert!(validate_config(&cfg).is_ok());
+        }
+    }
+
+    // ─── Null & empty: id fields ─────────────────────────────────────────────
+
+    /// Profile with empty id is rejected by validate_config (not just schema).
+    #[test]
+    fn validation_rejects_empty_profile_id() {
+        let mut cfg = minimal_valid_config();
+        cfg.profiles[0].id = String::new();
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty profile id must be rejected");
+    }
+
+    /// Action with empty id is rejected.
+    #[test]
+    fn validation_rejects_empty_action_id() {
+        let mut cfg = minimal_valid_config();
+        let mut action = make_shortcut_action("");
+        action.id = String::new();
+        cfg.actions = vec![action];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty action id must be rejected");
+    }
+
+    /// Binding with empty id is rejected.
+    #[test]
+    fn validation_rejects_empty_binding_id() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_shortcut_action("a1")];
+        let mut b = make_binding("", "a1");
+        b.id = String::new();
+        cfg.bindings = vec![b];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty binding id must be rejected");
+    }
+
+    /// Whitespace-only ids behave identically to empty ids.
+    #[test]
+    fn validation_rejects_whitespace_only_profile_id() {
+        let mut cfg = minimal_valid_config();
+        cfg.profiles[0].id = "   ".into();
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "whitespace-only profile id must be rejected");
+    }
+
+    /// Snippet with blank text is rejected.
+    #[test]
+    fn validation_rejects_blank_snippet_text() {
+        let mut cfg = minimal_valid_config();
+        cfg.snippet_library = vec![SnippetLibraryItem {
+            id: "s1".into(),
+            name: "S".into(),
+            text: "   ".into(),
+            paste_mode: PasteMode::SendText,
+            tags: vec![],
+            notes: None,
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "blank snippet text must be rejected");
+    }
+
+    /// AppMapping with blank exe is rejected.
+    #[test]
+    fn validation_rejects_blank_app_mapping_exe() {
+        let mut cfg = minimal_valid_config();
+        cfg.app_mappings = vec![AppMapping {
+            id: "m1".into(),
+            exe: "   ".into(),
+            process_path: None,
+            title_includes: vec![],
+            profile_id: "p1".into(),
+            enabled: true,
+            priority: 0,
+            compiled_title_regexes: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "blank exe must be rejected");
+    }
+
+    /// EncoderMapping with empty encoded_key is rejected.
+    #[test]
+    fn validation_rejects_empty_encoded_key() {
+        let mut cfg = minimal_valid_config();
+        cfg.encoder_mappings[0].encoded_key = String::new();
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty encoded_key must be rejected");
+    }
+
+    /// EncoderMapping with whitespace-only encoded_key is rejected.
+    #[test]
+    fn validation_rejects_whitespace_encoded_key() {
+        let mut cfg = minimal_valid_config();
+        cfg.encoder_mappings[0].encoded_key = "   ".into();
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "whitespace-only encoded_key must be rejected");
+    }
+
+    // ─── Null & empty: serde defaults fill optional fields ───────────────────
+
+    /// osd_enabled defaults to true when field is absent.
+    #[test]
+    fn settings_osd_enabled_defaults_to_true() {
+        let json = r#"{"fallbackProfileId":"p","theme":"t","startWithWindows":false,
+            "minimizeToTray":false,"debugLogging":false}"#;
+        let s: Settings = serde_json::from_str(json).expect("parse");
+        assert!(s.osd_enabled, "osd_enabled should default to true");
+    }
+
+    /// osd_duration_ms defaults to 2000 when field is absent.
+    #[test]
+    fn settings_osd_duration_defaults_to_2000() {
+        let json = r#"{"fallbackProfileId":"p","theme":"t","startWithWindows":false,
+            "minimizeToTray":false,"debugLogging":false}"#;
+        let s: Settings = serde_json::from_str(json).expect("parse");
+        assert_eq!(s.osd_duration_ms, 2000);
+    }
+
+    /// modifier_stale_gc_ms defaults to None (field is entirely optional).
+    #[test]
+    fn settings_modifier_stale_gc_ms_defaults_none() {
+        let json = r#"{"fallbackProfileId":"p","theme":"t","startWithWindows":false,
+            "minimizeToTray":false,"debugLogging":false}"#;
+        let s: Settings = serde_json::from_str(json).expect("parse");
+        assert_eq!(s.modifier_stale_gc_ms, None);
+    }
+
+    // ─── Overflow / duplicate-id handling ────────────────────────────────────
+
+    /// Duplicate profile ids are detected.
+    #[test]
+    fn validation_rejects_duplicate_profile_ids() {
+        let mut cfg = minimal_valid_config();
+        // Add a second profile with the same id as the first.
+        let dup = cfg.profiles[0].clone();
+        cfg.profiles.push(dup);
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "duplicate profile ids must be rejected");
+    }
+
+    /// Duplicate action ids are detected.
+    #[test]
+    fn validation_rejects_duplicate_action_ids() {
+        let mut cfg = minimal_valid_config();
+        let a = make_shortcut_action("a1");
+        cfg.actions = vec![a.clone(), a];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "duplicate action ids must be rejected");
+    }
+
+    /// Duplicate binding ids are detected.
+    #[test]
+    fn validation_rejects_duplicate_binding_ids() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_shortcut_action("a1")];
+        let b = make_binding("b1", "a1");
+        cfg.bindings = vec![b.clone(), b];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "duplicate binding ids must be rejected");
+    }
+
+    /// Duplicate (profile_id, control_id, layer) tuple in bindings is rejected.
+    #[test]
+    fn validation_rejects_duplicate_binding_tuple() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_shortcut_action("a1"), make_shortcut_action("a2")];
+        // Two bindings with distinct ids but same tuple.
+        let mut b2 = make_binding("b2", "a2");
+        b2.id = "b2".into();
+        cfg.bindings = vec![make_binding("b1", "a1"), b2];
+        // Both use profile_id="p1", control_id=Thumb01, layer=Standard → duplicate tuple.
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "duplicate binding tuple must be rejected");
+    }
+
+    /// Duplicate encoder mapping (control_id, layer) is rejected.
+    #[test]
+    fn validation_rejects_duplicate_encoder_tuple() {
+        let mut cfg = minimal_valid_config();
+        let dup = cfg.encoder_mappings[0].clone();
+        cfg.encoder_mappings.push(dup);
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "duplicate encoder mapping tuple must be rejected");
+    }
+
+    proptest! {
+        /// Very long strings in Profile.name do NOT crash validation (no length limit).
+        #[test]
+        fn long_profile_name_does_not_panic(len in 1usize..=8192) {
+            let mut cfg = minimal_valid_config();
+            cfg.profiles[0].name = "x".repeat(len);
+            // Validation must not panic; whether it passes or fails is acceptable.
+            let _ = validate_config(&cfg);
+        }
+    }
+
+    proptest! {
+        /// Very long strings in SnippetLibraryItem.text do NOT panic validation.
+        #[test]
+        fn long_snippet_text_does_not_panic(len in 1usize..=8192) {
+            let mut cfg = minimal_valid_config();
+            cfg.snippet_library = vec![SnippetLibraryItem {
+                id: "s1".into(),
+                name: "S".into(),
+                text: "x".repeat(len),
+                paste_mode: PasteMode::SendText,
+                tags: vec![],
+                notes: None,
+            }];
+            let _ = validate_config(&cfg);
+        }
+    }
+
+    proptest! {
+        /// N duplicate snippet ids: exactly one "duplicate id" error emitted per extra.
+        #[test]
+        fn duplicate_snippet_ids_n_times(n in 2usize..=10) {
+            let mut cfg = minimal_valid_config();
+            cfg.snippet_library = (0..n)
+                .map(|_| SnippetLibraryItem {
+                    id: "dup".into(),
+                    name: "D".into(),
+                    text: "hello".into(),
+                    paste_mode: PasteMode::SendText,
+                    tags: vec![],
+                    notes: None,
+                })
+                .collect();
+            let result = validate_config(&cfg);
+            prop_assert!(result.is_err());
+        }
+    }
+
+    // ─── Migration: migrate_paste_mode ───────────────────────────────────────
+
+    /// migrate_paste_mode: ClipboardPaste in an inline action becomes SendText.
+    #[test]
+    fn migration_clipboard_paste_in_inline_action_becomes_send_text() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::TextSnippet,
+            payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+                text: "hello".into(),
+                paste_mode: PasteMode::ClipboardPaste,
+                tags: vec![],
+            }),
+            pretty: "a1".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        migrate_paste_mode(&mut cfg);
+        match &cfg.actions[0].payload {
+            ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode, .. }) => {
+                assert_eq!(*paste_mode, PasteMode::SendText, "should be migrated to SendText");
+            }
+            _ => panic!("unexpected payload shape"),
+        }
+    }
+
+    /// migrate_paste_mode: ClipboardPaste in snippet_library becomes SendText.
+    #[test]
+    fn migration_clipboard_paste_in_snippet_library_becomes_send_text() {
+        let mut cfg = minimal_valid_config();
+        cfg.snippet_library = vec![SnippetLibraryItem {
+            id: "s1".into(),
+            name: "S".into(),
+            text: "hi".into(),
+            paste_mode: PasteMode::ClipboardPaste,
+            tags: vec![],
+            notes: None,
+        }];
+        migrate_paste_mode(&mut cfg);
+        assert_eq!(cfg.snippet_library[0].paste_mode, PasteMode::SendText);
+    }
+
+    /// migrate_paste_mode: SendText is NOT changed (already up-to-date).
+    #[test]
+    fn migration_send_text_unchanged() {
+        let mut cfg = minimal_valid_config();
+        cfg.snippet_library = vec![SnippetLibraryItem {
+            id: "s1".into(),
+            name: "S".into(),
+            text: "hi".into(),
+            paste_mode: PasteMode::SendText,
+            tags: vec![],
+            notes: None,
+        }];
+        migrate_paste_mode(&mut cfg);
+        assert_eq!(cfg.snippet_library[0].paste_mode, PasteMode::SendText);
+    }
+
+    /// migrate_paste_mode idempotent: applying twice equals applying once.
+    #[test]
+    fn migration_idempotent_inline_action() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::TextSnippet,
+            payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+                text: "hello".into(),
+                paste_mode: PasteMode::ClipboardPaste,
+                tags: vec![],
+            }),
+            pretty: "a1".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        migrate_paste_mode(&mut cfg);
+        let after_once = cfg.clone();
+        migrate_paste_mode(&mut cfg);
+        // Payload must be identical after a second application.
+        match (&after_once.actions[0].payload, &cfg.actions[0].payload) {
+            (
+                ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode: pm1, .. }),
+                ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode: pm2, .. }),
+            ) => assert_eq!(pm1, pm2),
+            _ => panic!("shape changed"),
+        }
+    }
+
+    proptest! {
+        /// migrate_paste_mode idempotent for N snippets with random paste modes.
+        #[test]
+        fn migration_idempotent_snippet_library(
+            modes in prop::collection::vec(
+                prop_oneof![Just(PasteMode::ClipboardPaste), Just(PasteMode::SendText)],
+                1..=20,
+            )
+        ) {
+            let mut cfg = minimal_valid_config();
+            cfg.snippet_library = modes
+                .iter()
+                .enumerate()
+                .map(|(i, &m)| SnippetLibraryItem {
+                    id: format!("s{}", i),
+                    name: format!("S{}", i),
+                    text: "hi".into(),
+                    paste_mode: m,
+                    tags: vec![],
+                    notes: None,
+                })
+                .collect();
+            migrate_paste_mode(&mut cfg);
+            let after_once = cfg.clone();
+            migrate_paste_mode(&mut cfg);
+            prop_assert_eq!(after_once.snippet_library, cfg.snippet_library);
+        }
+    }
+
+    /// LibraryRef TextSnippetPayload is NOT touched by migration (no paste_mode field).
+    #[test]
+    fn migration_does_not_touch_library_ref_action() {
+        let mut cfg = minimal_valid_config();
+        cfg.snippet_library = vec![SnippetLibraryItem {
+            id: "s1".into(),
+            name: "S".into(),
+            text: "hi".into(),
+            paste_mode: PasteMode::SendText,
+            tags: vec![],
+            notes: None,
+        }];
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::TextSnippet,
+            payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef {
+                snippet_id: "s1".into(),
+            }),
+            pretty: "a1".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let before = cfg.actions[0].payload.clone();
+        migrate_paste_mode(&mut cfg);
+        assert_eq!(cfg.actions[0].payload, before, "LibraryRef should be untouched");
+    }
+
+    // ─── Validation totality: never panics on adversarial input ──────────────
+
+    proptest! {
+        /// validate_config always returns Ok or Err, never panics, for
+        /// configs with garbage string ids and a valid version number.
+        #[test]
+        fn validation_never_panics_garbage_ids(
+            profile_id in "[a-z]{0,5}",
+            action_id_str in "[a-z]{0,5}",
+            binding_id_str in "[a-z]{0,5}",
+        ) {
+            let mut cfg = minimal_valid_config();
+            if !profile_id.is_empty() {
+                cfg.profiles[0].id = profile_id.clone();
+                cfg.settings.fallback_profile_id = profile_id.clone();
+            }
+            if !action_id_str.is_empty() {
+                let mut a = make_shortcut_action(&action_id_str);
+                a.id = action_id_str.clone();
+                cfg.actions = vec![a];
+            }
+            if !binding_id_str.is_empty() {
+                let mut b = make_binding(&binding_id_str, &action_id_str);
+                b.id = binding_id_str.clone();
+                cfg.bindings = vec![b];
+            }
+            // Must not panic.
+            let _ = validate_config(&cfg);
+        }
+    }
+
+    proptest! {
+        /// validate_config with wrong version always returns an error.
+        #[test]
+        fn validation_rejects_wrong_version(v in prop_oneof![
+            Just(0i32),
+            Just(1i32),
+            Just(3i32),
+            Just(i32::MAX),
+            Just(i32::MIN),
+        ]) {
+            let mut cfg = minimal_valid_config();
+            cfg.version = v;
+            prop_assert!(validate_config(&cfg).is_err());
+        }
+    }
+
+    // ─── Unknown-field tolerance via serde ───────────────────────────────────
+
+    /// Profile (deny_unknown_fields) rejects extra JSON keys.
+    #[test]
+    fn profile_rejects_unknown_fields() {
+        let json = r#"{"id":"x","name":"X","enabled":true,"priority":0,"unexpectedKey":true}"#;
+        let result: Result<Profile, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "Profile has deny_unknown_fields — unknown key must be rejected");
+    }
+
+    /// Binding (deny_unknown_fields) rejects extra JSON keys.
+    #[test]
+    fn binding_rejects_unknown_fields() {
+        let json = r#"{
+            "id":"b1","profileId":"p1","layer":"standard","controlId":"thumb_01",
+            "label":"lbl","actionRef":"a1","enabled":true,"unknownField":42
+        }"#;
+        let result: Result<Binding, _> = serde_json::from_str(json);
+        assert!(result.is_err(), "Binding has deny_unknown_fields — unknown key must be rejected");
+    }
+
+    /// AppConfig (deny_unknown_fields) rejects extra top-level JSON keys.
+    #[test]
+    fn app_config_rejects_unknown_top_level_field() {
+        // Build valid config JSON and inject a spurious top-level key.
+        let mut cfg = minimal_valid_config();
+        let mut v = serde_json::to_value(&cfg).unwrap();
+        v["surpriseField"] = serde_json::json!("boom");
+        let result: Result<AppConfig, _> = serde_json::from_value(v);
+        assert!(result.is_err(), "AppConfig has deny_unknown_fields — unknown key must fail");
+    }
+
+    // ─── Validation cross-references ─────────────────────────────────────────
+
+    /// Binding referencing non-existent action is rejected.
+    #[test]
+    fn validation_rejects_binding_with_missing_action_ref() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_shortcut_action("a1")];
+        let mut b = make_binding("b1", "does-not-exist");
+        b.action_ref = "does-not-exist".into();
+        cfg.bindings = vec![b];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "missing action_ref must be rejected");
+    }
+
+    /// Binding referencing non-existent profile is rejected.
+    #[test]
+    fn validation_rejects_binding_with_missing_profile_ref() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_shortcut_action("a1")];
+        let mut b = make_binding("b1", "a1");
+        b.profile_id = "no-such-profile".into();
+        cfg.bindings = vec![b];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "missing profile ref in binding must be rejected");
+    }
+
+    /// ProfileSwitch action referencing non-existent profile is rejected.
+    #[test]
+    fn validation_rejects_profile_switch_with_missing_target() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::ProfileSwitch,
+            payload: ActionPayload::ProfileSwitch(ProfileSwitchPayload {
+                target_profile_id: "ghost-profile".into(),
+            }),
+            pretty: "switch".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "profileSwitch to non-existent profile must fail");
+    }
+
+    /// ProfileSwitch with empty target_profile_id is rejected.
+    #[test]
+    fn validation_rejects_profile_switch_empty_target() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::ProfileSwitch,
+            payload: ActionPayload::ProfileSwitch(ProfileSwitchPayload {
+                target_profile_id: String::new(),
+            }),
+            pretty: "switch".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty profileSwitch target must fail");
+    }
+
+    /// AppMapping referencing non-existent profile is rejected.
+    #[test]
+    fn validation_rejects_app_mapping_with_missing_profile() {
+        let mut cfg = minimal_valid_config();
+        cfg.app_mappings = vec![AppMapping {
+            id: "m1".into(),
+            exe: "foo.exe".into(),
+            process_path: None,
+            title_includes: vec![],
+            profile_id: "nonexistent".into(),
+            enabled: true,
+            priority: 0,
+            compiled_title_regexes: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "app mapping with missing profile must fail");
+    }
+
+    // ─── Validation: action type / payload mismatch ──────────────────────────
+
+    /// Shortcut action type paired with MediaKey payload → mismatch error.
+    /// (Tests the catch-all `_ =>` arm in validate_action.)
+    #[test]
+    fn validation_rejects_action_type_payload_mismatch() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::Shortcut,    // type says Shortcut…
+            payload: ActionPayload::MediaKey(MediaKeyPayload { // …but payload is MediaKey
+                key: MediaKeyKind::PlayPause,
+            }),
+            pretty: "mismatch".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "type/payload mismatch must be rejected");
+    }
+
+    // ─── Validation: sequence & launch ───────────────────────────────────────
+
+    /// Sequence action with zero steps is rejected.
+    #[test]
+    fn validation_rejects_sequence_with_no_steps() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::Sequence,
+            payload: ActionPayload::Sequence(SequenceActionPayload { steps: vec![] }),
+            pretty: "empty sequence".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "sequence with zero steps must fail");
+    }
+
+    /// Launch action with empty target is rejected.
+    #[test]
+    fn validation_rejects_launch_with_empty_target() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::Launch,
+            payload: ActionPayload::Launch(LaunchActionPayload {
+                target: String::new(),
+                args: vec![],
+                working_dir: None,
+            }),
+            pretty: "launch".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "launch with empty target must fail");
+    }
+
+    /// Launch action with whitespace-only target is rejected.
+    #[test]
+    fn validation_rejects_launch_with_whitespace_target() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![Action {
+            id: "a1".into(),
+            action_type: ActionType::Launch,
+            payload: ActionPayload::Launch(LaunchActionPayload {
+                target: "   ".into(),
+                args: vec![],
+                working_dir: None,
+            }),
+            pretty: "launch".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "whitespace launch target must fail");
+    }
+
+    // ─── Validation: menu cycles ─────────────────────────────────────────────
+
+    /// A menu action that directly references itself (via action_ref == own id)
+    /// must be detected as a cycle.
+    /// NOTE: this is a SUSPECTED BUG test — see findings.
+    #[test]
+    fn validation_detects_menu_self_reference_cycle() {
+        let mut cfg = minimal_valid_config();
+        // menu action "m1" has a single menu item that points back to "m1".
+        cfg.actions = vec![Action {
+            id: "m1".into(),
+            action_type: ActionType::Menu,
+            payload: ActionPayload::Menu(MenuActionPayload {
+                items: vec![MenuItem::Action {
+                    id: "item1".into(),
+                    label: "Self".into(),
+                    action_ref: "m1".into(), // self-reference
+                    enabled: true,
+                }],
+            }),
+            pretty: "menu".into(),
+            notes: None,
+            conditions: vec![],
+        }];
+        let result = validate_config(&cfg);
+        // Expect a cycle error (or at minimum an error).
+        assert!(result.is_err(), "menu self-reference must be detected as a cycle");
+    }
+
+    /// Two menu actions that reference each other form an indirect cycle.
+    #[test]
+    fn validation_detects_menu_indirect_cycle() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![
+            Action {
+                id: "m1".into(),
+                action_type: ActionType::Menu,
+                payload: ActionPayload::Menu(MenuActionPayload {
+                    items: vec![MenuItem::Action {
+                        id: "item-m1".into(),
+                        label: "Go to m2".into(),
+                        action_ref: "m2".into(),
+                        enabled: true,
+                    }],
+                }),
+                pretty: "m1".into(),
+                notes: None,
+                conditions: vec![],
+            },
+            Action {
+                id: "m2".into(),
+                action_type: ActionType::Menu,
+                payload: ActionPayload::Menu(MenuActionPayload {
+                    items: vec![MenuItem::Action {
+                        id: "item-m2".into(),
+                        label: "Go to m1".into(),
+                        action_ref: "m1".into(), // cycle: m2 → m1
+                        enabled: true,
+                    }],
+                }),
+                pretty: "m2".into(),
+                notes: None,
+                conditions: vec![],
+            },
+        ];
+        // Cycle should be detected for at least one of the two menus.
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "mutual menu cycle must be detected");
+    }
+
+    // ─── Validation: AppMapping title_includes edge cases ────────────────────
+
+    /// AppMapping with an empty string in title_includes is rejected.
+    #[test]
+    fn validation_rejects_empty_title_includes_entry() {
+        let mut cfg = minimal_valid_config();
+        cfg.app_mappings = vec![AppMapping {
+            id: "m1".into(),
+            exe: "foo.exe".into(),
+            process_path: None,
+            title_includes: vec!["".into()],
+            profile_id: "p1".into(),
+            enabled: true,
+            priority: 0,
+            compiled_title_regexes: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "empty titleIncludes entry must be rejected");
+    }
+
+    /// AppMapping with a whitespace-only title_includes entry is rejected.
+    #[test]
+    fn validation_rejects_whitespace_title_includes_entry() {
+        let mut cfg = minimal_valid_config();
+        cfg.app_mappings = vec![AppMapping {
+            id: "m1".into(),
+            exe: "foo.exe".into(),
+            process_path: None,
+            title_includes: vec!["   ".into()],
+            profile_id: "p1".into(),
+            enabled: true,
+            priority: 0,
+            compiled_title_regexes: vec![],
+        }];
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "whitespace titleIncludes entry must be rejected");
+    }
+
+    /// Duplicate title_includes entries emit a warning (not an error).
+    #[test]
+    fn validation_warns_on_duplicate_title_includes() {
+        let mut cfg = minimal_valid_config();
+        cfg.app_mappings = vec![AppMapping {
+            id: "m1".into(),
+            exe: "foo.exe".into(),
+            process_path: None,
+            title_includes: vec!["Chrome".into(), "Chrome".into()],
+            profile_id: "p1".into(),
+            enabled: true,
+            priority: 0,
+            compiled_title_regexes: vec![],
+        }];
+        let result = validate_config(&cfg);
+        match result {
+            Ok(warnings) => assert!(
+                warnings.iter().any(|w| w.code == "duplicate_title_filter"),
+                "expected duplicate_title_filter warning"
+            ),
+            Err(e) => panic!("expected Ok(warnings), got Err: {e:?}"),
+        }
+    }
+
+    // ─── Validation: disabled fallback profile warning ────────────────────────
+
+    /// A disabled fallback profile emits a warning, not an error.
+    #[test]
+    fn validation_warns_when_fallback_profile_is_disabled() {
+        let mut cfg = minimal_valid_config();
+        cfg.profiles[0].enabled = false;
+        let result = validate_config(&cfg);
+        match result {
+            Ok(warnings) => assert!(
+                warnings.iter().any(|w| w.code == "disabled_fallback_profile"),
+                "expected disabled_fallback_profile warning"
+            ),
+            Err(e) => panic!("expected Ok(warnings) for disabled fallback, got Err: {e:?}"),
+        }
+    }
+
+    // ─── Serialization: ControlId as_str == JSON repr ────────────────────────
+
+    /// ControlId::as_str() must exactly match the JSON serde rename for every variant.
+    /// This property guards against drift between `as_str` and `#[serde(rename)]`.
+    #[test]
+    fn control_id_as_str_matches_serde_rename() {
+        for id in ControlId::ALL {
+            let json = serde_json::to_string(&id).expect("serialize ControlId");
+            // JSON wraps strings in quotes.
+            let expected_json = format!("\"{}\"", id.as_str());
+            assert_eq!(
+                json, expected_json,
+                "ControlId::{id:?} as_str() `{}` does not match serde JSON `{json}`",
+                id.as_str()
+            );
+        }
+    }
+
+    /// Layer::as_str() must match its serde JSON representation.
+    #[test]
+    fn layer_as_str_matches_serde_rename() {
+        for layer in [Layer::Standard, Layer::Hypershift] {
+            let json = serde_json::to_string(&layer).expect("serialize Layer");
+            let expected_json = format!("\"{}\"", layer.as_str());
+            assert_eq!(
+                json, expected_json,
+                "Layer::{layer:?} as_str() `{}` does not match serde JSON `{json}`",
+                layer.as_str()
+            );
+        }
+    }
+
+    // ─── Overflow: physical_controls missing required entries ─────────────────
+
+    /// Missing any single required control triggers a validation error.
+    #[test]
+    fn validation_rejects_each_missing_required_control() {
+        for removed in ControlId::ALL {
+            let mut cfg = minimal_valid_config();
+            cfg.physical_controls.retain(|c| c.id != removed);
+            let result = validate_config(&cfg);
+            assert!(
+                result.is_err(),
+                "removing control {:?} should fail validation",
+                removed
+            );
+        }
+    }
+
+    /// Duplicate physical controls (same ControlId) are rejected.
+    #[test]
+    fn validation_rejects_duplicate_physical_controls() {
+        let mut cfg = minimal_valid_config();
+        let dup = cfg.physical_controls[0].clone();
+        cfg.physical_controls.push(dup);
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "duplicate physical control must be rejected");
+    }
+
+    // ─── Concurrency: N/A justification ──────────────────────────────────────
+    // config_schema_validator() uses OnceLock (std, not once_cell), which provides
+    // safe single-init-many-readers semantics.  The only "shared state" is the
+    // compiled Validator, which is read-only after init.  There is no mutable
+    // shared state in the pure validation/migration paths, so concurrency races
+    // on config data structures cannot occur without an external mutex that lives
+    // outside this file.  Concurrency tests are therefore N/A.
+
+    // ─── Snapshot: default_seed_config is stable ─────────────────────────────
+
+    /// default_seed_config serializes to valid JSON and roundtrips to an equal value.
+    #[test]
+    fn default_seed_config_json_roundtrip() {
+        let cfg = default_seed_config();
+        let json = serde_json::to_string_pretty(&cfg).expect("serialize");
+        let back: AppConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(cfg, back, "default seed config must survive a JSON roundtrip unchanged");
+    }
+
+    /// Deserializing default seed JSON again produces equal AppConfig.
+    #[test]
+    fn default_seed_config_deterministic() {
+        let cfg1 = default_seed_config();
+        let cfg2 = default_seed_config();
+        assert_eq!(cfg1, cfg2, "default_seed_config must be deterministic");
+    }
+
+    // ─── collect_schema_errors: non-panicking public surface ─────────────────
+
+    /// collect_schema_errors on a valid config returns empty vec.
+    #[test]
+    fn collect_schema_errors_empty_for_valid_config() {
+        let cfg = default_seed_config();
+        let v = serde_json::to_value(&cfg).unwrap();
+        let errs = collect_schema_errors(&v);
+        assert!(errs.is_empty(), "expected no schema errors for default config, got {errs:?}");
+    }
+
+    /// collect_schema_errors on a null value returns at least one error (not a panic).
+    #[test]
+    fn collect_schema_errors_null_value_does_not_panic() {
+        let errs = collect_schema_errors(&serde_json::Value::Null);
+        assert!(!errs.is_empty(), "null value must produce schema errors");
+    }
+
+    /// collect_schema_errors on empty object returns at least one error.
+    #[test]
+    fn collect_schema_errors_empty_object_produces_errors() {
+        let errs = collect_schema_errors(&serde_json::json!({}));
+        assert!(!errs.is_empty(), "empty object must produce schema errors");
+    }
+}

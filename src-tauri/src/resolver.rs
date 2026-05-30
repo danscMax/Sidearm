@@ -657,3 +657,363 @@ mod tests {
         assert!(none.is_empty());
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use crate::config::{
+        Action, ActionPayload, ActionType, Binding, CapabilityStatus, ControlFamily, ControlId,
+        DisabledActionPayload, Layer, MappingSource, OsdAnimation, OsdFontSize, OsdPosition,
+        PhysicalControl, Settings,
+    };
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Minimal helpers (self-contained, mirrors the style of `mod tests`)
+    // -----------------------------------------------------------------------
+
+    fn minimal_config(app_mappings: Vec<AppMapping>) -> AppConfig {
+        AppConfig {
+            version: 2,
+            settings: Settings {
+                fallback_profile_id: "default".into(),
+                theme: "studio".into(),
+                start_with_windows: false,
+                minimize_to_tray: false,
+                debug_logging: false,
+                osd_enabled: true,
+                osd_duration_ms: 2000,
+                osd_position: OsdPosition::default(),
+                osd_font_size: OsdFontSize::default(),
+                osd_animation: OsdAnimation::default(),
+                modifier_stale_gc_ms: None,
+                replayed_modifier_force_release_ms: None,
+                last_selected_profile_id: None,
+            },
+            profiles: vec![
+                minimal_profile("default", "Default", true),
+                minimal_profile("other", "Other", true),
+                minimal_profile("disabled-profile", "Disabled", false),
+            ],
+            physical_controls: vec![PhysicalControl {
+                id: ControlId::Thumb01,
+                family: ControlFamily::ThumbGrid,
+                default_name: "Thumb 1".into(),
+                synapse_name: None,
+                remappable: true,
+                capability_status: CapabilityStatus::Verified,
+                notes: None,
+            }],
+            encoder_mappings: vec![crate::config::EncoderMapping {
+                control_id: ControlId::Thumb01,
+                layer: Layer::Standard,
+                encoded_key: "F13".into(),
+                source: MappingSource::Synapse,
+                verified: true,
+            }],
+            app_mappings,
+            bindings: vec![Binding {
+                id: "b1".into(),
+                profile_id: "default".into(),
+                layer: Layer::Standard,
+                control_id: ControlId::Thumb01,
+                label: "Test".into(),
+                action_ref: "a1".into(),
+                color_tag: None,
+                trigger_mode: None,
+                chord_partner: None,
+                enabled: true,
+            }],
+            actions: vec![Action {
+                id: "a1".into(),
+                action_type: ActionType::Disabled,
+                payload: ActionPayload::Disabled(DisabledActionPayload::default()),
+                pretty: "Disabled".into(),
+                notes: None,
+                conditions: Vec::new(),
+            }],
+            snippet_library: vec![],
+        }
+    }
+
+    fn minimal_profile(id: &str, name: &str, enabled: bool) -> crate::config::Profile {
+        crate::config::Profile {
+            id: id.into(),
+            name: name.into(),
+            description: None,
+            enabled,
+            priority: 0,
+        }
+    }
+
+    fn simple_app_mapping(id: &str, exe: &str, profile_id: &str) -> AppMapping {
+        AppMapping {
+            id: id.into(),
+            exe: exe.into(),
+            process_path: None,
+            title_includes: Vec::new(),
+            profile_id: profile_id.into(),
+            enabled: true,
+            priority: 100,
+            compiled_title_regexes: Vec::new(),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: find_profile respects enabled flag
+    // -----------------------------------------------------------------------
+
+    /// find_profile must return None for any profile with enabled=false,
+    /// regardless of whether the id matches.
+    #[test]
+    fn find_profile_disabled_profile_returns_none() {
+        let config = minimal_config(vec![]);
+        // "disabled-profile" is in the list but has enabled=false
+        assert_eq!(find_profile(&config, "disabled-profile"), None);
+    }
+
+    #[test]
+    fn find_profile_enabled_profile_returns_some() {
+        let config = minimal_config(vec![]);
+        assert!(find_profile(&config, "default").is_some());
+        assert!(find_profile(&config, "other").is_some());
+    }
+
+    #[test]
+    fn find_profile_unknown_id_returns_none() {
+        let config = minimal_config(vec![]);
+        assert_eq!(find_profile(&config, ""), None);
+        assert_eq!(find_profile(&config, "ghost"), None);
+        assert_eq!(find_profile(&config, "DEFAULT"), None); // case-sensitive
+    }
+
+    // -----------------------------------------------------------------------
+    // BUG: used_fallback_profile is incorrect when last_selected_profile_id
+    // refers to a DISABLED profile and no app mapping matches.
+    // The flag reports `true` (fell back) but the intent is ambiguous:
+    // the user explicitly chose "disabled-profile", it just can't be activated.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn used_fallback_profile_when_manual_profile_is_disabled() {
+        let mut config = minimal_config(vec![]);
+        config.settings.last_selected_profile_id = Some("disabled-profile".into());
+
+        let summary = resolve_profile_for_app_context(&config, "any.exe", "title", None);
+
+        // Because disabled-profile is not returned by find_profile, manual_profile = None,
+        // winner = None → used_fallback_profile = true (the code falls back to default).
+        // This is the current behaviour — documenting it as a suspected bug:
+        // a user who deliberately selected "disabled-profile" will silently get
+        // the fallback without any distinct indication.
+        assert!(
+            summary.used_fallback_profile,
+            "current behaviour: disabled manual-profile selection is silently treated as fallback"
+        );
+        assert_eq!(
+            summary.resolved_profile_id.as_deref(),
+            Some("default"),
+            "resolved to fallback because disabled profile is invisible to find_profile"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Null / empty exe and title must not panic
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn matching_app_mappings_never_panics(
+            exe in ".*",
+            title in ".*",
+        ) {
+            let config = minimal_config(vec![
+                simple_app_mapping("m1", "chrome.exe", "default"),
+                simple_app_mapping("m2", "code.exe", "other"),
+            ]);
+            // Must not panic regardless of input
+            let _result = matching_app_mappings(&config, &exe, &title, None);
+        }
+    }
+
+    proptest! {
+        #[test]
+        fn resolve_profile_never_panics(
+            exe in ".*",
+            title in ".*",
+        ) {
+            let config = minimal_config(vec![]);
+            let _result = resolve_profile_for_app_context(&config, &exe, &title, None);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: matching_app_mappings is case-insensitive on exe
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn matching_app_mappings_case_insensitive_exe() {
+        let config = minimal_config(vec![simple_app_mapping("m1", "Chrome.EXE", "other")]);
+
+        // All of these should match
+        assert!(!matching_app_mappings(&config, "chrome.exe", "", None).is_empty());
+        assert!(!matching_app_mappings(&config, "CHROME.EXE", "", None).is_empty());
+        assert!(!matching_app_mappings(&config, "Chrome.Exe", "", None).is_empty());
+
+        // Different name should not match
+        assert!(matching_app_mappings(&config, "firefox.exe", "", None).is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: disabled app mappings are excluded from candidates
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn disabled_app_mapping_is_excluded() {
+        let mut mapping = simple_app_mapping("disabled-map", "test.exe", "other");
+        mapping.enabled = false;
+        let config = minimal_config(vec![mapping]);
+        let result = matching_app_mappings(&config, "test.exe", "", None);
+        assert!(result.is_empty(), "disabled mapping must not appear in candidates");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: title_includes all-filter vs empty-filter
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn title_includes_empty_matches_any_title() {
+        let config = minimal_config(vec![simple_app_mapping("m1", "app.exe", "other")]);
+        // title_includes is empty → no title constraint → any title matches
+        assert!(!matching_app_mappings(&config, "app.exe", "anything at all", None).is_empty());
+        assert!(!matching_app_mappings(&config, "app.exe", "", None).is_empty());
+    }
+
+    #[test]
+    fn title_includes_nonempty_must_all_match() {
+        let mut config = minimal_config(vec![]);
+        let mut mapping = simple_app_mapping("m1", "app.exe", "other");
+        mapping.title_includes = vec!["Inbox".into(), "Gmail".into()];
+        config.app_mappings.push(mapping);
+
+        // Title contains both → matches
+        assert!(
+            !matching_app_mappings(&config, "app.exe", "Gmail - Inbox", None).is_empty()
+        );
+        // Title contains only one → does NOT match (ALL must match)
+        assert!(
+            matching_app_mappings(&config, "app.exe", "Gmail - Sent", None).is_empty()
+        );
+        // Title contains neither → does not match
+        assert!(
+            matching_app_mappings(&config, "app.exe", "Other App", None).is_empty()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Priority sort: higher priority wins over lower priority
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn higher_priority_mapping_wins() {
+        let mut low = simple_app_mapping("low", "app.exe", "default");
+        low.priority = 10;
+        let mut high = simple_app_mapping("high", "app.exe", "other");
+        high.priority = 200;
+        let config = minimal_config(vec![low, high]);
+
+        let result = matching_app_mappings(&config, "app.exe", "", None);
+        assert!(!result.is_empty());
+        assert_eq!(result[0].id, "high", "higher priority should be first");
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow / null: empty encoder_mappings → Unresolved
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn resolve_input_preview_empty_encoder_mappings_is_unresolved() {
+        let mut config = minimal_config(vec![]);
+        config.encoder_mappings.clear();
+        let result = resolve_input_preview(&config, "F13", "any.exe", "title", None);
+        assert_eq!(result.status, ResolutionStatus::Unresolved);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: duplicate encoder_mappings for the same encoded_key → Ambiguous
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn duplicate_encoder_mappings_for_same_key_is_ambiguous() {
+        let mut config = minimal_config(vec![]);
+        // Add a second mapping with a different control but the same encoded_key
+        config.encoder_mappings.push(crate::config::EncoderMapping {
+            control_id: ControlId::Thumb02,
+            layer: Layer::Standard,
+            encoded_key: "F13".into(),
+            source: MappingSource::Synapse,
+            verified: false,
+        });
+        let result = resolve_input_preview(&config, "F13", "any.exe", "title", None);
+        assert_eq!(result.status, ResolutionStatus::Ambiguous);
+        assert_eq!(result.candidate_control_ids.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Null: normalized_encoded_key never panics on arbitrary input
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        // Regression guard for the BUG-1 stack overflow: `.*` generates Cyrillic
+        // chars outside the ЙЦУКЕН map (e.g. 'Ђ' U+0402, 'Є' U+0404, 'Ї' U+0407),
+        // which previously made `parse_primary_key` (hotkeys.rs) recurse forever.
+        // The recursion is now guarded to only recurse when normalization makes
+        // progress, so this must never panic/overflow for any input.
+        #[test]
+        fn normalized_encoded_key_never_panics(s in ".*") {
+            let _result = normalized_encoded_key(&s);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: normalized_encoded_key is idempotent — normalizing twice
+    // should give the same result as normalizing once (for valid hotkeys).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn normalized_encoded_key_idempotent_for_valid_keys() {
+        let keys = ["F13", "Ctrl+F13", "ctrl+alt+f13", "  F13  ", "CTRL+SHIFT+F13"];
+        for &key in &keys {
+            let once = normalized_encoded_key(key);
+            let twice = normalized_encoded_key(&once);
+            assert_eq!(once, twice, "normalizing `{key}` twice should be idempotent");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Null: whitespace-only and empty encoded_key falls back gracefully
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn normalized_encoded_key_empty_string_no_panic() {
+        let result = normalized_encoded_key("");
+        // Should return the trimmed original ("") rather than panic
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn normalized_encoded_key_whitespace_only_no_panic() {
+        let result = normalized_encoded_key("   ");
+        // normalize_hotkey returns Err for whitespace-only → fallback is raw.trim()
+        assert_eq!(result, "");
+    }
+
+    // -----------------------------------------------------------------------
+    // Concurrency: N/A — resolver functions are stateless, all state lives in
+    // the caller-provided &AppConfig; no OnceLock/static in resolver.rs.
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Temporal: N/A — no time-dependent logic in resolver.rs.
+    // -----------------------------------------------------------------------
+}

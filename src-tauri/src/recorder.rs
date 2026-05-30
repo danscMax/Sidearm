@@ -310,3 +310,278 @@ mod tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Property-based edge-case tests — pure recorder logic, NO Win32 / OS calls
+// ---------------------------------------------------------------------------
+//
+// Skipped (outside recorder.rs scope):
+//  - capture_active_window / Win32 foreground capture
+//  - SendInput / hotkey hooks
+//
+// All tests use the public API of MacroRecorder plus the private
+// convert_to_sequence_steps function (same module).
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Category 1: BOUNDARY
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Recording N keystrokes (0 ≤ N ≤ 1001) must produce min(N, MAX_RECORDED_STEPS) steps.
+        /// This is the primary cap invariant: the Rust-side hard cap must never be exceeded.
+        #[test]
+        fn prop_max_steps_cap_never_exceeded(
+            count in 0usize..=1100usize,
+        ) {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(0).unwrap();
+            for i in 0u64..count as u64 {
+                recorder.record_keystroke(format!("K{i}"), i * 10);
+            }
+            let recording = recorder.stop(count as u64 * 10 + 1).unwrap();
+            prop_assert!(
+                recording.steps.len() <= MAX_RECORDED_STEPS,
+                "steps.len()={} must be ≤ MAX_RECORDED_STEPS={}",
+                recording.steps.len(), MAX_RECORDED_STEPS
+            );
+            let expected_len = count.min(MAX_RECORDED_STEPS);
+            prop_assert_eq!(
+                recording.steps.len(), expected_len,
+                "expected exactly min({}, {}) steps", count, MAX_RECORDED_STEPS
+            );
+        }
+
+        /// Any delay between two consecutive keystrokes must be capped at
+        /// MAX_STEP_DELAY_MS and never exceed it regardless of the gap.
+        #[test]
+        fn prop_delay_cap_never_exceeded(
+            gap_ms in 0u64..=600_000u64, // up to 10 minutes
+        ) {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(0).unwrap();
+            recorder.record_keystroke("A".into(), 0);
+            recorder.record_keystroke("B".into(), gap_ms);
+            let recording = recorder.stop(gap_ms + 1).unwrap();
+
+            if let Some(step) = recording.steps.get(1) {
+                match step {
+                    SequenceStep::Send { delay_ms, .. } => {
+                        if let Some(d) = delay_ms {
+                            prop_assert!(
+                                *d <= MAX_STEP_DELAY_MS,
+                                "delay {} exceeds MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        /// Zero-gap events (same timestamp) must produce delay_ms = None, not Some(0).
+        #[test]
+        fn prop_zero_gap_produces_none_delay(
+            ts in 0u64..=u64::MAX / 2,
+        ) {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(0).unwrap();
+            recorder.record_keystroke("A".into(), ts);
+            recorder.record_keystroke("B".into(), ts); // same timestamp
+            let recording = recorder.stop(ts + 1).unwrap();
+
+            match &recording.steps[1] {
+                SequenceStep::Send { delay_ms, .. } => {
+                    prop_assert_eq!(*delay_ms, None, "zero-gap must produce None delay");
+                }
+                _ => {}
+            }
+        }
+
+        /// First step must ALWAYS have delay_ms = None, regardless of start_at timestamp.
+        #[test]
+        fn prop_first_step_delay_always_none(
+            start_ts in 0u64..=u64::MAX / 2,
+            key_ts in 0u64..=u64::MAX / 2,
+        ) {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(start_ts).unwrap();
+            // key_ts could be before or after start_ts; recorder doesn't validate ordering
+            recorder.record_keystroke("X".into(), key_ts);
+            let recording = recorder.stop(key_ts.saturating_add(1)).unwrap();
+            match &recording.steps[0] {
+                SequenceStep::Send { delay_ms, .. } => {
+                    prop_assert_eq!(*delay_ms, None, "first step delay must always be None");
+                }
+                _ => {}
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 2: NULL & EMPTY
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unit_start_stop_empty_produces_no_steps() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        let recording = recorder.stop(100).unwrap();
+        assert!(recording.steps.is_empty(), "empty recording must have no steps");
+        assert_eq!(recording.started_at, 0);
+        assert_eq!(recording.stopped_at, Some(100));
+    }
+
+    #[test]
+    fn unit_no_keystrokes_while_idle_noop() {
+        let mut recorder = MacroRecorder::new();
+        // record_keystroke while Idle (not recording) must silently do nothing
+        recorder.record_keystroke("X".into(), 100);
+        assert!(!recorder.is_recording(), "recorder must still be Idle");
+        assert!(recorder.last_recording().is_none());
+    }
+
+    #[test]
+    fn unit_stop_while_idle_returns_err() {
+        let mut recorder = MacroRecorder::new();
+        assert!(recorder.stop(100).is_err(), "stop without start must return Err");
+    }
+
+    #[test]
+    fn unit_double_start_returns_err() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        assert!(recorder.start(10).is_err(), "second start must return Err");
+    }
+
+    #[test]
+    fn unit_last_recording_none_before_any_stop() {
+        let mut recorder = MacroRecorder::new();
+        assert!(recorder.last_recording().is_none());
+        recorder.start(0).unwrap();
+        assert!(recorder.last_recording().is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 3: OVERFLOW
+    // -----------------------------------------------------------------------
+
+    /// Verify that the delay computation uses saturating_sub:
+    /// a timestamp that wraps (later < earlier) must produce 0, not underflow.
+    #[test]
+    fn unit_delay_saturating_sub_no_underflow() {
+        // We can test convert_to_sequence_steps directly since it's in the same module
+        let events = vec![
+            RecordedEvent { key: "A".into(), timestamp: 1000 },
+            RecordedEvent { key: "B".into(), timestamp: 0 }, // earlier timestamp (pathological)
+        ];
+        let steps = convert_to_sequence_steps(&events);
+        // saturating_sub(0, 1000) = 0 → capped = 0 → delay_ms = None
+        match &steps[1] {
+            SequenceStep::Send { delay_ms, .. } => {
+                assert_eq!(*delay_ms, None,
+                    "backward timestamp must produce None delay (saturating_sub prevents underflow)");
+            }
+            _ => panic!("expected Send step"),
+        }
+    }
+
+    proptest! {
+        /// No timestamp combination must cause a panic in convert_to_sequence_steps.
+        /// Exercises the saturating_sub + min cap pipeline with arbitrary u64 values.
+        #[test]
+        fn prop_convert_steps_no_panic_arbitrary_timestamps(
+            t0 in any::<u64>(),
+            t1 in any::<u64>(),
+            t2 in any::<u64>(),
+        ) {
+            let events = vec![
+                RecordedEvent { key: "A".into(), timestamp: t0 },
+                RecordedEvent { key: "B".into(), timestamp: t1 },
+                RecordedEvent { key: "C".into(), timestamp: t2 },
+            ];
+            // Must not panic; delay caps must be respected
+            let steps = convert_to_sequence_steps(&events);
+            prop_assert_eq!(steps.len(), 3);
+            for step in &steps {
+                if let SequenceStep::Send { delay_ms, .. } = step {
+                    if let Some(d) = delay_ms {
+                        prop_assert!(*d <= MAX_STEP_DELAY_MS,
+                            "delay {} must not exceed MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS);
+                    }
+                }
+            }
+        }
+
+        /// At the exact cap boundary (MAX_RECORDED_STEPS keystrokes followed
+        /// by one more) the extra keystroke must be silently dropped.
+        #[test]
+        fn prop_cap_at_boundary_exact(extra in 0usize..=10usize) {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(0).unwrap();
+            for i in 0u64..(MAX_RECORDED_STEPS + extra) as u64 {
+                recorder.record_keystroke(format!("K{i}"), i);
+            }
+            let recording = recorder.stop(10_000_000).unwrap();
+            prop_assert_eq!(
+                recording.steps.len(), MAX_RECORDED_STEPS,
+                "steps must be capped at exactly MAX_RECORDED_STEPS={}", MAX_RECORDED_STEPS
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 4: CONCURRENCY
+    // -----------------------------------------------------------------------
+    // MacroRecorder has no interior concurrency — it is a plain &mut self API
+    // and explicitly NOT Send (it holds Vec<SequenceStep> which is Send, but
+    // the recorder is always used from a single command thread in Tauri).
+    // N/A: no shared-state concurrent path to test here without the Tauri runtime.
+
+    // -----------------------------------------------------------------------
+    // Category 5: TEMPORAL — timing boundary arithmetic
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// started_at / stopped_at in the recording must reflect the exact values
+        /// passed to start() and stop() — no time arithmetic is applied to them.
+        #[test]
+        fn prop_timestamps_pass_through_unmodified(
+            start_ts in 0u64..=u64::MAX / 2,
+            stop_ts in 0u64..=u64::MAX / 2,
+        ) {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(start_ts).unwrap();
+            let recording = recorder.stop(stop_ts).unwrap();
+            prop_assert_eq!(recording.started_at, start_ts);
+            prop_assert_eq!(recording.stopped_at, Some(stop_ts));
+        }
+
+        /// MAX_STEP_DELAY_MS cap must survive the extreme delay of
+        /// (u64::MAX - 1) → 1 (near-overflow range).
+        #[test]
+        fn prop_delay_cap_near_u64_max(
+            t0 in 0u64..=1_000u64,
+            t1 in (u64::MAX - 1_000)..=u64::MAX,
+        ) {
+            let events = vec![
+                RecordedEvent { key: "A".into(), timestamp: t0 },
+                RecordedEvent { key: "B".into(), timestamp: t1 },
+            ];
+            let steps = convert_to_sequence_steps(&events);
+            match &steps[1] {
+                SequenceStep::Send { delay_ms, .. } => {
+                    if let Some(d) = delay_ms {
+                        prop_assert_eq!(*d, MAX_STEP_DELAY_MS,
+                            "near-overflow gap must be capped at MAX_STEP_DELAY_MS");
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}

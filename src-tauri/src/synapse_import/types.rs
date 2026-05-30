@@ -197,3 +197,172 @@ impl ImportWarning {
         self
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Boundary: default_label_for with empty key and no modifiers
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_shortcut_empty_key_no_mods_falls_back_to_control_id() {
+        let action = ParsedAction::Shortcut { key: "".into(), ctrl: false, shift: false, alt: false, win: false };
+        let label = default_label_for("thumb_01", &action);
+        // All booleans false + empty key → label must be the control_id.
+        assert_eq!(label, "thumb_01");
+    }
+
+    #[test]
+    fn boundary_shortcut_empty_key_with_ctrl_mod() {
+        let action = ParsedAction::Shortcut { key: "".into(), ctrl: true, shift: false, alt: false, win: false };
+        let label = default_label_for("thumb_01", &action);
+        // "Ctrl" alone (no key) — label must not be empty.
+        assert_eq!(label, "Ctrl");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: TextSnippet truncation at 24 chars
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_text_snippet_label_truncated_at_24_chars() {
+        let text = "A".repeat(100);
+        let action = ParsedAction::TextSnippet { text: text.clone() };
+        let label = default_label_for("x", &action);
+        // Format is «<first 24 chars>».
+        let expected = format!("«{}»", &text[..24]);
+        assert_eq!(label, expected);
+    }
+
+    #[test]
+    fn boundary_text_snippet_exactly_24_chars_not_truncated() {
+        let text = "B".repeat(24);
+        let action = ParsedAction::TextSnippet { text: text.clone() };
+        let label = default_label_for("x", &action);
+        assert_eq!(label, format!("«{text}»"));
+    }
+
+    #[test]
+    fn boundary_text_snippet_23_chars_not_truncated() {
+        let text = "C".repeat(23);
+        let action = ParsedAction::TextSnippet { text: text.clone() };
+        let label = default_label_for("x", &action);
+        assert_eq!(label, format!("«{text}»"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: TextSnippet with empty text → «»
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_text_snippet_label() {
+        let action = ParsedAction::TextSnippet { text: "".into() };
+        let label = default_label_for("x", &action);
+        assert_eq!(label, "«»");
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: Disabled → "—"
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_disabled_action_label() {
+        assert_eq!(default_label_for("x", &ParsedAction::Disabled), "—");
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: Sequence → "Macro"
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_sequence_action_label() {
+        let action = ParsedAction::Sequence { macro_guid: "".into() };
+        assert_eq!(default_label_for("x", &action), "Macro");
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: Unmappable → "? {control_id}"
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_unmappable_label_contains_control_id() {
+        let action = ParsedAction::Unmappable { reason: "test".into() };
+        let label = default_label_for("thumb_05", &action);
+        assert_eq!(label, "? thumb_05");
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: TextSnippet with multi-byte UTF-8 chars — truncation is by
+    //           char boundary (chars().take(24)), not by byte — verify no panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_multibyte_text_snippet_truncated_by_char_not_byte() {
+        // "ф" is 2 bytes in UTF-8; 100 of them is 200 bytes but 100 chars.
+        let text = "ф".repeat(100);
+        let action = ParsedAction::TextSnippet { text };
+        let label = default_label_for("x", &action);
+        // Must not panic; must be truncated to 24 chars.
+        // Strip the «» guillemets (each is multi-byte in UTF-8).
+        let inner: String = label.chars().skip(1).take(label.chars().count() - 2).collect();
+        let char_count: usize = inner.chars().count();
+        assert_eq!(char_count, 24);
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: default_label_for never panics on arbitrary inputs
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_default_label_for_shortcut_never_panics(
+            key in ".*",
+            ctrl in any::<bool>(),
+            shift in any::<bool>(),
+            alt in any::<bool>(),
+            win in any::<bool>(),
+            control_id in ".*",
+        ) {
+            let action = ParsedAction::Shortcut { key, ctrl, shift, alt, win };
+            let _ = default_label_for(&control_id, &action);
+        }
+
+        #[test]
+        fn prop_default_label_for_text_snippet_never_panics(
+            text in ".*",
+            control_id in ".*",
+        ) {
+            let action = ParsedAction::TextSnippet { text };
+            let _ = default_label_for(&control_id, &action);
+        }
+
+        // Invariant: label is never empty (always falls back to something).
+        #[test]
+        fn prop_label_never_empty(
+            key in ".*",
+            ctrl in any::<bool>(),
+            shift in any::<bool>(),
+            alt in any::<bool>(),
+            win in any::<bool>(),
+            control_id in "[a-z][a-z0-9_]{0,30}",
+        ) {
+            let action = ParsedAction::Shortcut { key, ctrl, shift, alt, win };
+            let label = default_label_for(&control_id, &action);
+            assert!(!label.is_empty(), "label must never be empty");
+        }
+
+        // Invariant: TextSnippet label always starts with «.
+        #[test]
+        fn prop_text_snippet_label_starts_with_guillemet(text in ".*") {
+            let action = ParsedAction::TextSnippet { text };
+            let label = default_label_for("x", &action);
+            assert!(label.starts_with('«'));
+        }
+    }
+
+    // Concurrency: N/A — default_label_for is a pure function.
+    // Temporal:    N/A — no durations in this module.
+}

@@ -2066,3 +2066,633 @@ mod tests {
         assert_eq!(inputs.len(), 3);
     }
 }
+
+// ============================================================================
+// Property-based edge-case tests (pure logic only — NO SendInput, NO OS calls)
+// ============================================================================
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Helper: construct a minimal ShortcutActionPayload for planning tests.
+    // These feed plan_shortcut_inputs and plan_shortcut_hold_down/up_inputs
+    // which are pure (return Vec<KeyboardInputSpec>, no OS calls).
+    // -----------------------------------------------------------------------
+
+    fn payload_key(key: &str, ctrl: bool, shift: bool, alt: bool, win: bool) -> ShortcutActionPayload {
+        ShortcutActionPayload {
+            key: key.to_string(),
+            ctrl,
+            shift,
+            alt,
+            win,
+            raw: None,
+        }
+    }
+
+    fn default_snapshot() -> ModifierSnapshot {
+        ModifierSnapshot::default()
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: build_text_inputs — ASCII printable chars produce exactly
+    // 2 events each (down + up as Unicode events)
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Every ASCII printable character (0x21–0x7E) must produce exactly
+        /// 2 KeyboardInputSpec events (Unicode key-down + key-up).
+        #[test]
+        fn build_text_inputs_ascii_printable_two_events_each(
+            chars in prop::collection::vec(0x21u8..=0x7Eu8, 1..20)
+        ) {
+            let text: String = chars.iter().map(|&b| b as char).collect();
+            let char_count = text.chars().count();
+            let inputs = build_text_inputs(&text).expect("ASCII printable must not fail");
+            // Each ASCII char → 1 UTF-16 code unit → 2 events (down + up)
+            prop_assert_eq!(
+                inputs.len(),
+                char_count * 2,
+                "expected {} events for {} ASCII chars, got {}",
+                char_count * 2,
+                char_count,
+                inputs.len()
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: build_text_inputs — line endings
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_text_inputs_empty_string_ok() {
+        let inputs = build_text_inputs("").expect("empty string must succeed");
+        assert!(inputs.is_empty(), "empty text must produce no events");
+    }
+
+    #[test]
+    fn build_text_inputs_lf_produces_two_vk_return_events() {
+        let inputs = build_text_inputs("\n").expect("LF must succeed");
+        assert_eq!(inputs.len(), 2, "LF -> VK_RETURN tap = 2 events");
+        assert!(matches!(
+            inputs[0],
+            KeyboardInputSpec::VirtualKey { code: VK_RETURN, key_up: false, .. }
+        ));
+        assert!(matches!(
+            inputs[1],
+            KeyboardInputSpec::VirtualKey { code: VK_RETURN, key_up: true, .. }
+        ));
+    }
+
+    #[test]
+    fn build_text_inputs_crlf_produces_single_vk_return_tap() {
+        // CRLF must collapse to one VK_RETURN tap (2 events), not two.
+        let inputs = build_text_inputs("\r\n").expect("CRLF must succeed");
+        assert_eq!(inputs.len(), 2, "CRLF must produce exactly one VK_RETURN tap");
+    }
+
+    #[test]
+    fn build_text_inputs_lone_cr_produces_vk_return_tap() {
+        let inputs = build_text_inputs("\r").expect("lone CR must succeed");
+        assert_eq!(inputs.len(), 2, "lone CR → one VK_RETURN tap = 2 events");
+        assert!(matches!(
+            inputs[0],
+            KeyboardInputSpec::VirtualKey { code: VK_RETURN, key_up: false, .. }
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null: build_text_inputs — NUL must return Err, not panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn build_text_inputs_nul_char_returns_err() {
+        let result = build_text_inputs("\0");
+        assert!(result.is_err(), "NUL character must produce Err");
+    }
+
+    #[test]
+    fn build_text_inputs_nul_embedded_in_text_returns_err() {
+        let result = build_text_inputs("hello\0world");
+        assert!(result.is_err(), "NUL embedded in text must produce Err");
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow / unicode: build_text_inputs — BMP and surrogate-pair characters
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// BMP characters (U+0001..=U+FFFF, excluding surrogates, NUL, CR, LF)
+        /// must produce exactly 2 Unicode events each.
+        #[test]
+        fn build_text_inputs_bmp_char_two_events(
+            // Bounded range 0x20..=0xFFFF (NUL/CR/LF are all < 0x20, so already
+            // excluded); only UTF-16 surrogates need filtering. Using a bounded
+            // range instead of filtering prop::num::u32::ANY avoids proptest's
+            // "too many local rejects" abort (the filter rejected ~99.998%).
+            codepoint in (0x0020u32..=0xFFFFu32)
+                .prop_filter("exclude UTF-16 surrogates", |cp| {
+                    *cp < 0xD800u32 || *cp > 0xDFFFu32
+                })
+                .prop_map(|cp| char::from_u32(cp).unwrap())
+        ) {
+            let text = codepoint.to_string();
+            let inputs = build_text_inputs(&text).expect("BMP char must succeed");
+            // BMP char: encode_utf16 produces exactly 1 code unit → 2 events
+            prop_assert_eq!(
+                inputs.len(),
+                2,
+                "BMP char U+{:04X} must produce 2 events, got {}",
+                codepoint as u32,
+                inputs.len()
+            );
+            // Both must be Unicode events, not VirtualKey
+            prop_assert!(
+                matches!(inputs[0], KeyboardInputSpec::Unicode { key_up: false, .. }),
+                "first event must be Unicode key-down"
+            );
+            prop_assert!(
+                matches!(inputs[1], KeyboardInputSpec::Unicode { key_up: true, .. }),
+                "second event must be Unicode key-up"
+            );
+        }
+    }
+
+    /// Surrogate-pair char: encode_utf16 produces 2 code units → 4 events.
+    /// BUG-PROBE: send_text_with_delay uses plan.chunks(2) to pace events.
+    /// For a surrogate-pair char the plan has 4 events, so chunks(2) sends
+    /// the two halves as separate "characters" with a sleep between them.
+    /// While not incorrect for the OS (it reassembles surrogates), this
+    /// means the delay fires after the high surrogate alone, before the low
+    /// surrogate arrives — behaviour that differs from BMP chars.
+    /// Document with a concrete test.
+    #[test]
+    fn build_text_inputs_surrogate_pair_four_events() {
+        // U+1F600 GRINNING FACE — outside BMP, requires two UTF-16 code units.
+        let emoji = "\u{1F600}";
+        let inputs = build_text_inputs(emoji).expect("emoji must succeed");
+        assert_eq!(
+            inputs.len(),
+            4,
+            "emoji U+1F600 requires 2 UTF-16 code units → 4 events (down+up per unit)"
+        );
+        // All four must be Unicode events
+        for (i, ev) in inputs.iter().enumerate() {
+            assert!(
+                matches!(ev, KeyboardInputSpec::Unicode { .. }),
+                "event[{}] must be Unicode for emoji input",
+                i
+            );
+        }
+        // First two are down+up for the high surrogate (0xD83D)
+        assert!(matches!(inputs[0], KeyboardInputSpec::Unicode { key_up: false, .. }));
+        assert!(matches!(inputs[1], KeyboardInputSpec::Unicode { key_up: true, .. }));
+        // Last two are down+up for the low surrogate (0xDE00)
+        assert!(matches!(inputs[2], KeyboardInputSpec::Unicode { key_up: false, .. }));
+        assert!(matches!(inputs[3], KeyboardInputSpec::Unicode { key_up: true, .. }));
+    }
+
+    /// build_text_inputs must never panic on arbitrary Unicode strings —
+    /// only Err on NUL; everything else must succeed.
+    proptest! {
+        #[test]
+        fn build_text_inputs_never_panics_arbitrary_unicode(text in ".*") {
+            // May return Err only if text contains \0.
+            let result = build_text_inputs(&text);
+            if text.contains('\0') {
+                prop_assert!(result.is_err());
+            } else {
+                prop_assert!(result.is_ok());
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary + overflow: build_text_inputs — very long strings don't panic
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// A string of n ASCII 'A' characters must produce exactly 2*n events.
+        #[test]
+        fn build_text_inputs_long_ascii_event_count_scales_linearly(n in 0usize..500) {
+            let text = "A".repeat(n);
+            let inputs = build_text_inputs(&text).expect("long ASCII must succeed");
+            prop_assert_eq!(inputs.len(), n * 2);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: push_virtual_key_tap — always produces down then up
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn push_virtual_key_tap_always_down_then_up(code in any::<u16>(), extended in any::<bool>()) {
+            let mut inputs = Vec::new();
+            push_virtual_key_tap(&mut inputs, VirtualKeySpec { code, extended });
+            prop_assert_eq!(inputs.len(), 2);
+            prop_assert!(
+                matches!(
+                    inputs[0],
+                    KeyboardInputSpec::VirtualKey { key_up: false, .. }
+                ),
+                "first event must be a key-down"
+            );
+            prop_assert!(
+                matches!(
+                    inputs[1],
+                    KeyboardInputSpec::VirtualKey { key_up: true, .. }
+                ),
+                "second event must be a key-up"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: plan_shortcut_hold_up_inputs — all events are key-up
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// For any HeldShortcutState (arbitrary pressed modifier list + optional
+        /// primary key), plan_shortcut_hold_up_inputs must produce only key-up events.
+        #[test]
+        fn plan_hold_up_all_events_are_key_up(
+            mod_codes in prop::collection::vec(any::<u16>(), 0..5),
+            has_primary in any::<bool>(),
+            primary_code in any::<u16>(),
+        ) {
+            let pressed_modifier_vks = mod_codes
+                .into_iter()
+                .map(|code| VirtualKeySpec { code, extended: false })
+                .collect();
+            let primary_key = if has_primary {
+                Some(VirtualKeySpec { code: primary_code, extended: false })
+            } else {
+                None
+            };
+            let held = HeldShortcutState { pressed_modifier_vks, primary_key };
+            let inputs = plan_shortcut_hold_up_inputs(&held);
+            for ev in &inputs {
+                prop_assert!(
+                    matches!(ev, KeyboardInputSpec::VirtualKey { key_up: true, .. }),
+                    "hold-up must only emit key-up events, found: {:?}",
+                    ev
+                );
+            }
+        }
+
+        /// hold-up event count = number of pressed modifiers + 1 if primary is Some.
+        #[test]
+        fn plan_hold_up_event_count_is_mods_plus_primary(
+            mod_codes in prop::collection::vec(any::<u16>(), 0..5),
+            has_primary in any::<bool>(),
+            primary_code in any::<u16>(),
+        ) {
+            let n_mods = mod_codes.len();
+            let pressed_modifier_vks = mod_codes
+                .into_iter()
+                .map(|code| VirtualKeySpec { code, extended: false })
+                .collect();
+            let primary_key = if has_primary {
+                Some(VirtualKeySpec { code: primary_code, extended: false })
+            } else {
+                None
+            };
+            let held = HeldShortcutState { pressed_modifier_vks, primary_key };
+            let inputs = plan_shortcut_hold_up_inputs(&held);
+            let expected = n_mods + usize::from(has_primary);
+            prop_assert_eq!(inputs.len(), expected);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: plan_shortcut_inputs — empty primary + no modifiers → Err
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plan_shortcut_no_key_no_modifier_returns_err() {
+        let payload = payload_key("", false, false, false, false);
+        let result = plan_shortcut_inputs(&payload, &default_snapshot());
+        assert!(result.is_err(), "shortcut with no key and no modifiers must fail");
+    }
+
+    #[test]
+    fn plan_shortcut_no_key_with_ctrl_ok() {
+        let payload = payload_key("", true, false, false, false);
+        let result = plan_shortcut_inputs(&payload, &default_snapshot());
+        assert!(result.is_ok(), "modifier-only shortcut must plan successfully");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: plan_shortcut_inputs — modifier-only shortcut emits paired
+    // down+up for every pressed modifier (4 events for 2 modifiers: Ctrl+Alt)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plan_shortcut_modifier_only_two_modifiers_four_events() {
+        let payload = payload_key("", true, false, true, false); // Ctrl + Alt
+        let (plan, _reused) = plan_shortcut_inputs(&payload, &default_snapshot())
+            .expect("ctrl+alt modifier-only must plan");
+        // Win+Ctrl+Alt+Shift ordering: Win, Ctrl, Alt, Shift processed in that order
+        // pressed: Ctrl and Alt → 2 down + 2 up = 4 events
+        assert_eq!(plan.len(), 4);
+        // First two are key-downs; last two are key-ups in reverse
+        assert!(matches!(plan[0], KeyboardInputSpec::VirtualKey { key_up: false, .. }));
+        assert!(matches!(plan[1], KeyboardInputSpec::VirtualKey { key_up: false, .. }));
+        assert!(matches!(plan[2], KeyboardInputSpec::VirtualKey { key_up: true, .. }));
+        assert!(matches!(plan[3], KeyboardInputSpec::VirtualKey { key_up: true, .. }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: plan_shortcut_inputs — all four modifiers already active
+    // (snapshot = all true) → all reused, 0 extra events except primary tap
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plan_shortcut_all_modifiers_reused_primary_only_two_events() {
+        let snapshot = ModifierSnapshot {
+            ctrl: true,
+            shift: true,
+            alt: true,
+            win: true,
+        };
+        let payload = payload_key("A", true, true, true, true);
+        let (plan, reused) = plan_shortcut_inputs(&payload, &snapshot)
+            .expect("all-reused shortcut must plan");
+        assert_eq!(reused.len(), 4, "all four modifiers must be marked reused");
+        // Only primary tap emitted: down + up = 2 events
+        assert_eq!(plan.len(), 2);
+        assert!(matches!(plan[0], KeyboardInputSpec::VirtualKey { key_up: false, .. }));
+        assert!(matches!(plan[1], KeyboardInputSpec::VirtualKey { key_up: true, .. }));
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: plan_shortcut_inputs — VK_code symmetry:
+    // each pressed modifier's key-down matches the corresponding key-up
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn plan_shortcut_modifier_down_up_codes_symmetric() {
+        // Only Shift, from a clean snapshot
+        let payload = payload_key("A", false, true, false, false);
+        let (plan, _) = plan_shortcut_inputs(&payload, &default_snapshot())
+            .expect("shift+A must plan");
+        // Expected: Shift-down, A-down, A-up, Shift-up (4 events)
+        assert_eq!(plan.len(), 4);
+        let shift_down = match plan[0] {
+            KeyboardInputSpec::VirtualKey { code, key_up: false, .. } => code,
+            _ => panic!("expected shift key-down first"),
+        };
+        let shift_up = match plan[3] {
+            KeyboardInputSpec::VirtualKey { code, key_up: true, .. } => code,
+            _ => panic!("expected shift key-up last"),
+        };
+        assert_eq!(shift_down, shift_up, "Shift down/up must use the same VK code");
+        assert_eq!(shift_down, VK_LSHIFT);
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: extract_pressed_modifiers — never includes modifiers
+    // not requested by the payload
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// extract_pressed_modifiers must never return a modifier that the
+        /// payload did not request.
+        #[test]
+        fn extract_pressed_modifiers_only_desired_keys(
+            ctrl in any::<bool>(),
+            shift in any::<bool>(),
+            alt in any::<bool>(),
+            win in any::<bool>(),
+            snap_ctrl in any::<bool>(),
+            snap_shift in any::<bool>(),
+            snap_alt in any::<bool>(),
+            snap_win in any::<bool>(),
+        ) {
+            let payload = payload_key("", ctrl, shift, alt, win);
+            let snap = ModifierSnapshot {
+                ctrl: snap_ctrl,
+                shift: snap_shift,
+                alt: snap_alt,
+                win: snap_win,
+            };
+            let pressed = extract_pressed_modifiers(&payload, &snap);
+            for m in &pressed {
+                let desired = match m {
+                    ModifierKey::Ctrl => ctrl,
+                    ModifierKey::Shift => shift,
+                    ModifierKey::Alt => alt,
+                    ModifierKey::Win => win,
+                };
+                prop_assert!(desired, "pressed must only contain desired modifiers");
+            }
+        }
+
+        /// extract_pressed_modifiers must never return a modifier that is
+        /// already active in the snapshot.
+        #[test]
+        fn extract_pressed_modifiers_never_already_active(
+            ctrl in any::<bool>(),
+            shift in any::<bool>(),
+            alt in any::<bool>(),
+            win in any::<bool>(),
+            snap_ctrl in any::<bool>(),
+            snap_shift in any::<bool>(),
+            snap_alt in any::<bool>(),
+            snap_win in any::<bool>(),
+        ) {
+            let payload = payload_key("", ctrl, shift, alt, win);
+            let snap = ModifierSnapshot {
+                ctrl: snap_ctrl,
+                shift: snap_shift,
+                alt: snap_alt,
+                win: snap_win,
+            };
+            let pressed = extract_pressed_modifiers(&payload, &snap);
+            for m in &pressed {
+                let already_active = snap.is_active(*m);
+                prop_assert!(
+                    !already_active,
+                    "modifier {:?} is already active but appeared in pressed list",
+                    m
+                );
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: build_modifier_release_inputs — all events are key-up
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// build_modifier_release_inputs over any modifier subset must produce
+        /// only VirtualKey key-up events, one per modifier.
+        #[test]
+        fn build_modifier_release_inputs_all_key_up(
+            modifiers in prop::collection::vec(
+                prop_oneof![
+                    Just(ModifierKey::Ctrl),
+                    Just(ModifierKey::Shift),
+                    Just(ModifierKey::Alt),
+                    Just(ModifierKey::Win),
+                ],
+                0..5,
+            ),
+        ) {
+            let release = build_modifier_release_inputs(&modifiers);
+            prop_assert_eq!(release.len(), modifiers.len());
+            for ev in &release {
+                prop_assert!(
+                    matches!(ev, KeyboardInputSpec::VirtualKey { key_up: true, .. }),
+                    "release input must be a key-up event"
+                );
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: ModifierKey::label — non-empty, well-known strings
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn modifier_key_labels_are_known_strings() {
+        assert_eq!(ModifierKey::Ctrl.label(), "Ctrl");
+        assert_eq!(ModifierKey::Shift.label(), "Shift");
+        assert_eq!(ModifierKey::Alt.label(), "Alt");
+        assert_eq!(ModifierKey::Win.label(), "Win");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: ModifierKey::virtual_key — returns known VK codes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn modifier_key_virtual_keys_are_left_variants() {
+        assert_eq!(ModifierKey::Ctrl.virtual_key().code, VK_LCONTROL);
+        assert_eq!(ModifierKey::Shift.virtual_key().code, VK_LSHIFT);
+        assert_eq!(ModifierKey::Alt.virtual_key().code, VK_LMENU);
+        assert_eq!(ModifierKey::Win.virtual_key().code, VK_LWIN);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: Duration from inter_key_delay_ms — no overflow for u32::MAX
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// For any u32 inter_key_delay_ms, Duration::from_millis(u64::from(v))
+        /// must not overflow (u32→u64 widening is lossless; max value is
+        /// ~49.7 days which fits in Duration).
+        #[test]
+        fn inter_key_delay_u64_from_u32_never_overflows(v in any::<u32>()) {
+            let millis: u64 = u64::from(v);
+            let _ = std::time::Duration::from_millis(millis);
+            // If we reach here, no panic occurred.
+        }
+    }
+
+    #[test]
+    fn inter_key_delay_u32_max_does_not_overflow() {
+        let millis: u64 = u64::from(u32::MAX);
+        let d = std::time::Duration::from_millis(millis);
+        // ~49.7 days — valid Duration, no panic
+        assert!(d > std::time::Duration::from_secs(1));
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow / unicode: send_text_with_delay chunk(2) vs surrogate pairs
+    //
+    // BUG-PROBE documented as a test: the function splits plan.chunks(2) with
+    // an inter-key sleep between them.  For a surrogate-pair character (emoji),
+    // build_text_inputs produces 4 events.  chunks(2) fires a sleep between
+    // the high and low surrogate halves, not between full characters.
+    // This test pins the behaviour so any fix is detectable.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn surrogate_pair_produces_4_events_not_2_chunks_of_2() {
+        // U+1F916 ROBOT FACE — outside BMP, requires surrogate pair in UTF-16.
+        let emoji = "\u{1F916}";
+        let inputs = build_text_inputs(emoji).expect("emoji must succeed");
+        // The plan has 4 events → chunks(2) would fire delay BETWEEN surrogates,
+        // not between characters.  This is the observable artefact.
+        assert_eq!(
+            inputs.len(),
+            4,
+            "SMP char must produce 4 events; send_text_with_delay chunks(2) \
+             would insert delay between surrogate halves rather than full chars"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: build_release_all_modifier_inputs (Windows only) — coverage
+    // -----------------------------------------------------------------------
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn build_release_all_modifier_inputs_all_key_up_events() {
+        let inputs = build_release_all_modifier_inputs();
+        for ev in &inputs {
+            assert!(
+                matches!(ev, KeyboardInputSpec::VirtualKey { key_up: true, .. }),
+                "all events from release-all must be key-up"
+            );
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    proptest! {
+        /// All codes produced by build_release_all_modifier_inputs must be
+        /// recognised by is_modifier_vk or be VK_MASK_KEY — no random VK leaked.
+        #[test]
+        fn build_release_all_modifier_inputs_only_modifier_vks(_unused in 0u8..1) {
+            let inputs = build_release_all_modifier_inputs();
+            for ev in &inputs {
+                if let KeyboardInputSpec::VirtualKey { code, .. } = ev {
+                    prop_assert!(
+                        is_modifier_vk(*code),
+                        "release-all must only emit modifier VK codes, got 0x{:02X}",
+                        code
+                    );
+                }
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Concurrency: N/A
+    //
+    // All mutable shared state in input_synthesis (keyboard device mutex on
+    // Linux, GetAsyncKeyState on Windows) is inside OS-calling functions.
+    // The pure planning/building functions (plan_shortcut_inputs,
+    // build_text_inputs, etc.) operate on owned/borrowed data with no global
+    // state — concurrency testing of them adds no value beyond the existing
+    // properties above.
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Temporal: Duration computation coverage — no sleep() calls; only test
+    // the Duration VALUE that would be passed to thread::sleep.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn delay_zero_duration_is_zero_not_blocking() {
+        let d = std::time::Duration::from_millis(0);
+        assert_eq!(d, std::time::Duration::ZERO);
+    }
+
+    #[test]
+    fn delay_one_ms_duration_is_one_ms() {
+        let d = std::time::Duration::from_millis(1);
+        assert_eq!(d.as_millis(), 1);
+    }
+
+    #[test]
+    fn delay_max_u32_duration_does_not_overflow() {
+        let d = std::time::Duration::from_millis(u64::from(u32::MAX));
+        assert!(d.as_secs() > 0, "u32::MAX ms must be a positive Duration");
+    }
+}

@@ -841,3 +841,301 @@ mod tests {
         assert_eq!(prof.macros[0].steps.len(), 1);
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+
+    fn b64(json: &str) -> String {
+        base64::engine::general_purpose::STANDARD.encode(json)
+    }
+
+    fn wrap_profiles(profile_payloads: &[(&str, &str)]) -> String {
+        let profiles: Vec<String> = profile_payloads
+            .iter()
+            .map(|(name, inner)| {
+                format!(r#"{{"name": {name:?}, "payload": "{}", "hash": ""}}"#, b64(inner))
+            })
+            .collect();
+        format!(r#"{{"profiles": [{}], "macros": []}}"#, profiles.join(","))
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: completely empty JSON object → NotSynapseV4
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_empty_object_is_not_v4() {
+        let res = parse_synapse_v4_str("{}", "test".into());
+        assert!(matches!(res, Err(SynapseParseError::NotSynapseV4)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: both arrays empty → NotSynapseV4
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_empty_arrays_is_not_v4() {
+        let res = parse_synapse_v4_str(r#"{"profiles":[],"macros":[]}"#, "t".into());
+        assert!(matches!(res, Err(SynapseParseError::NotSynapseV4)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: outer JSON is empty string → OuterJson error (not panic)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_string_outer_json_error() {
+        let res = parse_synapse_v4_str("", "t".into());
+        assert!(matches!(res, Err(SynapseParseError::OuterJson(_))));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: outer JSON is `null` → OuterJson error
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_outer_json_is_null() {
+        let res = parse_synapse_v4_str("null", "t".into());
+        assert!(matches!(res, Err(SynapseParseError::OuterJson(_))));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: profile with empty payload base64 → profile decode warning
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_payload_base64_emits_warning() {
+        let outer = r#"{"profiles":[{"name":"X","payload":"","hash":""}],"macros":[]}"#;
+        let res = parse_synapse_v4_str(outer, "t".into());
+        let parsed = res.expect("outer parse should succeed");
+        // Empty b64 → inner JSON fails → profile_decode_failed warning.
+        assert!(
+            parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"),
+            "expected profile_decode_failed, got {:?}", parsed.warnings
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: valid outer, profile payload is `null` JSON string → decode warning
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_profile_payload_is_null_json() {
+        let outer = format!(
+            r#"{{"profiles":[{{"name":"X","payload":"{}","hash":""}}],"macros":[]}}"#,
+            b64("null")
+        );
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        assert!(parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: profile payload has no mappings fields → 0 bindings, ok
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_minimal_profile_payload_no_mappings() {
+        let inner = r#"{"guid":"g","name":"X"}"#;
+        let outer = wrap_profiles(&[("X", inner)]);
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        assert_eq!(parsed.profiles.len(), 1);
+        assert_eq!(parsed.profiles[0].bindings.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: non-base64 payload → Base64 decode error (not panic)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_invalid_base64_payload_returns_error_with_warning() {
+        let outer = r#"{"profiles":[{"name":"X","payload":"!!!NOT_BASE64!!!","hash":""}],"macros":[]}"#;
+        let parsed = parse_synapse_v4_str(outer, "t".into()).unwrap();
+        assert!(
+            parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"),
+            "expected profile_decode_failed for invalid b64"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: valid base64 but non-UTF-8 bytes → decode warning (not panic)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_base64_non_utf8_bytes_handled() {
+        // 0xFF 0xFE is not valid UTF-8.
+        let bad_utf8 = base64::engine::general_purpose::STANDARD.encode(&[0xFFu8, 0xFE]);
+        let outer = format!(
+            r#"{{"profiles":[{{"name":"X","payload":"{bad_utf8}","hash":""}}],"macros":[]}}"#
+        );
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        // Should emit a decode warning instead of crashing.
+        assert!(
+            parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"),
+            "expected decode warning for non-UTF-8 bytes"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: gigantic outer JSON (100 KB of dummy profiles) → must not hang
+    //           or OOM crash; parser either parses or returns an error quickly.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_large_outer_json_no_hang() {
+        // 500 profile envelopes with minimal invalid payloads.
+        let entry = format!(r#"{{"name":"X","payload":"{}","hash":""}}"#, b64("{}"));
+        let entries: Vec<_> = std::iter::repeat(entry).take(500).collect();
+        let outer = format!(r#"{{"profiles":[{}],"macros":[]}}"#, entries.join(","));
+        // Must complete without hanging; results are either Ok (with warnings) or Err.
+        let _ = parse_synapse_v4_str(&outer, "t".into());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: macro Number field as f64::MAX encoded in the JSON payload
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_macro_number_f64_max_no_panic() {
+        // A macro event with Type=0 (Delay) and Number=1.7e308 — the cast
+        // (secs * 1000.0).max(0.0) as u32 saturates on overflow for primitives.
+        let macro_inner = format!(
+            r#"{{"guid":"m","macroEvents":[{{"Type":0,"Number":{}}}]}}"#,
+            f64::MAX
+        );
+        let outer = format!(
+            r#"{{"profiles":[],"macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,
+            b64(&macro_inner)
+        );
+        // Must not panic. Macros with no referencing profile are decoded but not
+        // surfaced — we just verify no panic occurs.
+        let _ = parse_synapse_v4_str(&outer, "t".into());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: KeyEvent.Makecode as a huge JSON number (deserialize_lax_u16)
+    //           should truncate, not panic.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_makecode_huge_number_truncates() {
+        // deserialize_lax_u16 calls n.as_u64().unwrap_or(0) as u16 — large values
+        // wrap/truncate, never panic.
+        let macro_inner = r#"{"guid":"m","macroEvents":[
+            {"Type":1,"KeyEvent":{"Makecode":99999999,"State":0}},
+            {"Type":1,"KeyEvent":{"Makecode":99999999,"State":1}}
+        ]}"#;
+        let outer = format!(
+            r#"{{"profiles":[],"macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,
+            b64(macro_inner)
+        );
+        let _ = parse_synapse_v4_str(&outer, "t".into());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: KeyEvent.State = null → defaults to 0 (key-down), no panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_key_event_state_null_defaults_to_zero() {
+        let macro_inner = r#"{"guid":"m","macroEvents":[
+            {"Type":1,"KeyEvent":{"Makecode":30,"State":null}},
+            {"Type":1,"KeyEvent":{"Makecode":30,"State":1}}
+        ]}"#;
+        let profile_inner = format!(
+            r#"{{"guid":"p","name":"P","mappings":[
+               {{"inputType":"DKMInput","inputID":"DKM_M_01","isHyperShift":false,
+                 "outputType":"macroGroup","macroGroup":{{"guid":"m"}}}}
+            ],"sidePanelMappings":{{"12ButtonSide":[]}}}}"#
+        );
+        let outer = format!(
+            r#"{{"profiles":[{{"name":"P","payload":"{}","hash":""}}],
+                 "macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,
+            b64(&profile_inner),
+            b64(macro_inner)
+        );
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        // Profile's macro should parse without panic; steps may be empty or have Send.
+        assert_eq!(parsed.profiles.len(), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: Type field as non-integer, non-string JSON value (e.g., array)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_event_type_array_value_is_unknown() {
+        // event_type() receives serde_json::Value; if it's an array, the function
+        // returns Unknown without panic.
+        let macro_inner = r#"{"guid":"m","macroEvents":[
+            {"Type":[1,2,3],"KeyEvent":{"Makecode":30,"State":0}},
+            {"Type":[1,2,3],"KeyEvent":{"Makecode":30,"State":1}}
+        ]}"#;
+        let outer = format!(
+            r#"{{"profiles":[],"macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,
+            b64(macro_inner)
+        );
+        let _ = parse_synapse_v4_str(&outer, "t".into());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: duplicate profile GUIDs — parser should not panic or deduplicate
+    //           silently; both profiles should appear (collect-all semantics).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_duplicate_profile_guids_are_both_kept() {
+        let inner = r#"{"guid":"same-guid","name":"P","mappings":[],"sidePanelMappings":{"12ButtonSide":[]}}"#;
+        let outer = wrap_profiles(&[("P1", inner), ("P2", inner)]);
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        // Both profiles are parsed; no deduplication guarantee is specified —
+        // just verify no panic.
+        assert_eq!(parsed.profiles.len(), 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: deeply nested JSON payload (1000-deep object) must not stack-overflow
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_deeply_nested_json_payload_no_stack_overflow() {
+        // Build {"a":{"a":{"a":...}}} to 1000 depth.
+        let deep: String = (0..1000).map(|_| r#"{"a":"#.to_string()).collect::<Vec<_>>().join("") + "1" + &"}".repeat(1000);
+        let outer = format!(
+            r#"{{"profiles":[{{"name":"X","payload":"{}","hash":""}}],"macros":[]}}"#,
+            b64(&deep)
+        );
+        // serde_json may hit a recursion limit or succeed; must not panic.
+        let _ = parse_synapse_v4_str(&outer, "t".into());
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: profile with 1 mapping of each known outputType
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_all_known_output_types_no_panic() {
+        let inner = r#"{
+            "guid":"g","name":"All",
+            "mappings":[
+                {"inputType":"DKMInput","inputID":"DKM_M_01","isHyperShift":false,
+                 "outputType":"keyboardGroup","keyboardGroup":{"key":"KEY_A","modifiers":[]}},
+                {"inputType":"DKMInput","inputID":"DKM_M_02","isHyperShift":false,
+                 "outputType":"textBlockGroup","textBlockGroup":{"text":"hello"}},
+                {"inputType":"DKMInput","inputID":"DKM_M_03","isHyperShift":false,
+                 "outputType":"mouseGroup","mouseGroup":{"mouseAssignment":"Click"}},
+                {"inputType":"DKMInput","inputID":"DKM_M_04","isHyperShift":false,
+                 "outputType":"hyperShiftGroup"},
+                {"inputType":"DKMInput","inputID":"DKM_M_05","isHyperShift":false,
+                 "outputType":""}
+            ],
+            "sidePanelMappings":{"12ButtonSide":[]}
+        }"#;
+        let outer = wrap_profiles(&[("All", inner)]);
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        assert_eq!(parsed.profiles.len(), 1);
+    }
+
+    // Concurrency: N/A — parse_synapse_v4_str is a pure function taking &str.
+    // Temporal:    macro delay arithmetic is tested under overflow (f64::MAX delay).
+}

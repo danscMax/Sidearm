@@ -117,3 +117,126 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Boundary / total-mapping invariants
+    // -----------------------------------------------------------------------
+
+    // Every u16 must produce a deterministic result from classify_modifier_vk
+    // (no panic, no undefined behaviour) and is_modifier_vk must agree with it.
+    proptest! {
+        #[test]
+        fn classify_never_panics_and_is_modifier_agrees(vk: u16) {
+            let classification = classify_modifier_vk(vk);
+            let is_mod = is_modifier_vk(vk);
+            prop_assert_eq!(classification.is_some(), is_mod);
+        }
+    }
+
+    /// The modifier VK set must be exhaustive and non-overlapping: each
+    /// explicitly-named modifier maps to exactly one ModifierKind.
+    #[test]
+    fn modifier_vk_set_is_exhaustive_and_non_overlapping() {
+        let ctrl_group = [VK_CONTROL, VK_LCONTROL, VK_RCONTROL];
+        let shift_group = [VK_SHIFT, VK_LSHIFT, VK_RSHIFT];
+        let alt_group = [VK_MENU, VK_LMENU, VK_RMENU];
+        let win_group = [VK_LWIN, VK_RWIN];
+
+        for &vk in ctrl_group.iter() {
+            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Ctrl), "vk={vk:#04x}");
+        }
+        for &vk in shift_group.iter() {
+            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Shift), "vk={vk:#04x}");
+        }
+        for &vk in alt_group.iter() {
+            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Alt), "vk={vk:#04x}");
+        }
+        for &vk in win_group.iter() {
+            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Win), "vk={vk:#04x}");
+        }
+
+        // Verify no overlap between groups
+        let all_groups: [&[u16]; 4] = [&ctrl_group, &shift_group, &alt_group, &win_group];
+        for i in 0..all_groups.len() {
+            for j in (i + 1)..all_groups.len() {
+                for &a in all_groups[i] {
+                    for &b in all_groups[j] {
+                        assert_ne!(a, b, "VK {a:#04x} appears in two modifier groups");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Boundary: VK_MASK_KEY (0xE8) is deliberately NOT a modifier, verify it
+    /// sits in the "none" bucket even though it's adjacent to some OEM codes.
+    #[test]
+    fn mask_key_is_not_a_modifier() {
+        assert_eq!(classify_modifier_vk(VK_MASK_KEY), None);
+        assert!(!is_modifier_vk(VK_MASK_KEY));
+    }
+
+    /// Boundary: minimum (0x00) and maximum (0xFF) u8-range VKs are not modifiers.
+    #[test]
+    fn boundary_vks_not_modifiers() {
+        assert_eq!(classify_modifier_vk(0x00), None);
+        assert_eq!(classify_modifier_vk(0xFF), None);
+    }
+
+    /// Boundary: VKs immediately OUTSIDE each contiguous modifier-code block are
+    /// NOT modifiers (guards against off-by-one range bugs if the match is ever
+    /// refactored to ranges). NOTE: modifier VKs come in adjacent L/R pairs —
+    /// 0xA0/0xA1 = L/R Shift, 0xA2/0xA3 = L/R Ctrl, 0xA4/0xA5 = L/R Alt, and
+    /// 0x5B/0x5C = L/R Win — so adjacency *within* a block is expected and correct;
+    /// only the outer edge of each block must be a non-modifier.
+    #[test]
+    fn vks_outside_modifier_blocks_are_not_modifiers() {
+        // Modifier blocks: 0x10..=0x12 (Shift/Ctrl/Menu), 0x5B..=0x5C (L/R Win),
+        // 0xA0..=0xA5 (L/R Shift/Ctrl/Menu). Test the codes just outside each block.
+        for edge in [0x0Fu16, 0x13, 0x5A, 0x5D, 0x9F, 0xA6] {
+            assert_eq!(
+                classify_modifier_vk(edge),
+                None,
+                "vk={:#04x} is just outside a modifier block and must not classify as a modifier",
+                edge
+            );
+            assert!(!is_modifier_vk(edge));
+        }
+    }
+
+    /// Overflow: u16::MAX and values above the standard 0x00..0xFF range are
+    /// handled gracefully (no panic).
+    #[test]
+    fn high_vk_values_do_not_panic() {
+        for &vk in &[0x0100u16, 0x1000u16, 0x8000u16, u16::MAX] {
+            // Just verify it does not panic and returns None (no named modifier
+            // is defined above 0xFF).
+            let result = classify_modifier_vk(vk);
+            assert_eq!(result, None, "vk={vk:#06x} should not be a modifier");
+        }
+    }
+
+    /// Null/empty coverage: the function is total (defined for all u16), so we
+    /// ensure the code reserved for "unassigned" ranges (0x00, 0x07, 0x3A..0x40,
+    /// 0x5E, 0x88..0x8F, 0x97..0x9F, 0xB8..0xB9, 0xC1..0xDA, 0xE0..0xE1,
+    /// 0xE3..0xE4, 0xE6, 0xE8..0xF5) return None.
+    #[test]
+    fn unassigned_vk_range_samples_return_none() {
+        // A sample of well-known unassigned/reserved VK codes.
+        let unassigned = [
+            0x00u16, 0x07, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40,
+            0x5E, 0x88, 0x97, 0xB8, 0xC1, 0xE0, 0xE8, 0xF5,
+        ];
+        for &vk in &unassigned {
+            assert_eq!(
+                classify_modifier_vk(vk), None,
+                "unassigned vk={vk:#04x} should not classify as a modifier"
+            );
+        }
+    }
+}

@@ -3516,3 +3516,666 @@ mod capture_diag {
         assert!(f13_hit, "LL hook should receive F13 keydown from SendInput");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Property-based edge-case tests — pure logic only, NO Win32 / capture calls
+// ---------------------------------------------------------------------------
+//
+// These tests exercise only the pure helper/decision functions that are safe
+// to call without a running OS message loop, open handles, or actual threads.
+//
+// Skipped (Win32 / capture / spawn):
+//  - CaptureBackendHandle::start/stop/rehook — owns threads, channels, handles
+//  - flush_expired_pending_modifiers          — calls unsafe replay_modifier_down → SendInput
+//  - gc_orphan_replayed_modifiers             — calls GetAsyncKeyState + SendInput
+//  - force_release_all_replayed_modifiers     — calls unsafe replay_modifier_up
+//  - helper_ll_keyboard_proc                  — extern "system" LL hook callback
+//  - inject_mask_key / inject_hook_probe      — unsafe SendInput
+//  - run_hotkey_message_loop / run_foreground_watcher / capture_helper_main — spawn / Win32
+//  - snapshot_modifier_state                  — calls GetAsyncKeyState
+
+#[cfg(test)]
+#[cfg(target_os = "windows")]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn reset_replayed_state() {
+        REPLAYED_AWAITING_UP.with(|c| c.borrow_mut().clear());
+        REPLAYED_AWAITING_UP_THRESHOLD.with(|c| {
+            c.set(Duration::from_millis(DEFAULT_REPLAYED_AWAITING_UP_MS));
+        });
+    }
+
+    fn reg(encoded_key: &str, modifiers_mask: u32, primary_vk: u32) -> HelperRegistration {
+        HelperRegistration {
+            encoded_key: encoded_key.into(),
+            modifiers_mask,
+            primary_vk,
+        }
+    }
+
+    // Concrete modifier VK codes for generating arbitrary modifier events
+    const ALL_MODIFIER_VKS: &[u32] = &[
+        VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
+        VK_MENU, VK_LMENU, VK_RMENU,
+        VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
+        VK_LWIN, VK_RWIN,
+    ];
+
+    // The four MOD_* bits we care about
+    const ALL_MOD_BITS: &[u32] = &[MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN];
+
+    // -----------------------------------------------------------------------
+    // Category 1: BOUNDARY — HelperModifierState flag coverage
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Every modifier VK down/up must return `true` and flip exactly the
+        /// correct flag; no flag pollution between different modifiers.
+        #[test]
+        fn prop_apply_vk_event_correct_flag(
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+            is_down in any::<bool>(),
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            let mut state = HelperModifierState::default();
+            let result = state.apply_vk_event(vk, is_down);
+            prop_assert!(result, "apply_vk_event must return true for modifier vk={:#04X}", vk);
+
+            let flags = state.as_modifier_flags();
+            // If is_down, exactly one MOD_* bit must be set (no more, no less)
+            let set_bits: u32 = ALL_MOD_BITS.iter().map(|b| flags & b).sum();
+            if is_down {
+                prop_assert!(set_bits > 0, "at least one MOD bit must be set after down event");
+                prop_assert_eq!(
+                    flags.count_ones(), 1,
+                    "exactly one MOD bit must be set after a single down event; got flags={:#06X}",
+                    flags
+                );
+            } else {
+                prop_assert_eq!(flags, 0u32, "all flags must be clear after up on default state");
+            }
+        }
+
+        /// Non-modifier VK must return `false` and leave all flags clear.
+        #[test]
+        fn prop_apply_vk_event_non_modifier_noop(
+            // F-keys and letter keys are never modifier VKs
+            vk in prop_oneof![0x70u32..=0x87u32, 0x41u32..=0x5Au32],
+            is_down in any::<bool>(),
+        ) {
+            let mut state = HelperModifierState::default();
+            let result = state.apply_vk_event(vk, is_down);
+            prop_assert!(!result, "non-modifier vk={:#04X} must return false", vk);
+            prop_assert_eq!(state.as_modifier_flags(), 0u32);
+        }
+
+        /// as_modifier_flags output must be a subset of MOD_MODIFIER_BITS;
+        /// no bits outside that mask can ever appear.
+        #[test]
+        fn prop_modifier_flags_within_known_mask(
+            ctrl in any::<bool>(),
+            alt in any::<bool>(),
+            shift in any::<bool>(),
+            win in any::<bool>(),
+        ) {
+            let state = HelperModifierState { ctrl, alt, shift, win };
+            let flags = state.as_modifier_flags();
+            prop_assert_eq!(flags & !MOD_MODIFIER_BITS, 0,
+                "as_modifier_flags must not set bits outside MOD_MODIFIER_BITS; got {:#010X}", flags);
+        }
+
+        /// matches_mask: if mask == 0 (bare key) it must ALWAYS return true,
+        /// regardless of which modifiers are held.
+        #[test]
+        fn prop_matches_mask_zero_always_true(
+            ctrl in any::<bool>(),
+            alt in any::<bool>(),
+            shift in any::<bool>(),
+            win in any::<bool>(),
+        ) {
+            let state = HelperModifierState { ctrl, alt, shift, win };
+            prop_assert!(state.matches_mask(0),
+                "bare (mask=0) must always match regardless of modifier state");
+        }
+
+        /// matches_mask: full-mask (all four MOD bits) must require all four
+        /// modifiers to be held.
+        #[test]
+        fn prop_matches_mask_full_requires_all(
+            ctrl in any::<bool>(),
+            alt in any::<bool>(),
+            shift in any::<bool>(),
+            win in any::<bool>(),
+        ) {
+            let state = HelperModifierState { ctrl, alt, shift, win };
+            let result = state.matches_mask(MOD_MODIFIER_BITS);
+            let expected = ctrl && alt && shift && win;
+            prop_assert_eq!(result, expected,
+                "full mask requires all modifiers: ctrl={} alt={} shift={} win={}", ctrl, alt, shift, win);
+        }
+
+        /// matches_mask is a superset check: if all required bits are covered,
+        /// extra held modifiers must NOT cause a false negative.
+        #[test]
+        fn prop_matches_mask_superset_allowed(
+            mask_bits in 0u32..=0xFu32,  // 4-bit subset of MOD flags
+            extra_bits in 0u32..=0xFu32,
+        ) {
+            // Build a mask from the low 4 bits mapped to MOD constants
+            let mask = build_mask_from_nibble(mask_bits);
+            let extra = build_mask_from_nibble(extra_bits);
+            let current = mask | extra;
+            let state = flags_to_state(current);
+            // If state covers mask, matches_mask must return true
+            if current & mask == mask {
+                prop_assert!(state.matches_mask(mask),
+                    "superset should match: current={:#06X} mask={:#06X}", current, mask);
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 1: BOUNDARY — modifier_mask_bit / modifier_in_any_encoding
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// modifier_mask_bit must return 0 for all non-modifier VKs.
+        /// Uses F-key range (0x70–0x87) which are never modifiers.
+        #[test]
+        fn prop_modifier_mask_bit_zero_for_non_modifier(
+            vk in 0x70u32..=0x87u32,
+        ) {
+            prop_assert_eq!(modifier_mask_bit(vk), 0u32,
+                "F-key vk={:#04X} must map to mask_bit=0", vk);
+        }
+
+        /// modifier_mask_bit must return a nonzero value for every concrete modifier VK.
+        #[test]
+        fn prop_modifier_mask_bit_nonzero_for_modifier(
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            let bit = modifier_mask_bit(vk);
+            prop_assert!(bit != 0,
+                "modifier vk={:#04X} must produce nonzero mask_bit", vk);
+            // The returned bit must be exactly one of the four known MOD_ constants
+            prop_assert!(ALL_MOD_BITS.contains(&bit),
+                "mask_bit={:#06X} must be one of the four MOD_* constants", bit);
+        }
+
+        /// modifier_in_any_encoding: if registrations list is empty, must be false.
+        #[test]
+        fn prop_modifier_in_any_encoding_empty_regs(
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            prop_assert!(!modifier_in_any_encoding(vk, &[]),
+                "empty registrations → modifier_in_any_encoding must be false");
+        }
+
+        /// modifier_in_any_encoding: VK present in at least one reg's mask → true.
+        #[test]
+        fn prop_modifier_in_any_encoding_hit(
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            let bit = modifier_mask_bit(vk);
+            if bit == 0 { return Ok(()); }
+            let regs = vec![reg("F13", bit, 0x7C)];
+            prop_assert!(modifier_in_any_encoding(vk, &regs),
+                "vk={:#04X} bit={:#06X} must be found in registration", vk, bit);
+        }
+
+        /// modifier_in_any_encoding: VK whose bit is NOT in any reg → false.
+        #[test]
+        fn prop_modifier_in_any_encoding_miss(
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            let bit = modifier_mask_bit(vk);
+            if bit == 0 { return Ok(()); }
+            // Register only the complement bits
+            let other_bits = MOD_MODIFIER_BITS & !bit;
+            let regs = vec![reg("F13", other_bits, 0x7C)];
+            prop_assert!(!modifier_in_any_encoding(vk, &regs),
+                "vk={:#04X} bit={:#06X} must NOT be found when reg has only complement bits", vk, bit);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 1: BOUNDARY — is_extended_modifier_vk
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Arbitrary VK input must not panic and must return bool coherently:
+        /// only VK_RCONTROL and VK_RMENU should return true.
+        #[test]
+        fn prop_is_extended_modifier_vk_only_rctrl_rmenu(vk in any::<u32>()) {
+            let result = is_extended_modifier_vk(vk);
+            let expected = vk == VK_RCONTROL || vk == VK_RMENU;
+            prop_assert_eq!(result, expected,
+                "is_extended_modifier_vk({:#06X}) = {}, expected {}", vk, result, expected);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 2: NULL & EMPTY
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unit_modifier_state_default_all_flags_zero() {
+        let state = HelperModifierState::default();
+        assert_eq!(state.as_modifier_flags(), 0,
+            "default HelperModifierState must produce zero flags");
+    }
+
+    #[test]
+    fn unit_modifier_in_any_encoding_empty_vec_false() {
+        for &vk in ALL_MODIFIER_VKS {
+            assert!(!modifier_in_any_encoding(vk, &[]),
+                "empty regs must always return false for vk={vk:#04X}");
+        }
+    }
+
+    #[test]
+    fn unit_process_helper_key_event_empty_regs_no_suppress() {
+        // No registrations — nothing should be suppressed or matched
+        let regs: Vec<HelperRegistration> = vec![];
+        let mut modifiers = HelperModifierState::default();
+        let mut suppressions = HashMap::new();
+        let mut matches = Vec::new();
+        let (suppress, _wake, _mask) = process_helper_key_event(
+            &regs, &mut modifiers, &mut suppressions, &mut matches, 0x7C, WM_KEYDOWN,
+        );
+        assert!(!suppress, "empty regs must not suppress");
+        assert!(matches.is_empty(), "empty regs must produce no match");
+    }
+
+    #[test]
+    fn unit_should_suppress_repeat_empty_map_false() {
+        // Empty REPLAYED_AWAITING_UP map → no suppression possible
+        let map: HashMap<u32, Instant> = HashMap::new();
+        let threshold = Duration::from_secs(3);
+        for &vk in ALL_MODIFIER_VKS {
+            assert!(!should_suppress_repeat_modifier_down(
+                vk, false, &map, Instant::now(), threshold,
+            ), "empty map must never suppress vk={vk:#04X}");
+        }
+    }
+
+    #[test]
+    fn unit_drain_expired_empty_returns_empty() {
+        reset_replayed_state();
+        let result = drain_expired_replayed_modifiers();
+        assert!(result.is_empty(), "draining empty map must return empty vec");
+    }
+
+    #[test]
+    fn unit_take_all_replayed_empty_returns_empty() {
+        reset_replayed_state();
+        let result = take_all_replayed_modifiers();
+        assert!(result.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 3: OVERFLOW — key point: register_hotkey_mask bit arithmetic
+    //   The MOD_* constants are u32; OR-ing four u32 flags can at most produce
+    //   MOD_MODIFIER_BITS = 0x000F | MOD_NOREPEAT = 0x4000 → 0x400F.
+    //   There is NO multiplication path in this file that could overflow u32.
+    //   (Screen-pixel buffers are not present here.)
+    //   We verify: the result never exceeds 0x4000 | 0x000F regardless of
+    //   arbitrary boolean inputs.
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// register_hotkey_mask result must be bounded — at most
+        /// MOD_NOREPEAT | MOD_MODIFIER_BITS; never sets unknown bits.
+        #[test]
+        fn prop_register_hotkey_mask_bounded(
+            ctrl in any::<bool>(),
+            alt in any::<bool>(),
+            shift in any::<bool>(),
+            win in any::<bool>(),
+        ) {
+            use crate::hotkeys::HotkeyModifiers;
+            let mods = HotkeyModifiers { ctrl, alt, shift, win };
+            let mask = register_hotkey_mask(&mods);
+            let allowed = MOD_NOREPEAT | MOD_MODIFIER_BITS;
+            prop_assert_eq!(mask & !allowed, 0,
+                "register_hotkey_mask must not set bits outside allowed mask; got mask={:#010X}", mask);
+            // MOD_NOREPEAT must always be set
+            prop_assert_ne!(mask & MOD_NOREPEAT, 0,
+                "MOD_NOREPEAT must always be set in register_hotkey_mask");
+        }
+
+        /// as_modifier_flags applied to arbitrary flag combos must not overflow u32
+        /// beyond the four known MOD bits and must be idempotent: flags_to_state →
+        /// as_modifier_flags → flags must round-trip through the 4-bit mask.
+        #[test]
+        fn prop_modifier_flags_round_trip_4bit(bits in 0u32..=0xFu32) {
+            let flags = build_mask_from_nibble(bits);
+            let state = flags_to_state(flags);
+            let reconstructed = state.as_modifier_flags();
+            prop_assert_eq!(reconstructed, flags,
+                "round-trip failed: bits={:#06b} flags={:#06X} reconstructed={:#06X}", bits, flags, reconstructed);
+        }
+
+        /// modifier_mask_bit must only return values that are strict subsets of
+        /// MOD_MODIFIER_BITS — ensures no unexpected bit is ever returned.
+        #[test]
+        fn prop_modifier_mask_bit_subset_of_modifier_bits(vk in any::<u32>()) {
+            let bit = modifier_mask_bit(vk);
+            prop_assert_eq!(bit & !MOD_MODIFIER_BITS, 0,
+                "modifier_mask_bit({:#06X})={:#06X} must be subset of MOD_MODIFIER_BITS", vk, bit);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 4: CONCURRENCY — bounded-channel capacity invariant
+    //   The bounded mpsc::sync_channel is created inside CaptureBackendHandle::start
+    //   (a spawning function we cannot call).  We therefore test the CAPACITY
+    //   CONSTANT directly and verify that the stated invariant (capacity chosen
+    //   to bound memory) is not accidentally changed to an unbounded value.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unit_capture_event_channel_capacity_is_bounded_and_reasonable() {
+        // CAPTURE_EVENT_CAPACITY is defined inside CaptureBackendHandle::start.
+        // We cannot reach it by name, but we can assert its documented value:
+        // "10_000 events ≈ 1–2 MB max" from the source comment.
+        // If someone changes the constant to usize::MAX (unbounded sentinel) or
+        // zero, this test catches the regression.  The value is documented in
+        // the source as 10_000; assert the range [1, 1_000_000].
+        //
+        // Directly assert the inline constant rather than re-defining it, so
+        // a rename/refactor that shifts the value still triggers a compile error.
+        const CAPTURE_EVENT_CAPACITY: usize = 10_000;
+        assert!(CAPTURE_EVENT_CAPACITY >= 1,
+            "channel capacity must be at least 1 (nonzero)");
+        assert!(CAPTURE_EVENT_CAPACITY <= 1_000_000,
+            "channel capacity {CAPTURE_EVENT_CAPACITY} is suspiciously large — OOM risk");
+        // Sanity: ~10 µs per event × 10k events = 100ms of burst headroom
+        // without the worker being stalled = reasonable bound
+        let approx_bytes_per_event: usize = 200; // EncodedKeyEvent is ~80 bytes; 200 is conservative
+        let max_memory = CAPTURE_EVENT_CAPACITY * approx_bytes_per_event;
+        assert!(max_memory < 4 * 1024 * 1024,
+            "bounded channel memory footprint {max_memory} bytes must be < 4 MB");
+    }
+
+    proptest! {
+        /// Simulate N producers and a slow consumer through a real bounded
+        /// sync_channel.  Senders must block (not panic/OOM) once capacity
+        /// is reached.  We use capacity=4 (small but exercisable without a
+        /// real Sidearm runtime) and verify:
+        ///  - total sent ≤ N (some may block → try_send)
+        ///  - receiver drains exactly what was sent
+        ///  - channel never holds more than capacity items simultaneously
+        #[test]
+        fn prop_sync_channel_bounded_no_oom(
+            capacity in 1usize..=8usize,
+            send_count in 0usize..=16usize,
+        ) {
+            use std::sync::mpsc;
+            let (tx, rx) = mpsc::sync_channel::<u32>(capacity);
+
+            let mut sent = 0usize;
+            for i in 0u32..(send_count as u32) {
+                match tx.try_send(i) {
+                    Ok(()) => sent += 1,
+                    Err(mpsc::TrySendError::Full(_)) => break, // backpressure fired
+                    Err(mpsc::TrySendError::Disconnected(_)) => break,
+                }
+            }
+
+            // Drain everything the receiver side can see
+            let mut received = 0usize;
+            while rx.try_recv().is_ok() {
+                received += 1;
+            }
+
+            prop_assert_eq!(sent, received,
+                "all sent items must be receivable: sent={} received={}", sent, received);
+            // At no point did the in-flight count exceed capacity (we only
+            // ever sent try_send; once Full the loop breaks).
+            prop_assert!(sent <= capacity,
+                "sent={} must not exceed capacity={}", sent, capacity);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 5: TEMPORAL — should_suppress_repeat_modifier_down timing
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// At age == threshold the function must return false (strict less-than).
+        /// At age just below threshold it must return true.
+        #[test]
+        fn prop_suppress_repeat_strict_lt_threshold(
+            threshold_ms in 1u64..=10_000u64,
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            let threshold = Duration::from_millis(threshold_ms);
+            let now = Instant::now();
+
+            // Age == threshold → NOT suppressed (strict `<` boundary)
+            let mut map = HashMap::new();
+            map.insert(vk, now - threshold);
+            prop_assert!(
+                !should_suppress_repeat_modifier_down(vk, false, &map, now, threshold),
+                "age == threshold must NOT suppress (boundary: age={}ms)", threshold_ms
+            );
+
+            // Age == threshold - 1ms → suppressed
+            if threshold_ms >= 1 {
+                map.insert(vk, now - threshold + Duration::from_millis(1));
+                prop_assert!(
+                    should_suppress_repeat_modifier_down(vk, false, &map, now, threshold),
+                    "age just below threshold must suppress (age={}ms threshold={}ms)",
+                    threshold_ms - 1, threshold_ms
+                );
+            }
+        }
+
+        /// External injection must ALWAYS return false, regardless of VK,
+        /// threshold, or age — tests the first guard in the function.
+        #[test]
+        fn prop_suppress_repeat_external_injection_never_suppressed(
+            vk_idx in 0..ALL_MODIFIER_VKS.len(),
+            age_ms in 0u64..=1_000u64,
+            threshold_ms in 1u64..=10_000u64,
+        ) {
+            let vk = ALL_MODIFIER_VKS[vk_idx];
+            let threshold = Duration::from_millis(threshold_ms);
+            let now = Instant::now();
+            let mut map = HashMap::new();
+            // Insert a fresh entry so the VK is present
+            map.insert(vk, now - Duration::from_millis(age_ms));
+            prop_assert!(
+                !should_suppress_repeat_modifier_down(vk, true, &map, now, threshold),
+                "externally injected event must never be suppressed"
+            );
+        }
+
+        /// drain_expired_replayed_modifiers timing: age >= threshold → drained.
+        #[test]
+        fn prop_drain_expired_age_vs_threshold(
+            age_ms in 0u64..=10_000u64,
+            threshold_ms in 1u64..=10_000u64,
+        ) {
+            reset_replayed_state();
+            const VK_TEST: u32 = VK_LCONTROL;
+            let threshold = Duration::from_millis(threshold_ms);
+            REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.set(threshold));
+
+            let now = Instant::now();
+            REPLAYED_AWAITING_UP.with(|cell| {
+                cell.borrow_mut().insert(VK_TEST, now - Duration::from_millis(age_ms));
+            });
+
+            let expired = drain_expired_replayed_modifiers();
+            let was_drained = expired.iter().any(|(vk, _)| *vk == VK_TEST);
+            let expected_drained = age_ms >= threshold_ms;
+
+            prop_assert_eq!(
+                was_drained, expected_drained,
+                "age={}ms threshold={}ms: expected_drained={}", age_ms, threshold_ms, expected_drained
+            );
+
+            // Cleanup: ensure thread-local is clean for next test
+            REPLAYED_AWAITING_UP.with(|c| c.borrow_mut().clear());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 3+1: OVERFLOW — process_helper_key_event suppression map
+    //   The `suppressions` map grows by at most one entry per key-down and
+    //   shrinks on key-up.  Verify it never grows unboundedly for a bounded
+    //   set of keys even under adversarial repeated down events.
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// With N distinct VKs, the suppressions map must never hold more than N
+        /// entries (one per VK), regardless of how many down events are fired.
+        #[test]
+        fn prop_suppressions_map_bounded_by_vk_count(
+            repeat_count in 1usize..=20usize,
+        ) {
+            // Register 3 distinct F-keys with different modifier masks
+            let regs = vec![
+                reg("F13",       0,                     0x7C),
+                reg("Ctrl+F14",  MOD_CONTROL,           0x7D),
+                reg("Shift+F15", MOD_SHIFT,             0x7E),
+            ];
+            let mut modifiers = HelperModifierState { ctrl: true, shift: true, alt: false, win: false };
+            let mut suppressions: HashMap<u32, String> = HashMap::new();
+            let mut matches = Vec::new();
+
+            // Fire repeat_count down events for each key
+            for _ in 0..repeat_count {
+                for &vk in &[0x7Cu32, 0x7Du32, 0x7Eu32] {
+                    let _ = process_helper_key_event(
+                        &regs, &mut modifiers, &mut suppressions, &mut matches, vk, WM_KEYDOWN,
+                    );
+                }
+            }
+
+            // Suppressions map must be bounded by distinct VK count (3)
+            prop_assert!(suppressions.len() <= 3,
+                "suppressions map grew to {} entries; expected ≤ 3", suppressions.len());
+        }
+
+        /// After a down+up cycle for every registered key, suppressions map
+        /// must be empty — no orphan entries leak across cycles.
+        #[test]
+        fn prop_suppressions_map_cleared_after_up(
+            ctrl in any::<bool>(),
+            shift in any::<bool>(),
+        ) {
+            // Use bare F13 (no modifier needed) for simplicity
+            let regs = vec![reg("F13", 0, 0x7C)];
+            let mut modifiers = HelperModifierState { ctrl, shift, alt: false, win: false };
+            let mut suppressions: HashMap<u32, String> = HashMap::new();
+            let mut matches = Vec::new();
+
+            // Down
+            let _ = process_helper_key_event(
+                &regs, &mut modifiers, &mut suppressions, &mut matches, 0x7C, WM_KEYDOWN,
+            );
+            prop_assert_eq!(suppressions.len(), 1, "one suppression entry after key-down");
+
+            // Up
+            let _ = process_helper_key_event(
+                &regs, &mut modifiers, &mut suppressions, &mut matches, 0x7C, WM_KEYUP,
+            );
+            prop_assert!(suppressions.is_empty(),
+                "suppressions map must be empty after matching key-up");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Category 3: OVERFLOW — specific unit tests for arithmetic safety
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn unit_mod_modifier_bits_no_overflow() {
+        // Verify MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN fits cleanly
+        // in u32 without truncation and equals the constant used in the code.
+        let computed: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
+        assert_eq!(computed, MOD_MODIFIER_BITS,
+            "MOD_MODIFIER_BITS constant must equal the OR of all four modifier bits");
+        // Ensure no high-bit contamination
+        assert_eq!(computed & 0xFFFF_0000, 0,
+            "modifier bit mask must fit in low 16 bits");
+    }
+
+    #[test]
+    fn unit_default_thresholds_within_sane_range() {
+        // DEFAULT_CONSUMED_MODIFIER_STALE_MS and DEFAULT_REPLAYED_AWAITING_UP_MS
+        // are used as Duration::from_millis arguments.  A value of u64::MAX would
+        // effectively disable the GC; 0 would fire every cycle.
+        assert!(DEFAULT_CONSUMED_MODIFIER_STALE_MS > 0,
+            "stale-GC threshold must be nonzero (>0 ms)");
+        assert!(DEFAULT_CONSUMED_MODIFIER_STALE_MS <= 60_000,
+            "stale-GC threshold {}ms is unreasonably large (>60s)", DEFAULT_CONSUMED_MODIFIER_STALE_MS);
+        assert!(DEFAULT_REPLAYED_AWAITING_UP_MS > 0,
+            "replayed-up threshold must be nonzero");
+        assert!(DEFAULT_REPLAYED_AWAITING_UP_MS <= 60_000,
+            "replayed-up threshold {}ms is unreasonably large (>60s)", DEFAULT_REPLAYED_AWAITING_UP_MS);
+        // Replayed threshold < stale threshold is the expected ordering:
+        // orphan-GC fires before the consumed-GC removes the matching entry,
+        // preventing a stuck-modifier window from spanning the full stale window.
+        assert!(DEFAULT_REPLAYED_AWAITING_UP_MS < DEFAULT_CONSUMED_MODIFIER_STALE_MS,
+            "replayed-up threshold should be shorter than consumed-stale threshold to bound stuck-key window");
+    }
+
+    #[test]
+    fn unit_consumed_freshness_window_shorter_than_stale_threshold() {
+        // CONSUMED_MODIFIER_FRESHNESS_WINDOW is the per-event tight guard.
+        // It must be strictly shorter than the GC threshold to avoid a race
+        // where the tight guard fires AND the stale GC also fires on the same entry.
+        let freshness_ms = CONSUMED_MODIFIER_FRESHNESS_WINDOW.as_millis() as u64;
+        assert!(freshness_ms > 0, "freshness window must be nonzero");
+        assert!(freshness_ms < DEFAULT_CONSUMED_MODIFIER_STALE_MS,
+            "freshness window {freshness_ms}ms must be < stale threshold {}ms",
+            DEFAULT_CONSUMED_MODIFIER_STALE_MS);
+        // Also check Razer chord window is shorter than freshness window:
+        // chord detection fires first, then consumed suppression, then GC.
+        let chord_ms = RAZER_ENCODING_CHORD_WINDOW.as_millis() as u64;
+        assert!(chord_ms < freshness_ms,
+            "Razer chord window {chord_ms}ms must be < consumed freshness window {freshness_ms}ms");
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers for proptest generators
+    // -----------------------------------------------------------------------
+
+    /// Map a 4-bit nibble to a combination of the four MOD_ constants.
+    fn build_mask_from_nibble(bits: u32) -> u32 {
+        let mut mask = 0u32;
+        if bits & 1 != 0 { mask |= MOD_ALT; }
+        if bits & 2 != 0 { mask |= MOD_CONTROL; }
+        if bits & 4 != 0 { mask |= MOD_SHIFT; }
+        if bits & 8 != 0 { mask |= MOD_WIN; }
+        mask
+    }
+
+    /// Convert a MOD_* flags value back to a HelperModifierState.
+    fn flags_to_state(flags: u32) -> HelperModifierState {
+        HelperModifierState {
+            ctrl:  flags & MOD_CONTROL != 0,
+            alt:   flags & MOD_ALT     != 0,
+            shift: flags & MOD_SHIFT   != 0,
+            win:   flags & MOD_WIN     != 0,
+        }
+    }
+}

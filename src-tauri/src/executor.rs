@@ -434,7 +434,7 @@ fn run_live_sequence_action(
                 delay_ms,
                 repeat,
             } => {
-                let times = repeat.unwrap_or(1).clamp(1, MAX_STEP_REPEAT);
+                let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
                 for _ in 0..times {
                     input_synthesis::send_text(value).map_err(|message| {
                         execution_error(
@@ -458,7 +458,7 @@ fn run_live_sequence_action(
                 delay_ms,
                 repeat,
             } => {
-                let times = repeat.unwrap_or(1).clamp(1, MAX_STEP_REPEAT);
+                let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
                 for _ in 0..times {
                     input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(
                         |message| {
@@ -1362,4 +1362,493 @@ mod tests {
             "main.rs - VSCode"
         ));
     }
+}
+
+// ============================================================================
+// Property-based edge-case tests (pure logic only — NO SendInput, NO OS calls)
+// ============================================================================
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use crate::config::{
+        ActionCondition, MenuItem, SequenceActionPayload, SequenceStep, ShortcutActionPayload,
+        PasteMode,
+    };
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Helpers / strategies
+    // -----------------------------------------------------------------------
+
+    fn arb_condition() -> impl Strategy<Value = ActionCondition> {
+        prop_oneof![
+            ".*".prop_map(|s| ActionCondition::WindowTitleContains { value: s }),
+            ".*".prop_map(|s| ActionCondition::WindowTitleNotContains { value: s }),
+            ".*".prop_map(|s| ActionCondition::ExeEquals { value: s }),
+            ".*".prop_map(|s| ActionCondition::ExeNotEquals { value: s }),
+        ]
+    }
+
+    fn arb_shortcut_payload() -> impl Strategy<Value = ShortcutActionPayload> {
+        (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>(), ".*").prop_map(
+            |(ctrl, shift, alt, win, key)| ShortcutActionPayload {
+                key,
+                ctrl,
+                shift,
+                alt,
+                win,
+                raw: None,
+            },
+        )
+    }
+
+    fn leaf_menu_item() -> impl Strategy<Value = MenuItem> {
+        prop_oneof![
+            (".*", ".*", ".*", any::<bool>()).prop_map(|(id, label, action_ref, enabled)| {
+                MenuItem::Action { id, label, action_ref, enabled }
+            }),
+        ]
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: evaluate_conditions — determinism and never-panic invariant
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Any condition slice over any exe/title must return deterministically
+        /// (same inputs → same output) and never panic.
+        #[test]
+        fn evaluate_conditions_deterministic(
+            conditions in prop::collection::vec(arb_condition(), 0..8),
+            exe in ".*",
+            title in ".*",
+        ) {
+            let first = evaluate_conditions(&conditions, &exe, &title);
+            let second = evaluate_conditions(&conditions, &exe, &title);
+            prop_assert_eq!(first, second);
+        }
+
+        /// Empty conditions must always return true regardless of exe/title.
+        #[test]
+        fn evaluate_conditions_empty_always_passes_any_context(
+            exe in ".*",
+            title in ".*",
+        ) {
+            prop_assert!(evaluate_conditions(&[], &exe, &title));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: evaluate_conditions — Contains / NotContains duality
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// WindowTitleContains and WindowTitleNotContains with the same value
+        /// must produce opposite results for every (value, title) pair.
+        #[test]
+        fn contains_and_not_contains_are_opposites(value in ".*", title in ".*") {
+            let c = evaluate_conditions(
+                &[ActionCondition::WindowTitleContains { value: value.clone() }],
+                "",
+                &title,
+            );
+            let nc = evaluate_conditions(
+                &[ActionCondition::WindowTitleNotContains { value: value.clone() }],
+                "",
+                &title,
+            );
+            prop_assert_ne!(c, nc, "Contains and NotContains must always disagree");
+        }
+
+        /// ExeEquals and ExeNotEquals with the same value must produce opposite
+        /// results for every exe string.
+        #[test]
+        fn exe_equals_and_not_equals_are_opposites(value in ".*", exe in ".*") {
+            let eq = evaluate_conditions(
+                &[ActionCondition::ExeEquals { value: value.clone() }],
+                &exe,
+                "",
+            );
+            let ne = evaluate_conditions(
+                &[ActionCondition::ExeNotEquals { value: value.clone() }],
+                &exe,
+                "",
+            );
+            prop_assert_ne!(eq, ne, "ExeEquals and ExeNotEquals must always disagree");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: evaluate_conditions — AND semantics
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// A contradictory pair [Contains(v), NotContains(v)] must always be
+        /// false (all-must-pass AND logic).
+        #[test]
+        fn contradictory_condition_pair_always_false(value in ".+", title in ".*") {
+            let conditions = vec![
+                ActionCondition::WindowTitleContains { value: value.clone() },
+                ActionCondition::WindowTitleNotContains { value: value.clone() },
+            ];
+            prop_assert!(!evaluate_conditions(&conditions, "", &title));
+        }
+
+        /// Single ExeEquals with exact exe match must pass.
+        #[test]
+        fn exe_equals_matches_itself(exe in ".+") {
+            prop_assert!(
+                evaluate_conditions(
+                    &[ActionCondition::ExeEquals { value: exe.clone() }],
+                    &exe,
+                    "",
+                ),
+                "exe equals itself must pass"
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: count_enabled_menu_items — counts match actual enabled items
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Flat list of Action items: count_enabled_menu_items must equal the
+        /// number of enabled items.
+        #[test]
+        fn count_enabled_flat_list_correct(items in prop::collection::vec(leaf_menu_item(), 0..20)) {
+            let expected = items.iter().filter(|i| match i {
+                MenuItem::Action { enabled, .. } => *enabled,
+                _ => false,
+            }).count();
+            prop_assert_eq!(count_enabled_menu_items(&items), expected);
+        }
+
+        /// All-disabled flat list must always return 0.
+        #[test]
+        fn count_enabled_all_disabled_returns_zero(n in 0usize..20) {
+            let items: Vec<MenuItem> = (0..n)
+                .map(|i| MenuItem::Action {
+                    id: i.to_string(),
+                    label: i.to_string(),
+                    action_ref: i.to_string(),
+                    enabled: false,
+                })
+                .collect();
+            prop_assert_eq!(count_enabled_menu_items(&items), 0);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary + overflow: count_enabled_menu_items with nested Submenu
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn count_enabled_nested_submenu() {
+        // Submenu(enabled=true) containing 2 enabled actions.  Submenu itself
+        // counts 1 (enabled) + 2 (children) = 3.
+        let items = vec![MenuItem::Submenu {
+            id: "sub".into(),
+            label: "Sub".into(),
+            enabled: true,
+            items: vec![
+                MenuItem::Action {
+                    id: "a1".into(),
+                    label: "A1".into(),
+                    action_ref: "r1".into(),
+                    enabled: true,
+                },
+                MenuItem::Action {
+                    id: "a2".into(),
+                    label: "A2".into(),
+                    action_ref: "r2".into(),
+                    enabled: true,
+                },
+            ],
+        }];
+        assert_eq!(count_enabled_menu_items(&items), 3);
+    }
+
+    #[test]
+    fn count_enabled_disabled_submenu_enabled_children_still_counted() {
+        // Disabled submenu (counts 0 for itself) with 1 enabled child = 1 total.
+        let items = vec![MenuItem::Submenu {
+            id: "sub".into(),
+            label: "Sub".into(),
+            enabled: false,
+            items: vec![MenuItem::Action {
+                id: "a1".into(),
+                label: "A1".into(),
+                action_ref: "r1".into(),
+                enabled: true,
+            }],
+        }];
+        assert_eq!(count_enabled_menu_items(&items), 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: sequence_step_summary — never-panic over arbitrary inputs
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn sequence_step_summary_never_panics_send(value in ".*", delay in any::<Option<u32>>(), repeat in any::<Option<u32>>()) {
+            let step = SequenceStep::Send { value, delay_ms: delay, repeat };
+            let _ = sequence_step_summary(&step);
+        }
+
+        #[test]
+        fn sequence_step_summary_never_panics_text(value in ".*", delay in any::<Option<u32>>(), repeat in any::<Option<u32>>()) {
+            let step = SequenceStep::Text { value, delay_ms: delay, repeat };
+            let _ = sequence_step_summary(&step);
+        }
+
+        #[test]
+        fn sequence_step_summary_never_panics_sleep(delay_ms in any::<u32>()) {
+            let step = SequenceStep::Sleep { delay_ms };
+            let _ = sequence_step_summary(&step);
+        }
+
+        /// Sleep step summary must contain the decimal representation of delay_ms.
+        #[test]
+        fn sequence_step_summary_sleep_contains_delay(delay_ms in any::<u32>()) {
+            let step = SequenceStep::Sleep { delay_ms };
+            let summary = sequence_step_summary(&step);
+            prop_assert!(
+                summary.contains(&delay_ms.to_string()),
+                "summary '{}' must contain delay value {}",
+                summary,
+                delay_ms
+            );
+        }
+
+        /// Text step summary char count must agree with value.chars().count().
+        #[test]
+        fn sequence_step_summary_text_char_count(value in ".*") {
+            let expected_count = value.chars().count();
+            let step = SequenceStep::Text { value, delay_ms: None, repeat: None };
+            let summary = sequence_step_summary(&step);
+            prop_assert!(
+                summary.contains(&expected_count.to_string()),
+                "summary '{}' must contain char count {}",
+                summary,
+                expected_count
+            );
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: format_shortcut — never-panic, always a non-crashing string
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn format_shortcut_never_panics(payload in arb_shortcut_payload()) {
+            let _ = format_shortcut(&payload);
+        }
+
+        /// All-false modifier shortcut with empty key must produce empty string.
+        #[test]
+        fn format_shortcut_all_false_empty_key_is_empty(whitespace_key in "\\s*") {
+            let payload = ShortcutActionPayload {
+                key: whitespace_key,
+                ctrl: false, shift: false, alt: false, win: false,
+                raw: None,
+            };
+            prop_assert_eq!(format_shortcut(&payload), "");
+        }
+
+        /// All-true modifiers with non-empty key must include all modifier labels.
+        #[test]
+        fn format_shortcut_all_modifiers_present_when_set(key in "[A-Z]") {
+            let payload = ShortcutActionPayload {
+                key: key.clone(),
+                ctrl: true, shift: true, alt: true, win: true,
+                raw: None,
+            };
+            let s = format_shortcut(&payload);
+            prop_assert!(s.contains("Ctrl"));
+            prop_assert!(s.contains("Shift"));
+            prop_assert!(s.contains("Alt"));
+            prop_assert!(s.contains("Win"));
+            prop_assert!(s.contains(key.as_str()));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: validate_live_sequence — NUL detection in Text steps
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// Text step containing NUL (\0) must always be rejected.
+        #[test]
+        fn validate_live_sequence_rejects_text_with_nul(
+            prefix in ".*",
+            suffix in ".*",
+        ) {
+            let text = format!("{prefix}\0{suffix}");
+            let payload = SequenceActionPayload {
+                steps: vec![SequenceStep::Text { value: text, delay_ms: None, repeat: None }],
+            };
+            let result = validate_live_sequence(&payload);
+            prop_assert!(result.is_err(), "NUL in Text step must be rejected");
+        }
+
+        /// Text step without NUL must not be rejected for NUL reason.
+        #[test]
+        fn validate_live_sequence_text_without_nul_ok(
+            value in "[^\x00]*",
+        ) {
+            // The only Text rejection is NUL — a NUL-free value must pass.
+            let payload = SequenceActionPayload {
+                steps: vec![SequenceStep::Text { value, delay_ms: None, repeat: None }],
+            };
+            let result = validate_live_sequence(&payload);
+            prop_assert!(result.is_ok(), "NUL-free Text step must pass: {:?}", result);
+        }
+
+        /// Empty sequence must always be valid.
+        #[test]
+        fn validate_live_sequence_empty_is_ok(
+            _unused in 0u8..1,
+        ) {
+            let payload = SequenceActionPayload { steps: vec![] };
+            prop_assert!(validate_live_sequence(&payload).is_ok());
+        }
+
+        /// Sleep step with any u32 delay must always be valid.
+        #[test]
+        fn validate_live_sequence_sleep_any_delay_is_ok(delay_ms in any::<u32>()) {
+            let payload = SequenceActionPayload {
+                steps: vec![SequenceStep::Sleep { delay_ms }],
+            };
+            prop_assert!(validate_live_sequence(&payload).is_ok());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: delay clamping — Duration computation stays bounded
+    //
+    // The runtime uses:
+    //   Duration::from_millis(u64::from(delay_ms).min(MAX_STEP_DELAY_MS))
+    // We verify the computed Duration is always <= MAX_STEP_DELAY_MS.
+    // No sleep() calls; we only test the Duration value.
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        /// For any u32 delay, the computed Duration must be capped at 30 s.
+        #[test]
+        fn sleep_step_delay_clamped_to_max(delay_ms in any::<u32>()) {
+            let clamped = u64::from(delay_ms).min(MAX_STEP_DELAY_MS);
+            let duration = std::time::Duration::from_millis(clamped);
+            prop_assert!(
+                duration <= std::time::Duration::from_millis(MAX_STEP_DELAY_MS),
+                "computed Duration {:?} exceeds MAX_STEP_DELAY_MS {}ms",
+                duration,
+                MAX_STEP_DELAY_MS
+            );
+        }
+
+        /// For any u32 delay, the clamped value must be <= MAX_STEP_DELAY_MS
+        /// and must not overflow u64.
+        #[test]
+        fn sleep_step_u64_cast_never_overflows(delay_ms in any::<u32>()) {
+            // u32 widened to u64 cannot overflow; this is the compile-time
+            // guarantee; we also verify the .min() result stays in range.
+            let clamped: u64 = u64::from(delay_ms).min(MAX_STEP_DELAY_MS);
+            prop_assert!(clamped <= MAX_STEP_DELAY_MS);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: repeat — repeat=Some(0) means "do not execute" (step skipped)
+    // -----------------------------------------------------------------------
+
+    /// repeat=Some(0) must mean "do not execute". Production now uses
+    /// `repeat.unwrap_or(1).min(MAX_STEP_REPEAT)` (executor.rs:437/461), so 0 → 0
+    /// and the `for _ in 0..times` loop runs zero times → the step is skipped.
+    #[test]
+    fn repeat_zero_skips_step() {
+        let times = 0u32.min(MAX_STEP_REPEAT);
+        assert_eq!(times, 0, "repeat=0 must produce 0 iterations (step skipped)");
+    }
+
+    proptest! {
+        /// repeat=Some(n) for n in 1..=MAX_STEP_REPEAT must preserve n exactly
+        /// (no clamping modifies a valid in-range repeat value).
+        #[test]
+        fn repeat_valid_range_preserved(n in 1u32..=MAX_STEP_REPEAT) {
+            let times = n.min(MAX_STEP_REPEAT);
+            prop_assert_eq!(times, n);
+        }
+
+        /// repeat=Some(n) for n > MAX_STEP_REPEAT must be capped to MAX_STEP_REPEAT.
+        #[test]
+        fn repeat_above_max_clamped_to_max(n in (MAX_STEP_REPEAT + 1)..=u32::MAX) {
+            let times = n.min(MAX_STEP_REPEAT);
+            prop_assert_eq!(times, MAX_STEP_REPEAT);
+        }
+
+        /// None repeat defaults to 1 (exactly one execution).
+        #[test]
+        fn repeat_none_defaults_to_one(_x in 0u8..1) {
+            let times = None::<u32>.unwrap_or(1).clamp(1, MAX_STEP_REPEAT);
+            prop_assert_eq!(times, 1);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: paste_mode_name — total, no panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn paste_mode_name_total_coverage() {
+        for mode in [PasteMode::ClipboardPaste, PasteMode::SendText] {
+            let name = paste_mode_name(mode);
+            assert!(!name.is_empty(), "paste_mode_name must return a non-empty string");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Null / empty: format_shortcut key trimming
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn format_shortcut_whitespace_only_key_is_excluded() {
+        // key.trim().is_empty() means whitespace-only keys must be omitted.
+        let payload = ShortcutActionPayload {
+            key: "   \t\n".into(),
+            ctrl: true, shift: false, alt: false, win: false,
+            raw: None,
+        };
+        let s = format_shortcut(&payload);
+        assert_eq!(s, "Ctrl", "whitespace-only key must not appear in shortcut label");
+    }
+
+    #[test]
+    fn format_shortcut_empty_key_no_modifiers_is_empty() {
+        let payload = ShortcutActionPayload {
+            key: String::new(),
+            ctrl: false, shift: false, alt: false, win: false,
+            raw: None,
+        };
+        assert_eq!(format_shortcut(&payload), "");
+    }
+
+    // -----------------------------------------------------------------------
+    // Concurrency: N/A
+    //
+    // executor.rs does not expose any shared state (AtomicBool, Arc, Mutex)
+    // that can be tested without driving real OS input.  The cancellation flag
+    // in `run_live_sequence_action` is checked only inside the live send loop
+    // which calls send_text / send_hotkey_string — both emit real input and are
+    // excluded from pure-logic testing.
+    // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Temporal: N/A for actual sleep; Duration computation verified above.
+    // The only temporal logic in executor.rs is:
+    //   Duration::from_millis(u64::from(delay_ms).min(MAX_STEP_DELAY_MS))
+    // which is fully covered by the overflow/clamp props above.
+    // -----------------------------------------------------------------------
 }

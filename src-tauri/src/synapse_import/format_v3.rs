@@ -881,3 +881,268 @@ mod tests {
         .is_ok());
     }
 }
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    // -----------------------------------------------------------------------
+    // Boundary: enforce_zip_budget with exactly MAX_ZIP_ENTRIES entries → ok
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_exactly_max_entries_passes() {
+        assert!(enforce_zip_budget(
+            MAX_ZIP_ENTRIES,
+            std::iter::empty::<(&str, u64)>()
+        ).is_ok());
+    }
+
+    #[test]
+    fn boundary_max_plus_one_entries_fails() {
+        assert!(matches!(
+            enforce_zip_budget(MAX_ZIP_ENTRIES + 1, std::iter::empty::<(&str, u64)>()),
+            Err(SynapseV3Error::TooManyEntries(_))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: exactly MAX_ENTRY_UNCOMPRESSED per entry → ok
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_exactly_max_entry_size_passes() {
+        assert!(enforce_zip_budget(1, [("f.xml", MAX_ENTRY_UNCOMPRESSED)].into_iter()).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: single entry of MAX_ENTRY_UNCOMPRESSED+1 → EntryTooLarge
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_entry_size_one_over_max_fails() {
+        assert!(matches!(
+            enforce_zip_budget(1, [("f.xml", MAX_ENTRY_UNCOMPRESSED + 1)].into_iter()),
+            Err(SynapseV3Error::EntryTooLarge(_, _))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: saturating_add on total size — no integer overflow panic
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_saturating_add_no_panic() {
+        // Two entries whose declared sizes would overflow u64 if added naively.
+        // enforce_zip_budget uses saturating_add, so it must return ArchiveTooLarge.
+        assert!(matches!(
+            enforce_zip_budget(
+                2,
+                [("a.xml", u64::MAX / 2 + 1), ("b.xml", u64::MAX / 2 + 1)].into_iter()
+            ),
+            Err(SynapseV3Error::EntryTooLarge(_, _) | SynapseV3Error::ArchiveTooLarge(_))
+        ));
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: zero-size entries — all pass, total stays at 0
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_zero_size_entries_all_pass() {
+        let entries: Vec<(&str, u64)> = (0..100).map(|_| ("x.xml", 0u64)).collect();
+        assert!(enforce_zip_budget(100, entries.into_iter()).is_ok());
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: enforce_zip_budget never panics for any (count, sizes) input
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_enforce_zip_budget_never_panics(
+            count in 0usize..10_000,
+            sizes in prop::collection::vec(any::<u64>(), 0..20)
+        ) {
+            let entries: Vec<(&str, u64)> = sizes.iter().map(|&s| ("x.xml", s)).collect();
+            let _ = enforce_zip_budget(count, entries.into_iter());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: parse_v3_profile_meta with empty XML → fallback names
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_profile_xml_uses_fallbacks() {
+        let (guid, name) = parse_v3_profile_meta("<Profile></Profile>").unwrap();
+        // guid starts with "v3-" prefix when empty; name uses the guid.
+        assert!(guid.starts_with("v3-"), "expected fallback guid, got {guid}");
+        assert!(!name.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: parse_v3_profile_meta with only Name, no ProfileId
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_profile_meta_missing_guid_generates_fallback() {
+        let xml = "<Profile><Name>Test</Name></Profile>";
+        let (guid, name) = parse_v3_profile_meta(xml).unwrap();
+        assert_eq!(name, "Test");
+        assert!(guid.starts_with("v3-"), "expected v3-{name} fallback, got {guid}");
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: parse_v3_macro with empty XML → empty steps, empty guid
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_macro_xml_returns_empty_steps() {
+        let mut w = Vec::new();
+        let res = parse_v3_macro("<Macro></Macro>", &mut w);
+        let parsed = res.expect("empty macro xml should not fail");
+        assert!(parsed.steps.is_empty());
+        // Fallback guid uses "v3-macro-{name}".
+        assert!(parsed.synapse_guid.starts_with("v3-macro-"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: deeply nested mapping XML — iterative parser, no stack overflow
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_deep_mapping_xml_no_stack_overflow() {
+        // Build a deeply nested but well-formed XML to stress the iterative
+        // quick-xml parser: <Mappings><X0><X1>...<X1999></X1999>...</X0></Mappings>
+        let open: String = (0..2000).map(|i| format!("<X{i}>")).collect();
+        let close: String = (0..2000).rev().map(|i| format!("</X{i}>")).collect();
+        let xml = format!("<Mappings>{open}{close}</Mappings>");
+        let macros = std::collections::HashMap::new();
+        let mut bindings = Vec::new();
+        let mut warnings = Vec::new();
+        // Must not stack-overflow; may return Ok (no Mapping elements) or Err.
+        let _ = parse_v3_mapping_list(&xml, &macros, "deep", &mut bindings, &mut warnings);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: Makecode overflow in v3 macro XML (value > u16::MAX)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_v3_macro_makecode_too_large_is_skipped() {
+        let xml = format!(
+            r#"<Macro><Name>M</Name><MacroEvents>
+              <MacroEvent><Type>1</Type><Makecode>{}</Makecode><State>0</State></MacroEvent>
+              <MacroEvent><Type>1</Type><Makecode>{}</Makecode><State>1</State></MacroEvent>
+            </MacroEvents><Guid>g-v3</Guid></Macro>"#,
+            u64::MAX, u64::MAX
+        );
+        let mut w = Vec::new();
+        let parsed = parse_v3_macro(&xml, &mut w).expect("should not fail");
+        // Out-of-range makecode → parse::<u16> fails → event skipped → no Send steps.
+        assert!(parsed.steps.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: v3 macro Delay overflow beyond u32 → parse fails, dropped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_v3_macro_delay_too_large_is_dropped() {
+        let xml = format!(
+            r#"<Macro><Name>D</Name><MacroEvents>
+              <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
+            </MacroEvents><Guid>g-dv3</Guid></Macro>"#,
+            u64::MAX
+        );
+        let mut w = Vec::new();
+        let parsed = parse_v3_macro(&xml, &mut w).expect("should not fail");
+        // Out-of-range delay → parse::<u32> fails → None → not pushed.
+        assert!(parsed.steps.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: v3 macro with u32::MAX delay value → preserved as Sleep
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_v3_macro_u32_max_delay_preserved() {
+        let xml = format!(
+            r#"<Macro><Name>D</Name><MacroEvents>
+              <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
+            </MacroEvents><Guid>g-dmax</Guid></Macro>"#,
+            u32::MAX
+        );
+        let mut w = Vec::new();
+        let parsed = parse_v3_macro(&xml, &mut w).unwrap();
+        assert!(parsed.steps.iter().any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == u32::MAX)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: mapping XML with no <Mapping> elements → 0 bindings
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_empty_mappings_xml_no_bindings() {
+        let xml = r#"<?xml version="1.0"?><Mappings><MappingList></MappingList></Mappings>"#;
+        let macros = std::collections::HashMap::new();
+        let mut bindings = Vec::new();
+        let mut warnings = Vec::new();
+        parse_v3_mapping_list(xml, &macros, "P", &mut bindings, &mut warnings).unwrap();
+        assert!(bindings.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: mapping with MacroGroup but empty <Id> → Unmappable
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_macro_group_empty_id_is_unmappable() {
+        let xml = r#"<Mappings><MappingList>
+            <Mapping>
+              <InputType>DKMInput</InputType>
+              <DKMInput>DKM_M_01</DKMInput>
+              <MacroGroup><Id></Id></MacroGroup>
+            </Mapping>
+        </MappingList></Mappings>"#;
+        let macros = std::collections::HashMap::new();
+        let mut bindings = Vec::new();
+        let mut warnings = Vec::new();
+        parse_v3_mapping_list(xml, &macros, "P", &mut bindings, &mut warnings).unwrap();
+        // Empty <Id> → macro_guid is empty → Unmappable action.
+        if let Some(b) = bindings.first() {
+            assert!(matches!(b.action, ParsedAction::Unmappable { .. }));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: parse_v3_macro never panics on arbitrary XML strings
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_parse_v3_macro_never_panics(s in ".*") {
+            let mut w = Vec::new();
+            let _ = parse_v3_macro(&s, &mut w);
+        }
+
+        #[test]
+        fn prop_parse_v3_profile_meta_never_panics(s in ".*") {
+            let _ = parse_v3_profile_meta(&s);
+        }
+
+        #[test]
+        fn prop_parse_v3_mapping_list_never_panics(s in ".*") {
+            let macros = std::collections::HashMap::new();
+            let mut bindings = Vec::new();
+            let mut warnings = Vec::new();
+            let _ = parse_v3_mapping_list(&s, &macros, "P", &mut bindings, &mut warnings);
+        }
+    }
+
+    // Concurrency: N/A — all functions are pure; ZIP archive parsing (I/O) is
+    //              not tested here (requires real files).
+    // Temporal:    macro delay tests above cover u32::MAX and overflow paths.
+}

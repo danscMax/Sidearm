@@ -392,16 +392,23 @@ fn remove_profile_by_name(config: &mut AppConfig, name: &str) {
 fn unique_profile_name(base: &str, existing: &[Profile]) -> String {
     let base = if base.trim().is_empty() { "Imported" } else { base };
     let mut candidate = base.to_string();
-    let mut n = 2;
+    let mut n = 2usize;
+    // Each iteration produces a DISTINCT candidate ("base", "base (импорт)",
+    // "base (импорт 3)", …). With N existing profiles the pigeonhole principle
+    // guarantees a free name within N+1 attempts, so bound the loop by
+    // existing.len()+2 — always large enough to reach a unique name, unlike the
+    // old fixed cap of 1000 which could return a still-colliding name once more
+    // than ~1000 profiles shared the base name.
+    let max_attempts = existing.len() + 2;
     while existing.iter().any(|p| p.name == candidate) {
-        if n == 2 {
-            candidate = format!("{base} (импорт)");
+        candidate = if n == 2 {
+            format!("{base} (импорт)")
         } else {
-            candidate = format!("{base} (импорт {n})");
-        }
+            format!("{base} (импорт {n})")
+        };
         n += 1;
-        if n > 1000 {
-            break;
+        if n > max_attempts {
+            break; // safety net — unreachable in practice
         }
     }
     candidate
@@ -702,4 +709,467 @@ mod tests {
         let errors = crate::config::collect_schema_errors(&value);
         assert!(errors.is_empty(), "schema errors: {errors:?}");
     }
+}
+
+#[cfg(test)]
+mod edge_proptests {
+    use super::*;
+    use crate::synapse_import::types::{
+        ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile,
+        ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
+    };
+    use proptest::prelude::*;
+
+    fn empty_config() -> AppConfig {
+        serde_json::from_str(
+            r#"{
+                "version": 2,
+                "settings": {
+                    "fallbackProfileId": "default",
+                    "theme": "synapse-light",
+                    "startWithWindows": true,
+                    "minimizeToTray": true,
+                    "debugLogging": true
+                },
+                "profiles": [{"id":"default","name":"Default","enabled":true,"priority":10}],
+                "physicalControls": [],
+                "encoderMappings": [],
+                "appMappings": [],
+                "bindings": [],
+                "actions": [],
+                "snippetLibrary": []
+            }"#,
+        )
+        .unwrap()
+    }
+
+    fn minimal_parsed(profiles: Vec<ParsedProfile>) -> ParsedSynapseProfiles {
+        ParsedSynapseProfiles {
+            source_kind: SourceKind::SynapseV4,
+            source_path: "test".into(),
+            profiles,
+            warnings: vec![],
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: empty profiles list → config unchanged, summary all zeros
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_empty_parsed_profiles_no_change() {
+        let base = empty_config();
+        let n_before = base.profiles.len();
+        let result = apply_parsed_into_config(base, minimal_parsed(vec![]), &ImportOptions::default());
+        assert_eq!(result.config.profiles.len(), n_before);
+        assert_eq!(result.summary.profiles_added, 0);
+        assert_eq!(result.summary.bindings_added, 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: profile with 0 bindings → profile added, 0 bindings added
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_profile_with_zero_bindings() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "Empty".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        assert_eq!(result.summary.profiles_added, 1);
+        assert_eq!(result.summary.bindings_added, 0);
+        assert_eq!(result.config.bindings.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: profile name is empty string → falls back to "Imported"
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_empty_profile_name_becomes_imported() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        let added = result.config.profiles.last().unwrap();
+        assert_eq!(added.name, "Imported");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: whitespace-only profile name → falls back to "Imported"
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_whitespace_profile_name_becomes_imported() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "   \t  ".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        let added = result.config.profiles.last().unwrap();
+        assert_eq!(added.name, "Imported");
+    }
+
+    // -----------------------------------------------------------------------
+    // Boundary: priority arithmetic — existing profile priority + 10
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn boundary_priority_is_max_plus_ten() {
+        let base = empty_config(); // Default profile has priority 10
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "New".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        let added = result.config.profiles.last().unwrap();
+        assert_eq!(added.priority, 20); // 10 + 10
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: binding with unknown control_id → skipped with warning
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_unknown_control_id_is_skipped_with_warning() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "not_a_real_control_XYZZY".into(),
+                layer: "standard".into(),
+                source_input_id: "KEY_1".into(),
+                label: "X".into(),
+                action: ParsedAction::Shortcut { key: "A".into(), ctrl: false, shift: false, alt: false, win: false },
+            }],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        assert_eq!(result.config.bindings.len(), 0);
+        assert!(result.warnings.iter().any(|w| w.code == "control_id_not_in_enum"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: binding with unknown layer → skipped with warning
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_unknown_layer_is_skipped_with_warning() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "thumb_01".into(),
+                layer: "not_a_layer".into(),
+                source_input_id: "KEY_1".into(),
+                label: "X".into(),
+                action: ParsedAction::Shortcut { key: "A".into(), ctrl: false, shift: false, alt: false, win: false },
+            }],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        assert_eq!(result.config.bindings.len(), 0);
+        assert!(result.warnings.iter().any(|w| w.code == "layer_unknown"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: TextSnippet with whitespace-only text → skipped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_whitespace_text_snippet_is_skipped() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "thumb_01".into(),
+                layer: "standard".into(),
+                source_input_id: "KEY_1".into(),
+                label: "X".into(),
+                action: ParsedAction::TextSnippet { text: "   ".into() },
+            }],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        // Whitespace-only text → BuiltAction::Skipped → no binding produced.
+        assert_eq!(result.config.bindings.len(), 0);
+    }
+
+    // -----------------------------------------------------------------------
+    // Null & empty: Sequence binding with no matching macro → warning + skipped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn null_sequence_binding_with_no_macro_emits_warning() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "thumb_01".into(),
+                layer: "standard".into(),
+                source_input_id: "KEY_1".into(),
+                label: "X".into(),
+                action: ParsedAction::Sequence { macro_guid: "nonexistent-guid".into() },
+            }],
+            macros: vec![], // no macros provided
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        assert_eq!(result.config.bindings.len(), 0);
+        assert!(result.warnings.iter().any(|w| w.code == "sequence_ref_missing"));
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: macro with 10 000 steps → no panic, all steps are converted
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_large_macro_no_panic() {
+        let steps: Vec<ParsedSequenceStep> = (0..10_000)
+            .map(|i| if i % 2 == 0 {
+                ParsedSequenceStep::Send { value: "A".into() }
+            } else {
+                ParsedSequenceStep::Sleep { delay_ms: 50 }
+            })
+            .collect();
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "thumb_01".into(),
+                layer: "standard".into(),
+                source_input_id: "KEY_1".into(),
+                label: "X".into(),
+                action: ParsedAction::Sequence { macro_guid: "m1".into() },
+            }],
+            macros: vec![ParsedMacro {
+                synapse_guid: "m1".into(),
+                name: "Big".into(),
+                steps,
+            }],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        // The macro action must be created; binding links to it.
+        assert_eq!(result.config.bindings.len(), 1);
+        assert_eq!(result.summary.macros_added, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: empty macro (no steps) → schema-mandated placeholder Sleep(0)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_empty_macro_gets_placeholder_step() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "thumb_01".into(),
+                layer: "standard".into(),
+                source_input_id: "KEY_1".into(),
+                label: "X".into(),
+                action: ParsedAction::Sequence { macro_guid: "empty-macro".into() },
+            }],
+            macros: vec![ParsedMacro {
+                synapse_guid: "empty-macro".into(),
+                name: "E".into(),
+                steps: vec![],
+            }],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        // Binding and action are created; the action must have >= 1 step (schema).
+        let binding = &result.config.bindings[0];
+        let action = result.config.actions.iter().find(|a| a.id == binding.action_ref).unwrap();
+        if let crate::config::ActionPayload::Sequence(seq) = &action.payload {
+            assert!(!seq.steps.is_empty(), "empty macro must have a placeholder step");
+        } else {
+            panic!("expected Sequence payload");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: 1001 profiles with the same name — unique_profile_name loop
+    //           must terminate within its cap and not allocate a unique name
+    //           after the cap (the 1001st collision is returned as-is + suffix).
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_many_name_collisions_loop_terminates() {
+        // Seed the config with 1001 profiles all named "X".
+        let mut base = empty_config();
+        for i in 0..1001usize {
+            base.profiles.push(serde_json::from_value(serde_json::json!({
+                "id": format!("p-{i}"),
+                "name": "X",
+                "enabled": true,
+                "priority": i
+            })).unwrap());
+        }
+        // Importing "X" should not panic or loop indefinitely.
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        // One profile was added (even if the name is a duplicate at the cap boundary).
+        assert_eq!(result.summary.profiles_added, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Overflow: selected_profile_guids is an empty vec → all profiles skipped
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn overflow_empty_selected_guids_skips_all() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g1".into(),
+            name: "P1".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions {
+            selected_profile_guids: Some(vec![]),  // empty filter → nothing matches
+            merge_strategy: MergeStrategy::Append,
+        });
+        assert_eq!(result.summary.profiles_added, 0);
+        assert_eq!(result.summary.skipped, 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Invariant: make_random_id generates IDs matching the schema regex
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_make_random_id_matches_schema_regex() {
+        let re = regex::Regex::new("^[a-z][a-z0-9-]*$").unwrap();
+        for prefix in &["profile", "action", "binding"] {
+            for _ in 0..20 {
+                let id = make_random_id(prefix);
+                assert!(re.is_match(&id), "id {id:?} does not match schema regex");
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Invariant: ReplaceByName with a name that does not exist → no change in
+    //            profile count, new profile is just appended.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_replace_by_name_no_match_is_plain_append() {
+        let base = empty_config();
+        let before_count = base.profiles.len();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "NewProfile".into(),
+            bindings: vec![],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions {
+            selected_profile_guids: None,
+            merge_strategy: MergeStrategy::ReplaceByName,
+        });
+        assert_eq!(result.config.profiles.len(), before_count + 1);
+    }
+
+    // -----------------------------------------------------------------------
+    // Invariant: Disabled action creates a Disabled action entry
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn invariant_disabled_action_is_created() {
+        let base = empty_config();
+        let parsed = minimal_parsed(vec![ParsedProfile {
+            synapse_guid: "g".into(),
+            name: "X".into(),
+            bindings: vec![ParsedBinding {
+                control_id: "thumb_01".into(),
+                layer: "standard".into(),
+                source_input_id: "KEY_1".into(),
+                label: "—".into(),
+                action: ParsedAction::Disabled,
+            }],
+            macros: vec![],
+        }]);
+        let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        assert_eq!(result.config.bindings.len(), 1);
+        assert_eq!(result.config.actions.len(), 1);
+        assert_eq!(result.config.actions[0].action_type, ActionType::Disabled);
+    }
+
+    // -----------------------------------------------------------------------
+    // Property: apply_parsed never panics on arbitrary profile names
+    // -----------------------------------------------------------------------
+
+    proptest! {
+        #[test]
+        fn prop_apply_parsed_never_panics_arbitrary_name(name in ".*") {
+            let base = empty_config();
+            let parsed = minimal_parsed(vec![ParsedProfile {
+                synapse_guid: "g".into(),
+                name,
+                bindings: vec![],
+                macros: vec![],
+            }]);
+            let _ = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+        }
+
+        // Invariant: profile count never decreases when Append strategy is used.
+        #[test]
+        fn prop_append_never_decreases_profile_count(n in 0usize..20) {
+            let base = empty_config();
+            let before = base.profiles.len();
+            let profiles: Vec<ParsedProfile> = (0..n).map(|i| ParsedProfile {
+                synapse_guid: format!("g-{i}"),
+                name: format!("P{i}"),
+                bindings: vec![],
+                macros: vec![],
+            }).collect();
+            let parsed = minimal_parsed(profiles);
+            let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+            assert!(result.config.profiles.len() >= before);
+        }
+
+        // Invariant: summary.profiles_added == profiles imported when all pass.
+        #[test]
+        fn prop_summary_profiles_added_matches_count(n in 0usize..10) {
+            let base = empty_config();
+            let profiles: Vec<ParsedProfile> = (0..n).map(|i| ParsedProfile {
+                synapse_guid: format!("g-{i}"),
+                name: format!("Unique{i}"),
+                bindings: vec![],
+                macros: vec![],
+            }).collect();
+            let parsed = minimal_parsed(profiles);
+            let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
+            assert_eq!(result.summary.profiles_added, n);
+        }
+    }
+
+    // Concurrency: N/A — apply_parsed_into_config takes ownership of AppConfig;
+    //              make_random_id uses AtomicU64 for the counter (thread-safe),
+    //              but the function itself is not designed for concurrent calls
+    //              on the same config — no concurrency contract to test here.
+    // Temporal:    shortcut_pretty and label generation involve no durations.
 }

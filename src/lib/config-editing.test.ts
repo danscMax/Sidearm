@@ -43,6 +43,7 @@ import {
   makeAppMappingId,
   extractProfileExport,
   importProfile,
+  findDuplicateAppMapping,
 } from "./config-editing";
 import type { ProfileExportData } from "./config-editing";
 
@@ -1992,6 +1993,25 @@ describe("extractProfileExport", () => {
 });
 
 // ---------------------------------------------------------------------------
+// findDuplicateAppMapping
+// ---------------------------------------------------------------------------
+
+describe("findDuplicateAppMapping", () => {
+  it("matches case-insensitively against a mixed-case stored exe", () => {
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      appMappings: [makeAppMapping({ id: "m1", profileId: "p1", exe: "Notepad.EXE" })],
+    };
+    // A fresh capture lower-cases its exe; the stored entry is mixed-case.
+    expect(findDuplicateAppMapping(config, "p1", "notepad.exe")).toBeDefined();
+    expect(findDuplicateAppMapping(config, "p1", "  NOTEPAD.exe ")).toBeDefined();
+    // Different profile or different exe → no match.
+    expect(findDuplicateAppMapping(config, "p2", "notepad.exe")).toBeUndefined();
+    expect(findDuplicateAppMapping(config, "p1", "other.exe")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // importProfile
 // ---------------------------------------------------------------------------
 
@@ -2068,6 +2088,31 @@ describe("importProfile", () => {
     // Imported appMapping should reference the imported profile
     const importedMapping = result.appMappings[0];
     expect(importedMapping!.profileId).toBe(importedProfileInResult!.id);
+  });
+
+  it("imports a profile whose export omits appMappings without throwing", () => {
+    const config = createMinimalConfig();
+    // Legacy / hand-edited export missing the appMappings field entirely.
+    const exportData = {
+      ...makeExportData(),
+      appMappings: undefined,
+    } as unknown as ProfileExportData;
+    let result!: AppConfig;
+    expect(() => {
+      result = importProfile(config, exportData);
+    }).not.toThrow();
+    expect(result.appMappings).toHaveLength(0);
+  });
+
+  it("normalizes imported appMapping exe to lowercase", () => {
+    const config = createMinimalConfig();
+    const exportData = makeExportData({
+      appMappings: [
+        makeAppMapping({ id: "x", profileId: "imported-profile", exe: "Notepad.EXE" }),
+      ],
+    });
+    const result = importProfile(config, exportData);
+    expect(result.appMappings[0]!.exe).toBe("notepad.exe");
   });
 
   it("generates new IDs on collision and remaps internal references", () => {

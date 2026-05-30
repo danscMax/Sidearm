@@ -1243,7 +1243,13 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         CallNextHookEx, PostThreadMessageW, KBDLLHOOKSTRUCT,
     };
 
-    if code >= 0 {
+    // A panic unwinding across this `extern "system"` boundary is UB. Contain any
+    // panic in the hook body (RefCell borrows, allocation, FFI) and fall through
+    // to CallNextHookEx (don't suppress) instead of unwinding. The closure does
+    // not inherit the `unsafe fn` context, so its body is an explicit `unsafe`.
+    let should_suppress = if code >= 0 {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || -> bool {
+            unsafe {
         // Record that the hook callback fired — the health monitor uses this
         // to skip unnecessary SendInput probes when the hook is clearly alive.
         HOOK_HAD_CALLBACK.with(|cell| cell.set(true));
@@ -1254,7 +1260,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         // Probe event from the health monitor — acknowledge and pass through.
         if kb.dwExtraInfo == HOOK_PROBE_EXTRA_INFO {
             HELPER_PROBE_RECEIVED.with(|cell| cell.set(true));
-            return CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param);
+            return false;
         }
 
         let internal_injection =
@@ -1301,7 +1307,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                     PostThreadMessageW(tid, WM_APP, 0, 0);
                 }
             });
-            return CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param);
+            return false;
         }
 
         // Returns (suppress_key, new_match_added, inject_mask_key)
@@ -1661,10 +1667,20 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         }
 
         if suppress {
-            return 1;
+            return true;
         }
-    }
+        // Natural end of the hook body — pass the key through (don't suppress).
+        false
+            }
+        }))
+        .unwrap_or(false)
+    } else {
+        false
+    };
 
+    if should_suppress {
+        return 1;
+    }
     CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param)
 }
 
@@ -2400,6 +2416,11 @@ fn run_foreground_watcher(
         _event_thread: u32,
         _event_time: u32,
     ) {
+        // A panic unwinding across this `extern "system"` boundary is UB, and
+        // this callback runs on a thread in the MAIN app process. Contain any
+        // panic (heavy capture/emit, poisoned lock, re-entrant borrow) and drop
+        // the foreground event instead of unwinding.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         FG_CTX.with(|cell| {
             let borrow = cell.borrow();
             let Some(ctx) = borrow.as_ref() else { return };
@@ -2435,6 +2456,10 @@ fn run_foreground_watcher(
                 &ctx.config,
             );
         });
+        }));
+        if outcome.is_err() {
+            log::error!("[capture] winevent_callback panicked; foreground event dropped.");
+        }
     }
 
     // Store context in thread-local

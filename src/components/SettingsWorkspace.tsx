@@ -239,7 +239,11 @@ export function SettingsWorkspace({
     });
 
     if (typeof filePath === "string") {
-      await exportProfileBundle(filePath, JSON.stringify(data, null, 2));
+      try {
+        await exportProfileBundle(filePath, JSON.stringify(data, null, 2));
+      } catch (unknownError) {
+        setError(normalizeCommandError(unknownError));
+      }
     }
   }
 

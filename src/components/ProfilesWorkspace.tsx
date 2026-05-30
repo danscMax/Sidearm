@@ -673,14 +673,18 @@ export function ProfilesWorkspace({
             className="action-button action-button--small"
             onClick={async () => {
               if (!activeConfig || !activeProfile) return;
-              const data = extractProfileExport(activeConfig, activeProfile.id);
-              const json = JSON.stringify(data, null, 2);
-              const path = await save({
-                title: t("settings.exportDialogTitle"),
-                defaultPath: `${activeProfile.name}.json`,
-                filters: [{ name: "JSON", extensions: ["json"] }],
-              });
-              if (path) await exportProfileFile(path, json);
+              try {
+                const data = extractProfileExport(activeConfig, activeProfile.id);
+                const json = JSON.stringify(data, null, 2);
+                const path = await save({
+                  title: t("settings.exportDialogTitle"),
+                  defaultPath: `${activeProfile.name}.json`,
+                  filters: [{ name: "JSON", extensions: ["json"] }],
+                });
+                if (path) await exportProfileFile(path, json);
+              } catch {
+                showToast(t("settings.exportProfileError"), "warning");
+              }
             }}
           >
             {t("profile.exportProfile")}

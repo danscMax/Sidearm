@@ -518,6 +518,55 @@ describe("useAppPersistence", () => {
 
       expect(result.current.lastSave).toEqual(saveResponse);
     });
+
+    it("drains a queued edit on unmount even while a save is in flight (no data loss on close)", async () => {
+      mockedLoadConfig.mockResolvedValue(loadResponse);
+      const { result, unmount } = renderHook(() => useAppPersistence());
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+
+      // First save hangs in flight; the second (drained) save resolves at once.
+      let resolveFirst!: (v: SaveConfigResponse) => void;
+      mockedSaveConfig.mockReset();
+      mockedSaveConfig.mockImplementationOnce(
+        () =>
+          new Promise<SaveConfigResponse>((res) => {
+            resolveFirst = res;
+          }),
+      );
+      mockedSaveConfig.mockResolvedValue(saveResponse);
+
+      const firstEdit = makeConfig({ version: 2 });
+      const secondEdit = makeConfig({ version: 3 });
+
+      // Edit 1 → flush debounce → first save starts and hangs.
+      act(() => {
+        result.current.updateDraft(() => firstEdit);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(mockedSaveConfig).toHaveBeenCalledTimes(1);
+      expect(mockedSaveConfig).toHaveBeenNthCalledWith(1, firstEdit);
+
+      // Edit 2 queued while the first save is still in flight, then unmount
+      // (window close) before it completes.
+      act(() => {
+        result.current.updateDraft(() => secondEdit);
+      });
+      unmount();
+
+      // Completing the in-flight save must drain the queued edit immediately
+      // (the teardown path), persisting secondEdit instead of dropping it.
+      await act(async () => {
+        resolveFirst(saveResponse);
+        await Promise.resolve();
+      });
+
+      expect(mockedSaveConfig).toHaveBeenCalledTimes(2);
+      expect(mockedSaveConfig).toHaveBeenNthCalledWith(2, secondEdit);
+    });
   });
 
   // =========================================================================

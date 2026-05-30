@@ -152,8 +152,10 @@ pub enum MergeStrategy {
     /// "(импорт)" suffix. (Default.)
     #[default]
     Append,
-    /// Delete any existing profile whose name matches the imported one
-    /// (along with its bindings/actions/appMappings), then append.
+    /// Delete at most one existing profile whose name matches the imported one
+    /// (along with its bindings/actions/appMappings), then append. If several
+    /// profiles share the name, only the first is replaced and a
+    /// `replace_by_name_ambiguous` warning is emitted.
     ReplaceByName,
 }
 

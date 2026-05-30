@@ -159,9 +159,16 @@ export function useAppPersistence(
       onAutoSaveFailedRef.current?.(normalized.message);
     } finally {
       isSavingRef.current = false;
-      // If new changes queued during save, save again promptly (skip if unmounted)
-      if (saveQueueRef.current && !disposedRef.current) {
-        saveTimerRef.current = setTimeout(flushSave, 100);
+      // If new changes queued during this save, drain them. On teardown
+      // (unmount / window close) flush immediately rather than via a timer:
+      // the timer path was skipped when disposed, silently dropping an edit
+      // made within the debounce window while a save was already in flight.
+      if (saveQueueRef.current) {
+        if (disposedRef.current) {
+          void flushSave();
+        } else {
+          saveTimerRef.current = setTimeout(flushSave, 100);
+        }
       }
     }
   }

@@ -46,7 +46,7 @@ pub fn apply_parsed_into_config(
             }
         }
         if options.merge_strategy == MergeStrategy::ReplaceByName {
-            remove_profile_by_name(&mut config, &profile.name);
+            remove_profile_by_name(&mut config, &profile.name, &mut warnings);
         }
         match append_profile(&mut config, profile, &mut warnings) {
             Ok(ProfileAddition { bindings, actions }) => {
@@ -342,38 +342,48 @@ fn build_sequence_action(
 // Helpers
 // ============================================================================
 
-/// Remove any profile whose name matches `name`, along with all of its
-/// bindings, actions referenced only by those bindings, and appMappings.
-/// Used by `MergeStrategy::ReplaceByName`.
-fn remove_profile_by_name(config: &mut AppConfig, name: &str) {
-    let target_ids: Vec<String> = config
+/// Remove the single profile that `MergeStrategy::ReplaceByName` should
+/// overwrite, along with its bindings, appMappings, and any actions referenced
+/// *only* by those bindings.
+///
+/// Profile names are NOT unique in `AppConfig` — the user can rename freely, and
+/// the imported `name` comes from an untrusted file. Removing *every* same-named
+/// profile would let importing one profile named e.g. "Default" wipe several
+/// unrelated user profiles (and their bindings/macros). So we replace at most
+/// ONE (the first match) and warn when the name was ambiguous.
+fn remove_profile_by_name(config: &mut AppConfig, name: &str, warnings: &mut Vec<ImportWarning>) {
+    let matching_ids: Vec<String> = config
         .profiles
         .iter()
         .filter(|p| p.name == name)
         .map(|p| p.id.clone())
         .collect();
-    if target_ids.is_empty() {
+    let Some(target_id) = matching_ids.first().cloned() else {
         return;
+    };
+    if matching_ids.len() > 1 {
+        warnings.push(
+            ImportWarning::new(
+                "replace_by_name_ambiguous",
+                format!(
+                    "{} existing profiles are named `{name}`; replaced only the first and left the others untouched.",
+                    matching_ids.len()
+                ),
+            )
+            .with_context(name.to_string()),
+        );
     }
-    let target_set: std::collections::HashSet<&str> =
-        target_ids.iter().map(String::as_str).collect();
 
     let dropped_action_ids: std::collections::HashSet<String> = config
         .bindings
         .iter()
-        .filter(|b| target_set.contains(b.profile_id.as_str()))
+        .filter(|b| b.profile_id == target_id)
         .map(|b| b.action_ref.clone())
         .collect();
 
-    config
-        .profiles
-        .retain(|p| !target_set.contains(p.id.as_str()));
-    config
-        .bindings
-        .retain(|b| !target_set.contains(b.profile_id.as_str()));
-    config
-        .app_mappings
-        .retain(|m| !target_set.contains(m.profile_id.as_str()));
+    config.profiles.retain(|p| p.id != target_id);
+    config.bindings.retain(|b| b.profile_id != target_id);
+    config.app_mappings.retain(|m| m.profile_id != target_id);
 
     // An action can be referenced by multiple bindings (e.g. macros shared
     // within a profile). Only drop actions whose *remaining* bindings are
@@ -665,6 +675,48 @@ mod tests {
         // New binding + action present
         assert_eq!(result.config.bindings.len(), 1);
         assert_eq!(result.config.actions.len(), 1);
+    }
+
+    #[test]
+    fn replace_by_name_with_duplicate_names_removes_only_one_and_warns() {
+        let mut base = empty_config();
+        // Two distinct user profiles share the name "Gaming" (names are not
+        // unique). Importing a "Gaming" profile must NOT wipe both.
+        base.profiles.push(serde_json::from_str(
+            r#"{"id": "gaming-a", "name": "Gaming", "enabled": true, "priority": 5}"#,
+        ).unwrap());
+        base.profiles.push(serde_json::from_str(
+            r#"{"id": "gaming-b", "name": "Gaming", "enabled": true, "priority": 6}"#,
+        ).unwrap());
+
+        let parsed = ParsedSynapseProfiles {
+            source_kind: super::super::types::SourceKind::SynapseV4,
+            source_path: "t".into(),
+            profiles: vec![ParsedProfile {
+                synapse_guid: "g".into(),
+                name: "Gaming".into(),
+                bindings: vec![],
+                macros: vec![],
+            }],
+            warnings: vec![],
+        };
+        let result = apply_parsed_into_config(
+            base,
+            parsed,
+            &ImportOptions {
+                selected_profile_guids: None,
+                merge_strategy: MergeStrategy::ReplaceByName,
+            },
+        );
+        // Exactly ONE same-named profile was removed (the first match); the
+        // unrelated duplicate survived.
+        assert!(!result.config.profiles.iter().any(|p| p.id == "gaming-a"));
+        assert!(result.config.profiles.iter().any(|p| p.id == "gaming-b"));
+        // The ambiguity was surfaced as a warning.
+        assert!(result
+            .warnings
+            .iter()
+            .any(|w| w.code == "replace_by_name_ambiguous"));
     }
 
     #[test]

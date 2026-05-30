@@ -12,6 +12,13 @@ use super::makecode;
 use super::mapping::ModifierFlags;
 use super::types::{ImportWarning, ParsedSequenceStep};
 
+/// Upper bound on a single imported macro delay. Synapse stores delays as raw
+/// milliseconds (v3/xml `<Delay>`) or seconds (v4/xml `<Number>`); a crafted or
+/// fat-fingered value (e.g. `4294967` s ≈ 49 days) would otherwise be persisted
+/// verbatim into a `Sleep` step and hang the runtime when the macro fires. Cap
+/// each step so an import can never produce a multi-minute stall.
+const MAX_MACRO_DELAY_MS: u32 = 60_000; // 60 s
+
 /// A keyboard macro event normalized across Synapse formats.
 pub enum NormalizedEvent {
     /// Inter-event pause, in milliseconds.
@@ -43,7 +50,16 @@ pub fn build(
         match *event {
             NormalizedEvent::Delay(delay_ms) => {
                 if delay_ms > 0 {
-                    steps.push(ParsedSequenceStep::Sleep { delay_ms });
+                    let clamped = delay_ms.min(MAX_MACRO_DELAY_MS);
+                    if clamped != delay_ms {
+                        warnings.push(ImportWarning::new(
+                            "macro_delay_clamped",
+                            format!(
+                                "Macro `{macro_name}` had a {delay_ms} ms delay — clamped to {MAX_MACRO_DELAY_MS} ms."
+                            ),
+                        ));
+                    }
+                    steps.push(ParsedSequenceStep::Sleep { delay_ms: clamped });
                 }
             }
             NormalizedEvent::Key {
@@ -197,13 +213,22 @@ mod edge_proptests {
 
     #[test]
     fn boundary_delay_min_and_max() {
-        for &delay in &[1u32, u32::MAX] {
-            let events = vec![NormalizedEvent::Delay(delay)];
-            let mut w = Vec::new();
-            let steps = build(&events, "m", &mut w);
-            assert_eq!(steps.len(), 1);
-            assert!(matches!(&steps[0], ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == delay));
-        }
+        // A small delay passes through unchanged, no warning.
+        let mut w = Vec::new();
+        let steps = build(&[NormalizedEvent::Delay(1)], "m", &mut w);
+        assert_eq!(steps.len(), 1);
+        assert!(matches!(&steps[0], ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == 1));
+        assert!(w.is_empty());
+
+        // An absurd delay is clamped to the ceiling with a `macro_delay_clamped`
+        // warning, so an imported macro can never stall the runtime for minutes.
+        let mut w = Vec::new();
+        let steps = build(&[NormalizedEvent::Delay(u32::MAX)], "m", &mut w);
+        assert_eq!(steps.len(), 1);
+        assert!(
+            matches!(&steps[0], ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == MAX_MACRO_DELAY_MS)
+        );
+        assert!(w.iter().any(|x| x.code == "macro_delay_clamped"));
     }
 
     // -----------------------------------------------------------------------
@@ -360,5 +385,6 @@ mod edge_proptests {
     }
 
     // Concurrency: N/A — build() takes only immutable slices and owned Vecs.
-    // Temporal: delay values are u32 milliseconds; u32::MAX (~49 days) is handled above.
+    // Temporal: delay values are u32 milliseconds; values above MAX_MACRO_DELAY_MS
+    // are clamped (see boundary_delay_min_and_max).
 }

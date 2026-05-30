@@ -348,6 +348,26 @@ describe("temporal — captureVerificationObservation timestamp gate", () => {
       { numRuns: 500 },
     );
   });
+
+  it("ignores key-up frames so a release cannot overwrite the key-down observation", () => {
+    const session = makeSession([makeStep({ startedAt: 1000, result: "pending" })]);
+    const down = makeEvent({ receivedAt: 1500, encodedKey: "F13", isKeyUp: false });
+    const afterDown = captureVerificationObservation(session, down);
+    expect(afterDown.steps[0].observedEncodedKey).toBe("F13");
+
+    // A later key-up (here with a different/empty encodedKey) must NOT clobber
+    // the recorded key-down observation.
+    const up = makeEvent({ receivedAt: 1600, encodedKey: "", isKeyUp: true });
+    const afterUp = captureVerificationObservation(afterDown, up);
+    expect(afterUp).toBe(afterDown); // ref-eq: unchanged
+    expect(afterUp.steps[0].observedEncodedKey).toBe("F13");
+  });
+
+  it("ignores auto-repeat frames", () => {
+    const session = makeSession([makeStep({ startedAt: 1000, result: "pending" })]);
+    const repeat = makeEvent({ receivedAt: 1500, isRepeat: true });
+    expect(captureVerificationObservation(session, repeat)).toBe(session);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -521,37 +521,28 @@ describe("overflow: uniqueStrings with 100k-char single string", () => {
   });
 });
 
-describe("overflow: parseCommaSeparatedUniqueValues with unicode separators and BOM", () => {
-  it("BOM character in value is not stripped (treated as part of the token)", () => {
-    // BOM U+FEFF at start: after split and trim it becomes part of the first segment
-    const withBOM = "﻿tag1,tag2";
-    const result = parseCommaSeparatedUniqueValues(withBOM);
-    // Result should be 2 non-empty items; exact content depends on whether BOM is
-    // included in "﻿tag1" — we just verify no crash and correct count
-    expect(result.length).toBe(2);
+describe("overflow: parseCommaSeparatedUniqueValues with unicode separators and invisibles", () => {
+  it("leading BOM (U+FEFF) is stripped from the token", () => {
+    const bom = String.fromCodePoint(0xfeff);
+    const result = parseCommaSeparatedUniqueValues(`${bom}tag1,tag2`);
+    // U+FEFF is in the zero-width strip set, so the BOM is removed from "tag1".
+    expect(result).toEqual(["tag1", "tag2"]);
   });
 
-  it("non-breaking space (nbsp) is not treated as whitespace by trim() — SMELL", () => {
-    // String.prototype.trim() does NOT strip &nbsp; (U+00A0).
-    // A value like " " is non-empty after trim() but invisible visually.
-    // This is a known JS behavior — document it.
-    const nbsp = " ";
+  it("non-breaking space (U+00A0) collapses to empty via trim() and is dropped", () => {
+    const nbsp = String.fromCodePoint(0x00a0);
     const result = parseCommaSeparatedUniqueValues(`a,${nbsp},b`);
-    // " ".trim() === " " (non-empty!), so it will appear in the output.
-    // This could cause invisible duplicate-looking tags in the UI.
-    // We document: nbsp IS NOT dropped — callers should be aware.
-    expect(result).toContain("a");
-    expect(result).toContain("b");
-    // The nbsp segment survives because trim() doesn't strip U+00A0 in most engines.
-    // (May be runtime-dependent.)
+    // U+00A0 is NOT in the zero-width set, but String.prototype.trim() DOES strip
+    // it (it is ECMAScript WhiteSpace), so the middle token collapses to "".
+    expect(result).toEqual(["a", "b"]);
   });
 
-  it("zero-width space U+200B survives trim and appears in result — SMELL", () => {
-    const zwsp = "​";
+  it("zero-width space (U+200B) is stripped — no phantom token", () => {
+    const zwsp = String.fromCodePoint(0x200b);
     const result = parseCommaSeparatedUniqueValues(`a,${zwsp},b`);
-    // zwsp is not stripped by trim() in JS — it will appear as a separate token
-    expect(result).toContain("a");
-    expect(result).toContain("b");
+    // trim() does NOT remove U+200B, so stripZeroWidth removes it first; the
+    // middle token then collapses to "" and is dropped by uniqueStrings.
+    expect(result).toEqual(["a", "b"]);
   });
 });
 

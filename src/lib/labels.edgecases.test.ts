@@ -364,26 +364,23 @@ describe("null & empty: labelForEncoderSource — undefined returns non-empty fa
   });
 });
 
-describe("null & empty: surfacePrimaryLabel — whitespace-only binding label falls through to action.pretty", () => {
-  it("whitespace-only binding label uses action.pretty instead", () => {
-    // surfacePrimaryLabel returns `binding.label || action?.pretty || i18n.t("binding.assigned")`
-    // A binding.label of "   " is truthy in JS — this could be a bug: whitespace looks
-    // assigned but provides no useful label. We document the current behavior.
+describe("null & empty: surfacePrimaryLabel — whitespace-only binding label falls through", () => {
+  it("whitespace-only binding label is not returned verbatim", () => {
     const binding: Binding = {
       id: "b1",
       profileId: "p1",
       layer: "standard",
       controlId: "thumb_01",
-      label: "   ",   // whitespace — truthy in JS, may fool the short-circuit
+      label: "   ",
       actionRef: "a1",
       enabled: true,
     };
+    // Fixed: a whitespace-only label is falsy after trim(), so it falls through
+    // to action.pretty (null here) and then the i18n "assigned" fallback —
+    // it is never rendered as a blank string.
     const result = surfacePrimaryLabel(binding, null);
-    // Current code: `binding.label || ...` — whitespace is truthy, so it returns "   "
-    // We document this as a SMELL: whitespace-only labels are returned as-is.
-    expect(typeof result).toBe("string");
-    // The result is either the whitespace label (current behavior) or falls through — record it:
-    expect(result.length).toBeGreaterThanOrEqual(0);
+    expect(result).not.toBe("   ");
+    expect(result.trim().length).toBeGreaterThan(0);
   });
 });
 

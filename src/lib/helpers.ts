@@ -41,8 +41,25 @@ export function uniqueStrings(items: string[]): string[] {
   });
 }
 
+/** Invisible code points that String.prototype.trim() does NOT remove:
+ *  U+200B..U+200D (zero-width space/non-joiner/joiner), U+2060 (word joiner),
+ *  U+FEFF (BOM / zero-width no-break space). */
+const ZERO_WIDTH_CODE_POINTS = new Set([0x200b, 0x200c, 0x200d, 0x2060, 0xfeff]);
+
+function stripZeroWidth(value: string): string {
+  let out = "";
+  for (const ch of value) {
+    if (!ZERO_WIDTH_CODE_POINTS.has(ch.codePointAt(0) ?? -1)) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
 export function parseCommaSeparatedUniqueValues(value: string): string[] {
-  return uniqueStrings(value.split(",").map((tag) => tag.trim()));
+  // Strip zero-width characters first: trim() leaves them in place, so a token
+  // made only of them would otherwise survive as a phantom non-empty entry.
+  return uniqueStrings(value.split(",").map((tag) => stripZeroWidth(tag).trim()));
 }
 
 /** Append `item` to `prev`, keeping at most `cap` most-recent elements (FIFO

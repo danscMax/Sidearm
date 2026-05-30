@@ -785,6 +785,13 @@ fn force_release_all_replayed_modifiers(reason: &str) {
     });
 }
 
+/// Capacity of the bounded keyboard-event channel between the capture producer
+/// (LL hook thread + helper stdout reader, hot path) and the worker consumer,
+/// which a slow executor can stall. An unbounded channel would let events
+/// accumulate to OOM during such a stall — the v0.1.15 log_tx failure mode.
+/// 10_000 events ≈ 1–2 MB max, ~100 ms of typing on the fastest keyboards.
+const CAPTURE_EVENT_CAPACITY: usize = 10_000;
+
 impl CaptureBackendHandle {
     pub(super) fn start(
         app: AppHandle,
@@ -793,14 +800,8 @@ impl CaptureBackendHandle {
         app_name: String,
     ) -> Result<Self, String> {
         let registrations = build_hotkey_registrations(&config)?;
-        // Bounded keyboard event channel. Producer (LL hook thread + helper
-        // subprocess stdout reader) writes from the hot path; consumer
-        // (worker_thread) can be stalled by a slow executor (e.g. SendInput
-        // blocked on a hung target).  An unbounded channel here would let
-        // events accumulate to OOM during such a stall — same failure mode
-        // as the v0.1.15 log_tx incident.  10 000 events ≈ 1–2 MB max,
-        // covering ~100 ms of typing on the fastest mechanical keyboards.
-        const CAPTURE_EVENT_CAPACITY: usize = 10_000;
+        // Bounded keyboard event channel — see the module-level
+        // CAPTURE_EVENT_CAPACITY for the OOM rationale.
         let (event_tx, event_rx) =
             mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
         let helper_event_tx = event_tx.clone();
@@ -3889,20 +3890,13 @@ mod edge_proptests {
 
     #[test]
     fn unit_capture_event_channel_capacity_is_bounded_and_reasonable() {
-        // CAPTURE_EVENT_CAPACITY is defined inside CaptureBackendHandle::start.
-        // We cannot reach it by name, but we can assert its documented value:
-        // "10_000 events ≈ 1–2 MB max" from the source comment.
-        // If someone changes the constant to usize::MAX (unbounded sentinel) or
-        // zero, this test catches the regression.  The value is documented in
-        // the source as 10_000; assert the range [1, 1_000_000].
-        //
-        // Directly assert the inline constant rather than re-defining it, so
-        // a rename/refactor that shifts the value still triggers a compile error.
-        const CAPTURE_EVENT_CAPACITY: usize = 10_000;
+        // CAPTURE_EVENT_CAPACITY is now a module-level const, so this test
+        // references the real production value by name — a change to an
+        // unbounded sentinel or zero is caught here. Assert range [1, 1_000_000].
         assert!(CAPTURE_EVENT_CAPACITY >= 1,
             "channel capacity must be at least 1 (nonzero)");
         assert!(CAPTURE_EVENT_CAPACITY <= 1_000_000,
-            "channel capacity {CAPTURE_EVENT_CAPACITY} is suspiciously large — OOM risk");
+            "channel capacity {} is suspiciously large — OOM risk", CAPTURE_EVENT_CAPACITY);
         // Sanity: ~10 µs per event × 10k events = 100ms of burst headroom
         // without the worker being stalled = reasonable bound
         let approx_bytes_per_event: usize = 200; // EncodedKeyEvent is ~80 bytes; 200 is conservative

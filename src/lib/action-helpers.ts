@@ -266,15 +266,18 @@ export function setSequenceStepDelay(
   step: SequenceStep,
   nextDelay: number | undefined,
 ): SequenceStep {
+  // Clamp negative delays to 0 — a negative delayMs would serialize to a
+  // negative JSON number and fail Rust's u32 deserialization on save/load.
+  const clamped = nextDelay === undefined ? undefined : Math.max(0, nextDelay);
   if (step.type === "sleep") {
     return {
       ...step,
-      delayMs: nextDelay ?? 100,
+      delayMs: clamped ?? 100,
     };
   }
 
   return {
     ...step,
-    delayMs: nextDelay,
+    delayMs: clamped,
   };
 }

@@ -288,17 +288,16 @@ describe("boundary: setSequenceStepDelay — extreme delay values", () => {
     );
   });
 
-  it("setSequenceStepDelay with negative delay is accepted without throwing (callers must validate)", () => {
-    // The function itself has no clamping logic; negative delays pass through.
-    // This is a SMELL: negative sleep duration is semantically invalid.
+  it("setSequenceStepDelay clamps a negative delay to 0", () => {
+    // Negative delays are clamped to 0 — a negative delayMs would serialize to a
+    // negative JSON number and fail Rust's u32 deserialization on save/load.
     const step: SequenceStep = { type: "sleep", delayMs: 100 };
     let result: SequenceStep;
     expect(() => {
       result = setSequenceStepDelay(step, -500);
     }).not.toThrow();
-    // Sleep step clamps undefined → 100, but accepts -500 as-is
     if (result!.type === "sleep") {
-      expect(result!.delayMs).toBe(-500);
+      expect(result!.delayMs).toBe(0);
     }
   });
 });

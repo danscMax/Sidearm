@@ -69,6 +69,14 @@ export function appendToBoundedArray<T>(prev: readonly T[], item: T, cap: number
   return next.length > cap ? next.slice(next.length - cap) : next;
 }
 
+/** Return a new Set with `value` toggled — removed if present, added otherwise. */
+export function toggleInSet<T>(set: ReadonlySet<T>, value: T): Set<T> {
+  const next = new Set(set);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
 export function parseCommaSeparatedList(value: string): string[] {
   return value
     .split(",")

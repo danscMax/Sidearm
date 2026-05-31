@@ -12,6 +12,21 @@ import type {
 import { MEDIA_KEY_OPTIONS, MOUSE_ACTION_OPTIONS } from "./constants";
 import { labelForPasteMode } from "./labels";
 
+/** Active keyboard-modifier labels in canonical Ctrl→Shift→Alt→Win order. */
+export function modifierLabels(m: {
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  win?: boolean;
+}): string[] {
+  return [
+    m.ctrl ? "Ctrl" : null,
+    m.shift ? "Shift" : null,
+    m.alt ? "Alt" : null,
+    m.win ? "Win" : null,
+  ].filter(Boolean) as string[];
+}
+
 export function describeActionSummary(
   action: Action | null,
   snippetsById: Map<string, SnippetLibraryItem>,
@@ -21,25 +36,13 @@ export function describeActionSummary(
   }
 
   if (action.type === "shortcut") {
-    const modifiers = [
-      action.payload.ctrl ? "Ctrl" : null,
-      action.payload.shift ? "Shift" : null,
-      action.payload.alt ? "Alt" : null,
-      action.payload.win ? "Win" : null,
-      action.payload.key,
-    ].filter(Boolean);
-
+    const modifiers = [...modifierLabels(action.payload), action.payload.key].filter(Boolean);
     return `Шорткат: ${modifiers.join(" + ")}`;
   }
 
   if (action.type === "mouseAction") {
     const { payload } = action;
-    const mods = [
-      payload.ctrl ? "Ctrl" : null,
-      payload.shift ? "Shift" : null,
-      payload.alt ? "Alt" : null,
-      payload.win ? "Win" : null,
-    ].filter(Boolean);
+    const mods = modifierLabels(payload);
     const actionLabel = mouseActionLabel(payload.action) ?? payload.action;
     const prefix = mods.length > 0 ? `${mods.join(" + ")} + ` : "";
     return `Мышь: ${prefix}${actionLabel}`;

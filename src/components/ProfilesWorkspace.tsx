@@ -22,7 +22,7 @@ import {
   bindingMatchesQuery,
   conflictingBindingIds,
 } from "../lib/conflict-detection";
-import { sortAppMappings } from "../lib/helpers";
+import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
@@ -640,12 +640,7 @@ export function ProfilesWorkspace({
             });
           }}
           onToggleMultiSelect={(id) => {
-            setMultiSelectedControlIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            });
+            setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
           }}
           onOpenActionPicker={handleOpenActionPicker}
           onSelectLayer={onSelectLayer}

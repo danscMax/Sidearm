@@ -26,6 +26,7 @@ import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
   mediaKeyLabel,
+  modifierLabels,
   mouseActionLabel,
   setSequenceStepDelay,
 } from "../lib/action-helpers";
@@ -631,7 +632,7 @@ export function ActionPickerModal({
         case "textSnippet": {
           // Preserve tags from existing inline payload so editing the text
           // through this picker doesn't silently drop tag metadata that was
-          // set elsewhere (e.g. ActionInspector).
+          // set elsewhere.
           const preservedTags =
             existingAction?.type === "textSnippet" &&
             existingAction.payload.source === "inline"
@@ -681,22 +682,11 @@ export function ActionPickerModal({
   function autoName(actionType: ActionType): string {
     switch (actionType) {
       case "shortcut": {
-        const parts = [
-          shortcutDraft.ctrl ? "Ctrl" : null,
-          shortcutDraft.shift ? "Shift" : null,
-          shortcutDraft.alt ? "Alt" : null,
-          shortcutDraft.win ? "Win" : null,
-          shortcutDraft.key || null,
-        ].filter(Boolean);
+        const parts = [...modifierLabels(shortcutDraft), shortcutDraft.key || null].filter(Boolean);
         return parts.length > 0 ? parts.join(" + ") : t("picker.autoShortcut");
       }
       case "mouseAction": {
-        const mods = [
-          mouseDraft.ctrl ? "Ctrl" : null,
-          mouseDraft.shift ? "Shift" : null,
-          mouseDraft.alt ? "Alt" : null,
-          mouseDraft.win ? "Win" : null,
-        ].filter(Boolean);
+        const mods = modifierLabels(mouseDraft);
         const actionLabel = mouseActionLabel(mouseDraft.action) ?? t("picker.autoMouse");
         return mods.length > 0 ? `${mods.join(" + ")} + ${actionLabel}` : actionLabel;
       }

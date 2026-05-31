@@ -803,10 +803,6 @@ select::checkmark {
   border-color: rgba(159, 202, 105, 0.18);
 }
 
-.panel--compact {
-  padding: 14px;
-}
-
 .panel__eyebrow {
   display: block;
   margin: 16px 0 10px;
@@ -826,16 +822,6 @@ select::checkmark {
 .panel__muted {
   margin: 0;
   color: var(--c-text-muted);
-}
-
-.panel__warning {
-  margin: 0;
-  padding: var(--space-xs) var(--space-sm);
-  border-radius: var(--radius-sm);
-  background: hsl(40 80% 20% / 0.5);
-  color: hsl(40 90% 70%);
-  font-size: var(--fs-body-sm);
-  grid-column: 1 / -1;
 }
 
 .panel__path {
@@ -1278,47 +1264,6 @@ select::checkmark {
   font-weight: 600;
 }
 
-/* ── Toggle chip ── */
-.toggle-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  border: 1px solid var(--c-border);
-  font-size: 12px;
-  color: var(--c-text-muted);
-  cursor: pointer;
-  transition: all 0.15s;
-  user-select: none;
-}
-
-.toggle-chip input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-}
-
-.toggle-chip:has(input:checked) {
-  background: var(--c-accent-dim);
-  border-color: var(--c-accent);
-  color: var(--c-accent);
-}
-
-.toggle-chip:hover {
-  border-color: var(--c-border-hover);
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.toggle-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 /* ── Custom toggle switch ── */
 .toggle-switch {
   position: relative;
@@ -1672,24 +1617,6 @@ select::checkmark {
   animation: tab-fade-in 120ms ease-out;
 }
 
-
-/* Center workspace column */
-.workspace__center {
-  --layer-accent: #9fca69;
-  --layer-rgb: 159, 202, 105;
-  --layer-border-rgb: 180, 226, 125;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  padding: 0;
-}
-
-.workspace__center[data-layer="hypershift"] {
-  --layer-accent: #e8943a;
-  --layer-rgb: 232, 148, 58;
-  --layer-border-rgb: 255, 190, 100;
-}
 
 /* ── Mouse visualization (tabbed) ── */
 .mouse-visual-tabs {
@@ -3668,16 +3595,6 @@ code {
   padding: 9px 16px;
   font-size: 12px;
   border-radius: 10px;
-}
-
-.expert-section .toggle-grid {
-  gap: 6px;
-}
-
-.expert-section .toggle-chip {
-  padding: 3px 8px;
-  font-size: 11px;
-  border-radius: 8px;
 }
 
 /* ── Properties header (name + signal badge) ── */

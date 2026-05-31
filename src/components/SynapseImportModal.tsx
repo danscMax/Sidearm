@@ -6,6 +6,7 @@ import {
   importSynapseIntoConfig,
   normalizeCommandError,
 } from "../lib/backend";
+import { toggleInSet } from "../lib/helpers";
 import type {
   ImportSummary,
   ImportWarning,
@@ -58,21 +59,11 @@ export function SynapseImportModal({
   );
 
   function toggleProfile(guid: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(guid)) next.delete(guid);
-      else next.add(guid);
-      return next;
-    });
+    setSelected((prev) => toggleInSet(prev, guid));
   }
 
   function toggleExpanded(guid: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(guid)) next.delete(guid);
-      else next.add(guid);
-      return next;
-    });
+    setExpanded((prev) => toggleInSet(prev, guid));
   }
 
   async function handleSubmit() {

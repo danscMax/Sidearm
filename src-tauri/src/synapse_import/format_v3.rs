@@ -1064,11 +1064,12 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Overflow: v3 macro with u32::MAX delay value → preserved as Sleep
+    // Overflow: v3 macro with u32::MAX delay value → clamped (never persisted
+    // raw) with a `macro_delay_clamped` warning, so it can't hang the runtime.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn overflow_v3_macro_u32_max_delay_preserved() {
+    fn overflow_v3_macro_u32_max_delay_clamped() {
         let xml = format!(
             r#"<Macro><Name>D</Name><MacroEvents>
               <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
@@ -1077,7 +1078,15 @@ mod edge_proptests {
         );
         let mut w = Vec::new();
         let parsed = parse_v3_macro(&xml, &mut w).unwrap();
-        assert!(parsed.steps.iter().any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == u32::MAX)));
+        let sleep = parsed.steps.iter().find_map(|s| match s {
+            ParsedSequenceStep::Sleep { delay_ms } => Some(*delay_ms),
+            _ => None,
+        });
+        assert!(
+            matches!(sleep, Some(ms) if ms > 0 && ms < u32::MAX),
+            "u32::MAX delay must be clamped to a Sleep below the raw value; got {sleep:?}"
+        );
+        assert!(w.iter().any(|x| x.code == "macro_delay_clamped"));
     }
 
     // -----------------------------------------------------------------------

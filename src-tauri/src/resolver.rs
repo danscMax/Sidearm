@@ -270,13 +270,12 @@ pub(crate) fn matching_app_mappings<'a>(
     title: &str,
     process_path: Option<&str>,
 ) -> Vec<&'a AppMapping> {
-    let normalized_exe = exe.to_ascii_lowercase();
     let normalized_title = title.to_ascii_lowercase();
     let mut matches: Vec<&AppMapping> = config
         .app_mappings
         .iter()
         .filter(|mapping| mapping.enabled)
-        .filter(|mapping| mapping.exe.eq_ignore_ascii_case(&normalized_exe))
+        .filter(|mapping| mapping.exe.eq_ignore_ascii_case(exe))
         .filter(|mapping| match mapping.process_path.as_deref() {
             // A mapping that pins a full process path only matches when the
             // active process path matches it (case-insensitive). Mappings

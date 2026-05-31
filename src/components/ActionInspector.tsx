@@ -86,7 +86,7 @@ export function ActionInspector({
             <span className="field__label">{t("inspector.actionName")}</span>
             <input
               type="text"
-              value={selectedAction.pretty}
+              value={selectedAction.pretty ?? ""}
               onChange={(event) => {
                 updateSelectedActionDraft((action) => ({
                   ...action,
@@ -124,7 +124,7 @@ export function ActionInspector({
                 <span className="field__label">{t("inspector.key")}</span>
                 <input
                   type="text"
-                  value={selectedAction.payload.key}
+                  value={selectedAction.payload.key ?? ""}
                   onChange={(event) => {
                     updateSelectedActionDraft((action) =>
                       withShortcutPayload(action, (payload) => ({
@@ -237,7 +237,7 @@ export function ActionInspector({
                     <span className="field__label">{t("inspector.text")}</span>
                     <textarea
                       rows={5}
-                      value={selectedAction.payload.text}
+                      value={selectedAction.payload.text ?? ""}
                       onChange={(event) => {
                         updateSelectedActionDraft((action) =>
                           withTextSnippetPayload(action, (payload) =>
@@ -257,7 +257,7 @@ export function ActionInspector({
                     <span className="field__label">{t("inspector.tags")}</span>
                     <input
                       type="text"
-                      value={selectedAction.payload.tags.join(", ")}
+                      value={(selectedAction.payload.tags ?? []).join(", ")}
                       placeholder="tag1, tag2, tag3"
                       onChange={(event) => {
                         updateSelectedActionDraft((action) =>
@@ -294,7 +294,7 @@ export function ActionInspector({
                 <label className="field">
                   <span className="field__label">{t("inspector.librarySnippet")}</span>
                   <select
-                    value={selectedAction.payload.snippetId}
+                    value={selectedAction.payload.snippetId ?? ""}
                     onChange={(event) => {
                       updateSelectedActionDraft((action) =>
                         withTextSnippetPayload(action, (payload) =>
@@ -418,7 +418,7 @@ export function ActionInspector({
                           <span className="field__label">{t("inspector.value")}</span>
                           <input
                             type="text"
-                            value={step.value}
+                            value={step.value ?? ""}
                             onChange={(event) => {
                               updateSelectedActionDraft((action) =>
                                 withSequencePayload(action, (payload) => ({
@@ -580,7 +580,7 @@ export function ActionInspector({
                 <span className="field__label">{t("inspector.launchTarget")}</span>
                 <input
                   type="text"
-                  value={selectedAction.payload.target}
+                  value={selectedAction.payload.target ?? ""}
                   placeholder="C:\Path\To\App.exe"
                   onChange={(event) => {
                     updateSelectedActionDraft((action) =>

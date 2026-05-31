@@ -352,6 +352,11 @@ fn dirs_next_home() -> Option<PathBuf> {
 /// asking the backend to slurp an arbitrarily large file into memory.
 const MAX_IMPORT_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
 
+/// Maximum size of a full-config JSON file accepted on import. Larger than the
+/// per-profile cap (a full config can hold many profiles/snippets) but still
+/// bounds how much a corrupt or hostile file can ask the backend to slurp.
+const MAX_FULL_CONFIG_IMPORT_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
+
 /// Validate a user-chosen JSON file path: absolute + home-scoped (via
 /// `validate_user_file_path`) + a `.json` extension (case-insensitive). The
 /// extension whitelist keeps the narrow export/import commands from writing
@@ -427,6 +432,29 @@ async fn read_user_json(path: String, op: &'static str) -> Result<String, Comman
     })
     .await
     .map_err(|e| CommandError::internal(format!("{op} task failed: {e}")))?
+}
+
+/// Pure size check for full-config imports — extracted for unit testing.
+fn full_config_import_size_ok(len: u64) -> bool {
+    len <= MAX_FULL_CONFIG_IMPORT_BYTES
+}
+
+/// Enforce [`MAX_FULL_CONFIG_IMPORT_BYTES`] on a full-config import file before
+/// it is read into memory. Mirrors the per-profile cap in `read_user_json`, but
+/// guards the full-config preview/apply paths, which read the file directly and
+/// bypass `read_user_json`. Run inside the import command's blocking task.
+fn ensure_full_config_import_size(path: &Path) -> Result<(), CommandError> {
+    let len = fs::metadata(path)
+        .map_err(|e| CommandError::internal(format!("Failed to stat import file: {e}")))?
+        .len();
+    if !full_config_import_size_ok(len) {
+        return Err(CommandError::new(
+            "import_too_large",
+            format!("Import file exceeds the {MAX_FULL_CONFIG_IMPORT_BYTES}-byte limit."),
+            None,
+        ));
+    }
+    Ok(())
 }
 
 // Narrow, purpose-named replacements for the removed generic write_text_file/
@@ -746,6 +774,7 @@ async fn import_full_config_preview(
 ) -> Result<ImportPreview, CommandError> {
     let validated = validate_user_file_path(&source_path)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<ImportPreview, CommandError> {
+        ensure_full_config_import_size(&validated)?;
         let raw = fs::read_to_string(&validated).map_err(|e| {
             CommandError::new(
                 "io_error",
@@ -808,6 +837,7 @@ async fn import_full_config_apply(
 
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<SaveConfigResponse, CommandError> {
+            ensure_full_config_import_size(&validated)?;
             let imported =
                 read_and_migrate_config_file(&validated).map_err(CommandError::from)?;
             let final_config = match mode {
@@ -2516,6 +2546,15 @@ mod tests {
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")
+    }
+
+    #[test]
+    fn full_config_import_size_boundary() {
+        assert!(full_config_import_size_ok(0));
+        assert!(full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES - 1));
+        // At the limit is accepted; one byte over is rejected.
+        assert!(full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES));
+        assert!(!full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES + 1));
     }
 
     #[test]

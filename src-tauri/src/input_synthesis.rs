@@ -83,10 +83,11 @@ pub fn send_shortcut(
     );
 
     if let Err(send_error) = send_keyboard_inputs(&plan) {
-        // Best-effort cleanup: release any modifiers we pressed to prevent stuck keys.
-        let pressed = extract_pressed_modifiers(payload, &snapshot);
-        if !pressed.is_empty() {
-            let cleanup = build_modifier_release_inputs(&pressed);
+        // Best-effort cleanup: a partial SendInput can leave the primary key OR
+        // modifiers physically down. Release everything the plan could have
+        // pressed (primary + pressed modifiers), not just modifiers.
+        let cleanup = build_shortcut_cleanup_inputs(payload, &snapshot);
+        if !cleanup.is_empty() {
             let _ = send_keyboard_inputs(&cleanup);
         }
         return Err(send_error);
@@ -138,6 +139,30 @@ fn build_modifier_release_inputs(modifiers: &[ModifierKey]) -> Vec<KeyboardInput
             key_up: true,
         })
         .collect()
+}
+
+/// Best-effort key-ups to release everything a shortcut plan could have pressed,
+/// for the cleanup path when `send_keyboard_inputs` reports a partial insert. A
+/// truncated plan can leave the primary key OR modifiers physically down, so we
+/// over-release the primary key (if any) plus every desired-but-not-already-
+/// active modifier — a key-up of an un-pressed key is a harmless no-op. Infallible:
+/// a primary key that fails to parse is skipped (modifiers still get released).
+fn build_shortcut_cleanup_inputs(
+    payload: &ShortcutActionPayload,
+    snapshot: &ModifierSnapshot,
+) -> Vec<KeyboardInputSpec> {
+    let mut cleanup = Vec::new();
+    if !payload.key.trim().is_empty() {
+        if let Ok(pk) = parse_primary_key(&payload.key) {
+            if !is_modifier_vk(pk.code) {
+                push_virtual_key_up(&mut cleanup, pk);
+            }
+        }
+    }
+    cleanup.extend(build_modifier_release_inputs(&extract_pressed_modifiers(
+        payload, snapshot,
+    )));
+    cleanup
 }
 
 pub fn send_hotkey_string(
@@ -383,13 +408,32 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
         return Ok(());
     }
 
+    // On a partial send, the only virtual key that can be left physically down
+    // is VK_RETURN (newline taps); Unicode events latch no key. Release it plus
+    // any modifiers, best-effort, before propagating the error.
+    let cleanup_on_partial_send = || {
+        release_all_modifiers();
+        let _ = send_keyboard_inputs(&[KeyboardInputSpec::VirtualKey {
+            code: VK_RETURN,
+            extended: false,
+            key_up: true,
+        }]);
+    };
+
     if inter_key_delay_ms == 0 {
-        return send_keyboard_inputs(&plan);
+        if let Err(e) = send_keyboard_inputs(&plan) {
+            cleanup_on_partial_send();
+            return Err(e);
+        }
+        return Ok(());
     }
 
     // Send character-by-character: each char = 2 events (down + up)
     for chunk in plan.chunks(2) {
-        send_keyboard_inputs(chunk)?;
+        if let Err(e) = send_keyboard_inputs(chunk) {
+            cleanup_on_partial_send();
+            return Err(e);
+        }
         if chunk.len() == 2 {
             std::thread::sleep(std::time::Duration::from_millis(u64::from(inter_key_delay_ms)));
         }
@@ -434,6 +478,12 @@ pub fn send_shortcut_hold_up(held: &HeldShortcutState) -> Result<(), String> {
 /// unit tests can assert the spec list without invoking SendInput.
 #[cfg(target_os = "windows")]
 fn build_release_all_modifier_inputs() -> Vec<KeyboardInputSpec> {
+    // The extended flag on each VK is physically accurate (RCtrl/RAlt ARE
+    // extended scancodes; RShift/RWin are not), but it does not affect release
+    // correctness: Windows matches a KEYEVENTF_KEYUP by virtual-key code, not by
+    // the extended bit, and the generic VK_CONTROL/SHIFT/MENU entries below
+    // release whichever side is physically down regardless. So this blast is
+    // side- and extended-agnostic and needs no extra variants.
     vec![
         KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
         KeyboardInputSpec::VirtualKey { code: VK_RCONTROL, extended: true,  key_up: true },
@@ -1353,7 +1403,12 @@ pub fn send_mouse_action(
             })
             .collect();
         if !press_inputs.is_empty() {
-            send_keyboard_inputs(&press_inputs)?;
+            if let Err(e) = send_keyboard_inputs(&press_inputs) {
+                // Partial insert can leave modifiers physically down — release
+                // them before bailing (the LIFO release below is skipped on early return).
+                let _ = send_keyboard_inputs(&build_modifier_release_inputs(&mods_to_press));
+                return Err(e);
+            }
         }
         mods_to_press
     } else {
@@ -1675,6 +1730,70 @@ mod tests {
                     key_up: true,
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn cleanup_includes_primary_and_pressed_modifiers() {
+        // Ctrl+C with nothing already held → on a partial send we must release
+        // BOTH the primary key (C) and the modifier we pressed (Ctrl).
+        let payload = ShortcutActionPayload {
+            key: "C".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+            raw: Some("^c".into()),
+        };
+        let cleanup = build_shortcut_cleanup_inputs(&payload, &ModifierSnapshot::default());
+        assert_eq!(
+            cleanup,
+            vec![
+                KeyboardInputSpec::VirtualKey { code: b'C' as u16, extended: false, key_up: true },
+                KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
+            ]
+        );
+    }
+
+    #[test]
+    fn cleanup_modifier_only_has_no_primary() {
+        // Ctrl+Alt (modifier-only) → cleanup releases only the modifiers (Alt
+        // then Ctrl, reverse press order), no primary key.
+        let payload = ShortcutActionPayload {
+            key: "".into(),
+            ctrl: true,
+            shift: false,
+            alt: true,
+            win: false,
+            raw: None,
+        };
+        let cleanup = build_shortcut_cleanup_inputs(&payload, &ModifierSnapshot::default());
+        assert_eq!(
+            cleanup,
+            vec![
+                KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up: true },
+                KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
+            ]
+        );
+    }
+
+    #[test]
+    fn cleanup_excludes_already_active_modifier() {
+        // Ctrl+C with Ctrl already physically held → Ctrl was NOT pressed by us,
+        // so cleanup releases only the primary C (we never touched Ctrl).
+        let payload = ShortcutActionPayload {
+            key: "C".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+            raw: Some("^c".into()),
+        };
+        let snapshot = ModifierSnapshot { ctrl: true, shift: false, alt: false, win: false };
+        let cleanup = build_shortcut_cleanup_inputs(&payload, &snapshot);
+        assert_eq!(
+            cleanup,
+            vec![KeyboardInputSpec::VirtualKey { code: b'C' as u16, extended: false, key_up: true }]
         );
     }
 

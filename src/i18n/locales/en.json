@@ -384,6 +384,7 @@
     "importDialogTitle": "Import profile",
     "invalidProfileError": "File does not contain profile data.",
     "readProfileError": "Could not read profile file.",
+    "exportProfileError": "Could not save profile file.",
     "backupHeader": "BACKUP",
     "backupHelp": "Export the entire configuration (profiles, rules, bindings, settings) to a file for backup or transfer to another computer.",
     "saveConfigTitle": "Save configuration",

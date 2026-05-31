@@ -437,8 +437,12 @@ export function findDuplicateAppMapping(
   exe: string,
 ): AppMapping | undefined {
   const normalizedExe = exe.trim().toLowerCase();
+  // Compare case-insensitively on BOTH sides: stored `m.exe` is canonical
+  // lowercase when created via createAppMappingFromCapture, but an imported
+  // profile (importProfile) historically stored it verbatim, so a mixed-case
+  // entry would otherwise slip past this duplicate check.
   return config.appMappings.find(
-    (m) => m.profileId === profileId && m.exe === normalizedExe,
+    (m) => m.profileId === profileId && m.exe.trim().toLowerCase() === normalizedExe,
   );
 }
 
@@ -975,10 +979,13 @@ export function importProfile(
     actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
   }));
 
-  const newAppMappings: AppMapping[] = data.appMappings.map((m) => ({
+  const newAppMappings: AppMapping[] = (data.appMappings ?? []).map((m) => ({
     ...m,
     id: makeRandomId("app"),
     profileId: newId,
+    // Store exe canonically (lowercase) so the duplicate check and the
+    // case-insensitive runtime resolver agree, matching createAppMappingFromCapture.
+    exe: (m.exe ?? "").trim().toLowerCase(),
   }));
 
   return {

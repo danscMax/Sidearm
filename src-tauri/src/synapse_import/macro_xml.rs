@@ -478,11 +478,12 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Overflow: Delay field with u32::MAX value — must not panic
+    // Overflow: Delay field with u32::MAX value — must not panic, and is clamped
+    // (with a `macro_delay_clamped` warning) rather than persisted raw.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn overflow_delay_u32_max_is_preserved() {
+    fn overflow_delay_u32_max_is_clamped() {
         let xml = format!(
             r#"<Macro><Name>D</Name><MacroEvents>
               <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
@@ -491,10 +492,15 @@ mod edge_proptests {
         );
         let mut w = Vec::new();
         let parsed = parse_macro_xml_str(&xml, "D".into(), &mut w).unwrap();
+        let sleep = parsed.steps.iter().find_map(|s| match s {
+            ParsedSequenceStep::Sleep { delay_ms } => Some(*delay_ms),
+            _ => None,
+        });
         assert!(
-            parsed.steps.iter().any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms } if *delay_ms == u32::MAX)),
-            "u32::MAX delay must appear as Sleep; steps={:?}", parsed.steps
+            matches!(sleep, Some(ms) if ms > 0 && ms < u32::MAX),
+            "u32::MAX delay must be clamped to a Sleep below the raw value; got {sleep:?}"
         );
+        assert!(w.iter().any(|x| x.code == "macro_delay_clamped"));
     }
 
     // -----------------------------------------------------------------------

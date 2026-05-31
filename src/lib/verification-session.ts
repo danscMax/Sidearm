@@ -173,6 +173,13 @@ export function captureVerificationObservation(
   if (!step?.startedAt || event.receivedAt < step.startedAt) {
     return session;
   }
+  // Only the initial key-DOWN is the observation. Bindings fire on key-down, and
+  // a single physical press emits down + (repeats) + up. Without this guard the
+  // last frame before the user clicks "matched" wins — so a key-up frame would
+  // silently overwrite a correct observation and corrupt the verification result.
+  if (event.isKeyUp || event.isRepeat) {
+    return session;
+  }
 
   return updateStep(session, session.activeStepIndex, (currentStep) => ({
     ...currentStep,

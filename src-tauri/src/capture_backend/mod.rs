@@ -138,6 +138,106 @@ impl RuntimeController {
     }
 }
 
+/// Outcome of matching a key-up event to a held hold-shortcut entry.
+#[derive(Debug, PartialEq, Eq)]
+enum HeldMatch {
+    /// Exactly one held entry matches (by exact key, or by a unique base token).
+    One(String),
+    /// No held entry matches.
+    None,
+    /// The base-token fallback matched 2+ held entries — ambiguous, release none.
+    Ambiguous,
+}
+
+/// Select which held-shortcut entry a key-up event should release.
+///
+/// `held_actions` is keyed by the full encoded key (e.g. `"Ctrl+F13"`). Matching
+/// is exact-key-first (the normal Windows case where key-down and key-up carry
+/// the same encoded key), then a fallback by *base key token* — the segment
+/// after the last `'+'`. The fallback exists because on Linux/evdev the modifier
+/// can drop between down and up (down `"Alt+F24"`, up `"F24"`).
+///
+/// The base match MUST be exact token equality, never `str::ends_with` (which
+/// treats `"F3"` as a suffix of `"Ctrl+F13"`), and MUST be unique: releasing the
+/// wrong held shortcut leaves the intended one physically stuck, so an ambiguous
+/// base (2+ holds sharing the same base key) refuses to release any.
+fn select_held_key<'a>(
+    held_keys: impl Iterator<Item = &'a str>,
+    encoded_key: &str,
+) -> HeldMatch {
+    let base = encoded_key.rsplit('+').next().unwrap_or(encoded_key);
+    let mut exact: Option<String> = None;
+    let mut base_matches: Vec<String> = Vec::new();
+    for k in held_keys {
+        if k == encoded_key {
+            exact = Some(k.to_string());
+        }
+        if k.rsplit('+').next() == Some(base) {
+            base_matches.push(k.to_string());
+        }
+    }
+    if let Some(k) = exact {
+        return HeldMatch::One(k);
+    }
+    match base_matches.len() {
+        0 => HeldMatch::None,
+        1 => HeldMatch::One(base_matches.into_iter().next().unwrap()),
+        _ => HeldMatch::Ambiguous,
+    }
+}
+
+#[cfg(test)]
+mod select_held_key_tests {
+    use super::{select_held_key, HeldMatch};
+
+    #[test]
+    fn exact_match_wins() {
+        let held = ["Ctrl+F13", "Alt+F24"];
+        assert_eq!(
+            select_held_key(held.into_iter(), "Ctrl+F13"),
+            HeldMatch::One("Ctrl+F13".to_string())
+        );
+    }
+
+    #[test]
+    fn linux_modifier_drop_matches_base_token() {
+        // down was "Alt+F24"; key-up arrives as "F24" (Alt released first).
+        let held = ["Alt+F24"];
+        assert_eq!(
+            select_held_key(held.into_iter(), "F24"),
+            HeldMatch::One("Alt+F24".to_string())
+        );
+    }
+
+    #[test]
+    fn suffix_false_positive_is_rejected() {
+        // "Ctrl+F13".ends_with("F3") is true — the old bug. Base-token equality rejects it.
+        let held = ["Ctrl+F13"];
+        assert_eq!(select_held_key(held.into_iter(), "F3"), HeldMatch::None);
+    }
+
+    #[test]
+    fn ambiguous_base_releases_none() {
+        let held = ["Alt+F13", "Ctrl+F13"];
+        assert_eq!(select_held_key(held.into_iter(), "F13"), HeldMatch::Ambiguous);
+    }
+
+    #[test]
+    fn plain_base_key_exact_match() {
+        let held = ["F13"];
+        assert_eq!(
+            select_held_key(held.into_iter(), "F13"),
+            HeldMatch::One("F13".to_string())
+        );
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        let held = ["Ctrl+F13"];
+        assert_eq!(select_held_key(held.into_iter(), "Alt+F19"), HeldMatch::None);
+    }
+}
+
 fn process_encoded_key_event(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
@@ -166,19 +266,33 @@ fn process_encoded_key_event(
         log::info!("[capture] Key-up received for {}", event.encoded_key);
 
         // On Linux/evdev, modifier state may change between key-down and
-        // key-up (e.g. Razer releases Alt before F24), so the encoded_key
-        // at key-up ("F24") won't match key-down ("Alt+F24").  Search by
-        // exact match first, then fall back to any held entry whose
-        // encoded_key ends with the base key name.
-        let held_key = if held_actions.contains_key(&event.encoded_key) {
-            Some(event.encoded_key.clone())
-        } else {
-            // Extract base key (part after last '+', or the whole string)
-            let base = event.encoded_key.rsplit('+').next().unwrap_or(&event.encoded_key);
-            held_actions
-                .keys()
-                .find(|k| k.ends_with(base))
-                .cloned()
+        // key-up (e.g. Razer releases Alt before F24), so the encoded_key at
+        // key-up ("F24") won't match key-down ("Alt+F24"). select_held_key does
+        // exact-match-first then a unique base-token fallback (NOT a string
+        // suffix), refusing to release when the base is ambiguous.
+        let mut ambiguous = false;
+        let held_key = match select_held_key(
+            held_actions.keys().map(String::as_str),
+            &event.encoded_key,
+        ) {
+            HeldMatch::One(k) => Some(k),
+            HeldMatch::None => None,
+            HeldMatch::Ambiguous => {
+                ambiguous = true;
+                log::warn!(
+                    "[capture] Key-up for {} matched multiple held shortcuts by base key — releasing none.",
+                    event.encoded_key
+                );
+                log_entries.push((
+                    "выполнение",
+                    format!(
+                        "Отпускание `{}` неоднозначно (несколько удержаний с тем же базовым ключом) — ничего не отпущено.",
+                        event.encoded_key
+                    ),
+                    true,
+                ));
+                None
+            }
         };
 
         if let Some(held) = held_key.and_then(|k| held_actions.remove(&k)) {
@@ -206,7 +320,7 @@ fn process_encoded_key_event(
                     ));
                 }
             }
-        } else {
+        } else if !ambiguous {
             log::info!(
                 "[capture] Key-up for {} without active hold",
                 event.encoded_key

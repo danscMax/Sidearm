@@ -424,6 +424,13 @@ export function ProfilesWorkspace({
   const [newRuleCapturedProcessPath, setNewRuleCapturedProcessPath] = useState("");
   const [newRuleTitleEnabled, setNewRuleTitleEnabled] = useState(false);
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
+  const newRuleRef = useRef<HTMLDivElement>(null);
+  // Esc + Tab focus-trap for the inline "New rule" modal (shared hook). Gated on
+  // open so the window-level Escape listener is inert when it's closed/covered.
+  const newRuleKeyDown = useModalDismiss(newRuleRef, {
+    onClose: () => setNewRuleOpen(false),
+    escapeEnabled: newRuleOpen,
+  });
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
   const [bindingSearch, setBindingSearch] = useState("");
@@ -666,14 +673,18 @@ export function ProfilesWorkspace({
             className="action-button action-button--small"
             onClick={async () => {
               if (!activeConfig || !activeProfile) return;
-              const data = extractProfileExport(activeConfig, activeProfile.id);
-              const json = JSON.stringify(data, null, 2);
-              const path = await save({
-                title: t("settings.exportDialogTitle"),
-                defaultPath: `${activeProfile.name}.json`,
-                filters: [{ name: "JSON", extensions: ["json"] }],
-              });
-              if (path) await exportProfileFile(path, json);
+              try {
+                const data = extractProfileExport(activeConfig, activeProfile.id);
+                const json = JSON.stringify(data, null, 2);
+                const path = await save({
+                  title: t("settings.exportDialogTitle"),
+                  defaultPath: `${activeProfile.name}.json`,
+                  filters: [{ name: "JSON", extensions: ["json"] }],
+                });
+                if (path) await exportProfileFile(path, json);
+              } catch {
+                showToast(t("settings.exportProfileError"), "warning");
+              }
             }}
           >
             {t("profile.exportProfile")}
@@ -803,8 +814,12 @@ export function ProfilesWorkspace({
         <div className="modal-backdrop" onClick={() => setNewRuleOpen(false)}>
           <div
             className="rule-modal rule-modal--compact"
+            ref={newRuleRef}
+            tabIndex={-1}
+            role="dialog"
+            aria-modal="true"
             onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.key === "Escape") setNewRuleOpen(false); }}
+            onKeyDown={newRuleKeyDown}
           >
             <button
               type="button"

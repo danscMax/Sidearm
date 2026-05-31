@@ -23,6 +23,24 @@ use super::types::{
 };
 
 // ============================================================================
+// Untrusted-input limits
+// ============================================================================
+//
+// The v4 JSON path historically read the whole file unbounded and embedded a
+// fresh clone of every referenced macro into each profile, so a crafted file
+// (one huge macro referenced by many tiny profiles) could amplify into multi-GB
+// allocations. These caps mirror the zip-budget defense the v3 path already has
+// (`format_v3::MAX_*`) and bound the worst case to a few hundred MB. Real
+// `.synapse4` exports are well under 1 MiB with a handful of profiles/macros.
+
+/// Maximum accepted size of a `.synapse4` JSON file.
+const MAX_V4_FILE_BYTES: u64 = 8 * 1024 * 1024; // 8 MiB
+/// Maximum number of profiles in a single file (bounds macro-clone amplification).
+const MAX_V4_PROFILES: usize = 64;
+/// Maximum number of macros in a single file.
+const MAX_V4_MACROS: usize = 256;
+
+// ============================================================================
 // Raw wire-format mirrors
 // ============================================================================
 
@@ -216,10 +234,31 @@ pub enum SynapseParseError {
     InnerJson(serde_json::Error),
     #[error("File format is not recognised as Synapse v4 JSON.")]
     NotSynapseV4,
+    #[error("Synapse v4 file is too large ({0} bytes).")]
+    FileTooLarge(u64),
+    #[error("Synapse v4 file has too many profiles ({0}).")]
+    TooManyProfiles(usize),
+    #[error("Synapse v4 file has too many macros ({0}).")]
+    TooManyMacros(usize),
 }
 
 pub fn parse_synapse_v4_file(path: &Path) -> Result<ParsedSynapseProfiles, SynapseParseError> {
-    let raw = std::fs::read_to_string(path)?;
+    use std::io::Read;
+
+    // Reject oversized files up front, then cap the actual read in case the file
+    // grew or the metadata lied (belt-and-suspenders, mirroring `format_v3::read_file`).
+    let declared_len = std::fs::metadata(path)?.len();
+    if declared_len > MAX_V4_FILE_BYTES {
+        return Err(SynapseParseError::FileTooLarge(declared_len));
+    }
+    let mut raw = String::new();
+    std::fs::File::open(path)?
+        .take(MAX_V4_FILE_BYTES + 1)
+        .read_to_string(&mut raw)?;
+    if raw.len() as u64 > MAX_V4_FILE_BYTES {
+        return Err(SynapseParseError::FileTooLarge(raw.len() as u64));
+    }
+
     parse_synapse_v4_str(&raw, path.to_string_lossy().into_owned())
 }
 
@@ -229,6 +268,13 @@ pub fn parse_synapse_v4_str(
 ) -> Result<ParsedSynapseProfiles, SynapseParseError> {
     let outer: SynapseV4File =
         serde_json::from_str(raw).map_err(SynapseParseError::OuterJson)?;
+
+    if outer.profiles.len() > MAX_V4_PROFILES {
+        return Err(SynapseParseError::TooManyProfiles(outer.profiles.len()));
+    }
+    if outer.macros.len() > MAX_V4_MACROS {
+        return Err(SynapseParseError::TooManyMacros(outer.macros.len()));
+    }
 
     if outer.profiles.is_empty() && outer.macros.is_empty() {
         return Err(SynapseParseError::NotSynapseV4);

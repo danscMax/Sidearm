@@ -4937,15 +4937,23 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 .layer-badge {
-  display: inline-flex;
+  /* Stack both layer labels in one grid cell so the badge sizes to the widest
+     one; toggling the layer then never reflows the adjacent search field. */
+  display: inline-grid;
   align-items: center;
-  gap: 6px;
+  justify-items: center;
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 0.72rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+}
+.layer-badge__opt {
+  grid-area: 1 / 1;
+}
+.layer-badge__opt[aria-hidden="true"] {
+  visibility: hidden;
 }
 .layer-badge--standard {
   color: #68c57f;

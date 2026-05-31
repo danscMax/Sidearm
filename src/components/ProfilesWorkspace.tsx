@@ -607,9 +607,15 @@ export function ProfilesWorkspace({
       {/* ── Layer indicator + search ── */}
       <div className="profiles-workspace__toolbar">
         <span className={`layer-badge layer-badge--${selectedLayer}`}>
-          {selectedLayer === "hypershift"
-            ? t("layer.hypershift")
-            : t("layer.standard")}
+          {/* Both labels are rendered (the inactive one hidden) so the badge
+              always reserves the width of the widest layer name — toggling the
+              layer never shifts the search field beside it. */}
+          <span className="layer-badge__opt" aria-hidden={selectedLayer === "hypershift"}>
+            {t("layer.standard")}
+          </span>
+          <span className="layer-badge__opt" aria-hidden={selectedLayer !== "hypershift"}>
+            {t("layer.hypershift")}
+          </span>
         </span>
         <input
           type="search"

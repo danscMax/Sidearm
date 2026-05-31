@@ -84,7 +84,7 @@ export function MouseVisualization({
 
   if (visualMode === "schematic") {
     return (
-      <div className="mouse-visual-tabs">
+      <div className="mouse-visual-tabs" data-layer={selectedLayer}>
         <div className="mouse-visual-tabs__nav">
           <button
             type="button"
@@ -244,7 +244,7 @@ export function MouseVisualization({
   }
 
   return (
-    <div className="mouse-visual-tabs">
+    <div className="mouse-visual-tabs" data-layer={selectedLayer}>
       <div className="mouse-visual-tabs__nav">
         <ViewTabPills activeTab={activeTab} onSelect={setActiveTab} />
         <button

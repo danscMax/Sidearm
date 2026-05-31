@@ -524,7 +524,7 @@ export function MouseVisualizationSvg({
   }
 
   return (
-    <div className="mouse-visual-tabs">
+    <div className="mouse-visual-tabs" data-layer={selectedLayer}>
       <div className="mouse-visual-tabs__nav">
         <ViewTabPills activeTab={activeTab} onSelect={setActiveTab} />
       </div>

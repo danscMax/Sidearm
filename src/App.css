@@ -1620,11 +1620,22 @@ select::checkmark {
 
 /* ── Mouse visualization (tabbed) ── */
 .mouse-visual-tabs {
+  /* Layer accent (consumed by the SVG fills, hotspot/legend highlights and layer
+     pills below). Driven by data-layer={selectedLayer} on this root. */
+  --layer-accent: #9fca69;
+  --layer-rgb: 159, 202, 105;
+  --layer-border-rgb: 180, 226, 125;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 16px;
   width: 100%;
+}
+
+.mouse-visual-tabs[data-layer="hypershift"] {
+  --layer-accent: #e8943a;
+  --layer-rgb: 232, 148, 58;
+  --layer-border-rgb: 255, 190, 100;
 }
 
 .mouse-visual-tabs__nav {
@@ -4942,9 +4953,9 @@ input[type="number"] { -moz-appearance: textfield; }
   border: 1px solid rgba(104, 197, 127, 0.35);
 }
 .layer-badge--hypershift {
-  color: #a78bfa;
-  background: rgba(167, 139, 250, 0.1);
-  border: 1px solid rgba(167, 139, 250, 0.35);
+  color: #e8943a;
+  background: rgba(232, 148, 58, 0.1);
+  border: 1px solid rgba(232, 148, 58, 0.35);
 }
 
 .profiles-workspace__search {

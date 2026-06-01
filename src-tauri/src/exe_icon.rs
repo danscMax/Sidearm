@@ -197,7 +197,6 @@ fn encode_rgba_to_base64_png(pixels: &[u8], width: u32, height: u32) -> Option<S
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
 
     #[test]
     fn validate_icon_dims_accepts_in_range() {

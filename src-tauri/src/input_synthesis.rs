@@ -2374,8 +2374,8 @@ mod edge_proptests {
         assert!(matches!(inputs[3], KeyboardInputSpec::Unicode { key_up: true, .. }));
     }
 
-    /// build_text_inputs must never panic on arbitrary Unicode strings —
-    /// only Err on NUL; everything else must succeed.
+    // build_text_inputs must never panic on arbitrary Unicode strings —
+    // only Err on NUL; everything else must succeed.
     proptest! {
         #[test]
         fn build_text_inputs_never_panics_arbitrary_unicode(text in ".*") {

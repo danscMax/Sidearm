@@ -3682,7 +3682,7 @@ mod edge_proptests {
     use proptest::prelude::*;
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP, WM_SYSKEYDOWN, WM_SYSKEYUP};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{WM_KEYDOWN, WM_KEYUP};
 
     // -----------------------------------------------------------------------
     // Helpers

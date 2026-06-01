@@ -2923,7 +2923,6 @@ mod tests {
 mod edge_proptests {
     use super::*;
     use proptest::prelude::*;
-    use std::collections::HashMap;
 
     // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -3652,7 +3651,7 @@ mod edge_proptests {
     #[test]
     fn app_config_rejects_unknown_top_level_field() {
         // Build valid config JSON and inject a spurious top-level key.
-        let mut cfg = minimal_valid_config();
+        let cfg = minimal_valid_config();
         let mut v = serde_json::to_value(&cfg).unwrap();
         v["surpriseField"] = serde_json::json!("boom");
         let result: Result<AppConfig, _> = serde_json::from_value(v);

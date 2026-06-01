@@ -160,14 +160,6 @@ mod edge_proptests {
     use super::*;
     use proptest::prelude::*;
 
-    // Helper: build a single-key macro (key-down then key-up).
-    fn one_key(makecode: u16, is_extended: bool) -> Vec<NormalizedEvent> {
-        vec![
-            NormalizedEvent::Key { makecode, is_extended, is_down: true },
-            NormalizedEvent::Key { makecode, is_extended, is_down: false },
-        ]
-    }
-
     // -----------------------------------------------------------------------
     // Boundary: empty event list → empty steps
     // -----------------------------------------------------------------------

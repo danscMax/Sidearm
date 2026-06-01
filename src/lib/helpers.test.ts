@@ -7,6 +7,7 @@ import {
   parseCommaSeparatedUniqueValues,
   parseCommaSeparatedList,
   parseOptionalNumber,
+  toggleInSet,
 } from "./helpers";
 import { makeConfig } from "./test-fixtures";
 import type { PhysicalControl } from "./config";
@@ -242,5 +243,25 @@ describe("parseOptionalNumber", () => {
 
   it("handles floating point numbers", () => {
     expect(parseOptionalNumber("3.14")).toBeCloseTo(3.14);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// toggleInSet
+// ---------------------------------------------------------------------------
+
+describe("toggleInSet", () => {
+  it("adds a value that is absent", () => {
+    expect([...toggleInSet(new Set(["a"]), "b")]).toEqual(["a", "b"]);
+  });
+
+  it("removes a value that is present", () => {
+    expect([...toggleInSet(new Set(["a", "b"]), "a")]).toEqual(["b"]);
+  });
+
+  it("does not mutate the input set", () => {
+    const original = new Set(["a"]);
+    toggleInSet(original, "b");
+    expect([...original]).toEqual(["a"]);
   });
 });

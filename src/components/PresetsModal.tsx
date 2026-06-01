@@ -6,7 +6,7 @@ import type { PresetInfo } from "../lib/backend";
 import { importProfile } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
-import { useModalDismiss } from "../hooks/useModalDismiss";
+import { CloseButton, ModalShell } from "./shared";
 
 export interface PresetsModalProps {
   onCancel: () => void;
@@ -53,9 +53,6 @@ export function PresetsModal({
     containerRef.current?.focus();
   }, []);
 
-  // Escape-to-close + Tab focus trap (shared modal behavior).
-  const handleKeyDown = useModalDismiss(containerRef, { onClose: onCancel });
-
   async function applyPreset(preset: PresetInfo) {
     setApplying(preset.id);
     try {
@@ -78,29 +75,15 @@ export function PresetsModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        ref={containerRef}
-        className="presets-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="presets-modal-title"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
+    <ModalShell
+      onClose={onCancel}
+      className="presets-modal"
+      dialogRef={containerRef}
+      ariaLabelledby="presets-modal-title"
+    >
         <div className="presets-modal__header">
           <h3 id="presets-modal-title">{t("presets.title")}</h3>
-          <button
-            type="button"
-            className="rule-modal__close"
-            onClick={onCancel}
-            aria-label={t("common.close")}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M1 1l12 12M13 1L1 13" />
-            </svg>
-          </button>
+          <CloseButton onClick={onCancel} ariaLabel={t("common.close")} />
         </div>
 
         <p className="presets-modal__subtitle">{t("presets.subtitle")}</p>
@@ -134,7 +117,6 @@ export function PresetsModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

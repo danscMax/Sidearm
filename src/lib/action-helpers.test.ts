@@ -15,6 +15,7 @@ import {
   createDefaultSequenceStep,
   coerceSequenceStepType,
   setSequenceStepDelay,
+  modifierLabels,
 } from "./action-helpers";
 import { makeConfig, makeAction, makeSnippetMap, emptySnippets } from "./test-fixtures";
 
@@ -114,7 +115,7 @@ describe("describeActionSummary", () => {
       },
     });
     expect(describeActionSummary(action, emptySnippets)).toBe(
-      "Последовательность из 3 шаг(ов).",
+      "Последовательность из 3 шагов",
     );
   });
 
@@ -136,7 +137,7 @@ describe("describeActionSummary", () => {
         ],
       },
     });
-    expect(describeActionSummary(action, emptySnippets)).toBe("Меню из 2 пункт(ов).");
+    expect(describeActionSummary(action, emptySnippets)).toBe("Меню из 2 пунктов");
   });
 
   it("describes mouseAction", () => {
@@ -664,5 +665,28 @@ describe("setSequenceStepDelay", () => {
     const step: SequenceStep = { type: "launch", value: "app.exe" };
     const result = setSequenceStepDelay(step, 150);
     expect(result).toEqual({ type: "launch", value: "app.exe", delayMs: 150 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// modifierLabels
+// ---------------------------------------------------------------------------
+
+describe("modifierLabels", () => {
+  it("returns labels in canonical Ctrl→Shift→Alt→Win order", () => {
+    expect(modifierLabels({ ctrl: true, shift: true, alt: true, win: true })).toEqual([
+      "Ctrl",
+      "Shift",
+      "Alt",
+      "Win",
+    ]);
+  });
+
+  it("includes only the active modifiers, preserving order", () => {
+    expect(modifierLabels({ ctrl: true, alt: true })).toEqual(["Ctrl", "Alt"]);
+  });
+
+  it("returns an empty array when no modifier is set", () => {
+    expect(modifierLabels({})).toEqual([]);
   });
 });

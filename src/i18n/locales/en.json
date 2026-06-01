@@ -1,4 +1,20 @@
 {
+  "actionSummary": {
+    "none": "No action preview.",
+    "shortcut": "Shortcut: {{value}}",
+    "mouse": "Mouse: {{value}}",
+    "media": "Media: {{value}}",
+    "profile": "Profile: {{value}}",
+    "snippetLibrary": "Library snippet: {{name}}",
+    "snippetRef": "Snippet library reference: {{id}}",
+    "snippetInline": "Inline snippet via {{mode}}",
+    "sequence_one": "Sequence of {{count}} step",
+    "sequence_other": "Sequence of {{count}} steps",
+    "launch": "Launch target: {{target}}",
+    "menu_one": "Menu of {{count}} item",
+    "menu_other": "Menu of {{count}} items",
+    "disabledFallback": "Disabled placeholder action."
+  },
   "common": {
     "na": "N/A",
     "cancel": "Cancel",
@@ -461,6 +477,8 @@
     "switchPhoto": "Switch to photo",
     "switchSchematic": "Switch to schematic",
     "schematicAlt": "Razer Naga V2 HyperSpeed — schematic view",
+    "badgeHold": "Hold",
+    "badgeChord": "Chord",
     "tabAll": "All buttons",
     "tabTop": "Top panel",
     "tabSide": "Thumb grid"

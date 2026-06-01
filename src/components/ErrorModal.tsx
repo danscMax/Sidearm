@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { useModalDismiss } from "../hooks/useModalDismiss";
+import { ModalShell } from "./shared";
 import type { CommandError } from "../lib/config";
 import {
   formatErrorForClipboard,
@@ -26,12 +26,6 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
     }
   }, [error]);
 
-  // Escape-to-close (only while shown) + Tab focus trap (shared modal behavior).
-  const handleKeyDown = useModalDismiss(dialogRef, {
-    onClose: onDismiss,
-    escapeEnabled: !!error,
-  });
-
   if (!error) return null;
 
   const translated = translateCommandError(error, t);
@@ -53,17 +47,12 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
   }
 
   return (
-    <div className="modal-backdrop" onClick={onDismiss}>
-      <div
-        ref={dialogRef}
-        className="confirm-modal error-modal"
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="error-modal-title"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
+    <ModalShell
+      onClose={onDismiss}
+      className="confirm-modal error-modal"
+      dialogRef={dialogRef}
+      ariaLabelledby="error-modal-title"
+    >
         <header className="error-modal__header">
           <h2 id="error-modal-title">{translated.title}</h2>
         </header>
@@ -106,7 +95,6 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
             </button>
           ))}
         </footer>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -26,10 +26,10 @@ import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
   mediaKeyLabel,
+  modifierLabels,
   mouseActionLabel,
   setSequenceStepDelay,
 } from "../lib/action-helpers";
-import { useModalDismiss } from "../hooks/useModalDismiss";
 import {
   startMacroRecording,
   recordKeystroke,
@@ -44,7 +44,7 @@ import {
 } from "../lib/config-editing";
 import { ChipEditor } from "./ChipEditor";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { Toggle } from "./shared";
+import { Toggle, ModalShell } from "./shared";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -94,7 +94,7 @@ const CONDITION_TYPE_KEYS: Array<{ value: ActionCondition["type"]; key: string }
    Sequence Step Editor (reusable)
    ───────────────────────────────────────────────────────── */
 
-export function SequenceStepEditor({
+function SequenceStepEditor({
   steps,
   onUpdate,
 }: {
@@ -486,12 +486,6 @@ export function ActionPickerModal({
 
   const [isCapturing, setIsCapturing] = useState(false);
 
-  // Escape-to-close (disabled during key capture) + Tab focus trap.
-  const handleFocusTrap = useModalDismiss(modalRef, {
-    onClose: onCancel,
-    escapeEnabled: !isCapturing && !isCapturingSignal,
-  });
-
   // Draft action state per category
   const [shortcutDraft, setShortcutDraft] = useState<ShortcutActionPayload>(() =>
     existingAction?.type === "shortcut"
@@ -631,7 +625,7 @@ export function ActionPickerModal({
         case "textSnippet": {
           // Preserve tags from existing inline payload so editing the text
           // through this picker doesn't silently drop tag metadata that was
-          // set elsewhere (e.g. ActionInspector).
+          // set elsewhere.
           const preservedTags =
             existingAction?.type === "textSnippet" &&
             existingAction.payload.source === "inline"
@@ -681,22 +675,11 @@ export function ActionPickerModal({
   function autoName(actionType: ActionType): string {
     switch (actionType) {
       case "shortcut": {
-        const parts = [
-          shortcutDraft.ctrl ? "Ctrl" : null,
-          shortcutDraft.shift ? "Shift" : null,
-          shortcutDraft.alt ? "Alt" : null,
-          shortcutDraft.win ? "Win" : null,
-          shortcutDraft.key || null,
-        ].filter(Boolean);
+        const parts = [...modifierLabels(shortcutDraft), shortcutDraft.key || null].filter(Boolean);
         return parts.length > 0 ? parts.join(" + ") : t("picker.autoShortcut");
       }
       case "mouseAction": {
-        const mods = [
-          mouseDraft.ctrl ? "Ctrl" : null,
-          mouseDraft.shift ? "Shift" : null,
-          mouseDraft.alt ? "Alt" : null,
-          mouseDraft.win ? "Win" : null,
-        ].filter(Boolean);
+        const mods = modifierLabels(mouseDraft);
         const actionLabel = mouseActionLabel(mouseDraft.action) ?? t("picker.autoMouse");
         return mods.length > 0 ? `${mods.join(" + ")} + ${actionLabel}` : actionLabel;
       }
@@ -753,8 +736,13 @@ export function ActionPickerModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal action-picker" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="action-picker-title" onClick={(e) => e.stopPropagation()} onKeyDown={handleFocusTrap}>
+    <ModalShell
+      onClose={onCancel}
+      className="modal action-picker"
+      dialogRef={modalRef}
+      ariaLabelledby="action-picker-title"
+      escapeEnabled={!isCapturing && !isCapturingSignal}
+    >
         <div className="action-picker__header">
           <div>
             <h2 id="action-picker-title">{t("picker.title")}</h2>
@@ -1235,7 +1223,6 @@ export function ActionPickerModal({
             {t("common.save")}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -9,75 +9,81 @@ import type {
   SnippetLibraryItem,
   TextSnippetPayload,
 } from "./config";
+import i18n from "../i18n";
 import { MEDIA_KEY_OPTIONS, MOUSE_ACTION_OPTIONS } from "./constants";
 import { labelForPasteMode } from "./labels";
+
+/** Active keyboard-modifier labels in canonical Ctrl→Shift→Alt→Win order. */
+export function modifierLabels(m: {
+  ctrl?: boolean;
+  shift?: boolean;
+  alt?: boolean;
+  win?: boolean;
+}): string[] {
+  return [
+    m.ctrl ? "Ctrl" : null,
+    m.shift ? "Shift" : null,
+    m.alt ? "Alt" : null,
+    m.win ? "Win" : null,
+  ].filter(Boolean) as string[];
+}
 
 export function describeActionSummary(
   action: Action | null,
   snippetsById: Map<string, SnippetLibraryItem>,
 ): string {
   if (!action) {
-    return "Предпросмотр действия отсутствует.";
+    return i18n.t("actionSummary.none");
   }
 
   if (action.type === "shortcut") {
-    const modifiers = [
-      action.payload.ctrl ? "Ctrl" : null,
-      action.payload.shift ? "Shift" : null,
-      action.payload.alt ? "Alt" : null,
-      action.payload.win ? "Win" : null,
-      action.payload.key,
-    ].filter(Boolean);
-
-    return `Шорткат: ${modifiers.join(" + ")}`;
+    const modifiers = [...modifierLabels(action.payload), action.payload.key].filter(Boolean);
+    return i18n.t("actionSummary.shortcut", { value: modifiers.join(" + ") });
   }
 
   if (action.type === "mouseAction") {
     const { payload } = action;
-    const mods = [
-      payload.ctrl ? "Ctrl" : null,
-      payload.shift ? "Shift" : null,
-      payload.alt ? "Alt" : null,
-      payload.win ? "Win" : null,
-    ].filter(Boolean);
+    const mods = modifierLabels(payload);
     const actionLabel = mouseActionLabel(payload.action) ?? payload.action;
     const prefix = mods.length > 0 ? `${mods.join(" + ")} + ` : "";
-    return `Мышь: ${prefix}${actionLabel}`;
+    return i18n.t("actionSummary.mouse", { value: `${prefix}${actionLabel}` });
   }
 
   if (action.type === "mediaKey") {
     const label = mediaKeyLabel(action.payload.key);
-    return `Медиа: ${label ?? action.payload.key}`;
+    return i18n.t("actionSummary.media", { value: label ?? action.payload.key });
   }
 
   if (action.type === "profileSwitch") {
-    return `Профиль: ${action.payload.targetProfileId}`;
+    return i18n.t("actionSummary.profile", { value: action.payload.targetProfileId });
   }
 
   if (action.type === "textSnippet") {
     if (action.payload.source === "libraryRef") {
       const snippet = snippetsById.get(action.payload.snippetId);
       return snippet
-        ? `Фрагмент из библиотеки: ${snippet.name}`
-        : `Ссылка на библиотеку фрагментов: ${action.payload.snippetId}`;
+        ? i18n.t("actionSummary.snippetLibrary", { name: snippet.name })
+        : i18n.t("actionSummary.snippetRef", { id: action.payload.snippetId });
     }
 
-    return `Встроенный фрагмент через ${labelForPasteMode(action.payload.pasteMode)}`;
+    return i18n.t("actionSummary.snippetInline", {
+      mode: labelForPasteMode(action.payload.pasteMode),
+    });
   }
 
   if (action.type === "sequence") {
-    return `Последовательность из ${action.payload.steps.length} шаг(ов).`;
+    return i18n.t("actionSummary.sequence", { count: action.payload.steps.length });
   }
 
   if (action.type === "launch") {
-    return `Цель запуска: ${action.payload.target}`;
+    return i18n.t("actionSummary.launch", { target: action.payload.target });
   }
 
   if (action.type === "menu") {
-    return `Меню из ${action.payload.items.length} пункт(ов).`;
+    return i18n.t("actionSummary.menu", { count: action.payload.items.length });
   }
 
-  return action.notes ?? "Отключённое действие-заглушка.";
+  return action.notes ?? i18n.t("actionSummary.disabledFallback");
 }
 
 /** Human label for a mouse-action value (from `MOUSE_ACTION_OPTIONS`), or

@@ -16,16 +16,16 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
-import { useModalDismiss } from "../hooks/useModalDismiss";
 import { exportProfileFile, getExeIcon, importProfileFile } from "../lib/backend";
 import {
   bindingMatchesQuery,
   conflictingBindingIds,
 } from "../lib/conflict-detection";
-import { sortAppMappings } from "../lib/helpers";
+import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
+import { CloseButton, ModalShell } from "./shared";
 import { RunningProcessPicker } from "./RunningProcessPicker";
 
 /** Module-level icon cache: exe name -> base64 PNG (or empty string for "no icon"). */
@@ -138,31 +138,15 @@ function AppMappingModal({
     containerRef.current?.focus();
   }, []);
 
-  // Escape-to-close + Tab focus trap (shared modal behavior).
-  const handleKeyDown = useModalDismiss(containerRef, { onClose });
-
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
+    <>
+      <ModalShell
+        onClose={onClose}
         className="rule-modal"
-        ref={containerRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${mapping.exe}`}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
+        dialogRef={containerRef}
+        ariaLabel={`${mapping.exe}`}
       >
-        <button
-          type="button"
-          className="rule-modal__close"
-          onClick={onClose}
-          aria-label={t("common.close")}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M1 1l12 12M13 1L1 13" />
-          </svg>
-        </button>
+        <CloseButton onClick={onClose} ariaLabel={t("common.close")} />
 
         {/* Header */}
         <div className="rule-modal__header">
@@ -353,7 +337,7 @@ function AppMappingModal({
             </button>
           )}
         </div>
-      </div>
+      </ModalShell>
       {showProcessPicker ? (
         <RunningProcessPicker
           onCancel={() => setShowProcessPicker(false)}
@@ -369,7 +353,7 @@ function AppMappingModal({
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -424,13 +408,6 @@ export function ProfilesWorkspace({
   const [newRuleCapturedProcessPath, setNewRuleCapturedProcessPath] = useState("");
   const [newRuleTitleEnabled, setNewRuleTitleEnabled] = useState(false);
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
-  const newRuleRef = useRef<HTMLDivElement>(null);
-  // Esc + Tab focus-trap for the inline "New rule" modal (shared hook). Gated on
-  // open so the window-level Escape listener is inert when it's closed/covered.
-  const newRuleKeyDown = useModalDismiss(newRuleRef, {
-    onClose: () => setNewRuleOpen(false),
-    escapeEnabled: newRuleOpen,
-  });
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
   const [bindingSearch, setBindingSearch] = useState("");
@@ -607,9 +584,15 @@ export function ProfilesWorkspace({
       {/* ── Layer indicator + search ── */}
       <div className="profiles-workspace__toolbar">
         <span className={`layer-badge layer-badge--${selectedLayer}`}>
-          {selectedLayer === "hypershift"
-            ? t("layer.hypershift")
-            : t("layer.standard")}
+          {/* Both labels are rendered (the inactive one hidden) so the badge
+              always reserves the width of the widest layer name — toggling the
+              layer never shifts the search field beside it. */}
+          <span className="layer-badge__opt" aria-hidden={selectedLayer === "hypershift"}>
+            {t("layer.standard")}
+          </span>
+          <span className="layer-badge__opt" aria-hidden={selectedLayer !== "hypershift"}>
+            {t("layer.hypershift")}
+          </span>
         </span>
         <input
           type="search"
@@ -640,12 +623,7 @@ export function ProfilesWorkspace({
             });
           }}
           onToggleMultiSelect={(id) => {
-            setMultiSelectedControlIds((prev) => {
-              const next = new Set(prev);
-              if (next.has(id)) next.delete(id);
-              else next.add(id);
-              return next;
-            });
+            setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
           }}
           onOpenActionPicker={handleOpenActionPicker}
           onSelectLayer={onSelectLayer}
@@ -811,26 +789,11 @@ export function ProfilesWorkspace({
 
       {/* ── New rule dialog ── */}
       {newRuleOpen ? (
-        <div className="modal-backdrop" onClick={() => setNewRuleOpen(false)}>
-          <div
-            className="rule-modal rule-modal--compact"
-            ref={newRuleRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={newRuleKeyDown}
-          >
-            <button
-              type="button"
-              className="rule-modal__close"
-              onClick={() => setNewRuleOpen(false)}
-              aria-label={t("common.close")}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M1 1l12 12M13 1L1 13" />
-              </svg>
-            </button>
+        <ModalShell
+          onClose={() => setNewRuleOpen(false)}
+          className="rule-modal rule-modal--compact"
+        >
+            <CloseButton onClick={() => setNewRuleOpen(false)} ariaLabel={t("common.close")} />
             <div className="rule-modal__header">
               <span className="rule-modal__title">{t("newRule.title")}</span>
               <p className="rule-modal__subtitle">
@@ -980,8 +943,7 @@ export function ProfilesWorkspace({
                 {t("common.create")}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       ) : null}
 
       {/* ── Rule editor modal ── */}

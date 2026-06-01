@@ -24,10 +24,6 @@ export type ControlSurfaceEntry = {
 
 export type HotspotPosition = { left: number; top: number; label: string; size?: "sm" | "lg" };
 
-export type CalloutAnchor = HotspotPosition & {
-  calloutSide: "left" | "right";
-};
-
 export type ActionCategory = {
   id: string;
   icon: string;

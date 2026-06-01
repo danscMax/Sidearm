@@ -2,9 +2,24 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
-import { ACTION_CATEGORIES, layerCopy, topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
+import { topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
 import { displayNameForControl, surfacePrimaryLabel } from "../lib/labels";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
+import {
+  actionLabel,
+  COMBINED_LEFT_BUTTONS,
+  COMBINED_RIGHT_BUTTONS,
+  TOP_LEFT_BUTTONS,
+  TOP_RIGHT_BUTTONS,
+  type TriggerBadgeLabels,
+  type ViewTab,
+} from "../lib/mouse-visual";
+import { useControlInteractions } from "../hooks/useControlInteractions";
+import { HeatCount } from "./mouse-visual/HeatCount";
+import { LabelColumn } from "./mouse-visual/LabelColumn";
+import { LegendCell } from "./mouse-visual/LegendCell";
+import { LayerPills } from "./mouse-visual/LayerPills";
+import { ViewTabPills } from "./mouse-visual/ViewTabPills";
 
 type VisualMode = "photo" | "schematic";
 
@@ -25,63 +40,6 @@ interface MouseVisualizationProps {
   heatmapEnabled?: boolean;
   onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
 }
-
-type ViewTab = "top" | "side" | "combined";
-
-function actionLabel(entry: ControlSurfaceEntry): string {
-  if (entry.action && entry.action.type !== "disabled" && entry.binding?.enabled) {
-    const base = entry.action.pretty;
-    const badge = triggerBadge(entry.binding.triggerMode);
-    return badge ? `${base} ${badge}` : base;
-  }
-  return displayNameForControl(entry.control);
-}
-
-function triggerBadge(mode: string | undefined): string {
-  switch (mode) {
-    case "doublePress":
-      return "· 2×";
-    case "triplePress":
-      return "· 3×";
-    case "hold":
-      return "· Hold";
-    case "chord":
-      return "· Chord";
-    default:
-      return "";
-  }
-}
-
-function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {
-  const name = displayNameForControl(entry.control);
-  if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
-    return `${name}\n${unassignedLabel}`;
-  }
-  const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
-  return `${name}\n${cat?.label ?? ""}: ${entry.action.pretty}`;
-}
-
-/** Top view: left-side buttons (physical left half of mouse). */
-const TOP_LEFT_BUTTONS: ControlId[] = [
-  "mouse_left", "top_aux_01", "top_aux_02", "mouse_4",
-];
-
-/** Top view: right-side buttons (physical right half / wheel area). */
-const TOP_RIGHT_BUTTONS: ControlId[] = [
-  "hypershift_button", "wheel_up", "wheel_click", "mouse_5", "wheel_down",
-];
-
-/** Combined view: left labels (thumb 1-6 + DPI/LMB/M4). */
-const COMBINED_LEFT_BUTTONS: ControlId[] = [
-  "mouse_left", "top_aux_01", "top_aux_02", "mouse_4",
-  "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06",
-];
-
-/** Combined view: right labels (wheel/HS/M5 + thumb 7-12). */
-const COMBINED_RIGHT_BUTTONS: ControlId[] = [
-  "hypershift_button", "wheel_up", "wheel_click", "wheel_down", "mouse_5",
-  "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
-];
 
 /** Side view: 4 columns × 3 rows matching the physical thumb-grid layout. */
 const SIDE_LEGEND_GRID: ControlId[][] = [
@@ -107,46 +65,26 @@ export function MouseVisualization({
 }: MouseVisualizationProps) {
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
-  const [hoveredId, setHoveredId] = useState<ControlId | null>(null);
   const [visualMode, setVisualMode] = useState<VisualMode>("photo");
-  const [dragOverId, setDragOverId] = useState<ControlId | null>(null);
-
-  // Apply the heat background tint via the CSSOM so it keeps overriding the
-  // hotspot/cell background classes exactly as the old inline style did, while
-  // staying CSP-safe (no inline style attribute; FIXES P2-3).
-  function applyHeatBg(el: HTMLElement | null, controlId: ControlId): void {
-    if (!el) return;
-    const hot =
-      !!heatmapEnabled && !!executionCounts && (executionCounts.get(controlId) ?? 0) > 0;
-    if (hot) {
-      el.style.setProperty("background-color", "rgba(159, 202, 105, 0.07)");
-    } else {
-      el.style.removeProperty("background-color");
-    }
-  }
-
-  function heatCount(controlId: ControlId): React.ReactNode {
-    if (!heatmapEnabled || !executionCounts) return null;
-    const count = executionCounts.get(controlId) ?? 0;
-    if (count === 0) return null;
-    const maxCount = Math.max(1, ...Array.from(executionCounts.values()));
-    const intensity = Math.min(count / maxCount, 1);
-    const opacity = 0.35 + intensity * 0.65;
-    return (
-      <span
-        className="heat-count"
-        ref={(el) => {
-          if (el) el.style.setProperty("--heat-opacity", String(opacity));
-        }}
-      >
-        {count}x
-      </span>
-    );
-  }
+  const interaction = useControlInteractions({
+    entries,
+    onSelectControl,
+    onToggleMultiSelect,
+    onOpenActionPicker,
+    onContextMenu,
+    onDropBinding,
+    executionCounts,
+    heatmapEnabled,
+  });
+  const { entryMap, hoveredId, dragOverId, getInteractionProps, applyHeatBg } = interaction;
+  const triggerLabels: TriggerBadgeLabels = {
+    hold: t("visualization.badgeHold"),
+    chord: t("visualization.badgeChord"),
+  };
 
   if (visualMode === "schematic") {
     return (
-      <div className="mouse-visual-tabs">
+      <div className="mouse-visual-tabs" data-layer={selectedLayer}>
         <div className="mouse-visual-tabs__nav">
           <button
             type="button"
@@ -173,27 +111,6 @@ export function MouseVisualization({
         />
       </div>
     );
-  }
-
-  const entryMap = new Map(entries.map((e) => [e.control.id, e]));
-
-  function handleClick(id: ControlId, e: React.MouseEvent) {
-    if (e.ctrlKey || e.metaKey) {
-      onToggleMultiSelect(id);
-    } else {
-      onSelectControl(id);
-    }
-  }
-
-  function handleDblClick(id: ControlId, e: React.MouseEvent) {
-    e.preventDefault();
-    onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
-  }
-
-  function handleRightClick(id: ControlId, e: React.MouseEvent) {
-    e.preventDefault();
-    const entry = entryMap.get(id);
-    onContextMenu?.(id, entry?.binding ?? null, entry?.action ?? null, e.clientX, e.clientY);
   }
 
   function renderHotspotButtons(
@@ -237,37 +154,19 @@ export function MouseVisualization({
             }
             applyHeatBg(el, entry.control.id);
           }}
-          onClick={(e) => handleClick(entry.control.id, e)}
-          onDoubleClick={(e) => handleDblClick(entry.control.id, e)}
-          onContextMenu={(e) => handleRightClick(entry.control.id, e)}
-          onMouseEnter={() => setHoveredId(entry.control.id)}
-          onMouseLeave={() => setHoveredId(null)}
           title={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
             entry.binding,
             entry.action,
           )}`}
           draggable={!!entry.binding && !!entry.action}
-          onDragStart={(e) => {
-            if (!entry.binding || !entry.action) { e.preventDefault(); return; }
-            e.dataTransfer.effectAllowed = "copy";
-            e.dataTransfer.setData("application/json", JSON.stringify({
-              type: "binding", actionId: entry.action.id,
-            }));
-          }}
-          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-          onDragEnter={(e) => { e.preventDefault(); setDragOverId(entry.control.id); }}
-          onDragLeave={() => setDragOverId(null)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragOverId(null);
-            try {
-              const data = JSON.parse(e.dataTransfer.getData("application/json")) as { type: string; actionId: string };
-              if (data.type === "binding") onDropBinding?.(entry.control.id, data.actionId);
-            } catch { /* ignore malformed data */ }
-          }}
+          {...getInteractionProps(entry.control.id)}
         >
           {pos.label}
-          {heatCount(entry.control.id)}
+          <HeatCount
+            controlId={entry.control.id}
+            executionCounts={executionCounts}
+            heatmapEnabled={heatmapEnabled}
+          />
         </button>
       );
     });
@@ -280,56 +179,19 @@ export function MouseVisualization({
     side: "left" | "right",
   ) {
     return (
-      <div className={`mouse-top-labels mouse-top-labels--${side}`}>
-        {controlIds.map((controlId) => {
-          const entry = entryMap.get(controlId);
-          if (!entry) return null;
-          const badge = hotspots[controlId]?.label ?? controlId;
-          const isSelected = entry.isSelected || multiSelectedControlIds.has(controlId);
-          const isHovered = hoveredId === controlId;
-          const isDragOver = dragOverId === controlId;
-          const isDimmed = matchedControlIds != null && !matchedControlIds.has(controlId);
-          const hasConflict = !!entry.binding && conflictBindingIds?.has(entry.binding.id);
-          return (
-            <button
-              type="button"
-              key={controlId}
-              className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}${isDimmed ? " btn-legend__cell--dimmed" : ""}${hasConflict ? " btn-legend__cell--conflict" : ""}`}
-              data-action-type={entry.action?.type ?? ""}
-              data-tooltip={tooltipText(entry, t("visualization.unassigned"))}
-              ref={(el) => applyHeatBg(el, controlId)}
-              onClick={(e) => handleClick(controlId, e)}
-              onDoubleClick={(e) => handleDblClick(controlId, e)}
-              onContextMenu={(e) => handleRightClick(controlId, e)}
-              onMouseEnter={() => setHoveredId(controlId)}
-              onMouseLeave={() => setHoveredId(null)}
-              draggable={!!entry.binding && !!entry.action}
-              onDragStart={(e) => {
-                if (!entry.binding || !entry.action) { e.preventDefault(); return; }
-                e.dataTransfer.effectAllowed = "copy";
-                e.dataTransfer.setData("application/json", JSON.stringify({
-                  type: "binding", actionId: entry.action.id,
-                }));
-              }}
-              onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-              onDragEnter={(e) => { e.preventDefault(); setDragOverId(controlId); }}
-              onDragLeave={() => setDragOverId(null)}
-              onDrop={(e) => {
-                e.preventDefault();
-                setDragOverId(null);
-                try {
-                  const data = JSON.parse(e.dataTransfer.getData("application/json")) as { type: string; actionId: string };
-                  if (data.type === "binding") onDropBinding?.(controlId, data.actionId);
-                } catch { /* ignore malformed data */ }
-              }}
-            >
-              <span className="btn-legend__badge">{badge}</span>
-              <span className="btn-legend__label">{actionLabel(entry)}</span>
-              {heatCount(controlId)}
-            </button>
-          );
-        })}
-      </div>
+      <LabelColumn
+        controlIds={controlIds}
+        side={side}
+        interaction={interaction}
+        multiSelectedControlIds={multiSelectedControlIds}
+        badgeFor={(id) => hotspots[id]?.label ?? id}
+        actionLabelFor={(entry) => actionLabel(entry, { triggerLabels })}
+        unassignedLabel={t("visualization.unassigned")}
+        executionCounts={executionCounts}
+        heatmapEnabled={heatmapEnabled}
+        matchedControlIds={matchedControlIds}
+        conflictBindingIds={conflictBindingIds}
+      />
     );
   }
 
@@ -350,51 +212,29 @@ export function MouseVisualization({
             {row.map((controlId) => {
               const entry = entryMap.get(controlId);
               if (!entry) return null;
-              const badge = hotspots[controlId]?.label ?? controlId;
-              const isSelected = entry.isSelected || multiSelectedControlIds.has(controlId);
-              const isHovered = hoveredId === controlId;
-              const isDragOver = dragOverId === controlId;
-              const isDimmed = matchedControlIds != null && !matchedControlIds.has(controlId);
-              const hasConflict = !!entry.binding && conflictBindingIds?.has(entry.binding.id);
+              const selected = entry.isSelected || multiSelectedControlIds.has(controlId);
+              const dimmed = matchedControlIds != null && !matchedControlIds.has(controlId);
+              const conflict = !!entry.binding && (conflictBindingIds?.has(entry.binding.id) ?? false);
               return (
-                <button
-                  type="button"
+                <LegendCell
                   key={controlId}
-                  className={`btn-legend__cell${isSelected ? " btn-legend__cell--selected" : ""}${isHovered ? " btn-legend__cell--hovered" : ""}${isDragOver ? " mouse-visual__hotspot--dragover" : ""}${isDimmed ? " btn-legend__cell--dimmed" : ""}${hasConflict ? " btn-legend__cell--conflict" : ""}`}
-                  data-action-type={entry.action?.type ?? ""}
-                  ref={(el) => applyHeatBg(el, controlId)}
-                  onClick={(e) => handleClick(controlId, e)}
-                  onDoubleClick={(e) => handleDblClick(controlId, e)}
-                  onMouseEnter={() => setHoveredId(controlId)}
-                  onMouseLeave={() => setHoveredId(null)}
-                  title={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
+                  entry={entry}
+                  controlId={controlId}
+                  interaction={interaction}
+                  selected={selected}
+                  badge={hotspots[controlId]?.label ?? controlId}
+                  label={actionLabel(entry, { triggerLabels })}
+                  tooltip={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
                     entry.binding,
                     entry.action,
                   )}`}
-                  draggable={!!entry.binding && !!entry.action}
-                  onDragStart={(e) => {
-                    if (!entry.binding || !entry.action) { e.preventDefault(); return; }
-                    e.dataTransfer.effectAllowed = "copy";
-                    e.dataTransfer.setData("application/json", JSON.stringify({
-                      type: "binding", actionId: entry.action.id,
-                    }));
-                  }}
-                  onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; }}
-                  onDragEnter={(e) => { e.preventDefault(); setDragOverId(controlId); }}
-                  onDragLeave={() => setDragOverId(null)}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    setDragOverId(null);
-                    try {
-                      const data = JSON.parse(e.dataTransfer.getData("application/json")) as { type: string; actionId: string };
-                      if (data.type === "binding") onDropBinding?.(controlId, data.actionId);
-                    } catch { /* ignore malformed data */ }
-                  }}
-                >
-                  <span className="btn-legend__badge">{badge}</span>
-                  <span className="btn-legend__label">{actionLabel(entry)}</span>
-                  {heatCount(controlId)}
-                </button>
+                  nativeTooltip
+                  contextMenu={false}
+                  dimmed={dimmed}
+                  conflict={conflict}
+                  executionCounts={executionCounts}
+                  heatmapEnabled={heatmapEnabled}
+                />
               );
             })}
           </div>
@@ -403,43 +243,10 @@ export function MouseVisualization({
     );
   }
 
-  const layerIdx = layerCopy.findIndex((l) => l.value === selectedLayer);
-
-  const viewTabs: { key: ViewTab; label: string }[] = [
-    { key: "combined", label: t("visualization.tabAll") },
-    { key: "top", label: t("visualization.tabTop") },
-    { key: "side", label: t("visualization.tabSide") },
-  ];
-  const viewIdx = viewTabs.findIndex((t) => t.key === activeTab);
-
   return (
-    <div className="mouse-visual-tabs">
+    <div className="mouse-visual-tabs" data-layer={selectedLayer}>
       <div className="mouse-visual-tabs__nav">
-        <div
-          className="pill-track"
-          ref={(el) => {
-            if (el) el.style.setProperty("--pill-count", String(viewTabs.length));
-          }}
-        >
-          {viewIdx >= 0 ? (
-            <div
-              className="pill-track__indicator"
-              ref={(el) => {
-                if (el) el.style.setProperty("--pill-offset", `${viewIdx * 100}%`);
-              }}
-            />
-          ) : null}
-          {viewTabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              className={`pill-track__pill${tab.key === activeTab ? " pill-track__pill--active" : ""}`}
-              onClick={() => setActiveTab(tab.key)}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <ViewTabPills activeTab={activeTab} onSelect={setActiveTab} />
         <button
           type="button"
           className="view-mode-toggle view-mode-toggle--icon"
@@ -507,33 +314,7 @@ export function MouseVisualization({
         )}
       </div>
 
-      <div className="mouse-visual-tabs__footer">
-        <div
-          className="pill-track pill-track--layer"
-          ref={(el) => {
-            if (el) el.style.setProperty("--pill-count", String(layerCopy.length));
-          }}
-        >
-          {layerIdx >= 0 ? (
-            <div
-              className={`pill-track__indicator pill-track__indicator--${selectedLayer}`}
-              ref={(el) => {
-                if (el) el.style.setProperty("--pill-offset", `${layerIdx * 100}%`);
-              }}
-            />
-          ) : null}
-          {layerCopy.map((layer) => (
-            <button
-              key={layer.value}
-              type="button"
-              className={`pill-track__pill${layer.value === selectedLayer ? " pill-track__pill--active" : ""}`}
-              onClick={() => onSelectLayer(layer.value)}
-            >
-              {layer.label}
-            </button>
-          ))}
-        </div>
-      </div>
+      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} />
     </div>
   );
 }

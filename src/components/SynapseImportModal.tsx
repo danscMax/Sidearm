@@ -6,13 +6,13 @@ import {
   importSynapseIntoConfig,
   normalizeCommandError,
 } from "../lib/backend";
+import { toggleInSet } from "../lib/helpers";
 import type {
   ImportSummary,
-  ImportWarning,
   MergeStrategy,
   ParsedSynapseProfiles,
 } from "../lib/synapse-import";
-import { useModalDismiss } from "../hooks/useModalDismiss";
+import { ModalShell } from "./shared";
 
 export interface SynapseImportModalProps {
   parsed: ParsedSynapseProfiles;
@@ -42,12 +42,6 @@ export function SynapseImportModal({
     containerRef.current?.focus();
   }, []);
 
-  // Escape-to-close (disabled mid-submit) + Tab focus trap.
-  const handleKeyDown = useModalDismiss(containerRef, {
-    onClose: onCancel,
-    escapeEnabled: !submitting,
-  });
-
   const selectedCount = selected.size;
   const totalBindings = useMemo(
     () =>
@@ -58,21 +52,11 @@ export function SynapseImportModal({
   );
 
   function toggleProfile(guid: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(guid)) next.delete(guid);
-      else next.add(guid);
-      return next;
-    });
+    setSelected((prev) => toggleInSet(prev, guid));
   }
 
   function toggleExpanded(guid: string) {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(guid)) next.delete(guid);
-      else next.add(guid);
-      return next;
-    });
+    setExpanded((prev) => toggleInSet(prev, guid));
   }
 
   async function handleSubmit() {
@@ -96,16 +80,13 @@ export function SynapseImportModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={!submitting ? onCancel : undefined}>
-      <div
-        ref={containerRef}
-        className="confirm-modal synapse-import-modal"
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
+    <ModalShell
+      onClose={onCancel}
+      className="confirm-modal synapse-import-modal"
+      dialogRef={containerRef}
+      escapeEnabled={!submitting}
+      dismissOnBackdropClick={!submitting}
+    >
         <header>
           <h3>{t("synapseImport.title")}</h3>
           <p className="panel__muted">
@@ -271,25 +252,7 @@ export function SynapseImportModal({
                 })}
           </button>
         </footer>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 
-export function summarizeImport(
-  summary: ImportSummary,
-  t: ReturnType<typeof useTranslation>["t"],
-): string {
-  return t("synapseImport.summaryToast", {
-    profiles: summary.profilesAdded,
-    bindings: summary.bindingsAdded,
-    actions: summary.actionsAdded,
-    macros: summary.macrosAdded,
-  });
-}
-
-export function formatWarningsForClipboard(warnings: ImportWarning[]): string {
-  return warnings
-    .map((w) => `[${w.code}] ${w.message}${w.context ? ` — ${w.context}` : ""}`)
-    .join("\n");
-}

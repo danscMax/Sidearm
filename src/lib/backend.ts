@@ -277,7 +277,7 @@ export async function exportVerificationSession(
 /** Generic Tauri event subscription that forwards `event.payload` to
  *  `onPayload`. The typed `listen*Event` wrappers below delegate to it so the
  *  `listen<T>(name, e => cb(e.payload))` boilerplate lives in one place. */
-export async function listenEvent<T>(
+async function listenEvent<T>(
   eventName: string,
   onPayload: (payload: T) => void,
 ): Promise<UnlistenFn> {

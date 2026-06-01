@@ -1,5 +1,5 @@
 import type { ControlId } from "../config";
-import type { HotspotPosition, CalloutAnchor } from "./types";
+import type { HotspotPosition } from "./types";
 
 /** Hotspot positions for the TOP-DOWN photo (naga-top.jpg).
  *  Measured via hotspot-test.html click calibration. */
@@ -59,33 +59,4 @@ export const combinedViewHotspots: Partial<Record<ControlId, HotspotPosition>> =
   hypershift_button: { left: 60.5, top: 14, label: "HS", size: "sm" },
   mouse_4:           { left: 50, top: 23.5, label: "←", size: "sm" },
   mouse_5:           { left: 61, top: 23.5, label: "→", size: "sm" },
-};
-
-/** Callout anchors for the TOP-DOWN view — extends hotspots with calloutSide. */
-export const topViewCallouts: Partial<Record<ControlId, CalloutAnchor>> = {
-  mouse_left:        { left: 26, top: 10, label: "ЛКМ", calloutSide: "left" },
-  top_aux_01:        { left: 10, top: 11, label: "DPI↑", size: "sm", calloutSide: "left" },
-  top_aux_02:        { left: 10, top: 21, label: "DPI↓", size: "sm", calloutSide: "left" },
-  mouse_4:           { left: 32, top: 22.5, label: "→", size: "sm", calloutSide: "left" },
-  wheel_up:          { left: 45.5, top: 13.5, label: "▲", size: "sm", calloutSide: "right" },
-  wheel_click:       { left: 45.5, top: 22.5, label: "●", size: "sm", calloutSide: "right" },
-  wheel_down:        { left: 45.5, top: 31.5, label: "▼", size: "sm", calloutSide: "right" },
-  hypershift_button: { left: 66, top: 10, label: "HS", size: "sm", calloutSide: "right" },
-  mouse_5:           { left: 59.5, top: 23, label: "←", size: "sm", calloutSide: "right" },
-};
-
-/** Callout anchors for the SIDE view — extends hotspots with calloutSide. */
-export const sideViewCallouts: Partial<Record<ControlId, CalloutAnchor>> = {
-  thumb_01: { left: 44.5, top: 76, label: "1", calloutSide: "left" },
-  thumb_02: { left: 42.5, top: 56, label: "2", calloutSide: "left" },
-  thumb_03: { left: 41, top: 36.5, label: "3", calloutSide: "left" },
-  thumb_04: { left: 51.5, top: 73, label: "4", calloutSide: "left" },
-  thumb_05: { left: 50, top: 53.5, label: "5", calloutSide: "left" },
-  thumb_06: { left: 48.5, top: 33.5, label: "6", calloutSide: "left" },
-  thumb_07: { left: 59, top: 71, label: "7", calloutSide: "right" },
-  thumb_08: { left: 57, top: 51, label: "8", calloutSide: "right" },
-  thumb_09: { left: 55.5, top: 31.5, label: "9", calloutSide: "right" },
-  thumb_10: { left: 66, top: 68.5, label: "10", calloutSide: "right" },
-  thumb_11: { left: 64, top: 49, label: "11", calloutSide: "right" },
-  thumb_12: { left: 62.5, top: 29, label: "12", calloutSide: "right" },
 };

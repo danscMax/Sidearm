@@ -9,7 +9,6 @@ import {
 import { toggleInSet } from "../lib/helpers";
 import type {
   ImportSummary,
-  ImportWarning,
   MergeStrategy,
   ParsedSynapseProfiles,
 } from "../lib/synapse-import";
@@ -257,20 +256,3 @@ export function SynapseImportModal({
   );
 }
 
-export function summarizeImport(
-  summary: ImportSummary,
-  t: ReturnType<typeof useTranslation>["t"],
-): string {
-  return t("synapseImport.summaryToast", {
-    profiles: summary.profilesAdded,
-    bindings: summary.bindingsAdded,
-    actions: summary.actionsAdded,
-    macros: summary.macrosAdded,
-  });
-}
-
-export function formatWarningsForClipboard(warnings: ImportWarning[]): string {
-  return warnings
-    .map((w) => `[${w.code}] ${w.message}${w.context ? ` — ${w.context}` : ""}`)
-    .join("\n");
-}

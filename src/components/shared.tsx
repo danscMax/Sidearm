@@ -1,24 +1,6 @@
 import { useRef } from "react";
-import { useTranslation } from "react-i18next";
-import type { ValidationWarning, CommandError } from "../lib/config";
+import type { CommandError } from "../lib/config";
 import { useModalDismiss } from "../hooks/useModalDismiss";
-
-export function PanelGroup({
-  title,
-  defaultOpen = false,
-  children,
-}: {
-  title: string;
-  defaultOpen?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <details className="panel-group" open={defaultOpen || undefined}>
-      <summary>{title}</summary>
-      <div className="panel-group__body">{children}</div>
-    </details>
-  );
-}
 
 export function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -64,23 +46,6 @@ export function Toggle({
         </span>
       </span>
     </label>
-  );
-}
-
-export function WarningsPanel({ warnings }: { warnings: ValidationWarning[] }) {
-  const { t } = useTranslation();
-  return (
-    <div className="notice notice--warning">
-      <strong>{t("shared.warnings")}</strong>
-      <ul>
-        {warnings.map((warning) => (
-          <li key={`${warning.code}-${warning.path ?? warning.message}`}>
-            <span>{warning.message}</span>
-            {warning.path ? <code>{warning.path}</code> : null}
-          </li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

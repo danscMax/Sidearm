@@ -94,7 +94,7 @@ const CONDITION_TYPE_KEYS: Array<{ value: ActionCondition["type"]; key: string }
    Sequence Step Editor (reusable)
    ───────────────────────────────────────────────────────── */
 
-export function SequenceStepEditor({
+function SequenceStepEditor({
   steps,
   onUpdate,
 }: {

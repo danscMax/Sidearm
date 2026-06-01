@@ -196,7 +196,9 @@ impl CaptureBackendHandle {
                 HashMap::new();
 
             while let Ok(event) = event_rx.recv() {
-                process_encoded_key_event(
+                // EventOutcome is only consumed by the Windows stale-hold sweep;
+                // the evdev backend has no such sweep, so ignore it here.
+                let _ = process_encoded_key_event(
                     &worker_app,
                     &worker_runtime_store,
                     &worker_config,

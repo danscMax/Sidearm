@@ -238,6 +238,18 @@ mod select_held_key_tests {
     }
 }
 
+/// Outcome of handling one captured key event, reported back to the worker
+/// loop so it can decide whether to refresh the stale-hold deadline.
+pub(super) enum EventOutcome {
+    /// Event was dispatched, held, released, or otherwise fully handled.
+    Handled,
+    /// A hold-shortcut DOWN was dropped because the key is already held
+    /// (auto-repeat or cross-source duplicate). The worker must NOT refresh
+    /// `held_last_seen` for these — otherwise rapid re-taps after a helper
+    /// death defer the stale-hold sweep forever (B-F4, Mode B).
+    DroppedAsHeldDuplicate,
+}
+
 fn process_encoded_key_event(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
@@ -245,7 +257,7 @@ fn process_encoded_key_event(
     app_name: &str,
     event: EncodedKeyEvent,
     held_actions: &mut std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState>,
-) {
+) -> EventOutcome {
     // Accumulate log entries locally and flush in a single lock at the end to
     // avoid acquiring the runtime_store mutex multiple times per keypress.
     let mut log_entries: Vec<(&str, String, bool)> = Vec::new(); // (source, message, is_warn)
@@ -332,7 +344,7 @@ fn process_encoded_key_event(
             ));
         }
         flush_log_entries(runtime_store, log_entries);
-        return;
+        return EventOutcome::Handled;
     }
 
     let capture_result =
@@ -347,7 +359,7 @@ fn process_encoded_key_event(
                     created_at: runtime::timestamp_millis(),
                 };
                 emit_runtime_error(app, runtime_store, &error);
-                return;
+                return EventOutcome::Handled;
             }
         };
 
@@ -432,7 +444,7 @@ fn process_encoded_key_event(
     let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
     if preview.status != resolver::ResolutionStatus::Resolved {
         flush_log_entries(runtime_store, log_entries);
-        return;
+        return EventOutcome::Handled;
     }
 
     // Auto-repeat guard: only tap-mode shortcut actions should repeat.
@@ -441,7 +453,7 @@ fn process_encoded_key_event(
     // the program 30+ times per second).
     if event.is_repeat && preview.action_type.as_deref() != Some("shortcut") {
         flush_log_entries(runtime_store, log_entries);
-        return;
+        return EventOutcome::Handled;
     }
 
     // Modifier-only shortcuts (Ctrl+Alt, Ctrl+Shift, etc.) are forced to hold
@@ -478,7 +490,7 @@ fn process_encoded_key_event(
                 event.encoded_key
             );
             flush_log_entries(runtime_store, log_entries);
-            return;
+            return EventOutcome::DroppedAsHeldDuplicate;
         }
 
         let action = config
@@ -575,6 +587,8 @@ fn process_encoded_key_event(
     } else {
         run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
     }
+
+    EventOutcome::Handled
 }
 
 fn run_fire_and_forget(

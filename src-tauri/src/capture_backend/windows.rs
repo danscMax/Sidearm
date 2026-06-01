@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::{
-    sync::{mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
     thread::{self, JoinHandle},
 };
 use tauri::AppHandle;
 
-use super::{process_encoded_key_event, EncodedKeyEvent, CAPTURE_BACKEND_NAME};
+use super::{process_encoded_key_event, EncodedKeyEvent, EventOutcome, CAPTURE_BACKEND_NAME};
 use crate::{
     config::AppConfig,
     hotkeys,
@@ -805,6 +808,13 @@ impl CaptureBackendHandle {
         let (event_tx, event_rx) =
             mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
         let helper_event_tx = event_tx.clone();
+        // B-F4 Mode A: the helper's stdout reader flips this on EOF (helper
+        // process crash). The worker then force-releases every hold whose
+        // key-up the dead helper can no longer deliver, instead of waiting on
+        // (and indefinitely deferring) the 2s stale sweep.
+        let helper_died = Arc::new(AtomicBool::new(false));
+        let worker_helper_died = helper_died.clone();
+        let reader_helper_died = helper_died.clone();
         let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, String>>();
 
         let worker_app = app.clone();
@@ -831,21 +841,38 @@ impl CaptureBackendHandle {
                 match event_rx.recv_timeout(POLL_INTERVAL) {
                     Ok(event) => {
                         let encoded_key = event.encoded_key.clone();
-                        process_encoded_key_event(
+                        match process_encoded_key_event(
                             &worker_app,
                             &worker_runtime_store,
                             &worker_config,
                             &worker_app_name,
                             event,
                             &mut held_actions,
-                        );
-                        if held_actions.contains_key(&encoded_key) {
-                            held_last_seen.insert(encoded_key, Instant::now());
-                        } else {
-                            held_last_seen.remove(&encoded_key);
+                        ) {
+                            EventOutcome::Handled => {
+                                if held_actions.contains_key(&encoded_key) {
+                                    held_last_seen.insert(encoded_key, Instant::now());
+                                } else {
+                                    held_last_seen.remove(&encoded_key);
+                                }
+                            }
+                            // B-F4 Mode B: a tap dropped as an already-held
+                            // duplicate must NOT refresh the deadline, or rapid
+                            // re-taps defer the 2s stale sweep forever.
+                            EventOutcome::DroppedAsHeldDuplicate => {}
+                        }
+                        // B-F4 Mode A: react at once if the helper just died.
+                        if worker_helper_died.swap(false, Ordering::SeqCst) {
+                            release_dead_helper_holds(&mut held_actions, &mut held_last_seen);
                         }
                     }
                     Err(RecvTimeoutError::Timeout) => {
+                        // B-F4 Mode A: if the helper process crashed (stdout
+                        // EOF) during an idle period with no events flowing,
+                        // react within one poll interval rather than waiting 2s.
+                        if worker_helper_died.swap(false, Ordering::SeqCst) {
+                            release_dead_helper_holds(&mut held_actions, &mut held_last_seen);
+                        }
                         // Recover from stuck held_actions — happens when the
                         // capture helper dies mid-hold and no key-up event
                         // ever arrives.  Without this, subsequent presses of
@@ -917,6 +944,7 @@ impl CaptureBackendHandle {
             helper_event_tx,
             modifier_stale_gc_ms,
             replayed_modifier_force_release_ms,
+            reader_helper_died,
         );
         if !registrations.is_empty() && helper.is_none() {
             if let Ok(mut store) = runtime_store.lock() {
@@ -2114,6 +2142,32 @@ fn drain_helper_matches(stdout: &mut std::io::StdoutLock<'_>) -> std::io::Result
     Ok(())
 }
 
+/// Drain all held shortcuts and the stale-tracking map, returning the held
+/// states so the caller can inject their key-ups. Pure (no OS calls, no
+/// threads) so the B-F4 helper-death recovery is unit-testable in isolation.
+fn drain_dead_helper_holds(
+    held_actions: &mut std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState>,
+    held_last_seen: &mut std::collections::HashMap<String, std::time::Instant>,
+) -> Vec<(String, crate::input_synthesis::HeldShortcutState)> {
+    held_last_seen.clear();
+    held_actions.drain().collect()
+}
+
+/// Force-release every hold the dead helper can no longer send a key-up for
+/// (B-F4 Mode A). The SendInput injection is kept out of
+/// `drain_dead_helper_holds` so the bookkeeping stays pure and testable.
+fn release_dead_helper_holds(
+    held_actions: &mut std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState>,
+    held_last_seen: &mut std::collections::HashMap<String, std::time::Instant>,
+) {
+    for (key, held) in drain_dead_helper_holds(held_actions, held_last_seen) {
+        log::warn!("[capture] Helper died — force-releasing stuck hold `{key}`");
+        if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
+            log::warn!("[capture] Helper-death release failed for `{key}`: {e}");
+        }
+    }
+}
+
 /// Spawns the capture helper child process for modifier-combo hotkeys.
 /// Returns None if there are no modifier combos or if spawning fails (non-fatal).
 fn spawn_capture_helper(
@@ -2121,6 +2175,7 @@ fn spawn_capture_helper(
     event_tx: mpsc::SyncSender<EncodedKeyEvent>,
     modifier_stale_gc_ms: Option<u64>,
     replayed_modifier_force_release_ms: Option<u64>,
+    helper_died: Arc<AtomicBool>,
 ) -> Option<HelperHandle> {
     use std::io::Write;
     use std::os::windows::process::CommandExt;
@@ -2260,6 +2315,10 @@ fn spawn_capture_helper(
                 is_key_up,
             });
         }
+        // B-F4 Mode A: the read loop only exits when the helper's stdout hits
+        // EOF — i.e. the helper process has exited/crashed. Flag it so the
+        // worker releases holds whose key-ups will now never arrive.
+        helper_died.store(true, Ordering::SeqCst);
     });
 
     Some(HelperHandle {
@@ -2520,6 +2579,62 @@ fn run_foreground_watcher(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod helper_death_recovery_tests {
+    use super::drain_dead_helper_holds;
+    use crate::input_synthesis::HeldShortcutState;
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    fn dummy_held() -> HeldShortcutState {
+        HeldShortcutState {
+            pressed_modifier_vks: Vec::new(),
+            primary_key: None,
+        }
+    }
+
+    /// B-F4: after a helper-death drain, `held_actions` and `held_last_seen`
+    /// are both empty, so the `held_actions.contains_key(K)` gate that drops
+    /// taps (the hold-shortcut dedup + the worker refresh) is false — the next
+    /// tap of the same key is delivered instead of being silently skipped.
+    #[test]
+    fn drain_releases_holds_so_next_tap_is_not_dropped() {
+        let mut held: HashMap<String, HeldShortcutState> = HashMap::new();
+        let mut seen: HashMap<String, Instant> = HashMap::new();
+        let k = "Ctrl+F13".to_string();
+        held.insert(k.clone(), dummy_held());
+        seen.insert(k.clone(), Instant::now());
+
+        let released = drain_dead_helper_holds(&mut held, &mut seen);
+
+        assert_eq!(
+            released.len(),
+            1,
+            "the held entry must be returned for key-up injection"
+        );
+        assert_eq!(released[0].0, k);
+        assert!(held.is_empty(), "held_actions must be drained on helper death");
+        assert!(seen.is_empty(), "held_last_seen must be cleared on helper death");
+        assert!(
+            !held.contains_key(&k),
+            "next tap of the same key must not be skipped as already-held"
+        );
+    }
+
+    /// Helper death while nothing is held is a harmless no-op.
+    #[test]
+    fn drain_with_no_holds_is_empty() {
+        let mut held: HashMap<String, HeldShortcutState> = HashMap::new();
+        let mut seen: HashMap<String, Instant> = HashMap::new();
+
+        let released = drain_dead_helper_holds(&mut held, &mut seen);
+
+        assert!(released.is_empty());
+        assert!(held.is_empty());
+        assert!(seen.is_empty());
+    }
+}
 
 #[cfg(test)]
 mod helper_modifier_state_tests {

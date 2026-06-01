@@ -212,13 +212,6 @@
     "sleep": "Delay",
     "launch": "Launch"
   },
-  "viewState": {
-    "idle": "Idle",
-    "loading": "Loading configuration",
-    "ready": "Ready",
-    "saving": "Saving",
-    "error": "Error"
-  },
   "configWaiting": {
     "eyebrow": "Waiting for config",
     "heading": "Interface not loaded yet.",

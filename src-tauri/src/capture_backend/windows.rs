@@ -1534,7 +1534,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                         REPLAYED_AWAITING_UP.with(|cell| {
                             cell.borrow_mut().insert(pm.vk, now);
                         });
-                        unsafe { replay_modifier_down(pm.vk, pm.scan); }
+                        replay_modifier_down(pm.vk, pm.scan);
                         replayed_vks.push(pm.vk);
                     }
                 }

@@ -4,9 +4,9 @@
  * Property-based and unit edge-case tests for helpers.ts.
  * Targets invariants NOT covered by helpers.test.ts or edge-cases.test.ts.
  *
- * edge-cases.test.ts already tests parseCommaSeparatedUniqueValues PBT for:
- *   idempotence, no-empties, no-duplicates, trimmed values, length bound,
- *   first-occurrence order.
+ * This file also hosts the parseCommaSeparatedUniqueValues PBT suite
+ *   (idempotence, no-empties, no-duplicates, trimmed values, length bound,
+ *   first-occurrence order), migrated here from the former edge-cases.test.ts.
  *
  * This file adds:
  *   - uniqueStrings (not directly tested anywhere)
@@ -570,3 +570,97 @@ describe("overflow: sortAppMappings with MAX_SAFE_INTEGER priorities", () => {
 // TEMPORAL — N/A
 // No timestamp or ID-generation functions exist in helpers.ts.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// parseCommaSeparatedUniqueValues (PBT) — migrated from the former
+// edge-cases.test.ts
+// ---------------------------------------------------------------------------
+
+describe("parseCommaSeparatedUniqueValues (PBT)", () => {
+  it("idempotent: parse(parse(x).join(', ')) equals parse(x)", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (input) => {
+        const first = parseCommaSeparatedUniqueValues(input);
+        const rejoined = first.join(", ");
+        const second = parseCommaSeparatedUniqueValues(rejoined);
+        expect(second).toEqual(first);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("result never contains empty strings", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (input) => {
+        const result = parseCommaSeparatedUniqueValues(input);
+        for (const value of result) {
+          expect(value).not.toBe("");
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("result never contains duplicates", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (input) => {
+        const result = parseCommaSeparatedUniqueValues(input);
+        expect(new Set(result).size).toBe(result.length);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("all values in result are trimmed", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (input) => {
+        const result = parseCommaSeparatedUniqueValues(input);
+        for (const value of result) {
+          expect(value).toBe(value.trim());
+        }
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("result length is at most the number of comma-separated segments", () => {
+    fc.assert(
+      fc.property(fc.string({ maxLength: 200 }), (input) => {
+        const result = parseCommaSeparatedUniqueValues(input);
+        const segments = input.split(",").length;
+        expect(result.length).toBeLessThanOrEqual(segments);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("order is preserved (first occurrence wins)", () => {
+    // Use strings without commas since commas are the delimiter
+    const arbSegment = fc
+      .string({ minLength: 1, maxLength: 20 })
+      .filter((s) => !s.includes(","));
+
+    fc.assert(
+      fc.property(
+        fc.array(arbSegment, { minLength: 1, maxLength: 20 }),
+        (values) => {
+          const input = values.join(",");
+          const result = parseCommaSeparatedUniqueValues(input);
+          // Every element in result should appear in the original order
+          // relative to their first occurrence
+          const trimmedValues = values.map((v) => v.trim()).filter(Boolean);
+          const expectedOrder: string[] = [];
+          const seen = new Set<string>();
+          for (const v of trimmedValues) {
+            if (!seen.has(v)) {
+              seen.add(v);
+              expectedOrder.push(v);
+            }
+          }
+          expect(result).toEqual(expectedOrder);
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+});

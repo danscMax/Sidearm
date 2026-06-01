@@ -13,7 +13,7 @@ import type {
   Profile,
   SnippetLibraryItem,
 } from "./config";
-import { uniqueStrings } from "./helpers";
+import { clampPriority, uniqueStrings } from "./helpers";
 
 const PLACEHOLDER_ACTION_NOTE =
   "Created from the shell editor. Replace this placeholder before using it in runtime.";
@@ -464,7 +464,7 @@ export function createAppMappingFromCapture(
   if (!normalizedExe) {
     throw new Error("exe must not be empty");
   }
-  const clampedPriority = Math.max(0, Math.min(9999, Math.round(priority)));
+  const clampedPriority = clampPriority(priority);
   const baseId = makeAppMappingId(normalizedExe);
   const nextId = nextUniqueId(
     config.appMappings.map((mapping) => mapping.id),
@@ -923,6 +923,14 @@ export interface ProfileExportData {
   /** Encoder (wheel/dial) mappings for the profile's controls. Optional for
    *  backward compatibility with v2 files and bundled presets that predate it. */
   encoderMappings?: EncoderMapping[];
+}
+
+/** Structural validation for a parsed profile-export envelope. Guards against
+ *  importing the wrong JSON shape; does not deep-validate nested entries. */
+export function isValidProfileExport(raw: unknown): raw is ProfileExportData {
+  if (typeof raw !== "object" || raw === null) return false;
+  const d = raw as Record<string, unknown>;
+  return Boolean(d.profile) && Array.isArray(d.bindings) && Array.isArray(d.actions);
 }
 
 /** Extract a single profile with its bindings, actions, and app mappings into an export envelope. */

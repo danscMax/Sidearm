@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 
 import type {
   AppConfig,
@@ -33,6 +34,32 @@ import type {
   WindowCaptureResult,
   WindowResolutionEventName,
 } from "./runtime";
+
+/** A user-selected executable from {@link pickExecutablePath}. */
+export interface ExecutablePick {
+  /** Absolute path the user selected. */
+  path: string;
+  /** Lowercased basename, e.g. "chrome.exe". */
+  name: string;
+}
+
+/** Open a native picker for an executable file. Returns null if the user
+ *  cancels. Centralizes the dialog config + basename extraction shared by the
+ *  app-mapping and launch-action editors. */
+export async function pickExecutablePath(opts: {
+  title: string;
+  filterName: string;
+  extensions: string[];
+}): Promise<ExecutablePick | null> {
+  const selected = await open({
+    title: opts.title,
+    filters: [{ name: opts.filterName, extensions: opts.extensions }],
+    multiple: false,
+  });
+  if (typeof selected !== "string") return null;
+  const name = (selected.split(/[/\\]/).pop() ?? selected).toLowerCase();
+  return { path: selected, name };
+}
 
 export async function loadConfig(): Promise<LoadConfigResponse> {
   return invoke<LoadConfigResponse>("load_config");

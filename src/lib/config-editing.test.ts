@@ -44,6 +44,7 @@ import {
   extractProfileExport,
   importProfile,
   findDuplicateAppMapping,
+  isValidProfileExport,
 } from "./config-editing";
 import type { ProfileExportData } from "./config-editing";
 
@@ -2044,6 +2045,30 @@ function makeExportData(overrides: Partial<ProfileExportData> = {}): ProfileExpo
     ...overrides,
   };
 }
+
+describe("isValidProfileExport", () => {
+  it("accepts a well-formed export envelope", () => {
+    expect(isValidProfileExport(makeExportData())).toBe(true);
+  });
+
+  it("rejects null and non-objects", () => {
+    expect(isValidProfileExport(null)).toBe(false);
+    expect(isValidProfileExport(42)).toBe(false);
+    expect(isValidProfileExport("nope")).toBe(false);
+  });
+
+  it("rejects a missing profile", () => {
+    expect(isValidProfileExport({ ...makeExportData(), profile: undefined })).toBe(false);
+  });
+
+  it("rejects non-array bindings (the loose-check bug: bindings: 5 must not pass)", () => {
+    expect(isValidProfileExport({ ...makeExportData(), bindings: 5 })).toBe(false);
+  });
+
+  it("rejects non-array actions", () => {
+    expect(isValidProfileExport({ ...makeExportData(), actions: undefined })).toBe(false);
+  });
+});
 
 describe("importProfile", () => {
   it("merges imported profile into existing config with no collisions", () => {

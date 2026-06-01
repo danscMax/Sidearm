@@ -11,17 +11,18 @@ import {
   extractProfileExport,
   findDuplicateAppMapping,
   importProfile,
+  isValidProfileExport,
   reorderAppMappingPriority,
   upsertAppMapping,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
-import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
-import { exportProfileFile, getExeIcon, importProfileFile } from "../lib/backend";
+import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
+import { exportProfileFile, getExeIcon, importProfileFile, pickExecutablePath } from "../lib/backend";
 import {
   bindingMatchesQuery,
   conflictingBindingIds,
 } from "../lib/conflict-detection";
-import { sortAppMappings, toggleInSet } from "../lib/helpers";
+import { clampPriority, sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
@@ -179,15 +180,14 @@ function AppMappingModal({
                 type="button"
                 className="action-button action-button--small"
                 onClick={async () => {
-                  const selected = await open({
+                  const pick = await pickExecutablePath({
                     title: t("newRule.browseTitle"),
-                    filters: [{ name: t("newRule.browseFilter"), extensions: ["exe", "lnk"] }],
-                    multiple: false,
+                    filterName: t("newRule.browseFilter"),
+                    extensions: ["exe", "lnk"],
                   });
-                  if (typeof selected === "string") {
-                    const exeName = selected.split(/[/\\]/).pop() ?? selected;
+                  if (pick) {
                     updateDraft((c) =>
-                      upsertAppMapping(c, { ...mapping, exe: exeName.toLowerCase(), processPath: selected }),
+                      upsertAppMapping(c, { ...mapping, exe: pick.name, processPath: pick.path }),
                     );
                   }
                 }}
@@ -268,9 +268,7 @@ function AppMappingModal({
                 className="profiles__priority-input"
                 onChange={(e) => {
                   const v = Number(e.target.value);
-                  const clamped = Number.isFinite(v)
-                    ? Math.max(0, Math.min(9999, Math.round(v)))
-                    : 0;
+                  const clamped = Number.isFinite(v) ? clampPriority(v) : 0;
                   updateDraft((c) => upsertAppMapping(c, { ...mapping, priority: clamped }));
                 }}
               />
@@ -385,7 +383,7 @@ export function ProfilesWorkspace({
   showToast,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
-  const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVizPanel({
+  const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVisualPanel({
     effectiveProfileId,
     selectedLayer,
     updateDraft,
@@ -680,11 +678,7 @@ export function ProfilesWorkspace({
               try {
                 const json = await importProfileFile(path);
                 const data = JSON.parse(json) as ProfileExportData;
-                if (
-                  !data.profile ||
-                  !Array.isArray(data.bindings) ||
-                  !Array.isArray(data.actions)
-                ) {
+                if (!isValidProfileExport(data)) {
                   showToast(t("settings.invalidProfileError"), "warning");
                   return;
                 }
@@ -818,14 +812,13 @@ export function ProfilesWorkspace({
                     type="button"
                     className="action-button action-button--small"
                     onClick={async () => {
-                      const selected = await open({
+                      const pick = await pickExecutablePath({
                         title: t("newRule.browseTitle"),
-                        filters: [{ name: t("newRule.browseFilter"), extensions: ["exe", "lnk"] }],
-                        multiple: false,
+                        filterName: t("newRule.browseFilter"),
+                        extensions: ["exe", "lnk"],
                       });
-                      if (typeof selected === "string") {
-                        const exeName = selected.split(/[/\\]/).pop() ?? selected;
-                        setNewRuleExe(exeName.toLowerCase());
+                      if (pick) {
+                        setNewRuleExe(pick.name);
                         setNewRuleCapturedTitle("");
                       }
                     }}

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { listBundledPresets, normalizeCommandError, readBundledPreset } from "../lib/backend";
 import type { PresetInfo } from "../lib/backend";
-import { importProfile } from "../lib/config-editing";
+import { importProfile, isValidProfileExport } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
 import { CloseButton, ModalShell } from "./shared";
@@ -57,7 +57,7 @@ export function PresetsModal({
     setApplying(preset.id);
     try {
       const raw = (await readBundledPreset(preset.id)) as ProfileExportData;
-      if (!raw || !raw.profile || !Array.isArray(raw.bindings) || !Array.isArray(raw.actions)) {
+      if (!isValidProfileExport(raw)) {
         setError({
           code: "parse_error",
           message: t("presets.invalidFile", { id: preset.id }),

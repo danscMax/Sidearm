@@ -23,7 +23,9 @@ import {
   createProfile,
   extractProfileExport,
   importProfile,
+  isValidProfileExport,
 } from "../lib/config-editing";
+import { clampPriority } from "../lib/helpers";
 import {
   exportFullConfig,
   getAdminAutostartStatus,
@@ -262,7 +264,7 @@ export function SettingsWorkspace({
       const raw = await importProfileBundle(filePath);
       const data = JSON.parse(raw);
 
-      if (!data.profile || !data.bindings || !data.actions) {
+      if (!isValidProfileExport(data)) {
         setImportError(t("settings.invalidProfileError"));
         return;
       }
@@ -611,7 +613,7 @@ export function SettingsWorkspace({
                   value={activeProfile.priority}
                   onChange={(e) => {
                     const v = Number(e.target.value);
-                    const clamped = Number.isFinite(v) ? Math.max(0, Math.min(9999, Math.round(v))) : 0;
+                    const clamped = Number.isFinite(v) ? clampPriority(v) : 0;
                     updateDraft((c) => upsertProfile(c, { ...activeProfile, priority: clamped }));
                   }}
                 />

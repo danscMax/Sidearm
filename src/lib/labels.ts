@@ -18,7 +18,7 @@ import type {
   RuntimeStateSummary,
 } from "./runtime";
 import type { VerificationStepResult } from "./verification-session";
-import { ACTION_CATEGORIES, type ViewState } from "./constants";
+import { ACTION_CATEGORIES } from "./constants";
 
 export function formatTimestamp(timestamp: number | null): string {
   if (timestamp == null) {
@@ -200,21 +200,6 @@ const CONTROL_ID_TO_I18N_KEY: Partial<Record<ControlId, string>> = {
 export function displayNameForControl(control: PhysicalControl): string {
   const key = CONTROL_ID_TO_I18N_KEY[control.id];
   return key ? i18n.t(key) : control.defaultName;
-}
-
-export function stateLabel(viewState: ViewState): string {
-  switch (viewState) {
-    case "idle":
-      return i18n.t("viewState.idle");
-    case "loading":
-      return i18n.t("viewState.loading");
-    case "ready":
-      return i18n.t("viewState.ready");
-    case "saving":
-      return i18n.t("viewState.saving");
-    case "error":
-      return i18n.t("viewState.error");
-  }
 }
 
 export function surfacePrimaryLabel(binding: Binding | null, action: Action | null): string {

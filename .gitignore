@@ -50,6 +50,9 @@ docs/mockups/
 # Audit reports (generated, not source)
 .audit/
 
+# Dev scratch (one-off debug scripts)
+scan_log.ps1
+
 # Portable build output
 Sidearm-Portable/
 CODEX_REVIEW_*.md

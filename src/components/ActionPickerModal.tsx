@@ -35,6 +35,7 @@ import {
   recordKeystroke,
   stopMacroRecording,
   listenEncodedKeyEvent,
+  pickExecutablePath,
 } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
@@ -303,13 +304,13 @@ function SequenceStepEditor({
                         type="button"
                         className="action-button action-button--small"
                         onClick={async () => {
-                          const selected = await open({
+                          const pick = await pickExecutablePath({
                             title: t("picker.launchBrowseProgram"),
-                            filters: [{ name: t("picker.launchBrowseFilter"), extensions: ["exe", "lnk", "bat", "cmd"] }],
-                            multiple: false,
+                            filterName: t("picker.launchBrowseFilter"),
+                            extensions: ["exe", "lnk", "bat", "cmd"],
                           });
-                          if (typeof selected === "string") {
-                            updateStep(index, { ...step, value: selected } as SequenceStep);
+                          if (pick) {
+                            updateStep(index, { ...step, value: pick.path } as SequenceStep);
                           }
                         }}
                       >
@@ -889,13 +890,13 @@ export function ActionPickerModal({
                       type="button"
                       className="action-button action-button--small"
                       onClick={async () => {
-                        const selected = await open({
+                        const pick = await pickExecutablePath({
                           title: t("picker.launchBrowseProgram"),
-                          filters: [{ name: t("picker.launchBrowseFilter"), extensions: ["exe", "lnk", "bat", "cmd"] }],
-                          multiple: false,
+                          filterName: t("picker.launchBrowseFilter"),
+                          extensions: ["exe", "lnk", "bat", "cmd"],
                         });
-                        if (typeof selected === "string") {
-                          setLaunchDraft({ ...launchDraft, target: selected });
+                        if (pick) {
+                          setLaunchDraft({ ...launchDraft, target: pick.path });
                         }
                       }}
                     >

@@ -26,7 +26,6 @@ import type {
   SequenceStep,
 } from "./config";
 import type { VerificationStepResult } from "./verification-session";
-import type { ViewState } from "./constants";
 import {
   labelForControlFamily,
   labelForEncoderSource,
@@ -37,7 +36,6 @@ import {
   labelForCapability,
   labelForVerificationResult,
   actionCategoryIcon,
-  stateLabel,
   surfacePrimaryLabel,
   labelForPasteMode,
   labelForLayer,
@@ -255,23 +253,6 @@ describe("boundary: labelForVerificationResult — all VerificationStepResult va
 
   it("no two VerificationStepResult values share the same label", () => {
     const labels = ALL_RESULTS.map((r) => labelForVerificationResult(r));
-    expect(new Set(labels).size).toBe(labels.length);
-  });
-});
-
-describe("boundary: stateLabel — all ViewState values", () => {
-  const ALL_STATES: ViewState[] = ["idle", "loading", "ready", "saving", "error"];
-
-  it("every ViewState produces a non-empty label", () => {
-    for (const state of ALL_STATES) {
-      const label = stateLabel(state);
-      expect(typeof label).toBe("string");
-      expect(label.trim().length).toBeGreaterThan(0);
-    }
-  });
-
-  it("no two ViewState values share the same label", () => {
-    const labels = ALL_STATES.map((s) => stateLabel(s));
     expect(new Set(labels).size).toBe(labels.length);
   });
 });

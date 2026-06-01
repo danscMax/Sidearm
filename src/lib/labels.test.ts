@@ -5,7 +5,6 @@ import type {
   SequenceStep,
 } from "./config";
 import type { VerificationStepResult } from "./verification-session";
-import type { ViewState } from "./constants";
 import {
   formatTimestamp,
   logLevelBadgeClass,
@@ -22,7 +21,6 @@ import {
   labelForLayer,
   labelForVerificationResult,
   actionCategoryIcon,
-  stateLabel,
   surfacePrimaryLabel,
 } from "./labels";
 import { makeAction } from "./test-fixtures";
@@ -56,22 +54,6 @@ describe("logLevelBadgeClass", () => {
 
   it("returns badge--warn for warn level", () => {
     expect(logLevelBadgeClass("warn")).toBe("badge--warn");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// stateLabel
-// ---------------------------------------------------------------------------
-
-describe("stateLabel", () => {
-  it.each<[ViewState, string]>([
-    ["idle", "Ожидание"],
-    ["loading", "Загрузка конфигурации"],
-    ["ready", "Готово"],
-    ["saving", "Сохранение"],
-    ["error", "Ошибка"],
-  ])("returns %s for %s state", (state, expected) => {
-    expect(stateLabel(state)).toBe(expected);
   });
 });
 

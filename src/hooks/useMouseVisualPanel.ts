@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import type { AppConfig, Binding, ControlId, Layer } from "../lib/config";
 import { makeBindingId, makeRandomId, upsertBinding } from "../lib/config-editing";
 
-export function useMouseVizPanel(deps: {
+export function useMouseVisualPanel(deps: {
   effectiveProfileId: string | null;
   selectedLayer: Layer;
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;

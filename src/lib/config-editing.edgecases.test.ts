@@ -31,6 +31,7 @@ import type {
   SnippetLibraryItem,
 } from "./config";
 import {
+  createAppMappingFromCapture,
   makeProfileId,
   makeSnippetId,
   makeAppMappingId,
@@ -1056,5 +1057,331 @@ describe("invariant: duplicateBinding does not corrupt existing bindings", () =>
     // Plus the new one for thumb_03
     const atThumb03 = result.bindings.filter((b) => b.controlId === "thumb_03");
     expect(atThumb03.length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PBT migrated from the former edge-cases.test.ts:
+//   createAppMappingFromCapture + extractProfileExport/importProfile roundtrip.
+// (Uses the local minCfg factory defined above.)
+// ---------------------------------------------------------------------------
+
+const ALL_CONTROL_IDS: ControlId[] = [
+  "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06",
+  "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
+  "mouse_left", "mouse_right", "top_aux_01", "top_aux_02",
+  "mouse_4", "mouse_5", "wheel_up", "wheel_down", "wheel_click",
+  "wheel_left", "wheel_right", "hypershift_button",
+  "top_special_01", "top_special_02", "top_special_03",
+];
+
+const ALL_LAYERS: Layer[] = ["standard", "hypershift"];
+
+// Arbitrary for an existing set of app mappings with unique IDs (realistic input)
+const arbExistingAppMappings: fc.Arbitrary<AppMapping[]> = fc
+  .uniqueArray(
+    fc.string({ minLength: 3, maxLength: 20 }).map(
+      (s) => `app-${s.replace(/[^a-z0-9-]/g, "x")}`,
+    ),
+    { minLength: 0, maxLength: 10 },
+  )
+  .chain((ids) =>
+    fc.tuple(
+      ...ids.map((id) =>
+        fc.record({
+          id: fc.constant(id),
+          exe: fc.string({ minLength: 1, maxLength: 30 }).map((s) => s.toLowerCase()),
+          profileId: fc.constant("profile-default"),
+          enabled: fc.boolean(),
+          priority: fc.integer({ min: 0, max: 100 }),
+        }),
+      ),
+    ),
+  ) as fc.Arbitrary<AppMapping[]>;
+
+describe("createAppMappingFromCapture (PBT)", () => {
+  it("result mapping ID is always unique in resulting config", () => {
+    fc.assert(
+      fc.property(
+        arbExistingAppMappings,
+        fc.string({ minLength: 1, maxLength: 30 }).filter((s) => s.trim().length > 0),
+        fc.integer({ min: 0, max: 9999 }),
+        fc.string({ minLength: 0, maxLength: 40 }),
+        fc.boolean(),
+        (existingMappings, exe, priority, title, includeTitleFilter) => {
+          const config = minCfg({
+            appMappings: existingMappings,
+            profiles: [{ id: "profile-default", name: "Default", enabled: true, priority: 0 }],
+          });
+          const result = createAppMappingFromCapture(
+            config, "profile-default", priority, exe, title, includeTitleFilter,
+          );
+          const allIds = result.config.appMappings.map((m) => m.id);
+          const uniqueIds = new Set(allIds);
+          expect(uniqueIds.size).toBe(allIds.length);
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+  it("exe is normalized to lowercase", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0),
+        fc.integer({ min: 0, max: 9999 }),
+        (exe, priority) => {
+          const config = minCfg({
+            profiles: [{ id: "p1", name: "P1", enabled: true, priority: 0 }],
+          });
+          const result = createAppMappingFromCapture(config, "p1", priority, exe, "", false);
+          const newMapping = result.config.appMappings.find((m) => m.id === result.newMappingId);
+          expect(newMapping).toBeDefined();
+          expect(newMapping!.exe).toBe(newMapping!.exe.toLowerCase());
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+  it("exe is trimmed (no leading/trailing whitespace)", () => {
+    fc.assert(
+      fc.property(
+        fc.string({ minLength: 1, maxLength: 50 }).filter((s) => s.trim().length > 0),
+        fc.integer({ min: 0, max: 100 }),
+        (exe, priority) => {
+          const config = minCfg({
+            profiles: [{ id: "p1", name: "P1", enabled: true, priority: 0 }],
+          });
+          const result = createAppMappingFromCapture(config, "p1", priority, exe, "", false);
+          const newMapping = result.config.appMappings.find((m) => m.id === result.newMappingId);
+          expect(newMapping).toBeDefined();
+          expect(newMapping!.exe).toBe(newMapping!.exe.trim());
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+  it("empty exe throws error", () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom("", "  ", "\t", "\n"),
+        (exe) => {
+          const config = minCfg({
+            profiles: [{ id: "p1", name: "P1", enabled: true, priority: 0 }],
+          });
+          expect(() => createAppMappingFromCapture(config, "p1", 0, exe, "", false)).toThrow();
+        },
+      ),
+      { numRuns: 20 },
+    );
+  });
+
+  it("priority is clamped to 0-9999 range", () => {
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -10000, max: 20000 }),
+        (priority) => {
+          const config = minCfg({
+            profiles: [{ id: "p1", name: "P1", enabled: true, priority: 0 }],
+          });
+          const result = createAppMappingFromCapture(config, "p1", priority, "test.exe", "", false);
+          const mapping = result.config.appMappings.find((m) => m.id === result.newMappingId);
+          expect(mapping!.priority).toBeGreaterThanOrEqual(0);
+          expect(mapping!.priority).toBeLessThanOrEqual(9999);
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+
+});
+
+describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
+  // Build a config with a profile, bindings, and actions for roundtrip testing
+  const arbConfigWithProfile = fc.record({
+    profileName: fc.string({ minLength: 1, maxLength: 30 }),
+    bindingCount: fc.integer({ min: 1, max: 12 }),
+  }).chain(({ profileName, bindingCount }) => {
+    const profileId = `profile-${profileName.replace(/[^a-z0-9]/gi, "x").toLowerCase() || "p"}`;
+
+    // Create N unique actions
+    const actions: Action[] = [];
+    for (let i = 0; i < bindingCount; i++) {
+      actions.push({
+        id: `action-${profileId}-${i}`,
+        type: "disabled",
+        payload: {} as Record<string, never>,
+        pretty: `Action ${i}`,
+      });
+    }
+
+    // Create N bindings, cycling through controls and layers to avoid collisions
+    const bindings: Binding[] = [];
+    for (let i = 0; i < bindingCount; i++) {
+      const controlId = ALL_CONTROL_IDS[i % ALL_CONTROL_IDS.length];
+      const layer = ALL_LAYERS[Math.floor(i / ALL_CONTROL_IDS.length) % 2];
+      bindings.push({
+        id: `binding-${profileId}-${layer}-${controlId}`,
+        profileId,
+        layer,
+        controlId,
+        label: `Binding ${i}`,
+        actionRef: actions[i].id,
+        enabled: true,
+      });
+    }
+
+    const profile: Profile = {
+      id: profileId,
+      name: profileName,
+      enabled: true,
+      priority: 10,
+    };
+
+    return fc.record({
+      appMappingCount: fc.integer({ min: 0, max: 3 }),
+    }).map(({ appMappingCount }) => {
+      const appMappings: AppMapping[] = [];
+      for (let i = 0; i < appMappingCount; i++) {
+        appMappings.push({
+          id: `app-${profileId}-${i}`,
+          exe: `app${i}.exe`,
+          profileId,
+          enabled: true,
+          priority: i,
+        });
+      }
+
+      const config = minCfg({
+        profiles: [profile],
+        actions,
+        bindings,
+        appMappings,
+        encoderMappings: [],
+      });
+
+      return { config, profileId };
+    });
+  });
+
+  it("action count is preserved through export/import roundtrip", () => {
+    fc.assert(
+      fc.property(arbConfigWithProfile, ({ config, profileId }) => {
+        const exported = extractProfileExport(config, profileId);
+        expect(exported).not.toBeNull();
+        if (!exported) return;
+
+        const originalActionCount = exported.actions.length;
+
+        // Import into an empty config (no collisions)
+        const emptyConfig = minCfg();
+        const imported = importProfile(emptyConfig, exported);
+
+        // Count actions belonging to the newly imported profile
+        const importedProfile = imported.profiles[0];
+        expect(importedProfile).toBeDefined();
+
+        const importedBindings = imported.bindings.filter(
+          (b) => b.profileId === importedProfile.id,
+        );
+        const importedActionRefs = new Set(importedBindings.map((b) => b.actionRef));
+        const importedActions = imported.actions.filter((a) => importedActionRefs.has(a.id));
+
+        expect(importedActions.length).toBe(originalActionCount);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("binding count is preserved through export/import roundtrip", () => {
+    fc.assert(
+      fc.property(arbConfigWithProfile, ({ config, profileId }) => {
+        const exported = extractProfileExport(config, profileId);
+        expect(exported).not.toBeNull();
+        if (!exported) return;
+
+        const originalBindingCount = exported.bindings.length;
+        const emptyConfig = minCfg();
+        const imported = importProfile(emptyConfig, exported);
+        const importedProfile = imported.profiles[0];
+        const importedBindings = imported.bindings.filter(
+          (b) => b.profileId === importedProfile.id,
+        );
+
+        expect(importedBindings.length).toBe(originalBindingCount);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("import never creates duplicate IDs across config", () => {
+    fc.assert(
+      fc.property(arbConfigWithProfile, ({ config, profileId }) => {
+        const exported = extractProfileExport(config, profileId);
+        expect(exported).not.toBeNull();
+        if (!exported) return;
+
+        // Import into the SAME config (forces ID collisions)
+        const imported = importProfile(config, exported);
+
+        // Check all entity ID sets for uniqueness
+        const profileIds = imported.profiles.map((p) => p.id);
+        expect(new Set(profileIds).size).toBe(profileIds.length);
+
+        const bindingIds = imported.bindings.map((b) => b.id);
+        expect(new Set(bindingIds).size).toBe(bindingIds.length);
+
+        const actionIds = imported.actions.map((a) => a.id);
+        expect(new Set(actionIds).size).toBe(actionIds.length);
+
+        const appMappingIds = imported.appMappings.map((m) => m.id);
+        expect(new Set(appMappingIds).size).toBe(appMappingIds.length);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("import preserves all control-layer pairs from bindings", () => {
+    fc.assert(
+      fc.property(arbConfigWithProfile, ({ config, profileId }) => {
+        const exported = extractProfileExport(config, profileId);
+        if (!exported) return;
+
+        const emptyConfig = minCfg();
+        const imported = importProfile(emptyConfig, exported);
+        const importedProfile = imported.profiles[0];
+
+        const originalPairs = new Set(
+          exported.bindings.map((b) => `${b.layer}:${b.controlId}`),
+        );
+        const importedPairs = new Set(
+          imported.bindings
+            .filter((b) => b.profileId === importedProfile.id)
+            .map((b) => `${b.layer}:${b.controlId}`),
+        );
+
+        expect(importedPairs).toEqual(originalPairs);
+      }),
+      { numRuns: 500 },
+    );
+  });
+
+  it("imported bindings all have valid actionRef pointing to existing actions", () => {
+    fc.assert(
+      fc.property(arbConfigWithProfile, ({ config, profileId }) => {
+        const exported = extractProfileExport(config, profileId);
+        if (!exported) return;
+
+        const imported = importProfile(config, exported);
+        const actionIds = new Set(imported.actions.map((a) => a.id));
+
+        for (const binding of imported.bindings) {
+          expect(actionIds.has(binding.actionRef)).toBe(true);
+        }
+      }),
+      { numRuns: 500 },
+    );
   });
 });

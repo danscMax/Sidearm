@@ -1,4 +1,24 @@
 {
+  "actionSummary": {
+    "none": "Предпросмотр действия отсутствует.",
+    "shortcut": "Шорткат: {{value}}",
+    "mouse": "Мышь: {{value}}",
+    "media": "Медиа: {{value}}",
+    "profile": "Профиль: {{value}}",
+    "snippetLibrary": "Фрагмент из библиотеки: {{name}}",
+    "snippetRef": "Ссылка на библиотеку фрагментов: {{id}}",
+    "snippetInline": "Встроенный фрагмент через {{mode}}",
+    "sequence_one": "Последовательность из {{count}} шага",
+    "sequence_few": "Последовательность из {{count}} шагов",
+    "sequence_many": "Последовательность из {{count}} шагов",
+    "sequence_other": "Последовательность из {{count}} шагов",
+    "launch": "Цель запуска: {{target}}",
+    "menu_one": "Меню из {{count}} пункта",
+    "menu_few": "Меню из {{count}} пунктов",
+    "menu_many": "Меню из {{count}} пунктов",
+    "menu_other": "Меню из {{count}} пунктов",
+    "disabledFallback": "Отключённое действие-заглушка."
+  },
   "common": {
     "na": "н/д",
     "cancel": "Отмена",

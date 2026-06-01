@@ -115,7 +115,7 @@ describe("describeActionSummary", () => {
       },
     });
     expect(describeActionSummary(action, emptySnippets)).toBe(
-      "Последовательность из 3 шаг(ов).",
+      "Последовательность из 3 шагов",
     );
   });
 
@@ -137,7 +137,7 @@ describe("describeActionSummary", () => {
         ],
       },
     });
-    expect(describeActionSummary(action, emptySnippets)).toBe("Меню из 2 пункт(ов).");
+    expect(describeActionSummary(action, emptySnippets)).toBe("Меню из 2 пунктов");
   });
 
   it("describes mouseAction", () => {

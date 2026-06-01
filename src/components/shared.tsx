@@ -99,3 +99,30 @@ export function ErrorPanel({ error }: { error: CommandError }) {
     </div>
   );
 }
+
+/** The dismiss "×" button shared by modal headers. */
+export function CloseButton({
+  onClick,
+  ariaLabel,
+  className = "rule-modal__close",
+}: {
+  onClick: () => void;
+  ariaLabel: string;
+  className?: string;
+}) {
+  return (
+    <button type="button" className={className} onClick={onClick} aria-label={ariaLabel}>
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 14 14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      >
+        <path d="M1 1l12 12M13 1L1 13" />
+      </svg>
+    </button>
+  );
+}

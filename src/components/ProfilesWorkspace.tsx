@@ -26,6 +26,7 @@ import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
+import { CloseButton } from "./shared";
 import { RunningProcessPicker } from "./RunningProcessPicker";
 
 /** Module-level icon cache: exe name -> base64 PNG (or empty string for "no icon"). */
@@ -153,16 +154,7 @@ function AppMappingModal({
         onClick={(e) => e.stopPropagation()}
         onKeyDown={handleKeyDown}
       >
-        <button
-          type="button"
-          className="rule-modal__close"
-          onClick={onClose}
-          aria-label={t("common.close")}
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M1 1l12 12M13 1L1 13" />
-          </svg>
-        </button>
+        <CloseButton onClick={onClose} ariaLabel={t("common.close")} />
 
         {/* Header */}
         <div className="rule-modal__header">
@@ -822,16 +814,7 @@ export function ProfilesWorkspace({
             onClick={(e) => e.stopPropagation()}
             onKeyDown={newRuleKeyDown}
           >
-            <button
-              type="button"
-              className="rule-modal__close"
-              onClick={() => setNewRuleOpen(false)}
-              aria-label={t("common.close")}
-            >
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-                <path d="M1 1l12 12M13 1L1 13" />
-              </svg>
-            </button>
+            <CloseButton onClick={() => setNewRuleOpen(false)} ariaLabel={t("common.close")} />
             <div className="rule-modal__header">
               <span className="rule-modal__title">{t("newRule.title")}</span>
               <p className="rule-modal__subtitle">

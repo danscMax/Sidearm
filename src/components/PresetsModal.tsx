@@ -7,6 +7,7 @@ import { importProfile } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
 import { useModalDismiss } from "../hooks/useModalDismiss";
+import { CloseButton } from "./shared";
 
 export interface PresetsModalProps {
   onCancel: () => void;
@@ -91,16 +92,7 @@ export function PresetsModal({
       >
         <div className="presets-modal__header">
           <h3 id="presets-modal-title">{t("presets.title")}</h3>
-          <button
-            type="button"
-            className="rule-modal__close"
-            onClick={onCancel}
-            aria-label={t("common.close")}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M1 1l12 12M13 1L1 13" />
-            </svg>
-          </button>
+          <CloseButton onClick={onCancel} ariaLabel={t("common.close")} />
         </div>
 
         <p className="presets-modal__subtitle">{t("presets.subtitle")}</p>

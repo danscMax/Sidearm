@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { listRunningProcesses, normalizeCommandError } from "../lib/backend";
 import type { CommandError, RunningProcessInfo } from "../lib/config";
-import { useModalDismiss } from "../hooks/useModalDismiss";
+import { ModalShell } from "./shared";
 
 export interface RunningProcessPickerProps {
   onPick: (process: RunningProcessInfo) => void;
@@ -63,9 +63,6 @@ export function RunningProcessPicker({
     inputRef.current?.focus();
   }, []);
 
-  // Escape-to-close + Tab focus trap (shared modal behavior).
-  const handleKeyDown = useModalDismiss(containerRef, { onClose: onCancel });
-
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return processes;
@@ -77,17 +74,12 @@ export function RunningProcessPicker({
   }, [processes, query]);
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        ref={containerRef}
-        className="confirm-modal process-picker"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="process-picker-title"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
+    <ModalShell
+      onClose={onCancel}
+      className="confirm-modal process-picker"
+      dialogRef={containerRef}
+      ariaLabelledby="process-picker-title"
+    >
         <h3 id="process-picker-title">{t("processPicker.title")}</h3>
         <input
           ref={inputRef}
@@ -139,7 +131,6 @@ export function RunningProcessPicker({
             {t("common.cancel")}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -16,7 +16,6 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVizPanel } from "../hooks/useMouseVizPanel";
-import { useModalDismiss } from "../hooks/useModalDismiss";
 import { exportProfileFile, getExeIcon, importProfileFile } from "../lib/backend";
 import {
   bindingMatchesQuery,
@@ -26,7 +25,7 @@ import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
-import { CloseButton } from "./shared";
+import { CloseButton, ModalShell } from "./shared";
 import { RunningProcessPicker } from "./RunningProcessPicker";
 
 /** Module-level icon cache: exe name -> base64 PNG (or empty string for "no icon"). */
@@ -139,20 +138,13 @@ function AppMappingModal({
     containerRef.current?.focus();
   }, []);
 
-  // Escape-to-close + Tab focus trap (shared modal behavior).
-  const handleKeyDown = useModalDismiss(containerRef, { onClose });
-
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div
+    <>
+      <ModalShell
+        onClose={onClose}
         className="rule-modal"
-        ref={containerRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`${mapping.exe}`}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
+        dialogRef={containerRef}
+        ariaLabel={`${mapping.exe}`}
       >
         <CloseButton onClick={onClose} ariaLabel={t("common.close")} />
 
@@ -345,7 +337,7 @@ function AppMappingModal({
             </button>
           )}
         </div>
-      </div>
+      </ModalShell>
       {showProcessPicker ? (
         <RunningProcessPicker
           onCancel={() => setShowProcessPicker(false)}
@@ -361,7 +353,7 @@ function AppMappingModal({
           }}
         />
       ) : null}
-    </div>
+    </>
   );
 }
 
@@ -416,13 +408,6 @@ export function ProfilesWorkspace({
   const [newRuleCapturedProcessPath, setNewRuleCapturedProcessPath] = useState("");
   const [newRuleTitleEnabled, setNewRuleTitleEnabled] = useState(false);
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
-  const newRuleRef = useRef<HTMLDivElement>(null);
-  // Esc + Tab focus-trap for the inline "New rule" modal (shared hook). Gated on
-  // open so the window-level Escape listener is inert when it's closed/covered.
-  const newRuleKeyDown = useModalDismiss(newRuleRef, {
-    onClose: () => setNewRuleOpen(false),
-    escapeEnabled: newRuleOpen,
-  });
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
   const [bindingSearch, setBindingSearch] = useState("");
@@ -804,16 +789,10 @@ export function ProfilesWorkspace({
 
       {/* ── New rule dialog ── */}
       {newRuleOpen ? (
-        <div className="modal-backdrop" onClick={() => setNewRuleOpen(false)}>
-          <div
-            className="rule-modal rule-modal--compact"
-            ref={newRuleRef}
-            tabIndex={-1}
-            role="dialog"
-            aria-modal="true"
-            onClick={(e) => e.stopPropagation()}
-            onKeyDown={newRuleKeyDown}
-          >
+        <ModalShell
+          onClose={() => setNewRuleOpen(false)}
+          className="rule-modal rule-modal--compact"
+        >
             <CloseButton onClick={() => setNewRuleOpen(false)} ariaLabel={t("common.close")} />
             <div className="rule-modal__header">
               <span className="rule-modal__title">{t("newRule.title")}</span>
@@ -964,8 +943,7 @@ export function ProfilesWorkspace({
                 {t("common.create")}
               </button>
             </div>
-          </div>
-        </div>
+        </ModalShell>
       ) : null}
 
       {/* ── Rule editor modal ── */}

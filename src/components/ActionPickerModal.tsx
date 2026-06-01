@@ -30,7 +30,6 @@ import {
   mouseActionLabel,
   setSequenceStepDelay,
 } from "../lib/action-helpers";
-import { useModalDismiss } from "../hooks/useModalDismiss";
 import {
   startMacroRecording,
   recordKeystroke,
@@ -45,7 +44,7 @@ import {
 } from "../lib/config-editing";
 import { ChipEditor } from "./ChipEditor";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { Toggle } from "./shared";
+import { Toggle, ModalShell } from "./shared";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -487,12 +486,6 @@ export function ActionPickerModal({
 
   const [isCapturing, setIsCapturing] = useState(false);
 
-  // Escape-to-close (disabled during key capture) + Tab focus trap.
-  const handleFocusTrap = useModalDismiss(modalRef, {
-    onClose: onCancel,
-    escapeEnabled: !isCapturing && !isCapturingSignal,
-  });
-
   // Draft action state per category
   const [shortcutDraft, setShortcutDraft] = useState<ShortcutActionPayload>(() =>
     existingAction?.type === "shortcut"
@@ -743,8 +736,13 @@ export function ActionPickerModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div className="modal action-picker" ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="action-picker-title" onClick={(e) => e.stopPropagation()} onKeyDown={handleFocusTrap}>
+    <ModalShell
+      onClose={onCancel}
+      className="modal action-picker"
+      dialogRef={modalRef}
+      ariaLabelledby="action-picker-title"
+      escapeEnabled={!isCapturing && !isCapturingSignal}
+    >
         <div className="action-picker__header">
           <div>
             <h2 id="action-picker-title">{t("picker.title")}</h2>
@@ -1225,7 +1223,6 @@ export function ActionPickerModal({
             {t("common.save")}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

@@ -13,7 +13,7 @@ import type {
   MergeStrategy,
   ParsedSynapseProfiles,
 } from "../lib/synapse-import";
-import { useModalDismiss } from "../hooks/useModalDismiss";
+import { ModalShell } from "./shared";
 
 export interface SynapseImportModalProps {
   parsed: ParsedSynapseProfiles;
@@ -42,12 +42,6 @@ export function SynapseImportModal({
   useEffect(() => {
     containerRef.current?.focus();
   }, []);
-
-  // Escape-to-close (disabled mid-submit) + Tab focus trap.
-  const handleKeyDown = useModalDismiss(containerRef, {
-    onClose: onCancel,
-    escapeEnabled: !submitting,
-  });
 
   const selectedCount = selected.size;
   const totalBindings = useMemo(
@@ -87,16 +81,13 @@ export function SynapseImportModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={!submitting ? onCancel : undefined}>
-      <div
-        ref={containerRef}
-        className="confirm-modal synapse-import-modal"
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
+    <ModalShell
+      onClose={onCancel}
+      className="confirm-modal synapse-import-modal"
+      dialogRef={containerRef}
+      escapeEnabled={!submitting}
+      dismissOnBackdropClick={!submitting}
+    >
         <header>
           <h3>{t("synapseImport.title")}</h3>
           <p className="panel__muted">
@@ -262,8 +253,7 @@ export function SynapseImportModal({
                 })}
           </button>
         </footer>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

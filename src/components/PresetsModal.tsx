@@ -6,8 +6,7 @@ import type { PresetInfo } from "../lib/backend";
 import { importProfile } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
-import { useModalDismiss } from "../hooks/useModalDismiss";
-import { CloseButton } from "./shared";
+import { CloseButton, ModalShell } from "./shared";
 
 export interface PresetsModalProps {
   onCancel: () => void;
@@ -54,9 +53,6 @@ export function PresetsModal({
     containerRef.current?.focus();
   }, []);
 
-  // Escape-to-close + Tab focus trap (shared modal behavior).
-  const handleKeyDown = useModalDismiss(containerRef, { onClose: onCancel });
-
   async function applyPreset(preset: PresetInfo) {
     setApplying(preset.id);
     try {
@@ -79,17 +75,12 @@ export function PresetsModal({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onCancel}>
-      <div
-        ref={containerRef}
-        className="presets-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="presets-modal-title"
-        tabIndex={-1}
-        onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
-      >
+    <ModalShell
+      onClose={onCancel}
+      className="presets-modal"
+      dialogRef={containerRef}
+      ariaLabelledby="presets-modal-title"
+    >
         <div className="presets-modal__header">
           <h3 id="presets-modal-title">{t("presets.title")}</h3>
           <CloseButton onClick={onCancel} ariaLabel={t("common.close")} />
@@ -126,7 +117,6 @@ export function PresetsModal({
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }

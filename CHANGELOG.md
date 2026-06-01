@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.18] — 2026-06-01
+
+### Fixed
+- Mouse visualizer re-applies the per-layer accent: the **Hypershift** layer is
+  orange again (it had silently reverted to the standard green after an earlier
+  workspace refactor dropped the wrapper that set the layer CSS variables), and
+  the toolbar layer badge now matches that colour.
+- Switching layers no longer nudges the assignments **search field** sideways —
+  the layer badge reserves a stable width across the "Standard"/"Hypershift"
+  labels regardless of locale.
+- **Action summaries** in the control properties panel are localized again via
+  i18n instead of always rendering Russian, so they follow the selected UI
+  language (English included).
+
+### Changed
+- Internal: deduplicated the photo and schematic mouse visualizers into a shared
+  `lib/mouse-visual` + `useControlInteractions` hook + `mouse-visual/*` components,
+  and consolidated modal markup into a shared `ModalShell` + `CloseButton`. No
+  user-facing behaviour change. Added unit tests for the error translator and the
+  control-interaction hook.
+
+### Removed
+- Internal: removed dead code — 5 orphaned components, the CSS only they used, and
+  unused exports (~1.9k lines), with no functional impact.
+
 ## [0.1.17] — 2026-05-29
 
 ### Security

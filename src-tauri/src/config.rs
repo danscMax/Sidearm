@@ -205,11 +205,19 @@ pub struct Settings {
     /// presses a Sidearm action" use case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed_modifier_force_release_ms: Option<u64>,
-    /// Last profile the user explicitly picked in the sidebar. Runtime
-    /// resolver prefers this over `fallback_profile_id` when no appMapping
-    /// matches the foreground window; explicit mappings still win.
+    /// Last profile the user opened in the sidebar editor. This is **editor
+    /// view-state only** — the runtime resolver does NOT use it (resolution is
+    /// `app mapping > fallback`). Kept so the UI reopens the last-edited profile.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_selected_profile_id: Option<String>,
+    /// Whether the first-run onboarding wizard has been completed or skipped.
+    /// Gates the full-screen wizard in the frontend.
+    #[serde(default)]
+    pub onboarding_completed: bool,
+    /// Resume point (visible step index) for the onboarding wizard; `None`
+    /// starts from the beginning. Only meaningful while onboarding is incomplete.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onboarding_step: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1423,6 +1431,8 @@ pub(crate) fn default_seed_config() -> AppConfig {
             modifier_stale_gc_ms: None,
             replayed_modifier_force_release_ms: None,
             last_selected_profile_id: None,
+            onboarding_completed: false,
+            onboarding_step: None,
         },
         profiles: seed_profiles(),
         physical_controls: seed_physical_controls(),
@@ -2777,6 +2787,37 @@ mod tests {
         );
         assert_eq!(config.profiles.len(), 7);
         assert_eq!(config.physical_controls.len(), ControlId::ALL.len());
+    }
+
+    /// Regression: the Razer Synapse profile we ship for onboarding has the
+    /// Naga side buttons 1–2 represented twice (`DKM_M_0X` and `KEY_X`), which
+    /// previously produced duplicate (control, layer) bindings — schema-valid
+    /// but rejected by `validate_config` on save. Importer dedup must keep the
+    /// merged config valid.
+    #[test]
+    fn bundled_synapse_profile_imports_to_valid_config() {
+        use std::io::Write;
+        let base = default_seed_config();
+        let dir = tempdir().expect("temp");
+        let path = dir.path().join("p.synapse4");
+        let bytes: &[u8] = include_bytes!("../resources/Sidearm_profile.synapse4");
+        std::fs::File::create(&path)
+            .unwrap()
+            .write_all(bytes)
+            .unwrap();
+        let parsed = crate::synapse_import::parse_synapse_source(&path).expect("parse");
+        let opts = crate::synapse_import::ImportOptions {
+            selected_profile_guids: None,
+            merge_strategy: crate::synapse_import::MergeStrategy::ReplaceByName,
+        };
+        let result = crate::synapse_import::apply_parsed_into_config(base, parsed, &opts);
+        let v = serde_json::to_value(&result.config).unwrap();
+        assert!(
+            collect_schema_errors(&v).is_empty(),
+            "imported config must be schema-valid"
+        );
+        validate_config(&result.config)
+            .expect("imported bundled profile must pass full validation (no duplicate tuples)");
     }
 
     #[test]

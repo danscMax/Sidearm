@@ -118,6 +118,13 @@ fn append_profile(
 
     // Bindings + per-binding actions.
     let mut new_bindings: Vec<Binding> = Vec::new();
+    // Guard against two Synapse inputs resolving to the same Sidearm
+    // (control, layer) — e.g. a Naga side button present in the profile as both
+    // `DKM_M_0X` and `KEY_X`. `validate_config` rejects duplicate binding
+    // tuples, so keep the first occurrence and warn instead of producing an
+    // invalid config that fails on save.
+    let mut bound_controls: std::collections::HashSet<(Layer, ControlId)> =
+        std::collections::HashSet::new();
 
     for pb in &parsed.bindings {
         let control_id = match parse_control_id(&pb.control_id) {
@@ -141,6 +148,17 @@ fn append_profile(
                 continue;
             }
         };
+
+        if !bound_controls.insert((layer, control_id)) {
+            warnings.push(ImportWarning::new(
+                "duplicate_control_binding",
+                format!(
+                    "Control `{}` is mapped more than once on the `{}` layer; keeping the first.",
+                    pb.control_id, pb.layer
+                ),
+            ));
+            continue;
+        }
 
         match build_action_from_parsed(&pb.action, &macro_action_ids, warnings) {
             BuiltAction::New(action) => {

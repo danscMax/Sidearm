@@ -20,6 +20,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ErrorModal } from "./components/ErrorModal";
 import { PortableMigrationDialog } from "./components/PortableMigrationDialog";
+import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
@@ -73,6 +74,7 @@ function App() {
   const { t } = useTranslation();
 
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const toastSeqRef = useRef(0);
   const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
@@ -149,6 +151,14 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  // First-run onboarding: show the full-screen wizard until the user completes
+  // or skips it (both set settings.onboardingCompleted = true).
+  useEffect(() => {
+    if (activeConfig && activeConfig.settings.onboardingCompleted !== true) {
+      setShowOnboarding(true);
+    }
+  }, [activeConfig?.settings.onboardingCompleted]);
 
   const handleErrorAction = useCallback(
     async (kind: ErrorActionKind) => {
@@ -725,6 +735,13 @@ function App() {
       />
       {showMigrationDialog ? (
         <PortableMigrationDialog onChoose={handleMigrationChoice} />
+      ) : null}
+      {showOnboarding && activeConfig && !showMigrationDialog ? (
+        <OnboardingWizard
+          config={activeConfig}
+          applyConfig={(next) => updateDraft(() => next, { immediate: true })}
+          onClose={() => setShowOnboarding(false)}
+        />
       ) : null}
       {synapseParsed && activeConfig ? (
         <SynapseImportModal

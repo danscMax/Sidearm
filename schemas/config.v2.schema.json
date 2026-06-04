@@ -238,7 +238,16 @@
         },
         "lastSelectedProfileId": {
           "type": "string",
-          "description": "Profile the user last picked in the sidebar. Runtime uses it in place of fallbackProfileId when no appMapping matches."
+          "description": "Profile the user last opened in the sidebar editor. Editor view-state only; the runtime resolver does not use it (resolution is appMapping > fallback)."
+        },
+        "onboardingCompleted": {
+          "type": "boolean",
+          "description": "Whether the first-run onboarding wizard has been completed or skipped."
+        },
+        "onboardingStep": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Resume point (visible step index) for the onboarding wizard; omitted means start from the beginning."
         }
       }
     },

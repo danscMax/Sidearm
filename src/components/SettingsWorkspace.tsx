@@ -877,6 +877,20 @@ export function SettingsWorkspace({
           >
             {synapseLoading ? t("synapseImport.parsing") : t("synapseImport.button")}
           </button>
+          <button
+            type="button"
+            className="action-button"
+            onClick={() => {
+              updateDraft((c) => ({
+                ...c,
+                settings: { ...c.settings, onboardingCompleted: false },
+              }));
+            }}
+          >
+            {i18n.language?.startsWith("en")
+              ? "Re-run onboarding"
+              : "Пройти онбординг заново"}
+          </button>
         </div>
       </section>
 

@@ -1,5 +1,8 @@
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use tauri::{AppHandle, Emitter};
 
 use crate::{
@@ -35,6 +38,14 @@ pub fn capture_helper_main() {
 }
 
 pub const CAPTURE_BACKEND_NAME: &str = "windows-hotkey";
+
+/// When true, the runtime surfaces raw key events to the UI (the
+/// `encoded_key_received` event still fires) but does NOT resolve, execute, or
+/// inject them. Set by the onboarding live hardware test so pressing Naga
+/// buttons lights up the tester without firing their real actions. Lock-free,
+/// read on the hot dispatch path; toggled by the `set_input_capture_mode`
+/// command and always cleared when the test step is left.
+pub(crate) static SUPPRESS_EXECUTION: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -272,6 +283,14 @@ fn process_encoded_key_event(
     ));
 
     let _ = app.emit(EVENT_ENCODED_KEY_RECEIVED, &event);
+
+    // Live-capture/test mode: the UI just observed the raw key above; do NOT
+    // resolve, execute, or inject it. Lets the onboarding hardware test light
+    // up buttons without firing their real actions (search/delete/etc.).
+    if SUPPRESS_EXECUTION.load(Ordering::Relaxed) {
+        flush_log_entries(runtime_store, log_entries);
+        return EventOutcome::Handled;
+    }
 
     // --- Key-up path: release any held shortcut ---
     if event.is_key_up {

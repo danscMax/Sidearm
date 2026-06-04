@@ -1009,6 +1009,64 @@ async fn import_synapse_into_config(
     .map_err(|e| CommandError::internal(format!("import_synapse_into_config task failed: {e}")))?
 }
 
+// ============================================================================
+// Onboarding — bundled Synapse profile + environment checks
+// ============================================================================
+
+/// The Razer Synapse profile shipped with Sidearm. The user imports it into
+/// Razer Synapse so the Naga emits F13–F24; it also seeds Sidearm's own
+/// bindings via the normal Synapse-import pipeline. Embedded with
+/// `include_bytes!` because the portable build assembles by hand and does not
+/// run Tauri's resource bundler.
+const BUNDLED_SYNAPSE_PROFILE: &[u8] = include_bytes!("../resources/Sidearm_profile.synapse4");
+const BUNDLED_SYNAPSE_FILENAME: &str = "Sidearm_profile.synapse4";
+
+/// Write the bundled Synapse profile into the user's Downloads folder so they
+/// can import it into Razer Synapse, optionally revealing the folder. Returns
+/// the absolute path written — the onboarding wizard reuses it as the source
+/// for `parse_synapse_source` when seeding Sidearm's own bindings.
+#[tauri::command]
+async fn save_bundled_synapse_profile(app: AppHandle, reveal: bool) -> Result<String, CommandError> {
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|e| CommandError::internal(format!("download_dir: {e}")))?;
+    let dest = dir.join(BUNDLED_SYNAPSE_FILENAME);
+    fs::write(&dest, BUNDLED_SYNAPSE_PROFILE)
+        .map_err(|e| CommandError::internal(format!("write bundled profile: {e}")))?;
+    if reveal {
+        // Open the containing folder — passing the file itself would make
+        // Explorer try to "open" the unknown .synapse4 type.
+        let _ = crate::platform::shell::open_in_explorer(&dir);
+    }
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+/// Best-effort check for the onboarding pre-flight: is Razer Synapse installed
+/// or running? Windows-only signal; returns false on other platforms.
+#[tauri::command]
+async fn check_synapse_installed() -> Result<bool, CommandError> {
+    let running =
+        crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
+    #[cfg(target_os = "windows")]
+    let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
+        .is_some()
+        || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
+    #[cfg(not(target_os = "windows"))]
+    let installed = false;
+    Ok(running || installed)
+}
+
+/// Toggle "live capture" mode. While enabled, captured Naga keys are surfaced
+/// to the UI via `encoded_key_received` but are NOT resolved/executed/injected.
+/// The onboarding hardware test enables it so pressing buttons lights up the
+/// tester without firing their real actions; it is always cleared on exit.
+#[tauri::command]
+async fn set_input_capture_mode(enabled: bool) -> Result<(), CommandError> {
+    capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
+    Ok(())
+}
+
 #[tauri::command]
 async fn start_runtime(
     app: AppHandle,
@@ -2502,6 +2560,9 @@ pub fn run() {
             accept_portable_migration,
             parse_synapse_source,
             import_synapse_into_config,
+            save_bundled_synapse_profile,
+            check_synapse_installed,
+            set_input_capture_mode,
             start_runtime,
             stop_runtime,
             reload_runtime,

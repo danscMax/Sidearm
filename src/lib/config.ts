@@ -81,6 +81,8 @@ export interface Settings {
   modifierStaleGcMs?: number;
   replayedModifierForceReleaseMs?: number;
   lastSelectedProfileId?: string;
+  onboardingCompleted?: boolean;
+  onboardingStep?: number;
 }
 
 export interface Profile {

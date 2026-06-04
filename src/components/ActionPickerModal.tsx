@@ -1,398 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { open } from "@tauri-apps/plugin-dialog";
-import type {
-  Action,
-  ActionCondition,
-  ActionType,
-  AppConfig,
-  ControlId,
-  Layer,
-  MediaKeyKind,
-  MenuItem,
-  MouseActionKind,
-  PasteMode,
-  SequenceStep,
-  ShortcutActionPayload,
-  TriggerMode,
-} from "../lib/config";
-import {
-  ACTION_CATEGORIES,
-  MEDIA_KEY_OPTIONS,
-  MOUSE_ACTION_OPTIONS,
-} from "../lib/constants";
-import { labelForSequenceStep } from "../lib/labels";
-import {
-  coerceSequenceStepType,
-  createDefaultSequenceStep,
-  mediaKeyLabel,
-  modifierLabels,
-  mouseActionLabel,
-  setSequenceStepDelay,
-} from "../lib/action-helpers";
-import {
-  startMacroRecording,
-  recordKeystroke,
-  stopMacroRecording,
-  listenEncodedKeyEvent,
-  pickExecutablePath,
-} from "../lib/backend";
+import type { AppConfig, ControlId, Layer } from "../lib/config";
+import { ACTION_CATEGORIES } from "../lib/constants";
+import { listenEncodedKeyEvent } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
   upsertAction,
   upsertBinding,
   upsertEncoderMapping,
 } from "../lib/config-editing";
-import { ChipEditor } from "./ChipEditor";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { Toggle, ModalShell } from "./shared";
-
-/* ─────────────────────────────────────────────────────────
-   Normalize Key Name
-   ───────────────────────────────────────────────────────── */
-
-const KEY_NAME_MAP: Record<string, string> = {
-  " ": "Space",
-  ArrowUp: "Up",
-  ArrowDown: "Down",
-  ArrowLeft: "Left",
-  ArrowRight: "Right",
-  Escape: "Esc",
-};
-
-/** Resolve the human-readable key name from a KeyboardEvent.
- *  Chromium returns key="Unidentified" and code="" for F13-F24 (sent via SendInput).
- *  In that case, fall back to the deprecated keyCode (124=F13 … 135=F24). */
-function resolveKeyName(event: KeyboardEvent | React.KeyboardEvent): string {
-  // 1. Try event.key
-  if (event.key && event.key !== "Unidentified") return event.key;
-  // 2. Try event.code (e.g. "F13")
-  if (event.code && event.code !== "") return event.code;
-  // 3. Fall back to keyCode → F13-F24 mapping
-  const kc = event.keyCode;
-  if (kc >= 124 && kc <= 135) return `F${kc - 111}`;
-  // 4. Other high VK codes
-  if (kc > 0) return `VK_${kc}`;
-  return "Unknown";
-}
-
-function normalizeKeyName(key: string): string {
-  return KEY_NAME_MAP[key] ?? (key.length === 1 ? key.toUpperCase() : key);
-}
-
-/* ─────────────────────────────────────────────────────────
-   Condition Types
-   ───────────────────────────────────────────────────────── */
-
-const CONDITION_TYPE_KEYS: Array<{ value: ActionCondition["type"]; key: string }> = [
-  { value: "windowTitleContains", key: "picker.conditionWindowTitleContains" },
-  { value: "windowTitleNotContains", key: "picker.conditionWindowTitleNotContains" },
-  { value: "exeEquals", key: "picker.conditionExeEquals" },
-  { value: "exeNotEquals", key: "picker.conditionExeNotEquals" },
-];
-
-/* ─────────────────────────────────────────────────────────
-   Sequence Step Editor (reusable)
-   ───────────────────────────────────────────────────────── */
-
-function SequenceStepEditor({
-  steps,
-  onUpdate,
-}: {
-  steps: SequenceStep[];
-  onUpdate: (steps: SequenceStep[]) => void;
-}) {
-  const { t } = useTranslation();
-  const [isRecording, setIsRecording] = useState(false);
-  const [recordedCount, setRecordedCount] = useState(0);
-  const [limitReached, setLimitReached] = useState(false);
-
-  /** Hard cap on recorded steps to protect against runaway sequences. */
-  const RECORD_LIMIT = 1000;
-
-  // Capture keystrokes during recording and forward to Rust
-  useEffect(() => {
-    if (!isRecording) return;
-
-    function handleRecordKey(e: KeyboardEvent) {
-      // Ignore bare modifiers
-      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
-      e.preventDefault();
-      e.stopPropagation();
-
-      const rawKey = resolveKeyName(e);
-      const parts: string[] = [];
-      if (e.ctrlKey) parts.push("Ctrl");
-      if (e.altKey) parts.push("Alt");
-      if (e.shiftKey) parts.push("Shift");
-      const keyName = normalizeKeyName(rawKey);
-      parts.push(keyName);
-      const formatted = parts.join("+");
-
-      void recordKeystroke(formatted);
-      setRecordedCount((c) => c + 1);
-    }
-
-    window.addEventListener("keydown", handleRecordKey, true);
-    return () => window.removeEventListener("keydown", handleRecordKey, true);
-  }, [isRecording]);
-
-  // Auto-stop when the hard cap is reached.
-  useEffect(() => {
-    if (isRecording && recordedCount >= RECORD_LIMIT) {
-      setLimitReached(true);
-      void handleStopRecording();
-    }
-  }, [recordedCount, isRecording]);
-
-  async function handleStartRecording() {
-    try {
-      setRecordedCount(0);
-      setLimitReached(false);
-      await startMacroRecording();
-      setIsRecording(true);
-    } catch {
-      // Silently ignore — recorder might already be in use
-    }
-  }
-
-  async function handleStopRecording() {
-    try {
-      const recording = await stopMacroRecording();
-      setIsRecording(false);
-      if (recording.steps.length > 0) {
-        onUpdate(recording.steps);
-      }
-    } catch {
-      setIsRecording(false);
-    }
-  }
-
-  function addStep(type: SequenceStep["type"]) {
-    onUpdate([...steps, createDefaultSequenceStep(type)]);
-  }
-
-  function removeStep(index: number) {
-    if (steps.length <= 1) return;
-    onUpdate(steps.filter((_, i) => i !== index));
-  }
-
-  function updateStep(index: number, next: SequenceStep) {
-    onUpdate(steps.map((s, i) => (i === index ? next : s)));
-  }
-
-  return (
-    <div className="editor-grid">
-      <div className="field__header">
-        <span className="field__label">{t("picker.sequenceSteps")}</span>
-        <div className="editor-actions">
-          {isRecording ? (
-            <button
-              type="button"
-              className="action-button action-button--accent action-button--small"
-              onClick={() => { void handleStopRecording(); }}
-            >
-              {t("picker.stopRecording")}
-            </button>
-          ) : (
-            <>
-              <button
-                type="button"
-                className="action-button action-button--small"
-                onClick={() => { void handleStartRecording(); }}
-              >
-                {t("picker.recordMacro")}
-              </button>
-              {(
-                [
-                  ["send", t("picker.addSend")],
-                  ["text", t("picker.addText")],
-                  ["sleep", t("picker.addSleep")],
-                  ["launch", t("picker.addLaunch")],
-                ] as Array<[SequenceStep["type"], string]>
-              ).map(([stepType, label]) => (
-                <button
-                  type="button"
-                  key={stepType}
-                  className="action-button action-button--secondary action-button--small"
-                  onClick={() => addStep(stepType)}
-                >
-                  + {label}
-                </button>
-              ))}
-            </>
-          )}
-        </div>
-      </div>
-
-      {isRecording ? (
-        <div className="notice notice--warning mb-8">
-          <strong>
-            {t("picker.recordingNotice")}{" "}
-            <span className="text-dim">
-              {t("picker.recordingCount", { count: recordedCount, max: RECORD_LIMIT })}
-            </span>
-          </strong>
-          <p>{t("picker.recordingHint")}</p>
-        </div>
-      ) : null}
-      {limitReached ? (
-        <div className="notice notice--warning mb-8">
-          <strong>{t("picker.recordLimitReached", { max: RECORD_LIMIT })}</strong>
-        </div>
-      ) : null}
-
-      <div className="stack-list">
-        {steps.map((step, index) => (
-          <div className="compound-card" key={index}>
-            <div className="compound-card__header">
-              <div>
-                <strong>{t("picker.stepTitle", { index: index + 1 })}</strong>
-                <span className="compound-card__meta">{labelForSequenceStep(step.type)}</span>
-              </div>
-              <button
-                type="button"
-                className="action-button action-button--secondary action-button--small"
-                disabled={steps.length === 1}
-                onClick={() => removeStep(index)}
-              >
-                {t("common.delete")}
-              </button>
-            </div>
-
-            <div className="editor-grid">
-              <label className="field">
-                <span className="field__label">{t("picker.stepType")}</span>
-                <select
-                  value={step.type}
-                  onChange={(e) => updateStep(index, coerceSequenceStepType(step, e.target.value as SequenceStep["type"]))}
-                >
-                  <option value="send">{t("picker.stepSend")}</option>
-                  <option value="text">{t("picker.stepText")}</option>
-                  <option value="sleep">{t("picker.stepSleep")}</option>
-                  <option value="launch">{t("picker.stepLaunch")}</option>
-                </select>
-              </label>
-
-              {step.type === "send" || step.type === "text" ? (
-                <label className="field">
-                  <span className="field__label">{t("picker.stepValue")}</span>
-                  <input
-                    type="text"
-                    value={step.value}
-                    onChange={(e) =>
-                      updateStep(index, { ...step, value: e.target.value } as SequenceStep)
-                    }
-                  />
-                </label>
-              ) : null}
-
-              {step.type === "launch" ? (
-                <>
-                  <label className="field">
-                    <span className="field__label">{t("picker.programLabel")}</span>
-                    <div className="field__row">
-                      <input
-                        type="text"
-                        value={step.value}
-                        onChange={(e) =>
-                          updateStep(index, { ...step, value: e.target.value } as SequenceStep)
-                        }
-                        placeholder="C:\Program Files\app.exe"
-                      />
-                      <button
-                        type="button"
-                        className="action-button action-button--small"
-                        onClick={async () => {
-                          const pick = await pickExecutablePath({
-                            title: t("picker.launchBrowseProgram"),
-                            filterName: t("picker.launchBrowseFilter"),
-                            extensions: ["exe", "lnk", "bat", "cmd"],
-                          });
-                          if (pick) {
-                            updateStep(index, { ...step, value: pick.path } as SequenceStep);
-                          }
-                        }}
-                      >
-                        {t("picker.launchBrowseBtn")}
-                      </button>
-                    </div>
-                  </label>
-                  <div className="field">
-                    <span className="field__label">{t("picker.launchArgsLabel")}</span>
-                    <ChipEditor
-                      values={step.args ?? []}
-                      onChange={(vals) =>
-                        updateStep(index, {
-                          ...step,
-                          args: vals.length > 0 ? vals : undefined,
-                        } as SequenceStep)
-                      }
-                      placeholder={t("picker.launchArgsPlaceholder")}
-                      ariaLabel={t("picker.launchArgsLabel")}
-                    />
-                  </div>
-                  <label className="field">
-                    <span className="field__label">{t("picker.launchWorkingDirLabel")}</span>
-                    <div className="field__row">
-                      <input
-                        type="text"
-                        value={step.workingDir ?? ""}
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          updateStep(index, {
-                            ...step,
-                            workingDir: v.trim() ? v : undefined,
-                          } as SequenceStep);
-                        }}
-                        placeholder={t("picker.launchWorkingDirPlaceholder")}
-                      />
-                      <button
-                        type="button"
-                        className="action-button action-button--small"
-                        onClick={async () => {
-                          const selected = await open({
-                            title: t("picker.launchBrowseDir"),
-                            directory: true,
-                            multiple: false,
-                          });
-                          if (typeof selected === "string") {
-                            updateStep(index, { ...step, workingDir: selected } as SequenceStep);
-                          }
-                        }}
-                      >
-                        {t("picker.launchBrowseDirBtn")}
-                      </button>
-                    </div>
-                  </label>
-                </>
-              ) : null}
-
-              <label className="field">
-                <span className="field__label">{t("picker.stepDelay")}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={30000}
-                  value={step.delayMs ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value.trim();
-                    const raw = v ? Number(v) : undefined;
-                    const delay =
-                      raw !== undefined && Number.isFinite(raw)
-                        ? Math.max(0, Math.min(30000, Math.round(raw)))
-                        : undefined;
-                    updateStep(index, setSequenceStepDelay(step, delay));
-                  }}
-                />
-              </label>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+import { ModalShell } from "./shared";
+import {
+  autoName,
+  buildAction,
+  createInitialDrafts,
+  isSaveDisabled,
+  type PickerDrafts,
+} from "../lib/action-picker-helpers";
+import { SequenceStepEditor } from "./action-picker/SequenceStepEditor";
+import { ShortcutEditor } from "./action-picker/ShortcutEditor";
+import { MouseActionEditor } from "./action-picker/MouseActionEditor";
+import { TextSnippetEditor } from "./action-picker/TextSnippetEditor";
+import { LaunchEditor } from "./action-picker/LaunchEditor";
+import { MediaKeyEditor } from "./action-picker/MediaKeyEditor";
+import { ProfileSwitchEditor } from "./action-picker/ProfileSwitchEditor";
+import { SignalCaptureField } from "./action-picker/SignalCaptureField";
+import { ConditionsEditor } from "./action-picker/ConditionsEditor";
+import { TriggerModeEditor } from "./action-picker/TriggerModeEditor";
 
 /* ─────────────────────────────────────────────────────────
    Action Picker Modal
@@ -487,73 +122,23 @@ export function ActionPickerModal({
 
   const [isCapturing, setIsCapturing] = useState(false);
 
-  // Draft action state per category
-  const [shortcutDraft, setShortcutDraft] = useState<ShortcutActionPayload>(() =>
-    existingAction?.type === "shortcut"
-      ? existingAction.payload
-      : { key: "", ctrl: false, shift: false, alt: false, win: false },
+  // Draft action state per category — seeded once from the edited action/binding
+  const initial = useMemo(
+    () => createInitialDrafts(existingAction, binding, config.profiles),
+    [existingAction, binding, config.profiles],
   );
-  const [mouseDraft, setMouseDraft] = useState<{
-    action: MouseActionKind;
-    ctrl: boolean;
-    shift: boolean;
-    alt: boolean;
-    win: boolean;
-  }>(() =>
-    existingAction?.type === "mouseAction"
-      ? {
-          action: existingAction.payload.action,
-          ctrl: existingAction.payload.ctrl ?? false,
-          shift: existingAction.payload.shift ?? false,
-          alt: existingAction.payload.alt ?? false,
-          win: existingAction.payload.win ?? false,
-        }
-      : { action: "leftClick", ctrl: false, shift: false, alt: false, win: false },
-  );
-  const [textDraft, setTextDraft] = useState<{ text: string; pasteMode: PasteMode }>(() =>
-    existingAction?.type === "textSnippet" && existingAction.payload.source === "inline"
-      ? { text: existingAction.payload.text, pasteMode: existingAction.payload.pasteMode }
-      : { text: "", pasteMode: "sendText" },
-  );
-  const [launchDraft, setLaunchDraft] = useState<{ target: string; args: string[]; workingDir: string }>(() =>
-    existingAction?.type === "launch"
-      ? {
-          target: existingAction.payload.target,
-          args: existingAction.payload.args ?? [],
-          workingDir: existingAction.payload.workingDir ?? "",
-        }
-      : { target: "", args: [], workingDir: "" },
-  );
-  const [mediaDraft, setMediaDraft] = useState<MediaKeyKind>(() =>
-    existingAction?.type === "mediaKey"
-      ? existingAction.payload.key
-      : "playPause",
-  );
-  const [profileDraft, setProfileDraft] = useState<string>(() =>
-    existingAction?.type === "profileSwitch"
-      ? existingAction.payload.targetProfileId
-      : config.profiles[0]?.id ?? "",
-  );
-  const [sequenceDraft, setSequenceDraft] = useState<SequenceStep[]>(() =>
-    existingAction?.type === "sequence"
-      ? existingAction.payload.steps
-      : [{ type: "send", value: "Ctrl+C" }],
-  );
-  const [nameDraft, setNameDraft] = useState(() =>
-    existingAction?.pretty ?? "",
-  );
-  const [triggerModeDraft, setTriggerModeDraft] = useState<TriggerMode>(
-    () => binding?.triggerMode ?? "press",
-  );
-  const [chordPartnerDraft, setChordPartnerDraft] = useState<string>(
-    () => binding?.chordPartner ?? "",
-  );
-  const [conditionsDraft, setConditionsDraft] = useState<ActionCondition[]>(
-    () => existingAction?.conditions ?? [],
-  );
-  const [menuItemsDraft, setMenuItemsDraft] = useState<MenuItem[]>(() =>
-    existingAction?.type === "menu" ? existingAction.payload.items : [],
-  );
+  const [shortcutDraft, setShortcutDraft] = useState(initial.shortcut);
+  const [mouseDraft, setMouseDraft] = useState(initial.mouse);
+  const [textDraft, setTextDraft] = useState(initial.text);
+  const [launchDraft, setLaunchDraft] = useState(initial.launch);
+  const [mediaDraft, setMediaDraft] = useState(initial.media);
+  const [profileDraft, setProfileDraft] = useState(initial.profile);
+  const [sequenceDraft, setSequenceDraft] = useState(initial.sequence);
+  const [nameDraft, setNameDraft] = useState(initial.name);
+  const [triggerModeDraft, setTriggerModeDraft] = useState(initial.triggerMode);
+  const [chordPartnerDraft, setChordPartnerDraft] = useState(initial.chordPartner);
+  const [conditionsDraft, setConditionsDraft] = useState(initial.conditions);
+  const [menuItemsDraft, setMenuItemsDraft] = useState(initial.menuItems);
 
   const menuActionOptions = useMemo(
     () =>
@@ -562,24 +147,6 @@ export function ActionPickerModal({
         : config.actions,
     [config.actions, existingAction],
   );
-
-  function handleKeyCapture(event: React.KeyboardEvent) {
-    if (!isCapturing) return;
-    event.preventDefault();
-    event.stopPropagation();
-
-    const key = resolveKeyName(event);
-    if (["Control", "Shift", "Alt", "Meta"].includes(key)) return;
-
-    setShortcutDraft({
-      key: normalizeKeyName(key),
-      ctrl: event.ctrlKey,
-      shift: event.shiftKey,
-      alt: event.altKey,
-      win: event.metaKey,
-    });
-    setIsCapturing(false);
-  }
 
   // Signal capture: listen to runtime's encoded_key_received event
   useEffect(() => {
@@ -599,114 +166,21 @@ export function ActionPickerModal({
     };
   }, [isCapturingSignal]);
 
-  function buildAction(): Action {
-    const category = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory) ?? ACTION_CATEGORIES[0];
-    const actionType = category.actionType;
-    const actionId = existingAction?.id ?? `action-picker-${Date.now()}`;
-    const pretty = nameDraft.trim() || autoName(actionType);
-    const validConditions = conditionsDraft.filter((c) => c.value.trim());
-
-    const base: Action = (() => {
-      switch (actionType) {
-        case "shortcut":
-          return { id: actionId, type: "shortcut" as const, payload: shortcutDraft, pretty };
-        case "mouseAction":
-          return {
-            id: actionId,
-            type: "mouseAction" as const,
-            payload: {
-              action: mouseDraft.action,
-              ...(mouseDraft.ctrl && { ctrl: true }),
-              ...(mouseDraft.shift && { shift: true }),
-              ...(mouseDraft.alt && { alt: true }),
-              ...(mouseDraft.win && { win: true }),
-            },
-            pretty,
-          };
-        case "textSnippet": {
-          // Preserve tags from existing inline payload so editing the text
-          // through this picker doesn't silently drop tag metadata that was
-          // set elsewhere.
-          const preservedTags =
-            existingAction?.type === "textSnippet" &&
-            existingAction.payload.source === "inline"
-              ? existingAction.payload.tags
-              : [];
-          return {
-            id: actionId,
-            type: "textSnippet" as const,
-            payload: {
-              source: "inline" as const,
-              text: textDraft.text,
-              pasteMode: textDraft.pasteMode,
-              tags: preservedTags,
-            },
-            pretty,
-          };
-        }
-        case "sequence":
-          return { id: actionId, type: "sequence" as const, payload: { steps: sequenceDraft }, pretty };
-        case "launch":
-          return {
-            id: actionId,
-            type: "launch" as const,
-            payload: {
-              target: launchDraft.target,
-              args: launchDraft.args.length > 0 ? launchDraft.args : undefined,
-              workingDir: launchDraft.workingDir.trim() ? launchDraft.workingDir.trim() : undefined,
-            },
-            pretty,
-          };
-        case "mediaKey":
-          return { id: actionId, type: "mediaKey" as const, payload: { key: mediaDraft }, pretty };
-        case "profileSwitch":
-          return { id: actionId, type: "profileSwitch" as const, payload: { targetProfileId: profileDraft }, pretty };
-        case "menu":
-          return { id: actionId, type: "menu" as const, payload: { items: menuItemsDraft }, pretty: pretty || t("picker.defaultMenu") };
-        case "disabled":
-          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || t("picker.defaultDisabled") };
-        default:
-          return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: t("picker.defaultDisabled") };
-      }
-    })();
-
-    return validConditions.length > 0 ? { ...base, conditions: validConditions } : base;
-  }
-
-  function autoName(actionType: ActionType): string {
-    switch (actionType) {
-      case "shortcut": {
-        const parts = [...modifierLabels(shortcutDraft), shortcutDraft.key || null].filter(Boolean);
-        return parts.length > 0 ? parts.join(" + ") : t("picker.autoShortcut");
-      }
-      case "mouseAction": {
-        const mods = modifierLabels(mouseDraft);
-        const actionLabel = mouseActionLabel(mouseDraft.action) ?? t("picker.autoMouse");
-        return mods.length > 0 ? `${mods.join(" + ")} + ${actionLabel}` : actionLabel;
-      }
-      case "textSnippet":
-        return textDraft.text.slice(0, 30) || t("picker.autoText");
-      case "sequence":
-        return t("picker.autoMacro");
-      case "launch":
-        return launchDraft.target.split(/[/\\]/).pop() ?? t("sequence.launch");
-      case "mediaKey":
-        return mediaKeyLabel(mediaDraft) ?? t("action.type.mediaKey");
-      case "profileSwitch": {
-        const p = config.profiles.find((pr) => pr.id === profileDraft);
-        return p ? t("picker.autoProfile", { name: p.name }) : t("picker.autoProfileFallback");
-      }
-      case "menu":
-        return t("picker.defaultMenu");
-      case "disabled":
-        return t("picker.defaultDisabled");
-      default:
-        return t("picker.defaultAction");
-    }
-  }
+  const drafts: PickerDrafts = {
+    shortcut: shortcutDraft,
+    mouse: mouseDraft,
+    text: textDraft,
+    launch: launchDraft,
+    media: mediaDraft,
+    profile: profileDraft,
+    sequence: sequenceDraft,
+    menuItems: menuItemsDraft,
+    name: nameDraft,
+    conditions: conditionsDraft,
+  };
 
   function handleSave() {
-    const nextAction = buildAction();
+    const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
     let nextConfig = upsertAction(config, nextAction);
 
     if (binding) {
@@ -784,88 +258,20 @@ export function ActionPickerModal({
             </h3>
 
             {effectiveCategory === "shortcut" ? (
-              <div className="editor-grid" onKeyDown={handleKeyCapture}>
-                <label className="field">
-                  <span className="field__label">{t("picker.keyLabel")}</span>
-                  <div className="capture-row">
-                    <input
-                      type="text"
-                      readOnly
-                      value={shortcutDraft.key}
-                      placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
-                      className={isCapturing ? "capture-active" : ""}
-                    />
-                    <button
-                      type="button"
-                      className={`action-button${isCapturing ? " action-button--accent" : ""}`}
-                      onClick={() => setIsCapturing(!isCapturing)}
-                    >
-                      {isCapturing ? t("common.cancel") : t("picker.record")}
-                    </button>
-                  </div>
-                </label>
-                <div className="modifier-row">
-                  {(["ctrl", "shift", "alt", "win"] as const).map((mod) => (
-                    <label key={mod} className="field field--inline">
-                      <Toggle
-                        checked={shortcutDraft[mod]}
-                        onChange={(checked) => setShortcutDraft({ ...shortcutDraft, [mod]: checked })}
-                        ariaLabel={mod.charAt(0).toUpperCase() + mod.slice(1)}
-                      />
-                      <span className="field__label">{mod.charAt(0).toUpperCase() + mod.slice(1)}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="panel__muted">
-                  {t("picker.modifiersHint")}
-                </p>
-              </div>
+              <ShortcutEditor
+                draft={shortcutDraft}
+                onChange={setShortcutDraft}
+                isCapturing={isCapturing}
+                setIsCapturing={setIsCapturing}
+              />
             ) : null}
 
             {effectiveCategory === "mouseAction" ? (
-              <div className="editor-grid">
-                <div className="picker-grid">
-                  {MOUSE_ACTION_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`picker-grid__btn${mouseDraft.action === opt.value ? " picker-grid__btn--active" : ""}`}
-                      onClick={() => setMouseDraft({ ...mouseDraft, action: opt.value })}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="modifier-row">
-                  {(["ctrl", "shift", "alt", "win"] as const).map((mod) => (
-                    <label key={mod} className="field field--inline">
-                      <Toggle
-                        checked={mouseDraft[mod]}
-                        onChange={(checked) => setMouseDraft({ ...mouseDraft, [mod]: checked })}
-                        ariaLabel={mod.charAt(0).toUpperCase() + mod.slice(1)}
-                      />
-                      <span className="field__label">{mod.charAt(0).toUpperCase() + mod.slice(1)}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="panel__muted">
-                  {t("picker.mouseModifiersHint")}
-                </p>
-              </div>
+              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} />
             ) : null}
 
             {effectiveCategory === "textSnippet" ? (
-              <div className="editor-grid">
-                <label className="field">
-                  <span className="field__label">{t("picker.textLabel")}</span>
-                  <textarea
-                    rows={4}
-                    value={textDraft.text}
-                    onChange={(e) => setTextDraft({ ...textDraft, text: e.target.value })}
-                    placeholder={t("picker.textPlaceholder")}
-                  />
-                </label>
-              </div>
+              <TextSnippetEditor draft={textDraft} onChange={setTextDraft} />
             ) : null}
 
             {effectiveCategory === "sequence" ? (
@@ -876,71 +282,7 @@ export function ActionPickerModal({
             ) : null}
 
             {effectiveCategory === "launch" ? (
-              <div className="editor-grid">
-                <label className="field">
-                  <span className="field__label">{t("picker.programLabel")}</span>
-                  <div className="field__row">
-                    <input
-                      type="text"
-                      value={launchDraft.target}
-                      onChange={(e) => setLaunchDraft({ ...launchDraft, target: e.target.value })}
-                      placeholder="C:\Program Files\app.exe"
-                    />
-                    <button
-                      type="button"
-                      className="action-button action-button--small"
-                      onClick={async () => {
-                        const pick = await pickExecutablePath({
-                          title: t("picker.launchBrowseProgram"),
-                          filterName: t("picker.launchBrowseFilter"),
-                          extensions: ["exe", "lnk", "bat", "cmd"],
-                        });
-                        if (pick) {
-                          setLaunchDraft({ ...launchDraft, target: pick.path });
-                        }
-                      }}
-                    >
-                      {t("picker.launchBrowseBtn")}
-                    </button>
-                  </div>
-                </label>
-                <div className="field">
-                  <span className="field__label">{t("picker.launchArgsLabel")}</span>
-                  <ChipEditor
-                    values={launchDraft.args}
-                    onChange={(vals) => setLaunchDraft({ ...launchDraft, args: vals })}
-                    placeholder={t("picker.launchArgsPlaceholder")}
-                    ariaLabel={t("picker.launchArgsLabel")}
-                  />
-                </div>
-                <label className="field">
-                  <span className="field__label">{t("picker.launchWorkingDirLabel")}</span>
-                  <div className="field__row">
-                    <input
-                      type="text"
-                      value={launchDraft.workingDir}
-                      onChange={(e) => setLaunchDraft({ ...launchDraft, workingDir: e.target.value })}
-                      placeholder={t("picker.launchWorkingDirPlaceholder")}
-                    />
-                    <button
-                      type="button"
-                      className="action-button action-button--small"
-                      onClick={async () => {
-                        const selected = await open({
-                          title: t("picker.launchBrowseDir"),
-                          directory: true,
-                          multiple: false,
-                        });
-                        if (typeof selected === "string") {
-                          setLaunchDraft({ ...launchDraft, workingDir: selected });
-                        }
-                      }}
-                    >
-                      {t("picker.launchBrowseDirBtn")}
-                    </button>
-                  </div>
-                </label>
-              </div>
+              <LaunchEditor draft={launchDraft} onChange={setLaunchDraft} />
             ) : null}
 
             {effectiveCategory === "menu" ? (
@@ -954,36 +296,15 @@ export function ActionPickerModal({
             ) : null}
 
             {effectiveCategory === "mediaKey" ? (
-              <div className="editor-grid">
-                <div className="picker-grid">
-                  {MEDIA_KEY_OPTIONS.map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      className={`picker-grid__btn${mediaDraft === opt.value ? " picker-grid__btn--active" : ""}`}
-                      onClick={() => setMediaDraft(opt.value)}
-                    >
-                      {opt.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <MediaKeyEditor value={mediaDraft} onChange={setMediaDraft} />
             ) : null}
 
             {effectiveCategory === "profileSwitch" ? (
-              <div className="editor-grid">
-                <label className="field">
-                  <span className="field__label">{t("picker.switchProfile")}</span>
-                  <select
-                    value={profileDraft}
-                    onChange={(e) => setProfileDraft(e.target.value)}
-                  >
-                    {config.profiles.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
-                  </select>
-                </label>
-              </div>
+              <ProfileSwitchEditor
+                value={profileDraft}
+                onChange={setProfileDraft}
+                profiles={config.profiles}
+              />
             ) : null}
 
             {effectiveCategory === "disabled" ? (
@@ -995,49 +316,13 @@ export function ActionPickerModal({
             ) : null}
 
             {controlId && selectedLayer ? (
-              <div className="editor-grid mt-12">
-                <label className="field">
-                  <span className="field__label">
-                    {t("picker.signalLabel")}
-                    {expectedSignal ? (
-                      <span className="field__hint" title={`${t("picker.signalRecommended")} ${expectedSignal}`}>
-                        ?
-                      </span>
-                    ) : null}
-                  </span>
-                  <div className="capture-row">
-                    <input
-                      type="text"
-                      readOnly
-                      value={signalDraft ?? ""}
-                      placeholder={isCapturingSignal ? t("picker.signalCapturing") : t("picker.signalEmpty")}
-                      className={isCapturingSignal ? "capture-active" : ""}
-                    />
-                    <button
-                      type="button"
-                      className={`action-button${isCapturingSignal ? " action-button--accent" : ""}`}
-                      onClick={() => setIsCapturingSignal(!isCapturingSignal)}
-                    >
-                      {isCapturingSignal ? t("common.cancel") : t("picker.record")}
-                    </button>
-                  </div>
-                  {isCapturingSignal ? (
-                    <p className="panel__muted">{t("picker.signalCaptureHint")}</p>
-                  ) : null}
-                </label>
-                {expectedSignal && signalDraft !== expectedSignal ? (
-                  <p className="panel__muted">
-                    {t("picker.signalRecommended")} <code>{expectedSignal}</code>{" "}
-                    <button
-                      type="button"
-                      className="action-button action-button--small action-button--ghost"
-                      onClick={() => setSignalDraft(expectedSignal)}
-                    >
-                      {t("picker.signalApply")}
-                    </button>
-                  </p>
-                ) : null}
-              </div>
+              <SignalCaptureField
+                signalDraft={signalDraft}
+                setSignalDraft={setSignalDraft}
+                isCapturing={isCapturingSignal}
+                setIsCapturing={setIsCapturingSignal}
+                expectedSignal={expectedSignal}
+              />
             ) : null}
 
             <label className="field mt-12">
@@ -1046,159 +331,22 @@ export function ActionPickerModal({
                 type="text"
                 value={nameDraft}
                 onChange={(e) => setNameDraft(e.target.value)}
-                placeholder={autoName(ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.actionType ?? "disabled")}
+                placeholder={autoName(ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.actionType ?? "disabled", drafts, t, config.profiles)}
               />
             </label>
 
-            <div className="editor-grid mt-12">
-              <div className="field__header">
-                <span className="field__label">{t("picker.conditionsLabel")}</span>
-                <button
-                  type="button"
-                  className="action-button action-button--secondary action-button--small"
-                  onClick={() =>
-                    setConditionsDraft([
-                      ...conditionsDraft,
-                      { type: "windowTitleContains", value: "" },
-                    ])
-                  }
-                >
-                  {t("picker.conditionsAdd")}
-                </button>
-              </div>
+            <ConditionsEditor conditions={conditionsDraft} onChange={setConditionsDraft} />
 
-              {conditionsDraft.length === 0 ? (
-                <p className="panel__muted">
-                  {t("picker.conditionsEmpty")}
-                </p>
-              ) : (
-                <div className="stack-list">
-                  {conditionsDraft.map((condition, index) => (
-                    <div className="compound-card" key={index}>
-                      <div className="compound-card__header">
-                        <strong>{t("picker.conditionTitle", { index: index + 1 })}</strong>
-                        <button
-                          type="button"
-                          className="action-button action-button--secondary action-button--small"
-                          onClick={() =>
-                            setConditionsDraft(conditionsDraft.filter((_, i) => i !== index))
-                          }
-                        >
-                          {t("common.delete")}
-                        </button>
-                      </div>
-                      <div className="editor-grid">
-                        <label className="field">
-                          <span className="field__label">{t("picker.conditionType")}</span>
-                          <select
-                            value={condition.type}
-                            onChange={(e) => {
-                              const nextType = e.target.value as ActionCondition["type"];
-                              setConditionsDraft(
-                                conditionsDraft.map((c, i) =>
-                                  i === index ? { type: nextType, value: c.value } : c,
-                                ),
-                              );
-                            }}
-                          >
-                            {CONDITION_TYPE_KEYS.map((ct) => (
-                              <option key={ct.value} value={ct.value}>
-                                {t(ct.key)}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span className="field__label">{t("picker.conditionValue")}</span>
-                          <input
-                            type="text"
-                            value={condition.value}
-                            placeholder={
-                              condition.type.startsWith("exe")
-                                ? t("picker.conditionPlaceholderExe")
-                                : t("picker.conditionPlaceholderTitle")
-                            }
-                            onChange={(e) =>
-                              setConditionsDraft(
-                                conditionsDraft.map((c, i) =>
-                                  i === index ? { ...c, value: e.target.value } : c,
-                                ),
-                              )
-                            }
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  ))}
-                  <p className="panel__muted">
-                    {t("picker.conditionsAllRequired")}
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <label className="field mt-12">
-              <span className="field__label">{t("picker.triggerMode")}</span>
-              <select
-                value={triggerModeDraft}
-                onChange={(e) => setTriggerModeDraft(e.target.value as TriggerMode)}
-              >
-                <option value="press">{t("picker.triggerPress")}</option>
-                <option value="doublePress">{t("picker.triggerDoublePress")}</option>
-                <option value="triplePress">{t("picker.triggerTriplePress")}</option>
-                <option value="hold">{t("picker.triggerHold")}</option>
-                <option value="chord">{t("picker.triggerChord")}</option>
-              </select>
-            </label>
-
-            {triggerModeDraft === "chord" && controlId ? (
-              <div className="field">
-                <p className="panel__muted chord-explainer">
-                  {t("picker.chordExplainer")}
-                </p>
-                <div className="chord-preview">
-                  <span className="chord-preview__key">
-                    {config.physicalControls.find((c) => c.id === controlId)?.defaultName ?? controlId}
-                  </span>
-                  <span className="chord-preview__plus">+</span>
-                  <span className="chord-preview__key chord-preview__key--partner">
-                    {config.physicalControls.find((c) => c.id === chordPartnerDraft)?.defaultName ?? "…"}
-                  </span>
-                </div>
-                <label className="field">
-                  <span className="field__label">{t("picker.chordPartner")}</span>
-                  <select
-                    value={chordPartnerDraft}
-                    onChange={(e) => setChordPartnerDraft(e.target.value as ControlId)}
-                  >
-                    <option value="">{t("picker.chordPartnerEmpty")}</option>
-                    {config.physicalControls
-                      .filter((c) => c.id !== controlId && c.remappable)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.defaultName}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-                {chordPartnerDraft && selectedLayer ? (
-                  (() => {
-                    const partnerHasChord = config.bindings.some(
-                      (b) =>
-                        b.controlId === chordPartnerDraft &&
-                        b.layer === selectedLayer &&
-                        b.triggerMode === "chord" &&
-                        b.enabled,
-                    );
-                    return partnerHasChord ? null : (
-                      <p className="notice notice--warning chord-warning">
-                        {t("picker.chordWarnNoPartnerBinding")}
-                      </p>
-                    );
-                  })()
-                ) : null}
-              </div>
-            ) : null}
+            <TriggerModeEditor
+              triggerMode={triggerModeDraft}
+              onChange={setTriggerModeDraft}
+              chordPartner={chordPartnerDraft}
+              setChordPartner={setChordPartnerDraft}
+              controlId={controlId}
+              selectedLayer={selectedLayer}
+              physicalControls={config.physicalControls}
+              bindings={config.bindings}
+            />
           </div>
         </div>
 
@@ -1210,16 +358,7 @@ export function ActionPickerModal({
             type="button"
             className="action-button action-button--primary"
             onClick={handleSave}
-            disabled={
-              (effectiveCategory === "shortcut" &&
-                !shortcutDraft.key &&
-                !shortcutDraft.ctrl &&
-                !shortcutDraft.shift &&
-                !shortcutDraft.alt &&
-                !shortcutDraft.win) ||
-              (effectiveCategory === "textSnippet" && !textDraft.text.trim()) ||
-              (effectiveCategory === "launch" && !launchDraft.target.trim())
-            }
+            disabled={isSaveDisabled(effectiveCategory, drafts)}
           >
             {t("common.save")}
           </button>

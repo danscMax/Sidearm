@@ -821,6 +821,34 @@ impl ModifierKey {
     }
 }
 
+/// Max time `clear_modifiers` waits for Ctrl/Alt (the Unicode/VK_PACKET
+/// corruptors) to read released after injecting their key-ups, before proceeding
+/// best-effort. Deliberately well under the multi-second stuck-replay window — A
+/// only rides out the sub-100ms propagation / one-shot re-assert race.
+#[cfg(target_os = "windows")]
+const MODIFIER_CLEAR_TIMEOUT_MS: u64 = 60;
+/// Poll cadence while waiting; each poll that still sees Ctrl/Alt down re-injects
+/// that modifier's key-up before sleeping (also bounds re-inject frequency).
+#[cfg(target_os = "windows")]
+const MODIFIER_CLEAR_POLL_MS: u64 = 5;
+
+/// Key-up events for whichever of Ctrl/Alt is still reported down — re-asserts the
+/// release against a Razer flush-timeout replayed-down. Pure so it is unit-testable
+/// (the `GetAsyncKeyState`/`SendInput`/sleep parts are not). Uses the same
+/// left-variant VKs as the release block above (Windows matches key-up by VK code,
+/// not L/R side).
+#[cfg(target_os = "windows")]
+fn modifier_reassert_inputs(ctrl_down: bool, alt_down: bool) -> Vec<KeyboardInputSpec> {
+    let mut inputs = Vec::new();
+    if ctrl_down {
+        inputs.push(KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true });
+    }
+    if alt_down {
+        inputs.push(KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up: true });
+    }
+    inputs
+}
+
 /// Selectively clears held modifier keys by injecting key-up events.
 ///
 /// Only modifiers whose flag is `true` in `mask` are cleared. This allows
@@ -945,6 +973,46 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
         log::debug!("[clear-modifiers] post: {}", post_state);
     } else {
         log::debug!("[clear-modifiers] nothing to release");
+    }
+
+    // Verify-and-wait: don't return until Ctrl AND Alt actually read released — the
+    // documented Unicode/VK_PACKET corruptors. A self-injected key-up clears the
+    // async state only once the Raw Input Thread dequeues it, and a Razer
+    // flush-timeout can replay a modifier-down mid-window, so we poll and re-inject
+    // the still-down modifier's key-up until clear or the bounded timeout. Shift/Win
+    // are intentionally NOT waited on, so a legitimately-held physical Shift never
+    // times out here. Runs after the if/else so a replayed-down arriving when nothing
+    // was initially held is still caught.
+    let wait_start = std::time::Instant::now();
+    let deadline = wait_start + std::time::Duration::from_millis(MODIFIER_CLEAR_TIMEOUT_MS);
+    let mut ctrl_down;
+    let mut alt_down;
+    loop {
+        unsafe {
+            ctrl_down = key_is_down(GetAsyncKeyState(VK_CONTROL as i32));
+            alt_down = key_is_down(GetAsyncKeyState(VK_MENU as i32));
+        }
+        if !ctrl_down && !alt_down {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        // Re-assert the release for whichever is still down; ignore transient
+        // SendInput errors — the next re-read is the real gate, and a hiccup must
+        // not abort text input.
+        let _ = send_keyboard_inputs(&modifier_reassert_inputs(ctrl_down, alt_down));
+        std::thread::sleep(std::time::Duration::from_millis(MODIFIER_CLEAR_POLL_MS));
+    }
+    let waited_ms = wait_start.elapsed().as_millis();
+    if ctrl_down || alt_down {
+        log::warn!(
+            "[clear-modifiers] verify-and-wait TIMEOUT after {waited_ms}ms — proceeding \
+             best-effort (Unicode output may garble): ctrl_down={ctrl_down} alt_down={alt_down} | {}",
+            snapshot_state(),
+        );
+    } else {
+        log::info!("[clear-modifiers] verify-and-wait: Ctrl/Alt cleared after {waited_ms}ms");
     }
 
     Ok(())
@@ -1647,6 +1715,31 @@ mod tests {
             assert!(codes.contains(&vk), "missing VK 0x{:02X} in release-all blast", vk);
         }
         assert_eq!(codes.len(), 11, "should emit exactly 11 modifier VKs");
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn modifier_reassert_inputs_emits_key_ups_for_still_down_only() {
+        fn codes(inputs: &[KeyboardInputSpec]) -> Vec<(u16, bool)> {
+            inputs
+                .iter()
+                .map(|i| match i {
+                    KeyboardInputSpec::VirtualKey { code, key_up, .. } => (*code, *key_up),
+                    _ => panic!("expected only VirtualKey events"),
+                })
+                .collect()
+        }
+
+        // Neither down → nothing to re-assert.
+        assert!(modifier_reassert_inputs(false, false).is_empty());
+        // Ctrl-only / Alt-only → that modifier's key-up.
+        assert_eq!(codes(&modifier_reassert_inputs(true, false)), vec![(VK_LCONTROL, true)]);
+        assert_eq!(codes(&modifier_reassert_inputs(false, true)), vec![(VK_LMENU, true)]);
+        // Both → Ctrl then Alt, both key-ups, never a key-down.
+        assert_eq!(
+            codes(&modifier_reassert_inputs(true, true)),
+            vec![(VK_LCONTROL, true), (VK_LMENU, true)],
+        );
     }
 
     #[test]

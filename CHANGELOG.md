@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.20] — 2026-06-04
+
+### Fixed
+- **Cyrillic text snippets no longer garble into mojibake.** Short snippets type
+  their text via `SendInput` `KEYEVENTF_UNICODE`, which Windows corrupts for
+  non-ASCII characters when a Ctrl/Alt modifier is momentarily held — the Razer
+  encoding-modifier suppression could leave one asserted past the injection. The
+  injector now waits (bounded) until Ctrl and Alt actually read released before
+  typing, re-asserting their release against a late key-up. English text and long
+  (clipboard-pasted) snippets were never affected.
+
+### Changed
+- Internal: the action picker is decomposed into focused per-category editor
+  components plus a tested pure-logic module (no behaviour change), and the
+  executable/directory path pickers are shared instead of duplicated.
+
+### Security
+- Patched build-time dependencies (`vite`, `postcss`, `picomatch`) via
+  `npm audit fix` — 0 advisories remaining. The shipped binary was not affected.
+
+### Removed
+- Unused dead exports and the unused `@tauri-apps/plugin-global-shortcut` and
+  `@tauri-apps/plugin-notification` JS bindings (both are driven from Rust).
+
 ## [0.1.19] — 2026-06-04
 
 ### Added

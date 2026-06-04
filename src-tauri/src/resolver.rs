@@ -69,36 +69,47 @@ pub struct ResolvedInputPreview {
     pub trigger_mode: Option<TriggerMode>,
 }
 
-pub fn resolve_profile_for_app_context(
-    config: &AppConfig,
+/// Which profile applies to a foreground app context, plus the supporting
+/// detail both call sites need.
+///
+/// Single source of truth for "given an app, which profile wins". The logic
+/// used to be duplicated — once in `window_capture` (drives the OSD /
+/// active-profile indicator) and once here (drives input-preview / dispatch) —
+/// and the two copies drifted: only this side consulted
+/// `last_selected_profile_id`. That made the indicator show the fallback
+/// profile while dispatch silently used the editor-selected profile, so
+/// selecting an empty profile made every unmapped app stop responding with no
+/// visible reason. Resolution is now `app mapping > fallback` for everyone;
+/// `last_selected_profile_id` is editor view state only, never a runtime
+/// override.
+pub(crate) struct ProfileSelection<'a> {
+    pub matched_mapping: Option<&'a AppMapping>,
+    pub profile: Option<&'a Profile>,
+    pub used_fallback: bool,
+    pub candidates: Vec<&'a AppMapping>,
+    pub reason: String,
+}
+
+/// Resolve the winning profile for an app context. Shared by the foreground
+/// watcher and the dispatch/preview path so they can never disagree again.
+pub(crate) fn select_profile_for_app_context<'a>(
+    config: &'a AppConfig,
     exe: &str,
     title: &str,
     process_path: Option<&str>,
-) -> ProfileResolutionSummary {
+) -> ProfileSelection<'a> {
     let fallback_profile = config
         .profiles
         .iter()
         .find(|profile| profile.id == config.settings.fallback_profile_id);
-    let manual_profile = config
-        .settings
-        .last_selected_profile_id
-        .as_deref()
-        .and_then(|id| find_profile(config, id));
     let candidates = matching_app_mappings(config, exe, title, process_path);
     let winner = candidates.first().copied();
-    let resolved_profile = winner
+    let profile = winner
         .and_then(|mapping| find_profile(config, &mapping.profile_id))
-        .or(manual_profile)
         .or(fallback_profile);
-
-    let used_fallback_profile = winner.is_none() && manual_profile.is_none();
-    let resolution_reason = if let Some(mapping) = winner {
+    let used_fallback = winner.is_none();
+    let reason = if let Some(mapping) = winner {
         format!("Matched app mapping `{}`.", mapping.id)
-    } else if let Some(profile) = manual_profile {
-        format!(
-            "No matching app mapping. Using manual selection `{}`.",
-            profile.id,
-        )
     } else {
         format!(
             "No matching app mapping found. Using fallback profile `{}`.",
@@ -106,16 +117,33 @@ pub fn resolve_profile_for_app_context(
         )
     };
 
+    ProfileSelection {
+        matched_mapping: winner,
+        profile,
+        used_fallback,
+        candidates,
+        reason,
+    }
+}
+
+pub fn resolve_profile_for_app_context(
+    config: &AppConfig,
+    exe: &str,
+    title: &str,
+    process_path: Option<&str>,
+) -> ProfileResolutionSummary {
+    let selection = select_profile_for_app_context(config, exe, title, process_path);
     ProfileResolutionSummary {
-        matched_app_mapping_id: winner.map(|mapping| mapping.id.clone()),
-        resolved_profile_id: resolved_profile.map(|profile| profile.id.clone()),
-        resolved_profile_name: resolved_profile.map(|profile| profile.name.clone()),
-        used_fallback_profile,
-        candidate_app_mapping_ids: candidates
-            .into_iter()
+        matched_app_mapping_id: selection.matched_mapping.map(|mapping| mapping.id.clone()),
+        resolved_profile_id: selection.profile.map(|profile| profile.id.clone()),
+        resolved_profile_name: selection.profile.map(|profile| profile.name.clone()),
+        used_fallback_profile: selection.used_fallback,
+        candidate_app_mapping_ids: selection
+            .candidates
+            .iter()
             .map(|mapping| mapping.id.clone())
             .collect(),
-        resolution_reason,
+        resolution_reason: selection.reason,
     }
 }
 
@@ -377,19 +405,18 @@ mod tests {
     }
 
     #[test]
-    fn resolve_picks_manual_profile_when_no_mapping_matches() {
+    fn resolve_ignores_manual_selection_and_uses_fallback() {
+        // `last_selected_profile_id` is the editor's view state, not a runtime
+        // override. An unmapped app must resolve to the fallback profile so the
+        // dispatch path agrees with the OSD/indicator (window_capture) path —
+        // otherwise selecting an empty profile silently breaks unmapped apps.
         let mut config = test_config(vec![]);
         config.settings.last_selected_profile_id = Some("code".into());
 
         let summary = resolve_profile_for_app_context(&config, "chrome.exe", "Docs", None);
 
-        assert_eq!(summary.resolved_profile_id.as_deref(), Some("code"));
-        assert!(!summary.used_fallback_profile);
-        assert!(
-            summary.resolution_reason.contains("manual selection"),
-            "expected manual-selection reason, got `{}`",
-            summary.resolution_reason
-        );
+        assert_eq!(summary.resolved_profile_id.as_deref(), Some("default"));
+        assert!(summary.used_fallback_profile);
     }
 
     #[test]
@@ -459,6 +486,8 @@ mod tests {
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
                 last_selected_profile_id: None,
+                onboarding_completed: false,
+                onboarding_step: None,
             },
             profiles: vec![
                 profile("default", "Default", 0),
@@ -688,6 +717,8 @@ mod edge_proptests {
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
                 last_selected_profile_id: None,
+                onboarding_completed: false,
+                onboarding_step: None,
             },
             profiles: vec![
                 minimal_profile("default", "Default", true),

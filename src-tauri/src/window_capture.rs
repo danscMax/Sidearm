@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::{thread, time::Duration};
 
 use crate::config::AppConfig;
-use crate::resolver::{find_profile, matching_app_mappings};
+use crate::resolver::select_profile_for_app_context;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -76,32 +76,27 @@ pub(crate) struct RawWindowCapture {
 }
 
 fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> WindowCaptureResult {
-    let fallback_profile = config
-        .profiles
-        .iter()
-        .find(|profile| profile.id == config.settings.fallback_profile_id);
-    let candidates = matching_app_mappings(
+    // Shared resolver — identical `app mapping > fallback` logic as the
+    // dispatch/preview path, so the active-profile indicator and what actually
+    // fires can never disagree again.
+    let selection = select_profile_for_app_context(
         config,
         &raw_window.exe,
         &raw_window.title,
         Some(&raw_window.process_path),
     );
-    let winner = candidates.first().copied();
-    let resolved_profile = winner
-        .and_then(|mapping| find_profile(config, &mapping.profile_id))
-        .or(fallback_profile);
-
-    let used_fallback_profile = winner.is_none();
-    let resolution_reason = if let Some(mapping) = winner {
-        format!("Matched app mapping `{}`.", mapping.id)
-    } else {
-        format!(
-            "No matching app mapping found. Using fallback profile `{}`.",
-            config.settings.fallback_profile_id
-        )
-    };
 
     WindowCaptureResult {
+        matched_app_mapping_id: selection.matched_mapping.map(|mapping| mapping.id.clone()),
+        resolved_profile_id: selection.profile.map(|profile| profile.id.clone()),
+        resolved_profile_name: selection.profile.map(|profile| profile.name.clone()),
+        used_fallback_profile: selection.used_fallback,
+        candidate_app_mapping_ids: selection
+            .candidates
+            .iter()
+            .map(|mapping| mapping.id.clone())
+            .collect(),
+        resolution_reason: selection.reason,
         hwnd: raw_window.hwnd,
         exe: raw_window.exe,
         process_path: raw_window.process_path,
@@ -109,15 +104,6 @@ fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> W
         captured_at: raw_window.captured_at,
         ignored: false,
         ignore_reason: None,
-        matched_app_mapping_id: winner.map(|mapping| mapping.id.clone()),
-        resolved_profile_id: resolved_profile.map(|profile| profile.id.clone()),
-        resolved_profile_name: resolved_profile.map(|profile| profile.name.clone()),
-        used_fallback_profile,
-        candidate_app_mapping_ids: candidates
-            .into_iter()
-            .map(|mapping| mapping.id.clone())
-            .collect(),
-        resolution_reason,
         is_elevated: raw_window.is_elevated,
     }
 }
@@ -264,6 +250,8 @@ mod tests {
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
                 last_selected_profile_id: None,
+                onboarding_completed: false,
+                onboarding_step: None,
             },
             profiles: vec![
                 profile("default", "Default", 0),
@@ -407,6 +395,8 @@ mod edge_proptests {
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
                 last_selected_profile_id: None,
+                onboarding_completed: false,
+                onboarding_step: None,
             },
             profiles: vec![
                 Profile { id: "fallback".into(), name: "Fallback".into(), description: None, enabled: true, priority: 0 },

@@ -236,17 +236,6 @@ export interface ProfileSwitchPayload {
 
 export type DisabledActionPayload = Record<string, never>;
 
-export type ActionPayload =
-  | ShortcutActionPayload
-  | TextSnippetPayload
-  | SequenceActionPayload
-  | LaunchActionPayload
-  | MenuActionPayload
-  | MouseActionPayload
-  | MediaKeyPayload
-  | ProfileSwitchPayload
-  | DisabledActionPayload;
-
 export type ActionCondition =
   | { type: "windowTitleContains"; value: string }
   | { type: "windowTitleNotContains"; value: string }

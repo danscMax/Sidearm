@@ -539,7 +539,7 @@ export function ensurePlaceholderBinding(
   };
 }
 
-export function ensureEncoderMapping(
+function ensureEncoderMapping(
   config: AppConfig,
   layer: Layer,
   control: PhysicalControl,

@@ -216,20 +216,6 @@ export async function setAdminAutostart(enabled: boolean): Promise<AdminAutostar
   return invoke<AdminAutostartStatus>("set_admin_autostart", { enabled });
 }
 
-/**
- * Re-launch Sidearm with administrator privileges (UAC prompt) and exit the
- * current process.  Required to inject input into elevated foreground windows
- * (Task Manager, regedit, UAC dialogs) — Windows UIPI silently blocks
- * `SendInput` from a Medium-IL process to a High-IL one.
- */
-export async function relaunchAsAdmin(): Promise<void> {
-  return invoke<void>("relaunch_as_admin");
-}
-
-export async function getLogDirectory(): Promise<string> {
-  return invoke<string>("get_log_directory");
-}
-
 export async function openLogDirectory(): Promise<void> {
   return invoke<void>("open_log_directory");
 }

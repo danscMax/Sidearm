@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.19] — 2026-06-04
+
+### Added
+- **First-run onboarding wizard.** A full-screen setup wizard guides new users
+  through Razer Synapse configuration, verifies the F13–F24 pipeline live
+  (press Naga buttons and watch them light up), offers run-as-administrator
+  autostart, and ends with a hands-on "press a button, watch it fire" step.
+  Ships the Razer Synapse profile in the app and adds a "Re-run onboarding"
+  entry in Settings.
+
+### Fixed
+- **Per-app profile resolution.** The foreground watcher and the dispatch path
+  used drifted copies of the resolver; only dispatch consulted the editor's
+  last-selected profile, so selecting an empty profile could make every
+  unmapped app stop responding while the on-screen indicator still showed a
+  working profile. Both now share one resolver (app mapping → fallback);
+  the editor selection no longer overrides the runtime.
+- **Razer Synapse import** no longer produces a config rejected on save when a
+  button is mapped via two Synapse inputs (e.g. `DKM_M_0X` and `KEY_X`):
+  duplicate `(control, layer)` bindings are de-duplicated with a warning.
+
 ## [0.1.18] — 2026-06-01
 
 ### Fixed

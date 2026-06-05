@@ -225,6 +225,13 @@ if (-not $SkipBuild) {
 
     $script:buildStartTime = Get-Date
 
+    # Stop any running Sidearm BEFORE compiling. The release LTO link step is
+    # memory-heavy; freeing the running instance(s) lowers the chance of a
+    # transient OOM/link failure under load and rules out any lock on
+    # target/release/sidearm.exe. The assemble step stops it again before
+    # copying the fresh EXE.
+    Stop-AppProcessIfRunning
+
     if ($CleanCargo) {
         Write-Host "    $([char]0x25B6) cargo clean -p sidearm (-CleanCargo requested)..." -ForegroundColor White
         Set-Location -LiteralPath $TAURI_DIR

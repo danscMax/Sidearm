@@ -384,6 +384,12 @@ export function coerceActionType(
           payload: {} as Record<string, never>,
           notes: action.notes ?? PLACEHOLDER_ACTION_NOTE,
         };
+      case "repairClipboard":
+        return {
+          ...action,
+          type: "repairClipboard",
+          payload: { strategy: "latin1" },
+        };
     }
   })();
 

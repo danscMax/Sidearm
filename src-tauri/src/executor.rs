@@ -204,6 +204,7 @@ pub fn run_preview_action(
 
     match (&action.action_type, &action.payload) {
         (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => run_live_shortcut_action(
+            config,
             action,
             preview,
             payload,
@@ -245,6 +246,9 @@ pub fn run_preview_action(
             warnings: Vec::new(),
             executed_at: timestamp_millis(),
         }),
+        (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {
+            run_live_repair_clipboard_action(action, preview, Some(action_id))
+        }
         _ => Err(execution_error(
             "unsupported_live_execution",
             "выполнение",
@@ -329,6 +333,11 @@ fn summarize_action(
         (ActionType::Disabled, ActionPayload::Disabled(_)) => Ok((
             ExecutionOutcome::Noop,
             "Отключённое действие — ничего не выполняется.".into(),
+            Vec::new(),
+        )),
+        (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => Ok((
+            ExecutionOutcome::Simulated,
+            "Починит кодировку буфера обмена (UTF-8 ↔ Latin-1).".into(),
             Vec::new(),
         )),
         _ => Err(format!(
@@ -559,13 +568,27 @@ fn validate_live_sequence(payload: &crate::config::SequenceActionPayload) -> Res
     Ok(())
 }
 
+#[cfg_attr(not(target_os = "windows"), allow(unused_variables))]
 fn run_live_shortcut_action(
+    config: &AppConfig,
     action: &Action,
     preview: &ResolvedInputPreview,
     payload: &crate::config::ShortcutActionPayload,
     action_id: Option<String>,
 ) -> Result<ActionExecutionEvent, ExecutorError> {
     let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
+
+    // Capture the clipboard sequence number before a copy/cut shortcut so the
+    // opt-in auto-repair can wait for the copy to land, then fix OSC 52 mojibake.
+    #[cfg(target_os = "windows")]
+    let repair_seq_before = if config.settings.repair_clipboard_on_copy
+        && input_synthesis::is_clipboard_shortcut(payload)
+    {
+        Some(input_synthesis::clipboard_sequence_number())
+    } else {
+        None
+    };
+
     let dispatch = input_synthesis::send_shortcut(payload, &encoding_mods).map_err(|message| {
         log::error!(
             "[executor] Shortcut injection failed for key {}: {message}",
@@ -579,6 +602,20 @@ fn run_live_shortcut_action(
             action_id.clone(),
         )
     })?;
+
+    // Opt-in auto-repair: if enabled and this was a copy/cut, wait for the copy
+    // to land and undo OSC 52 mojibake. Best-effort — never fails the action.
+    #[cfg(target_os = "windows")]
+    if let Some(seq_before) = repair_seq_before {
+        match input_synthesis::repair_clipboard_after_copy(seq_before) {
+            Ok(Some(fixed)) => log::info!(
+                "[repair] auto-repaired clipboard after copy ({} chars)",
+                fixed.chars().count()
+            ),
+            Ok(None) => {}
+            Err(message) => log::warn!("[repair] auto-repair after copy failed: {message}"),
+        }
+    }
 
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),
@@ -689,6 +726,55 @@ fn run_live_media_key_action(
         outcome: ExecutionOutcome::Injected,
         process_id: None,
         summary: format!("Отправлена медиа-клавиша `{key:?}`."),
+        warnings: Vec::new(),
+        executed_at: timestamp_millis(),
+    })
+}
+
+fn run_live_repair_clipboard_action(
+    action: &Action,
+    preview: &ResolvedInputPreview,
+    action_id: Option<String>,
+) -> Result<ActionExecutionEvent, ExecutorError> {
+    let (outcome, summary) = match input_synthesis::repair_clipboard() {
+        Ok(Some(fixed)) => (
+            ExecutionOutcome::Injected,
+            format!("Буфер обмена починен ({} симв.).", fixed.chars().count()),
+        ),
+        Ok(None) => (
+            ExecutionOutcome::Noop,
+            "Буфер обмена в порядке — чинить нечего.".into(),
+        ),
+        Err(message) => {
+            log::error!(
+                "[executor] Clipboard repair failed for key {}: {message}",
+                preview.encoded_key
+            );
+            return Err(execution_error(
+                "execution_failed",
+                "выполнение",
+                &message,
+                Some(preview.encoded_key.clone()),
+                action_id,
+            ));
+        }
+    };
+
+    Ok(ActionExecutionEvent {
+        encoded_key: preview.encoded_key.clone(),
+        action_id: action.id.clone(),
+        action_type: action.action_type.as_str().into(),
+        action_pretty: action.pretty.clone(),
+        resolved_profile_id: preview.resolved_profile_id.clone(),
+        resolved_profile_name: preview.resolved_profile_name.clone(),
+        matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+        control_id: preview.control_id.clone(),
+        layer: preview.layer.clone(),
+        binding_id: preview.binding_id.clone(),
+        mode: ExecutionMode::Live,
+        outcome,
+        process_id: None,
+        summary,
         warnings: Vec::new(),
         executed_at: timestamp_millis(),
     })

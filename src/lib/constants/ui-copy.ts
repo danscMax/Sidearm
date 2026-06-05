@@ -83,6 +83,7 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
   profileSwitch: "Профиль",
   menu: "Контекстное меню",
   disabled: "Отключено",
+  repairClipboard: "Починить буфер",
 };
 
 export const editableActionTypes: Array<{
@@ -98,6 +99,7 @@ export const editableActionTypes: Array<{
   { value: "profileSwitch", label: ACTION_TYPE_LABELS.profileSwitch },
   { value: "menu", label: ACTION_TYPE_LABELS.menu },
   { value: "disabled", label: ACTION_TYPE_LABELS.disabled },
+  { value: "repairClipboard", label: ACTION_TYPE_LABELS.repairClipboard },
 ];
 
 export const ACTION_CATEGORIES: ActionCategory[] = [
@@ -110,6 +112,7 @@ export const ACTION_CATEGORIES: ActionCategory[] = [
   { id: "profileSwitch", icon: "Pf", label: ACTION_TYPE_LABELS.profileSwitch, actionType: "profileSwitch" },
   { id: "menu", icon: "Mn", label: ACTION_TYPE_LABELS.menu, actionType: "menu" },
   { id: "disabled", icon: "—", label: ACTION_TYPE_LABELS.disabled, actionType: "disabled" },
+  { id: "repairClipboard", icon: "Rb", label: ACTION_TYPE_LABELS.repairClipboard, actionType: "repairClipboard" },
 ];
 
 export const MOUSE_ACTION_OPTIONS: Array<{ value: MouseActionKind; label: string }> = [

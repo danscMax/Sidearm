@@ -315,6 +315,14 @@ export function ActionPickerModal({
               </div>
             ) : null}
 
+            {effectiveCategory === "repairClipboard" ? (
+              <div className="editor-grid">
+                <p className="panel__muted">
+                  {t("picker.repairClipboardHint")}
+                </p>
+              </div>
+            ) : null}
+
             {controlId && selectedLayer ? (
               <SignalCaptureField
                 signalDraft={signalDraft}

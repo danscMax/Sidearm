@@ -218,6 +218,11 @@ pub struct Settings {
     /// starts from the beginning. Only meaningful while onboarding is incomplete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub onboarding_step: Option<u32>,
+    /// Auto-repair the clipboard after a copy/cut shortcut if it was garbled by
+    /// the terminal's OSC 52 path (valid UTF-8 read as Latin-1). Off by default;
+    /// the conservative detector only rewrites unambiguous mojibake.
+    #[serde(default)]
+    pub repair_clipboard_on_copy: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -491,6 +496,7 @@ pub enum ActionType {
     MediaKey,
     ProfileSwitch,
     Disabled,
+    RepairClipboard,
 }
 
 impl ActionType {
@@ -505,6 +511,7 @@ impl ActionType {
             ActionType::MediaKey => "mediaKey",
             ActionType::ProfileSwitch => "profileSwitch",
             ActionType::Disabled => "disabled",
+            ActionType::RepairClipboard => "repairClipboard",
         }
     }
 }
@@ -548,6 +555,7 @@ pub enum ActionPayload {
     MediaKey(MediaKeyPayload),
     ProfileSwitch(ProfileSwitchPayload),
     Disabled(DisabledActionPayload),
+    RepairClipboard(RepairClipboardActionPayload),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -715,6 +723,24 @@ pub struct ProfileSwitchPayload {
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisabledActionPayload {}
+
+/// Repair strategy for [`RepairClipboardActionPayload`]. Kept as a required field
+/// (no `#[serde(default)]`) so the payload serializes as `{"strategy":"latin1"}`
+/// and never collides with the empty `DisabledActionPayload` in the untagged
+/// `ActionPayload` enum.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum RepairStrategy {
+    /// Re-decode UTF-8 bytes that were read as Latin-1 (the OSC 52 terminal bug).
+    #[default]
+    Latin1,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RepairClipboardActionPayload {
+    pub strategy: RepairStrategy,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -1423,6 +1449,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             start_with_windows: true,
             minimize_to_tray: true,
             debug_logging: true,
+            repair_clipboard_on_copy: false,
             osd_enabled: true,
             osd_duration_ms: 2000,
             osd_position: OsdPosition::default(),
@@ -2756,6 +2783,26 @@ fn binding_id(profile_id: &str, layer: Layer, control_id: ControlId) -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn repair_clipboard_payload_roundtrips_and_avoids_disabled_collision() {
+        // The required `strategy` discriminator keeps the untagged ActionPayload
+        // enum unambiguous: RepairClipboard serializes as {"strategy":"latin1"}.
+        let payload = ActionPayload::RepairClipboard(RepairClipboardActionPayload {
+            strategy: RepairStrategy::Latin1,
+        });
+        let json = serde_json::to_string(&payload).expect("serialize");
+        assert_eq!(json, r#"{"strategy":"latin1"}"#);
+        assert_eq!(
+            serde_json::from_str::<ActionPayload>(&json).expect("roundtrip"),
+            payload
+        );
+        // An empty payload still deserializes as Disabled, never RepairClipboard.
+        assert_eq!(
+            serde_json::from_str::<ActionPayload>("{}").expect("empty payload"),
+            ActionPayload::Disabled(DisabledActionPayload {})
+        );
+    }
 
     #[test]
     fn sequence_step_repeat_is_optional_and_roundtrips() {

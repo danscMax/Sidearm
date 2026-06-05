@@ -13,7 +13,8 @@
     "launch": "Launch target: {{target}}",
     "menu_one": "Menu of {{count}} item",
     "menu_other": "Menu of {{count}} items",
-    "disabledFallback": "Disabled placeholder action."
+    "disabledFallback": "Disabled placeholder action.",
+    "repairClipboard": "Repair clipboard encoding (UTF-8 ↔ Latin-1)."
   },
   "common": {
     "na": "N/A",
@@ -160,7 +161,8 @@
       "mediaKey": "Media",
       "profileSwitch": "Profile",
       "menu": "Menu",
-      "disabled": "Disabled"
+      "disabled": "Disabled",
+      "repairClipboard": "Repair clipboard"
     }
   },
   "mouseAction": {
@@ -410,6 +412,8 @@
     "importSummary": "File contains: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{appMappings}} rules, {{snippets}} snippets. {{warnings}} The current config will be fully replaced. Continue?",
     "languageHeader": "INTERFACE LANGUAGE",
     "osdHeader": "NOTIFICATIONS",
+    "repairClipboardHeader": "Auto-repair clipboard",
+    "repairClipboardHelp": "After a copy/cut shortcut, automatically undo clipboard mojibake caused by the terminal's OSC 52 path (valid UTF-8 read as Latin-1). Off by default; conservative — only unambiguous mojibake is rewritten, correct text is never touched.",
     "osdEnabled": "Show notifications",
     "osdDuration": "Duration",
     "osdPosition": "Position",
@@ -612,6 +616,7 @@
     "launchBrowseDirBtn": "Folder…",
     "switchProfile": "Switch to profile",
     "disabledHint": "The button will be disabled — pressing it will do nothing.",
+    "repairClipboardHint": "On press, re-decodes the clipboard if the terminal's OSC 52 copy garbled it (valid UTF-8 read as Latin-1). Correct text is left untouched.",
     "signalLabel": "Button signal",
     "signalCapturing": "Press a button on the mouse...",
     "signalEmpty": "Not set",

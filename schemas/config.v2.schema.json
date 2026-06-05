@@ -199,6 +199,11 @@
           "type": "boolean",
           "default": true
         },
+        "repairClipboardOnCopy": {
+          "type": "boolean",
+          "default": false,
+          "description": "Auto-repair the clipboard after a copy/cut shortcut if it was garbled by the terminal's OSC 52 path (valid UTF-8 read as Latin-1)."
+        },
         "osdEnabled": {
           "type": "boolean",
           "default": true

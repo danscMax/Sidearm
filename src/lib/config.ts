@@ -48,7 +48,8 @@ export type ActionType =
   | "mouseAction"
   | "mediaKey"
   | "profileSwitch"
-  | "disabled";
+  | "disabled"
+  | "repairClipboard";
 
 export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord";
 
@@ -83,6 +84,7 @@ export interface Settings {
   lastSelectedProfileId?: string;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
+  repairClipboardOnCopy?: boolean;
 }
 
 export interface Profile {
@@ -236,6 +238,13 @@ export interface ProfileSwitchPayload {
 
 export type DisabledActionPayload = Record<string, never>;
 
+/** Clipboard-repair action payload. `strategy` is required (mirrors the Rust
+ *  `RepairClipboardActionPayload`) so the serialized payload is
+ *  `{"strategy":"latin1"}` and never collides with the empty disabled payload. */
+export interface RepairClipboardPayload {
+  strategy: "latin1";
+}
+
 export type ActionCondition =
   | { type: "windowTitleContains"; value: string }
   | { type: "windowTitleNotContains"; value: string }
@@ -260,6 +269,7 @@ export type Action = ActionBase &
     | { type: "mediaKey"; payload: MediaKeyPayload }
     | { type: "profileSwitch"; payload: ProfileSwitchPayload }
     | { type: "disabled"; payload: DisabledActionPayload }
+    | { type: "repairClipboard"; payload: RepairClipboardPayload }
   );
 
 export interface SnippetLibraryItem {

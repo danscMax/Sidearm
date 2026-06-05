@@ -83,6 +83,10 @@ export function describeActionSummary(
     return i18n.t("actionSummary.menu", { count: action.payload.items.length });
   }
 
+  if (action.type === "repairClipboard") {
+    return i18n.t("actionSummary.repairClipboard");
+  }
+
   return action.notes ?? i18n.t("actionSummary.disabledFallback");
 }
 
@@ -136,6 +140,10 @@ export function isActionLiveRunnable(config: AppConfig, actionId: string): boole
   // (executor.rs run_live_mouse_action / run_live_media_key_action),
   // so the "Execute live" button must be enabled for them too.
   if (action.type === "mouseAction" || action.type === "mediaKey") {
+    return true;
+  }
+
+  if (action.type === "repairClipboard") {
     return true;
   }
 

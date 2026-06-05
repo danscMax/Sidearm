@@ -508,6 +508,18 @@ export function SettingsWorkspace({
         </div>
       </section>
 
+      {/* Clipboard repair (OSC 52 mojibake workaround) */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.repairClipboardHeader")}</span>
+          <Toggle
+            checked={osd.repairClipboardOnCopy ?? false}
+            onChange={(checked) => updateSettings({ repairClipboardOnCopy: checked })}
+          />
+        </div>
+        <p className="panel__muted help-sm">{t("settings.repairClipboardHelp")}</p>
+      </section>
+
       {/* Advanced capture tuning */}
       <section className="settings-section">
         <div className="settings-section__header">

@@ -128,6 +128,8 @@ export function autoName(
       return t("picker.defaultMenu");
     case "disabled":
       return t("picker.defaultDisabled");
+    case "repairClipboard":
+      return t("action.type.repairClipboard");
     default:
       return t("picker.defaultAction");
   }
@@ -212,6 +214,8 @@ export function buildAction(params: {
         return { id: actionId, type: "menu" as const, payload: { items: drafts.menuItems }, pretty: pretty || t("picker.defaultMenu") };
       case "disabled":
         return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || t("picker.defaultDisabled") };
+      case "repairClipboard":
+        return { id: actionId, type: "repairClipboard" as const, payload: { strategy: "latin1" as const }, pretty };
       default:
         return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: t("picker.defaultDisabled") };
     }

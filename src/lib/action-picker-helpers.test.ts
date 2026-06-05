@@ -108,6 +108,10 @@ describe("autoName", () => {
     expect(autoName("profileSwitch", makeDrafts({ profile: "p2" }), t, profiles)).toBe("picker.autoProfile");
     expect(autoName("profileSwitch", makeDrafts({ profile: "missing" }), t, profiles)).toBe("picker.autoProfileFallback");
   });
+
+  it("uses the action.type label for repairClipboard", () => {
+    expect(autoName("repairClipboard", makeDrafts(), t, profiles)).toBe("action.type.repairClipboard");
+  });
 });
 
 describe("buildAction", () => {
@@ -167,6 +171,20 @@ describe("buildAction", () => {
       expect(action.payload.text).toBe("new text");
       expect(action.payload.pasteMode).toBe("clipboardPaste");
       expect(action.payload.tags).toEqual(["keep"]);
+    }
+  });
+
+  it("builds a repairClipboard action with the required latin1 strategy", () => {
+    const action = buildAction({
+      effectiveCategory: "repairClipboard",
+      existingAction: null,
+      drafts: makeDrafts(),
+      t,
+      profiles,
+    });
+    expect(action.type).toBe("repairClipboard");
+    if (action.type === "repairClipboard") {
+      expect(action.payload).toEqual({ strategy: "latin1" });
     }
   });
 

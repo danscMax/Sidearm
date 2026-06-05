@@ -62,6 +62,7 @@ const ALL_ACTION_TYPES: ActionType[] = [
   "mediaKey",
   "profileSwitch",
   "disabled",
+  "repairClipboard",
 ];
 
 // ---------------------------------------------------------------------------

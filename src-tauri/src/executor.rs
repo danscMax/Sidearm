@@ -259,6 +259,43 @@ pub fn run_preview_action(
     }
 }
 
+/// Dry-run a draft action directly (no resolver, no saved config lookup, no
+/// encoder signal required). Used by the "Test" button in the action picker so
+/// the user can preview what an action *would* do while still editing it.
+pub fn dry_run_action(
+    config: &AppConfig,
+    action: &Action,
+) -> Result<ActionExecutionEvent, ExecutorError> {
+    let (outcome, summary, warnings) = summarize_action(config, action).map_err(|message| {
+        execution_error(
+            "dry_run_failed",
+            "тест",
+            &message,
+            None,
+            Some(action.id.clone()),
+        )
+    })?;
+
+    Ok(ActionExecutionEvent {
+        encoded_key: String::new(),
+        action_id: action.id.clone(),
+        action_type: action.action_type.as_str().into(),
+        action_pretty: action.pretty.clone(),
+        resolved_profile_id: None,
+        resolved_profile_name: None,
+        matched_app_mapping_id: None,
+        control_id: None,
+        layer: None,
+        binding_id: None,
+        mode: ExecutionMode::DryRun,
+        outcome,
+        process_id: None,
+        summary,
+        warnings,
+        executed_at: timestamp_millis(),
+    })
+}
+
 fn summarize_action(
     config: &AppConfig,
     action: &Action,
@@ -287,13 +324,19 @@ fn summarize_action(
             Vec::new(),
         )),
         (ActionType::Launch, ActionPayload::Launch(payload)) => {
+            let target = payload.target.trim();
+            let open_via_shell = is_url_target(target) || Path::new(target).is_dir();
             let mut warnings = Vec::new();
-            if Path::new(&payload.target).is_absolute() && !Path::new(&payload.target).exists() {
+            if !open_via_shell
+                && Path::new(target).is_absolute()
+                && !Path::new(target).exists()
+            {
                 warnings.push("Путь к цели запуска не существует.".into());
             }
 
-            Ok((
-                ExecutionOutcome::Simulated,
+            let summary = if open_via_shell {
+                format!("Откроет `{}`.", payload.target)
+            } else {
                 format!(
                     "Запустит `{}`{}.",
                     payload.target,
@@ -302,9 +345,10 @@ fn summarize_action(
                     } else {
                         format!(" с {} арг.", payload.args.len())
                     }
-                ),
-                warnings,
-            ))
+                )
+            };
+
+            Ok((ExecutionOutcome::Simulated, summary, warnings))
         }
         (ActionType::Menu, ActionPayload::Menu(payload)) => Ok((
             ExecutionOutcome::Simulated,
@@ -353,12 +397,59 @@ struct LaunchRequest {
     working_dir: Option<PathBuf>,
 }
 
+/// True when the launch target is a URL/URI (opened via the shell handler,
+/// not spawned as a process).
+fn is_url_target(target: &str) -> bool {
+    let t = target.trim();
+    t.starts_with("http://")
+        || t.starts_with("https://")
+        || t.starts_with("mailto:")
+        || t.starts_with("ftp://")
+        || t.starts_with("file://")
+}
+
 fn run_live_launch_action(
     action: &Action,
     preview: &ResolvedInputPreview,
     payload: &crate::config::LaunchActionPayload,
     action_id: Option<String>,
 ) -> Result<ActionExecutionEvent, ExecutorError> {
+    let target = payload.target.trim();
+    let open_via_shell = is_url_target(target) || Path::new(target).is_dir();
+
+    if open_via_shell {
+        // URLs and folders are handed to the system default handler — there is
+        // no child process, so no PID to track.
+        crate::platform::shell::open_target(target).map_err(|message| {
+            execution_error(
+                "execution_failed",
+                "выполнение",
+                &format!("Не удалось открыть `{}`: {message}", payload.target),
+                Some(preview.encoded_key.clone()),
+                action_id.clone(),
+            )
+        })?;
+
+        return Ok(ActionExecutionEvent {
+            encoded_key: preview.encoded_key.clone(),
+            action_id: action.id.clone(),
+            action_type: action.action_type.as_str().into(),
+            action_pretty: action.pretty.clone(),
+            resolved_profile_id: preview.resolved_profile_id.clone(),
+            resolved_profile_name: preview.resolved_profile_name.clone(),
+            matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+            control_id: preview.control_id.clone(),
+            layer: preview.layer.clone(),
+            binding_id: preview.binding_id.clone(),
+            mode: ExecutionMode::Live,
+            outcome: ExecutionOutcome::Spawned,
+            process_id: None,
+            summary: format!("Открыто `{}`.", payload.target),
+            warnings: Vec::new(),
+            executed_at: timestamp_millis(),
+        });
+    }
+
     let process_id = spawn_launch_target(payload, preview, action_id.clone())?;
 
     Ok(ActionExecutionEvent {
@@ -604,17 +695,21 @@ fn run_live_shortcut_action(
     })?;
 
     // Opt-in auto-repair: if enabled and this was a copy/cut, wait for the copy
-    // to land and undo OSC 52 mojibake. Best-effort — never fails the action.
+    // to land and undo OSC 52 mojibake. Runs on a detached thread — the poll
+    // blocks up to 400ms and would otherwise stall the capture worker (delaying
+    // the next button action). Best-effort; the result is only logged.
     #[cfg(target_os = "windows")]
     if let Some(seq_before) = repair_seq_before {
-        match input_synthesis::repair_clipboard_after_copy(seq_before) {
-            Ok(Some(fixed)) => log::info!(
-                "[repair] auto-repaired clipboard after copy ({} chars)",
-                fixed.chars().count()
-            ),
-            Ok(None) => {}
-            Err(message) => log::warn!("[repair] auto-repair after copy failed: {message}"),
-        }
+        std::thread::spawn(move || {
+            match input_synthesis::repair_clipboard_after_copy(seq_before) {
+                Ok(Some(fixed)) => log::info!(
+                    "[repair] auto-repaired clipboard after copy ({} chars)",
+                    fixed.chars().count()
+                ),
+                Ok(None) => {}
+                Err(message) => log::warn!("[repair] auto-repair after copy failed: {message}"),
+            }
+        });
     }
 
     Ok(ActionExecutionEvent {

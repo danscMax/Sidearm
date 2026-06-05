@@ -146,3 +146,13 @@ pub(crate) fn open_in_explorer(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Failed to open path with xdg-open: {error}"))?;
     Ok(())
 }
+
+/// Open a URL, folder, or document with the system default handler (`xdg-open`).
+/// Used by the launch action for non-executable targets (URLs and directories).
+pub(crate) fn open_target(target: &str) -> Result<(), String> {
+    std::process::Command::new("xdg-open")
+        .arg(target)
+        .spawn()
+        .map_err(|error| format!("Failed to open target with xdg-open: {error}"))?;
+    Ok(())
+}

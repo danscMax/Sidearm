@@ -241,3 +241,34 @@ pub(crate) fn open_in_explorer(path: &Path) -> Result<(), String> {
     .map_err(|error| format!("Failed to open path in Explorer: {error}"))?;
     Ok(())
 }
+
+/// Open a URL, folder, or document with the system default handler
+/// (`ShellExecuteW` with the "open" verb). Used by the launch action for
+/// non-executable targets (URLs and directories).
+pub(crate) fn open_target(target: &str) -> Result<(), String> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let verb_w: Vec<u16> = "open\0".encode_utf16().collect();
+    let target_w: Vec<u16> = std::ffi::OsStr::new(target)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // ShellExecuteW returns an HINSTANCE; values <= 32 indicate failure.
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            verb_w.as_ptr(),
+            target_w.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        )
+    };
+    if (result as isize) <= 32 {
+        return Err(format!("ShellExecuteW failed to open `{target}` (code {})", result as isize));
+    }
+    Ok(())
+}

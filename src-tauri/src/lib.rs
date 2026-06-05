@@ -75,6 +75,52 @@ impl<'a, T> RecoverPoison<'a, T> for std::sync::LockResult<std::sync::MutexGuard
 /// generation hasn't changed, preventing premature hide on rapid switches.
 static OSD_GENERATION: AtomicU64 = AtomicU64::new(0);
 
+/// Request sent to the single long-lived OSD hide-timer thread.
+struct OsdHideRequest {
+    win: tauri::WebviewWindow,
+    generation: u64,
+    duration_ms: u64,
+}
+
+/// Sender to the one OSD hide-timer thread. Replaces the previous
+/// thread-spawn-per-show, which could pile up dozens of sleeping threads under
+/// rapid profile/window switching (each living up to osd_duration_ms).
+static OSD_HIDE_TX: std::sync::OnceLock<std::sync::mpsc::Sender<OsdHideRequest>> =
+    std::sync::OnceLock::new();
+
+fn osd_hide_sender() -> &'static std::sync::mpsc::Sender<OsdHideRequest> {
+    OSD_HIDE_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<OsdHideRequest>();
+        std::thread::spawn(move || {
+            let mut pending: Option<OsdHideRequest> = None;
+            loop {
+                match pending.take() {
+                    // Idle: block until the next show request arrives.
+                    None => match rx.recv() {
+                        Ok(req) => pending = Some(req),
+                        Err(_) => return, // all senders dropped (app shutdown)
+                    },
+                    // Waiting out a request's duration. A newer request supersedes
+                    // it (restart the wait); a timeout fires the hide. The Ok arm
+                    // must NOT hide — it means a fresher show arrived.
+                    Some(req) => {
+                        match rx.recv_timeout(std::time::Duration::from_millis(req.duration_ms)) {
+                            Ok(newer) => pending = Some(newer),
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                                if OSD_GENERATION.load(Ordering::Acquire) == req.generation {
+                                    let _ = req.win.hide();
+                                }
+                            }
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                        }
+                    }
+                }
+            }
+        });
+        tx
+    })
+}
+
 /// Check whether the current foreground window is fullscreen on its monitor.
 fn is_foreground_fullscreen() -> bool {
     #[cfg(target_os = "windows")]
@@ -191,15 +237,14 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
         }),
     );
 
-    // Auto-hide
-    let gen = OSD_GENERATION.fetch_add(1, Ordering::Release) + 1;
+    // Auto-hide: hand the request to the single hide-timer thread instead of
+    // spawning a fresh sleeping thread on every show.
+    let generation = OSD_GENERATION.fetch_add(1, Ordering::Release) + 1;
     let duration_ms = settings.osd_duration_ms.max(500).min(10000) as u64;
-    let win = w.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_millis(duration_ms));
-        if OSD_GENERATION.load(Ordering::Acquire) == gen {
-            let _ = win.hide();
-        }
+    let _ = osd_hide_sender().send(OsdHideRequest {
+        win: w.clone(),
+        generation,
+        duration_ms,
     });
 }
 
@@ -242,6 +287,29 @@ fn resolve_app_paths(app: &AppHandle) -> Arc<paths::AppPaths> {
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     Ok(resolve_app_paths(app).config_dir.clone())
+}
+
+/// Atomically copy `src` → `dst`: stream into a temp file in dst's directory,
+/// fsync, then rename over `dst`. A crash/IO error mid-copy leaves `dst`
+/// untouched (old content or absent) — never a truncated config. Mirrors the
+/// NamedTempFile+persist pattern in `config::write_config_to_path`.
+/// NOTE: the temp file MUST live in dst's parent dir so `persist()` is an atomic
+/// same-volume rename, not a degraded copy+delete that loses atomicity.
+fn atomic_copy_file(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    let dir = dst.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "destination has no parent directory",
+        )
+    })?;
+    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
+    {
+        let mut reader = fs::File::open(src)?;
+        std::io::copy(&mut reader, tmp.as_file_mut())?;
+    }
+    tmp.as_file().sync_all()?;
+    tmp.persist(dst).map_err(|e| e.error)?;
+    Ok(())
 }
 
 fn resolve_log_dir(app: &AppHandle) -> PathBuf {
@@ -615,12 +683,23 @@ async fn restore_config_from_backup(
 ) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
     let backup_pb = PathBuf::from(&backup_path);
-    if !backup::is_valid_backup_location(&config_dir, &backup_pb) {
-        return Err(CommandError::new(
-            "invalid_backup_path",
-            "Backup path must point to a file inside the config directory.",
-            Some(vec![backup_path]),
-        ));
+    match backup::check_backup_location(&config_dir, &backup_pb) {
+        backup::BackupLocationCheck::Inside => {}
+        backup::BackupLocationCheck::Outside => {
+            return Err(CommandError::new(
+                "invalid_backup_path",
+                "Backup path must point to a file inside the config directory.",
+                Some(vec![backup_path]),
+            ));
+        }
+        backup::BackupLocationCheck::Unresolvable(detail) => {
+            log::warn!("[restore] backup path unresolvable: {detail}");
+            return Err(CommandError::new(
+                "backup_path_unresolvable",
+                "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.",
+                Some(vec![backup_path]),
+            ));
+        }
     }
 
     let config_dir_for_task = config_dir.clone();
@@ -851,7 +930,7 @@ async fn accept_portable_migration(
                 // Always overwrite on explicit user-initiated migration, even
                 // if the target exists — it was likely auto-created by an
                 // earlier `load_config` as a default seed.
-                fs::copy(&roaming_config, &target).map_err(|e| {
+                atomic_copy_file(&roaming_config, &target).map_err(|e| {
                     CommandError::internal(format!(
                         "Failed to copy roaming config into portable dir: {e}"
                     ))
@@ -1733,6 +1812,29 @@ async fn run_preview_action(
     .await
 }
 
+/// Dry-run a draft action straight from the picker (no save, no encoder signal).
+/// Loads the on-disk config only to resolve library snippets / profile names.
+#[tauri::command]
+async fn dry_run_action(
+    app: AppHandle,
+    action: config::Action,
+) -> Result<ActionExecutionEvent, CommandError> {
+    let config_dir = resolve_config_dir(&app)?;
+    let config = tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
+        .await
+        .map_err(|error| CommandError::internal(format!("dry_run_action task failed: {error}")))?
+        .map_err(CommandError::from)?
+        .config;
+
+    executor::dry_run_action(&config, &action).map_err(|error| {
+        CommandError::new(
+            error.code,
+            error.event.message.clone(),
+            error.event.action_id.clone().map(|id| vec![id]),
+        )
+    })
+}
+
 fn emit_runtime_error(
     app: &AppHandle,
     runtime_store: &State<'_, Arc<Mutex<RuntimeStore>>>,
@@ -1908,7 +2010,7 @@ fn migrate_old_config(app: &AppHandle) {
             let path = entry.path();
             if path.extension().is_some_and(|ext| ext == "json") {
                 let dest = new_config_dir.join(entry.file_name());
-                let _ = fs::copy(&path, &dest);
+                let _ = atomic_copy_file(&path, &dest);
             }
         }
     }
@@ -2495,6 +2597,7 @@ pub fn run() {
             preview_resolution,
             execute_preview_action,
             run_preview_action,
+            dry_run_action,
             get_exe_icon,
             export_profile,
             import_profile,

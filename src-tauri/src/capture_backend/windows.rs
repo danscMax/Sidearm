@@ -78,6 +78,20 @@ const HOOK_HEALTH_CHECK_INTERVAL_MS: u32 = 5000;
 const HOOK_PROBE_FAIL_THRESHOLD: u32 = 3;
 
 // Thread-local state for the capture helper's LL keyboard hook callback.
+/// Whether per-keystroke capture diagnostics are enabled (`SIDEARM_DEBUG_CAPTURE=1`).
+/// Read once and cached for the process lifetime. Default OFF so the LL keyboard
+/// hook does zero formatting/IPC per key at the default Info level — this is the
+/// hot path implicated in the v0.1.15 framework-log OOM.
+fn debug_capture_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SIDEARM_DEBUG_CAPTURE")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
 thread_local! {
     static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
         std::cell::RefCell::new(Vec::new());
@@ -1305,7 +1319,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             || msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSKEYDOWN;
         let is_keyup = msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_KEYUP
             || msg == windows_sys::Win32::UI::WindowsAndMessaging::WM_SYSKEYUP;
-        if is_keydown || is_keyup {
+        if (is_keydown || is_keyup) && debug_capture_enabled() {
             let prefix = if internal_injection { "int-" } else { "" };
             let kind = if is_modifier {
                 if is_keydown { "mod-down" } else { "mod-up" }
@@ -2290,10 +2304,12 @@ fn spawn_capture_helper(
             if trimmed.is_empty() {
                 continue;
             }
-            // Diagnostic lines from helper — route to log::info! so they
-            // appear in the Webview log panel via tauri-plugin-log.
+            // Diagnostic lines from helper — routed to log::debug! so at the
+            // default Info level they never reach the disk/Webview sinks (the
+            // per-keystroke feedback loop behind the v0.1.15 OOM). Enable with
+            // SIDEARM_DEBUG_CAPTURE=1 plus a Debug log level to see them.
             if let Some(rest) = trimmed.strip_prefix("DEBUG:") {
-                log::info!("[helper] {rest}");
+                log::debug!("[helper] {rest}");
                 continue;
             }
             let (is_key_up, is_repeat, encoded_key) =

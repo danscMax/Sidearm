@@ -105,14 +105,40 @@ pub fn write_daily_snapshot_and_prune(config_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// True if `stem` is exactly `YYYY-MM-DD`. Valid date stems sort chronologically
+/// under plain string ordering, so we sort the validated stems directly — no
+/// calendar math needed, and a foreign *.json can't masquerade as a snapshot.
+fn is_snapshot_date_stem(stem: &str) -> bool {
+    let b = stem.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let digits = |range: std::ops::Range<usize>| b[range].iter().all(u8::is_ascii_digit);
+    if !(digits(0..4) && digits(5..7) && digits(8..10)) {
+        return false;
+    }
+    let month = stem[5..7].parse::<u32>().unwrap_or(0);
+    let day = stem[8..10].parse::<u32>().unwrap_or(0);
+    (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
 fn prune_snapshots(snapshots_dir: &Path, keep: usize) -> io::Result<()> {
+    // Only real `YYYY-MM-DD.json` snapshots are counted and pruned. Foreign
+    // *.json files are left untouched and never evict a real snapshot — the old
+    // lexicographic full-path sort could drop the newest snapshots if a file
+    // sorting earlier (or a bad-clock future date) landed in the directory.
     let mut entries: Vec<PathBuf> = fs::read_dir(snapshots_dir)?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+        .filter(|p| {
+            p.file_stem()
+                .and_then(|s| s.to_str())
+                .is_some_and(is_snapshot_date_stem)
+        })
         .collect();
 
-    entries.sort();
+    entries.sort_by(|a, b| a.file_stem().cmp(&b.file_stem()));
 
     if entries.len() > keep {
         let to_drop = entries.len() - keep;
@@ -180,14 +206,45 @@ pub fn list_backups(config_dir: &Path) -> io::Result<Vec<BackupEntry>> {
 
 /// Reject paths pointing outside the configured backup dirs. Prevents
 /// path-traversal when the frontend asks to restore an arbitrary backup.
-pub fn is_valid_backup_location(config_dir: &Path, candidate: &Path) -> bool {
-    let Ok(candidate_abs) = candidate.canonicalize() else {
-        return false;
+/// Result of validating a restore-from-backup path.
+pub enum BackupLocationCheck {
+    /// Canonicalized and provably inside the config directory.
+    Inside,
+    /// Canonicalized but NOT inside the config directory (security reject).
+    Outside,
+    /// A path could not be canonicalized (e.g. transient FS error on a
+    /// disconnected network drive, or a path component that no longer exists).
+    Unresolvable(String),
+}
+
+/// Validate a backup path. `canonicalize` remains the sole authority on
+/// "inside" — we never fall back to lexical normalization (which `..`, symlinks,
+/// or 8.3 short names could defeat). The only added behavior over a plain bool
+/// is distinguishing a transient stat failure from a genuine outside-the-dir
+/// path, so the UI can show a retry-friendly message instead of a misleading
+/// "outside the config directory" error.
+pub fn check_backup_location(config_dir: &Path, candidate: &Path) -> BackupLocationCheck {
+    let candidate_abs = match candidate.canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            return BackupLocationCheck::Unresolvable(format!(
+                "cannot resolve backup path: {error}"
+            ))
+        }
     };
-    let Ok(config_abs) = config_dir.canonicalize() else {
-        return false;
+    let config_abs = match config_dir.canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            return BackupLocationCheck::Unresolvable(format!(
+                "cannot resolve config directory: {error}"
+            ))
+        }
     };
-    candidate_abs.starts_with(&config_abs)
+    if candidate_abs.starts_with(&config_abs) {
+        BackupLocationCheck::Inside
+    } else {
+        BackupLocationCheck::Outside
+    }
 }
 
 fn entry_meta(path: &Path) -> Option<(u64, u128)> {
@@ -333,21 +390,71 @@ mod tests {
             fs::File::create(dir.join(format!("2020-01-{day:02}.json")))
                 .expect("create snap");
         }
+        // Foreign / malformed *.json files must NOT count toward the cap and
+        // must NOT evict real snapshots (regression guard for the old
+        // lexicographic full-path sort).
+        fs::File::create(dir.join("aaa.json")).expect("foreign");
+        fs::File::create(dir.join("config (1).json")).expect("foreign");
+        fs::File::create(dir.join("2020-13-99.json")).expect("bad date");
+
         prune_snapshots(&dir, 5).expect("prune");
-        let remaining: Vec<_> = fs::read_dir(&dir)
+        let remaining: Vec<String> = fs::read_dir(&dir)
             .unwrap()
             .filter_map(|e| e.ok())
-            .map(|e| e.file_name())
+            .map(|e| e.file_name().to_string_lossy().to_string())
             .collect();
-        assert_eq!(remaining.len(), 5, "keeps 5 newest");
-        // Names sort lexicographically → the 5 highest stay
-        let mut names: Vec<String> = remaining
-            .iter()
-            .map(|n| n.to_string_lossy().to_string())
-            .collect();
-        names.sort();
-        assert_eq!(names[0], "2020-01-16.json");
-        assert_eq!(names[4], "2020-01-20.json");
+
+        // The 5 newest real snapshots survive, older ones are pruned...
+        assert!(remaining.contains(&"2020-01-16.json".to_string()));
+        assert!(remaining.contains(&"2020-01-20.json".to_string()));
+        assert!(!remaining.contains(&"2020-01-15.json".to_string()));
+        // ...and every foreign file is left untouched.
+        assert!(remaining.contains(&"aaa.json".to_string()));
+        assert!(remaining.contains(&"config (1).json".to_string()));
+        assert!(remaining.contains(&"2020-13-99.json".to_string()));
+    }
+
+    #[test]
+    fn is_snapshot_date_stem_validates_format() {
+        assert!(is_snapshot_date_stem("2020-01-16"));
+        assert!(is_snapshot_date_stem("2026-12-31"));
+        assert!(!is_snapshot_date_stem("aaa"));
+        assert!(!is_snapshot_date_stem("2020-13-01")); // bad month
+        assert!(!is_snapshot_date_stem("2020-01-32")); // bad day
+        assert!(!is_snapshot_date_stem("2020-1-1")); // wrong width
+        assert!(!is_snapshot_date_stem("config (1)"));
+    }
+
+    #[test]
+    fn check_backup_location_enforces_containment() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_dir = temp.path().join("config");
+        fs::create_dir_all(&config_dir).expect("config dir");
+
+        // A real file inside the config dir → Inside.
+        let inside = config_dir.join("config.bak.1");
+        fs::File::create(&inside).expect("inside file");
+        assert!(matches!(
+            check_backup_location(&config_dir, &inside),
+            BackupLocationCheck::Inside
+        ));
+
+        // A sibling file outside the config dir → must NOT be Inside.
+        let outside_dir = temp.path().join("elsewhere");
+        fs::create_dir_all(&outside_dir).expect("outside dir");
+        let outside = outside_dir.join("evil.json");
+        fs::File::create(&outside).expect("outside file");
+        assert!(!matches!(
+            check_backup_location(&config_dir, &outside),
+            BackupLocationCheck::Inside
+        ));
+
+        // A nonexistent path → Unresolvable (canonicalize fails), never Inside.
+        let missing = config_dir.join("does-not-exist.json");
+        assert!(matches!(
+            check_backup_location(&config_dir, &missing),
+            BackupLocationCheck::Unresolvable(_)
+        ));
     }
 
     #[test]
@@ -362,21 +469,4 @@ mod tests {
         assert_eq!(ymd_from_unix_secs(1_582_934_400), (2020, 2, 29));
     }
 
-    #[test]
-    fn is_valid_backup_location_rejects_traversal() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let outside = tempfile::NamedTempFile::new().expect("outside");
-        assert!(!is_valid_backup_location(
-            temp.path(),
-            outside.path()
-        ));
-    }
-
-    #[test]
-    fn is_valid_backup_location_accepts_child() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let child = temp.path().join("config.bak.1");
-        fs::File::create(&child).expect("create");
-        assert!(is_valid_backup_location(temp.path(), &child));
-    }
 }

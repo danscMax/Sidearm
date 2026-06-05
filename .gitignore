@@ -56,6 +56,7 @@ scan_log.ps1
 # Portable build output
 Sidearm-Portable/
 CODEX_REVIEW_*.md
+FIXES_*.md
 
 # Playwright / smoke-test artifacts
 output/

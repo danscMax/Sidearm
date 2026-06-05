@@ -26,12 +26,11 @@ src/                  # React frontend (TypeScript)
 src-tauri/            # Rust backend
   src/
     lib.rs            # IPC commands, app setup
-    capture_backend.rs # Keyboard hook + foreground watcher
+    capture_backend/  # Keyboard hook + foreground watcher (mod/windows/linux)
     executor.rs       # Action execution (shortcuts, macros, text)
-    clipboard.rs      # Clipboard operations (STA thread)
     resolver.rs       # Profile/button resolution
     config.rs         # Config schema + validation
-    input_synthesis.rs # SendInput wrapper
+    input_synthesis.rs # SendInput wrapper + clipboard operations (STA thread)
 ```
 
 ## Making Changes

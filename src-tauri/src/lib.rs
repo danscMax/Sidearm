@@ -248,26 +248,13 @@ fn resolve_log_dir(app: &AppHandle) -> PathBuf {
     resolve_app_paths(app).log_dir.clone()
 }
 
-/// Validate that a user-supplied file path is within an allowed directory.
-/// Paths must be under the user's home directory and must not contain `..` segments.
+/// Validate a user-supplied file path. The path is chosen by the user through a
+/// native OS save/open dialog, which is the trust boundary — so any absolute
+/// location is allowed (e.g. a backup folder on another drive / OneDrive). We
+/// still reject relative paths and `..` segments as a cheap guard against
+/// surprising or obfuscated targets.
 fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
-    let home = dirs_next_home().ok_or_else(|| {
-        CommandError::new(
-            "invalid_path",
-            "Could not determine user home directory.",
-            None,
-        )
-    })?;
-    validate_user_file_path_with_home(path, &home)
-}
-
-/// Core of `validate_user_file_path` with the home directory injected, so it can
-/// be unit-tested against a temp dir without mutating the process-global
-/// HOME/USERPROFILE env var (which would race across parallel test threads).
-fn validate_user_file_path_with_home(path: &str, home: &Path) -> Result<PathBuf, CommandError> {
     let path = PathBuf::from(path);
-
-    // Reject relative paths
     if !path.is_absolute() {
         return Err(CommandError::new(
             "invalid_path",
@@ -275,76 +262,17 @@ fn validate_user_file_path_with_home(path: &str, home: &Path) -> Result<PathBuf,
             None,
         ));
     }
-
-    // Must be under the user's home directory (canonicalized for consistent comparison)
-    let home = std::fs::canonicalize(home).map_err(|e| {
-        CommandError::new(
-            "invalid_path",
-            format!("Home directory canonicalization failed: {e}"),
-            None,
-        )
-    })?;
-
-    // For existing paths (reads): canonicalize the path itself.
-    // For new files (writes): walk up to the nearest existing ancestor, canonicalize
-    // it, then append the non-existent tail.  This handles writes where intermediate
-    // directories don't exist yet (create_dir_all runs after validation).
-    let canonical = if path.exists() {
-        std::fs::canonicalize(&path).map_err(|e| {
-            CommandError::new(
-                "invalid_path",
-                format!("Path canonicalization failed: {e}"),
-                None,
-            )
-        })?
-    } else {
-        let mut tail: Vec<std::ffi::OsString> = Vec::new();
-        let mut cursor = path.as_path();
-        loop {
-            tail.push(cursor.file_name().ok_or_else(|| {
-                CommandError::new("invalid_path", "Path has no filename component.", None)
-            })?.to_owned());
-            cursor = cursor.parent().ok_or_else(|| {
-                CommandError::new("invalid_path", "No existing ancestor directory found.", None)
-            })?;
-            if cursor.exists() {
-                break;
-            }
-        }
-        let mut canonical = std::fs::canonicalize(cursor).map_err(|e| {
-            CommandError::new(
-                "invalid_path",
-                format!("Ancestor canonicalization failed: {e}"),
-                None,
-            )
-        })?;
-        for part in tail.into_iter().rev() {
-            canonical.push(part);
-        }
-        canonical
-    };
-
-    if !canonical.starts_with(&home) {
+    if path
+        .components()
+        .any(|component| matches!(component, std::path::Component::ParentDir))
+    {
         return Err(CommandError::new(
             "invalid_path",
-            "File path must be within the user home directory.",
+            "File path must not contain `..` segments.",
             None,
         ));
     }
-
-    Ok(canonical)
-}
-
-/// Resolve the user's home directory via the HOME / USERPROFILE env var.
-fn dirs_next_home() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("USERPROFILE").map(PathBuf::from)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var_os("HOME").map(PathBuf::from)
-    }
+    Ok(path)
 }
 
 /// Maximum size of a profile JSON file accepted on import. Generous vs. a
@@ -357,30 +285,16 @@ const MAX_IMPORT_BYTES: u64 = 5 * 1024 * 1024; // 5 MiB
 /// bounds how much a corrupt or hostile file can ask the backend to slurp.
 const MAX_FULL_CONFIG_IMPORT_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 
-/// Validate a user-chosen JSON file path: absolute + home-scoped (via
-/// `validate_user_file_path`) + a `.json` extension (case-insensitive). The
-/// extension whitelist keeps the narrow export/import commands from writing
-/// shell profiles, autostart scripts, or `.lnk`/`.ps1` files even though the
-/// path is already constrained to the home directory (FIXES P2-2).
+/// As [`validate_user_file_path`], plus a `.json` extension (case-insensitive).
+/// The extension whitelist keeps the export/import commands from writing shell
+/// profiles, autostart scripts, or `.lnk`/`.ps1` files now that the path is no
+/// longer confined to the home directory (preserves the P2-2 fix).
 fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
-    let home = dirs_next_home().ok_or_else(|| {
-        CommandError::new(
-            "invalid_path",
-            "Could not determine user home directory.",
-            None,
-        )
-    })?;
-    validate_user_json_path_with_home(path, &home)
-}
-
-/// Core of `validate_user_json_path` with the home directory injected (testable;
-/// see `validate_user_file_path_with_home`).
-fn validate_user_json_path_with_home(path: &str, home: &Path) -> Result<PathBuf, CommandError> {
-    let validated = validate_user_file_path_with_home(path, home)?;
+    let validated = validate_user_file_path(path)?;
     let is_json = validated
         .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("json"));
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
     if !is_json {
         return Err(CommandError::new(
             "invalid_path",
@@ -732,7 +646,7 @@ async fn export_full_config(
     app: AppHandle,
     target_path: String,
 ) -> Result<String, CommandError> {
-    let validated = validate_user_file_path(&target_path)?;
+    let validated = validate_user_json_path(&target_path)?;
     let config_dir = resolve_config_dir(&app)?;
     let source = config_dir.join("config.json");
     tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
@@ -2619,53 +2533,40 @@ mod tests {
     }
 
     #[test]
-    fn validate_path_accepts_absolute_under_home() {
-        let home = temp_home();
-        // A not-yet-existing file under home (the export/write case) must pass via
-        // the nearest-existing-ancestor walk.
-        let target = home.path().join("export.json");
-        let res = validate_user_file_path_with_home(&target.to_string_lossy(), home.path());
-        assert!(res.is_ok(), "absolute path under home should pass, got {res:?}");
+    fn validate_path_accepts_any_absolute_location() {
+        // The OS dialog is the trust boundary, so an absolute path anywhere (e.g.
+        // a backup folder on another drive) is accepted — not just under home.
+        let dir = temp_home();
+        let target = dir.path().join("export.json");
+        assert!(validate_user_file_path(&target.to_string_lossy()).is_ok());
     }
 
     #[test]
     fn validate_path_rejects_relative() {
-        let home = temp_home();
-        let res = validate_user_file_path_with_home("relative/file.json", home.path());
-        assert!(res.is_err(), "relative path must be rejected");
+        assert!(validate_user_file_path("relative/file.json").is_err());
     }
 
     #[test]
-    fn validate_path_rejects_outside_home() {
-        let home = temp_home();
-        let outside = temp_home();
-        let target = outside.path().join("evil.json");
-        let res = validate_user_file_path_with_home(&target.to_string_lossy(), home.path());
-        assert!(res.is_err(), "path outside home must be rejected");
-    }
-
-    #[test]
-    fn validate_path_rejects_traversal_escape() {
-        let home = temp_home();
-        // home/../escaped.json canonicalizes above home and must be rejected.
-        let escape = home.path().join("..").join("escaped.json");
-        let res = validate_user_file_path_with_home(&escape.to_string_lossy(), home.path());
-        assert!(res.is_err(), "..-escape above home must be rejected");
+    fn validate_path_rejects_parent_dir_segments() {
+        // `..` segments are rejected as a cheap guard against obfuscated targets.
+        let dir = temp_home();
+        let escape = dir.path().join("..").join("escaped.json");
+        assert!(validate_user_file_path(&escape.to_string_lossy()).is_err());
     }
 
     #[test]
     fn json_path_requires_json_extension() {
-        let home = temp_home();
-        let json = home.path().join("a.json");
-        let json_upper = home.path().join("a.JSON");
-        let txt = home.path().join("a.txt");
-        let noext = home.path().join("noext");
-        assert!(validate_user_json_path_with_home(&json.to_string_lossy(), home.path()).is_ok());
+        let dir = temp_home();
+        let json = dir.path().join("a.json");
+        let json_upper = dir.path().join("a.JSON");
+        let txt = dir.path().join("a.txt");
+        let noext = dir.path().join("noext");
+        assert!(validate_user_json_path(&json.to_string_lossy()).is_ok());
         assert!(
-            validate_user_json_path_with_home(&json_upper.to_string_lossy(), home.path()).is_ok(),
+            validate_user_json_path(&json_upper.to_string_lossy()).is_ok(),
             "extension check must be case-insensitive"
         );
-        assert!(validate_user_json_path_with_home(&txt.to_string_lossy(), home.path()).is_err());
-        assert!(validate_user_json_path_with_home(&noext.to_string_lossy(), home.path()).is_err());
+        assert!(validate_user_json_path(&txt.to_string_lossy()).is_err());
+        assert!(validate_user_json_path(&noext.to_string_lossy()).is_err());
     }
 }

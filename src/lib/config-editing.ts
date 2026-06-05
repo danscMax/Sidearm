@@ -18,6 +18,13 @@ import { clampPriority, uniqueStrings } from "./helpers";
 const PLACEHOLDER_ACTION_NOTE =
   "Created from the shell editor. Replace this placeholder before using it in runtime.";
 
+/** True for the auto-created "Unassigned" placeholder action (a disabled action
+ *  carrying the placeholder note). Lets callers tell a first-time assignment
+ *  apart from editing a real, deliberately-saved action. */
+export function isPlaceholderAction(action: Action | null | undefined): boolean {
+  return !!action && action.type === "disabled" && action.notes === PLACEHOLDER_ACTION_NOTE;
+}
+
 const TOP_PANEL_MAP: Record<string, { standard: string | null; hypershift: string | null }> = {
   top_aux_01: { standard: "Ctrl+Shift+F23", hypershift: "Ctrl+Alt+F23" },
   top_aux_02: { standard: "Ctrl+Shift+F24", hypershift: "Ctrl+Alt+F24" },

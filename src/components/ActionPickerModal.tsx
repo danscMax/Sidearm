@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { ACTION_CATEGORIES } from "../lib/constants";
-import { dryRunAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
+import { liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
+  isPlaceholderAction,
   makeSnippetId,
   upsertAction,
   upsertBinding,
@@ -134,6 +135,7 @@ export function ActionPickerModal({
   const [textDraft, setTextDraft] = useState(initial.text);
   const [saveSnippetToLibrary, setSaveSnippetToLibrary] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testRunning, setTestRunning] = useState(false);
   const [launchDraft, setLaunchDraft] = useState(initial.launch);
   const [mediaDraft, setMediaDraft] = useState(initial.media);
   const [profileDraft, setProfileDraft] = useState(initial.profile);
@@ -204,9 +206,10 @@ export function ActionPickerModal({
         ...binding,
         actionRef: nextAction.id,
         label: nextAction.pretty,
-        // Preserve enabled state when editing an existing action; default-enable
-        // a brand-new assignment (placeholder bindings start disabled).
-        enabled: existingAction ? binding.enabled : true,
+        // Preserve enabled state only when editing a REAL saved action; a
+        // first-time assignment sits on a disabled placeholder action+binding
+        // (enabled:false), so treat placeholder as "new" and enable it.
+        enabled: existingAction && !isPlaceholderAction(existingAction) ? binding.enabled : true,
         triggerMode: triggerModeDraft === "press" ? undefined : triggerModeDraft,
         chordPartner: triggerModeDraft === "chord" && chordPartnerDraft
           ? chordPartnerDraft as ControlId
@@ -229,9 +232,20 @@ export function ActionPickerModal({
   }
 
   async function handleTest() {
+    if (testRunning) return;
     const draftAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
+    setTestRunning(true);
     try {
-      const result = await dryRunAction(draftAction);
+      // Launch/URL/folder don't depend on focus — run immediately. Input
+      // actions (keys, text, media, macro) go to the focused window, so count
+      // down to let the user switch to their target window first.
+      if (effectiveCategory !== "launch") {
+        for (let n = 3; n > 0; n -= 1) {
+          setTestResult({ ok: true, text: t("picker.testCountdown", { n }) });
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+      }
+      const result = await liveTestAction(draftAction);
       const detail =
         result.warnings.length > 0
           ? `${result.summary} — ${result.warnings.join("; ")}`
@@ -239,6 +253,8 @@ export function ActionPickerModal({
       setTestResult({ ok: true, text: detail });
     } catch (error) {
       setTestResult({ ok: false, text: normalizeCommandError(error).message });
+    } finally {
+      setTestRunning(false);
     }
   }
 
@@ -413,7 +429,7 @@ export function ActionPickerModal({
             type="button"
             className="action-button action-button--ghost"
             onClick={handleTest}
-            disabled={isSaveDisabled(effectiveCategory, drafts)}
+            disabled={isSaveDisabled(effectiveCategory, drafts) || testRunning}
           >
             {t("picker.test")}
           </button>

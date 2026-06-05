@@ -21,7 +21,7 @@ export function LaunchEditor({
         filterName={t("picker.launchBrowseFilter")}
         browseLabel={t("picker.launchBrowseBtn")}
       />
-      <p className="field__hint">{t("picker.launchTargetHint")}</p>
+      <p className="field__description">{t("picker.launchTargetHint")}</p>
       <div className="field">
         <span className="field__label">{t("picker.launchArgsLabel")}</span>
         <ChipEditor

@@ -275,11 +275,12 @@ export async function runPreviewAction(
 }
 
 /**
- * Dry-run a draft action straight from the picker — no save, no encoder signal.
- * Returns the same summary/warnings as the diagnostics dry-run.
+ * Live-test a draft action straight from the picker — no save, no encoder
+ * signal. Actually executes it; the caller runs a countdown first so the user
+ * can switch to the target window.
  */
-export async function dryRunAction(action: Action): Promise<ActionExecutionEvent> {
-  return invoke<ActionExecutionEvent>("dry_run_action", { action });
+export async function liveTestAction(action: Action): Promise<ActionExecutionEvent> {
+  return invoke<ActionExecutionEvent>("live_test_action", { action });
 }
 
 export async function getExeIcon(exeName: string, processPath?: string): Promise<string | null> {

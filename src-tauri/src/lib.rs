@@ -1812,21 +1812,23 @@ async fn run_preview_action(
     .await
 }
 
-/// Dry-run a draft action straight from the picker (no save, no encoder signal).
-/// Loads the on-disk config only to resolve library snippets / profile names.
+/// Live-test a draft action straight from the picker (no save, no encoder signal).
+/// Actually executes the action; the frontend runs the "switch to your window"
+/// countdown before calling this. Loads the on-disk config only to resolve
+/// library snippets / profile names referenced by the draft.
 #[tauri::command]
-async fn dry_run_action(
+async fn live_test_action(
     app: AppHandle,
     action: config::Action,
 ) -> Result<ActionExecutionEvent, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
     let config = tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
         .await
-        .map_err(|error| CommandError::internal(format!("dry_run_action task failed: {error}")))?
+        .map_err(|error| CommandError::internal(format!("live_test_action task failed: {error}")))?
         .map_err(CommandError::from)?
         .config;
 
-    executor::dry_run_action(&config, &action).map_err(|error| {
+    executor::live_test_action(&config, &action).map_err(|error| {
         CommandError::new(
             error.code,
             error.event.message.clone(),
@@ -2597,7 +2599,7 @@ pub fn run() {
             preview_resolution,
             execute_preview_action,
             run_preview_action,
-            dry_run_action,
+            live_test_action,
             get_exe_icon,
             export_profile,
             import_profile,

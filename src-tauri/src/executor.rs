@@ -262,38 +262,41 @@ pub fn run_preview_action(
 /// Dry-run a draft action directly (no resolver, no saved config lookup, no
 /// encoder signal required). Used by the "Test" button in the action picker so
 /// the user can preview what an action *would* do while still editing it.
-pub fn dry_run_action(
+/// Live-test a draft action straight from the picker: inject the draft into a
+/// config clone so the normal live path can resolve it by id, then run it for
+/// real through the executor. No save, no encoder signal — the picker handles
+/// the "switch to your target window" countdown before calling this.
+pub fn live_test_action(
     config: &AppConfig,
     action: &Action,
 ) -> Result<ActionExecutionEvent, ExecutorError> {
-    let (outcome, summary, warnings) = summarize_action(config, action).map_err(|message| {
-        execution_error(
-            "dry_run_failed",
-            "тест",
-            &message,
-            None,
-            Some(action.id.clone()),
-        )
-    })?;
+    let mut cfg = config.clone();
+    cfg.actions.retain(|candidate| candidate.id != action.id);
+    cfg.actions.push(action.clone());
 
-    Ok(ActionExecutionEvent {
+    let preview = ResolvedInputPreview {
+        status: ResolutionStatus::Resolved,
         encoded_key: String::new(),
-        action_id: action.id.clone(),
-        action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        reason: String::new(),
+        matched_app_mapping_id: None,
         resolved_profile_id: None,
         resolved_profile_name: None,
-        matched_app_mapping_id: None,
+        used_fallback_profile: false,
+        candidate_app_mapping_ids: Vec::new(),
+        candidate_control_ids: Vec::new(),
         control_id: None,
         layer: None,
         binding_id: None,
-        mode: ExecutionMode::DryRun,
-        outcome,
-        process_id: None,
-        summary,
-        warnings,
-        executed_at: timestamp_millis(),
-    })
+        binding_label: None,
+        action_id: Some(action.id.clone()),
+        action_type: Some(action.action_type.as_str().into()),
+        action_pretty: Some(action.pretty.clone()),
+        mapping_verified: None,
+        mapping_source: None,
+        trigger_mode: None,
+    };
+
+    run_preview_action(&cfg, &preview)
 }
 
 fn summarize_action(

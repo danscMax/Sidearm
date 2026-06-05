@@ -612,6 +612,7 @@
   "picker": {
     "title": "Assign action",
     "test": "Test",
+    "testCountdown": "Testing in {{n}}… switch to your target window",
     "searchPlaceholder": "Search action...",
     "keyLabel": "Key",
     "keyCapturing": "Press a key...",

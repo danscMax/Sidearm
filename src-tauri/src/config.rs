@@ -2836,6 +2836,27 @@ mod tests {
         assert_eq!(config.physical_controls.len(), ControlId::ALL.len());
     }
 
+    #[test]
+    fn repair_clipboard_action_is_schema_valid() {
+        // Guard against the actionType-enum gap in config.v2.schema.json: a config
+        // holding a repairClipboard action must pass JSON-schema validation (the
+        // omission previously broke saving/exporting any profile using it).
+        let mut config = default_seed_config();
+        config.actions.push(Action {
+            id: "repair-clipboard-test".into(),
+            action_type: ActionType::RepairClipboard,
+            payload: ActionPayload::RepairClipboard(RepairClipboardActionPayload {
+                strategy: RepairStrategy::Latin1,
+            }),
+            pretty: "Repair clipboard".into(),
+            notes: None,
+            conditions: Vec::new(),
+        });
+        let value = serde_json::to_value(&config).expect("serialize config");
+        let errors = collect_schema_errors(&value);
+        assert!(errors.is_empty(), "repairClipboard action must be schema-valid: {errors:?}");
+    }
+
     /// Regression: the Razer Synapse profile we ship for onboarding has the
     /// Naga side buttons 1–2 represented twice (`DKM_M_0X` and `KEY_X`), which
     /// previously produced duplicate (control, layer) bindings — schema-valid

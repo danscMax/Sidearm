@@ -127,7 +127,8 @@
         "mouseAction",
         "mediaKey",
         "profileSwitch",
-        "disabled"
+        "disabled",
+        "repairClipboard"
       ]
     },
     "pasteMode": {

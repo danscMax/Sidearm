@@ -250,6 +250,7 @@
     "badgeInfo": "инфо",
     "badgeDebug": "отлад.",
     "allCategories": "Все категории",
+    "categoryFilter": "Фильтр журнала по категории",
     "export": "Экспорт",
     "folder": "Папка логов",
     "clear": "Очистить",
@@ -329,6 +330,8 @@
     "heatmapDisable": "Выключить тепловую карту",
     "searchPlaceholder": "Поиск назначений…",
     "searchMeta": "Найдено: {{count}}",
+    "searchAllProfiles": "Все профили",
+    "searchNoResults": "Совпадений нет ни в одном профиле.",
     "dblClickSettings": "Двойной клик — открыть настройки профилей"
   },
   "newRule": {
@@ -387,6 +390,8 @@
     "descriptionLabel": "Описание",
     "descriptionPlaceholder": "Необязательное описание",
     "unnamed": "Безымянный профиль",
+    "renamedToUnnamed": "Имя профиля не может быть пустым — переименован в «Безымянный профиль».",
+    "rerunOnboarding": "Пройти онбординг заново",
     "allProfilesHeader": "ВСЕ ПРОФИЛИ",
     "priorityMeta": "Приоритет: {{priority}}",
     "disabledMeta": "Отключён",
@@ -453,10 +458,21 @@
     "autostartReregisterButton": "Перерегистрировать на текущий путь",
     "osdPreviewProfileLabel": "Профиль:"
   },
+  "conflict": {
+    "banner_one": "{{count}} конфликт сочетаний на этом слое",
+    "banner_few": "{{count}} конфликта сочетаний на этом слое",
+    "banner_many": "{{count}} конфликтов сочетаний на этом слое",
+    "group": "{{signature}} — {{controls}}"
+  },
   "command": {
     "undo": "Отменить",
     "redo": "Повторить",
     "reload": "Загрузить с диска",
+    "newProfile": "Новый профиль",
+    "duplicateProfile": "Дублировать профиль",
+    "addRule": "Добавить правило приложения",
+    "openConfigFolder": "Открыть папку конфигурации",
+    "captureWindow": "Захватить активное окно",
     "gotoProfiles": "Перейти: Профили",
     "gotoDebug": "Перейти: Диагностика",
     "gotoSettings": "Перейти: Настройки",
@@ -537,6 +553,7 @@
     "status": "Статус",
     "actionEyebrow": "Назначенное действие",
     "actionEmpty": "Для этой кнопки на текущем слое назначение ещё не создано.",
+    "enabledToggle": "Включить или отключить это назначение",
     "expected": "Ожидалось",
     "configured": "Настроено",
     "observed": "Наблюдалось",
@@ -599,6 +616,7 @@
   },
   "picker": {
     "title": "Назначить действие",
+    "test": "Тест",
     "searchPlaceholder": "Поиск действия...",
     "keyLabel": "Клавиша",
     "keyCapturing": "Нажмите клавишу...",
@@ -609,6 +627,7 @@
     "textLabel": "Текст",
     "textPlaceholder": "Введите текст для ввода...",
     "programLabel": "Программа",
+    "launchTargetHint": "Можно также ввести URL (https://…) или путь к папке.",
     "launchArgsLabel": "Аргументы",
     "launchArgsPlaceholder": "--flag value",
     "launchWorkingDirLabel": "Рабочая папка",
@@ -692,6 +711,9 @@
   },
   "snippet": {
     "eyebrow": "Библиотека фрагментов",
+    "insertFromLibrary": "Вставить из библиотеки",
+    "insertPlaceholder": "Выберите фрагмент…",
+    "saveToLibrary": "Также сохранить в библиотеку фрагментов",
     "id": "ID фрагмента",
     "name": "Название фрагмента",
     "text": "Текст фрагмента",

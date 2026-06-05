@@ -54,11 +54,13 @@ export interface SettingsWorkspaceProps {
     title: string;
     message: string;
     confirmLabel?: string;
+    danger?: boolean;
     onConfirm: () => void;
   } | null) => void;
   refreshConfig: () => void;
   setError: (error: CommandError | null) => void;
   onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;
+  showToast: (message: string, kind?: "info" | "success" | "warning") => void;
 }
 
 export function SettingsWorkspace({
@@ -71,6 +73,7 @@ export function SettingsWorkspace({
   refreshConfig,
   setError,
   onRequestSynapseImport,
+  showToast,
 }: SettingsWorkspaceProps) {
   const { t, i18n } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
@@ -222,6 +225,7 @@ export function SettingsWorkspace({
       title: t("settings.deleteConfirmTitle"),
       message: t("settings.deleteConfirmMessage", { name: profile.name }),
       confirmLabel: t("common.delete"),
+      danger: true,
       onConfirm: () => {
         updateDraft((c) => deleteProfile(c, profile.id));
         setSelectedProfileId(null);
@@ -371,6 +375,7 @@ export function SettingsWorkspace({
         <div className="settings-actions">
           <button
             type="button"
+            aria-pressed={i18n.language === "ru"}
             className={`action-button action-button--small${i18n.language === "ru" ? "" : " action-button--ghost"}`}
             onClick={() => changeLanguage("ru")}
           >
@@ -378,6 +383,7 @@ export function SettingsWorkspace({
           </button>
           <button
             type="button"
+            aria-pressed={i18n.language === "en"}
             className={`action-button action-button--small${i18n.language === "en" ? "" : " action-button--ghost"}`}
             onClick={() => changeLanguage("en")}
           >
@@ -601,10 +607,12 @@ export function SettingsWorkspace({
                     )
                   }
                   onBlur={(e) => {
-                    if (!e.target.value.trim())
+                    if (!e.target.value.trim()) {
                       updateDraft((c) =>
                         upsertProfile(c, { ...activeProfile, name: t("settings.unnamed") }),
                       );
+                      showToast(t("settings.renamedToUnnamed"), "info");
+                    }
                   }}
                 />
               </label>
@@ -829,6 +837,7 @@ export function SettingsWorkspace({
                     warnings: warningsSummary,
                   }),
                   confirmLabel: t("settings.replaceConfigConfirm"),
+                  danger: true,
                   onConfirm: async () => {
                     try {
                       await importFullConfigApply(path, "replace");
@@ -899,9 +908,7 @@ export function SettingsWorkspace({
               }));
             }}
           >
-            {i18n.language?.startsWith("en")
-              ? "Re-run onboarding"
-              : "Пройти онбординг заново"}
+            {t("settings.rerunOnboarding")}
           </button>
         </div>
       </section>

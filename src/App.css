@@ -452,7 +452,8 @@ select::checkmark {
   transition: background 150ms, border-color 150ms;
 }
 
-.toolbar__btn--search:hover {
+.toolbar__btn--search:hover,
+.toolbar__btn--search:focus-visible {
   background: rgba(255, 255, 255, 0.04);
   border-color: var(--c-border-hover);
 }
@@ -523,7 +524,7 @@ select::checkmark {
   max-height: 200px;
   overflow: auto;
   padding: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background-color: #242a1e;
   font-size: 12px;
   white-space: pre-wrap;
@@ -531,7 +532,7 @@ select::checkmark {
 }
 .error-boundary__reload {
   padding: 8px 24px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   border: 1px solid #4a5240;
   background-color: #2a3124;
   color: #c8d0b8;
@@ -627,6 +628,10 @@ select::checkmark {
   color: var(--c-text-bright);
 }
 
+.toolbar__btn--secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.2);
+}
+
 /* Flat icon buttons for toolbar actions */
 .toolbar__icon-btn {
   display: inline-flex;
@@ -673,7 +678,8 @@ select::checkmark {
   transition: background 0.12s, color 0.12s;
 }
 
-.toolbar__lang:hover {
+.toolbar__lang:hover,
+.toolbar__lang:focus-visible {
   background: rgba(255, 255, 255, 0.08);
   color: var(--c-text-bright);
 }
@@ -700,7 +706,7 @@ select::checkmark {
   height: 16px;
   padding: 0 4px;
   margin-left: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.12);
   font-size: 10px;
   font-weight: 700;
@@ -1098,6 +1104,7 @@ select::checkmark {
 
 .action-button:hover:not(:disabled) {
   transform: translateY(-1px);
+  filter: brightness(1.08);
 }
 
 /* ── Verification session scope dropdown ── */
@@ -1578,7 +1585,7 @@ select::checkmark {
   min-width: 20px;
   height: 20px;
   padding: 0 4px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(var(--layer-rgb, 159, 202, 105), 0.15);
   color: var(--layer-accent, var(--c-accent));
   font-size: var(--fs-micro);
@@ -2767,7 +2774,7 @@ code {
   font-weight: 600;
 }
 
-.action-button--primary:hover {
+.action-button--primary:hover:not(:disabled) {
   filter: brightness(1.1);
 }
 
@@ -3137,7 +3144,7 @@ code {
   flex: 1;
   padding: 10px 16px;
   font-size: 13px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(0, 0, 0, 0.35);
   border: 1px solid var(--c-border);
   color: var(--c-text-bright);
@@ -3263,7 +3270,7 @@ code {
   padding: 4px 8px;
   gap: 8px;
   border-top-color: rgba(255, 255, 255, 0.03);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   font-size: 0.78rem;
 }
 
@@ -3347,7 +3354,7 @@ code {
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: rgba(159, 202, 105, 0.12);
   color: var(--c-accent);
   border: 1px solid rgba(159, 202, 105, 0.18);
@@ -3402,7 +3409,7 @@ code {
 .props-meta__select select {
   padding: 6px 10px;
   font-size: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--c-border);
   color: var(--c-text);
@@ -3417,7 +3424,7 @@ code {
 /* ── Properties panel: action preview ── */
 .props-action {
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(159, 202, 105, 0.05);
   border: 1px solid rgba(159, 202, 105, 0.1);
   border-left: 3px solid var(--c-accent);
@@ -3478,7 +3485,7 @@ code {
   padding: 7px 10px;
   background: rgba(0, 0, 0, 0.18);
   border: 1px solid rgba(255, 255, 255, 0.04);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
 }
 
 .props-signal__label {
@@ -3523,6 +3530,90 @@ code {
   font-size: 13px;
   color: var(--c-text-muted);
   margin: 0;
+}
+
+/* Per-binding enable/disable toggle in the properties inspector */
+.props-action__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+}
+
+/* Shortcut-conflict banner above the mouse visualization */
+.profiles__conflict-banner {
+  margin-bottom: 12px;
+}
+.profiles__conflict-banner ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+/* Cross-profile search results list */
+.profiles__search-results {
+  margin-bottom: 12px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.profiles__search-results-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.profiles__search-result {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  color: var(--c-text);
+}
+.profiles__search-result:hover {
+  border-color: var(--c-border-hover);
+  background: rgba(255, 255, 255, 0.06);
+}
+.profiles__search-result-profile {
+  font-weight: 600;
+  color: var(--c-text-bright);
+}
+.profiles__search-result-meta {
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+}
+
+/* "Save to snippet library" checkbox in the text-snippet editor */
+.snippet-save-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+}
+
+/* Inline result of the action-picker "Test" (dry-run) button */
+.action-picker__test-result {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-xs);
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-border);
+  font-size: var(--fs-caption);
+  color: var(--c-text);
+}
+.action-picker__test-result--error {
+  border-color: rgba(224, 85, 85, 0.4);
+  color: var(--c-danger);
 }
 
 /* ── Expert section density overrides ── */
@@ -3570,7 +3661,7 @@ code {
 .expert-section .field textarea {
   padding: 8px 12px;
   font-size: 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--c-border);
   color: var(--c-text);
@@ -3587,7 +3678,7 @@ code {
 .expert-section .badge {
   padding: 2px 7px;
   font-size: 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   letter-spacing: 0.03em;
 }
 
@@ -3597,7 +3688,7 @@ code {
 
 .expert-section .notice {
   padding: 14px 16px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   margin-top: 4px;
 }
@@ -3605,7 +3696,7 @@ code {
 .expert-section .action-button {
   padding: 9px 16px;
   font-size: 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 
 /* ── Properties header (name + signal badge) ── */
@@ -3620,7 +3711,7 @@ code {
   font-family: var(--font-mono);
   font-size: 12px;
   padding: 3px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: rgba(159, 202, 105, 0.12);
   color: var(--c-accent);
   border: 1px solid rgba(159, 202, 105, 0.18);
@@ -3641,7 +3732,7 @@ code {
   align-items: center;
   gap: 7px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--c-border);
   background: rgba(255, 255, 255, 0.04);
   color: var(--c-text-muted);
@@ -3727,7 +3818,7 @@ code {
   appearance: none;
   -webkit-appearance: none;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.12);
   cursor: pointer;
   transition: background 150ms ease;
@@ -4403,7 +4494,7 @@ img.profiles__app-card-monogram {
 .settings-section {
   background: rgba(255, 255, 255, 0.03);
   border: 1px solid var(--c-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   padding: 20px;
 }
 
@@ -4428,7 +4519,7 @@ img.profiles__app-card-monogram {
   opacity: 0.6;
   background: rgba(255, 255, 255, 0.06);
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
 }
 
 /* Settings editor */
@@ -4480,7 +4571,7 @@ input[type="number"] { -moz-appearance: textfield; }
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
   cursor: pointer;
@@ -4530,7 +4621,7 @@ input[type="number"] { -moz-appearance: textfield; }
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--c-text-muted);
   opacity: 0.5;
@@ -4583,7 +4674,7 @@ input[type="number"] { -moz-appearance: textfield; }
   height: 64px;
   background: rgba(0, 0, 0, 0.25);
   border: 1px solid var(--c-border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 8px;
   overflow: hidden;
 }
@@ -4750,7 +4841,7 @@ input[type="number"] { -moz-appearance: textfield; }
   right: 20px;
   z-index: 1100;
   padding: 10px 16px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: var(--c-surface, #1e2320);
   color: var(--c-text);
   border: 1px solid var(--c-border);
@@ -4759,9 +4850,11 @@ input[type="number"] { -moz-appearance: textfield; }
   max-width: 360px;
   animation: toast-in 160ms ease-out;
 }
-.toast--success { border-color: rgba(104, 197, 127, 0.5); }
-.toast--warning { border-color: rgba(234, 179, 8, 0.5); }
-.toast--info    { border-color: rgba(99, 179, 237, 0.5); }
+/* Toast accent colors derive from the app's semantic tokens (--c-ok / --c-warning
+   / notice-info) so toast severity matches every other warning/ok/info surface. */
+.toast--success { border-color: rgba(117, 194, 104, 0.5); }
+.toast--warning { border-color: rgba(196, 153, 52, 0.5); }
+.toast--info    { border-color: rgba(92, 154, 221, 0.5); }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }
@@ -4785,7 +4878,8 @@ input[type="number"] { -moz-appearance: textfield; }
   font-family: inherit;
   transition: background 120ms ease, border-color 120ms ease;
 }
-.portable-badge:hover { background: rgba(255, 255, 255, 0.08); }
+.portable-badge:hover,
+.portable-badge:focus-visible { background: rgba(255, 255, 255, 0.08); }
 .portable-badge__dot {
   width: 7px;
   height: 7px;
@@ -4974,7 +5068,7 @@ input[type="number"] { -moz-appearance: textfield; }
   background: var(--c-surface, #1e2320);
   color: var(--c-text);
   border: 1px solid var(--c-border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
 }
 .profiles-workspace__search:focus {
   outline: none;
@@ -5037,7 +5131,7 @@ input[type="number"] { -moz-appearance: textfield; }
   align-items: center;
   padding: 4px 10px;
   border: 1px solid var(--c-border);
-  border-radius: 6px;
+  border-radius: var(--radius-xs);
   background: rgba(255, 255, 255, 0.04);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 0.82rem;

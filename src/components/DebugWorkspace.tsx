@@ -46,7 +46,7 @@ import { LogPanel } from "./LogPanel";
 import { Fact } from "./shared";
 import type { LogPanelControl } from "../hooks/useLogPanel";
 
-export interface DebugRuntimeProps {
+interface DebugRuntimeProps {
   debugLog: DebugLogEntry[];
   resolutionKeyInput: string;
   setResolutionKeyInput: (value: string) => void;
@@ -60,7 +60,7 @@ export interface DebugRuntimeProps {
   handleRunPreviewAction: () => Promise<void>;
 }
 
-export interface DebugVerificationProps {
+interface DebugVerificationProps {
   session: VerificationSession | null;
   scope: VerificationSessionScope;
   setScope: (scope: VerificationSessionScope) => void;

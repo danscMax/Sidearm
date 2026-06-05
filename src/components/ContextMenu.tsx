@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 
-export interface ContextMenuItem {
+interface ContextMenuItem {
   label: string;
   onClick: () => void;
   danger?: boolean;

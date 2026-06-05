@@ -11,12 +11,14 @@ export function ConfirmModal({
   title,
   message,
   confirmLabel,
+  danger,
   onConfirm,
   onCancel,
 }: {
   title: string;
   message: string;
   confirmLabel?: string;
+  danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -49,7 +51,7 @@ export function ConfirmModal({
         <button
           ref={confirmButtonRef}
           type="button"
-          className="action-button action-button--primary"
+          className={`action-button ${danger ? "action-button--danger" : "action-button--primary"}`}
           onClick={onConfirm}
         >
           {confirmLabel ?? t("common.confirm")}

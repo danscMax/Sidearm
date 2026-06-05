@@ -61,6 +61,7 @@ export function Sidebar({
     title: string;
     message: string;
     confirmLabel?: string;
+    danger?: boolean;
     onConfirm: () => void;
   } | null) => void;
 }) {
@@ -78,6 +79,7 @@ export function Sidebar({
         <button
           key={mode.value}
           type="button"
+          aria-current={workspaceMode === mode.value ? "page" : undefined}
           className={`nav-item${workspaceMode === mode.value ? " nav-item--active" : ""}`}
           onClick={() => { onSwitchMode(mode.value); }}
         >
@@ -214,6 +216,7 @@ export function Sidebar({
                         title: t("confirm.deleteProfileTitle"),
                         message: t("confirm.deleteProfileMessage", { name: targetProfile.name }),
                         confirmLabel: t("common.delete"),
+                        danger: true,
                         onConfirm: () => {
                           updateDraft((c) => deleteProfile(c, targetProfile.id));
                           setSelectedProfileId(null);

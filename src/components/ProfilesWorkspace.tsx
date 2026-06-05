@@ -1,44 +1,45 @@
-import { startTransition, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
+import type { AppConfig, ControlId, Layer, Profile } from "../lib/config";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
 import {
+  copyBindingFromLayer,
   createAppMappingFromCapture,
   deleteAppMapping,
+  duplicateBinding,
   extractProfileExport,
   findDuplicateAppMapping,
   importProfile,
   isValidProfileExport,
+  removeBinding,
   reorderAppMappingPriority,
   upsertAppMapping,
+  upsertBinding,
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
-import { exportProfileFile, getExeIcon, importProfileFile, pickExecutablePath } from "../lib/backend";
+import { exportProfileFile, importProfileFile, pickExecutablePath } from "../lib/backend";
 import {
   bindingMatchesQuery,
   conflictingBindingIds,
+  findShortcutConflicts,
 } from "../lib/conflict-detection";
-import { clampPriority, sortAppMappings, toggleInSet } from "../lib/helpers";
-import { ChipEditor } from "./ChipEditor";
+import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
 import { CloseButton, ModalShell } from "./shared";
-import { RunningProcessPicker } from "./RunningProcessPicker";
-
-/** Module-level icon cache: exe name -> base64 PNG (or empty string for "no icon"). */
-const exeIconCache = new Map<string, string>();
-
-/** Pending fetch promises to avoid duplicate concurrent requests. */
-const exeIconPending = new Map<string, Promise<string | null>>();
+import { ExeIcon } from "./ExeIcon";
+import { AppMappingModal } from "./AppMappingModal";
 
 export interface ProfilesWorkspaceProps {
   activeConfig: AppConfig;
   activeProfile: Profile | null;
   effectiveProfileId: string | null;
+  addRuleSignal: boolean;
+  onAddRuleHandled: () => void;
   lastCapture: WindowCaptureResult | null;
   captureDelayMs: number;
   viewState: ViewState;
@@ -48,6 +49,7 @@ export interface ProfilesWorkspaceProps {
     title: string;
     message: string;
     confirmLabel?: string;
+    danger?: boolean;
     onConfirm: () => void;
   } | null) => void;
   handleCaptureActiveWindow: () => Promise<void>;
@@ -56,303 +58,14 @@ export interface ProfilesWorkspaceProps {
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
   onSelectLayer: (layer: Layer) => void;
+  setSelectedProfileId: (id: string | null) => void;
   setSelectedControlId: (id: ControlId | null) => void;
   setMultiSelectedControlIds: (ids: Set<ControlId> | ((prev: Set<ControlId>) => Set<ControlId>)) => void;
   setActionPickerBindingId: (id: string | null) => void;
   setActionPickerOpen: (open: boolean) => void;
   executionCounts?: Map<string, number>;
+  heatmapEnabledRef?: RefObject<boolean>;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
-}
-
-/** First 2 uppercase letters of exe name (sans extension) for monogram icon. */
-function exeMonogram(exe: string): string {
-  const base = exe.replace(/\.exe$/i, "");
-  return base.slice(0, 2).toUpperCase();
-}
-
-/** Renders an exe icon (fetched from backend) with monogram fallback. */
-function ExeIcon({ exe, processPath, className }: { exe: string; processPath?: string; className: string }) {
-  const cacheKey = exe;
-  const [iconSrc, setIconSrc] = useState<string | null>(() => {
-    const cached = exeIconCache.get(cacheKey);
-    return cached ? `data:image/png;base64,${cached}` : null;
-  });
-
-  useEffect(() => {
-    if (exeIconCache.has(cacheKey)) {
-      const v = exeIconCache.get(cacheKey)!;
-      setIconSrc(v ? `data:image/png;base64,${v}` : null);
-      return;
-    }
-
-    let cancelled = false;
-    let pending = exeIconPending.get(cacheKey);
-    if (!pending) {
-      pending = getExeIcon(exe, processPath);
-      exeIconPending.set(cacheKey, pending);
-    }
-    pending.then((b64) => {
-      exeIconCache.set(cacheKey, b64 ?? "");
-      exeIconPending.delete(cacheKey);
-      if (!cancelled && b64) {
-        setIconSrc(`data:image/png;base64,${b64}`);
-      }
-    }).catch(() => {
-      exeIconCache.set(cacheKey, "");
-      exeIconPending.delete(cacheKey);
-    });
-    return () => { cancelled = true; };
-  }, [exe, processPath]);
-
-  if (iconSrc) {
-    return <img className={className} src={iconSrc} alt={exe} draggable={false} />;
-  }
-  return <span className={className}>{exeMonogram(exe)}</span>;
-}
-
-/* ────────────────────────────────────────────────────────────
-   App Mapping Modal
-   ──────────────────────────────────────────────────────────── */
-
-interface AppMappingModalProps {
-  mapping: AppMapping;
-  profileName: string;
-  activeConfig: AppConfig;
-  updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
-  onClose: () => void;
-}
-
-function AppMappingModal({
-  mapping,
-  profileName,
-  activeConfig,
-  updateDraft,
-  onClose,
-}: AppMappingModalProps) {
-  const { t } = useTranslation();
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [showProcessPicker, setShowProcessPicker] = useState(false);
-
-  // Auto-focus the modal container on mount
-  useEffect(() => {
-    containerRef.current?.focus();
-  }, []);
-
-  return (
-    <>
-      <ModalShell
-        onClose={onClose}
-        className="rule-modal"
-        dialogRef={containerRef}
-        ariaLabel={`${mapping.exe}`}
-      >
-        <CloseButton onClick={onClose} ariaLabel={t("common.close")} />
-
-        {/* Header */}
-        <div className="rule-modal__header">
-          <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
-          <div>
-            <span className="rule-modal__title">{mapping.exe}</span>
-            <span className="rule-modal__profile-name">{t("ruleModal.profileLabel", { name: profileName })}</span>
-          </div>
-        </div>
-
-        {/* Body */}
-        <div className="rule-modal__body">
-          <p className="rule-modal__description">
-            {t("ruleModal.description", { name: profileName })}
-          </p>
-
-          {/* Exe input + Browse */}
-          <div className="field">
-            <span className="field__label">{t("ruleModal.exeLabel")}</span>
-            <div className="field__row">
-              <input
-                type="text"
-                value={mapping.exe}
-                placeholder="chrome.exe"
-                onChange={(e) =>
-                  updateDraft((c) => upsertAppMapping(c, { ...mapping, exe: e.target.value, processPath: undefined }))
-                }
-              />
-              <button
-                type="button"
-                className="action-button action-button--small"
-                onClick={async () => {
-                  const pick = await pickExecutablePath({
-                    title: t("newRule.browseTitle"),
-                    filterName: t("newRule.browseFilter"),
-                    extensions: ["exe", "lnk"],
-                  });
-                  if (pick) {
-                    updateDraft((c) =>
-                      upsertAppMapping(c, { ...mapping, exe: pick.name, processPath: pick.path }),
-                    );
-                  }
-                }}
-              >
-                {t("common.browse")}
-              </button>
-              <button
-                type="button"
-                className="action-button action-button--small"
-                onClick={() => setShowProcessPicker(true)}
-                title={t("ruleModal.pickRunningTooltip")}
-              >
-                {t("ruleModal.pickRunning")}
-              </button>
-            </div>
-            {mapping.processPath ? (
-              <p
-                className="field__description field__description--mono"
-                title={mapping.processPath}
-              >
-                {mapping.processPath}
-              </p>
-            ) : null}
-          </div>
-
-          {/* Title filters */}
-          <div className="field">
-            <span className="field__label">{t("ruleModal.titleLabel")}</span>
-            <ChipEditor
-              values={mapping.titleIncludes ?? []}
-              onChange={(vals) =>
-                updateDraft((c) =>
-                  upsertAppMapping(c, {
-                    ...mapping,
-                    titleIncludes: vals.length > 0 ? vals : undefined,
-                  }),
-                )
-              }
-              placeholder={t("common.optional")}
-              ariaLabel={t("ruleModal.titleLabel")}
-            />
-            <p className="field__description">
-              {t("ruleModal.titleHelp")}
-            </p>
-          </div>
-
-          {/* Toggle + Priority row */}
-          <div className="rule-modal__inline-row">
-            <label className="rule-modal__inline-field">
-              <span className="field__label">{t("common.enabled")}</span>
-              <input
-                className="profiles__toggle"
-                type="checkbox"
-                checked={mapping.enabled}
-                onChange={(e) =>
-                  updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, enabled: e.target.checked }),
-                  )
-                }
-              />
-            </label>
-
-            <label className="rule-modal__inline-field">
-              <span className="field__label">
-                {t("ruleModal.priorityLabel")}
-                <span
-                  className="field__hint"
-                  title={t("ruleModal.priorityTooltip")}
-                >
-                  ?
-                </span>
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={9999}
-                value={mapping.priority}
-                className="profiles__priority-input"
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  const clamped = Number.isFinite(v) ? clampPriority(v) : 0;
-                  updateDraft((c) => upsertAppMapping(c, { ...mapping, priority: clamped }));
-                }}
-              />
-            </label>
-          </div>
-
-          {/* Move to another profile */}
-          <div className="field">
-            <span className="field__label">{t("debug.profile")}</span>
-            <select
-              value={mapping.profileId}
-              onChange={(e) => {
-                const newProfileId = e.target.value;
-                if (newProfileId !== mapping.profileId) {
-                  updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, profileId: newProfileId }),
-                  );
-                }
-              }}
-            >
-              {activeConfig.profiles.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            <p className="field__description">
-              {t("ruleModal.moveProfileHelp")}
-            </p>
-          </div>
-        </div>
-
-        {/* Footer */}
-        <div className="rule-modal__footer">
-          <span className="rule-modal__autosave">{t("ruleModal.autosave")}</span>
-          <span className="rule-modal__spacer" />
-
-          {confirmingDelete ? (
-            <div className="rule-modal__delete-confirm">
-              {t("ruleModal.deleteConfirm")}
-              <button
-                type="button"
-                className="action-button action-button--small action-button--ghost profiles__delete-btn"
-                onClick={() => {
-                  updateDraft((c) => deleteAppMapping(c, mapping.id));
-                  onClose();
-                }}
-              >
-                {t("common.yes")}
-              </button>
-              <button
-                type="button"
-                className="action-button action-button--small action-button--ghost"
-                onClick={() => setConfirmingDelete(false)}
-              >
-                {t("common.no")}
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="action-button action-button--ghost profiles__delete-btn"
-              onClick={() => setConfirmingDelete(true)}
-            >
-              {t("ruleModal.deleteRule")}
-            </button>
-          )}
-        </div>
-      </ModalShell>
-      {showProcessPicker ? (
-        <RunningProcessPicker
-          onCancel={() => setShowProcessPicker(false)}
-          onPick={(proc) => {
-            updateDraft((c) =>
-              upsertAppMapping(c, {
-                ...mapping,
-                exe: proc.exe.toLowerCase(),
-                processPath: proc.path || undefined,
-              }),
-            );
-            setShowProcessPicker(false);
-          }}
-        />
-      ) : null}
-    </>
-  );
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -363,6 +76,8 @@ export function ProfilesWorkspace({
   activeConfig,
   activeProfile,
   effectiveProfileId,
+  addRuleSignal,
+  onAddRuleHandled,
   lastCapture,
   captureDelayMs,
   viewState,
@@ -375,11 +90,13 @@ export function ProfilesWorkspace({
   selectedLayer,
   multiSelectedControlIds,
   onSelectLayer,
+  setSelectedProfileId,
   setSelectedControlId,
   setMultiSelectedControlIds,
   setActionPickerBindingId,
   setActionPickerOpen,
   executionCounts,
+  heatmapEnabledRef,
   showToast,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
@@ -388,6 +105,12 @@ export function ProfilesWorkspace({
     selectedLayer,
     updateDraft,
   });
+
+  // Mirror heatmap state into the ref useRuntime reads, so execution-count
+  // bookkeeping is skipped while the heatmap is off.
+  useEffect(() => {
+    if (heatmapEnabledRef) heatmapEnabledRef.current = heatmapEnabled;
+  }, [heatmapEnabled, heatmapEnabledRef]);
 
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
@@ -408,7 +131,21 @@ export function ProfilesWorkspace({
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
+  const [bindingCtxMenu, setBindingCtxMenu] = useState<
+    { x: number; y: number; controlId: ControlId; bindingId: string | null } | null
+  >(null);
   const [bindingSearch, setBindingSearch] = useState("");
+  const [searchAllProfiles, setSearchAllProfiles] = useState(false);
+
+  // Open the new-rule dialog when the command palette requests it, then ack
+  // so a later remount (mode switch) doesn't reopen it.
+  useEffect(() => {
+    if (addRuleSignal) {
+      setNewRuleOpen(true);
+      setNewRuleExe("");
+      onAddRuleHandled();
+    }
+  }, [addRuleSignal]);
 
   // Drag-reorder state for the profile rules grid.
   const [draggingMappingId, setDraggingMappingId] = useState<string | null>(null);
@@ -417,6 +154,16 @@ export function ProfilesWorkspace({
   const conflictIds = useMemo(
     () => (activeConfig ? conflictingBindingIds(activeConfig) : new Set<string>()),
     [activeConfig],
+  );
+
+  // Conflict groups scoped to what's currently on screen (this profile + layer),
+  // so the banner names exactly the buttons the user can see.
+  const layerConflicts = useMemo(
+    () =>
+      findShortcutConflicts(activeConfig).filter(
+        (g) => g.profileId === effectiveProfileId && g.layer === selectedLayer,
+      ),
+    [activeConfig, effectiveProfileId, selectedLayer],
   );
 
   const searchQuery = bindingSearch.trim();
@@ -432,6 +179,22 @@ export function ProfilesWorkspace({
     }
     return ids;
   }, [familySections, searchQuery]);
+
+  // Cross-profile search: scan every binding in the config (bindingMatchesQuery
+  // is profile-agnostic) so the user can find a shortcut wherever it's bound.
+  const crossProfileResults = useMemo(() => {
+    if (!searchQuery || !searchAllProfiles) return [];
+    const actionsById = new Map(activeConfig.actions.map((a) => [a.id, a]));
+    const profilesById = new Map(activeConfig.profiles.map((p) => [p.id, p]));
+    const controlsById = new Map(activeConfig.physicalControls.map((c) => [c.id, c]));
+    return activeConfig.bindings
+      .filter((b) => bindingMatchesQuery(b, actionsById.get(b.actionRef) ?? null, searchQuery))
+      .map((b) => ({
+        binding: b,
+        profileName: profilesById.get(b.profileId)?.name ?? b.profileId,
+        controlName: controlsById.get(b.controlId)?.defaultName ?? b.controlId,
+      }));
+  }, [activeConfig, searchQuery, searchAllProfiles]);
 
   const selectedAppMappings = useMemo(
     () =>
@@ -599,12 +362,66 @@ export function ProfilesWorkspace({
           value={bindingSearch}
           onChange={(e) => setBindingSearch(e.target.value)}
         />
-        {searchQuery && matchedControlIds ? (
+        {searchQuery && !searchAllProfiles && matchedControlIds ? (
           <span className="profiles-workspace__search-meta">
             {t("profile.searchMeta", { count: matchedControlIds.size })}
           </span>
         ) : null}
+        <button
+          type="button"
+          className={`action-button action-button--small${searchAllProfiles ? " action-button--active" : ""}`}
+          onClick={() => setSearchAllProfiles((v) => !v)}
+        >
+          {t("profile.searchAllProfiles")}
+        </button>
       </div>
+
+      {searchAllProfiles && searchQuery ? (
+        <div className="profiles__search-results">
+          {crossProfileResults.length === 0 ? (
+            <p className="props-empty__text">{t("profile.searchNoResults")}</p>
+          ) : (
+            <ul className="profiles__search-results-list">
+              {crossProfileResults.map((r) => (
+                <li key={r.binding.id}>
+                  <button
+                    type="button"
+                    className="profiles__search-result"
+                    onClick={() => {
+                      setSelectedProfileId(r.binding.profileId);
+                      onSelectLayer(r.binding.layer);
+                      startTransition(() => setSelectedControlId(r.binding.controlId));
+                      setSearchAllProfiles(false);
+                    }}
+                  >
+                    <span className="profiles__search-result-profile">{r.profileName}</span>
+                    <span className="profiles__search-result-meta">
+                      {(r.binding.layer === "hypershift" ? t("layer.hypershift") : t("layer.standard"))}
+                      {" · "}{r.controlName}{" · "}{r.binding.label}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      {layerConflicts.length > 0 ? (
+        <div className="notice notice--warning profiles__conflict-banner">
+          <strong>{t("conflict.banner", { count: layerConflicts.length })}</strong>
+          <ul>
+            {layerConflicts.map((g) => (
+              <li key={`${g.layer}:${g.signature}`}>
+                {t("conflict.group", {
+                  signature: g.signature,
+                  controls: g.bindings.map((b) => b.label).join(", "),
+                })}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       {/* ── Mouse visualization ── */}
       <div className="profiles__mouse-viz">
@@ -624,6 +441,9 @@ export function ProfilesWorkspace({
             setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
           }}
           onOpenActionPicker={handleOpenActionPicker}
+          onContextMenu={(id, binding, _action, x, y) =>
+            setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
+          }
           onSelectLayer={onSelectLayer}
           executionCounts={executionCounts}
           heatmapEnabled={heatmapEnabled}
@@ -776,9 +596,10 @@ export function ProfilesWorkspace({
       </div>
 
       {selectedAppMappings.length === 0 && activeProfile ? (
-        <p className="profiles__empty-hint">
-          {t("profile.emptyHint")}
-        </p>
+        <div className="props-empty">
+          <p className="props-empty__icon" aria-hidden="true">⊹</p>
+          <p className="props-empty__text">{t("profile.emptyHint")}</p>
+        </div>
       ) : null}
 
       {/* ── New rule dialog ── */}
@@ -995,11 +816,67 @@ export function ProfilesWorkspace({
                     title: t("confirm.deleteRuleTitle"),
                     message: t("confirm.deleteRuleMessage", { exe: targetMapping.exe }),
                     confirmLabel: t("common.delete"),
+                    danger: true,
                     onConfirm: () => {
                       updateDraft((c) => deleteAppMapping(c, targetMapping.id));
                       setConfirmModal(null);
                     },
                   });
+                },
+              },
+            ]}
+          />
+        );
+      })() : null}
+      {bindingCtxMenu ? (() => {
+        const binding = bindingCtxMenu.bindingId
+          ? activeConfig.bindings.find((b) => b.id === bindingCtxMenu.bindingId) ?? null
+          : null;
+        const cid = bindingCtxMenu.controlId;
+        const otherLayer: Layer = selectedLayer === "hypershift" ? "standard" : "hypershift";
+        const otherLayerLabel = otherLayer === "hypershift" ? t("layer.hypershift") : t("layer.standard");
+        return (
+          <ContextMenu
+            x={bindingCtxMenu.x}
+            y={bindingCtxMenu.y}
+            onClose={() => setBindingCtxMenu(null)}
+            items={[
+              {
+                label: t("common.edit"),
+                onClick: () => handleOpenActionPicker(cid, binding),
+              },
+              {
+                label: t("common.duplicate"),
+                disabled: !binding,
+                onClick: () => {
+                  if (binding) updateDraft((c) => duplicateBinding(c, binding.id, cid));
+                },
+              },
+              {
+                label: t("assignments.copyToLayer", { layer: otherLayerLabel }),
+                disabled: !binding || !effectiveProfileId,
+                onClick: () => {
+                  if (binding && effectiveProfileId)
+                    updateDraft((c) =>
+                      copyBindingFromLayer(c, effectiveProfileId, cid, selectedLayer, otherLayer),
+                    );
+                },
+              },
+              {
+                label: binding?.enabled ? t("assignments.disable") : t("assignments.enable"),
+                disabled: !binding,
+                onClick: () => {
+                  if (binding)
+                    updateDraft((c) => upsertBinding(c, { ...binding, enabled: !binding.enabled }));
+                },
+              },
+              null,
+              {
+                label: t("assignments.clear"),
+                danger: true,
+                disabled: !binding,
+                onClick: () => {
+                  if (binding) updateDraft((c) => removeBinding(c, binding.id));
                 },
               },
             ]}

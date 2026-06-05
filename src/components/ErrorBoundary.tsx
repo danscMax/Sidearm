@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import i18n from "../i18n";
 
 interface Props {
   children: ReactNode;
@@ -29,9 +30,9 @@ export class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="error-boundary">
+        <div className="error-boundary" role="alert">
           <h2 className="error-boundary__title">
-            Произошла непредвиденная ошибка
+            {i18n.t("errors.unknown.title")}
           </h2>
           <pre className="error-boundary__pre">
             {this.state.error?.message ?? "Unknown error"}
@@ -40,7 +41,7 @@ export class ErrorBoundary extends Component<Props, State> {
             onClick={this.handleReload}
             className="error-boundary__reload"
           >
-            Перезагрузить
+            {i18n.t("errors.actions.retry")}
           </button>
         </div>
       );

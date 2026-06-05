@@ -11,6 +11,7 @@ import { useAppPersistence } from "./hooks/useAppPersistence";
 import { useLogPanel } from "./hooks/useLogPanel";
 import { useRuntime } from "./hooks/useRuntime";
 import { useVerification } from "./hooks/useVerification";
+import { useActionPicker } from "./hooks/useActionPicker";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -43,6 +44,8 @@ import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import { listen } from "@tauri-apps/api/event";
 import {
   createProfile,
+  duplicateProfile,
+  removeBinding,
 } from "./lib/config-editing";
 import type {
   Action,
@@ -206,6 +209,7 @@ function App() {
 
   const verificationKeyEventRef = useRef<((event: EncodedKeyEvent) => void) | null>(null);
   const verificationResolutionRef = useRef<((preview: import("./lib/runtime").ResolvedInputPreview) => void) | null>(null);
+  const heatmapEnabledRef = useRef(false);
   const runtime = useRuntime({
     setError,
     onEncodedKeyEvent: (event: EncodedKeyEvent) => {
@@ -214,6 +218,7 @@ function App() {
     onControlResolutionEvent: (preview) => {
       verificationResolutionRef.current?.(preview);
     },
+    heatmapEnabledRef,
   });
   const {
     runtimeSummary, debugLog,
@@ -258,9 +263,13 @@ function App() {
     title: string;
     message: string;
     confirmLabel?: string;
+    danger?: boolean;
     onConfirm: () => void;
   } | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  // Cross-component "open the add-rule dialog" request from the command palette.
+  // ProfilesWorkspace consumes it on mount/change and calls back to reset.
+  const [addRuleSignal, setAddRuleSignal] = useState(false);
 
 
   useEffect(() => {
@@ -392,6 +401,18 @@ function App() {
           setMultiSelectedControlIds(new Set());
         });
       }
+    } else if (e.key === "Enter" && selectedControlId && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // Enter: open the action picker for the selected control
+      e.preventDefault();
+      handleOpenActionPicker(selectedControlId, selectedBinding);
+    } else if (
+      (e.key === "Delete" || e.key === "Backspace") &&
+      selectedControlId &&
+      selectedBinding
+    ) {
+      // Delete/Backspace: clear the selected control's binding
+      e.preventDefault();
+      updateDraft((c) => removeBinding(c, selectedBinding.id));
     } else if (!e.ctrlKey && !e.altKey && !e.metaKey) {
       // Number keys 1-4: switch workspace tabs
       const modeIndex = Number(e.key) - 1;
@@ -427,6 +448,19 @@ function App() {
     }
   }
 
+  function handleDuplicateActiveProfile() {
+    if (!effectiveProfileId) return;
+    let newId: string | null = null;
+    updateDraft((c) => {
+      const result = duplicateProfile(c, effectiveProfileId);
+      newId = result.newProfileId;
+      return result.config;
+    }, { immediate: true });
+    if (newId) {
+      startTransition(() => setSelectedProfileId(newId));
+    }
+  }
+
   const profiles = useMemo(
     () =>
       activeConfig
@@ -439,6 +473,16 @@ function App() {
   );
   const effectiveProfileId =
     selectedProfileId ?? activeConfig?.settings.fallbackProfileId ?? null;
+
+  // Keyboard-driven action picker (Enter on a selected control). Reuses the
+  // same hook the visualization uses, so placeholder-binding creation stays DRY.
+  const handleOpenActionPicker = useActionPicker({
+    effectiveProfileId,
+    selectedLayer,
+    updateDraft,
+    setActionPickerBindingId,
+    setActionPickerOpen,
+  });
 
   const verification = useVerification({
     activeConfig,
@@ -605,6 +649,8 @@ function App() {
                 activeConfig={activeConfig}
                 activeProfile={activeProfile}
                 effectiveProfileId={effectiveProfileId}
+                addRuleSignal={addRuleSignal}
+                onAddRuleHandled={() => setAddRuleSignal(false)}
                 lastCapture={lastCapture}
                 captureDelayMs={captureDelayMs}
                 viewState={viewState}
@@ -617,11 +663,13 @@ function App() {
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}
                 onSelectLayer={(layer) => setSelectedLayer(layer)}
+                setSelectedProfileId={setSelectedProfileId}
                 setSelectedControlId={setSelectedControlId}
                 setMultiSelectedControlIds={setMultiSelectedControlIds}
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
                 executionCounts={runtime.executionCounts}
+                heatmapEnabledRef={heatmapEnabledRef}
                 showToast={showToast}
               />
             ) : workspaceMode === "settings" ? (
@@ -635,6 +683,7 @@ function App() {
                 refreshConfig={refreshConfig}
                 setError={setError}
                 onRequestSynapseImport={setSynapseParsed}
+                showToast={showToast}
               />
             ) : (
               <DebugWorkspace
@@ -724,6 +773,7 @@ function App() {
           title={confirmModal.title}
           message={confirmModal.message}
           confirmLabel={confirmModal.confirmLabel}
+          danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
           onCancel={() => setConfirmModal(null)}
         />
@@ -780,6 +830,22 @@ function App() {
                 break;
               case "reload":
                 void refreshConfig();
+                break;
+              case "new-profile":
+                handleCreateProfile();
+                break;
+              case "duplicate-profile":
+                handleDuplicateActiveProfile();
+                break;
+              case "add-rule":
+                switchWorkspaceMode("profiles");
+                setAddRuleSignal(true);
+                break;
+              case "open-config-folder":
+                void openConfigFolder();
+                break;
+              case "capture-window":
+                void handleCaptureActiveWindow();
                 break;
               case "tab-profiles":
                 switchWorkspaceMode("profiles");

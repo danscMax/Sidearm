@@ -37,6 +37,7 @@ export function ViewTabPills({ activeTab, onSelect }: ViewTabPillsProps) {
         <button
           key={tab.key}
           type="button"
+          aria-pressed={tab.key === activeTab}
           className={`pill-track__pill${tab.key === activeTab ? " pill-track__pill--active" : ""}`}
           onClick={() => onSelect(tab.key)}
         >

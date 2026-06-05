@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
 import type {
+  Action,
   AppConfig,
   AppPathsInfo,
   BackupEntry,
@@ -271,6 +272,14 @@ export async function runPreviewAction(
     exe,
     title,
   });
+}
+
+/**
+ * Dry-run a draft action straight from the picker — no save, no encoder signal.
+ * Returns the same summary/warnings as the diagnostics dry-run.
+ */
+export async function dryRunAction(action: Action): Promise<ActionExecutionEvent> {
+  return invoke<ActionExecutionEvent>("dry_run_action", { action });
 }
 
 export async function getExeIcon(exeName: string, processPath?: string): Promise<string | null> {

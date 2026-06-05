@@ -18,6 +18,7 @@ import {
 import type { AppConfig } from "../../lib/config";
 import type { ActionExecutionEvent, EncodedKeyEvent } from "../../lib/runtime";
 import { NagaIllustration } from "./NagaIllustration";
+import { useModalDismiss } from "../../hooks/useModalDismiss";
 import "./onboarding.css";
 
 type StepKey = "welcome" | "synapse" | "live" | "admin" | "tryit";
@@ -141,6 +142,13 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     onClose();
   }, [config, applyConfig, onClose]);
 
+  // Keyboard containment + Escape-to-skip, matching the app's other modals.
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const handleModalKeyDown = useModalDismiss(overlayRef, { onClose: complete });
+  useEffect(() => {
+    overlayRef.current?.querySelector<HTMLElement>("button")?.focus();
+  }, []);
+
   const goNext = useCallback(() => {
     setStepIdx((i) => {
       if (i >= STEPS.length - 1) {
@@ -185,11 +193,18 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   }, [synapseOk, elevated]);
 
   return (
-    <div className="onb-overlay" role="dialog" aria-modal="true" aria-label="Sidearm onboarding">
+    <div
+      className="onb-overlay"
+      role="dialog"
+      aria-modal="true"
+      aria-label={T.ariaTitle}
+      ref={overlayRef}
+      onKeyDown={handleModalKeyDown}
+    >
       <div className="onb-card">
         <div className="onb-header">
           <span className="onb-header__title">{T.brand}</span>
-          <div className="onb-lang" role="group" aria-label="Language">
+          <div className="onb-lang" role="group" aria-label={T.ariaLanguage}>
             <button
               type="button"
               className={lang === "ru" ? "is-active" : ""}
@@ -270,7 +285,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
               <>
                 <h2 className="onb-step__title">{T.live.title}</h2>
                 <p className="onb-step__lead">{T.live.lead}</p>
-                <NagaIllustration detected={detected} active={activeBtn} labels={labels} />
+                <NagaIllustration detected={detected} active={activeBtn} labels={labels} label={T.ariaNaga} />
                 <div className="onb-live-readout">
                   {lastKey ? (
                     <>
@@ -363,6 +378,9 @@ function hintFor(state: CheckState, T: Copy): string {
 
 interface Copy {
   brand: string;
+  ariaTitle: string;
+  ariaLanguage: string;
+  ariaNaga: string;
   skip: string;
   back: string;
   next: string;
@@ -397,6 +415,9 @@ interface Copy {
 const COPY: Record<Lang, Copy> = {
   ru: {
     brand: "Настройка Sidearm",
+    ariaTitle: "Настройка Sidearm",
+    ariaLanguage: "Язык",
+    ariaNaga: "Сетка кнопок Razer Naga",
     skip: "Пропустить настройку",
     back: "Назад",
     next: "Далее",
@@ -447,6 +468,9 @@ const COPY: Record<Lang, Copy> = {
   },
   en: {
     brand: "Sidearm setup",
+    ariaTitle: "Sidearm onboarding",
+    ariaLanguage: "Language",
+    ariaNaga: "Razer Naga thumb grid",
     skip: "Skip setup",
     back: "Back",
     next: "Next",

@@ -17,6 +17,7 @@ import {
   expectedEncodedKeyForControl,
   seedExpectedEncoderMapping,
   updateControlCapabilityStatus,
+  upsertBinding,
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import {
@@ -26,6 +27,7 @@ import {
 } from "../lib/labels";
 import { describeActionSummary } from "../lib/action-helpers";
 import { describeVerificationAlignment } from "../lib/verification-helpers";
+import { Toggle } from "./shared";
 
 export interface ControlPropertiesPanelProps {
   selectedControl: PhysicalControl | null;
@@ -139,6 +141,18 @@ export function ControlPropertiesPanel({
           <div className="props-action__body">
             <strong className="props-action__name">{selectedBinding.label}</strong>
             <span className="props-action__detail">{describeActionSummary(selectedAction, snippetById)}</span>
+            {updateDraft ? (
+              <label className="props-action__toggle">
+                <Toggle
+                  checked={selectedBinding.enabled}
+                  onChange={(checked) =>
+                    updateDraft((c) => upsertBinding(c, { ...selectedBinding, enabled: checked }))
+                  }
+                  ariaLabel={t("properties.enabledToggle")}
+                />
+                <span>{selectedBinding.enabled ? t("common.enabled") : t("common.disabled")}</span>
+              </label>
+            ) : null}
           </div>
         ) : (
           <p className="props-action__empty">{t("properties.actionEmpty")}</p>

@@ -30,6 +30,7 @@ export function LayerPills({ selectedLayer, onSelectLayer }: LayerPillsProps) {
           <button
             key={layer.value}
             type="button"
+            aria-pressed={layer.value === selectedLayer}
             className={`pill-track__pill${layer.value === selectedLayer ? " pill-track__pill--active" : ""}`}
             onClick={() => onSelectLayer(layer.value)}
           >

@@ -72,6 +72,8 @@ export function useRuntime(deps: {
   setError: React.Dispatch<React.SetStateAction<CommandError | null>>;
   onEncodedKeyEvent?: (event: EncodedKeyEvent) => void;
   onControlResolutionEvent?: (preview: ResolvedInputPreview) => void;
+  /** When provided and false, skip execution-count bookkeeping (heatmap off). */
+  heatmapEnabledRef?: React.RefObject<boolean>;
 }): RuntimeControl {
   const { setError } = deps;
 
@@ -124,7 +126,10 @@ export function useRuntime(deps: {
       setLastExecution(event);
       setLastRuntimeError(null);
       const cid = event.controlId;
-      if (event.mode === "live" && cid) {
+      // Only maintain per-control execution counts when the heatmap is on —
+      // otherwise a held auto-repeating button clones the Map and re-renders
+      // the visualization on every repeat tick for data nothing displays.
+      if (event.mode === "live" && cid && (deps.heatmapEnabledRef?.current ?? true)) {
         setExecutionCounts((prev) => {
           const next = new Map(prev);
           next.set(cid, (next.get(cid) ?? 0) + 1);

@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { ACTION_CATEGORIES } from "../lib/constants";
-import { listenEncodedKeyEvent } from "../lib/backend";
+import { dryRunAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import {
   expectedEncodedKeyForControl,
+  makeSnippetId,
   upsertAction,
   upsertBinding,
   upsertEncoderMapping,
+  upsertSnippetLibraryItem,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
 import { ModalShell } from "./shared";
@@ -130,6 +132,8 @@ export function ActionPickerModal({
   const [shortcutDraft, setShortcutDraft] = useState(initial.shortcut);
   const [mouseDraft, setMouseDraft] = useState(initial.mouse);
   const [textDraft, setTextDraft] = useState(initial.text);
+  const [saveSnippetToLibrary, setSaveSnippetToLibrary] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [launchDraft, setLaunchDraft] = useState(initial.launch);
   const [mediaDraft, setMediaDraft] = useState(initial.media);
   const [profileDraft, setProfileDraft] = useState(initial.profile);
@@ -183,12 +187,26 @@ export function ActionPickerModal({
     const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
     let nextConfig = upsertAction(config, nextAction);
 
+    // Opt-in: also store this snippet's text in the reusable library.
+    if (saveSnippetToLibrary && effectiveCategory === "textSnippet" && textDraft.text.trim()) {
+      const snippetName = nameDraft.trim() || nextAction.pretty || textDraft.text.trim().slice(0, 30);
+      nextConfig = upsertSnippetLibraryItem(nextConfig, {
+        id: makeSnippetId(snippetName),
+        name: snippetName,
+        text: textDraft.text,
+        pasteMode: textDraft.pasteMode,
+        tags: [],
+      });
+    }
+
     if (binding) {
       nextConfig = upsertBinding(nextConfig, {
         ...binding,
         actionRef: nextAction.id,
         label: nextAction.pretty,
-        enabled: true,
+        // Preserve enabled state when editing an existing action; default-enable
+        // a brand-new assignment (placeholder bindings start disabled).
+        enabled: existingAction ? binding.enabled : true,
         triggerMode: triggerModeDraft === "press" ? undefined : triggerModeDraft,
         chordPartner: triggerModeDraft === "chord" && chordPartnerDraft
           ? chordPartnerDraft as ControlId
@@ -208,6 +226,20 @@ export function ActionPickerModal({
     }
 
     onSave(nextConfig);
+  }
+
+  async function handleTest() {
+    const draftAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
+    try {
+      const result = await dryRunAction(draftAction);
+      const detail =
+        result.warnings.length > 0
+          ? `${result.summary} — ${result.warnings.join("; ")}`
+          : result.summary;
+      setTestResult({ ok: true, text: detail });
+    } catch (error) {
+      setTestResult({ ok: false, text: normalizeCommandError(error).message });
+    }
   }
 
   return (
@@ -271,7 +303,13 @@ export function ActionPickerModal({
             ) : null}
 
             {effectiveCategory === "textSnippet" ? (
-              <TextSnippetEditor draft={textDraft} onChange={setTextDraft} />
+              <TextSnippetEditor
+                draft={textDraft}
+                onChange={setTextDraft}
+                library={config.snippetLibrary}
+                saveToLibrary={saveSnippetToLibrary}
+                onToggleSaveToLibrary={setSaveSnippetToLibrary}
+              />
             ) : null}
 
             {effectiveCategory === "sequence" ? (
@@ -358,9 +396,26 @@ export function ActionPickerModal({
           </div>
         </div>
 
+        {testResult ? (
+          <p
+            className={`action-picker__test-result${testResult.ok ? "" : " action-picker__test-result--error"}`}
+            role="status"
+          >
+            {testResult.text}
+          </p>
+        ) : null}
+
         <div className="action-picker__footer">
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>
             {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--ghost"
+            onClick={handleTest}
+            disabled={isSaveDisabled(effectiveCategory, drafts)}
+          >
+            {t("picker.test")}
           </button>
           <button
             type="button"

@@ -89,6 +89,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             <button
               key={level}
               type="button"
+              aria-pressed={levelFilter === level}
               className={`action-button action-button--small${levelFilter === level ? "" : " action-button--ghost"}`}
               onClick={() => {
                 setLevelFilter(level);
@@ -99,6 +100,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           ))}
           <select
             className="log-panel__category-select"
+            aria-label={t("log.categoryFilter")}
             value={categoryFilter}
             onChange={(e) => {
               setCategoryFilter(e.target.value);

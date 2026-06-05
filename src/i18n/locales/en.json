@@ -246,6 +246,7 @@
     "badgeInfo": "info",
     "badgeDebug": "debug",
     "allCategories": "All categories",
+    "categoryFilter": "Filter log by category",
     "export": "Export",
     "folder": "Log folder",
     "clear": "Clear",
@@ -325,6 +326,8 @@
     "heatmapDisable": "Disable heatmap",
     "searchPlaceholder": "Search bindings…",
     "searchMeta": "Found: {{count}}",
+    "searchAllProfiles": "All profiles",
+    "searchNoResults": "No matching bindings in any profile.",
     "dblClickSettings": "Double-click to open profile settings"
   },
   "newRule": {
@@ -383,6 +386,8 @@
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "Optional description",
     "unnamed": "Unnamed profile",
+    "renamedToUnnamed": "Profile name cannot be empty — renamed to “Unnamed profile”.",
+    "rerunOnboarding": "Re-run onboarding",
     "allProfilesHeader": "ALL PROFILES",
     "priorityMeta": "Priority: {{priority}}",
     "disabledMeta": "Disabled",
@@ -449,10 +454,20 @@
     "autostartReregisterButton": "Re-register for current path",
     "osdPreviewProfileLabel": "Profile:"
   },
+  "conflict": {
+    "banner_one": "{{count}} shortcut conflict on this layer",
+    "banner_other": "{{count}} shortcut conflicts on this layer",
+    "group": "{{signature}} — {{controls}}"
+  },
   "command": {
     "undo": "Undo",
     "redo": "Redo",
     "reload": "Reload from disk",
+    "newProfile": "New profile",
+    "duplicateProfile": "Duplicate profile",
+    "addRule": "Add app rule",
+    "openConfigFolder": "Open config folder",
+    "captureWindow": "Capture active window",
     "gotoProfiles": "Go to: Profiles",
     "gotoDebug": "Go to: Diagnostics",
     "gotoSettings": "Go to: Settings",
@@ -533,6 +548,7 @@
     "status": "Status",
     "actionEyebrow": "Assigned action",
     "actionEmpty": "No assignment has been created for this button on the current layer.",
+    "enabledToggle": "Toggle whether this binding is active",
     "expected": "Expected",
     "configured": "Configured",
     "observed": "Observed",
@@ -595,6 +611,7 @@
   },
   "picker": {
     "title": "Assign action",
+    "test": "Test",
     "searchPlaceholder": "Search action...",
     "keyLabel": "Key",
     "keyCapturing": "Press a key...",
@@ -605,6 +622,7 @@
     "textLabel": "Text",
     "textPlaceholder": "Enter text to type...",
     "programLabel": "Program",
+    "launchTargetHint": "You can also enter a URL (https://…) or a folder path.",
     "launchArgsLabel": "Arguments",
     "launchArgsPlaceholder": "--flag value",
     "launchWorkingDirLabel": "Working directory",
@@ -688,6 +706,9 @@
   },
   "snippet": {
     "eyebrow": "Snippet library",
+    "insertFromLibrary": "Insert from library",
+    "insertPlaceholder": "Choose a snippet…",
+    "saveToLibrary": "Also save to snippet library",
     "id": "Snippet ID",
     "name": "Snippet name",
     "text": "Snippet text",

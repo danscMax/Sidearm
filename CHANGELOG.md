@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.21] — 2026-06-05
+
+### Added
+- **Binding context menu** — right-click a mouse button to edit, duplicate, copy
+  to the other layer, enable/disable, or clear its binding.
+- **"Test" button in the action picker** — runs the draft action for real
+  (3-2-1 countdown so you can switch to the target window; Launch/URL fires
+  immediately), instead of only describing it.
+- **Shortcut-conflict banner** naming the clashing buttons on the current layer.
+- **Per-binding enable/disable toggle** in the inspector.
+- **Launch action opens URLs and folders**, not just executables.
+- **Cross-profile binding search** — find where a shortcut is bound across all
+  profiles.
+- **Snippet library** — insert from / save to the reusable snippet library in
+  the text editor.
+- **Command palette** gains new/duplicate profile, add rule, open config folder,
+  and capture window.
+- **Keyboard**: Enter opens the picker, Delete clears the selected control's
+  binding.
+
+### Changed
+- Visual polish: toast colors aligned to design tokens, button hover states,
+  `:focus-visible` on toolbar/titlebar controls, radius tokens, richer empty
+  states.
+- Accessibility: `aria-pressed`/`aria-current` on toggle groups, localized
+  `ErrorBoundary` and onboarding, onboarding focus-trap + Escape.
+- Reliability: per-keystroke debug logging gated behind `SIDEARM_DEBUG_CAPTURE`,
+  a single OSD hide-timer thread, clipboard auto-repair moved off the worker
+  thread, atomic config copies during migration, date-safe snapshot pruning, and
+  a clearer restore error for unreachable backup paths.
+- Mouse illustrations downscaled (~0.8 MB smaller install).
+- Tooling: `clippy` wired into `check:rust` (+ strict `lint:rust`); the portable
+  build script now stops a running app before compiling.
+
+### Fixed
+- Editing a binding no longer silently re-enables one you deliberately disabled;
+  first-time assignments now correctly save as enabled.
+- Destructive confirmation dialogs use a red (danger) button.
+
 ## [0.1.20] — 2026-06-04
 
 ### Fixed

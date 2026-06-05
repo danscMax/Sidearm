@@ -66,6 +66,15 @@ pub fn send_shortcut(
         payload.key,
         encoding_mods.ctrl, encoding_mods.shift, encoding_mods.alt, encoding_mods.win,
     );
+
+    // Opt-in clipboard-copy diagnostic (SIDEARM_CLIPBOARD_DIAG=1): record the
+    // clipboard sequence number before a copy/cut shortcut so the post-send
+    // snapshot can tell whether the target app actually replaced the clipboard.
+    #[cfg(target_os = "windows")]
+    let clipboard_diag = clipboard_diag_enabled() && is_clipboard_shortcut(payload);
+    #[cfg(target_os = "windows")]
+    let clipboard_seq_before = if clipboard_diag { clipboard_sequence_number() } else { 0 };
+
     clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
     log::info!(
@@ -91,6 +100,13 @@ pub fn send_shortcut(
             let _ = send_keyboard_inputs(&cleanup);
         }
         return Err(send_error);
+    }
+
+    // Post-copy clipboard snapshot for the opt-in diagnostic — no-op unless enabled
+    // and the shortcut is a copy/cut combo. Best-effort: reads, never writes.
+    #[cfg(target_os = "windows")]
+    if clipboard_diag {
+        run_clipboard_copy_diagnostic(payload, clipboard_seq_before);
     }
 
     let warnings = if reused_modifiers.is_empty() {
@@ -350,6 +366,425 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
 fn paste_via_clipboard(_text: &str) -> Result<(), String> {
     Err("Clipboard paste is not implemented for this platform".into())
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard mojibake repair
+// ---------------------------------------------------------------------------
+//
+// Repairs the "valid UTF-8 bytes read as Latin-1" corruption that the VS Code /
+// xterm.js integrated terminal produces from a tool's OSC 52 clipboard write
+// (UTF-8 byte 0xD1 -> U+00D1, etc.). Not Sidearm's bug, but Sidearm can undo it
+// on demand. Deliberately conservative — see `repair_latin1_mojibake`.
+
+/// Re-decode a string that is valid UTF-8 mis-read as Latin-1 (each UTF-8 byte
+/// widened to a U+00xx code unit). Returns `Some(fixed)` ONLY when the repair is
+/// unambiguous, so legitimate Western-European text is never mangled:
+/// - every char must be <= U+00FF (so the chars ARE the original bytes);
+/// - those bytes must form valid UTF-8;
+/// - the decoded result must differ AND contain a char >= U+0100 (i.e. it really
+///   un-mangled into non-Latin-1 text such as Cyrillic).
+///
+/// `café` / `über` viewed as Latin-1 bytes are not valid UTF-8, so they return
+/// `None` (left untouched).
+pub fn repair_latin1_mojibake(s: &str) -> Option<String> {
+    if s.is_empty() || s.chars().any(|c| c as u32 > 0xFF) {
+        return None;
+    }
+    let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
+    let decoded = String::from_utf8(bytes).ok()?;
+    if decoded == s || !decoded.chars().any(|c| c as u32 >= 0x100) {
+        return None;
+    }
+    Some(decoded)
+}
+
+/// Read the clipboard's Unicode text (best-effort); `None` if empty/non-text.
+#[cfg(target_os = "windows")]
+fn clipboard_get_text() -> Option<String> {
+    use std::{ptr, thread, time::Duration};
+    use windows_sys::Win32::System::{
+        DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard},
+        Memory::{GlobalLock, GlobalUnlock},
+        Ole::CF_UNICODETEXT,
+    };
+    for attempt in 0..10u32 {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            let text = unsafe {
+                let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
+                if handle.is_null() {
+                    None
+                } else {
+                    let locked = GlobalLock(handle);
+                    if locked.is_null() {
+                        None
+                    } else {
+                        let wide = locked as *const u16;
+                        let mut len = 0usize;
+                        while *wide.add(len) != 0 {
+                            len += 1;
+                        }
+                        let t = String::from_utf16_lossy(std::slice::from_raw_parts(wide, len));
+                        let _ = GlobalUnlock(handle);
+                        Some(t)
+                    }
+                }
+            };
+            unsafe { CloseClipboard() };
+            return text;
+        }
+        if attempt + 1 < 10 {
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    None
+}
+
+/// Replace the clipboard's text with `text` (CF_UNICODETEXT).
+#[cfg(target_os = "windows")]
+fn clipboard_set_text(text: &str) -> Result<(), String> {
+    use std::{ptr, thread, time::Duration};
+    use windows_sys::Win32::{
+        Foundation::GlobalFree,
+        System::{
+            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            Ole::CF_UNICODETEXT,
+        },
+    };
+    let mut opened = false;
+    for attempt in 0..10u32 {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            opened = true;
+            break;
+        }
+        if attempt + 1 < 10 {
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    if !opened {
+        return Err("OpenClipboard failed after 10 retries".into());
+    }
+    let result = unsafe {
+        EmptyClipboard();
+        let encoded: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
+        let byte_len = encoded.len() * std::mem::size_of::<u16>();
+        let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
+        if handle.is_null() {
+            Err("GlobalAlloc failed".to_string())
+        } else {
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                let _ = GlobalFree(handle);
+                Err("GlobalLock failed".to_string())
+            } else {
+                ptr::copy_nonoverlapping(encoded.as_ptr() as *const u8, locked as *mut u8, byte_len);
+                let _ = GlobalUnlock(handle);
+                if SetClipboardData(u32::from(CF_UNICODETEXT), handle).is_null() {
+                    let _ = GlobalFree(handle);
+                    Err("SetClipboardData failed".to_string())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+    };
+    unsafe { CloseClipboard() };
+    result
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_get_text() -> Option<String> {
+    let mut clipboard = arboard::Clipboard::new().ok()?;
+    clipboard.get_text().ok()
+}
+
+#[cfg(target_os = "linux")]
+fn clipboard_set_text(text: &str) -> Result<(), String> {
+    let mut clipboard =
+        arboard::Clipboard::new().map_err(|e| format!("Failed to open clipboard: {e}"))?;
+    clipboard
+        .set_text(text)
+        .map_err(|e| format!("Failed to set clipboard text: {e}"))
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn clipboard_get_text() -> Option<String> {
+    None
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn clipboard_set_text(_text: &str) -> Result<(), String> {
+    Err("Clipboard set is not implemented for this platform".into())
+}
+
+/// Read the clipboard, repair UTF-8-as-Latin-1 mojibake if present, and write the
+/// fix back. `Ok(Some(fixed))` if it repaired, `Ok(None)` if there was nothing to do.
+pub fn repair_clipboard() -> Result<Option<String>, String> {
+    let current = match clipboard_get_text() {
+        Some(text) => text,
+        None => return Ok(None),
+    };
+    match repair_latin1_mojibake(&current) {
+        Some(fixed) => {
+            clipboard_set_text(&fixed)?;
+            Ok(Some(fixed))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Auto-repair variant: wait (bounded) for a just-issued copy to land on the
+/// clipboard (its sequence number changes), then repair. `Ok(None)` if the copy
+/// never landed within the timeout or there was nothing to fix.
+#[cfg(target_os = "windows")]
+pub fn repair_clipboard_after_copy(seq_before: u32) -> Result<Option<String>, String> {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    let deadline = Instant::now() + Duration::from_millis(400);
+    loop {
+        if clipboard_sequence_number() != seq_before {
+            return repair_clipboard();
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Clipboard-copy diagnostic (opt-in via SIDEARM_CLIPBOARD_DIAG=1)
+// ---------------------------------------------------------------------------
+//
+// Investigates an intermittent report: copying Cyrillic from a terminal with a
+// synthesized `Ctrl+C` occasionally lands mojibake (valid UTF-8 read as CP1251)
+// in the clipboard, while a physical `Ctrl+C` is always correct. Sidearm never
+// writes the clipboard on a copy shortcut — the foreground app does — so this
+// snapshots what actually ends up there right after our keystroke, to localize
+// where the corruption enters (which format carries it, and whether our copy
+// even registered). Fully gated behind the env flag: a no-op (no clipboard
+// access, no behavior change) when unset.
+
+#[cfg(target_os = "windows")]
+static CLIPBOARD_DIAG_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Whether the opt-in clipboard diagnostic is enabled (`SIDEARM_CLIPBOARD_DIAG=1`).
+/// Read once and cached for the process lifetime.
+#[cfg(target_os = "windows")]
+fn clipboard_diag_enabled() -> bool {
+    use std::sync::OnceLock;
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SIDEARM_CLIPBOARD_DIAG")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
+/// True when the shortcut copies/cuts to the clipboard (Ctrl+C / Ctrl+X /
+/// Ctrl+Insert) — the only combos whose post-send clipboard is worth snapshotting.
+#[cfg(target_os = "windows")]
+pub(crate) fn is_clipboard_shortcut(payload: &ShortcutActionPayload) -> bool {
+    if payload.win || !payload.ctrl {
+        return false;
+    }
+    let key = payload.key.trim();
+    key.eq_ignore_ascii_case("c")
+        || key.eq_ignore_ascii_case("x")
+        || key.eq_ignore_ascii_case("insert")
+        || key.eq_ignore_ascii_case("ins")
+}
+
+#[cfg(target_os = "windows")]
+pub(crate) fn clipboard_sequence_number() -> u32 {
+    unsafe { windows_sys::Win32::System::DataExchange::GetClipboardSequenceNumber() }
+}
+
+/// Log the foreground window, then snapshot the clipboard after a short delay
+/// (the target app writes the clipboard asynchronously after Ctrl+C). Best-effort.
+#[cfg(target_os = "windows")]
+fn run_clipboard_copy_diagnostic(payload: &ShortcutActionPayload, seq_before: u32) {
+    use std::sync::atomic::Ordering;
+    let n = CLIPBOARD_DIAG_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+    let foreground = crate::platform::window::capture_foreground_window()
+        .map(|window| format!("{} \"{}\"", window.exe, window.title))
+        .unwrap_or_else(|error| format!("<unknown: {error}>"));
+    log::info!(
+        "[clipboard-diag] #{n} shortcut={}{}{}{} fg={foreground}",
+        if payload.ctrl { "Ctrl+" } else { "" },
+        if payload.shift { "Shift+" } else { "" },
+        if payload.alt { "Alt+" } else { "" },
+        payload.key,
+    );
+    std::thread::sleep(std::time::Duration::from_millis(80));
+    clipboard_diagnostic_snapshot("[clipboard-diag]", seq_before);
+}
+
+/// Read-only snapshot: sequence-number delta, the available formats, and the
+/// bytes behind `CF_UNICODETEXT`, `CF_TEXT`, and any custom text-ish format
+/// (e.g. Chromium/VS Code `text/plain;charset=utf-8`). All best-effort; failures
+/// are logged and swallowed — never affects the copy.
+#[cfg(target_os = "windows")]
+fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
+    use std::{ptr, thread, time::Duration};
+    use windows_sys::Win32::System::{
+        DataExchange::{
+            CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
+            GetClipboardSequenceNumber, OpenClipboard,
+        },
+        Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+        Ole::{CF_TEXT, CF_UNICODETEXT},
+    };
+
+    let seq_after = unsafe { GetClipboardSequenceNumber() };
+    let changed = seq_before != seq_after;
+
+    let mut opened = false;
+    for attempt in 0..10u32 {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            opened = true;
+            break;
+        }
+        if attempt + 1 < 10 {
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    if !opened {
+        log::warn!(
+            "{tag} seq {seq_before}->{seq_after} changed={changed} — OpenClipboard failed; no snapshot"
+        );
+        return;
+    }
+
+    // Raw bytes (GlobalSize-bounded) of an arbitrary clipboard format.
+    let grab = |fmt: u32, cap: usize| -> Option<Vec<u8>> {
+        unsafe {
+            let handle = GetClipboardData(fmt);
+            if handle.is_null() {
+                return None;
+            }
+            let size = GlobalSize(handle);
+            if size == 0 {
+                return None;
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                return None;
+            }
+            let n = (size as usize).min(cap);
+            let bytes = std::slice::from_raw_parts(locked as *const u8, n).to_vec();
+            let _ = GlobalUnlock(handle);
+            Some(bytes)
+        }
+    };
+
+    // Formats the source actually placed.
+    let mut formats: Vec<(u32, Option<String>)> = Vec::new();
+    unsafe {
+        let mut fmt = EnumClipboardFormats(0);
+        while fmt != 0 {
+            let mut name = [0u16; 80];
+            let len = GetClipboardFormatNameW(fmt, name.as_mut_ptr(), name.len() as i32);
+            let name = (len > 0).then(|| String::from_utf16_lossy(&name[..len as usize]));
+            formats.push((fmt, name));
+            fmt = EnumClipboardFormats(fmt);
+        }
+    }
+    let formats_label = formats
+        .iter()
+        .map(|(id, name)| match name {
+            Some(name) => format!("{id}:{name}"),
+            None => id.to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    // CF_UNICODETEXT — the canonical Unicode payload. The u16 hex reveals whether
+    // Cyrillic is intact (U+04xx) or mojibake (Ð/Ñ… = U+00Dx).
+    let unicode = unsafe {
+        let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
+        if handle.is_null() {
+            None
+        } else {
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                None
+            } else {
+                let wide = locked as *const u16;
+                let mut len = 0usize;
+                while len < 16_384 && *wide.add(len) != 0 {
+                    len += 1;
+                }
+                let units = std::slice::from_raw_parts(wide, len);
+                let preview = String::from_utf16_lossy(units)
+                    .chars()
+                    .take(40)
+                    .collect::<String>()
+                    .replace('\n', "\\n")
+                    .replace('\r', "\\r");
+                let hex = units
+                    .iter()
+                    .take(32)
+                    .map(|unit| format!("{unit:04X}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let _ = GlobalUnlock(handle);
+                Some((len, preview, hex))
+            }
+        }
+    };
+
+    let ansi = grab(u32::from(CF_TEXT), 64);
+
+    // Custom text-ish formats (Chromium/VS Code "text/plain;charset=utf-8", HTML) —
+    // prime suspects for UTF-8 bytes mislabeled / read as CP1251 by a paste target.
+    let custom: Vec<(String, Vec<u8>)> = formats
+        .iter()
+        .filter_map(|(id, name)| {
+            let name = name.as_ref()?;
+            let lname = name.to_ascii_lowercase();
+            let texty = lname.contains("text") || lname.contains("utf") || lname.contains("html");
+            if *id >= 0xC000 && texty {
+                grab(*id, 64).map(|bytes| (name.clone(), bytes))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    unsafe { CloseClipboard() };
+
+    let hex = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    log::info!("{tag} seq {seq_before}->{seq_after} changed={changed} formats=[{formats_label}]");
+    match &unicode {
+        Some((len, preview, u16hex)) => {
+            log::info!("{tag} CF_UNICODETEXT units={len} text=\"{preview}\" u16=[{u16hex}]")
+        }
+        None => log::info!("{tag} CF_UNICODETEXT absent"),
+    }
+    match &ansi {
+        Some(bytes) => log::info!("{tag} CF_TEXT bytes={} hex=[{}]", bytes.len(), hex(bytes)),
+        None => log::info!("{tag} CF_TEXT absent"),
+    }
+    for (name, bytes) in &custom {
+        let utf8 = String::from_utf8_lossy(bytes)
+            .chars()
+            .take(40)
+            .collect::<String>()
+            .replace('\n', "\\n")
+            .replace('\r', "\\r");
+        log::info!("{tag} «{name}» bytes={} utf8=\"{utf8}\" hex=[{}]", bytes.len(), hex(bytes));
+    }
 }
 
 /// All modifiers must be cleared for text injection — held Ctrl/Alt corrupts
@@ -1740,6 +2175,46 @@ mod tests {
             codes(&modifier_reassert_inputs(true, true)),
             vec![(VK_LCONTROL, true), (VK_LMENU, true)],
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn is_clipboard_shortcut_matches_copy_cut_combos_only() {
+        let mk = |ctrl: bool, shift: bool, alt: bool, win: bool, key: &str| ShortcutActionPayload {
+            key: key.into(),
+            ctrl,
+            shift,
+            alt,
+            win,
+            raw: None,
+        };
+        // Copy / cut / clipboard-insert.
+        assert!(is_clipboard_shortcut(&mk(true, false, false, false, "C")));
+        assert!(is_clipboard_shortcut(&mk(true, false, false, false, "x")));
+        assert!(is_clipboard_shortcut(&mk(true, false, false, false, "Insert")));
+        // Not a copy combo: paste, bare key, Win-modified, unrelated key.
+        assert!(!is_clipboard_shortcut(&mk(true, false, false, false, "V")));
+        assert!(!is_clipboard_shortcut(&mk(false, false, false, false, "C")));
+        assert!(!is_clipboard_shortcut(&mk(true, false, false, true, "C")));
+        assert!(!is_clipboard_shortcut(&mk(true, false, false, false, "A")));
+    }
+
+    #[test]
+    fn repair_latin1_mojibake_fixes_utf8_read_as_latin1() {
+        // UTF-8 bytes of "Привет" widened to Latin-1 code units (the OSC 52 bug).
+        let mojibake: String = "Привет".bytes().map(|b| b as char).collect();
+        assert_ne!(mojibake, "Привет");
+        assert_eq!(repair_latin1_mojibake(&mojibake).as_deref(), Some("Привет"));
+    }
+
+    #[test]
+    fn repair_latin1_mojibake_leaves_clean_text_untouched() {
+        // ASCII, legitimate Latin-1, already-correct Cyrillic, and empty must not change.
+        assert_eq!(repair_latin1_mojibake("Docker build ok"), None);
+        assert_eq!(repair_latin1_mojibake("café"), None);
+        assert_eq!(repair_latin1_mojibake("über"), None);
+        assert_eq!(repair_latin1_mojibake("Привет"), None);
+        assert_eq!(repair_latin1_mojibake(""), None);
     }
 
     #[test]

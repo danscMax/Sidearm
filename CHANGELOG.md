@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.22] — 2026-06-06
+
+### Security
+- Updated `vite` (8.0.16) and `picomatch` (4.0.4) to clear known advisories — a
+  path traversal and an arbitrary file read in the vite dev server, and a
+  picomatch ReDoS. Dev toolchain only; the shipped app is unaffected.
+
+### Changed
+- Renamed two persisted config fields for consistency: `actionRef` → `actionId`
+  and `pretty` → `displayName`. Backward-compatible — existing configs still load
+  and are migrated to the new names on the next save.
+
+### Internal
+- Added a CI pipeline (typecheck · tests · clippy · cargo test) and `knip`
+  dead-code detection wired into `npm run check`; hardened the dependency-audit
+  workflow (prebuilt cargo-audit, prod-only `npm audit`, Node 24 action majors).
+
 ## [0.1.21] — 2026-06-05
 
 ### Added

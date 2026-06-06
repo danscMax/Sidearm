@@ -39,7 +39,10 @@ jobs:
       - run: npm ci
       # Build the frontend first so tauri-build (build.rs) finds frontendDist (../dist).
       - run: npm run build
-      - uses: dtolnay/rust-toolchain@stable
+      # Pinned to the local dev toolchain (rustc 1.94.0): clippy lints drift between
+      # Rust releases, so a floating @stable fails the gate whenever a newer clippy
+      # adds lints that the locally-verified version does not flag. Bump deliberately.
+      - uses: dtolnay/rust-toolchain@1.94.0
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2

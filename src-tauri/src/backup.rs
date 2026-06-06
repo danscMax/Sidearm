@@ -200,7 +200,7 @@ pub fn list_backups(config_dir: &Path) -> io::Result<Vec<BackupEntry>> {
         }
     }
 
-    entries.sort_by(|a, b| b.modified_ms.cmp(&a.modified_ms));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.modified_ms));
     Ok(entries)
 }
 

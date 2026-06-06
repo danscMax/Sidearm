@@ -367,11 +367,9 @@ fn assign_mapping_text(b: &mut MappingBuilder, stack: &[String], text: &str) {
         "VirtualKey" => b.key_vk = text.parse().ok(),
         "Modifier" => b.key_modifier = text.to_string(),
         "MouseAssignment" => b.mouse_assignment = text.to_string(),
-        "Id" => {
-            // Only consume <Id> inside <MacroGroup>.
-            if stack.iter().any(|s| s == "MacroGroup") {
-                b.macro_guid = text.to_string();
-            }
+        // Only consume <Id> inside <MacroGroup>.
+        "Id" if stack.iter().any(|s| s == "MacroGroup") => {
+            b.macro_guid = text.to_string();
         }
         _ => {}
     }

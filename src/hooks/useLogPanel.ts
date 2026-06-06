@@ -2,9 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { attachLogger } from "@tauri-apps/plugin-log";
 import { appendToBoundedArray } from "../lib/helpers";
 
-export type LogLevelFilter = "all" | "error" | "warn" | "info" | "debug";
+type LogLevelFilter = "all" | "error" | "warn" | "info" | "debug";
 
-export interface LogPanelEntry {
+interface LogPanelEntry {
   id: number;
   level: "error" | "warn" | "info" | "debug" | "trace";
   category: string;

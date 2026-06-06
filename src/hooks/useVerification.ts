@@ -16,6 +16,7 @@ import type {
 import type {
   EncodedKeyEvent,
   ResolvedInputPreview,
+  RuntimeStatus,
   WindowCaptureResult,
 } from "../lib/runtime";
 import {
@@ -76,7 +77,7 @@ export function useVerification(deps: {
   selectedControlId: ControlId | null;
   setSelectedLayer: React.Dispatch<React.SetStateAction<Layer>>;
   setSelectedControlId: React.Dispatch<React.SetStateAction<ControlId | null>>;
-  runtimeStatus: import("../lib/runtime").RuntimeStatus;
+  runtimeStatus: RuntimeStatus;
   ensureRuntimeStarted: () => Promise<void>;
   clearRuntimeError: () => void;
   lastEncodedKey: EncodedKeyEvent | null;

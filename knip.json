@@ -1,8 +1,4 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["public/osd.js"],
-  "ignoreExportsUsedInFile": {
-    "interface": true,
-    "type": true
-  }
+  "entry": ["public/osd.js"]
 }

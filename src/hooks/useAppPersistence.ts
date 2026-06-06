@@ -6,13 +6,14 @@ import type {
   CommandError,
   LoadConfigResponse,
   SaveConfigResponse,
+  ValidationWarning,
 } from "../lib/config";
 import type { ViewState } from "../lib/constants";
 
 const MAX_UNDO = 15;
 const AUTO_SAVE_DELAY_MS = 500;
 
-export interface UpdateDraftOptions {
+interface UpdateDraftOptions {
   /**
    * Skip the 500 ms debounce and flush the save immediately. Use for explicit
    * commit moments (Save button in a modal, import, profile switch) where
@@ -35,7 +36,7 @@ export interface AppPersistence {
 
   // Derived
   activeConfig: AppConfig | null;
-  activeWarnings: import("../lib/config").ValidationWarning[];
+  activeWarnings: ValidationWarning[];
   activePath: string;
 
   // Functions

@@ -55,7 +55,7 @@ export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "ch
 
 export type PasteMode = "clipboardPaste" | "sendText";
 
-export type ValidationSeverity = "warning";
+type ValidationSeverity = "warning";
 
 export interface ValidationWarning {
   code: string;
@@ -211,7 +211,7 @@ export type MouseActionKind =
   | "mouseBack"
   | "mouseForward";
 
-export interface MouseActionPayload {
+interface MouseActionPayload {
   action: MouseActionKind;
   ctrl?: boolean;
   shift?: boolean;
@@ -228,20 +228,20 @@ export type MediaKeyKind =
   | "volumeDown"
   | "mute";
 
-export interface MediaKeyPayload {
+interface MediaKeyPayload {
   key: MediaKeyKind;
 }
 
-export interface ProfileSwitchPayload {
+interface ProfileSwitchPayload {
   targetProfileId: string;
 }
 
-export type DisabledActionPayload = Record<string, never>;
+type DisabledActionPayload = Record<string, never>;
 
 /** Clipboard-repair action payload. `strategy` is required (mirrors the Rust
  *  `RepairClipboardActionPayload`) so the serialized payload is
  *  `{"strategy":"latin1"}` and never collides with the empty disabled payload. */
-export interface RepairClipboardPayload {
+interface RepairClipboardPayload {
   strategy: "latin1";
 }
 
@@ -325,7 +325,7 @@ export interface AppPathsInfo {
   needsPortableMigrationPrompt: boolean;
 }
 
-export type BackupKind =
+type BackupKind =
   | { kind: "rolling"; value: number }
   | { kind: "snapshot"; value: string }
   | { kind: "lastKnownGood" };

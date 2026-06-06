@@ -2,7 +2,7 @@ import type { ActionType, ControlId, Layer, MappingSource, TriggerMode } from ".
 
 export type RuntimeStatus = "idle" | "running";
 
-export type DebugLogLevel = "debug" | "info" | "warn" | "error";
+type DebugLogLevel = "debug" | "info" | "warn" | "error";
 
 export type RuntimeEventName =
   | "runtime_started"
@@ -15,9 +15,9 @@ export type ControlResolutionEventName = "control_resolved";
 export type ActionExecutionEventName = "action_executed";
 export type RuntimeErrorEventName = "runtime_error";
 
-export type ResolutionStatus = "resolved" | "unresolved" | "ambiguous" | "conditionUnmet";
-export type ExecutionMode = "dryRun" | "live";
-export type ExecutionOutcome = "spawned" | "injected" | "simulated" | "noop";
+type ResolutionStatus = "resolved" | "unresolved" | "ambiguous" | "conditionUnmet";
+type ExecutionMode = "dryRun" | "live";
+type ExecutionOutcome = "spawned" | "injected" | "simulated" | "noop";
 
 export interface RuntimeStateSummary {
   status: RuntimeStatus;

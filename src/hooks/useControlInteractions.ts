@@ -9,7 +9,7 @@ import type { ControlSurfaceEntry } from "../lib/constants";
 import { buildBindingDragData, HEAT_TINT, parseBindingDragData } from "../lib/mouse-visual";
 
 /** Event-handler bundle spread onto an interactive control (a `<button>` or SVG `<g>`). */
-export interface ControlInteractionProps {
+interface ControlInteractionProps {
   onClick: (e: React.MouseEvent<Element>) => void;
   onDoubleClick: (e: React.MouseEvent<Element>) => void;
   /** Omitted when the control opts out of a context menu (e.g. the side grid). */

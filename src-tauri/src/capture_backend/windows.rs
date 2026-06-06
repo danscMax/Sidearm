@@ -94,27 +94,27 @@ fn debug_capture_enabled() -> bool {
 
 thread_local! {
     static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
-        std::cell::RefCell::new(Vec::new());
+        const { std::cell::RefCell::new(Vec::new()) };
     static HELPER_MODIFIERS: std::cell::RefCell<HelperModifierState> =
         std::cell::RefCell::new(HelperModifierState::default());
     static HELPER_SUPPRESSIONS: std::cell::RefCell<std::collections::HashMap<u32, String>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
-        std::cell::RefCell::new(Vec::new());
-    static HELPER_THREAD_ID: std::cell::Cell<u32> = std::cell::Cell::new(0);
+        const { std::cell::RefCell::new(Vec::new()) };
+    static HELPER_THREAD_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     /// Set to `true` by the hook callback when it receives a probe event
     /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
-    static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Set to `true` by the hook callback on ANY invocation (real key or probe).
     /// Consumed (replaced with `false`) by the health monitor each cycle.
     /// When `true`, the hook is demonstrably alive — no probe needed.
-    static HOOK_HAD_CALLBACK: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    static HOOK_HAD_CALLBACK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 
     /// Buffered modifier-down events waiting for an F-key match.
     /// If an F-key match arrives within the timeout, these were Razer encoding
     /// and should stay suppressed. If timeout expires, replay them via SendInput.
     static PENDING_MODIFIERS: std::cell::RefCell<Vec<PendingModifier>> =
-        std::cell::RefCell::new(Vec::new());
+        const { std::cell::RefCell::new(Vec::new()) };
 
     /// VK codes of modifiers consumed by an F-key match, mapped to the time
     /// they were consumed.  Their key-up events must be suppressed (Razer
@@ -480,16 +480,16 @@ thread_local! {
     /// Active threshold on the helper thread. Set once from the stdin init
     /// payload; defaults to the compile-time default if unset.
     static CONSUMED_MODIFIER_STALE_THRESHOLD: std::cell::Cell<std::time::Duration> =
-        std::cell::Cell::new(std::time::Duration::from_millis(
+        const { std::cell::Cell::new(std::time::Duration::from_millis(
             DEFAULT_CONSUMED_MODIFIER_STALE_MS,
-        ));
+        )) };
 
     /// Active threshold for force-releasing orphan replayed modifiers.
     /// Set from stdin init payload; defaults to compile-time default.
     static REPLAYED_AWAITING_UP_THRESHOLD: std::cell::Cell<std::time::Duration> =
-        std::cell::Cell::new(std::time::Duration::from_millis(
+        const { std::cell::Cell::new(std::time::Duration::from_millis(
             DEFAULT_REPLAYED_AWAITING_UP_MS,
-        ));
+        )) };
 
     /// Re-entrancy guard: set to `true` while `flush_expired_pending_modifiers`
     /// is between inserting into `REPLAYED_AWAITING_UP` and the matching
@@ -500,7 +500,7 @@ thread_local! {
     ///
     /// Cleared at the end of flush.  Read by the fresh-down clearing site to
     /// short-circuit `REPLAYED_AWAITING_UP.remove(&vk)` while flushing.
-    static FLUSHING_REPLAYED: std::cell::Cell<bool> = std::cell::Cell::new(false);
+    static FLUSHING_REPLAYED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Pure decision: should a real (non-injected) modifier-down event be
@@ -1661,11 +1661,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
                 // terminal → Ctrl stays held until I press Ctrl again" bug.
                 let pending_entry = PENDING_MODIFIERS.with(|cell| {
                     let mut pending = cell.borrow_mut();
-                    if let Some(pos) = pending.iter().position(|pm| pm.vk == vk) {
-                        Some(pending.remove(pos))
-                    } else {
-                        None
-                    }
+                    pending.iter().position(|pm| pm.vk == vk).map(|pos| pending.remove(pos))
                 });
                 if let Some(pm) = pending_entry {
                     HELPER_MATCHES.with(|cell| {
@@ -3510,7 +3506,7 @@ mod capture_diag {
         }
 
         thread_local! {
-            static TEST_HOOK: RefCell<Option<TestHookState>> = RefCell::new(None);
+            static TEST_HOOK: RefCell<Option<TestHookState>> = const { RefCell::new(None) };
         }
 
         unsafe extern "system" fn test_hook_proc(
@@ -3621,7 +3617,7 @@ mod capture_diag {
         log::debug!("\n=== TEST: WH_KEYBOARD_LL + SendInput(F13) ===");
 
         thread_local! {
-            static TEST_HITS: RefCell<Vec<u32>> = RefCell::new(Vec::new());
+            static TEST_HITS: RefCell<Vec<u32>> = const { RefCell::new(Vec::new()) };
         }
 
         unsafe extern "system" fn test_hook_proc(
@@ -3661,7 +3657,7 @@ mod capture_diag {
         let hits = TEST_HITS.with(|cell| cell.borrow().clone());
         log::debug!("  Hook received {} key-down events: {:?}", hits.len(), hits);
 
-        let f13_hit = hits.iter().any(|vk| *vk == VK_F13 as u32);
+        let f13_hit = hits.contains(&(VK_F13 as u32));
         if f13_hit {
             log::debug!("  RESULT: LL hook CAN catch simple F13 via SendInput");
         } else {
@@ -4044,6 +4040,9 @@ mod edge_proptests {
     //   to bound memory) is not accidentally changed to an unbounded value.
     // -----------------------------------------------------------------------
 
+    // Deliberate const range-guard: clippy flags the always-true asserts, but that
+    // is the point — they fail the build if the const is later edited out of range.
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn unit_capture_event_channel_capacity_is_bounded_and_reasonable() {
         // CAPTURE_EVENT_CAPACITY is now a module-level const, so this test
@@ -4268,6 +4267,9 @@ mod edge_proptests {
             "modifier bit mask must fit in low 16 bits");
     }
 
+    // Deliberate const range-guard (see note above): asserts catch a future edit
+    // that pushes these thresholds out of the sane millisecond range.
+    #[allow(clippy::assertions_on_constants)]
     #[test]
     fn unit_default_thresholds_within_sane_range() {
         // DEFAULT_CONSUMED_MODIFIER_STALE_MS and DEFAULT_REPLAYED_AWAITING_UP_MS

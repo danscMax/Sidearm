@@ -232,8 +232,7 @@ pub fn translate_key_token(token: &str) -> Result<String, KeyTranslationError> {
                 return Ok(rest.to_string());
             }
         }
-        if rest.starts_with('F') {
-            let tail = &rest[1..];
+        if let Some(tail) = rest.strip_prefix('F') {
             // Function keys exist only as F1..=F24. Reject F0, F25+ and absurd
             // numbers instead of blindly accepting any digit tail.
             if let Ok(n) = tail.parse::<u8>() {
@@ -694,7 +693,7 @@ mod edge_proptests {
         // VK_F1=0x70 .. VK_F24=0x87
         for i in 0u16..24 {
             let vk = 0x70 + i;
-            let name = vk_to_key(vk).expect(&format!("VK F{} (0x{vk:02X}) should resolve", i + 1));
+            let name = vk_to_key(vk).unwrap_or_else(|| panic!("VK F{} (0x{vk:02X}) should resolve", i + 1));
             assert_eq!(name, format!("F{}", i + 1));
         }
     }

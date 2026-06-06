@@ -359,7 +359,7 @@ mod tests {
             .filter_map(|e| e.ok())
             .collect();
         assert_eq!(entries.len(), 1, "one snapshot per day");
-        let contents = fs::read_to_string(&entries[0].path()).unwrap();
+        let contents = fs::read_to_string(entries[0].path()).unwrap();
         assert_eq!(contents, "day-a", "snapshot uses first save of day");
     }
 

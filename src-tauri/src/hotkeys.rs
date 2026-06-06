@@ -70,7 +70,7 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
     }
 
     let normalized = trimmed.to_ascii_uppercase();
-    let compact = normalized.replace(' ', "").replace('_', "");
+    let compact = normalized.replace([' ', '_'], "");
 
     if let Some(function_key) = parse_function_key(&compact) {
         return Ok(function_key);

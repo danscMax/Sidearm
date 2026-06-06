@@ -209,7 +209,7 @@ mod win {
         // BIND_OPTS3 -> BIND_OPTS2 -> BIND_OPTS is the layout windows-rs exposes.
         let mut bind_opts3 = BIND_OPTS3::default();
         bind_opts3.Base.Base.cbStruct = std::mem::size_of::<BIND_OPTS3>() as u32;
-        bind_opts3.Base.dwClassContext = CLSCTX_INPROC_SERVER.0 as u32;
+        bind_opts3.Base.dwClassContext = CLSCTX_INPROC_SERVER.0;
 
         let result: windows::core::Result<ITaskService> = unsafe {
             CoGetObject(

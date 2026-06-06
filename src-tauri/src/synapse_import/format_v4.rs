@@ -1010,7 +1010,7 @@ mod edge_proptests {
     #[test]
     fn overflow_base64_non_utf8_bytes_handled() {
         // 0xFF 0xFE is not valid UTF-8.
-        let bad_utf8 = base64::engine::general_purpose::STANDARD.encode(&[0xFFu8, 0xFE]);
+        let bad_utf8 = base64::engine::general_purpose::STANDARD.encode([0xFFu8, 0xFE]);
         let outer = format!(
             r#"{{"profiles":[{{"name":"X","payload":"{bad_utf8}","hash":""}}],"macros":[]}}"#
         );
@@ -1031,7 +1031,7 @@ mod edge_proptests {
     fn overflow_large_outer_json_no_hang() {
         // 500 profile envelopes with minimal invalid payloads.
         let entry = format!(r#"{{"name":"X","payload":"{}","hash":""}}"#, b64("{}"));
-        let entries: Vec<_> = std::iter::repeat(entry).take(500).collect();
+        let entries: Vec<_> = std::iter::repeat_n(entry, 500).collect();
         let outer = format!(r#"{{"profiles":[{}],"macros":[]}}"#, entries.join(","));
         // Must complete without hanging; results are either Ok (with warnings) or Err.
         let _ = parse_synapse_v4_str(&outer, "t".into());
@@ -1088,12 +1088,10 @@ mod edge_proptests {
             {"Type":1,"KeyEvent":{"Makecode":30,"State":null}},
             {"Type":1,"KeyEvent":{"Makecode":30,"State":1}}
         ]}"#;
-        let profile_inner = format!(
-            r#"{{"guid":"p","name":"P","mappings":[
-               {{"inputType":"DKMInput","inputID":"DKM_M_01","isHyperShift":false,
-                 "outputType":"macroGroup","macroGroup":{{"guid":"m"}}}}
-            ],"sidePanelMappings":{{"12ButtonSide":[]}}}}"#
-        );
+        let profile_inner = r#"{"guid":"p","name":"P","mappings":[
+               {"inputType":"DKMInput","inputID":"DKM_M_01","isHyperShift":false,
+                 "outputType":"macroGroup","macroGroup":{"guid":"m"}}
+            ],"sidePanelMappings":{"12ButtonSide":[]}}"#.to_string();
         let outer = format!(
             r#"{{"profiles":[{{"name":"P","payload":"{}","hash":""}}],
                  "macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,

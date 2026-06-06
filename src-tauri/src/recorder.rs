@@ -21,7 +21,9 @@ pub struct MacroRecording {
 }
 
 #[derive(Debug)]
+#[derive(Default)]
 enum RecorderState {
+    #[default]
     Idle,
     Recording {
         started_at: u64,
@@ -44,11 +46,6 @@ pub struct MacroRecorder {
     state: Option<RecorderState>,
 }
 
-impl Default for RecorderState {
-    fn default() -> Self {
-        RecorderState::Idle
-    }
-}
 
 impl MacroRecorder {
     pub fn new() -> Self {
@@ -368,18 +365,11 @@ mod edge_proptests {
             recorder.record_keystroke("B".into(), gap_ms);
             let recording = recorder.stop(gap_ms + 1).unwrap();
 
-            if let Some(step) = recording.steps.get(1) {
-                match step {
-                    SequenceStep::Send { delay_ms, .. } => {
-                        if let Some(d) = delay_ms {
-                            prop_assert!(
-                                *d <= MAX_STEP_DELAY_MS,
-                                "delay {} exceeds MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS
-                            );
-                        }
-                    }
-                    _ => {}
-                }
+            if let Some(SequenceStep::Send { delay_ms: Some(d), .. }) = recording.steps.get(1) {
+                prop_assert!(
+                    *d <= MAX_STEP_DELAY_MS,
+                    "delay {} exceeds MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS
+                );
             }
         }
 
@@ -394,11 +384,8 @@ mod edge_proptests {
             recorder.record_keystroke("B".into(), ts); // same timestamp
             let recording = recorder.stop(ts + 1).unwrap();
 
-            match &recording.steps[1] {
-                SequenceStep::Send { delay_ms, .. } => {
-                    prop_assert_eq!(*delay_ms, None, "zero-gap must produce None delay");
-                }
-                _ => {}
+            if let SequenceStep::Send { delay_ms, .. } = &recording.steps[1] {
+                prop_assert_eq!(*delay_ms, None, "zero-gap must produce None delay");
             }
         }
 
@@ -413,11 +400,8 @@ mod edge_proptests {
             // key_ts could be before or after start_ts; recorder doesn't validate ordering
             recorder.record_keystroke("X".into(), key_ts);
             let recording = recorder.stop(key_ts.saturating_add(1)).unwrap();
-            match &recording.steps[0] {
-                SequenceStep::Send { delay_ms, .. } => {
-                    prop_assert_eq!(*delay_ms, None, "first step delay must always be None");
-                }
-                _ => {}
+            if let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] {
+                prop_assert_eq!(*delay_ms, None, "first step delay must always be None");
             }
         }
     }
@@ -508,11 +492,9 @@ mod edge_proptests {
             let steps = convert_to_sequence_steps(&events);
             prop_assert_eq!(steps.len(), 3);
             for step in &steps {
-                if let SequenceStep::Send { delay_ms, .. } = step {
-                    if let Some(d) = delay_ms {
-                        prop_assert!(*d <= MAX_STEP_DELAY_MS,
-                            "delay {} must not exceed MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS);
-                    }
+                if let SequenceStep::Send { delay_ms: Some(d), .. } = step {
+                    prop_assert!(*d <= MAX_STEP_DELAY_MS,
+                        "delay {} must not exceed MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS);
                 }
             }
         }
@@ -573,14 +555,9 @@ mod edge_proptests {
                 RecordedEvent { key: "B".into(), timestamp: t1 },
             ];
             let steps = convert_to_sequence_steps(&events);
-            match &steps[1] {
-                SequenceStep::Send { delay_ms, .. } => {
-                    if let Some(d) = delay_ms {
-                        prop_assert_eq!(*d, MAX_STEP_DELAY_MS,
-                            "near-overflow gap must be capped at MAX_STEP_DELAY_MS");
-                    }
-                }
-                _ => {}
+            if let SequenceStep::Send { delay_ms: Some(d), .. } = &steps[1] {
+                prop_assert_eq!(*d, MAX_STEP_DELAY_MS,
+                    "near-overflow gap must be capped at MAX_STEP_DELAY_MS");
             }
         }
     }

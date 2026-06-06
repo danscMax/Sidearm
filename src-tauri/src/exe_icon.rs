@@ -26,8 +26,12 @@ const ICON_SIZE_FALLBACK: u32 = 32;
 /// shell icons at any DPI scaling.
 const MAX_ICON_DIM: u32 = 256;
 
+// These mirror the Win32 type names verbatim, so keep the WinAPI casing.
+#[allow(clippy::upper_case_acronyms)]
 type HICON = *mut c_void;
+#[allow(clippy::upper_case_acronyms)]
 type HDC = *mut c_void;
+#[allow(clippy::upper_case_acronyms)]
 type HGDIOBJ = *mut c_void;
 
 /// RAII guard for an HICON handle.

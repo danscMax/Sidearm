@@ -197,58 +197,6 @@ fn select_held_key<'a>(
     }
 }
 
-#[cfg(test)]
-mod select_held_key_tests {
-    use super::{select_held_key, HeldMatch};
-
-    #[test]
-    fn exact_match_wins() {
-        let held = ["Ctrl+F13", "Alt+F24"];
-        assert_eq!(
-            select_held_key(held.into_iter(), "Ctrl+F13"),
-            HeldMatch::One("Ctrl+F13".to_string())
-        );
-    }
-
-    #[test]
-    fn linux_modifier_drop_matches_base_token() {
-        // down was "Alt+F24"; key-up arrives as "F24" (Alt released first).
-        let held = ["Alt+F24"];
-        assert_eq!(
-            select_held_key(held.into_iter(), "F24"),
-            HeldMatch::One("Alt+F24".to_string())
-        );
-    }
-
-    #[test]
-    fn suffix_false_positive_is_rejected() {
-        // "Ctrl+F13".ends_with("F3") is true — the old bug. Base-token equality rejects it.
-        let held = ["Ctrl+F13"];
-        assert_eq!(select_held_key(held.into_iter(), "F3"), HeldMatch::None);
-    }
-
-    #[test]
-    fn ambiguous_base_releases_none() {
-        let held = ["Alt+F13", "Ctrl+F13"];
-        assert_eq!(select_held_key(held.into_iter(), "F13"), HeldMatch::Ambiguous);
-    }
-
-    #[test]
-    fn plain_base_key_exact_match() {
-        let held = ["F13"];
-        assert_eq!(
-            select_held_key(held.into_iter(), "F13"),
-            HeldMatch::One("F13".to_string())
-        );
-    }
-
-    #[test]
-    fn no_match_returns_none() {
-        let held = ["Ctrl+F13"];
-        assert_eq!(select_held_key(held.into_iter(), "Alt+F19"), HeldMatch::None);
-    }
-}
-
 /// Outcome of handling one captured key event, reported back to the worker
 /// loop so it can decide whether to refresh the stale-hold deadline.
 pub(super) enum EventOutcome {
@@ -736,4 +684,56 @@ fn emit_runtime_error(
     }
 
     let _ = app.emit(EVENT_RUNTIME_ERROR, event);
+}
+
+#[cfg(test)]
+mod select_held_key_tests {
+    use super::{select_held_key, HeldMatch};
+
+    #[test]
+    fn exact_match_wins() {
+        let held = ["Ctrl+F13", "Alt+F24"];
+        assert_eq!(
+            select_held_key(held.into_iter(), "Ctrl+F13"),
+            HeldMatch::One("Ctrl+F13".to_string())
+        );
+    }
+
+    #[test]
+    fn linux_modifier_drop_matches_base_token() {
+        // down was "Alt+F24"; key-up arrives as "F24" (Alt released first).
+        let held = ["Alt+F24"];
+        assert_eq!(
+            select_held_key(held.into_iter(), "F24"),
+            HeldMatch::One("Alt+F24".to_string())
+        );
+    }
+
+    #[test]
+    fn suffix_false_positive_is_rejected() {
+        // "Ctrl+F13".ends_with("F3") is true — the old bug. Base-token equality rejects it.
+        let held = ["Ctrl+F13"];
+        assert_eq!(select_held_key(held.into_iter(), "F3"), HeldMatch::None);
+    }
+
+    #[test]
+    fn ambiguous_base_releases_none() {
+        let held = ["Alt+F13", "Ctrl+F13"];
+        assert_eq!(select_held_key(held.into_iter(), "F13"), HeldMatch::Ambiguous);
+    }
+
+    #[test]
+    fn plain_base_key_exact_match() {
+        let held = ["F13"];
+        assert_eq!(
+            select_held_key(held.into_iter(), "F13"),
+            HeldMatch::One("F13".to_string())
+        );
+    }
+
+    #[test]
+    fn no_match_returns_none() {
+        let held = ["Ctrl+F13"];
+        assert_eq!(select_held_key(held.into_iter(), "Alt+F19"), HeldMatch::None);
+    }
 }

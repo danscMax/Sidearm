@@ -430,6 +430,7 @@ mod edge_proptests {
     /// So at delta == window_ms:
     ///   - key_down says "chord" (delta <= window_ms)
     ///   - tick says "pending" (delta NOT > window_ms)
+    ///
     /// This test exposes the inconsistency.
     #[test]
     fn tick_and_key_down_boundary_inconsistency() {

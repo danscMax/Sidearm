@@ -536,7 +536,7 @@ fn build_shortcut_from_key_group(
     };
 
     // Fold modifier-only key tokens back into flags (e.g. VK_CONTROL).
-    if let Ok(()) = (|| -> Result<(), KeyTranslationError> {
+    if let Ok(()) = {
         let token = format!("KEY_{}", key.to_ascii_uppercase());
         match translate_key_token(&token) {
             Ok(_) => Ok(()),
@@ -546,7 +546,7 @@ fn build_shortcut_from_key_group(
             }
             Err(other) => Err(other),
         }
-    })() {
+    } {
         // translate succeeded as non-modifier, do nothing.
     }
 

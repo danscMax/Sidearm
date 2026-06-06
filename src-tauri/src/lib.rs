@@ -240,7 +240,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     // Auto-hide: hand the request to the single hide-timer thread instead of
     // spawning a fresh sleeping thread on every show.
     let generation = OSD_GENERATION.fetch_add(1, Ordering::Release) + 1;
-    let duration_ms = settings.osd_duration_ms.max(500).min(10000) as u64;
+    let duration_ms = settings.osd_duration_ms.clamp(500, 10000) as u64;
     let _ = osd_hide_sender().send(OsdHideRequest {
         win: w.clone(),
         generation,
@@ -1466,10 +1466,10 @@ async fn list_running_processes() -> Result<Vec<RunningProcessInfo>, CommandErro
     tauri::async_runtime::spawn_blocking(|| -> Vec<RunningProcessInfo> {
         #[cfg(target_os = "windows")]
         {
-            return crate::platform::shell::list_running_processes()
+            crate::platform::shell::list_running_processes()
                 .into_iter()
                 .map(|p| RunningProcessInfo { exe: p.exe, path: p.path, pid: p.pid })
-                .collect();
+                .collect()
         }
         #[cfg(target_os = "linux")]
         {
@@ -2271,7 +2271,7 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
             // One-time migration from old "com.nagaworkflowstudio.desktop" config dir.
-            migrate_old_config(&app.handle());
+            migrate_old_config(app.handle());
 
             log::info!(
                 "[log-retention] sweep: deleted {deleted}, kept {kept} \
@@ -2358,8 +2358,8 @@ pub fn run() {
             // Pre-creating at startup caused foreground watcher interference and
             // startup flash when WebView2 wasn't ready yet.
 
-            check_crash_sentinel(&app.handle());
-            cleanup_old_logs(&app.handle());
+            check_crash_sentinel(app.handle());
+            cleanup_old_logs(app.handle());
             log::info!(
                 "[system] Sidearm v{} started",
                 app.package_info().version

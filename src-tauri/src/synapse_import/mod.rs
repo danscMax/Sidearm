@@ -35,6 +35,7 @@ pub enum SynapseImportError {
 /// first bytes and dispatch to the right parser.
 ///  - `{`  (0x7B) → v4 JSON
 ///  - `PK` (0x50 0x4B) → v3 ZIP archive
+///
 /// For v4, if a sibling `Макросы/` (or `Macros/`) folder exists next to the
 /// file, its `.xml` macros are also pulled in so GUID-referenced macros
 /// resolve end-to-end.

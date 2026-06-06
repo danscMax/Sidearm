@@ -7,13 +7,20 @@ jobs:
   rust-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - run: cargo install cargo-audit
+      - uses: actions/checkout@v6
+      # Prebuilt binary instead of `cargo install cargo-audit`, which compiled from
+      # source (~3 min) on every run.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-audit
       - run: cargo audit --file src-tauri/Cargo.lock
   npm-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with: { node-version: '22' }
-      - run: npm audit --audit-level=high
+      # --omit=dev: audit only deps shipped in the app (the webview runtime). Build-only
+      # tooling (vite/vitest/knip) lives in devDependencies; its advisories (e.g. the
+      # vite dev-server CVEs) never reach the shipped binary.
+      - run: npm audit --omit=dev --audit-level=high

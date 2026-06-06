@@ -1,0 +1,49 @@
+name: CI
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web (typecheck · tests · dead-code)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run check:web   # tsc --noEmit
+      - run: npm test            # vitest run
+      - run: npm run check:dead  # knip
+
+  rust:
+    name: Rust (clippy · tests)
+    # windows-latest, NOT ubuntu: most of the backend is #[cfg(target_os = "windows")]
+    # (capture_backend/windows, platform/windows, Windows input_synthesis paths). On Linux
+    # those modules are cfg'd out, so clippy/tests there would lint almost nothing.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      # Build the frontend first so tauri-build (build.rs) finds frontendDist (../dist).
+      - run: npm run build
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm run lint:rust   # clippy --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml

@@ -338,11 +338,11 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn is_current_process_not_elevated_without_admin() {
-        assert!(
-            !super::is_current_process_elevated(),
-            "Test process should not be elevated (running without admin)"
-        );
+    fn is_current_process_elevated_query_returns_a_bool() {
+        // Elevation depends on how the test process was launched — non-elevated in a
+        // normal dev shell, but elevated on CI runners — so we cannot assert a specific
+        // value. Verify only that the unsafe token query runs and yields a bool.
+        let _: bool = super::is_current_process_elevated();
     }
 }
 

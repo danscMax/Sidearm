@@ -233,7 +233,7 @@ pub fn resolve_input_preview(
         config
             .actions
             .iter()
-            .find(|action| action.id == binding.action_ref)
+            .find(|action| action.id == binding.action_id)
     });
 
     let (status, reason) = if let Some(action) = action {
@@ -251,7 +251,7 @@ pub fn resolve_input_preview(
                 ResolutionStatus::ConditionUnmet,
                 format!(
                     "`{normalized_key}` is bound to `{}`, but its conditions are not met for the active window (exe `{exe}`).",
-                    action.pretty
+                    action.display_name
                 ),
             )
         }
@@ -285,7 +285,7 @@ pub fn resolve_input_preview(
         binding_label: binding.map(|binding| binding.label.clone()),
         action_id: action.map(|action| action.id.clone()),
         action_type: action.map(|action| action.action_type.as_str().to_owned()),
-        action_pretty: action.map(|action| action.pretty.clone()),
+        action_pretty: action.map(|action| action.display_name.clone()),
         mapping_verified: Some(mapping.verified),
         mapping_source: Some(mapping_source_name(mapping).to_owned()),
         trigger_mode: binding.and_then(|b| b.trigger_mode),
@@ -518,7 +518,7 @@ mod tests {
                 layer: Layer::Standard,
                 control_id: ControlId::Thumb01,
                 label: "Example".into(),
-                action_ref: "action-default-standard-thumb-01".into(),
+                action_id: "action-default-standard-thumb-01".into(),
                 color_tag: None,
                 trigger_mode: None,
                 chord_partner: None,
@@ -528,7 +528,7 @@ mod tests {
                 id: "action-default-standard-thumb-01".into(),
                 action_type: ActionType::Disabled,
                 payload: ActionPayload::Disabled(Default::default()),
-                pretty: "Disabled".into(),
+                display_name: "Disabled".into(),
                 notes: None,
                 conditions: Vec::new(),
             }],
@@ -750,7 +750,7 @@ mod edge_proptests {
                 layer: Layer::Standard,
                 control_id: ControlId::Thumb01,
                 label: "Test".into(),
-                action_ref: "a1".into(),
+                action_id: "a1".into(),
                 color_tag: None,
                 trigger_mode: None,
                 chord_partner: None,
@@ -760,7 +760,7 @@ mod edge_proptests {
                 id: "a1".into(),
                 action_type: ActionType::Disabled,
                 payload: ActionPayload::Disabled(DisabledActionPayload::default()),
-                pretty: "Disabled".into(),
+                display_name: "Disabled".into(),
                 notes: None,
                 conditions: Vec::new(),
             }],

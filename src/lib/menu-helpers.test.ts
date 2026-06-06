@@ -14,22 +14,22 @@ import {
 describe("collectMenuItemIds", () => {
   it("collects ids from a flat list", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
-      { kind: "action", id: "b", label: "B", actionRef: "r2", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
+      { kind: "action", id: "b", label: "B", actionId: "r2", enabled: true },
     ];
     expect(collectMenuItemIds(items)).toEqual(["a", "b"]);
   });
 
   it("collects ids from nested submenus", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
       {
         kind: "submenu",
         id: "sub",
         label: "Sub",
         enabled: true,
         items: [
-          { kind: "action", id: "b", label: "B", actionRef: "r2", enabled: true },
+          { kind: "action", id: "b", label: "B", actionId: "r2", enabled: true },
         ],
       },
     ];
@@ -50,7 +50,7 @@ describe("collectMenuItemIds", () => {
             label: "S2",
             enabled: true,
             items: [
-              { kind: "action", id: "deep", label: "Deep", actionRef: "r1", enabled: true },
+              { kind: "action", id: "deep", label: "Deep", actionId: "r1", enabled: true },
             ],
           },
         ],
@@ -73,13 +73,13 @@ describe("appendMenuItem", () => {
     kind: "action",
     id: "new",
     label: "New",
-    actionRef: "r1",
+    actionId: "r1",
     enabled: true,
   };
 
   it("appends to root level when parentId is null", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
     ];
     const result = appendMenuItem(items, null, newItem);
     expect(result).toHaveLength(2);
@@ -93,7 +93,7 @@ describe("appendMenuItem", () => {
         id: "sub",
         label: "Sub",
         enabled: true,
-        items: [{ kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true }],
+        items: [{ kind: "action", id: "a", label: "A", actionId: "r1", enabled: true }],
       },
     ];
     const result = appendMenuItem(items, "sub", newItem);
@@ -130,7 +130,7 @@ describe("appendMenuItem", () => {
 
   it("does not crash when parentId does not exist", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
     ];
     const result = appendMenuItem(items, "nonexistent", newItem);
     expect(result).toHaveLength(1);
@@ -139,7 +139,7 @@ describe("appendMenuItem", () => {
 
   it("does not mutate original items", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
     ];
     const original = [...items];
     appendMenuItem(items, null, newItem);
@@ -154,7 +154,7 @@ describe("appendMenuItem", () => {
 describe("updateMenuItem", () => {
   it("updates a root-level item", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "Old", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "Old", actionId: "r1", enabled: true },
     ];
     const result = updateMenuItem(items, "a", (item) =>
       item.kind === "action" ? { ...item, label: "New" } : item,
@@ -170,7 +170,7 @@ describe("updateMenuItem", () => {
         label: "Sub",
         enabled: true,
         items: [
-          { kind: "action", id: "a", label: "Old", actionRef: "r1", enabled: true },
+          { kind: "action", id: "a", label: "Old", actionId: "r1", enabled: true },
         ],
       },
     ];
@@ -184,7 +184,7 @@ describe("updateMenuItem", () => {
 
   it("returns unchanged items when targetId is not found", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
     ];
     const result = updateMenuItem(items, "nonexistent", (item) => item);
     expect(result[0].id).toBe("a");
@@ -198,8 +198,8 @@ describe("updateMenuItem", () => {
 describe("removeMenuItem", () => {
   it("removes a root-level item", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
-      { kind: "action", id: "b", label: "B", actionRef: "r2", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
+      { kind: "action", id: "b", label: "B", actionId: "r2", enabled: true },
     ];
     const result = removeMenuItem(items, "a");
     expect(result).toHaveLength(1);
@@ -214,8 +214,8 @@ describe("removeMenuItem", () => {
         label: "Sub",
         enabled: true,
         items: [
-          { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
-          { kind: "action", id: "b", label: "B", actionRef: "r2", enabled: true },
+          { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
+          { kind: "action", id: "b", label: "B", actionId: "r2", enabled: true },
         ],
       },
     ];
@@ -234,7 +234,7 @@ describe("removeMenuItem", () => {
         label: "Sub",
         enabled: true,
         items: [
-          { kind: "action", id: "only", label: "Only", actionRef: "r1", enabled: true },
+          { kind: "action", id: "only", label: "Only", actionId: "r1", enabled: true },
         ],
       },
     ];
@@ -256,7 +256,7 @@ describe("removeMenuItem", () => {
             label: "S2",
             enabled: true,
             items: [
-              { kind: "action", id: "deep", label: "Deep", actionRef: "r1", enabled: true },
+              { kind: "action", id: "deep", label: "Deep", actionId: "r1", enabled: true },
             ],
           },
         ],
@@ -269,7 +269,7 @@ describe("removeMenuItem", () => {
 
   it("returns unchanged items when targetId not found", () => {
     const items: MenuItem[] = [
-      { kind: "action", id: "a", label: "A", actionRef: "r1", enabled: true },
+      { kind: "action", id: "a", label: "A", actionId: "r1", enabled: true },
     ];
     const result = removeMenuItem(items, "nonexistent");
     expect(result).toHaveLength(1);

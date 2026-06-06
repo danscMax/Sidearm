@@ -152,13 +152,13 @@ export function buildAction(params: {
   const category = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory) ?? ACTION_CATEGORIES[0];
   const actionType = category.actionType;
   const actionId = existingAction?.id ?? `action-picker-${Date.now()}`;
-  const pretty = drafts.name.trim() || autoName(actionType, drafts, t, profiles);
+  const displayName = drafts.name.trim() || autoName(actionType, drafts, t, profiles);
   const validConditions = drafts.conditions.filter((c) => c.value.trim());
 
   const base: Action = (() => {
     switch (actionType) {
       case "shortcut":
-        return { id: actionId, type: "shortcut" as const, payload: drafts.shortcut, pretty };
+        return { id: actionId, type: "shortcut" as const, payload: drafts.shortcut, displayName };
       case "mouseAction":
         return {
           id: actionId,
@@ -170,7 +170,7 @@ export function buildAction(params: {
             ...(drafts.mouse.alt && { alt: true }),
             ...(drafts.mouse.win && { win: true }),
           },
-          pretty,
+          displayName,
         };
       case "textSnippet": {
         // Preserve tags from existing inline payload so editing the text
@@ -190,11 +190,11 @@ export function buildAction(params: {
             pasteMode: drafts.text.pasteMode,
             tags: preservedTags,
           },
-          pretty,
+          displayName,
         };
       }
       case "sequence":
-        return { id: actionId, type: "sequence" as const, payload: { steps: drafts.sequence }, pretty };
+        return { id: actionId, type: "sequence" as const, payload: { steps: drafts.sequence }, displayName };
       case "launch":
         return {
           id: actionId,
@@ -204,20 +204,20 @@ export function buildAction(params: {
             args: drafts.launch.args.length > 0 ? drafts.launch.args : undefined,
             workingDir: drafts.launch.workingDir.trim() ? drafts.launch.workingDir.trim() : undefined,
           },
-          pretty,
+          displayName,
         };
       case "mediaKey":
-        return { id: actionId, type: "mediaKey" as const, payload: { key: drafts.media }, pretty };
+        return { id: actionId, type: "mediaKey" as const, payload: { key: drafts.media }, displayName };
       case "profileSwitch":
-        return { id: actionId, type: "profileSwitch" as const, payload: { targetProfileId: drafts.profile }, pretty };
+        return { id: actionId, type: "profileSwitch" as const, payload: { targetProfileId: drafts.profile }, displayName };
       case "menu":
-        return { id: actionId, type: "menu" as const, payload: { items: drafts.menuItems }, pretty: pretty || t("picker.defaultMenu") };
+        return { id: actionId, type: "menu" as const, payload: { items: drafts.menuItems }, displayName: displayName || t("picker.defaultMenu") };
       case "disabled":
-        return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: pretty || t("picker.defaultDisabled") };
+        return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, displayName: displayName || t("picker.defaultDisabled") };
       case "repairClipboard":
-        return { id: actionId, type: "repairClipboard" as const, payload: { strategy: "latin1" as const }, pretty };
+        return { id: actionId, type: "repairClipboard" as const, payload: { strategy: "latin1" as const }, displayName };
       default:
-        return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, pretty: t("picker.defaultDisabled") };
+        return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, displayName: t("picker.defaultDisabled") };
     }
   })();
 
@@ -279,7 +279,7 @@ export function createInitialDrafts(
         ? existingAction.payload.steps
         : [{ type: "send", value: "Ctrl+C" }],
     menuItems: existingAction?.type === "menu" ? existingAction.payload.items : [],
-    name: existingAction?.pretty ?? "",
+    name: existingAction?.displayName ?? "",
     conditions: existingAction?.conditions ?? [],
     triggerMode: binding?.triggerMode ?? "press",
     chordPartner: binding?.chordPartner ?? "",

@@ -31,7 +31,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
 
   for (const binding of config.bindings) {
     if (!binding.enabled) continue;
-    const action = actionsById.get(binding.actionRef);
+    const action = actionsById.get(binding.actionId);
     if (!action || action.type !== "shortcut") continue;
     const signature = shortcutSignature(action.payload as ShortcutActionPayload);
     if (!signature) continue;
@@ -84,7 +84,7 @@ export function shortcutSignature(payload: ShortcutActionPayload): string {
 
 /**
  * Filter: does a binding/action pair match a freeform search query?
- * Matches against label, action.pretty, and the shortcut signature.
+ * Matches against label, action.displayName, and the shortcut signature.
  */
 export function bindingMatchesQuery(
   binding: Binding | null | undefined,
@@ -97,7 +97,7 @@ export function bindingMatchesQuery(
   const parts: string[] = [];
   if (binding) parts.push(binding.label ?? "");
   if (action) {
-    parts.push(action.pretty ?? "");
+    parts.push(action.displayName ?? "");
     if (action.type === "shortcut") {
       const sig = shortcutSignature(action.payload as ShortcutActionPayload);
       if (sig) parts.push(sig);

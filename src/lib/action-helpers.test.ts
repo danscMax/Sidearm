@@ -132,8 +132,8 @@ describe("describeActionSummary", () => {
       type: "menu",
       payload: {
         items: [
-          { kind: "action", id: "mi1", label: "Item", actionRef: "a1", enabled: true },
-          { kind: "action", id: "mi2", label: "Item 2", actionRef: "a2", enabled: true },
+          { kind: "action", id: "mi1", label: "Item", actionId: "a1", enabled: true },
+          { kind: "action", id: "mi2", label: "Item 2", actionId: "a2", enabled: true },
         ],
       },
     });
@@ -503,7 +503,7 @@ describe("withMenuPayload", () => {
     });
     const result = withMenuPayload(action, (p) => ({
       ...p,
-      items: [{ kind: "action" as const, id: "mi1", label: "New", actionRef: "a1", enabled: true }],
+      items: [{ kind: "action" as const, id: "mi1", label: "New", actionId: "a1", enabled: true }],
     }));
     if (result.type === "menu") {
       expect(result.payload.items).toHaveLength(1);

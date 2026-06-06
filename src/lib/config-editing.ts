@@ -55,10 +55,10 @@ export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
   const binding = config.bindings.find((b) => b.id === bindingId);
   if (!binding) return config;
   const nextBindings = config.bindings.filter((b) => b.id !== bindingId);
-  const actionStillReferenced = nextBindings.some((b) => b.actionRef === binding.actionRef);
+  const actionStillReferenced = nextBindings.some((b) => b.actionId === binding.actionId);
   const nextActions = actionStillReferenced
     ? config.actions
-    : config.actions.filter((a) => a.id !== binding.actionRef);
+    : config.actions.filter((a) => a.id !== binding.actionId);
   return { ...config, bindings: nextBindings, actions: nextActions };
 }
 
@@ -297,7 +297,7 @@ export function coerceActionType(
           id: placeholderActionId,
           type: "disabled",
           payload: {} as Record<string, never>,
-          pretty: "Menu target placeholder",
+          displayName: "Menu target placeholder",
           notes: PLACEHOLDER_ACTION_NOTE,
         },
       ],
@@ -325,7 +325,7 @@ export function coerceActionType(
           type: "textSnippet",
           payload: {
             source: "inline",
-            text: action.pretty || "New snippet",
+            text: action.displayName || "New snippet",
             pasteMode: "sendText",
             tags: [],
           },
@@ -338,7 +338,7 @@ export function coerceActionType(
             steps: [
               {
                 type: "text",
-                value: action.pretty.trim() || "Replace me",
+                value: action.displayName.trim() || "Replace me",
               },
             ],
           },
@@ -360,7 +360,7 @@ export function coerceActionType(
               createDefaultActionMenuItem(
                 [],
                 menuActionRef ?? actionId,
-                nextConfig.actions.find((candidate) => candidate.id === menuActionRef)?.pretty ??
+                nextConfig.actions.find((candidate) => candidate.id === menuActionRef)?.displayName ??
                   "Menu target",
               ),
             ],
@@ -417,7 +417,7 @@ export function promoteInlineSnippetActionToLibrary(
     return config;
   }
 
-  const snippetName = preferredName.trim() || action.pretty.trim() || "New snippet";
+  const snippetName = preferredName.trim() || action.displayName.trim() || "New snippet";
   const baseSnippetId = makeSnippetId(snippetName);
   const snippetId = nextUniqueId(
     config.snippetLibrary.map((snippet) => snippet.id),
@@ -528,7 +528,7 @@ export function ensurePlaceholderBinding(
     layer,
     controlId: control.id,
     label: `Unassigned - ${control.defaultName}`,
-    actionRef: actionId,
+    actionId: actionId,
     enabled: false,
   };
 
@@ -542,7 +542,7 @@ export function ensurePlaceholderBinding(
     id: actionId,
     type: "disabled",
     payload: {} as Record<string, never>,
-    pretty: `Unassigned - ${control.defaultName}`,
+    displayName: `Unassigned - ${control.defaultName}`,
     notes: PLACEHOLDER_ACTION_NOTE,
   };
 
@@ -669,11 +669,11 @@ export function duplicateProfile(
   const newActions: typeof config.actions = [];
 
   for (const binding of sourceBindings) {
-    if (!actionIdMap.has(binding.actionRef)) {
-      const sourceAction = config.actions.find((a) => a.id === binding.actionRef);
+    if (!actionIdMap.has(binding.actionId)) {
+      const sourceAction = config.actions.find((a) => a.id === binding.actionId);
       if (sourceAction) {
         const newActionId = makeRandomId("action");
-        actionIdMap.set(binding.actionRef, newActionId);
+        actionIdMap.set(binding.actionId, newActionId);
         newActions.push({ ...structuredClone(sourceAction), id: newActionId });
       }
     }
@@ -683,7 +683,7 @@ export function duplicateProfile(
     ...b,
     id: makeRandomId("binding"),
     profileId: newId,
-    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+    actionId: actionIdMap.get(b.actionId) ?? b.actionId,
   }));
 
   return {
@@ -726,7 +726,7 @@ export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
 
   // Remove orphaned actions no longer referenced by any remaining binding.
   // Walk menu items recursively to preserve nested action refs.
-  const referencedActionIds = new Set(nextBindings.map((b) => b.actionRef));
+  const referencedActionIds = new Set(nextBindings.map((b) => b.actionId));
   for (const actionId of referencedActionIds) {
     const action = config.actions.find((a) => a.id === actionId);
     if (action?.type === "menu") {
@@ -753,7 +753,7 @@ export function duplicateBinding(
   const binding = config.bindings.find((b) => b.id === bindingId);
   if (!binding) return config;
 
-  const action = config.actions.find((a) => a.id === binding.actionRef);
+  const action = config.actions.find((a) => a.id === binding.actionId);
   if (!action) return config;
 
   const layer = targetLayer ?? binding.layer;
@@ -775,7 +775,7 @@ export function duplicateBinding(
     id: newBindingId,
     controlId: targetControlId,
     layer,
-    actionRef: newActionId,
+    actionId: newActionId,
   };
 
   // Remove existing binding for target if any
@@ -859,14 +859,14 @@ export function makeRandomId(prefix: string): string {
 
 export function createDefaultActionMenuItem(
   existingIds: string[],
-  actionRef: string,
+  actionId: string,
   preferredLabel: string,
 ): MenuItem {
   return {
     kind: "action",
     id: nextUniqueId(existingIds, "menu-item-action"),
     label: preferredLabel.trim() || "Menu item",
-    actionRef,
+    actionId,
     enabled: true,
   };
 }
@@ -895,7 +895,7 @@ export function createDefaultSubmenuItem(
 export function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): void {
   for (const item of items) {
     if (item.kind === "action") {
-      refs.add(item.actionRef);
+      refs.add(item.actionId);
     } else if (item.kind === "submenu" && item.items) {
       collectMenuActionRefs(item.items, refs);
     }
@@ -957,7 +957,7 @@ export function extractProfileExport(
   }
 
   const bindings = config.bindings.filter((b) => b.profileId === profileId);
-  const actionRefs = new Set(bindings.map((b) => b.actionRef));
+  const actionRefs = new Set(bindings.map((b) => b.actionId));
   const actions = config.actions.filter((a) => actionRefs.has(a.id));
   const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
   const encoderMappings = config.encoderMappings.filter((e) =>
@@ -997,7 +997,7 @@ export function importProfile(
     ...b,
     id: makeRandomId("binding"),
     profileId: newId,
-    actionRef: actionIdMap.get(b.actionRef) ?? b.actionRef,
+    actionId: actionIdMap.get(b.actionId) ?? b.actionId,
   }));
 
   const newAppMappings: AppMapping[] = (data.appMappings ?? []).map((m) => ({

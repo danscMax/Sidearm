@@ -56,7 +56,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 export function makeAction(overrides: Partial<Action> & Pick<Action, "type" | "payload">): Action {
   return {
     id: "a1",
-    pretty: "Test Action",
+    displayName: "Test Action",
     ...overrides,
   } as Action;
 }

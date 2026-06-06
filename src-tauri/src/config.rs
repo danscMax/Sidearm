@@ -474,7 +474,9 @@ pub struct Binding {
     pub layer: Layer,
     pub control_id: ControlId,
     pub label: String,
-    pub action_ref: String,
+    // Renamed from `actionRef` (v0.1.22); `alias` keeps existing on-disk configs loadable.
+    #[serde(alias = "actionRef")]
+    pub action_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color_tag: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -536,7 +538,9 @@ pub struct Action {
     #[serde(rename = "type")]
     pub action_type: ActionType,
     pub payload: ActionPayload,
-    pub pretty: String,
+    // Renamed from `display_name` (v0.1.22); `alias` keeps existing on-disk configs loadable.
+    #[serde(alias = "pretty")]
+    pub display_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -655,7 +659,8 @@ pub enum MenuItem {
     Action {
         id: String,
         label: String,
-        action_ref: String,
+        #[serde(alias = "actionRef")]
+        action_id: String,
         enabled: bool,
     },
     #[serde(rename_all = "camelCase")]
@@ -1061,10 +1066,10 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
                 binding.id, binding.profile_id
             ));
         }
-        if !action_ids.contains(&binding.action_ref) {
+        if !action_ids.contains(&binding.action_id) {
             errors.push(format!(
                 "binding `{}` references missing action `{}`.",
-                binding.id, binding.action_ref
+                binding.id, binding.action_id
             ));
         }
         let binding_key = format!(
@@ -1301,15 +1306,15 @@ fn validate_menu_items<'a>(
     let mut menu_item_ids = HashSet::new();
     for item in items {
         match item {
-            MenuItem::Action { id, action_ref, .. } => {
+            MenuItem::Action { id, action_id: referenced_id, .. } => {
                 if !menu_item_ids.insert(id.clone()) {
                     errors.push(format!(
                         "menu action `{action_id}` contains duplicate menu item id `{id}`."
                     ));
                 }
-                if !action_ids.contains(action_ref) {
+                if !action_ids.contains(referenced_id) {
                     errors.push(format!(
-                        "menu action `{action_id}` references missing action `{action_ref}`."
+                        "menu action `{action_id}` references missing action `{referenced_id}`."
                     ));
                 }
             }
@@ -1377,12 +1382,12 @@ fn menu_item_has_cycle<'a>(
     stack: &mut HashSet<&'a str>,
 ) -> bool {
     match item {
-        MenuItem::Action { action_ref, .. } => {
-            if action_ref == root_action_id {
+        MenuItem::Action { action_id, .. } => {
+            if action_id == root_action_id {
                 return true;
             }
-            actions_by_id.get(action_ref.as_str()).is_some_and(|_| {
-                has_menu_cycle(root_action_id, action_ref, actions_by_id, visited, stack)
+            actions_by_id.get(action_id.as_str()).is_some_and(|_| {
+                has_menu_cycle(root_action_id, action_id, actions_by_id, visited, stack)
             })
         }
         MenuItem::Submenu { items, .. } => items.iter().any(|nested_item| {
@@ -1884,7 +1889,7 @@ fn seed_snippet_library() -> Vec<SnippetLibraryItem> {
 fn seed_actions() -> Vec<Action> {
     let mut actions = Vec::new();
 
-    for (profile, layer, control, pretty, key, ctrl, shift, alt, win, raw) in [
+    for (profile, layer, control, display_name, key, ctrl, shift, alt, win, raw) in [
         (
             "default",
             Layer::Standard,
@@ -2380,7 +2385,7 @@ fn seed_actions() -> Vec<Action> {
     ] {
         actions.push(shortcut_action(
             action_id(profile, layer, control),
-            pretty,
+            display_name,
             key,
             ctrl,
             shift,
@@ -2390,7 +2395,7 @@ fn seed_actions() -> Vec<Action> {
         ));
     }
 
-    for (profile, layer, control, pretty, snippet_id) in [
+    for (profile, layer, control, display_name, snippet_id) in [
         (
             "code",
             Layer::Standard,
@@ -2464,19 +2469,19 @@ fn seed_actions() -> Vec<Action> {
     ] {
         actions.push(text_snippet_library_action(
             action_id(profile, layer, control),
-            pretty,
+            display_name,
             snippet_id,
         ));
     }
 
-    for (profile, layer, control, pretty, notes) in [
+    for (profile, layer, control, display_name, notes) in [
         ("main", Layer::Hypershift, ControlId::Thumb05, "Right Ctrl + Right Shift + -", "Unresolved exact semantics. Preserve as placeholder until device validation confirms whether this is a shortcut or text payload."),
         ("main", Layer::Hypershift, ControlId::Thumb09, "Copy without paragraphs", "Unresolved exact logic. Preserve as placeholder until the text or sequence behavior is confirmed."),
         ("code", Layer::Hypershift, ControlId::Thumb12, "Paste Win", "Unresolved exact intent. Preserve as placeholder until the real action is confirmed."),
     ] {
         actions.push(disabled_placeholder_action(
             action_id(profile, layer, control),
-            pretty,
+            display_name,
             notes,
         ));
     }
@@ -2690,9 +2695,10 @@ fn snippet(id: &str, name: &str, text: &str, tags: &[&str]) -> SnippetLibraryIte
     }
 }
 
+#[allow(clippy::too_many_arguments)] // test helper mirroring a shortcut's fields
 fn shortcut_action(
     id: String,
-    pretty: &str,
+    display_name: &str,
     key: &str,
     ctrl: bool,
     shift: bool,
@@ -2711,31 +2717,31 @@ fn shortcut_action(
             win,
             raw: Some(raw.into()),
         }),
-        pretty: pretty.into(),
+        display_name: display_name.into(),
         notes: None,
         conditions: Vec::new(),
     }
 }
 
-fn text_snippet_library_action(id: String, pretty: &str, snippet_id: &str) -> Action {
+fn text_snippet_library_action(id: String, display_name: &str, snippet_id: &str) -> Action {
     Action {
         id,
         action_type: ActionType::TextSnippet,
         payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef {
             snippet_id: snippet_id.into(),
         }),
-        pretty: pretty.into(),
+        display_name: display_name.into(),
         notes: None,
         conditions: Vec::new(),
     }
 }
 
-fn disabled_placeholder_action(id: String, pretty: &str, notes: &str) -> Action {
+fn disabled_placeholder_action(id: String, display_name: &str, notes: &str) -> Action {
     Action {
         id,
         action_type: ActionType::Disabled,
         payload: ActionPayload::Disabled(DisabledActionPayload::default()),
-        pretty: pretty.into(),
+        display_name: display_name.into(),
         notes: Some(notes.into()),
         conditions: Vec::new(),
     }
@@ -2747,7 +2753,7 @@ fn binding(
     layer: Layer,
     control_id: ControlId,
     label: &str,
-    action_ref: String,
+    action_id: String,
 ) -> Binding {
     Binding {
         id,
@@ -2755,7 +2761,7 @@ fn binding(
         layer,
         control_id,
         label: label.into(),
-        action_ref,
+        action_id,
         color_tag: None,
         trigger_mode: None,
         chord_partner: None,
@@ -2848,7 +2854,7 @@ mod tests {
             payload: ActionPayload::RepairClipboard(RepairClipboardActionPayload {
                 strategy: RepairStrategy::Latin1,
             }),
-            pretty: "Repair clipboard".into(),
+            display_name: "Repair clipboard".into(),
             notes: None,
             conditions: Vec::new(),
         });
@@ -3070,25 +3076,66 @@ mod edge_proptests {
                 win: false,
                 raw: None,
             }),
-            pretty: id.into(),
+            display_name: id.into(),
             notes: None,
             conditions: vec![],
         }
     }
 
-    fn make_binding(id: &str, action_ref: &str) -> Binding {
+    fn make_binding(id: &str, action_id: &str) -> Binding {
         Binding {
             id: id.into(),
             profile_id: "p1".into(),
             layer: Layer::Standard,
             control_id: ControlId::Thumb01,
             label: "lbl".into(),
-            action_ref: action_ref.into(),
+            action_id: action_id.into(),
             color_tag: None,
             trigger_mode: None,
             chord_partner: None,
             enabled: true,
         }
+    }
+
+    // ─── Backward-compatible serde rename (v0.1.22) ──────────────────────────
+
+    /// A config persisted by an OLDER Sidearm (pre-rename wire names `actionRef` /
+    /// `pretty`) must still (a) pass JSON-schema validation, (b) deserialize via the
+    /// serde aliases onto the renamed `action_id` / `display_name` fields with zero
+    /// data loss, and (c) re-serialize under the NEW names — migrating the file on
+    /// the next save. Guards existing user configs against breaking on upgrade.
+    #[test]
+    fn legacy_action_ref_and_pretty_names_still_load() {
+        let config = default_seed_config();
+        let modern = serde_json::to_string(&config).expect("serialize seed config");
+        assert!(
+            modern.contains("\"actionId\"") && modern.contains("\"displayName\""),
+            "current version must write the new wire names"
+        );
+
+        // Rewrite the on-disk keys back to the pre-rename names. These keys only ever
+        // name the renamed Binding/MenuItem/Action fields in a persisted AppConfig.
+        let legacy = modern
+            .replace("\"actionId\"", "\"actionRef\"")
+            .replace("\"displayName\"", "\"pretty\"");
+        let legacy_value: serde_json::Value =
+            serde_json::from_str(&legacy).expect("legacy json parses");
+
+        // (a) embedded JSON schema still accepts the legacy field names
+        validate_config_schema_value(&legacy_value)
+            .expect("legacy actionRef/pretty must pass schema validation");
+
+        // (b) serde aliases map them onto the renamed fields with no data loss
+        let loaded: AppConfig =
+            serde_json::from_value(legacy_value).expect("legacy config must deserialize");
+        assert_eq!(loaded.bindings, config.bindings, "binding.action_id preserved via alias");
+        assert_eq!(loaded.actions, config.actions, "action.display_name preserved via alias");
+
+        // (c) re-serialization migrates the file to the new names, dropping the old
+        let migrated = serde_json::to_string(&loaded).expect("re-serialize");
+        assert!(migrated.contains("\"actionId\"") && migrated.contains("\"displayName\""));
+        assert!(!migrated.contains("\"actionRef\""), "legacy binding key must be dropped");
+        assert!(!migrated.contains("\"pretty\""), "legacy action key must be dropped");
     }
 
     // ─── Serialization round-trips ──────────────────────────────────────────
@@ -3145,7 +3192,7 @@ mod edge_proptests {
                 layer,
                 control_id: ControlId::Thumb01,
                 label: "lbl".into(),
-                action_ref: "a1".into(),
+                action_id: "a1".into(),
                 color_tag: None,
                 trigger_mode,
                 chord_partner: None,
@@ -3558,7 +3605,7 @@ mod edge_proptests {
                 paste_mode: PasteMode::ClipboardPaste,
                 tags: vec![],
             }),
-            pretty: "a1".into(),
+            display_name: "a1".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3615,7 +3662,7 @@ mod edge_proptests {
                 paste_mode: PasteMode::ClipboardPaste,
                 tags: vec![],
             }),
-            pretty: "a1".into(),
+            display_name: "a1".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3679,7 +3726,7 @@ mod edge_proptests {
             payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef {
                 snippet_id: "s1".into(),
             }),
-            pretty: "a1".into(),
+            display_name: "a1".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3775,10 +3822,10 @@ mod edge_proptests {
         let mut cfg = minimal_valid_config();
         cfg.actions = vec![make_shortcut_action("a1")];
         let mut b = make_binding("b1", "does-not-exist");
-        b.action_ref = "does-not-exist".into();
+        b.action_id = "does-not-exist".into();
         cfg.bindings = vec![b];
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "missing action_ref must be rejected");
+        assert!(result.is_err(), "missing action_id must be rejected");
     }
 
     /// Binding referencing non-existent profile is rejected.
@@ -3803,7 +3850,7 @@ mod edge_proptests {
             payload: ActionPayload::ProfileSwitch(ProfileSwitchPayload {
                 target_profile_id: "ghost-profile".into(),
             }),
-            pretty: "switch".into(),
+            display_name: "switch".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3821,7 +3868,7 @@ mod edge_proptests {
             payload: ActionPayload::ProfileSwitch(ProfileSwitchPayload {
                 target_profile_id: String::new(),
             }),
-            pretty: "switch".into(),
+            display_name: "switch".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3860,7 +3907,7 @@ mod edge_proptests {
             payload: ActionPayload::MediaKey(MediaKeyPayload { // …but payload is MediaKey
                 key: MediaKeyKind::PlayPause,
             }),
-            pretty: "mismatch".into(),
+            display_name: "mismatch".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3878,7 +3925,7 @@ mod edge_proptests {
             id: "a1".into(),
             action_type: ActionType::Sequence,
             payload: ActionPayload::Sequence(SequenceActionPayload { steps: vec![] }),
-            pretty: "empty sequence".into(),
+            display_name: "empty sequence".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3898,7 +3945,7 @@ mod edge_proptests {
                 args: vec![],
                 working_dir: None,
             }),
-            pretty: "launch".into(),
+            display_name: "launch".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3918,7 +3965,7 @@ mod edge_proptests {
                 args: vec![],
                 working_dir: None,
             }),
-            pretty: "launch".into(),
+            display_name: "launch".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3928,7 +3975,7 @@ mod edge_proptests {
 
     // ─── Validation: menu cycles ─────────────────────────────────────────────
 
-    /// A menu action that directly references itself (via action_ref == own id)
+    /// A menu action that directly references itself (via action_id == own id)
     /// must be detected as a cycle.
     /// NOTE: this is a SUSPECTED BUG test — see findings.
     #[test]
@@ -3942,11 +3989,11 @@ mod edge_proptests {
                 items: vec![MenuItem::Action {
                     id: "item1".into(),
                     label: "Self".into(),
-                    action_ref: "m1".into(), // self-reference
+                    action_id: "m1".into(), // self-reference
                     enabled: true,
                 }],
             }),
-            pretty: "menu".into(),
+            display_name: "menu".into(),
             notes: None,
             conditions: vec![],
         }];
@@ -3967,11 +4014,11 @@ mod edge_proptests {
                     items: vec![MenuItem::Action {
                         id: "item-m1".into(),
                         label: "Go to m2".into(),
-                        action_ref: "m2".into(),
+                        action_id: "m2".into(),
                         enabled: true,
                     }],
                 }),
-                pretty: "m1".into(),
+                display_name: "m1".into(),
                 notes: None,
                 conditions: vec![],
             },
@@ -3982,11 +4029,11 @@ mod edge_proptests {
                     items: vec![MenuItem::Action {
                         id: "item-m2".into(),
                         label: "Go to m1".into(),
-                        action_ref: "m1".into(), // cycle: m2 → m1
+                        action_id: "m1".into(), // cycle: m2 → m1
                         enabled: true,
                     }],
                 }),
-                pretty: "m2".into(),
+                display_name: "m2".into(),
                 notes: None,
                 conditions: vec![],
             },

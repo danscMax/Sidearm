@@ -51,7 +51,7 @@ export function actionLabel(
   opts: { triggerLabels?: TriggerBadgeLabels } = {},
 ): string {
   if (entry.action && entry.action.type !== "disabled" && entry.binding?.enabled) {
-    const base = entry.action.pretty;
+    const base = entry.action.displayName;
     if (!opts.triggerLabels) return base;
     const badge = triggerBadge(entry.binding.triggerMode, opts.triggerLabels);
     return badge ? `${base} ${badge}` : base;
@@ -80,7 +80,7 @@ export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string)
     return `${name}\n${unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
-  return `${name}\n${cat?.label ?? ""}: ${entry.action.pretty}`;
+  return `${name}\n${cat?.label ?? ""}: ${entry.action.displayName}`;
 }
 
 /** className for a `btn-legend__cell` button. `dimmed`/`conflict` apply in photo mode only. */

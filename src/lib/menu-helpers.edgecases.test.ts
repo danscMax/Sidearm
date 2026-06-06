@@ -49,7 +49,7 @@ const arbActionItem = (id: string): MenuItem => ({
   kind: "action",
   id,
   label: `Label ${id}`,
-  actionRef: `ref-${id}`,
+  actionId: `ref-${id}`,
   enabled: true,
 });
 
@@ -421,7 +421,7 @@ describe("overflow: label with unicode / emoji in menu item", () => {
       kind: "action",
       id: "emoji-item",
       label: "🎮 Действие",
-      actionRef: "ref-emoji",
+      actionId: "ref-emoji",
       enabled: true,
     };
     const result = appendMenuItem([], null, item);

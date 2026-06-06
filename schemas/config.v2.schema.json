@@ -395,8 +395,11 @@
         "layer",
         "controlId",
         "label",
-        "actionRef",
         "enabled"
+      ],
+      "anyOf": [
+        { "required": ["actionId"] },
+        { "required": ["actionRef"] }
       ],
       "properties": {
         "id": {
@@ -415,6 +418,9 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "actionRef": {
+          "$ref": "#/$defs/idToken"
+        },
+        "actionId": {
           "$ref": "#/$defs/idToken"
         },
         "colorTag": {
@@ -460,8 +466,11 @@
       "required": [
         "id",
         "type",
-        "payload",
-        "pretty"
+        "payload"
+      ],
+      "anyOf": [
+        { "required": ["displayName"] },
+        { "required": ["pretty"] }
       ],
       "properties": {
         "id": {
@@ -474,6 +483,9 @@
           "type": "object"
         },
         "pretty": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "displayName": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "notes": {
@@ -939,8 +951,11 @@
         "id",
         "kind",
         "label",
-        "actionRef",
         "enabled"
+      ],
+      "anyOf": [
+        { "required": ["actionId"] },
+        { "required": ["actionRef"] }
       ],
       "properties": {
         "id": {
@@ -953,6 +968,9 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "actionRef": {
+          "$ref": "#/$defs/idToken"
+        },
+        "actionId": {
           "$ref": "#/$defs/idToken"
         },
         "enabled": {

@@ -39,7 +39,7 @@ export function MenuItemsEditor({
     const nextItem = createDefaultActionMenuItem(
       existingIds,
       fallbackAction.id,
-      fallbackAction.pretty,
+      fallbackAction.displayName,
     );
     onChange(appendMenuItem(items, parentId, nextItem));
   }
@@ -51,7 +51,7 @@ export function MenuItemsEditor({
     const nextItem = createDefaultSubmenuItem(
       existingIds,
       fallbackAction.id,
-      fallbackAction.pretty,
+      fallbackAction.displayName,
     );
     onChange(appendMenuItem(items, parentId, nextItem));
   }
@@ -133,13 +133,13 @@ export function MenuItemsEditor({
             <label className="field">
               <span className="field__label">{t("inspector.menuItemActionRef")}</span>
               <select
-                value={item.actionRef}
+                value={item.actionId}
                 disabled={disabled}
                 onChange={(event) =>
                   onChange(
                     updateMenuItem(items, item.id, (currentItem) =>
                       currentItem.kind === "action"
-                        ? { ...currentItem, actionRef: event.target.value }
+                        ? { ...currentItem, actionId: event.target.value }
                         : currentItem,
                     ),
                   )
@@ -147,7 +147,7 @@ export function MenuItemsEditor({
               >
                 {availableActions.map((action) => (
                   <option key={action.id} value={action.id}>
-                    {action.pretty} ({action.type})
+                    {action.displayName} ({action.type})
                   </option>
                 ))}
               </select>

@@ -94,7 +94,7 @@ function makeBinding(overrides: Partial<Binding> = {}): Binding {
     layer: "standard" as Layer,
     controlId: "thumb_01" as ControlId,
     label: "Test Binding",
-    actionRef: "action-1",
+    actionId: "action-1",
     enabled: true,
     ...overrides,
   };
@@ -105,7 +105,7 @@ function makeAction(overrides: Partial<Action> = {}): Action {
     id: "action-1",
     type: "shortcut",
     payload: { key: "A", ctrl: false, shift: false, alt: false, win: false },
-    pretty: "Test Action",
+    displayName: "Test Action",
     ...overrides,
   } as Action;
 }
@@ -270,11 +270,11 @@ describe("upsertAction", () => {
     const action = makeAction();
     const config = { ...createMinimalConfig(), actions: [action] };
 
-    const updated = { ...action, pretty: "Updated Pretty" } as Action;
+    const updated = { ...action, displayName: "Updated Pretty" } as Action;
     const result = upsertAction(config, updated);
 
     expect(result.actions).toHaveLength(1);
-    expect(result.actions[0]!.pretty).toBe("Updated Pretty");
+    expect(result.actions[0]!.displayName).toBe("Updated Pretty");
   });
 
   it("does not mutate the original config", () => {
@@ -595,7 +595,7 @@ describe("coerceActionType", () => {
       id: "a",
       type: "disabled",
       payload: {} as Record<string, never>,
-      pretty: "My Step",
+      displayName: "My Step",
     });
     const config = configWithAction(action);
 
@@ -610,12 +610,12 @@ describe("coerceActionType", () => {
     }
   });
 
-  it("coerces to sequence with 'Replace me' when pretty is empty", () => {
+  it("coerces to sequence with 'Replace me' when displayName is empty", () => {
     const action = makeAction({
       id: "a",
       type: "disabled",
       payload: {} as Record<string, never>,
-      pretty: "   ",
+      displayName: "   ",
     });
     const config = configWithAction(action);
 
@@ -640,7 +640,7 @@ describe("coerceActionType", () => {
   });
 
   it("coerces to menu and references an existing action", () => {
-    const otherAction = makeAction({ id: "other", pretty: "Other Action" });
+    const otherAction = makeAction({ id: "other", displayName: "Other Action" });
     const action = makeAction({ id: "a", type: "disabled", payload: {} as Record<string, never> });
     const config = { ...createMinimalConfig(), actions: [action, otherAction] };
 
@@ -651,7 +651,7 @@ describe("coerceActionType", () => {
       expect(coerced.payload.items).toHaveLength(1);
       expect(coerced.payload.items[0]!.kind).toBe("action");
       if (coerced.payload.items[0]!.kind === "action") {
-        expect(coerced.payload.items[0]!.actionRef).toBe("other");
+        expect(coerced.payload.items[0]!.actionId).toBe("other");
       }
     }
   });
@@ -764,7 +764,7 @@ describe("promoteInlineSnippetActionToLibrary", () => {
         pasteMode: "clipboardPaste",
         tags: ["greeting"],
       },
-      pretty: "Hello Snippet",
+      displayName: "Hello Snippet",
     };
     const config = { ...createMinimalConfig(), actions: [action] };
 
@@ -801,7 +801,7 @@ describe("promoteInlineSnippetActionToLibrary", () => {
         source: "libraryRef",
         snippetId: "snippet-existing",
       },
-      pretty: "Ref Snippet",
+      displayName: "Ref Snippet",
     };
     const config = { ...createMinimalConfig(), actions: [action] };
 
@@ -815,12 +815,12 @@ describe("promoteInlineSnippetActionToLibrary", () => {
     expect(result).toBe(config);
   });
 
-  it("uses action pretty as snippet name when preferred name is empty", () => {
+  it("uses action displayName as snippet name when preferred name is empty", () => {
     const action: Action = {
       id: "a",
       type: "textSnippet",
       payload: { source: "inline", text: "t", pasteMode: "clipboardPaste", tags: [] },
-      pretty: "Action Name",
+      displayName: "Action Name",
     };
     const config = { ...createMinimalConfig(), actions: [action] };
 
@@ -828,12 +828,12 @@ describe("promoteInlineSnippetActionToLibrary", () => {
     expect(result.snippetLibrary[0]!.name).toBe("Action Name");
   });
 
-  it("uses 'New snippet' when both preferred name and pretty are empty", () => {
+  it("uses 'New snippet' when both preferred name and display name are empty", () => {
     const action: Action = {
       id: "a",
       type: "textSnippet",
       payload: { source: "inline", text: "t", pasteMode: "clipboardPaste", tags: [] },
-      pretty: "   ",
+      displayName: "   ",
     };
     const config = { ...createMinimalConfig(), actions: [action] };
 
@@ -846,7 +846,7 @@ describe("promoteInlineSnippetActionToLibrary", () => {
       id: "a",
       type: "textSnippet",
       payload: { source: "inline", text: "t", pasteMode: "clipboardPaste", tags: ["a", "b", "a", "c", "b"] },
-      pretty: "Dups",
+      displayName: "Dups",
     };
     const config = { ...createMinimalConfig(), actions: [action] };
 
@@ -933,7 +933,7 @@ describe("ensurePlaceholderBinding", () => {
 
     const action = result.actions[0]!;
     expect(action.type).toBe("disabled");
-    expect(action.id).toBe(binding.actionRef);
+    expect(action.id).toBe(binding.actionId);
   });
 
   it("reuses an existing action id if it matches the derived id", () => {
@@ -946,7 +946,7 @@ describe("ensurePlaceholderBinding", () => {
     // Should reuse the existing action, not create another
     expect(result.actions).toHaveLength(1);
     expect(result.bindings).toHaveLength(1);
-    expect(result.bindings[0]!.actionRef).toBe(derivedActionId);
+    expect(result.bindings[0]!.actionId).toBe(derivedActionId);
   });
 });
 
@@ -1097,7 +1097,7 @@ describe("createProfile", () => {
 describe("deleteProfile", () => {
   it("removes the profile, its bindings, orphaned actions, and app mappings", () => {
     const profile = makeProfile({ id: "prof-1" });
-    const binding = makeBinding({ id: "b1", profileId: "prof-1", actionRef: "a1" });
+    const binding = makeBinding({ id: "b1", profileId: "prof-1", actionId: "a1" });
     const action = makeAction({ id: "a1" });
     const appMapping = makeAppMapping({ id: "am1", profileId: "prof-1" });
     const config = {
@@ -1119,12 +1119,12 @@ describe("deleteProfile", () => {
     const p1 = makeProfile({ id: "prof-1" });
     const p2 = makeProfile({ id: "prof-2" });
     const sharedAction = makeAction({ id: "shared-action" });
-    const b1 = makeBinding({ id: "b1", profileId: "prof-1", actionRef: "shared-action" });
+    const b1 = makeBinding({ id: "b1", profileId: "prof-1", actionId: "shared-action" });
     const b2 = makeBinding({
       id: "b2",
       profileId: "prof-2",
       controlId: "thumb_02",
-      actionRef: "shared-action",
+      actionId: "shared-action",
     });
     const config = {
       ...createMinimalConfig(),
@@ -1141,8 +1141,8 @@ describe("deleteProfile", () => {
   it("preserves bindings and app mappings for other profiles", () => {
     const p1 = makeProfile({ id: "prof-1" });
     const p2 = makeProfile({ id: "prof-2" });
-    const b1 = makeBinding({ id: "b1", profileId: "prof-1", actionRef: "a1" });
-    const b2 = makeBinding({ id: "b2", profileId: "prof-2", actionRef: "a2" });
+    const b1 = makeBinding({ id: "b1", profileId: "prof-1", actionId: "a1" });
+    const b2 = makeBinding({ id: "b2", profileId: "prof-2", actionId: "a2" });
     const a1 = makeAction({ id: "a1" });
     const a2 = makeAction({ id: "a2" });
     const am1 = makeAppMapping({ id: "am1", profileId: "prof-1" });
@@ -1185,9 +1185,9 @@ describe("deleteProfile", () => {
     const otherProfile = makeProfile({ id: "prof-2" });
     const orphanAction = makeAction({ id: "orphan" });
     const sharedAction = makeAction({ id: "shared" });
-    const b1 = makeBinding({ id: "b1", profileId: "prof-1", controlId: "thumb_01", actionRef: "orphan" });
-    const b2 = makeBinding({ id: "b2", profileId: "prof-1", controlId: "thumb_02", actionRef: "shared" });
-    const b3 = makeBinding({ id: "b3", profileId: "prof-2", controlId: "thumb_03", actionRef: "shared" });
+    const b1 = makeBinding({ id: "b1", profileId: "prof-1", controlId: "thumb_01", actionId: "orphan" });
+    const b2 = makeBinding({ id: "b2", profileId: "prof-1", controlId: "thumb_02", actionId: "shared" });
+    const b3 = makeBinding({ id: "b3", profileId: "prof-2", controlId: "thumb_03", actionId: "shared" });
     const config = {
       ...createMinimalConfig(),
       profiles: [profile, otherProfile],
@@ -1205,26 +1205,26 @@ describe("deleteProfile", () => {
     const survivingProfile = makeProfile({ id: "prof-keep" });
 
     // Menu action with nested actionRefs
-    const menuTargetAction = makeAction({ id: "menu-target-1", pretty: "Open Browser" });
-    const menuTargetAction2 = makeAction({ id: "menu-target-2", pretty: "Open Editor" });
+    const menuTargetAction = makeAction({ id: "menu-target-1", displayName: "Open Browser" });
+    const menuTargetAction2 = makeAction({ id: "menu-target-2", displayName: "Open Editor" });
     const menuAction: Action = {
       id: "menu-action",
       type: "menu",
       payload: {
         items: [
-          { kind: "action", id: "mi-1", label: "Browser", actionRef: "menu-target-1", enabled: true },
-          { kind: "action", id: "mi-2", label: "Editor", actionRef: "menu-target-2", enabled: true },
+          { kind: "action", id: "mi-1", label: "Browser", actionId: "menu-target-1", enabled: true },
+          { kind: "action", id: "mi-2", label: "Editor", actionId: "menu-target-2", enabled: true },
         ],
       },
-      pretty: "My Menu",
+      displayName: "My Menu",
     };
 
     // Binding on deleted profile (should be removed)
-    const deletedBinding = makeBinding({ id: "b-del", profileId: "prof-del", controlId: "thumb_01", actionRef: "orphan-action" });
-    const orphanAction = makeAction({ id: "orphan-action", pretty: "Orphan" });
+    const deletedBinding = makeBinding({ id: "b-del", profileId: "prof-del", controlId: "thumb_01", actionId: "orphan-action" });
+    const orphanAction = makeAction({ id: "orphan-action", displayName: "Orphan" });
 
     // Binding on surviving profile referencing the menu
-    const survivingBinding = makeBinding({ id: "b-keep", profileId: "prof-keep", controlId: "thumb_02", actionRef: "menu-action" });
+    const survivingBinding = makeBinding({ id: "b-keep", profileId: "prof-keep", controlId: "thumb_02", actionId: "menu-action" });
 
     const config: AppConfig = {
       ...createMinimalConfig(),
@@ -1244,7 +1244,7 @@ describe("deleteProfile", () => {
   it("preserves actions referenced by nested submenu items", () => {
     const profile = makeProfile({ id: "prof-keep" });
 
-    const deepAction = makeAction({ id: "deep-action", pretty: "Deep" });
+    const deepAction = makeAction({ id: "deep-action", displayName: "Deep" });
     const menuAction: Action = {
       id: "menu-action",
       type: "menu",
@@ -1256,20 +1256,20 @@ describe("deleteProfile", () => {
             label: "Sub",
             enabled: true,
             items: [
-              { kind: "action", id: "mi-deep", label: "Deep Item", actionRef: "deep-action", enabled: true },
+              { kind: "action", id: "mi-deep", label: "Deep Item", actionId: "deep-action", enabled: true },
             ],
           } as MenuItem,
         ],
       },
-      pretty: "Menu with submenu",
+      displayName: "Menu with submenu",
     };
 
-    const binding = makeBinding({ id: "b1", profileId: "prof-keep", controlId: "thumb_01", actionRef: "menu-action" });
+    const binding = makeBinding({ id: "b1", profileId: "prof-keep", controlId: "thumb_01", actionId: "menu-action" });
 
     // A second profile that we delete
     const deletedProfile = makeProfile({ id: "prof-del" });
-    const deletedBinding = makeBinding({ id: "b-del", profileId: "prof-del", controlId: "thumb_02", actionRef: "some-action" });
-    const someAction = makeAction({ id: "some-action", pretty: "Deleted action" });
+    const deletedBinding = makeBinding({ id: "b-del", profileId: "prof-del", controlId: "thumb_02", actionId: "some-action" });
+    const someAction = makeAction({ id: "some-action", displayName: "Deleted action" });
 
     const config: AppConfig = {
       ...createMinimalConfig(),
@@ -1292,13 +1292,13 @@ describe("deleteProfile", () => {
 
 describe("duplicateBinding", () => {
   it("copies a binding and its action to a new control", () => {
-    const action = makeAction({ id: "a1", pretty: "Copy Me" });
+    const action = makeAction({ id: "a1", displayName: "Copy Me" });
     const binding = makeBinding({
       id: "b1",
       profileId: "prof",
       layer: "standard",
       controlId: "thumb_01",
-      actionRef: "a1",
+      actionId: "a1",
     });
     const config = {
       ...createMinimalConfig(),
@@ -1317,15 +1317,15 @@ describe("duplicateBinding", () => {
 
     const newAction = result.actions.find((a) => a.id !== "a1");
     expect(newAction).toBeDefined();
-    expect(newAction!.pretty).toBe("Copy Me");
-    expect(newBinding!.actionRef).toBe(newAction!.id);
+    expect(newAction!.displayName).toBe("Copy Me");
+    expect(newBinding!.actionId).toBe(newAction!.id);
   });
 
   it("removes any existing binding at the target slot", () => {
     const a1 = makeAction({ id: "a1" });
     const a2 = makeAction({ id: "a2" });
-    const source = makeBinding({ id: "b1", profileId: "prof", controlId: "thumb_01", actionRef: "a1" });
-    const target = makeBinding({ id: "b2", profileId: "prof", controlId: "thumb_05", actionRef: "a2" });
+    const source = makeBinding({ id: "b1", profileId: "prof", controlId: "thumb_01", actionId: "a1" });
+    const target = makeBinding({ id: "b2", profileId: "prof", controlId: "thumb_05", actionId: "a2" });
     const config = {
       ...createMinimalConfig(),
       actions: [a1, a2],
@@ -1346,7 +1346,7 @@ describe("duplicateBinding", () => {
   });
 
   it("returns config unchanged when the action referenced by binding is not found", () => {
-    const binding = makeBinding({ id: "b1", actionRef: "missing-action" });
+    const binding = makeBinding({ id: "b1", actionId: "missing-action" });
     const config = { ...createMinimalConfig(), bindings: [binding] };
 
     const result = duplicateBinding(config, "b1", "thumb_05");
@@ -1360,7 +1360,7 @@ describe("duplicateBinding", () => {
       profileId: "prof",
       layer: "standard",
       controlId: "thumb_01",
-      actionRef: "a1",
+      actionId: "a1",
     });
     const config = {
       ...createMinimalConfig(),
@@ -1388,7 +1388,7 @@ describe("copyBindingFromLayer", () => {
       profileId: "prof",
       layer: "standard",
       controlId: "thumb_03",
-      actionRef: "a1",
+      actionId: "a1",
     });
     const config = {
       ...createMinimalConfig(),
@@ -1798,7 +1798,7 @@ describe("ActionCondition", () => {
       id: "cond-test",
       type: "shortcut",
       payload: { key: "C", ctrl: true, shift: false, alt: false, win: false },
-      pretty: "Ctrl+C",
+      displayName: "Ctrl+C",
       conditions,
     };
     const updated = upsertAction(config, action);
@@ -1812,7 +1812,7 @@ describe("ActionCondition", () => {
       id: "no-cond",
       type: "disabled",
       payload: {} as Record<string, never>,
-      pretty: "Disabled",
+      displayName: "Disabled",
     };
     const updated = upsertAction(config, action);
     const found = updated.actions.find((a) => a.id === "no-cond");
@@ -1827,7 +1827,7 @@ describe("ActionCondition", () => {
 describe("removeBinding", () => {
   it("removes a binding and its orphaned action", () => {
     const action = makeAction({ id: "action-orphan" });
-    const binding = makeBinding({ id: "binding-rm", actionRef: "action-orphan" });
+    const binding = makeBinding({ id: "binding-rm", actionId: "action-orphan" });
     const config: AppConfig = {
       ...createMinimalConfig(),
       bindings: [binding],
@@ -1842,8 +1842,8 @@ describe("removeBinding", () => {
 
   it("keeps action if referenced by another binding", () => {
     const action = makeAction({ id: "action-shared" });
-    const binding1 = makeBinding({ id: "binding-1", actionRef: "action-shared" });
-    const binding2 = makeBinding({ id: "binding-2", actionRef: "action-shared", controlId: "thumb_02" as ControlId });
+    const binding1 = makeBinding({ id: "binding-1", actionId: "action-shared" });
+    const binding2 = makeBinding({ id: "binding-2", actionId: "action-shared", controlId: "thumb_02" as ControlId });
     const config: AppConfig = {
       ...createMinimalConfig(),
       bindings: [binding1, binding2],
@@ -1880,19 +1880,19 @@ describe("removeBinding", () => {
 describe("extractProfileExport", () => {
   it("extracts profile with its bindings, actions, and appMappings", () => {
     const profile = makeProfile({ id: "p1", name: "Gaming" });
-    const action1 = makeAction({ id: "act-1", pretty: "Ctrl+C" });
-    const action2 = makeAction({ id: "act-2", pretty: "Ctrl+V" });
+    const action1 = makeAction({ id: "act-1", displayName: "Ctrl+C" });
+    const action2 = makeAction({ id: "act-2", displayName: "Ctrl+V" });
     const binding1 = makeBinding({
       id: "b1",
       profileId: "p1",
       controlId: "thumb_01",
-      actionRef: "act-1",
+      actionId: "act-1",
     });
     const binding2 = makeBinding({
       id: "b2",
       profileId: "p1",
       controlId: "thumb_02",
-      actionRef: "act-2",
+      actionId: "act-2",
     });
     const appMapping = makeAppMapping({
       id: "app-1",
@@ -1922,20 +1922,20 @@ describe("extractProfileExport", () => {
   it("only includes actions referenced by the profile's bindings", () => {
     const profileA = makeProfile({ id: "pA", name: "Profile A" });
     const profileB = makeProfile({ id: "pB", name: "Profile B" });
-    const actionA = makeAction({ id: "act-a", pretty: "Action A" });
-    const actionB = makeAction({ id: "act-b", pretty: "Action B" });
-    const actionOrphan = makeAction({ id: "act-orphan", pretty: "Orphan" });
+    const actionA = makeAction({ id: "act-a", displayName: "Action A" });
+    const actionB = makeAction({ id: "act-b", displayName: "Action B" });
+    const actionOrphan = makeAction({ id: "act-orphan", displayName: "Orphan" });
     const bindingA = makeBinding({
       id: "bA",
       profileId: "pA",
       controlId: "thumb_01",
-      actionRef: "act-a",
+      actionId: "act-a",
     });
     const bindingB = makeBinding({
       id: "bB",
       profileId: "pB",
       controlId: "thumb_01",
-      actionRef: "act-b",
+      actionId: "act-b",
     });
     const appMappingB = makeAppMapping({
       id: "app-b",
@@ -1974,9 +1974,9 @@ describe("extractProfileExport", () => {
       profileId: "pE",
       controlId: "thumb_05",
       layer: "standard",
-      actionRef: "act-e",
+      actionId: "act-e",
     });
-    const action = makeAction({ id: "act-e", pretty: "E" });
+    const action = makeAction({ id: "act-e", displayName: "E" });
     const encoder = makeEncoderMapping({ controlId: "thumb_05", layer: "standard" });
     const unrelated = makeEncoderMapping({ controlId: "thumb_09", layer: "standard" });
     const config: AppConfig = {
@@ -2026,11 +2026,11 @@ function makeExportData(overrides: Partial<ProfileExportData> = {}): ProfileExpo
         id: "imported-binding-1",
         profileId: "imported-profile",
         controlId: "thumb_01",
-        actionRef: "imported-action-1",
+        actionId: "imported-action-1",
       }),
     ],
     actions: [
-      makeAction({ id: "imported-action-1", pretty: "Imported Action" }),
+      makeAction({ id: "imported-action-1", displayName: "Imported Action" }),
     ],
     appMappings: [
       makeAppMapping({
@@ -2073,11 +2073,11 @@ describe("isValidProfileExport", () => {
 describe("importProfile", () => {
   it("merges imported profile into existing config with no collisions", () => {
     const existingProfile = makeProfile({ id: "existing-profile", name: "Existing" });
-    const existingAction = makeAction({ id: "existing-action", pretty: "Existing" });
+    const existingAction = makeAction({ id: "existing-action", displayName: "Existing" });
     const existingBinding = makeBinding({
       id: "existing-binding",
       profileId: "existing-profile",
-      actionRef: "existing-action",
+      actionId: "existing-action",
     });
     const config: AppConfig = {
       ...createMinimalConfig(),
@@ -2108,7 +2108,7 @@ describe("importProfile", () => {
     const importedProfileInResult = result.profiles.find((p) => p.name === "Imported");
     expect(importedBinding!.profileId).toBe(importedProfileInResult!.id);
     const importedActionInResult = result.actions.find((a) => a.id !== "existing-action");
-    expect(importedBinding!.actionRef).toBe(importedActionInResult!.id);
+    expect(importedBinding!.actionId).toBe(importedActionInResult!.id);
 
     // Imported appMapping should reference the imported profile
     const importedMapping = result.appMappings[0];
@@ -2143,12 +2143,12 @@ describe("importProfile", () => {
   it("generates new IDs on collision and remaps internal references", () => {
     // Set up a config that has the SAME IDs as the import data
     const collidingProfile = makeProfile({ id: "imported-profile", name: "Collider" });
-    const collidingAction = makeAction({ id: "imported-action-1", pretty: "Collider Action" });
+    const collidingAction = makeAction({ id: "imported-action-1", displayName: "Collider Action" });
     const collidingBinding = makeBinding({
       id: "imported-binding-1",
       profileId: "imported-profile",
       controlId: "thumb_03",
-      actionRef: "imported-action-1",
+      actionId: "imported-action-1",
     });
     const collidingAppMapping = makeAppMapping({
       id: "imported-app-1",
@@ -2180,7 +2180,7 @@ describe("importProfile", () => {
     // New action ID should differ from original
     const newAction = result.actions.find((a) => a.id !== "imported-action-1");
     expect(newAction).toBeDefined();
-    expect(newAction!.pretty).toBe("Imported Action");
+    expect(newAction!.displayName).toBe("Imported Action");
 
     // New binding ID should differ from original
     const newBinding = result.bindings.find((b) => b.id !== "imported-binding-1");
@@ -2189,8 +2189,8 @@ describe("importProfile", () => {
     // Internal references must be updated:
     // binding.profileId -> new profile ID
     expect(newBinding!.profileId).toBe(newProfile!.id);
-    // binding.actionRef -> new action ID
-    expect(newBinding!.actionRef).toBe(newAction!.id);
+    // binding.actionId -> new action ID
+    expect(newBinding!.actionId).toBe(newAction!.id);
 
     // New appMapping ID should differ from original
     const newAppMapping = result.appMappings.find((m) => m.id !== "imported-app-1");
@@ -2207,12 +2207,12 @@ describe("importProfile", () => {
 
   it("does not modify existing config data", () => {
     const existingProfile = makeProfile({ id: "keep-me", name: "Original" });
-    const existingAction = makeAction({ id: "keep-action", pretty: "Original Action" });
+    const existingAction = makeAction({ id: "keep-action", displayName: "Original Action" });
     const existingBinding = makeBinding({
       id: "keep-binding",
       profileId: "keep-me",
       controlId: "thumb_02",
-      actionRef: "keep-action",
+      actionId: "keep-action",
     });
     const existingAppMapping = makeAppMapping({
       id: "keep-app",

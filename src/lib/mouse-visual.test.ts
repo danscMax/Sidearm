@@ -19,7 +19,7 @@ function assignedEntry(triggerMode?: string): ControlSurfaceEntry {
   return {
     control,
     binding: { id: "b1", enabled: true, triggerMode } as unknown as Binding,
-    action: { id: "a1", type: "shortcut", pretty: "Ctrl+C" } as unknown as Action,
+    action: { id: "a1", type: "shortcut", displayName: "Ctrl+C" } as unknown as Action,
     mapping: null,
     isSelected: false,
   };

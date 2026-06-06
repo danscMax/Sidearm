@@ -126,7 +126,7 @@ describe("buildAction", () => {
     });
     expect(action.id).toBe(existing.id);
     expect(action.type).toBe("shortcut");
-    expect(action.pretty).toBe("My Shortcut");
+    expect(action.displayName).toBe("My Shortcut");
   });
 
   it("generates an action-picker id when there is no existing action", () => {
@@ -219,7 +219,7 @@ describe("buildAction", () => {
     expect(action.conditions).toEqual([{ type: "exeEquals", value: "game.exe" }]);
   });
 
-  it("falls back to a default pretty for menu actions with no name", () => {
+  it("falls back to a default display name for menu actions with no name", () => {
     const action = buildAction({
       effectiveCategory: "menu",
       existingAction: null,
@@ -228,7 +228,7 @@ describe("buildAction", () => {
       profiles,
     });
     expect(action.type).toBe("menu");
-    expect(action.pretty).toBe("picker.defaultMenu");
+    expect(action.displayName).toBe("picker.defaultMenu");
   });
 });
 
@@ -250,7 +250,7 @@ describe("createInitialDrafts", () => {
     expect(createInitialDrafts(null, null, []).profile).toBe("");
   });
 
-  it("hydrates from an existing shortcut action and its pretty name", () => {
+  it("hydrates from an existing shortcut action and its display name", () => {
     const existing = makeAction({
       type: "shortcut",
       payload: { key: "F5", ctrl: true, shift: false, alt: false, win: false },
@@ -283,7 +283,7 @@ describe("createInitialDrafts", () => {
       layer: "standard",
       controlId: "thumb_01",
       label: "x",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
       triggerMode: "hold",
       chordPartner: "thumb_02",

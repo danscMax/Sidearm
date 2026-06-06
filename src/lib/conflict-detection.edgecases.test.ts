@@ -8,7 +8,7 @@
  *   Boundary   (40%) — empty config; 1/2/N bindings; threshold ±1 (size ≥ 2);
  *                       all modifier combinations; key case sensitivity.
  *   Null/Empty (20%) — bindings with empty-string key; no bindings; no actions;
- *                       missing actionRef; binding referencing unknown action.
+ *                       missing actionId; binding referencing unknown action.
  *   Overflow   (15%) — large number of bindings; many conflicting groups;
  *                       long key strings; unicode keys; 3+ bindings in one group.
  *   Concurrency(15%) — N/A: all functions are pure, synchronous, stateless.
@@ -43,7 +43,7 @@ function makeShortcutAction(
   return {
     id,
     type: "shortcut",
-    pretty: `action-${id}`,
+    displayName: `action-${id}`,
     payload: {
       ctrl: false,
       shift: false,
@@ -60,7 +60,7 @@ function makeBinding(
     profileId?: string;
     layer?: Layer;
     controlId?: ControlId;
-    actionRef: string;
+    actionId: string;
     enabled?: boolean;
     label?: string;
   },
@@ -71,7 +71,7 @@ function makeBinding(
     layer: opts.layer ?? "standard",
     controlId: (opts.controlId ?? "thumb_01") as ControlId,
     label: opts.label ?? "",
-    actionRef: opts.actionRef,
+    actionId: opts.actionId,
     enabled: opts.enabled ?? true,
   };
 }
@@ -207,7 +207,7 @@ describe("boundary — findShortcutConflicts with empty/minimal config", () => {
 
   it("single binding, single action → no conflict (need ≥2 bindings per group)", () => {
     const actions = [makeShortcutAction("a1", { key: "A", ctrl: true })];
-    const bindings = [makeBinding("b1", { actionRef: "a1" })];
+    const bindings = [makeBinding("b1", { actionId: "a1" })];
     expect(findShortcutConflicts(makeConfig(actions, bindings))).toHaveLength(0);
   });
 
@@ -217,8 +217,8 @@ describe("boundary — findShortcutConflicts with empty/minimal config", () => {
       makeShortcutAction("a2", { key: "A", ctrl: true }),
     ];
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", profileId: "p1" }),
-      makeBinding("b2", { actionRef: "a2", profileId: "p2" }),
+      makeBinding("b1", { actionId: "a1", profileId: "p1" }),
+      makeBinding("b2", { actionId: "a2", profileId: "p2" }),
     ];
     expect(findShortcutConflicts(makeConfig(actions, bindings))).toHaveLength(0);
   });
@@ -229,8 +229,8 @@ describe("boundary — findShortcutConflicts with empty/minimal config", () => {
       makeShortcutAction("a2", { key: "A", ctrl: true }),
     ];
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", layer: "standard" }),
-      makeBinding("b2", { actionRef: "a2", layer: "hypershift" }),
+      makeBinding("b1", { actionId: "a1", layer: "standard" }),
+      makeBinding("b2", { actionId: "a2", layer: "hypershift" }),
     ];
     expect(findShortcutConflicts(makeConfig(actions, bindings))).toHaveLength(0);
   });
@@ -247,8 +247,8 @@ describe("boundary — size threshold ≥ 2", () => {
       makeShortcutAction("a2", { key: "B", ctrl: true }),
     ];
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", controlId: "thumb_01" }),
-      makeBinding("b2", { actionRef: "a2", controlId: "thumb_02" }),
+      makeBinding("b1", { actionId: "a1", controlId: "thumb_01" }),
+      makeBinding("b2", { actionId: "a2", controlId: "thumb_02" }),
     ];
     const groups = findShortcutConflicts(makeConfig(actions, bindings));
     expect(groups).toHaveLength(1);
@@ -262,9 +262,9 @@ describe("boundary — size threshold ≥ 2", () => {
       makeShortcutAction("a3", { key: "C", ctrl: true }),
     ];
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", controlId: "thumb_01" }),
-      makeBinding("b2", { actionRef: "a2", controlId: "thumb_02" }),
-      makeBinding("b3", { actionRef: "a3", controlId: "thumb_03" }),
+      makeBinding("b1", { actionId: "a1", controlId: "thumb_01" }),
+      makeBinding("b2", { actionId: "a2", controlId: "thumb_02" }),
+      makeBinding("b3", { actionId: "a3", controlId: "thumb_03" }),
     ];
     const groups = findShortcutConflicts(makeConfig(actions, bindings));
     expect(groups).toHaveLength(1);
@@ -288,8 +288,8 @@ describe("invariant — conflict detection symmetry", () => {
           makeShortcutAction("a2", { key, ...mods }),
         ];
         const bindings = [
-          makeBinding("b1", { actionRef: "a1", controlId: "thumb_01" }),
-          makeBinding("b2", { actionRef: "a2", controlId: "thumb_02" }),
+          makeBinding("b1", { actionId: "a1", controlId: "thumb_01" }),
+          makeBinding("b2", { actionId: "a2", controlId: "thumb_02" }),
         ];
         const groups = findShortcutConflicts(makeConfig(actions, bindings));
         expect(groups).toHaveLength(1);
@@ -311,7 +311,7 @@ describe("invariant — no self-conflict (reflexive exclusion)", () => {
     fc.assert(
       fc.property(keyArb, modArb, (key, mods) => {
         const actions = [makeShortcutAction("a1", { key, ...mods })];
-        const bindings = [makeBinding("b1", { actionRef: "a1" })];
+        const bindings = [makeBinding("b1", { actionId: "a1" })];
         expect(findShortcutConflicts(makeConfig(actions, bindings))).toHaveLength(0);
       }),
       { numRuns: 500 },
@@ -334,8 +334,8 @@ describe("invariant — disabled bindings are excluded", () => {
           makeShortcutAction("a2", { key, ...mods }),
         ];
         const bindings = [
-          makeBinding("b1", { actionRef: "a1", enabled: whichDisabled ? false : true }),
-          makeBinding("b2", { actionRef: "a2", enabled: whichDisabled ? true : false }),
+          makeBinding("b1", { actionId: "a1", enabled: whichDisabled ? false : true }),
+          makeBinding("b2", { actionId: "a2", enabled: whichDisabled ? true : false }),
         ];
         // At least one is disabled → no conflict group of size ≥ 2
         expect(findShortcutConflicts(makeConfig(actions, bindings))).toHaveLength(0);
@@ -350,10 +350,10 @@ describe("invariant — disabled bindings are excluded", () => {
 // ---------------------------------------------------------------------------
 
 describe("null/empty — binding referencing missing or non-shortcut action", () => {
-  it("binding referencing a missing actionRef is silently ignored", () => {
+  it("binding referencing a missing actionId is silently ignored", () => {
     const bindings = [
-      makeBinding("b1", { actionRef: "nonexistent-action-id" }),
-      makeBinding("b2", { actionRef: "also-missing" }),
+      makeBinding("b1", { actionId: "nonexistent-action-id" }),
+      makeBinding("b2", { actionId: "also-missing" }),
     ];
     // No actions at all — both bindings dangle
     expect(findShortcutConflicts(makeConfig([], bindings))).toHaveLength(0);
@@ -363,12 +363,12 @@ describe("null/empty — binding referencing missing or non-shortcut action", ()
     const snippetAction: Action = {
       id: "a1",
       type: "textSnippet",
-      pretty: "Snippet",
+      displayName: "Snippet",
       payload: { source: "inline", text: "hello", pasteMode: "sendText", tags: [] },
     };
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", controlId: "thumb_01" }),
-      makeBinding("b2", { actionRef: "a1", controlId: "thumb_02" }),
+      makeBinding("b1", { actionId: "a1", controlId: "thumb_01" }),
+      makeBinding("b2", { actionId: "a1", controlId: "thumb_02" }),
     ];
     // textSnippet is not a "shortcut" type → ignored
     expect(findShortcutConflicts(makeConfig([snippetAction], bindings))).toHaveLength(0);
@@ -380,8 +380,8 @@ describe("null/empty — binding referencing missing or non-shortcut action", ()
       makeShortcutAction("a2", { key: "" }),
     ];
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", controlId: "thumb_01" }),
-      makeBinding("b2", { actionRef: "a2", controlId: "thumb_02" }),
+      makeBinding("b1", { actionId: "a1", controlId: "thumb_01" }),
+      makeBinding("b2", { actionId: "a2", controlId: "thumb_02" }),
     ];
     // shortcutSignature("") returns "" → filtered out → no conflicts
     expect(findShortcutConflicts(makeConfig(actions, bindings))).toHaveLength(0);
@@ -406,7 +406,7 @@ describe("overflow — many unique bindings produce no false conflicts", () => {
         ];
         const bindings = actions.map((a, i) =>
           makeBinding(`b${i}`, {
-            actionRef: a.id,
+            actionId: a.id,
             controlId: controlIds[i % controlIds.length],
           }),
         );
@@ -436,7 +436,7 @@ describe("overflow — large conflict group completeness", () => {
         ];
         const bindings = actions.map((a, i) =>
           makeBinding(`b${i}`, {
-            actionRef: a.id,
+            actionId: a.id,
             controlId: controlIds[i % controlIds.length],
           }),
         );
@@ -471,10 +471,10 @@ describe("invariant — conflictingBindingIds consistency", () => {
             "thumb_06", "thumb_07", "thumb_08", "thumb_09", "thumb_10",
           ];
           const conflictBindings = conflictActions.map((a, i) =>
-            makeBinding(`cb${i}`, { actionRef: a.id, controlId: controlIds[i % controlIds.length] }),
+            makeBinding(`cb${i}`, { actionId: a.id, controlId: controlIds[i % controlIds.length] }),
           );
           const uniqueBindings = uniqueActions.map((a, i) =>
-            makeBinding(`ub${i}`, { actionRef: a.id, controlId: controlIds[(i + conflicting) % controlIds.length] }),
+            makeBinding(`ub${i}`, { actionId: a.id, controlId: controlIds[(i + conflicting) % controlIds.length] }),
           );
           const cfg = makeConfig(
             [...conflictActions, ...uniqueActions],
@@ -514,8 +514,8 @@ describe("invariant — findShortcutConflicts determinism", () => {
           makeShortcutAction("a2", { key, ...mods }),
         ];
         const bindings = [
-          makeBinding("b1", { actionRef: "a1", controlId: "thumb_01" }),
-          makeBinding("b2", { actionRef: "a2", controlId: "thumb_02" }),
+          makeBinding("b1", { actionId: "a1", controlId: "thumb_01" }),
+          makeBinding("b2", { actionId: "a2", controlId: "thumb_02" }),
         ];
         const cfg = makeConfig(actions, bindings);
         expect(findShortcutConflicts(cfg)).toEqual(findShortcutConflicts(cfg));
@@ -559,7 +559,7 @@ describe("invariant — modifier combinations produce correct distinct signature
 // ---------------------------------------------------------------------------
 
 describe("boundary — bindingMatchesQuery edge inputs", () => {
-  const b = makeBinding("b1", { actionRef: "a1", label: "Copy selection" });
+  const b = makeBinding("b1", { actionId: "a1", label: "Copy selection" });
   const a = makeShortcutAction("a1", { key: "C", ctrl: true });
 
   it("whitespace-only query matches everything (trimmed to empty)", () => {
@@ -568,7 +568,7 @@ describe("boundary — bindingMatchesQuery edge inputs", () => {
 
   it("null binding with non-empty query matches only via action fields", () => {
     // null binding → no label to match
-    expect(bindingMatchesQuery(null, a, "ctrl")).toBe(true); // action.pretty contains Ctrl
+    expect(bindingMatchesQuery(null, a, "ctrl")).toBe(true); // action.displayName contains Ctrl
     expect(bindingMatchesQuery(null, null, "anything")).toBe(false);
   });
 
@@ -610,7 +610,7 @@ describe("boundary — bindingMatchesQuery case-insensitive matching", () => {
       fc.property(
         fc.constantFrom("copy", "COPY", "Copy", "cOpY"),
         (q) => {
-          const b2 = { ...makeBinding("b1", { actionRef: "a1" }), label: "Copy selection" };
+          const b2 = { ...makeBinding("b1", { actionId: "a1" }), label: "Copy selection" };
           expect(bindingMatchesQuery(b2, null, q)).toBe(true);
         },
       ),
@@ -630,8 +630,8 @@ describe("null/empty — binding label does not affect conflict detection", () =
       makeShortcutAction("a2", { key: "D", ctrl: true }),
     ];
     const bindings = [
-      makeBinding("b1", { actionRef: "a1", label: "", controlId: "thumb_01" }),
-      makeBinding("b2", { actionRef: "a2", label: "", controlId: "thumb_02" }),
+      makeBinding("b1", { actionId: "a1", label: "", controlId: "thumb_01" }),
+      makeBinding("b2", { actionId: "a2", label: "", controlId: "thumb_02" }),
     ];
     const groups = findShortcutConflicts(makeConfig(actions, bindings));
     expect(groups).toHaveLength(1);

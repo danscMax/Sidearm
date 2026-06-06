@@ -204,7 +204,7 @@ describe("boundary: isActionLiveRunnable — menu and profileSwitch always false
           kind: "action" as const,
           id: `mi${i}`,
           label: `Item ${i}`,
-          actionRef: `a${i}`,
+          actionId: `a${i}`,
           enabled: true,
         }));
         const config = makeConfig({

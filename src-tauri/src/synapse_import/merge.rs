@@ -168,7 +168,7 @@ fn append_profile(
                     layer,
                     control_id,
                     label: pb.label.clone(),
-                    action_ref: action.id.clone(),
+                    action_id: action.id.clone(),
                     color_tag: None,
                     trigger_mode: None,
                     chord_partner: None,
@@ -184,7 +184,7 @@ fn append_profile(
                     layer,
                     control_id,
                     label: pb.label.clone(),
-                    action_ref: action_id,
+                    action_id,
                     color_tag: None,
                     trigger_mode: None,
                     chord_partner: None,
@@ -225,7 +225,7 @@ fn build_action_from_parsed(
     match parsed {
         ParsedAction::Shortcut { key, ctrl, shift, alt, win } => {
             let id = make_random_id("action");
-            let pretty = shortcut_pretty(key, *ctrl, *shift, *alt, *win);
+            let display_name = shortcut_pretty(key, *ctrl, *shift, *alt, *win);
             BuiltAction::New(Action {
                 id,
                 action_type: ActionType::Shortcut,
@@ -237,7 +237,7 @@ fn build_action_from_parsed(
                     win: *win,
                     raw: None,
                 }),
-                pretty,
+                display_name,
                 notes: None,
                 conditions: Vec::new(),
             })
@@ -256,7 +256,7 @@ fn build_action_from_parsed(
                     paste_mode: PasteMode::SendText,
                     tags: Vec::new(),
                 }),
-                pretty: format!("«{snippet}»"),
+                display_name: format!("«{snippet}»"),
                 notes: None,
                 conditions: Vec::new(),
             })
@@ -285,7 +285,7 @@ fn build_action_from_parsed(
                         alt: false,
                         win: false,
                     }),
-                    pretty: action.clone(),
+                    display_name: action.clone(),
                     notes: None,
                     conditions: Vec::new(),
                 })
@@ -304,7 +304,7 @@ fn build_action_from_parsed(
                 id,
                 action_type: ActionType::Disabled,
                 payload: ActionPayload::Disabled(Default::default()),
-                pretty: "—".into(),
+                display_name: "—".into(),
                 notes: None,
                 conditions: Vec::new(),
             })
@@ -350,7 +350,7 @@ fn build_sequence_action(
         id: action_id.to_string(),
         action_type: ActionType::Sequence,
         payload: ActionPayload::Sequence(SequenceActionPayload { steps }),
-        pretty: format!("🎬 {}", parsed.name),
+        display_name: format!("🎬 {}", parsed.name),
         notes: Some(format!("Imported from Razer Synapse macro `{}`", parsed.name)),
         conditions: Vec::new(),
     }
@@ -396,7 +396,7 @@ fn remove_profile_by_name(config: &mut AppConfig, name: &str, warnings: &mut Vec
         .bindings
         .iter()
         .filter(|b| b.profile_id == target_id)
-        .map(|b| b.action_ref.clone())
+        .map(|b| b.action_id.clone())
         .collect();
 
     config.profiles.retain(|p| p.id != target_id);
@@ -410,10 +410,10 @@ fn remove_profile_by_name(config: &mut AppConfig, name: &str, warnings: &mut Vec
     let still_referenced: std::collections::HashSet<String> = config
         .bindings
         .iter()
-        .map(|b| b.action_ref.clone())
+        .map(|b| b.action_id.clone())
         .collect();
     config.actions.retain(|a| {
-        !(dropped_action_ids.contains(&a.id) && !still_referenced.contains(&a.id))
+        !dropped_action_ids.contains(&a.id) || still_referenced.contains(&a.id)
     });
 }
 
@@ -626,7 +626,7 @@ mod tests {
             .config
             .actions
             .iter()
-            .find(|a| a.id == binding.action_ref)
+            .find(|a| a.id == binding.action_id)
             .expect("action referenced by binding");
         assert_eq!(action.action_type, ActionType::Sequence);
     }
@@ -1067,7 +1067,7 @@ mod edge_proptests {
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
         // Binding and action are created; the action must have >= 1 step (schema).
         let binding = &result.config.bindings[0];
-        let action = result.config.actions.iter().find(|a| a.id == binding.action_ref).unwrap();
+        let action = result.config.actions.iter().find(|a| a.id == binding.action_id).unwrap();
         if let crate::config::ActionPayload::Sequence(seq) = &action.payload {
             assert!(!seq.steps.is_empty(), "empty macro must have a placeholder step");
         } else {

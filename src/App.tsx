@@ -560,7 +560,7 @@ function App() {
   const selectedBinding =
     selectedControl ? bindingByControlId.get(selectedControl.id) ?? null : null;
   const selectedAction = selectedBinding
-    ? actionById.get(selectedBinding.actionRef) ?? null
+    ? actionById.get(selectedBinding.actionId) ?? null
     : null;
   const selectedEncoder = selectedControl
     ? encoderByControlId.get(selectedControl.id) ?? null
@@ -586,7 +586,7 @@ function App() {
               return {
                 control,
                 binding,
-                action: binding ? actionById.get(binding.actionRef) ?? null : null,
+                action: binding ? actionById.get(binding.actionId) ?? null : null,
                 mapping: encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
               };

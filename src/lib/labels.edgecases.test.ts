@@ -8,7 +8,7 @@
  *   - Boundary (40%): every ActionType variant, every enum case for all label
  *     functions — totality invariant (M6 bug class). Also tests
  *     ACTION_TYPE_LABELS completeness vs. ACTION_CATEGORIES alignment.
- *   - Null & empty (20%): unknown/cast values, null binding, empty action pretty,
+ *   - Null & empty (20%): unknown/cast values, null binding, empty action displayName,
  *     undefined encoder source, whitespace-only binding label.
  *   - Overflow (15%): very long strings in binding/action, unicode/RTL labels.
  *   - Concurrency (N/A): all functions are pure, synchronous, no shared state.
@@ -354,11 +354,11 @@ describe("null & empty: surfacePrimaryLabel — whitespace-only binding label fa
       layer: "standard",
       controlId: "thumb_01",
       label: "   ",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
     // Fixed: a whitespace-only label is falsy after trim(), so it falls through
-    // to action.pretty (null here) and then the i18n "assigned" fallback —
+    // to action.displayName (null here) and then the i18n "assigned" fallback —
     // it is never rendered as a blank string.
     const result = surfacePrimaryLabel(binding, null);
     expect(result).not.toBe("   ");
@@ -366,15 +366,15 @@ describe("null & empty: surfacePrimaryLabel — whitespace-only binding label fa
   });
 });
 
-describe("null & empty: surfacePrimaryLabel — binding with empty-string pretty on action", () => {
-  it("returns the i18n assigned fallback when both binding.label and action.pretty are empty", () => {
+describe("null & empty: surfacePrimaryLabel — binding with empty-string displayName on action", () => {
+  it("returns the i18n assigned fallback when both binding.label and action.displayName are empty", () => {
     const binding: Binding = {
       id: "b1",
       profileId: "p1",
       layer: "standard",
       controlId: "thumb_01",
       label: "",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
     const result = surfacePrimaryLabel(binding, null);
@@ -416,7 +416,7 @@ describe("overflow: surfacePrimaryLabel — 100k-char binding label does not thr
       layer: "standard",
       controlId: "thumb_01",
       label: longLabel,
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
     let result: string;

@@ -24,8 +24,8 @@ export function useMouseVisualPanel(deps: {
           profileId: effectiveProfileId,
           layer: selectedLayer,
           controlId: targetControlId,
-          label: newAction.pretty,
-          actionRef: newAction.id,
+          label: newAction.displayName,
+          actionId: newAction.id,
           enabled: true,
         };
         return upsertBinding(

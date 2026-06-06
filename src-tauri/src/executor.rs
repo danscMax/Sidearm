@@ -139,7 +139,7 @@ pub fn execute_preview_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -232,7 +232,7 @@ pub fn run_preview_action(
             encoded_key: preview.encoded_key.clone(),
             action_id: action.id.clone(),
             action_type: action.action_type.as_str().into(),
-            action_pretty: action.pretty.clone(),
+            action_pretty: action.display_name.clone(),
             resolved_profile_id: preview.resolved_profile_id.clone(),
             resolved_profile_name: preview.resolved_profile_name.clone(),
             matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -290,7 +290,7 @@ pub fn live_test_action(
         binding_label: None,
         action_id: Some(action.id.clone()),
         action_type: Some(action.action_type.as_str().into()),
-        action_pretty: Some(action.pretty.clone()),
+        action_pretty: Some(action.display_name.clone()),
         mapping_verified: None,
         mapping_source: None,
         trigger_mode: None,
@@ -437,7 +437,7 @@ fn run_live_launch_action(
             encoded_key: preview.encoded_key.clone(),
             action_id: action.id.clone(),
             action_type: action.action_type.as_str().into(),
-            action_pretty: action.pretty.clone(),
+            action_pretty: action.display_name.clone(),
             resolved_profile_id: preview.resolved_profile_id.clone(),
             resolved_profile_name: preview.resolved_profile_name.clone(),
             matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -459,7 +459,7 @@ fn run_live_launch_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -605,7 +605,7 @@ fn run_live_sequence_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -719,7 +719,7 @@ fn run_live_shortcut_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -762,7 +762,7 @@ fn run_live_mouse_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -813,7 +813,7 @@ fn run_live_media_key_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -862,7 +862,7 @@ fn run_live_repair_clipboard_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -945,7 +945,7 @@ fn run_live_text_snippet_action(
         encoded_key: preview.encoded_key.clone(),
         action_id: action.id.clone(),
         action_type: action.action_type.as_str().into(),
-        action_pretty: action.pretty.clone(),
+        action_pretty: action.display_name.clone(),
         resolved_profile_id: preview.resolved_profile_id.clone(),
         resolved_profile_name: preview.resolved_profile_name.clone(),
         matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
@@ -1266,7 +1266,7 @@ mod tests {
         let action_id = config
             .actions
             .iter()
-            .find(|candidate| candidate.pretty == "Ask Me")
+            .find(|candidate| candidate.display_name == "Ask Me")
             .map(|candidate| candidate.id.clone())
             .expect("expected seed action");
         let action = config
@@ -1325,7 +1325,7 @@ mod tests {
             items: vec![MenuItem::Action {
                 id: "item-1".into(),
                 label: "Copy".into(),
-                action_ref: "action-default-standard-thumb-01".into(),
+                action_id: "action-default-standard-thumb-01".into(),
                 enabled: true,
             }],
         });
@@ -1588,8 +1588,8 @@ mod edge_proptests {
 
     fn leaf_menu_item() -> impl Strategy<Value = MenuItem> {
         prop_oneof![
-            (".*", ".*", ".*", any::<bool>()).prop_map(|(id, label, action_ref, enabled)| {
-                MenuItem::Action { id, label, action_ref, enabled }
+            (".*", ".*", ".*", any::<bool>()).prop_map(|(id, label, action_id, enabled)| {
+                MenuItem::Action { id, label, action_id, enabled }
             }),
         ]
     }
@@ -1715,7 +1715,7 @@ mod edge_proptests {
                 .map(|i| MenuItem::Action {
                     id: i.to_string(),
                     label: i.to_string(),
-                    action_ref: i.to_string(),
+                    action_id: i.to_string(),
                     enabled: false,
                 })
                 .collect();
@@ -1739,13 +1739,13 @@ mod edge_proptests {
                 MenuItem::Action {
                     id: "a1".into(),
                     label: "A1".into(),
-                    action_ref: "r1".into(),
+                    action_id: "r1".into(),
                     enabled: true,
                 },
                 MenuItem::Action {
                     id: "a2".into(),
                     label: "A2".into(),
-                    action_ref: "r2".into(),
+                    action_id: "r2".into(),
                     enabled: true,
                 },
             ],
@@ -1763,7 +1763,7 @@ mod edge_proptests {
             items: vec![MenuItem::Action {
                 id: "a1".into(),
                 label: "A1".into(),
-                action_ref: "r1".into(),
+                action_id: "r1".into(),
                 enabled: true,
             }],
         }];
@@ -1953,7 +1953,7 @@ mod edge_proptests {
     /// and the `for _ in 0..times` loop runs zero times → the step is skipped.
     #[test]
     fn repeat_zero_skips_step() {
-        let times = 0u32.min(MAX_STEP_REPEAT);
+        let times = 0u32;
         assert_eq!(times, 0, "repeat=0 must produce 0 iterations (step skipped)");
     }
 
@@ -1976,7 +1976,7 @@ mod edge_proptests {
         /// None repeat defaults to 1 (exactly one execution).
         #[test]
         fn repeat_none_defaults_to_one(_x in 0u8..1) {
-            let times = None::<u32>.unwrap_or(1).clamp(1, MAX_STEP_REPEAT);
+            let times = 1.clamp(1, MAX_STEP_REPEAT);
             prop_assert_eq!(times, 1);
         }
     }

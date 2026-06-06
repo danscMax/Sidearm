@@ -23,7 +23,7 @@ function shortcutAction(
       alt: mods.alt ?? false,
       win: mods.win ?? false,
     },
-    pretty: `${mods.ctrl ? "Ctrl+" : ""}${key}`,
+    displayName: `${mods.ctrl ? "Ctrl+" : ""}${key}`,
   };
 }
 
@@ -32,7 +32,7 @@ function binding(
   profileId: string,
   layer: "standard" | "hypershift",
   controlId: string,
-  actionRef: string,
+  actionId: string,
   enabled = true,
 ): Binding {
   return {
@@ -41,7 +41,7 @@ function binding(
     layer,
     controlId: controlId as Binding["controlId"],
     label: "",
-    actionRef,
+    actionId,
     enabled,
   };
 }
@@ -140,8 +140,8 @@ describe("findShortcutConflicts", () => {
 
   it("ignores non-shortcut actions", () => {
     const actions: Action[] = [
-      { id: "a1", type: "disabled", payload: {} as never, pretty: "off" },
-      { id: "a2", type: "disabled", payload: {} as never, pretty: "off" },
+      { id: "a1", type: "disabled", payload: {} as never, displayName: "off" },
+      { id: "a2", type: "disabled", payload: {} as never, displayName: "off" },
     ];
     const bindings = [
       binding("b1", "p", "standard", "thumb_01", "a1"),
@@ -182,7 +182,7 @@ describe("bindingMatchesQuery", () => {
     expect(bindingMatchesQuery(b, null, "paste")).toBe(false);
   });
 
-  it("matches against action.pretty", () => {
+  it("matches against action.displayName", () => {
     const b = binding("b1", "p", "standard", "thumb_01", "a1");
     const a = shortcutAction("a1", "C", { ctrl: true });
     expect(bindingMatchesQuery(b, a, "ctrl+c")).toBe(true);

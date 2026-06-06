@@ -17,7 +17,7 @@ function assignedEntry(): ControlSurfaceEntry {
   return {
     control: { id: ASSIGNED, defaultName: "Thumb 1" } as unknown as PhysicalControl,
     binding: { id: "b1", enabled: true } as unknown as Binding,
-    action: { id: "a1", type: "shortcut", pretty: "Ctrl+C" } as unknown as Action,
+    action: { id: "a1", type: "shortcut", displayName: "Ctrl+C" } as unknown as Action,
     mapping: null,
     isSelected: false,
   };

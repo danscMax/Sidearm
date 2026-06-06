@@ -100,7 +100,7 @@ function makeAction(id = "a1"): Action {
     id,
     type: "disabled",
     payload: {} as Record<string, never>,
-    pretty: "Action " + id,
+    displayName: "Action " + id,
   };
 }
 
@@ -108,10 +108,10 @@ function makeBinding(
   id = "b1",
   profileId = "p1",
   controlId: ControlId = "thumb_01",
-  actionRef = "a1",
+  actionId = "a1",
   layer: Layer = "standard",
 ): Binding {
-  return { id, profileId, layer, controlId, label: "Binding " + id, actionRef, enabled: true };
+  return { id, profileId, layer, controlId, label: "Binding " + id, actionId, enabled: true };
 }
 
 function makeAppMapping(id = "app-x", profileId = "p1", priority = 10): AppMapping {
@@ -336,14 +336,14 @@ describe("boundary: duplicateProfile clones exactly the right entities", () => {
       id: "a1",
       type: "textSnippet",
       payload: { source: "inline", text: "hello", pasteMode: "sendText", tags: ["t1"] },
-      pretty: "Snippet",
+      displayName: "Snippet",
     };
     const binding = makeBinding("b1", "src", "thumb_01", "a1");
     const cfg = minCfg({ profiles: [src], actions: [action], bindings: [binding] });
 
     const { config: result, newProfileId } = duplicateProfile(cfg, "src");
     const clonedAction = result.actions.find(
-      (a) => a.id !== "a1" && result.bindings.find((b) => b.profileId === newProfileId && b.actionRef === a.id),
+      (a) => a.id !== "a1" && result.bindings.find((b) => b.profileId === newProfileId && b.actionId === a.id),
     );
     expect(clonedAction).toBeDefined();
     // Mutating the clone's tags should not affect the original
@@ -582,14 +582,14 @@ describe("null & empty: collectMenuActionRefs with empty/deeply nested items", (
     const refs = new Set<string>();
     collectMenuActionRefs(
       [
-        { kind: "action", id: "mi1", label: "A", actionRef: "ref-a", enabled: true },
+        { kind: "action", id: "mi1", label: "A", actionId: "ref-a", enabled: true },
         {
           kind: "submenu",
           id: "sub1",
           label: "Sub",
           enabled: true,
           items: [
-            { kind: "action", id: "mi2", label: "B", actionRef: "ref-b", enabled: true },
+            { kind: "action", id: "mi2", label: "B", actionId: "ref-b", enabled: true },
           ],
         },
       ],
@@ -784,7 +784,7 @@ describe("invariant: import preserves action payload content (semantic roundtrip
       id: "a1",
       type: "textSnippet",
       payload: { source: "inline", text: "The quick brown fox", pasteMode: "sendText", tags: ["speed"] },
-      pretty: "Fox snippet",
+      displayName: "Fox snippet",
     };
     const binding = makeBinding("b1", "src", "thumb_01", "a1");
     const cfg = minCfg({ profiles: [p], actions: [action], bindings: [binding] });
@@ -794,7 +794,7 @@ describe("invariant: import preserves action payload content (semantic roundtrip
 
     const importedProfile = imported.profiles[0]!;
     const importedBinding = imported.bindings.find((b) => b.profileId === importedProfile.id)!;
-    const importedAction = imported.actions.find((a) => a.id === importedBinding.actionRef)!;
+    const importedAction = imported.actions.find((a) => a.id === importedBinding.actionId)!;
 
     expect(importedAction.type).toBe("textSnippet");
     if (importedAction.type === "textSnippet" && importedAction.payload.source === "inline") {
@@ -852,7 +852,7 @@ describe("invariant: coerceActionType — name collision when only one action ex
       const actionIds = new Set(result.actions.map((a) => a.id));
       for (const item of coerced.payload.items) {
         if (item.kind === "action") {
-          expect(actionIds.has(item.actionRef)).toBe(true);
+          expect(actionIds.has(item.actionId)).toBe(true);
         }
       }
     }
@@ -870,12 +870,12 @@ describe("invariant: coerceActionType — name collision when only one action ex
     }
   });
 
-  it("coerceActionType to 'sequence' with action pretty of all-whitespace uses fallback", () => {
+  it("coerceActionType to 'sequence' with action display name of all-whitespace uses fallback", () => {
     const action: Action = {
       id: "a1",
       type: "shortcut",
       payload: { key: "A", ctrl: false, shift: false, alt: false, win: false },
-      pretty: "   \t  ",
+      displayName: "   \t  ",
     };
     const cfg = minCfg({ actions: [action] });
     const result = coerceActionType(cfg, "a1", "sequence");
@@ -900,7 +900,7 @@ describe("invariant: promoteInlineSnippetActionToLibrary deduplication", () => {
         pasteMode: "clipboardPaste",
         tags: Array.from({ length: 1000 }, () => "repeated-tag"),
       },
-      pretty: "Tagged",
+      displayName: "Tagged",
     };
     const cfg = minCfg({ actions: [action] });
     const result = promoteInlineSnippetActionToLibrary(cfg, "a1", "Promoted");
@@ -912,7 +912,7 @@ describe("invariant: promoteInlineSnippetActionToLibrary deduplication", () => {
       id: "a1",
       type: "textSnippet",
       payload: { source: "inline", text: "text", pasteMode: "sendText", tags: [] },
-      pretty: "Pretty",
+      displayName: "Pretty",
     };
     // Call twice on fresh configs with the same name — id must be the same
     const cfg1 = minCfg({ actions: [{ ...action }] });
@@ -1213,7 +1213,7 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
         id: `action-${profileId}-${i}`,
         type: "disabled",
         payload: {} as Record<string, never>,
-        pretty: `Action ${i}`,
+        displayName: `Action ${i}`,
       });
     }
 
@@ -1228,7 +1228,7 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
         layer,
         controlId,
         label: `Binding ${i}`,
-        actionRef: actions[i].id,
+        actionId: actions[i].id,
         enabled: true,
       });
     }
@@ -1286,7 +1286,7 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
         const importedBindings = imported.bindings.filter(
           (b) => b.profileId === importedProfile.id,
         );
-        const importedActionRefs = new Set(importedBindings.map((b) => b.actionRef));
+        const importedActionRefs = new Set(importedBindings.map((b) => b.actionId));
         const importedActions = imported.actions.filter((a) => importedActionRefs.has(a.id));
 
         expect(importedActions.length).toBe(originalActionCount);
@@ -1368,7 +1368,7 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
     );
   });
 
-  it("imported bindings all have valid actionRef pointing to existing actions", () => {
+  it("imported bindings all have valid actionId pointing to existing actions", () => {
     fc.assert(
       fc.property(arbConfigWithProfile, ({ config, profileId }) => {
         const exported = extractProfileExport(config, profileId);
@@ -1378,7 +1378,7 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
         const actionIds = new Set(imported.actions.map((a) => a.id));
 
         for (const binding of imported.bindings) {
-          expect(actionIds.has(binding.actionRef)).toBe(true);
+          expect(actionIds.has(binding.actionId)).toBe(true);
         }
       }),
       { numRuns: 500 },

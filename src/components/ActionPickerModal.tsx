@@ -80,7 +80,7 @@ export function ActionPickerModal({
 
   const binding = bindingId ? config.bindings.find((b) => b.id === bindingId) ?? null : null;
   const existingAction = binding
-    ? config.actions.find((a) => a.id === binding.actionRef) ?? null
+    ? config.actions.find((a) => a.id === binding.actionId) ?? null
     : null;
 
   // Encoder signal state
@@ -191,7 +191,7 @@ export function ActionPickerModal({
 
     // Opt-in: also store this snippet's text in the reusable library.
     if (saveSnippetToLibrary && effectiveCategory === "textSnippet" && textDraft.text.trim()) {
-      const snippetName = nameDraft.trim() || nextAction.pretty || textDraft.text.trim().slice(0, 30);
+      const snippetName = nameDraft.trim() || nextAction.displayName || textDraft.text.trim().slice(0, 30);
       nextConfig = upsertSnippetLibraryItem(nextConfig, {
         id: makeSnippetId(snippetName),
         name: snippetName,
@@ -204,8 +204,8 @@ export function ActionPickerModal({
     if (binding) {
       nextConfig = upsertBinding(nextConfig, {
         ...binding,
-        actionRef: nextAction.id,
-        label: nextAction.pretty,
+        actionId: nextAction.id,
+        label: nextAction.displayName,
         // Preserve enabled state only when editing a REAL saved action; a
         // first-time assignment sits on a disabled placeholder action+binding
         // (enabled:false), so treat placeholder as "new" and enable it.

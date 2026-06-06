@@ -73,7 +73,7 @@ describe("surfacePrimaryLabel", () => {
       layer: "standard",
       controlId: "thumb_01",
       label: "My Bind",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: false,
     };
     expect(surfacePrimaryLabel(binding, null)).toBe("My Bind · отключено");
@@ -86,37 +86,37 @@ describe("surfacePrimaryLabel", () => {
       layer: "standard",
       controlId: "thumb_01",
       label: "Custom Label",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
     expect(surfacePrimaryLabel(binding, null)).toBe("Custom Label");
   });
 
-  it("returns action pretty name when binding label is empty", () => {
+  it("returns action display name when binding label is empty", () => {
     const binding: Binding = {
       id: "b1",
       profileId: "p1",
       layer: "standard",
       controlId: "thumb_01",
       label: "",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
-    const action = makeAction({ type: "disabled", payload: {}, pretty: "Ctrl+C" });
+    const action = makeAction({ type: "disabled", payload: {}, displayName: "Ctrl+C" });
     expect(surfacePrimaryLabel(binding, action)).toBe("Ctrl+C");
   });
 
-  it("returns fallback when binding has no label and no action pretty", () => {
+  it("returns fallback when binding has no label and no action display name", () => {
     const binding: Binding = {
       id: "b1",
       profileId: "p1",
       layer: "standard",
       controlId: "thumb_01",
       label: "",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
-    const action = makeAction({ type: "disabled", payload: {}, pretty: "" });
+    const action = makeAction({ type: "disabled", payload: {}, displayName: "" });
     expect(surfacePrimaryLabel(binding, action)).toBe("Назначено");
   });
 
@@ -127,7 +127,7 @@ describe("surfacePrimaryLabel", () => {
       layer: "standard",
       controlId: "thumb_01",
       label: "",
-      actionRef: "a1",
+      actionId: "a1",
       enabled: true,
     };
     expect(surfacePrimaryLabel(binding, null)).toBe("Назначено");

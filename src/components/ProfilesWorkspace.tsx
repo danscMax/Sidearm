@@ -188,7 +188,7 @@ export function ProfilesWorkspace({
     const profilesById = new Map(activeConfig.profiles.map((p) => [p.id, p]));
     const controlsById = new Map(activeConfig.physicalControls.map((c) => [c.id, c]));
     return activeConfig.bindings
-      .filter((b) => bindingMatchesQuery(b, actionsById.get(b.actionRef) ?? null, searchQuery))
+      .filter((b) => bindingMatchesQuery(b, actionsById.get(b.actionId) ?? null, searchQuery))
       .map((b) => ({
         binding: b,
         profileName: profilesById.get(b.profileId)?.name ?? b.profileId,

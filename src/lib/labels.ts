@@ -211,5 +211,5 @@ export function surfacePrimaryLabel(binding: Binding | null, action: Action | nu
     return `${binding.label} · ${i18n.t("binding.disabledSuffix")}`;
   }
 
-  return binding.label.trim() ? binding.label : (action?.pretty || i18n.t("binding.assigned"));
+  return binding.label.trim() ? binding.label : (action?.displayName || i18n.t("binding.assigned"));
 }

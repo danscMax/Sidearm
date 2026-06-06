@@ -129,7 +129,7 @@ export interface Binding {
   layer: Layer;
   controlId: ControlId;
   label: string;
-  actionRef: string;
+  actionId: string;
   colorTag?: string;
   enabled: boolean;
   triggerMode?: TriggerMode;
@@ -184,7 +184,7 @@ export type MenuItem =
       kind: "action";
       id: string;
       label: string;
-      actionRef: string;
+      actionId: string;
       enabled: boolean;
     }
   | {
@@ -253,7 +253,7 @@ export type ActionCondition =
 
 interface ActionBase {
   id: string;
-  pretty: string;
+  displayName: string;
   notes?: string;
   conditions?: ActionCondition[];
 }

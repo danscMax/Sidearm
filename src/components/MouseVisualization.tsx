@@ -15,7 +15,6 @@ import {
   type ViewTab,
 } from "../lib/mouse-visual";
 import { useControlInteractions } from "../hooks/useControlInteractions";
-import { HeatCount } from "./mouse-visual/HeatCount";
 import { LabelColumn } from "./mouse-visual/LabelColumn";
 import { LegendCell } from "./mouse-visual/LegendCell";
 import { LayerPills } from "./mouse-visual/LayerPills";
@@ -133,6 +132,11 @@ export function MouseVisualization({
         matchedControlIds != null && !matchedControlIds.has(entry.control.id);
       const hasConflict =
         !!entry.binding && conflictBindingIds?.has(entry.binding.id);
+      // Heatmap on the photo is conveyed by the background tint (applyHeatBg);
+      // the exact press count rides along in the tooltip instead of an
+      // overflowing in-circle badge.
+      const heatCount =
+        heatmapEnabled && executionCounts ? (executionCounts.get(entry.control.id) ?? 0) : 0;
 
       return (
         <button
@@ -157,16 +161,11 @@ export function MouseVisualization({
           title={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
             entry.binding,
             entry.action,
-          )}`}
+          )}${heatCount > 0 ? ` · ${heatCount}×` : ""}`}
           draggable={!!entry.binding && !!entry.action}
           {...getInteractionProps(entry.control.id)}
         >
           {pos.label}
-          <HeatCount
-            controlId={entry.control.id}
-            executionCounts={executionCounts}
-            heatmapEnabled={heatmapEnabled}
-          />
         </button>
       );
     });

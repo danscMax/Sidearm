@@ -1883,13 +1883,6 @@ select::checkmark {
   flex-shrink: 0;
 }
 
-.mouse-visual__hotspot .heat-count {
-  font-size: 0.55rem;
-  right: 2px;
-  top: 2px;
-  transform: none;
-}
-
 .mouse-visual__label {
   margin-top: 4px;
   text-align: center;

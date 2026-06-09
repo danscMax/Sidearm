@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # Sidearm -- Portable Build Script
 # ============================================================================
 # Builds a portable release:
@@ -25,13 +25,23 @@ param(
     [switch]$Clean,
     [switch]$CleanCargo,
     [switch]$Verify,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$NoOpen
 )
 
 chcp 65001 | Out-Null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 [Console]::InputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
+
+# Shared console UI + helpers (banner glyphs, Write-Step/Ok/Fail/Warn/Info,
+# Show-Notification, Get-AppVersion). Vendored at the repo root.
+$kit = Join-Path $PSScriptRoot 'ScriptKit.ps1'
+if (Test-Path $kit) { . $kit }
+
+# Wall-clock start for the whole run (build + assemble + verify), shown in the
+# final summary alongside the per-phase Rust timing.
+$script:totalStartTime = Get-Date
 
 # ---- Paths ----
 $PROJECT_ROOT = $PSScriptRoot
@@ -62,38 +72,30 @@ $WEBVIEW2_URL  = 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
 # Add Cargo to PATH
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
+# App version (for banner + summary) -- read from package.json, best-effort.
+$APP_VERSION = Get-AppVersion $PROJECT_ROOT
+
 # ============================================================================
 # Progress bar helpers
 # ============================================================================
 
+# Box glyphs, Write-Step, Write-Ok/Fail/Warn/Info and Show-Notification now come
+# from ScriptKit.ps1 (dot-sourced above). Only build-specific state lives here.
 $script:buildStartTime = $null
 $script:lastProgressLine = ''
 
-$script:BOX_H   = ([char]0x2500).ToString()
-$script:BOX_TL  = ([char]0x250C).ToString()
-$script:BOX_TR  = ([char]0x2510).ToString()
-$script:BOX_BL  = ([char]0x2514).ToString()
-$script:BOX_BR  = ([char]0x2518).ToString()
-$script:BOX_V   = ([char]0x2502).ToString()
-$script:BLOCK_F = ([char]0x2588).ToString()
-$script:BLOCK_E = ([char]0x2591).ToString()
-
-function Write-Step($step, $total, $msg) {
-    Write-Host ""
-    Write-Host ("  " + $script:BOX_H * 60) -ForegroundColor DarkGray
-    $pct = [math]::Floor(($step - 1) / $total * 100)
-    $filled = [math]::Floor($pct / 2)
-    $empty = 50 - $filled
-    $bar = $script:BLOCK_F * $filled + $script:BLOCK_E * $empty
-    Write-Host "  $bar ${pct}%" -ForegroundColor Cyan
-    Write-Host "  [$step/$total] $msg" -ForegroundColor Yellow
+# Quick pre-flight: the tools the build needs must be on PATH before we start.
+function Invoke-PreFlight {
+    Write-Host "  Pre-flight checks..." -ForegroundColor Cyan
+    $ok = $true
+    if (Get-Command npm -ErrorAction SilentlyContinue)   { Write-Ok "npm found on PATH" }   else { Write-Fail "npm not found on PATH";   $ok = $false }
+    if (Get-Command cargo -ErrorAction SilentlyContinue) { Write-Ok "cargo found on PATH" } else { Write-Fail "cargo not found on PATH"; $ok = $false }
+    if (-not $ok) {
+        Show-Notification -Title 'Sidearm Build FAILED' -Body 'Pre-flight: npm or cargo missing.' -IsError
+        exit 1
+    }
     Write-Host ""
 }
-
-function Write-Ok($msg)   { Write-Host "    $([char]0x2714) $msg" -ForegroundColor Green }
-function Write-Fail($msg) { Write-Host "    $([char]0x2718) $msg" -ForegroundColor Red }
-function Write-Warn($msg) { Write-Host "    $([char]0x26A0) $msg" -ForegroundColor Yellow }
-function Write-Info($msg) { Write-Host "    $([char]0x2022) $msg" -ForegroundColor DarkGray }
 
 function Write-BuildProgress {
     param([string]$Line)
@@ -140,7 +142,7 @@ function Write-BuildProgress {
         }
         $filled = [math]::Floor($pct / 4)
         $empty = 25 - $filled
-        $bar = $script:BLOCK_F * $filled + $script:BLOCK_E * $empty
+        $bar = $script:SK_BLOCK_F * $filled + $script:SK_BLOCK_E * $empty
         $msg = "    $bar ${pct}% ($done/$total)$elapsed"
         Write-Host "`r$($msg.PadRight(80))" -NoNewline -ForegroundColor DarkCyan
     }
@@ -180,10 +182,7 @@ function Stop-AppProcessIfRunning {
 # Banner
 # ============================================================================
 
-Write-Host ""
-Write-Host ("  " + $BOX_TL + ($BOX_H * 58) + $BOX_TR) -ForegroundColor Cyan
-Write-Host ("  " + $BOX_V + "  Sidearm  Portable Build                                 " + $BOX_V) -ForegroundColor Cyan
-Write-Host ("  " + $BOX_BL + ($BOX_H * 58) + $BOX_BR) -ForegroundColor Cyan
+Write-Banner "Sidearm  Portable Build   v$APP_VERSION" "Tauri (Rust + React) portable release"
 Write-Host ""
 Write-Host "    Target dir: $TAURI_TARGET_DIR" -ForegroundColor DarkGray
 Write-Host "    Output:     $PORTABLE_DIR" -ForegroundColor DarkGray
@@ -218,6 +217,8 @@ if ($Verify) {
 $totalSteps = 3
 
 if (-not $SkipBuild) {
+    Invoke-PreFlight
+
     Write-Step 1 $totalSteps "Building Tauri application (Rust + React)"
 
     Write-Info "Started at $(Get-Date -Format 'HH:mm:ss')"
@@ -251,6 +252,7 @@ if (-not $SkipBuild) {
     if ($LASTEXITCODE -ne 0) {
         $ErrorActionPreference = $oldEAP
         Write-Fail "Frontend build failed (exit code $LASTEXITCODE)"
+        Show-Notification -Title 'Sidearm Build FAILED' -Body "Frontend build failed (exit $LASTEXITCODE)." -IsError
         exit 1
     }
     Write-Ok "Frontend built"
@@ -328,6 +330,7 @@ if (-not $SkipBuild) {
 
     if ($buildExitCode -ne 0) {
         Write-Fail "Rust build failed (exit code $buildExitCode) after $durStr"
+        Show-Notification -Title 'Sidearm Build FAILED' -Body "Rust build failed after $durStr." -IsError
         exit 1
     }
 
@@ -445,36 +448,55 @@ if (Test-Path -LiteralPath $portableExe) {
 # Final summary
 # ============================================================================
 
-$totalSize = (Get-ChildItem -LiteralPath $PORTABLE_DIR -Recurse -File | Measure-Object -Property Length -Sum).Sum
+$totalSize   = (Get-ChildItem -LiteralPath $PORTABLE_DIR -Recurse -File | Measure-Object -Property Length -Sum).Sum
 $totalSizeMB = [math]::Round($totalSize / 1MB, 1)
+$exeMB       = if (Test-Path -LiteralPath $portableExe) {
+    [math]::Round((Get-Item -LiteralPath $portableExe).Length / 1MB, 1)
+} else { 0 }
+
+$totalDur  = (Get-Date) - $script:totalStartTime
+$totalTime = "{0}:{1:D2}" -f [math]::Floor($totalDur.TotalMinutes), $totalDur.Seconds
+
+$bar = $SK_H * 58
 
 Write-Host ""
-Write-Host ("  " + $BOX_H * 60) -ForegroundColor DarkGray
-$bar100 = $BLOCK_F * 50
-Write-Host "  $bar100 100%" -ForegroundColor Green
+Write-Host ("  " + $SK_H * 60) -ForegroundColor DarkGray
+Write-Host "  $($SK_BLOCK_F * 50) 100%" -ForegroundColor Green
 Write-Host ""
 
 if ($errors -gt 0) {
-    Write-Host ("  " + $BOX_TL + ($BOX_H * 58) + $BOX_TR) -ForegroundColor Red
-    $failLine = "  BUILD FAILED   $errors error(s), $warnings warning(s)"
-    $fpad = 57 - $failLine.Length; if ($fpad -lt 0) { $fpad = 0 }
-    Write-Host ("  " + $BOX_V + $failLine + (' ' * $fpad) + $BOX_V) -ForegroundColor Red
-    Write-Host ("  " + $BOX_BL + ($BOX_H * 58) + $BOX_BR) -ForegroundColor Red
+    Write-Host "  $SK_TL$bar$SK_TR" -ForegroundColor Red
+    Write-Host "  $SK_V  BUILD FAILED  --  $errors error(s), $warnings warning(s)" -ForegroundColor Red
+    Write-Host "  $SK_BL$bar$SK_BR" -ForegroundColor Red
+    Show-Notification -Title 'Sidearm Build FAILED' -Body "$errors error(s), $warnings warning(s) -- see terminal." -IsError
+    Set-Location -LiteralPath $PROJECT_ROOT
     exit 1
-} else {
-    Write-Host ("  " + $BOX_TL + ($BOX_H * 58) + $BOX_TR) -ForegroundColor Green
-    $statusLine = "  READY   ${totalSizeMB} MB total"
-    $pad = 57 - $statusLine.Length
-    if ($pad -lt 0) { $pad = 0 }
-    Write-Host ("  " + $BOX_V + $statusLine + (' ' * $pad) + $BOX_V) -ForegroundColor Green
-    Write-Host ("  " + $BOX_BL + ($BOX_H * 58) + $BOX_BR) -ForegroundColor Green
+}
 
-    if ($warnings -gt 0) {
-        Write-Host "    $warnings warning(s) - see above" -ForegroundColor Yellow
+Write-Host "  $SK_TL$bar$SK_TR" -ForegroundColor Green
+Write-Host "  $SK_V  READY  --  v$APP_VERSION  --  $totalTime" -ForegroundColor Green
+Write-Host "  $SK_TM$bar" -ForegroundColor Green
+$inv      = [Globalization.CultureInfo]::InvariantCulture
+$exeStr   = $exeMB.ToString('0.0', $inv)
+$totalStr = $totalSizeMB.ToString('0.0', $inv)
+Write-Host ("  $SK_V  {0,-12} {1} MB" -f $EXE_NAME, $exeStr) -ForegroundColor White
+Write-Host ("  $SK_V  {0,-12} {1} MB" -f 'Total', $totalStr) -ForegroundColor White
+if ($warnings -gt 0) {
+    Write-Host "  $SK_V  $warnings warning(s) -- see above" -ForegroundColor Yellow
+}
+Write-Host "  $SK_TM$bar" -ForegroundColor Green
+Write-Host "  $SK_V  $PORTABLE_DIR" -ForegroundColor DarkGray
+Write-Host "  $SK_BL$bar$SK_BR" -ForegroundColor Green
+
+Show-Notification -Title 'Sidearm Portable Ready' -Body "v$APP_VERSION -- $totalSizeMB MB -- $totalTime" -IconPath $portableExe
+
+# Open the portable folder in Explorer (suppress with -NoOpen, e.g. CI/headless).
+if (-not $NoOpen) {
+    if (Test-Path -LiteralPath $portableExe) {
+        Start-Process explorer.exe -ArgumentList "/select,`"$portableExe`""
+    } elseif (Test-Path -LiteralPath $PORTABLE_DIR) {
+        Start-Process explorer.exe -ArgumentList "`"$PORTABLE_DIR`""
     }
-
-    Write-Host ""
-    Write-Host "    Output: $PORTABLE_DIR" -ForegroundColor White
 }
 
 Set-Location -LiteralPath $PROJECT_ROOT

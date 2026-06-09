@@ -339,11 +339,16 @@ function App() {
     }
   }, [activeConfig, selectedControlId]);
 
-  // Sync UI profile with runtime's resolved profile (auto-switch on window focus change).
-  // Suppressed while a manual capture is in progress (countdown → capture → result).
+  // Auto-follow the runtime's resolved profile on window-focus change — but ONLY
+  // on the Assignments view, where the intent is to show the active profile's
+  // bindings as you edit. On Diagnostics/Settings a manual profile pick must
+  // stick, so a capture event must not silently overwrite it (root cause of
+  // "I switch the profile and nothing changes / it snaps back").
+  // Also suppressed while a manual capture is in progress (countdown → capture → result).
   const [profileSyncSuppressed, setProfileSyncSuppressed] = useState(false);
   useEffect(() => {
     if (profileSyncSuppressed) return;
+    if (workspaceMode !== "profiles") return;
     if (
       lastCapture &&
       !lastCapture.ignored &&
@@ -354,7 +359,7 @@ function App() {
         setSelectedProfileId(lastCapture.resolvedProfileId!);
       });
     }
-  }, [lastCapture, profileSyncSuppressed]);
+  }, [lastCapture, profileSyncSuppressed, workspaceMode]);
 
   // H1: Global keyboard shortcuts (useEffectEvent avoids re-registering on every render)
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {

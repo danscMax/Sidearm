@@ -87,6 +87,8 @@ export function Sidebar({
           {t(`workspace.${mode.value}.label`)}
         </button>
       ))}
+      {workspaceMode !== "settings" ? (
+      <>
       <div className="sidebar__sep" />
       <div className="sidebar__section">
         <div className="sidebar__section-header">
@@ -162,7 +164,15 @@ export function Sidebar({
             }
           />
         )}
+        {runtimeStatus === "running" && profiles.some((p) => p.name === runtimeResolvedProfileName) ? (
+          <p className="sidebar__profile-legend help-caption">
+            <span className="pill-track__active-dot sidebar__profile-legend-dot" aria-hidden="true" />
+            {t("sidebar.runtimeLegend")}
+          </p>
+        ) : null}
       </div>
+      </>
+      ) : null}
       <button
         className={`sidebar__runtime sidebar__runtime--${runtimeStatus === "running" ? "running" : "stopped"}`}
         onClick={onToggleRuntime}

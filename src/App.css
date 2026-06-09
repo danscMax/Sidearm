@@ -547,6 +547,10 @@ select::checkmark {
 .help-caption { font-size: 0.75rem; margin: 6px 0 0; }
 .section-help { font-size: 0.75rem; padding: 0 20px 8px; }
 
+/* Sidebar legend explaining the runtime "active profile" dot. */
+.sidebar__profile-legend { display: flex; align-items: center; gap: 6px; color: var(--c-text-muted); }
+.sidebar__profile-legend-dot { position: static; display: inline-block; flex-shrink: 0; }
+
 /* SettingsWorkspace static help/mono + disabled states */
 .mono-sm { font-family: var(--font-mono); font-size: 0.78rem; }
 .help-sm { font-size: 0.78rem; margin-bottom: 12px; }
@@ -2240,11 +2244,12 @@ code {
 }
 .profile-dropdown__item-dot {
   flex-shrink: 0;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--c-ok, #75c268);
-  box-shadow: 0 0 4px rgba(117, 194, 104, 0.6);
+  /* Contrast ring (dropdown menu bg) — same intent as the pill dot. */
+  box-shadow: 0 0 0 2px var(--c-bg), 0 0 5px rgba(117, 194, 104, 0.7);
 }
 
 /* ── Chip editor (titleIncludes / launch args / similar lists of strings) ── */
@@ -2488,11 +2493,13 @@ code {
   position: absolute;
   top: 3px;
   right: 3px;
-  width: 6px;
-  height: 6px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--c-ok);
-  box-shadow: 0 0 4px rgba(117, 194, 104, 0.5);
+  /* Contrast ring (sidebar surface) keeps the runtime dot legible on the */
+  /* accent-tinted active pill — "active in runtime" must not blend into "selected". */
+  box-shadow: 0 0 0 2px var(--c-surface), 0 0 5px rgba(117, 194, 104, 0.7);
   pointer-events: none;
 }
 

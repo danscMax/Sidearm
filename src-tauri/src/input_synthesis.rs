@@ -624,6 +624,78 @@ fn clipboard_set_text(_text: &str) -> Result<(), String> {
     Err("Clipboard set is not implemented for this platform".into())
 }
 
+/// True for any clipboard format that must be preserved across a repair — i.e.
+/// NOT one of the plain-text formats Windows auto-synthesizes for a text copy.
+/// Everything else (registered HTML/RTF at id >= 0xC000, `CF_BITMAP`/`CF_DIB`/
+/// `CF_DIBV5`, `CF_HDROP`, metafiles, private formats) is rich content we must
+/// not clobber by overwriting the clipboard with text-only.
+#[cfg(target_os = "windows")]
+fn is_nontext_clipboard_format(id: u32) -> bool {
+    // CF_TEXT=1, CF_OEMTEXT=7, CF_UNICODETEXT=13, CF_LOCALE=16
+    !matches!(id, 1 | 7 | 13 | 16)
+}
+
+/// Best-effort name for a predefined (standard) clipboard format id, for logs.
+#[cfg(target_os = "windows")]
+fn standard_clipboard_format_name(id: u32) -> String {
+    match id {
+        2 => "CF_BITMAP".into(),
+        3 => "CF_METAFILEPICT".into(),
+        6 => "CF_TIFF".into(),
+        8 => "CF_DIB".into(),
+        14 => "CF_ENHMETAFILE".into(),
+        15 => "CF_HDROP".into(),
+        17 => "CF_DIBV5".into(),
+        other => format!("CF#{other}"),
+    }
+}
+
+/// Labels for the non-text formats currently on the clipboard. `Some(vec)` —
+/// `vec` is empty when the clipboard holds only plain text (safe to rewrite),
+/// non-empty when rich content is present (repair must be skipped to preserve
+/// it). `None` — the clipboard could not be inspected, so the caller should skip
+/// conservatively rather than risk clobbering unknown content.
+#[cfg(target_os = "windows")]
+fn clipboard_nontext_format_labels() -> Option<Vec<String>> {
+    use std::{ptr, thread, time::Duration};
+    use windows_sys::Win32::System::DataExchange::{
+        CloseClipboard, EnumClipboardFormats, GetClipboardFormatNameW, OpenClipboard,
+    };
+
+    let mut opened = false;
+    for attempt in 0..10u32 {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            opened = true;
+            break;
+        }
+        if attempt + 1 < 10 {
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    if !opened {
+        return None;
+    }
+
+    let mut labels = Vec::new();
+    unsafe {
+        let mut fmt = EnumClipboardFormats(0);
+        while fmt != 0 {
+            if is_nontext_clipboard_format(fmt) {
+                let mut name = [0u16; 80];
+                let len = GetClipboardFormatNameW(fmt, name.as_mut_ptr(), name.len() as i32);
+                labels.push(if len > 0 {
+                    format!("{fmt}:{}", String::from_utf16_lossy(&name[..len as usize]))
+                } else {
+                    standard_clipboard_format_name(fmt)
+                });
+            }
+            fmt = EnumClipboardFormats(fmt);
+        }
+        CloseClipboard();
+    }
+    Some(labels)
+}
+
 /// Read the clipboard, repair UTF-8-as-Latin-1 mojibake if present, and write the
 /// fix back. `Ok(Some(fixed))` if it repaired, `Ok(None)` if there was nothing to do.
 pub fn repair_clipboard() -> Result<Option<String>, String> {
@@ -636,6 +708,29 @@ pub fn repair_clipboard() -> Result<Option<String>, String> {
     };
     match repair_latin1_mojibake(&current) {
         Some(fixed) => {
+            // Safeguard: never EmptyClipboard-and-overwrite a copy that also
+            // carries rich content (images, files, HTML, RTF) — repairing the
+            // text would silently discard those formats. Skip unless the
+            // clipboard holds plain text only.
+            #[cfg(target_os = "windows")]
+            match clipboard_nontext_format_labels() {
+                None => {
+                    log::info!(
+                        "[repair] mojibake found but clipboard could not be inspected; \
+                         skipped to avoid clobbering unknown formats"
+                    );
+                    return Ok(None);
+                }
+                Some(labels) if !labels.is_empty() => {
+                    log::info!(
+                        "[repair] mojibake found but skipped to preserve {} non-text format(s): {}",
+                        labels.len(),
+                        labels.join(", ")
+                    );
+                    return Ok(None);
+                }
+                Some(_) => {} // plain text only — safe to rewrite
+            }
             clipboard_set_text(&fixed)?;
             Ok(Some(fixed))
         }
@@ -2336,6 +2431,21 @@ mod tests {
         // D1->Ñ, 87->‡, D1->Ñ, 82->‚, D0->Ð, BE->¾.
         let mojibake = "Ñ‡Ñ‚Ð¾";
         assert_eq!(repair_latin1_mojibake(mojibake).as_deref(), Some("что"));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn nontext_clipboard_format_classifier() {
+        // Plain-text formats Windows synthesizes for a text copy are safe to
+        // overwrite during a repair.
+        for text_fmt in [1u32 /*CF_TEXT*/, 7 /*CF_OEMTEXT*/, 13 /*CF_UNICODETEXT*/, 16 /*CF_LOCALE*/] {
+            assert!(!is_nontext_clipboard_format(text_fmt), "fmt {text_fmt} must be text");
+        }
+        // Rich/binary formats (and registered HTML/RTF at id >= 0xC000) must be
+        // preserved — the repair has to skip when any of these is present.
+        for rich_fmt in [2u32 /*CF_BITMAP*/, 8 /*CF_DIB*/, 17 /*CF_DIBV5*/, 15 /*CF_HDROP*/, 0xC001 /*registered, e.g. "HTML Format"*/] {
+            assert!(is_nontext_clipboard_format(rich_fmt), "fmt {rich_fmt} must be non-text");
+        }
     }
 
     #[test]

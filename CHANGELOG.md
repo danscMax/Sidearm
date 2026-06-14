@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.25] — 2026-06-14
+
+### Fixed
+- Clipboard auto-repair now skips any copy that also carries non-text formats
+  (images, files, HTML, RTF) instead of rewriting the clipboard with text only —
+  so a repair can no longer discard rich content. Plain-text copies (the only
+  ones that actually mojibake) are still repaired; the skip and the preserved
+  formats are logged.
+
 ## [0.1.24] — 2026-06-14
 
 ### Fixed

@@ -1,9 +1,13 @@
 # ============================================================================
-# ScriptKit v1 -- shared console UI + helpers for build / run / setup scripts
+# ScriptKit v2 -- shared console UI + helpers for build / run / setup scripts
 # ============================================================================
 # VENDORED helper. Copy this file into a repo and dot-source it near the top of
 # a script:
 #     . (Join-Path $PSScriptRoot 'ScriptKit.ps1')
+#
+# CANON: E:\Scripts\claude-maintenance-hub\tools\ScriptKit.ps1 is the source of
+# truth. Edit it there, bump $script:SK_Version, then roll out to every vendored
+# copy with: claude-maintenance-hub\tools\Sync-ScriptKit.ps1 -Apply
 #
 # Design rules (keep them when editing):
 #   * Pure presentation / small utilities -- NO Set-StrictMode (this dot-sources
@@ -12,8 +16,10 @@
 #     file cleanly even without a BOM.
 #   * Box glyphs are built at runtime ([char]0x....) -- renders in PS 5.1.
 #   * Keep this file IDENTICAL across repos. Bump the version below on change so
-#     drift between copies is visible.
+#     drift between copies is visible (Sync-ScriptKit.ps1 -Check).
 # ============================================================================
+
+$script:SK_Version = 2   # drift marker -- Sync-ScriptKit.ps1 compares this
 
 # --- UTF-8 console (box glyphs + check marks render instead of mojibake) ----
 try { chcp 65001 | Out-Null } catch { }
@@ -207,6 +213,52 @@ function Get-AppVersion {
         }
     }
     return '?'
+}
+
+# ============================================================================
+# Status JSON (unified component status envelope for the Maintenance Hub)
+# ============================================================================
+
+# Write a unified "<component>.last.json" envelope under <Root>. This is the
+# single DRY entry point every maintenance script uses to report its result to
+# the dashboard. Self-guarded (try/catch) so a status-write failure can never
+# break the caller's real job -- still, call it inside the caller's own try too.
+#
+# Status values: ok | changes | error | held.
+# Counts: changed = items updated, failed = items that errored, total = scanned.
+# -Extra merges component-specific fields into the envelope (e.g. log path).
+function Write-StatusJson {
+    param(
+        [Parameter(Mandatory)][string]$Root,
+        [Parameter(Mandatory)][string]$Component,
+        [ValidateSet('ok','changes','error','held')][string]$Status = 'ok',
+        [int]$Changed = 0,
+        [int]$Failed = 0,
+        [int]$Total = 0,
+        [double]$DurationSec = 0,
+        [string]$Mode = 'check',
+        [string]$Summary = '',
+        [hashtable]$Extra
+    )
+    try {
+        $payload = [ordered]@{
+            schemaVersion = 1
+            component     = $Component
+            status        = $Status
+            timestamp     = (Get-Date -Format 'o')
+            mode          = $Mode
+            durationSec   = [math]::Round([double]$DurationSec, 1)
+            counts        = [ordered]@{ changed = [int]$Changed; failed = [int]$Failed; total = [int]$Total }
+            summary       = $Summary
+        }
+        if ($Extra) { foreach ($k in $Extra.Keys) { $payload[$k] = $Extra[$k] } }
+        if (-not (Test-Path -LiteralPath $Root)) { New-Item -ItemType Directory -Path $Root -Force | Out-Null }
+        $path = Join-Path $Root ("{0}.last.json" -f $Component)
+        [System.IO.File]::WriteAllText($path, ($payload | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
+        return $path
+    } catch {
+        return $null
+    }
 }
 
 # ============================================================================

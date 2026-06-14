@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.24] — 2026-06-14
+
+### Fixed
+- Clipboard auto-repair (the `repairClipboard` action and the "repair on copy"
+  setting) now also undoes mis-decodes that came through the terminal's
+  **Windows-1252** path, not only Latin-1 — so Cyrillic letters that turned into
+  symbols like `€ ' " – —` are recovered too.
+- Auto-repair now works on **mixed** clipboard text. Previously a single
+  already-correct character (e.g. real Cyrillic) made it bail on the whole
+  string; it now re-decodes each mangled run independently and leaves correct
+  characters untouched.
+
+### Changed
+- The post-copy repair waits up to 800 ms (was 400 ms) for slow/large copies to
+  land before giving up, and logs why a repair was skipped — including the
+  foreground window when a copy never reached the clipboard — to make
+  intermittent "copy not fixed" reports diagnosable from the log alone.
+
 ## [0.1.22] — 2026-06-06
 
 ### Security

@@ -377,26 +377,132 @@ fn paste_via_clipboard(_text: &str) -> Result<(), String> {
 // (UTF-8 byte 0xD1 -> U+00D1, etc.). Not Sidearm's bug, but Sidearm can undo it
 // on demand. Deliberately conservative — see `repair_latin1_mojibake`.
 
-/// Re-decode a string that is valid UTF-8 mis-read as Latin-1 (each UTF-8 byte
-/// widened to a U+00xx code unit). Returns `Some(fixed)` ONLY when the repair is
-/// unambiguous, so legitimate Western-European text is never mangled:
-/// - every char must be <= U+00FF (so the chars ARE the original bytes);
-/// - those bytes must form valid UTF-8;
-/// - the decoded result must differ AND contain a char >= U+0100 (i.e. it really
-///   un-mangled into non-Latin-1 text such as Cyrillic).
+/// Map a single char back to the source byte it would have come from when one
+/// UTF-8 byte was mis-decoded as **Latin-1 (ISO-8859-1) or Windows-1252**.
 ///
-/// `café` / `über` viewed as Latin-1 bytes are not valid UTF-8, so they return
-/// `None` (left untouched).
+/// Latin-1 simply widens each byte 0x00–0xFF to U+00xx. Windows-1252 is identical
+/// EXCEPT bytes 0x80–0x9F, which it maps to specific punctuation code points
+/// (€ ‚ ƒ „ … ' ' " " – — … all > U+00FF). A terminal that copies through the
+/// CP1252 path therefore turns the second UTF-8 byte of many Cyrillic letters
+/// (р с т у ф … = `D1 80…8F`) into those symbols, which the old `<= 0xFF` gate
+/// rejected outright. Handling both schemes lets the repair survive either path.
+///
+/// Returns `None` for any char that NEITHER scheme could have produced, so a
+/// single foreign code point makes the whole repair bail — staying conservative.
+fn mojibake_source_byte(c: char) -> Option<u8> {
+    // Windows-1252-specific 0x80–0x9F mappings (all > U+00FF, so they cannot
+    // collide with the Latin-1 range handled below).
+    let cp1252 = match c {
+        '\u{20AC}' => 0x80,
+        '\u{201A}' => 0x82,
+        '\u{0192}' => 0x83,
+        '\u{201E}' => 0x84,
+        '\u{2026}' => 0x85,
+        '\u{2020}' => 0x86,
+        '\u{2021}' => 0x87,
+        '\u{02C6}' => 0x88,
+        '\u{2030}' => 0x89,
+        '\u{0160}' => 0x8A,
+        '\u{2039}' => 0x8B,
+        '\u{0152}' => 0x8C,
+        '\u{017D}' => 0x8E,
+        '\u{2018}' => 0x91,
+        '\u{2019}' => 0x92,
+        '\u{201C}' => 0x93,
+        '\u{201D}' => 0x94,
+        '\u{2022}' => 0x95,
+        '\u{2013}' => 0x96,
+        '\u{2014}' => 0x97,
+        '\u{02DC}' => 0x98,
+        '\u{2122}' => 0x99,
+        '\u{0161}' => 0x9A,
+        '\u{203A}' => 0x9B,
+        '\u{0153}' => 0x9C,
+        '\u{017E}' => 0x9E,
+        '\u{0178}' => 0x9F,
+        _ => 0, // sentinel: not a CP1252-specific char
+    };
+    if cp1252 != 0 {
+        return Some(cp1252);
+    }
+    // Latin-1: any char <= 0xFF is exactly its own byte.
+    if (c as u32) <= 0xFF {
+        Some(c as u8)
+    } else {
+        None
+    }
+}
+
+/// Re-decode a string that is valid UTF-8 mis-read as Latin-1 OR Windows-1252
+/// (each UTF-8 byte widened to a single code unit). Returns `Some(fixed)` ONLY
+/// when at least one fragment was un-mangled, so legitimate text is never changed.
+///
+/// Works **per run**: any char that is NOT a single mis-decoded byte (real
+/// Cyrillic, CJK, emoji, …) is treated as a separator and copied through
+/// verbatim, while each maximal run of byte-mappable chars is re-decoded on its
+/// own. Real terminal copies are frequently MIXED — some characters survived
+/// correctly while others were mangled — and an all-or-nothing pass bailed on
+/// the entire string the moment it saw one already-correct char.
+///
+/// A run is replaced only when its bytes form valid UTF-8 AND the result differs
+/// AND contains a char >= U+0100 (i.e. it really un-mangled into non-Latin-1 text
+/// such as Cyrillic). So `café` / `über` (invalid UTF-8 as bytes) and a lone
+/// smart quote (`don't`, a stray continuation byte) stay untouched.
 pub fn repair_latin1_mojibake(s: &str) -> Option<String> {
-    if s.is_empty() || s.chars().any(|c| c as u32 > 0xFF) {
+    if s.is_empty() {
         return None;
     }
-    let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
-    let decoded = String::from_utf8(bytes).ok()?;
-    if decoded == s || !decoded.chars().any(|c| c as u32 >= 0x100) {
-        return None;
+
+    // Re-decode the buffered run; keep it verbatim unless it cleanly un-mangles.
+    fn flush(out: &mut String, bytes: &mut Vec<u8>, src: &mut String, changed: &mut bool) {
+        if bytes.is_empty() {
+            return;
+        }
+        match std::str::from_utf8(bytes) {
+            Ok(decoded)
+                if decoded != src.as_str() && decoded.chars().any(|c| c as u32 >= 0x100) =>
+            {
+                out.push_str(decoded);
+                *changed = true;
+            }
+            _ => out.push_str(src),
+        }
+        bytes.clear();
+        src.clear();
     }
-    Some(decoded)
+
+    let mut out = String::with_capacity(s.len());
+    let mut run_bytes: Vec<u8> = Vec::new();
+    let mut run_src = String::new();
+    let mut changed = false;
+
+    for c in s.chars() {
+        match mojibake_source_byte(c) {
+            Some(b) => {
+                run_bytes.push(b);
+                run_src.push(c);
+            }
+            None => {
+                flush(&mut out, &mut run_bytes, &mut run_src, &mut changed);
+                out.push(c);
+            }
+        }
+    }
+    flush(&mut out, &mut run_bytes, &mut run_src, &mut changed);
+
+    changed.then_some(out)
+}
+
+/// Human-readable reason why `repair_latin1_mojibake` declined to touch `s`.
+/// Used only for diagnostic logging when an auto-repair finds nothing to do, so
+/// an intermittent "copy not fixed" report can be localized from the log alone.
+fn describe_unrepairable(s: &str) -> String {
+    if !s.chars().any(|c| c as u32 > 0x7F) {
+        "plain ASCII — nothing to repair".to_string()
+    } else {
+        "no decodable mojibake runs — text appears already-correct (not single-byte mojibake)"
+            .to_string()
+    }
 }
 
 /// Read the clipboard's Unicode text (best-effort); `None` if empty/non-text.
@@ -523,14 +629,24 @@ fn clipboard_set_text(_text: &str) -> Result<(), String> {
 pub fn repair_clipboard() -> Result<Option<String>, String> {
     let current = match clipboard_get_text() {
         Some(text) => text,
-        None => return Ok(None),
+        None => {
+            log::debug!("[repair] clipboard empty or non-text; nothing to repair");
+            return Ok(None);
+        }
     };
     match repair_latin1_mojibake(&current) {
         Some(fixed) => {
             clipboard_set_text(&fixed)?;
             Ok(Some(fixed))
         }
-        None => Ok(None),
+        None => {
+            log::info!(
+                "[repair] no repair applied: {} (len={} chars)",
+                describe_unrepairable(&current),
+                current.chars().count()
+            );
+            Ok(None)
+        }
     }
 }
 
@@ -543,12 +659,18 @@ pub fn repair_clipboard_after_copy(seq_before: u32) -> Result<Option<String>, St
         thread,
         time::{Duration, Instant},
     };
-    let deadline = Instant::now() + Duration::from_millis(400);
+    let deadline = Instant::now() + Duration::from_millis(800);
     loop {
         if clipboard_sequence_number() != seq_before {
             return repair_clipboard();
         }
         if Instant::now() >= deadline {
+            let foreground = crate::platform::window::capture_foreground_window()
+                .map(|w| format!("{} \"{}\"", w.exe, w.title))
+                .unwrap_or_else(|e| format!("<unknown: {e}>"));
+            log::info!(
+                "[repair] copy did not land within 800ms (clipboard seq unchanged); skipped — foreground={foreground}"
+            );
             return Ok(None);
         }
         thread::sleep(Duration::from_millis(20));
@@ -2208,6 +2330,27 @@ mod tests {
     }
 
     #[test]
+    fn repair_latin1_mojibake_fixes_utf8_read_as_cp1252() {
+        // "что" UTF-8 (D1 87 D1 82 D0 BE) mis-decoded as Windows-1252, where the
+        // 0x87/0x82 second bytes become ‡/‚ (> U+00FF) instead of C1 controls:
+        // D1->Ñ, 87->‡, D1->Ñ, 82->‚, D0->Ð, BE->¾.
+        let mojibake = "Ñ‡Ñ‚Ð¾";
+        assert_eq!(repair_latin1_mojibake(mojibake).as_deref(), Some("что"));
+    }
+
+    #[test]
+    fn repair_latin1_mojibake_fixes_mixed_real_and_mojibake() {
+        // A real, already-correct "Н" (U+041D) sitting next to a mojibake run
+        // " режиме" (its UTF-8 bytes widened to Latin-1). Per-run repair must fix
+        // the mangled run while leaving the correct char verbatim — the exact
+        // shape that made the old all-or-nothing pass bail on the whole string.
+        let mangled: String = " режиме".bytes().map(|b| b as char).collect();
+        let input = format!("Н{mangled}");
+        assert_ne!(input, "Н режиме");
+        assert_eq!(repair_latin1_mojibake(&input).as_deref(), Some("Н режиме"));
+    }
+
+    #[test]
     fn repair_latin1_mojibake_leaves_clean_text_untouched() {
         // ASCII, legitimate Latin-1, already-correct Cyrillic, and empty must not change.
         assert_eq!(repair_latin1_mojibake("Docker build ok"), None);
@@ -2215,6 +2358,11 @@ mod tests {
         assert_eq!(repair_latin1_mojibake("über"), None);
         assert_eq!(repair_latin1_mojibake("Привет"), None);
         assert_eq!(repair_latin1_mojibake(""), None);
+        // Legitimate CP1252 punctuation in otherwise-clean text: each special char
+        // maps back to a lone 0x80–0x9F byte that is not valid UTF-8 on its own,
+        // so the conservative repair leaves it alone.
+        assert_eq!(repair_latin1_mojibake("don\u{2019}t"), None);
+        assert_eq!(repair_latin1_mojibake("\u{201C}hi\u{201D}"), None);
     }
 
     #[test]

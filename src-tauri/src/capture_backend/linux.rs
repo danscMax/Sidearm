@@ -280,6 +280,11 @@ impl CaptureBackendHandle {
 /// When F13-F24 are detected (with optional modifier tracking), sends
 /// EncodedKeyEvent through the channel.
 fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender<EncodedKeyEvent>) {
+    // Audit F032: iterate instead of recursing on hotplug/disconnect. The old
+    // `return run_evdev_capture_loop(...)` tail-calls are not guaranteed to be
+    // tail-call-optimized by rustc, so a device that repeatedly reconnects would
+    // grow the stack unbounded. This labeled loop restarts capture in place.
+    'capture: loop {
     let device_paths = find_razer_naga_devices();
 
     if device_paths.is_empty() {
@@ -300,8 +305,8 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
                     "[capture] Razer Naga device(s) detected via hotplug: {:?}",
                     paths
                 );
-                // Restart capture with found devices — tail-call into the main loop.
-                return run_evdev_capture_loop(stop_flag, event_tx);
+                // Restart capture with the found devices.
+                continue 'capture;
             }
         }
     }
@@ -324,6 +329,17 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
             return;
         }
     };
+
+    // Audit F002: open the device non-blocking so fetch_events() returns WouldBlock
+    // when idle instead of parking the thread until the next event. Without this,
+    // stop() -> thread.join() hangs forever whenever no input arrives after the stop
+    // flag is set (the read loop only re-checks the flag between events). Non-fatal.
+    if let Err(e) = device.set_nonblocking(true) {
+        log::warn!(
+            "[capture] Could not set evdev device non-blocking: {e}. \
+             Stopping capture may be delayed until the next input event."
+        );
+    }
 
     log::info!(
         "[capture] Opened evdev device: {} ({})",
@@ -439,10 +455,12 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
 
     if device_lost {
         // Device disconnected — restart hotplug polling to reconnect.
-        return run_evdev_capture_loop(stop_flag, event_tx);
+        continue 'capture;
     }
 
     log::info!("[capture] evdev capture loop exited.");
+    return;
+    } // 'capture loop
 }
 
 /// Foreground window watcher. Polls the active window every ~300ms and emits

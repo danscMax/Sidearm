@@ -5,9 +5,9 @@
 # a script:
 #     . (Join-Path $PSScriptRoot 'ScriptKit.ps1')
 #
-# CANON: E:\Scripts\claude-maintenance-hub\tools\ScriptKit.ps1 is the source of
+# CANON: E:\Scripts\AgentHub\tools\ScriptKit.ps1 is the source of
 # truth. Edit it there, bump $script:SK_Version, then roll out to every vendored
-# copy with: claude-maintenance-hub\tools\Sync-ScriptKit.ps1 -Apply
+# copy with: AgentHub\tools\Sync-ScriptKit.ps1 -Apply
 #
 # Design rules (keep them when editing):
 #   * Pure presentation / small utilities -- NO Set-StrictMode (this dot-sources
@@ -216,7 +216,7 @@ function Get-AppVersion {
 }
 
 # ============================================================================
-# Status JSON (unified component status envelope for the Maintenance Hub)
+# Status JSON (unified component status envelope for AgentHub)
 # ============================================================================
 
 # Write a unified "<component>.last.json" envelope under <Root>. This is the
@@ -257,6 +257,9 @@ function Write-StatusJson {
         [System.IO.File]::WriteAllText($path, ($payload | ConvertTo-Json -Depth 8), [System.Text.UTF8Encoding]::new($false))
         return $path
     } catch {
+        # Don't fail the caller, but don't fail silently either — a swallowed write means the
+        # dashboard would keep showing a stale status.
+        try { Write-Log ("Write-StatusJson failed: {0}" -f $_.Exception.Message) -Level 'WARN' -Color 'Yellow' } catch { }
         return $null
     }
 }

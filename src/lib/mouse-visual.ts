@@ -4,6 +4,7 @@
 // differences between the two modes are expressed as explicit options, not
 // forked copies.
 
+import i18n from "../i18n";
 import type { ControlId, TriggerMode } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
 import { ACTION_CATEGORIES } from "./constants";
@@ -80,7 +81,8 @@ export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string)
     return `${name}\n${unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
-  return `${name}\n${cat?.label ?? ""}: ${entry.action.displayName}`;
+  const catLabel = cat ? i18n.t(cat.label) : "";
+  return `${name}\n${catLabel}: ${entry.action.displayName}`;
 }
 
 /** className for a `btn-legend__cell` button. `dimmed`/`conflict` apply in photo mode only. */

@@ -299,7 +299,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                         >
                           {verificationScopeCopy.map((scope) => (
                             <option key={scope.value} value={scope.value}>
-                              {scope.label}
+                              {t(scope.label)}
                             </option>
                           ))}
                         </select>
@@ -307,11 +307,12 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     </div>
 
                     <p className="panel__muted">
-                      {
-                        verificationScopeCopy.find(
+                      {(() => {
+                        const bodyKey = verificationScopeCopy.find(
                           (scope) => scope.value === verificationScope,
-                        )?.body
-                      }
+                        )?.body;
+                        return bodyKey ? t(bodyKey) : "";
+                      })()}
                     </p>
 
                     <div className="editor-actions">

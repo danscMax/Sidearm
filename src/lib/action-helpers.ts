@@ -91,15 +91,19 @@ export function describeActionSummary(
 }
 
 /** Human label for a mouse-action value (from `MOUSE_ACTION_OPTIONS`), or
- *  `undefined` if unknown — callers supply their own fallback. Shared by
+ *  `undefined` if unknown — callers supply their own fallback. The option's
+ *  `label` is an i18n key, resolved here at call time. Shared by
  *  `describeActionSummary` and the picker's `autoName`. */
 export function mouseActionLabel(value: string): string | undefined {
-  return MOUSE_ACTION_OPTIONS.find((o) => o.value === value)?.label;
+  const option = MOUSE_ACTION_OPTIONS.find((o) => o.value === value);
+  return option ? i18n.t(option.label) : undefined;
 }
 
-/** Human label for a media-key value (from `MEDIA_KEY_OPTIONS`), or undefined. */
+/** Human label for a media-key value (from `MEDIA_KEY_OPTIONS`), or undefined.
+ *  The option's `label` is an i18n key, resolved here at call time. */
 export function mediaKeyLabel(value: string): string | undefined {
-  return MEDIA_KEY_OPTIONS.find((o) => o.value === value)?.label;
+  const option = MEDIA_KEY_OPTIONS.find((o) => o.value === value);
+  return option ? i18n.t(option.label) : undefined;
 }
 
 export function isActionLiveRunnable(config: AppConfig, actionId: string): boolean {

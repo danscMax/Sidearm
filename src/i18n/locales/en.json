@@ -179,6 +179,7 @@
     "mouseForward": "Forward"
   },
   "mediaKey": {
+    "playPause": "Play / Pause",
     "nextTrack": "Next track",
     "prevTrack": "Previous track",
     "stop": "Stop",
@@ -236,6 +237,16 @@
     "scopeCurrentFamilyDesc": "Only buttons from the selected group: thumb grid, top panel, wheel, or system controls.",
     "scopeAll": "Entire layer",
     "scopeAllDesc": "All controls in the current layer, one by one."
+  },
+  "verificationScope": {
+    "currentFamily": {
+      "label": "Current group",
+      "body": "Only buttons from the selected group: thumb grid, top panel, wheel, or system controls."
+    },
+    "all": {
+      "label": "Entire layer",
+      "body": "All controls in the current layer, one by one."
+    }
   },
   "log": {
     "levelAll": "All",

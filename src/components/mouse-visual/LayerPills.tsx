@@ -1,5 +1,6 @@
 // The layer-select pill strip rendered in the footer of both visualizers.
 
+import { useTranslation } from "react-i18next";
 import type { Layer } from "../../lib/config";
 import { layerCopy } from "../../lib/constants";
 
@@ -9,6 +10,7 @@ interface LayerPillsProps {
 }
 
 export function LayerPills({ selectedLayer, onSelectLayer }: LayerPillsProps) {
+  const { t } = useTranslation();
   const layerIdx = layerCopy.findIndex((l) => l.value === selectedLayer);
   return (
     <div className="mouse-visual-tabs__footer">
@@ -34,7 +36,7 @@ export function LayerPills({ selectedLayer, onSelectLayer }: LayerPillsProps) {
             className={`pill-track__pill${layer.value === selectedLayer ? " pill-track__pill--active" : ""}`}
             onClick={() => onSelectLayer(layer.value)}
           >
-            {layer.label}
+            {t(layer.label)}
           </button>
         ))}
       </div>

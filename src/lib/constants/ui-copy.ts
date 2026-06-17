@@ -8,37 +8,25 @@ import type {
 import type { VerificationSessionScope } from "../verification-session";
 import type { ActionCategory, WorkspaceMode } from "./types";
 
+// NOTE on i18n: these constants intentionally do NOT store rendered display
+// text. Any `label`/`body` field below holds an i18n KEY (e.g.
+// `action.type.shortcut`), never a translated literal. Consumers resolve the
+// real text at render time via `t(key)` (components) or `i18n.t(key)` (plain
+// modules), so switching the UI language re-renders correctly. Only structural
+// fields (value/actionType/icon/id) are language-neutral. — Audit F004.
+
 export const controlFamilyOrder: ControlFamily[] = ["thumbGrid", "topPanel", "system"];
-export const workspaceModeCopy: Array<{
-  value: WorkspaceMode;
-  label: string;
-  body: string;
-  heading: string;
-  meta: string;
-}> = [
-  {
-    value: "profiles",
-    label: "Назначения",
-    heading: "Назначения",
-    body: "Профили, кнопки и правила для приложений.",
-    meta: "Назначения кнопок",
-  },
-  {
-    value: "debug",
-    label: "Диагностика",
-    heading: "Диагностика",
-    body: "Сигналы, проверка кнопок, журнал событий.",
-    meta: "Диагностика и проверка",
-  },
-  {
-    value: "settings",
-    label: "Настройки",
-    heading: "Настройки",
-    body: "Профили, приоритеты и общие параметры приложения.",
-    meta: "Настройки профилей",
-  },
+
+/** Workspace tab order. Display text (label/heading/body/meta) is resolved by
+ *  consumers via `t(\`workspace.${value}.*\`)`, so only `value` lives here. */
+export const workspaceModeCopy: Array<{ value: WorkspaceMode }> = [
+  { value: "profiles" },
+  { value: "debug" },
+  { value: "settings" },
 ];
 
+/** Verification-session scope options. `label`/`body` are i18n KEYS; resolve
+ *  with `t(scope.label)` / `t(scope.body)` at render time. */
 export const verificationScopeCopy: Array<{
   value: VerificationSessionScope;
   label: string;
@@ -46,44 +34,36 @@ export const verificationScopeCopy: Array<{
 }> = [
   {
     value: "currentFamily",
-    label: "Текущая группа",
-    body: "Только кнопки из выбранной группы: боковая клавиатура, верхняя панель, колесо или системные контролы.",
+    label: "verificationScope.currentFamily.label",
+    body: "verificationScope.currentFamily.body",
   },
   {
     value: "all",
-    label: "Весь слой",
-    body: "Все контролы текущего слоя по очереди.",
+    label: "verificationScope.all.label",
+    body: "verificationScope.all.body",
   },
 ];
 
-
-export const layerCopy: Array<{ value: Layer; label: string; body: string }> = [
-  {
-    value: "standard",
-    label: "Стандартный",
-    body: "Основной слой назначений и сигналов.",
-  },
-  {
-    value: "hypershift",
-    label: "Hypershift",
-    body: "Второй слой со своими биндами и отдельной валидацией.",
-  },
+/** Layer pills. `label` is an i18n KEY; resolve with `t(layer.label)`. */
+export const layerCopy: Array<{ value: Layer; label: string }> = [
+  { value: "standard", label: "layer.standard" },
+  { value: "hypershift", label: "layer.hypershift" },
 ];
 
-/** Single source of truth for action-type display labels. Both
- *  `editableActionTypes` and `ACTION_CATEGORIES` derive their labels from here
- *  so the two lists cannot drift (previously "Меню" vs "Контекстное меню"). */
+/** Single source of truth for action-type i18n KEYS. Both `editableActionTypes`
+ *  and `ACTION_CATEGORIES` derive their `label` from here so the two lists
+ *  cannot drift. Each value is an i18n key — resolve with `t(key)` at render. */
 export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
-  shortcut: "Клавиатура",
-  mouseAction: "Мышь",
-  textSnippet: "Текст",
-  sequence: "Макрос",
-  launch: "Запуск",
-  mediaKey: "Медиа",
-  profileSwitch: "Профиль",
-  menu: "Контекстное меню",
-  disabled: "Отключено",
-  repairClipboard: "Починить буфер",
+  shortcut: "action.type.shortcut",
+  mouseAction: "action.type.mouseAction",
+  textSnippet: "action.type.textSnippet",
+  sequence: "action.type.sequence",
+  launch: "action.type.launch",
+  mediaKey: "action.type.mediaKey",
+  profileSwitch: "action.type.profileSwitch",
+  menu: "action.type.menu",
+  disabled: "action.type.disabled",
+  repairClipboard: "action.type.repairClipboard",
 };
 
 export const editableActionTypes: Array<{
@@ -115,25 +95,29 @@ export const ACTION_CATEGORIES: ActionCategory[] = [
   { id: "repairClipboard", icon: "Rb", label: ACTION_TYPE_LABELS.repairClipboard, actionType: "repairClipboard" },
 ];
 
+/** Mouse-action options. `label` is an i18n KEY (`mouseAction.${value}`);
+ *  resolve with `t(opt.label)` / `i18n.t(opt.label)` at render time. */
 export const MOUSE_ACTION_OPTIONS: Array<{ value: MouseActionKind; label: string }> = [
-  { value: "leftClick", label: "Левый клик" },
-  { value: "rightClick", label: "Правый клик" },
-  { value: "middleClick", label: "Средний клик" },
-  { value: "doubleClick", label: "Двойной клик" },
-  { value: "scrollUp", label: "Скролл вверх" },
-  { value: "scrollDown", label: "Скролл вниз" },
-  { value: "scrollLeft", label: "Скролл влево" },
-  { value: "scrollRight", label: "Скролл вправо" },
-  { value: "mouseBack", label: "Назад" },
-  { value: "mouseForward", label: "Вперёд" },
+  { value: "leftClick", label: "mouseAction.leftClick" },
+  { value: "rightClick", label: "mouseAction.rightClick" },
+  { value: "middleClick", label: "mouseAction.middleClick" },
+  { value: "doubleClick", label: "mouseAction.doubleClick" },
+  { value: "scrollUp", label: "mouseAction.scrollUp" },
+  { value: "scrollDown", label: "mouseAction.scrollDown" },
+  { value: "scrollLeft", label: "mouseAction.scrollLeft" },
+  { value: "scrollRight", label: "mouseAction.scrollRight" },
+  { value: "mouseBack", label: "mouseAction.mouseBack" },
+  { value: "mouseForward", label: "mouseAction.mouseForward" },
 ];
 
+/** Media-key options. `label` is an i18n KEY (`mediaKey.${value}`); resolve
+ *  with `t(opt.label)` / `i18n.t(opt.label)` at render time. */
 export const MEDIA_KEY_OPTIONS: Array<{ value: MediaKeyKind; label: string }> = [
-  { value: "playPause", label: "Play / Pause" },
-  { value: "nextTrack", label: "Следующий трек" },
-  { value: "prevTrack", label: "Предыдущий трек" },
-  { value: "stop", label: "Стоп" },
-  { value: "volumeUp", label: "Громкость +" },
-  { value: "volumeDown", label: "Громкость −" },
-  { value: "mute", label: "Без звука" },
+  { value: "playPause", label: "mediaKey.playPause" },
+  { value: "nextTrack", label: "mediaKey.nextTrack" },
+  { value: "prevTrack", label: "mediaKey.prevTrack" },
+  { value: "stop", label: "mediaKey.stop" },
+  { value: "volumeUp", label: "mediaKey.volumeUp" },
+  { value: "volumeDown", label: "mediaKey.volumeDown" },
+  { value: "mute", label: "mediaKey.mute" },
 ];

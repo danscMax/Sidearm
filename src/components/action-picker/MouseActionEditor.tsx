@@ -21,7 +21,7 @@ export function MouseActionEditor({
             className={`picker-grid__btn${draft.action === opt.value ? " picker-grid__btn--active" : ""}`}
             onClick={() => onChange({ ...draft, action: opt.value })}
           >
-            {opt.label}
+            {t(opt.label)}
           </button>
         ))}
       </div>

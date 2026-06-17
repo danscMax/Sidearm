@@ -115,7 +115,7 @@ export function ActionPickerModal({
 
   const filteredCategories = searchQuery.trim()
     ? ACTION_CATEGORIES.filter((cat) =>
-        cat.label.toLowerCase().includes(searchQuery.trim().toLowerCase())
+        t(cat.label).toLowerCase().includes(searchQuery.trim().toLowerCase())
       )
     : ACTION_CATEGORIES;
 
@@ -292,17 +292,20 @@ export function ActionPickerModal({
                 type="button"
                 className={`action-picker__cat-btn${effectiveCategory === cat.id ? " action-picker__cat-btn--active" : ""}`}
                 onClick={() => { setSearchQuery(""); setActiveCategoryWithMemory(cat.id); }}
-                title={cat.label}
+                title={t(cat.label)}
               >
                 <span className="action-picker__cat-icon">{cat.icon}</span>
-                <span className="action-picker__cat-label">{cat.label}</span>
+                <span className="action-picker__cat-label">{t(cat.label)}</span>
               </button>
             ))}
           </nav>
 
           <div className="action-picker__editor">
             <h3 className="action-picker__cat-title">
-              {ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.label}
+              {(() => {
+                const key = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.label;
+                return key ? t(key) : "";
+              })()}
             </h3>
 
             {effectiveCategory === "shortcut" ? (

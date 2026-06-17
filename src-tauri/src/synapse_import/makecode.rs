@@ -6,11 +6,11 @@
 //! base-table byte with a different key — the caller uses `is_extended`
 //! to disambiguate.
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 
 /// Key that a scancode resolves to when the extended-flag is off.
-static BASE_TABLE: Lazy<HashMap<u16, &'static str>> = Lazy::new(|| {
+static BASE_TABLE: LazyLock<HashMap<u16, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         (0x01, "Escape"),
         (0x02, "1"),
@@ -113,7 +113,7 @@ static BASE_TABLE: Lazy<HashMap<u16, &'static str>> = Lazy::new(|| {
 });
 
 /// Key that a scancode resolves to when the extended-flag (E0 prefix) is on.
-static EXTENDED_TABLE: Lazy<HashMap<u16, &'static str>> = Lazy::new(|| {
+static EXTENDED_TABLE: LazyLock<HashMap<u16, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         (0x1C, "NumEnter"),
         (0x1D, "RightCtrl"),

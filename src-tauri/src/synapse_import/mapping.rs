@@ -5,7 +5,7 @@
 //! 2. Synapse `KEY_*` token → Sidearm keyboard `key` string + modifier booleans
 //! 3. Synapse `outputType` → Sidearm `actionType`
 
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
 use std::collections::HashMap;
 
 use super::types::{ImportWarning, ParsedAction};
@@ -16,7 +16,7 @@ use super::types::{ImportWarning, ParsedAction};
 
 /// v4 side-panel thumb grid uses `KEY_1..KEY_9, KEY_0, KEY_HYPEN, KEY_EQUAL`
 /// inside `sidePanelMappings.12ButtonSide[]`. The ordering is fixed in Synapse.
-pub static THUMB_GRID_V4: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+pub static THUMB_GRID_V4: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         ("KEY_1", "thumb_01"),
         ("KEY_2", "thumb_02"),
@@ -34,7 +34,7 @@ pub static THUMB_GRID_V4: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(
 });
 
 /// v3 XML and v4 device-level `mappings[]` use `DKM_M_01..12` for thumb slots.
-pub static THUMB_GRID_DKM: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+pub static THUMB_GRID_DKM: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     for (i, thumb) in [
         "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06",
@@ -51,7 +51,7 @@ pub static THUMB_GRID_DKM: Lazy<HashMap<&'static str, &'static str>> = Lazy::new
 
 /// Mouse / scroll / top buttons appear in the v4 `mappings[]` array and in
 /// v3 `<MouseInput>` payloads.
-pub static MOUSE_BUTTONS: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+pub static MOUSE_BUTTONS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         ("LeftClick", "mouse_left"),
         ("RightClick", "mouse_right"),
@@ -105,7 +105,7 @@ pub fn input_id_to_control_id(
 // KEY_* token → Sidearm key + modifiers
 // ============================================================================
 
-pub static KEY_TOKEN_SPECIAL: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+pub static KEY_TOKEN_SPECIAL: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
         ("KEY_TAB", "Tab"),
         ("KEY_ENTER", "Enter"),
@@ -268,7 +268,7 @@ pub fn parse_modifier_array(tokens: &[String]) -> ModifierFlags {
 // Win32 VirtualKey code → Sidearm key name  (v3 <KeyAssignment><VirtualKey>)
 // ============================================================================
 
-pub static VK_TO_KEY: Lazy<HashMap<u16, &'static str>> = Lazy::new(|| {
+pub static VK_TO_KEY: LazyLock<HashMap<u16, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     // Letter keys: VK_A (0x41) .. VK_Z (0x5A)
     for i in 0..26u16 {

@@ -4484,7 +4484,6 @@ dependencies = [
  "evdev",
  "jsonschema",
  "log",
- "once_cell",
  "png 0.17.16",
  "proptest",
  "quick-xml 0.31.0",

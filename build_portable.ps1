@@ -384,8 +384,20 @@ $resOutDir = Join-Path $PORTABLE_DIR 'resources'
 New-Item -ItemType Directory -Path $resOutDir -Force | Out-Null
 
 if (Test-Path -LiteralPath $WEBVIEW2_EXE) {
-    Copy-Item -LiteralPath $WEBVIEW2_EXE -Destination $resOutDir
-    Write-Ok "resources/MicrosoftEdgeWebview2Setup.exe"
+    # Audit F042: verify the bootstrapper's Authenticode signature before bundling it.
+    # The evergreen MicrosoftEdgeWebview2Setup.exe changes hash on every Microsoft
+    # update, so a pinned SHA-256 would be brittle — but it is always Microsoft-signed.
+    # Refuse to bundle a binary that is unsigned, tampered, or not signed by Microsoft.
+    $sig = Get-AuthenticodeSignature -LiteralPath $WEBVIEW2_EXE
+    $signer = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '<none>' }
+    if ($sig.Status -eq 'Valid' -and $signer -match 'O=Microsoft Corporation') {
+        Copy-Item -LiteralPath $WEBVIEW2_EXE -Destination $resOutDir
+        Write-Ok "resources/MicrosoftEdgeWebview2Setup.exe (Authenticode-verified: Microsoft)"
+    } else {
+        Write-Warn "WebView2 bootstrapper failed Authenticode verification — NOT bundling it."
+        Write-Info "Status: $($sig.Status); Signer: $signer"
+        Write-Info "Re-download a genuine copy from: $WEBVIEW2_URL"
+    }
 } else {
     Write-Warn "WebView2 bootstrapper not found at: $WEBVIEW2_EXE"
     Write-Info "Download from: $WEBVIEW2_URL"

@@ -299,5 +299,9 @@ export function isSaveDisabled(effectiveCategory: string, drafts: PickerDrafts):
   }
   if (effectiveCategory === "textSnippet") return !drafts.text.text.trim();
   if (effectiveCategory === "launch") return !drafts.launch.target.trim();
+  // Audit F005: an empty menu passes the backend schema check only to be rejected by
+  // validate_action (menu must have >=1 item), which rolls back the whole draft. Block
+  // Save here so the user keeps their work instead of losing it to a backend error.
+  if (effectiveCategory === "menu") return drafts.menuItems.length === 0;
   return false;
 }

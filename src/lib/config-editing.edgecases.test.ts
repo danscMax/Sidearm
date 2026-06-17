@@ -175,6 +175,19 @@ describe("boundary: makeProfileId / makeSnippetId / makeAppMappingId idempotence
     );
   });
 
+  it("makeProfileId always starts with a letter (schema idToken ^[a-z]) — audit F013", () => {
+    // A name starting with a digit ("2nd profile", "3D") must not yield a
+    // schema-invalid id (idToken = ^[a-z][a-z0-9-]*$) that would break save.
+    fc.assert(
+      fc.property(fc.string({ minLength: 0, maxLength: 200 }), (name) => {
+        expect(makeProfileId(name)).toMatch(/^[a-z][a-z0-9-]*$/);
+      }),
+      { numRuns: 1000 },
+    );
+    expect(makeProfileId("2nd profile")).toMatch(/^[a-z]/);
+    expect(makeProfileId("3D")).toMatch(/^[a-z]/);
+  });
+
   it("makeSnippetId result always starts with 'snippet-'", () => {
     fc.assert(
       fc.property(fc.string({ minLength: 0, maxLength: 200 }), (name) => {

@@ -1288,6 +1288,11 @@ fn validate_action<'a>(
             }
         }
         (ActionType::Disabled, ActionPayload::Disabled(_)) => {}
+        // RepairClipboard's payload carries only a typed `strategy` enum, which serde
+        // validates at deserialization — no further semantic invariants to check.
+        // (Audit F001: a missing arm here sent every repairClipboard action to the
+        // catch-all below, so validate_config rejected save/load of any config using it.)
+        (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {}
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
@@ -2861,6 +2866,27 @@ mod tests {
         let value = serde_json::to_value(&config).expect("serialize config");
         let errors = collect_schema_errors(&value);
         assert!(errors.is_empty(), "repairClipboard action must be schema-valid: {errors:?}");
+    }
+
+    #[test]
+    fn repair_clipboard_action_passes_semantic_validation() {
+        // Audit F001 regression: validate_action lacked a RepairClipboard arm, so a
+        // repairClipboard action fell through to the catch-all and validate_config
+        // rejected it — breaking save/load of any config using it. The schema-only
+        // test above did not cover the semantic (validate_config) path.
+        let mut config = default_seed_config();
+        config.actions.push(Action {
+            id: "repair-clipboard-semantic".into(),
+            action_type: ActionType::RepairClipboard,
+            payload: ActionPayload::RepairClipboard(RepairClipboardActionPayload {
+                strategy: RepairStrategy::Latin1,
+            }),
+            display_name: "Repair clipboard".into(),
+            notes: None,
+            conditions: Vec::new(),
+        });
+        validate_config(&config)
+            .expect("repairClipboard action must pass semantic validation (validate_config)");
     }
 
     /// Regression: the Razer Synapse profile we ship for onboarding has the

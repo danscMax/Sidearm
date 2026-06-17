@@ -847,7 +847,11 @@ export function makeProfileId(name: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
-  return normalized || "profile";
+  const base = normalized || "profile";
+  // Schema idToken requires a leading letter (^[a-z][a-z0-9-]*$). A name starting
+  // with a digit ("2nd profile", "3D") would otherwise yield a schema-invalid id and
+  // make save fail (audit F013). Mirror makeAppMappingId's letter-prefix guarantee.
+  return /^[a-z]/.test(base) ? base : `p-${base}`;
 }
 
 // Generates a schema-compliant id matching ^[a-z][a-z0-9-]*$.

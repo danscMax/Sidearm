@@ -311,6 +311,16 @@ describe("isSaveDisabled", () => {
     expect(isSaveDisabled("launch", makeDrafts({ launch: { target: "app.exe", args: [], workingDir: "" } }))).toBe(false);
   });
 
+  it("disables save for an empty menu, enables once it has an item — audit F005", () => {
+    expect(isSaveDisabled("menu", makeDrafts())).toBe(true);
+    expect(
+      isSaveDisabled(
+        "menu",
+        makeDrafts({ menuItems: [{ kind: "action", id: "a", label: "A", actionId: "r1", enabled: true }] }),
+      ),
+    ).toBe(false);
+  });
+
   it("never blocks save for categories without required fields", () => {
     expect(isSaveDisabled("mediaKey", makeDrafts())).toBe(false);
     expect(isSaveDisabled("disabled", makeDrafts())).toBe(false);

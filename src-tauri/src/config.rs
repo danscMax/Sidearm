@@ -95,39 +95,51 @@ const REGEX_PREFIX: &str = "regex:";
 const MAX_REGEX_PATTERN_LEN: usize = 500;
 const REGEX_SIZE_LIMIT: usize = 10_240;
 
+/// Compile a `title_includes` regex pattern under the SAME guards used at
+/// pre-compilation time: reject patterns longer than [`MAX_REGEX_PATTERN_LEN`]
+/// and cap the compiled program at [`REGEX_SIZE_LIMIT`] bytes. `pattern` is the
+/// raw pattern WITHOUT the `regex:` prefix. Returns `None` (logging a warning)
+/// when the pattern is rejected or fails to build, so callers treat it as
+/// "does not match".
+///
+/// Shared by `AppConfig::compile_title_regexes` and the resolver's
+/// compile-on-demand fallback so a pattern rejected at load time can never be
+/// recompiled without limits on the hot path. See finding F020.
+pub(crate) fn compile_title_regex(pattern: &str, context: &str) -> Option<regex::Regex> {
+    if pattern.len() > MAX_REGEX_PATTERN_LEN {
+        log::warn!(
+            "[config] Regex pattern too long ({} chars, max {}) in {}",
+            pattern.len(),
+            MAX_REGEX_PATTERN_LEN,
+            context
+        );
+        return None;
+    }
+    match regex::RegexBuilder::new(&format!("(?i){pattern}"))
+        .size_limit(REGEX_SIZE_LIMIT)
+        .build()
+    {
+        Ok(re) => Some(re),
+        Err(e) => {
+            log::warn!("[config] Invalid regex in {context}: {e}");
+            None
+        }
+    }
+}
+
 impl AppConfig {
     /// Pre-compile regex patterns in `title_includes` fields for all app mappings.
     /// Call after config load/save to avoid recompiling on every keypress.
     pub fn compile_title_regexes(&mut self) {
         for mapping in &mut self.app_mappings {
+            let mapping_context = format!("app mapping `{}`", mapping.id);
             mapping.compiled_title_regexes = mapping
                 .title_includes
                 .iter()
                 .map(|needle| {
-                    needle.strip_prefix(REGEX_PREFIX).and_then(|pattern| {
-                        if pattern.len() > MAX_REGEX_PATTERN_LEN {
-                            log::warn!(
-                                "[config] Regex pattern too long ({} chars, max {}) in app mapping `{}`",
-                                pattern.len(),
-                                MAX_REGEX_PATTERN_LEN,
-                                mapping.id
-                            );
-                            return None;
-                        }
-                        match regex::RegexBuilder::new(&format!("(?i){pattern}"))
-                            .size_limit(REGEX_SIZE_LIMIT)
-                            .build()
-                        {
-                            Ok(re) => Some(re),
-                            Err(e) => {
-                                log::warn!(
-                                    "[config] Invalid regex in app mapping `{}`: {e}",
-                                    mapping.id
-                                );
-                                None
-                            }
-                        }
-                    })
+                    needle
+                        .strip_prefix(REGEX_PREFIX)
+                        .and_then(|pattern| compile_title_regex(pattern, &mapping_context))
                 })
                 .collect();
         }

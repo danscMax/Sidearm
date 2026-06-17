@@ -173,6 +173,18 @@ export function buildAction(params: {
           displayName,
         };
       case "textSnippet": {
+        // Audit F039: the picker has no editor for library-referenced snippets,
+        // so a libraryRef seeds an empty inline draft. Without this guard saving
+        // would overwrite the reference with empty inline text, losing snippetId
+        // and content. When editing a libraryRef and the draft text is still
+        // empty (nothing was typed), keep the original reference intact.
+        if (
+          existingAction?.type === "textSnippet" &&
+          existingAction.payload.source === "libraryRef" &&
+          !drafts.text.text.trim()
+        ) {
+          return { ...existingAction, displayName };
+        }
         // Preserve tags from existing inline payload so editing the text
         // through this picker doesn't silently drop tag metadata that was
         // set elsewhere.

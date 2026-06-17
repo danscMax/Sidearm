@@ -16,11 +16,6 @@ use windows_sys::Win32::Graphics::Gdi::{
 use windows_sys::Win32::UI::Shell::ExtractIconExW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
 
-/// Fallback icon dimension, used only when the real bitmap size cannot be
-/// queried via `GetObjectW`. The actual size (`SM_CXICON` — 32 on standard
-/// DPI, 48/64 on high-DPI) is read at runtime in `extract_icon_rgba`.
-const ICON_SIZE_FALLBACK: u32 = 32;
-
 /// Upper bound on icon dimensions we will read, bounding the pixel buffer and
 /// PNG size and rejecting absurd / corrupt bitmaps. 256 covers the largest
 /// shell icons at any DPI scaling.
@@ -136,8 +131,11 @@ fn extract_icon_rgba(exe_path: &str) -> Option<(Vec<u8>, u32, u32)> {
             // Query OK: reject out-of-range dims (no icon beats a wrong one).
             validate_icon_dims(bm.bmWidth, bm.bmHeight)?
         } else {
-            // Query failed: fall back to 32x32 — no worse than the old code.
-            (ICON_SIZE_FALLBACK, ICON_SIZE_FALLBACK)
+            // Query failed: prefer the monogram fallback over a possibly clipped
+            // 32x32 read (on hi-DPI the real bitmap may be 48/64). Consistent
+            // with the `validate_icon_dims(...)?` path above — no icon beats a
+            // wrong one. See finding F034.
+            return None;
         };
 
         // 4. Read pixels via GetDIBits

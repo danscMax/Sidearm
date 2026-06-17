@@ -1,4 +1,3 @@
-use regex::Regex;
 use serde::Serialize;
 
 use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile, TriggerMode};
@@ -395,11 +394,15 @@ pub(crate) fn matching_app_mappings<'a>(
                     .enumerate()
                     .all(|(i, needle)| {
                         if needle.starts_with(REGEX_PREFIX) {
-                            // Use pre-compiled regex if available, fall back to compile-on-demand
+                            // Use pre-compiled regex if available, fall back to
+                            // compile-on-demand THROUGH THE SAME guards as
+                            // pre-compilation (length + size limit) so a pattern
+                            // rejected at load time cannot be recompiled without
+                            // limits on the hot path. See finding F020.
                             if let Some(Some(re)) = mapping.compiled_title_regexes.get(i) {
                                 re.is_match(&normalized_title)
                             } else if let Some(pattern) = needle.strip_prefix(REGEX_PREFIX) {
-                                Regex::new(&format!("(?i){pattern}"))
+                                crate::config::compile_title_regex(pattern, "app mapping title fallback")
                                     .map(|re| re.is_match(&normalized_title))
                                     .unwrap_or(false)
                             } else {
@@ -1046,6 +1049,38 @@ mod edge_proptests {
         // Title contains neither → does not match
         assert!(
             matching_app_mappings(&config, "app.exe", "Other App", None).is_empty()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // F020: over-long regex rejected at pre-compile time must NOT be
+    // recompiled without limits in the fallback path.
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn oversized_title_regex_does_not_match_via_fallback() {
+        // A pattern longer than MAX_REGEX_PATTERN_LEN (500). It is a valid
+        // regex that WOULD match any title, so if the fallback recompiled it
+        // without the length gate the mapping would match.
+        let long_pattern = format!("regex:{}.*", "a".repeat(600));
+        let mut mapping = simple_app_mapping("m1", "app.exe", "other");
+        mapping.title_includes = vec![long_pattern];
+
+        let mut config = minimal_config(vec![mapping]);
+        // Pre-compile: the over-long pattern is rejected and stored as None,
+        // so the resolver hits the compile-on-demand fallback branch.
+        config.compile_title_regexes();
+        let compiled = &config.app_mappings[0].compiled_title_regexes;
+        assert_eq!(compiled.len(), 1);
+        assert!(
+            compiled[0].is_none(),
+            "over-long pattern must be rejected at pre-compile time"
+        );
+
+        // The fallback now applies the same length gate → no match.
+        assert!(
+            matching_app_mappings(&config, "app.exe", "anything", None).is_empty(),
+            "fallback must honour the regex length gate and not match"
         );
     }
 

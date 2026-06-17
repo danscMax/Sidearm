@@ -27,6 +27,9 @@ export function useCssVars<T extends HTMLElement | SVGElement = HTMLElement>(
   vars: Record<string, CssVarValue>,
 ): RefObject<T | null> {
   const ref = useRef<T | null>(null);
+  // Names set on the previous run, so keys that vanish entirely from `vars`
+  // (not just turned undefined/null) still get removed from the element.
+  const prevKeysRef = useRef<string[]>([]);
   // Serialize so the effect re-runs only when the values actually change,
   // independent of the object identity React hands us on every render.
   const serialized = JSON.stringify(vars);
@@ -34,6 +37,12 @@ export function useCssVars<T extends HTMLElement | SVGElement = HTMLElement>(
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
+    // Remove properties for keys that are no longer present in `vars`.
+    for (const name of prevKeysRef.current) {
+      if (!(name in vars)) {
+        el.style.removeProperty(name);
+      }
+    }
     for (const [name, value] of Object.entries(vars)) {
       if (value === undefined || value === null) {
         el.style.removeProperty(name);
@@ -41,6 +50,7 @@ export function useCssVars<T extends HTMLElement | SVGElement = HTMLElement>(
         el.style.setProperty(name, String(value));
       }
     }
+    prevKeysRef.current = Object.keys(vars);
     // `vars` is intentionally tracked via its serialized form (`serialized`).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serialized]);

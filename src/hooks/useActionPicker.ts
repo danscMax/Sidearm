@@ -1,9 +1,6 @@
 import { useCallback } from "react";
 import type { AppConfig, Binding, ControlId, Layer } from "../lib/config";
-import {
-  ensurePlaceholderBinding,
-  makeBindingId,
-} from "../lib/config-editing";
+import { ensurePlaceholderBinding } from "../lib/config-editing";
 
 export function useActionPicker(deps: {
   effectiveProfileId: string | null;
@@ -30,14 +27,20 @@ export function useActionPicker(deps: {
         return;
       }
 
+      // Capture the id ensurePlaceholderBinding actually assigns. Reconstructing
+      // it independently would diverge on a base-id collision (audit F010),
+      // leaving the picker pointed at a non-existent binding.
+      let createdBindingId: string | null = null;
       updateDraft((config) => {
         const control = config.physicalControls.find((c) => c.id === controlId);
         if (!control) return config;
-        return ensurePlaceholderBinding(config, effectiveProfileId, selectedLayer, control);
+        const result = ensurePlaceholderBinding(config, effectiveProfileId, selectedLayer, control);
+        createdBindingId = result.bindingId;
+        return result.config;
       });
 
-      const bindingId = makeBindingId(effectiveProfileId, selectedLayer, controlId);
-      setActionPickerBindingId(bindingId);
+      if (createdBindingId === null) return;
+      setActionPickerBindingId(createdBindingId);
       setActionPickerOpen(true);
     },
     [effectiveProfileId, selectedLayer, updateDraft, setActionPickerBindingId, setActionPickerOpen],

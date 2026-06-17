@@ -256,13 +256,16 @@ export function coerceSequenceStepType(
       return {
         type: "send",
         value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_SEND,
-        delayMs: "delayMs" in step ? step.delayMs : undefined,
+        // Audit F012: a sleep step's delayMs is the pause DURATION, not an
+        // inter-step delay; carrying it over silently changes its meaning.
+        delayMs: step.type === "sleep" ? undefined : "delayMs" in step ? step.delayMs : undefined,
       };
     case "text":
       return {
         type: "text",
         value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_TEXT,
-        delayMs: "delayMs" in step ? step.delayMs : undefined,
+        // Audit F012: see "send" above — don't reinterpret a sleep duration as a delay.
+        delayMs: step.type === "sleep" ? undefined : "delayMs" in step ? step.delayMs : undefined,
       };
     case "sleep":
       return {

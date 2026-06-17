@@ -1300,6 +1300,11 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         let msg = w_param as u32;
         let vk = kb.vkCode;
         // Probe event from the health monitor — acknowledge and pass through.
+        // `return false` (passthrough) is intentional: VK 0xE8 is an unassigned
+        // key with no symbol/action in virtually every application (the same key
+        // AutoHotkey uses as a mask), and the probe only fires after 5 s of zero
+        // hook activity, so delivering it to the focused window is harmless. We
+        // deliberately do NOT suppress it. See finding F033 (Low/defensive).
         if kb.dwExtraInfo == HOOK_PROBE_EXTRA_INFO {
             HELPER_PROBE_RECEIVED.with(|cell| cell.set(true));
             return false;

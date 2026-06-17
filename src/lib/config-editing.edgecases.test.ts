@@ -982,12 +982,14 @@ describe("invariant: ensurePlaceholderBinding is idempotent", () => {
     const cfg = minCfg({ profiles: [makeProfile("p1")] });
 
     const once = ensurePlaceholderBinding(cfg, "p1", "standard", control);
-    const twice = ensurePlaceholderBinding(once, "p1", "standard", control);
+    const twice = ensurePlaceholderBinding(once.config, "p1", "standard", control);
 
-    const matches = twice.bindings.filter(
+    const matches = twice.config.bindings.filter(
       (b) => b.profileId === "p1" && b.layer === "standard" && b.controlId === "thumb_05",
     );
     expect(matches.length).toBe(1);
+    // The id is stable across repeated calls for the same slot.
+    expect(twice.bindingId).toBe(once.bindingId);
   });
 });
 

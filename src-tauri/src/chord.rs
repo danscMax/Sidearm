@@ -1,5 +1,18 @@
 #![allow(dead_code)]
 
+//! Chord / combo detection (NOT WIRED).
+//!
+//! This module is an intentionally-retained, not-yet-wired feature: it detects
+//! when two keys arrive within a configurable window and emits them as a single
+//! "chord" instead of two independent presses. It is kept on purpose as the
+//! planned home for chord/combo support and is fully unit-/property-tested.
+//!
+//! The production chord timing used for Razer encoding today lives separately in
+//! `capture_backend/windows.rs` (`RAZER_ENCODING_CHORD_WINDOW`); this module is
+//! NOT the source of truth for that path. The crate-level `#![allow(dead_code)]`
+//! above is therefore documented intent, not an oversight — do not delete this
+//! module assuming it is dead. See finding F024.
+
 /// Result of evaluating the chord detector state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ChordResult {
@@ -33,6 +46,16 @@ impl ChordDetector {
         }
     }
 
+    /// Single source of truth for the window-boundary semantics shared by
+    /// `key_down` and `tick`. A pending key first seen at `received_at` is still
+    /// "within the window" at `now` when the elapsed delta is `<= window_ms`
+    /// (the exact boundary is inclusive — matches `exact_boundary_is_chord`).
+    /// Both call sites MUST use this so the boundary cannot be classified
+    /// differently by the two paths. See finding F006.
+    fn within_window(&self, received_at: u64, now: u64) -> bool {
+        now.saturating_sub(received_at) <= self.window_ms
+    }
+
     /// Feed a key-down event into the detector.
     /// Returns the chord result immediately.
     pub fn key_down(&mut self, encoded_key: String, now: u64) -> ChordResult {
@@ -46,7 +69,7 @@ impl ChordDetector {
                 ChordResult::Pending
             }
             Some(first) => {
-                if now.saturating_sub(first.received_at) <= self.window_ms {
+                if self.within_window(first.received_at, now) {
                     // Second key within window -- chord!
                     // Sort keys alphabetically for consistent chord identity
                     let (a, b) = if first.encoded_key <= encoded_key {
@@ -75,7 +98,11 @@ impl ChordDetector {
     /// Call this periodically (e.g., on timer tick) or before processing.
     pub fn tick(&mut self, now: u64) -> ChordResult {
         match &self.pending {
-            Some(pending) if now.saturating_sub(pending.received_at) > self.window_ms => {
+            // Use the same `within_window` predicate as `key_down`: the key is
+            // emitted as a single press only once it is NO LONGER within the
+            // window, so the exact boundary stays Pending (chord-able) in both
+            // paths. See finding F006.
+            Some(pending) if !self.within_window(pending.received_at, now) => {
                 let key = self.pending.take().unwrap().encoded_key;
                 ChordResult::SingleKey(key)
             }
@@ -425,20 +452,22 @@ mod edge_proptests {
         );
     }
 
-    /// SUSPECTED BUG: tick() and key_down() disagree at the exact boundary.
-    /// tick() uses `>` (strictly greater), while key_down() uses `<=` (<=).
-    /// So at delta == window_ms:
-    ///   - key_down says "chord" (delta <= window_ms)
-    ///   - tick says "pending" (delta NOT > window_ms)
-    ///
-    /// This test exposes the inconsistency.
+    /// Regression guard for finding F006: `tick()` and `key_down()` now share
+    /// the single `within_window` predicate, so the exact boundary
+    /// (delta == window_ms) is classified consistently by both paths as
+    /// "still within the window": key_down with a second key at the boundary
+    /// returns Chord (in-window) and tick with no second key at the boundary
+    /// returns Pending (in-window). Both agree the boundary is in-window;
+    /// neither prematurely expires it, so a tick and a second key arriving at
+    /// the same instant can no longer disagree on whether the key is still
+    /// chord-able.
     #[test]
-    fn tick_and_key_down_boundary_inconsistency() {
+    fn tick_and_key_down_boundary_consistent() {
         let window_ms = 100u64;
         let t0 = 1000u64;
         let t_exact = t0 + window_ms; // delta == window_ms exactly
 
-        // key_down at exact boundary → Chord (delta <= window_ms)
+        // key_down at exact boundary → Chord (boundary is within the window).
         let mut d1 = det(window_ms);
         d1.key_down("A".into(), t0);
         let kd_result = d1.key_down("B".into(), t_exact);
@@ -447,19 +476,27 @@ mod edge_proptests {
             "key_down at exact boundary should be Chord: {kd_result:?}"
         );
 
-        // tick at exact boundary → Pending (delta NOT > window_ms)
+        // tick at exact boundary → Pending (boundary is within the window):
+        // the key is NOT yet emitted as a single press, consistent with
+        // key_down treating the same boundary as chord-able.
         let mut d2 = det(window_ms);
         d2.key_down("A".into(), t0);
         let tick_result = d2.tick(t_exact);
-        // NOTE: this assertion documents the CURRENT behavior — tick returns
-        // Pending at the exact boundary, while key_down returns Chord.
-        // The inconsistency means: if a second key and a tick arrive at the
-        // same instant (t == t0 + window_ms), the outcome depends on which
-        // path processes first. This is a design ambiguity worth noting.
         assert_eq!(
             tick_result,
             ChordResult::Pending,
-            "tick at exact boundary is Pending (tick uses >, key_down uses <=)"
+            "tick at exact boundary stays Pending (shared within_window predicate)"
+        );
+
+        // One ms past the boundary, the shared predicate flips for BOTH paths:
+        // tick emits the single key, and key_down would start a new window.
+        let mut d3 = det(window_ms);
+        d3.key_down("A".into(), t0);
+        let tick_past = d3.tick(t_exact + 1);
+        assert_eq!(
+            tick_past,
+            ChordResult::SingleKey("A".into()),
+            "one ms past boundary tick emits the single key"
         );
     }
 

@@ -503,15 +503,24 @@ export function createAppMappingFromCapture(
   };
 }
 
+/** Result of {@link ensurePlaceholderBinding}: the (possibly unchanged) config
+ *  plus the id of the binding that now backs the (profile, layer, control) slot.
+ *  Returning the real id avoids reconstructing it at the call site, which would
+ *  diverge from the actually-created id on a base-id collision (audit F010). */
+export interface EnsurePlaceholderBindingResult {
+  config: AppConfig;
+  bindingId: string;
+}
+
 export function ensurePlaceholderBinding(
   config: AppConfig,
   profileId: string,
   layer: Layer,
   control: PhysicalControl,
-): AppConfig {
+): EnsurePlaceholderBindingResult {
   const existingBinding = findBinding(config, profileId, layer, control.id);
   if (existingBinding) {
-    return config;
+    return { config, bindingId: existingBinding.id };
   }
 
   const baseActionId = makeActionId(profileId, layer, control.id);
@@ -534,7 +543,8 @@ export function ensurePlaceholderBinding(
 
   if (actionIdSet.has(actionId)) {
     return {
-      ...upsertBinding(config, nextBinding),
+      config: { ...upsertBinding(config, nextBinding) },
+      bindingId,
     };
   }
 
@@ -547,8 +557,11 @@ export function ensurePlaceholderBinding(
   };
 
   return {
-    ...upsertBinding(config, nextBinding),
-    actions: [...config.actions, nextAction],
+    config: {
+      ...upsertBinding(config, nextBinding),
+      actions: [...config.actions, nextAction],
+    },
+    bindingId,
   };
 }
 
@@ -724,16 +737,9 @@ export function createProfile(config: AppConfig, preferredName: string): AppConf
 export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
   const nextBindings = config.bindings.filter((b) => b.profileId !== profileId);
 
-  // Remove orphaned actions no longer referenced by any remaining binding.
-  // Walk menu items recursively to preserve nested action refs.
-  const referencedActionIds = new Set(nextBindings.map((b) => b.actionId));
-  for (const actionId of referencedActionIds) {
-    const action = config.actions.find((a) => a.id === actionId);
-    if (action?.type === "menu") {
-      collectMenuActionRefs(action.payload.items, referencedActionIds);
-    }
-  }
-  const nextActions = config.actions.filter((a) => referencedActionIds.has(a.id));
+  // Remove orphaned actions no longer referenced by any remaining binding
+  // (menu-aware: nested action refs are preserved).
+  const nextActions = pruneOrphanActions(config.actions, nextBindings);
 
   return {
     ...config,
@@ -784,10 +790,17 @@ export function duplicateBinding(
       !(b.profileId === binding.profileId && b.layer === layer && b.controlId === targetControlId),
   );
 
+  const nextBindings = [...filteredBindings, newBinding];
+  // Audit F040: if the replaced target binding was the last reference to its
+  // action, that action would otherwise be orphaned. Prune it the same way
+  // removeBinding/deleteProfile do (menu-aware), so duplication can't leak
+  // dangling actions into the config.
+  const nextActions = pruneOrphanActions([...config.actions, newAction], nextBindings);
+
   return {
     ...config,
-    actions: [...config.actions, newAction],
-    bindings: [...filteredBindings, newBinding],
+    actions: nextActions,
+    bindings: nextBindings,
   };
 }
 
@@ -904,6 +917,22 @@ export function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): voi
       collectMenuActionRefs(item.items, refs);
     }
   }
+}
+
+/** Drop actions that no binding references (directly or via a menu payload).
+ *  `nextBindings` is the binding set that should survive; actions reachable from
+ *  it — including nested menu action refs — are kept, the rest are pruned. */
+function pruneOrphanActions(actions: Action[], nextBindings: Binding[]): Action[] {
+  const referencedActionIds = new Set(nextBindings.map((b) => b.actionId));
+  // Live iteration: collectMenuActionRefs may add ids that themselves point at
+  // menu actions, and `for...of` over a Set visits entries added mid-iteration.
+  for (const actionId of referencedActionIds) {
+    const action = actions.find((a) => a.id === actionId);
+    if (action?.type === "menu") {
+      collectMenuActionRefs(action.payload.items, referencedActionIds);
+    }
+  }
+  return actions.filter((a) => referencedActionIds.has(a.id));
 }
 
 function normalizeControlToken(controlId: ControlId): string {

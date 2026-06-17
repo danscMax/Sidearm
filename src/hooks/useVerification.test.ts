@@ -448,9 +448,14 @@ describe("useVerification", () => {
       expect(result.current.verificationSession).toBeNull();
     });
 
-    it("onControlResolutionEvent captures resolution on active step", async () => {
+    it("onControlResolutionEvent captures resolution on active step once the key was observed", async () => {
       const { result } = await renderWithSession();
 
+      // Audit F014: a resolution is only attributed to the step it correlates
+      // with, so the step must have observed the matching key-down first.
+      act(() => {
+        result.current.onEncodedKeyEvent(encodedKeyEvent);
+      });
       act(() => {
         result.current.onControlResolutionEvent(resolutionPreview);
       });
@@ -459,6 +464,27 @@ describe("useVerification", () => {
       expect(step.resolutionStatus).toBe("resolved");
       expect(step.resolvedControlId).toBe("thumb_01");
       expect(step.resolvedLayer).toBe("standard");
+    });
+
+    // Audit F014: a stray/foreign resolution whose key doesn't match the step's
+    // observed key-down must NOT overwrite the step's resolution fields.
+    it("onControlResolutionEvent ignores a resolution whose key differs from the observed one", async () => {
+      const { result } = await renderWithSession();
+
+      act(() => {
+        result.current.onEncodedKeyEvent(encodedKeyEvent); // observes "F13"
+      });
+      act(() => {
+        result.current.onControlResolutionEvent({
+          ...resolutionPreview,
+          encodedKey: "F19",
+          controlId: "thumb_07",
+        });
+      });
+
+      const step = result.current.verificationSession!.steps[0];
+      expect(step.resolutionStatus).toBeNull();
+      expect(step.resolvedControlId).toBeNull();
     });
 
     it("onControlResolutionEvent is ignored when no session exists", () => {

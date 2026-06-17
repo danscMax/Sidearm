@@ -174,6 +174,30 @@ describe("buildAction", () => {
     }
   });
 
+  it("keeps a libraryRef snippet intact when its text was not edited — audit F039", () => {
+    const existing = makeAction({
+      type: "textSnippet",
+      payload: { source: "libraryRef", snippetId: "snip-42" },
+    });
+    const action = buildAction({
+      effectiveCategory: "textSnippet",
+      existingAction: existing,
+      // The picker has no editor for libraryRef, so the text draft stays empty.
+      drafts: makeDrafts({ name: "Renamed", text: { text: "", pasteMode: "sendText" } }),
+      t,
+      profiles,
+    });
+    expect(action.type).toBe("textSnippet");
+    if (action.type === "textSnippet") {
+      expect(action.payload.source).toBe("libraryRef");
+      if (action.payload.source === "libraryRef") {
+        expect(action.payload.snippetId).toBe("snip-42");
+      }
+    }
+    // The display name still updates so renaming the reference works.
+    expect(action.displayName).toBe("Renamed");
+  });
+
   it("builds a repairClipboard action with the required latin1 strategy", () => {
     const action = buildAction({
       effectiveCategory: "repairClipboard",

@@ -232,6 +232,8 @@ pub enum SynapseParseError {
     Base64(#[from] base64::DecodeError),
     #[error("Inner JSON parse failed: {0}")]
     InnerJson(serde_json::Error),
+    #[error("Decoded payload is not valid UTF-8: {0}")]
+    PayloadNotUtf8(#[from] std::string::FromUtf8Error),
     #[error("File format is not recognised as Synapse v4 JSON.")]
     NotSynapseV4,
     #[error("Synapse v4 file is too large ({0} bytes).")]
@@ -332,14 +334,9 @@ pub fn parse_synapse_v4_str(
 
 fn decode_base64_payload(b64: &str) -> Result<String, SynapseParseError> {
     let bytes = base64::engine::general_purpose::STANDARD.decode(b64.trim())?;
-    String::from_utf8(bytes).map_err(|e| {
-        SynapseParseError::InnerJson(serde_json::from_str::<serde_json::Value>(&e.to_string())
-            .err()
-            .unwrap_or_else(|| {
-                // Fabricate a generic error — we just need something of the right type.
-                serde::de::Error::custom("payload is not valid UTF-8")
-            }))
-    })
+    // Report a non-UTF-8 payload honestly via its own error variant rather than
+    // mislabelling it as an inner-JSON failure. See finding F026.
+    String::from_utf8(bytes).map_err(SynapseParseError::PayloadNotUtf8)
 }
 
 fn decode_profile(
@@ -1016,9 +1013,22 @@ mod edge_proptests {
         );
         let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
         // Should emit a decode warning instead of crashing.
+        let warning = parsed
+            .warnings
+            .iter()
+            .find(|w| w.code == "profile_decode_failed")
+            .expect("expected decode warning for non-UTF-8 bytes");
+        // F026: the message must name the real cause (non-UTF-8 payload), not
+        // be mislabelled as an inner-JSON failure.
         assert!(
-            parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"),
-            "expected decode warning for non-UTF-8 bytes"
+            warning.message.contains("not valid UTF-8"),
+            "expected an honest non-UTF-8 message, got: {}",
+            warning.message
+        );
+        assert!(
+            !warning.message.contains("Inner JSON"),
+            "non-UTF-8 payload must not be reported as an inner-JSON failure: {}",
+            warning.message
         );
     }
 

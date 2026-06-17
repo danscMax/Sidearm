@@ -87,8 +87,13 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
         return;
     }
 
+    // Skip sibling macros with an empty GUID: they can never resolve a binding
+    // (bindings reference a concrete macro_guid) and, more importantly, an empty
+    // key would make `w.message.contains("")` below match EVERY warning, wrongly
+    // suppressing all `macro_reference_missing` diagnostics. See finding F007.
     let by_guid: std::collections::HashMap<String, ParsedMacro> = extra_macros
         .into_iter()
+        .filter(|m| !m.synapse_guid.is_empty())
         .map(|m| (m.synapse_guid.clone(), m))
         .collect();
 
@@ -112,13 +117,78 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
 
     // Strip any now-resolved "macro_reference_missing" warnings to avoid
     // confusing users.
-    parsed.warnings.retain(|w| {
+    strip_resolved_missing_macro_warnings(&mut parsed.warnings, by_guid.keys());
+    parsed.warnings.extend(extra_warnings);
+}
+
+/// Remove `macro_reference_missing` warnings whose message references one of the
+/// now-resolved macro GUIDs. Empty GUID keys are ignored so a stray empty key
+/// cannot match (and therefore suppress) every warning via a substring match on
+/// the empty string. See finding F007.
+fn strip_resolved_missing_macro_warnings<'a>(
+    warnings: &mut Vec<ImportWarning>,
+    resolved_guids: impl IntoIterator<Item = &'a String>,
+) {
+    let resolved: Vec<&str> = resolved_guids
+        .into_iter()
+        .map(String::as_str)
+        .filter(|guid| !guid.is_empty())
+        .collect();
+    warnings.retain(|w| {
         if w.code != "macro_reference_missing" {
             return true;
         }
-        !by_guid
-            .keys()
-            .any(|guid| w.message.contains(guid.as_str()))
+        !resolved.iter().any(|guid| w.message.contains(guid))
     });
-    parsed.warnings.extend(extra_warnings);
+}
+
+#[cfg(test)]
+mod enrich_tests {
+    use super::*;
+
+    fn warn(code: &str, message: &str) -> ImportWarning {
+        ImportWarning::new(code, message.to_string())
+    }
+
+    #[test]
+    fn empty_guid_does_not_suppress_unrelated_warnings() {
+        // Regression for F007: a resolved set containing an empty GUID must NOT
+        // strip warnings for genuinely-unresolved macros.
+        let mut warnings = vec![
+            warn(
+                "macro_reference_missing",
+                "Binding references missing macro {ABC-123}.",
+            ),
+            warn("other_warning", "unrelated"),
+        ];
+        let guids = [String::new()]; // empty GUID from a malformed sibling XML
+        strip_resolved_missing_macro_warnings(&mut warnings, guids.iter());
+        assert_eq!(
+            warnings.len(),
+            2,
+            "empty GUID must not suppress unrelated macro_reference_missing warnings"
+        );
+        assert!(warnings.iter().any(|w| w.code == "macro_reference_missing"));
+    }
+
+    #[test]
+    fn matching_guid_strips_only_resolved_warning() {
+        let mut warnings = vec![
+            warn(
+                "macro_reference_missing",
+                "Binding references missing macro {ABC-123}.",
+            ),
+            warn(
+                "macro_reference_missing",
+                "Binding references missing macro {DEF-456}.",
+            ),
+        ];
+        let guids = ["{ABC-123}".to_string()];
+        strip_resolved_missing_macro_warnings(&mut warnings, guids.iter());
+        assert_eq!(warnings.len(), 1);
+        assert!(
+            warnings[0].message.contains("{DEF-456}"),
+            "only the resolved-GUID warning should be stripped"
+        );
+    }
 }

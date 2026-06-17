@@ -91,19 +91,28 @@ export function useLogPanel(): LogPanelControl {
   );
 
   useEffect(() => {
+    // `cancelled` guards the async attach against the StrictMode double-mount:
+    // if cleanup runs before attachLogger resolves, `detach` is still null, so
+    // we detach the logger as soon as it arrives instead of leaking it.
+    let cancelled = false;
     let detach: (() => void) | null = null;
 
     void attachLogger(({ level, message }) => {
       ingest({ level, message });
     })
       .then((fn) => {
-        detach = fn;
+        if (cancelled) {
+          fn();
+        } else {
+          detach = fn;
+        }
       })
       .catch((error) => {
         console.error("Failed to attach logger:", error);
       });
 
     return () => {
+      cancelled = true;
       detach?.();
     };
   }, [ingest]);

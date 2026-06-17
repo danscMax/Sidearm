@@ -133,11 +133,27 @@ pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
 /// The effective UID is the second field. If it is 0, the process is root.
 fn is_process_elevated(pid: u32) -> bool {
     let status_path = format!("/proc/{pid}/status");
-    let content = match std::fs::read_to_string(&status_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
+    match std::fs::read_to_string(&status_path) {
+        Ok(content) => parse_effective_uid_is_root(&content),
+        Err(e) => elevated_on_read_error(&e),
+    }
+}
 
+/// Fail-safe interpretation of a `/proc/<pid>/status` read error.
+///
+/// Mirrors the Windows-side fail-safe (window.rs `is_process_elevated`):
+/// a permission error (e.g. `/proc` mounted with `hidepid=2`) means we
+/// genuinely cannot tell, so assume elevated — under-warning is worse than
+/// over-warning, since input injection into an elevated window would fail
+/// regardless. Only a vanished process (`NotFound`) is treated as not-elevated.
+/// See finding F044.
+fn elevated_on_read_error(err: &std::io::Error) -> bool {
+    err.kind() == std::io::ErrorKind::PermissionDenied
+}
+
+/// Parse the effective UID from `/proc/<pid>/status` contents and report whether
+/// it is root (0). Returns false when no `Uid:` line is present.
+fn parse_effective_uid_is_root(content: &str) -> bool {
     for line in content.lines() {
         if let Some(rest) = line.strip_prefix("Uid:") {
             // Fields: real, effective, saved-set, filesystem
@@ -204,4 +220,50 @@ fn try_gnome_dbus_geometry() -> Option<(i64, i64, i64, i64)> {
     let w = v.get("width")?.as_i64()?;
     let h = v.get("height")?.as_i64()?;
     Some((x, y, w, h))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    // F044: a permission error must be treated as "elevated" (fail-safe),
+    // matching the Windows-side behaviour, so a window we cannot inspect (e.g.
+    // hidepid=2) still triggers the elevation warning.
+    #[test]
+    fn permission_denied_is_treated_as_elevated() {
+        let err = Error::from(ErrorKind::PermissionDenied);
+        assert!(
+            elevated_on_read_error(&err),
+            "permission denied must conservatively report elevated"
+        );
+    }
+
+    // A vanished process (status file gone) is NOT elevated.
+    #[test]
+    fn not_found_is_not_elevated() {
+        let err = Error::from(ErrorKind::NotFound);
+        assert!(
+            !elevated_on_read_error(&err),
+            "a missing process must report not-elevated"
+        );
+    }
+
+    #[test]
+    fn effective_uid_root_is_elevated() {
+        let status = "Name:\tbash\nUid:\t0\t0\t0\t0\nGid:\t0\t0\t0\t0\n";
+        assert!(parse_effective_uid_is_root(status));
+    }
+
+    #[test]
+    fn effective_uid_nonroot_is_not_elevated() {
+        let status = "Name:\tbash\nUid:\t1000\t1000\t1000\t1000\n";
+        assert!(!parse_effective_uid_is_root(status));
+    }
+
+    #[test]
+    fn missing_uid_line_is_not_elevated() {
+        let status = "Name:\tbash\nState:\tR (running)\n";
+        assert!(!parse_effective_uid_is_root(status));
+    }
 }

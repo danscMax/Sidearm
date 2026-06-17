@@ -1421,12 +1421,16 @@ async fn capture_active_window(
     }
     .await;
 
-    // Always reset capture_in_progress regardless of success/failure
+    // Always reset capture_in_progress regardless of success/failure — even if
+    // the mutex was poisoned by a panic in another thread, otherwise a failed
+    // capture would permanently disable auto-profile-switching until runtime
+    // restart. Use the same `recover_poison()` idiom as every other lock site
+    // here instead of silently skipping the reset on a poisoned lock. See
+    // finding F036.
     {
-        if let Ok(mut store) = runtime_store.lock() {
-            store.set_capture_in_progress(false);
-            log::info!("[system] capture_in_progress = false (auto-switching resumed)");
-        }
+        let mut store = runtime_store.lock().recover_poison();
+        store.set_capture_in_progress(false);
+        log::info!("[system] capture_in_progress = false (auto-switching resumed)");
     }
 
     let result = capture_result?;

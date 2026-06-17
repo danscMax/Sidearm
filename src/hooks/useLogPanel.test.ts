@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import { attachLogger } from "@tauri-apps/plugin-log";
 import { useLogPanel } from "./useLogPanel";
 
 // Mock @tauri-apps/plugin-log
@@ -195,5 +196,31 @@ describe("useLogPanel", () => {
     expect(result.current.logs).toEqual([]);
     expect(result.current.filteredLogs).toEqual([]);
     expect(result.current.categories).toEqual([]);
+  });
+
+  // Audit F038: if the effect cleanup runs before attachLogger resolves (the
+  // StrictMode double-mount), the resolved detach fn must still be invoked so
+  // the first logger does not leak and duplicate log lines.
+  it("detaches the logger even when unmount races the attach promise", async () => {
+    let resolveAttach: ((detach: () => void) => void) | undefined;
+    const detach = vi.fn();
+    vi.mocked(attachLogger).mockImplementationOnce(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveAttach = resolve;
+        }),
+    );
+
+    const { unmount } = renderHook(() => useLogPanel());
+    // Unmount before the attach promise resolves — detach is still null here.
+    unmount();
+    // Now the logger finally attaches; cleanup already ran, so it must be torn
+    // down immediately.
+    await act(async () => {
+      resolveAttach?.(detach);
+      await Promise.resolve();
+    });
+
+    expect(detach).toHaveBeenCalledTimes(1);
   });
 });

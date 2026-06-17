@@ -387,13 +387,75 @@ describe("null/empty — captureVerificationResolution guards", () => {
     expect(captureVerificationResolution(session, preview)).toBe(session);
   });
 
-  it("records resolution when step is active and pending", () => {
-    const session = makeSession([makeStep({ startedAt: 1000, result: "pending" })]);
-    const preview = makePreview({ status: "resolved", controlId: "thumb_02", layer: "hypershift" });
+  it("records resolution when step is active, pending and the preview key matches the observed key", () => {
+    const session = makeSession([
+      makeStep({ startedAt: 1000, result: "pending", observedEncodedKey: "F13" }),
+    ]);
+    const preview = makePreview({
+      status: "resolved",
+      encodedKey: "F13",
+      controlId: "thumb_02",
+      layer: "hypershift",
+    });
     const updated = captureVerificationResolution(session, preview);
     expect(updated.steps[0].resolutionStatus).toBe("resolved");
     expect(updated.steps[0].resolvedControlId).toBe("thumb_02");
     expect(updated.steps[0].resolvedLayer).toBe("hypershift");
+  });
+
+  // F014: a resolution event whose key does not match the step's observed
+  // key-down belongs to a different (stray/foreign) press and must be ignored.
+  it("ignores resolution when the preview key does not match the observed key", () => {
+    const session = makeSession([
+      makeStep({ startedAt: 1000, result: "pending", observedEncodedKey: "F13" }),
+    ]);
+    const foreign = makePreview({ encodedKey: "F19", controlId: "thumb_07", layer: "standard" });
+    expect(captureVerificationResolution(session, foreign)).toBe(session);
+  });
+
+  // F014: before any key-down is observed there is nothing to correlate against,
+  // so a resolution preview cannot be attributed to this step.
+  it("ignores resolution when the step has not observed any key yet", () => {
+    const session = makeSession([
+      makeStep({ startedAt: 1000, result: "pending", observedEncodedKey: null }),
+    ]);
+    const preview = makePreview({ encodedKey: "F13" });
+    expect(captureVerificationResolution(session, preview)).toBe(session);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F041: updateStep is strict about index bounds (via public wrappers)
+// ---------------------------------------------------------------------------
+
+describe("boundary — updateStep out-of-range never creates a broken step", () => {
+  // finalizeVerificationStep moves activeStepIndex to steps.length on completion.
+  // Calling a mutator (e.g. updateVerificationStepNotes) on a completed session
+  // would write past the array end; the bounds guard makes it a no-op instead.
+  it("updateVerificationStepNotes on a completed session is a no-op (no hole appended)", () => {
+    const session = makeSession([makeStep({ startedAt: 1000, result: "matched" })], {
+      activeStepIndex: 1,
+      completedAt: 9000,
+    });
+    const after = updateVerificationStepNotes(session, "note");
+    expect(after).toBe(session);
+    expect(after.steps).toHaveLength(1);
+  });
+
+  it("restartVerificationStep on a completed session is a no-op (no hole appended)", () => {
+    const session = makeSession([makeStep({ startedAt: 1000, result: "matched" })], {
+      activeStepIndex: 1,
+      completedAt: 9000,
+    });
+    const after = restartVerificationStep(session, 5000);
+    expect(after).toBe(session);
+    expect(after.steps).toHaveLength(1);
+  });
+
+  it("empty session mutators leave the steps array empty (no broken slot)", () => {
+    const session = makeSession([]);
+    expect(updateVerificationStepNotes(session, "x").steps).toHaveLength(0);
+    expect(restartVerificationStep(session, 5000).steps).toHaveLength(0);
   });
 });
 

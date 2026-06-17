@@ -197,6 +197,14 @@ export function captureVerificationResolution(
   if (!step?.startedAt || step.result !== "pending") {
     return session;
   }
+  // Correlate the resolution with the observed key-down, the same way
+  // captureVerificationObservation gates by timestamp. A control_resolved event
+  // fires for ANY resolved press during a live session, so without this guard a
+  // stray/foreign press could overwrite this step's resolvedControlId/Layer.
+  // Only accept a preview that belongs to the key this step already observed.
+  if (!step.observedEncodedKey || preview.encodedKey !== step.observedEncodedKey) {
+    return session;
+  }
 
   return updateStep(session, session.activeStepIndex, (currentStep) => ({
     ...currentStep,
@@ -380,6 +388,12 @@ function updateStep(
   index: number,
   updateStepValue: (step: VerificationSessionStep) => VerificationSessionStep,
 ): VerificationSession {
+  // Guard against out-of-range indices (e.g. activeStepIndex === steps.length
+  // after a session is finalized). Writing past the array end would spread
+  // `undefined` and produce a hole/broken step missing required fields.
+  if (index < 0 || index >= session.steps.length) {
+    return session;
+  }
   const steps = session.steps.slice();
   steps[index] = updateStepValue(steps[index]);
   return { ...session, steps };

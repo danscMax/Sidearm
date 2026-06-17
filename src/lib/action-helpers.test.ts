@@ -577,10 +577,18 @@ describe("coerceSequenceStepType", () => {
     expect(result).toEqual({ type: "sleep", delayMs: 100 });
   });
 
-  it("converts sleep to send with default value", () => {
+  // Audit F012: a sleep's delayMs is the pause duration, not an inter-step
+  // delay, so converting sleep→send/text must NOT carry it over.
+  it("converts sleep to send without carrying the pause duration as a delay", () => {
     const step: SequenceStep = { type: "sleep", delayMs: 500 };
     const result = coerceSequenceStepType(step, "send");
-    expect(result).toEqual({ type: "send", value: "Ctrl+C", delayMs: 500 });
+    expect(result).toEqual({ type: "send", value: "Ctrl+C", delayMs: undefined });
+  });
+
+  it("converts sleep to text without carrying the pause duration as a delay", () => {
+    const step: SequenceStep = { type: "sleep", delayMs: 5000 };
+    const result = coerceSequenceStepType(step, "text");
+    expect(result).toEqual({ type: "text", value: "Замените этот текст", delayMs: undefined });
   });
 
   it("converts send to launch preserving value", () => {

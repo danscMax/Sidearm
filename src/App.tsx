@@ -374,6 +374,22 @@ function App() {
       return;
     }
 
+    // Audit F008: while a modal/overlay is open, global shortcuts (undo/redo,
+    // Ctrl+K, arrows, Enter→action picker, number tabs) must not fire "through"
+    // it onto the background workspace. Only Escape is allowed past this gate —
+    // the branch below routes it to close the topmost overlay.
+    const anyModalOpen =
+      commandPaletteOpen ||
+      actionPickerOpen ||
+      !!confirmModal ||
+      showMigrationDialog ||
+      showOnboarding ||
+      !!synapseParsed ||
+      viewState === "error";
+    if (anyModalOpen && e.key !== "Escape") {
+      return;
+    }
+
     if (e.ctrlKey && e.key === "z" && !e.shiftKey) {
       e.preventDefault();
       handleUndoWithToast();

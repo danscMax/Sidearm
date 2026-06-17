@@ -905,7 +905,7 @@ describe("createAppMappingFromCapture", () => {
 describe("ensurePlaceholderBinding", () => {
   const control = makePhysicalControl({ id: "thumb_01", defaultName: "Thumb 1" });
 
-  it("returns config unchanged when binding already exists for the slot", () => {
+  it("returns config unchanged and the existing id when a binding exists for the slot", () => {
     const binding = makeBinding({
       profileId: "prof",
       layer: "standard",
@@ -914,17 +914,19 @@ describe("ensurePlaceholderBinding", () => {
     const config = { ...createMinimalConfig(), bindings: [binding] };
 
     const result = ensurePlaceholderBinding(config, "prof", "standard", control);
-    expect(result).toBe(config);
+    expect(result.config).toBe(config);
+    expect(result.bindingId).toBe(binding.id);
   });
 
   it("creates both a new binding and action when neither exists", () => {
     const config = createMinimalConfig();
 
-    const result = ensurePlaceholderBinding(config, "prof", "standard", control);
+    const { config: result, bindingId } = ensurePlaceholderBinding(config, "prof", "standard", control);
     expect(result.bindings).toHaveLength(1);
     expect(result.actions).toHaveLength(1);
 
     const binding = result.bindings[0]!;
+    expect(binding.id).toBe(bindingId);
     expect(binding.profileId).toBe("prof");
     expect(binding.layer).toBe("standard");
     expect(binding.controlId).toBe("thumb_01");
@@ -941,11 +943,12 @@ describe("ensurePlaceholderBinding", () => {
     const existingAction = makeAction({ id: derivedActionId, type: "shortcut" });
     const config = { ...createMinimalConfig(), actions: [existingAction] };
 
-    const result = ensurePlaceholderBinding(config, "prof", "standard", control);
+    const { config: result, bindingId } = ensurePlaceholderBinding(config, "prof", "standard", control);
 
     // Should reuse the existing action, not create another
     expect(result.actions).toHaveLength(1);
     expect(result.bindings).toHaveLength(1);
+    expect(result.bindings[0]!.id).toBe(bindingId);
     expect(result.bindings[0]!.actionId).toBe(derivedActionId);
   });
 });
@@ -1337,6 +1340,45 @@ describe("duplicateBinding", () => {
     const bindingsAtTarget = result.bindings.filter((b) => b.controlId === "thumb_05");
     expect(bindingsAtTarget).toHaveLength(1);
     expect(bindingsAtTarget[0]!.id).not.toBe("b2");
+  });
+
+  // Audit F040: replacing a target binding whose action has no other reference
+  // must prune that now-orphaned action instead of leaking it.
+  it("prunes the orphaned action of a replaced target binding", () => {
+    const a1 = makeAction({ id: "a1" });
+    const a2 = makeAction({ id: "a2" });
+    const source = makeBinding({ id: "b1", profileId: "prof", controlId: "thumb_01", actionId: "a1" });
+    const target = makeBinding({ id: "b2", profileId: "prof", controlId: "thumb_05", actionId: "a2" });
+    const config = {
+      ...createMinimalConfig(),
+      actions: [a1, a2],
+      bindings: [source, target],
+    };
+
+    const result = duplicateBinding(config, "b1", "thumb_05");
+    // a2 was only referenced by the replaced b2 → it must be gone.
+    expect(result.actions.some((a) => a.id === "a2")).toBe(false);
+    // Source action plus the freshly cloned copy remain.
+    expect(result.actions.some((a) => a.id === "a1")).toBe(true);
+    expect(result.actions).toHaveLength(2);
+  });
+
+  // Audit F040: an action still referenced by another binding must survive even
+  // if a binding pointing at it was replaced at the target slot.
+  it("keeps a replaced target's action when another binding still references it", () => {
+    const a1 = makeAction({ id: "a1" });
+    const shared = makeAction({ id: "shared" });
+    const source = makeBinding({ id: "b1", profileId: "prof", controlId: "thumb_01", actionId: "a1" });
+    const target = makeBinding({ id: "b2", profileId: "prof", controlId: "thumb_05", actionId: "shared" });
+    const other = makeBinding({ id: "b3", profileId: "prof", controlId: "thumb_06", actionId: "shared" });
+    const config = {
+      ...createMinimalConfig(),
+      actions: [a1, shared],
+      bindings: [source, target, other],
+    };
+
+    const result = duplicateBinding(config, "b1", "thumb_05");
+    expect(result.actions.some((a) => a.id === "shared")).toBe(true);
   });
 
   it("returns config unchanged when binding id is not found", () => {

@@ -36,6 +36,8 @@ pub enum ExecutionOutcome {
     Injected,
     Simulated,
     Noop,
+    /// A ProfileSwitch action changed the active runtime profile (audit F003).
+    Switched,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -249,10 +251,43 @@ pub fn run_preview_action(
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {
             run_live_repair_clipboard_action(action, preview, Some(action_id))
         }
+        // Audit F003: ProfileSwitch sets the sticky runtime profile override. The
+        // override WRITE happens in the live dispatch path (capture_backend), which
+        // owns the RuntimeStore; here we only report the switch so the Test/dry-run
+        // path can preview it without actually changing the active profile.
+        (ActionType::ProfileSwitch, ActionPayload::ProfileSwitch(payload)) => {
+            let profile_name = config
+                .profiles
+                .iter()
+                .find(|p| p.id == payload.target_profile_id)
+                .map(|p| p.name.clone())
+                .unwrap_or_else(|| payload.target_profile_id.clone());
+            Ok(ActionExecutionEvent {
+                encoded_key: preview.encoded_key.clone(),
+                action_id: action.id.clone(),
+                action_type: action.action_type.as_str().into(),
+                action_pretty: action.display_name.clone(),
+                resolved_profile_id: preview.resolved_profile_id.clone(),
+                resolved_profile_name: preview.resolved_profile_name.clone(),
+                matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+                control_id: preview.control_id.clone(),
+                layer: preview.layer.clone(),
+                binding_id: preview.binding_id.clone(),
+                mode: ExecutionMode::Live,
+                outcome: ExecutionOutcome::Switched,
+                process_id: None,
+                summary: format!("Переключение на профиль `{profile_name}`."),
+                warnings: Vec::new(),
+                executed_at: timestamp_millis(),
+            })
+        }
+        // Only Menu remains without live execution (it needs a popup UI). Everything
+        // else — shortcuts, mouse, text, launch, media, profile switch, clipboard
+        // repair, disabled, sequences — is handled above.
         _ => Err(execution_error(
             "unsupported_live_execution",
             "выполнение",
-            "Выполнение вживую поддерживается для шорткатов, действий мыши, текстовых вставок, запуска программ, отключённых действий и последовательностей из поддерживаемых шагов.",
+            "Меню (Menu) пока не выполняется вживую — для него нужен всплывающий выбор пункта. Остальные типы действий поддержаны.",
             Some(preview.encoded_key.clone()),
             Some(action_id),
         )),
@@ -1333,6 +1368,28 @@ mod tests {
         let error = run_preview_action(&config, &preview).expect_err("expected rejection");
 
         assert_eq!(error.code, "unsupported_live_execution");
+    }
+
+    #[test]
+    fn run_preview_action_executes_profile_switch() {
+        // Audit F003: ProfileSwitch is now live-executable — run_preview_action reports
+        // a Switched outcome (the override WRITE itself happens in the dispatch path).
+        let mut config = default_seed_config();
+        let target = config.profiles[0].id.clone();
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
+        let action_id = preview.action_id.clone().expect("expected resolved action id");
+        let action = config
+            .actions
+            .iter_mut()
+            .find(|candidate| candidate.id == action_id)
+            .expect("expected mutable action");
+        action.action_type = ActionType::ProfileSwitch;
+        action.payload = ActionPayload::ProfileSwitch(crate::config::ProfileSwitchPayload {
+            target_profile_id: target,
+        });
+
+        let event = run_preview_action(&config, &preview).expect("profile switch should execute");
+        assert_eq!(event.outcome, ExecutionOutcome::Switched);
     }
 
     #[test]

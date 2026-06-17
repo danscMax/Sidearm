@@ -90,14 +90,47 @@ pub(crate) struct ProfileSelection<'a> {
     pub reason: String,
 }
 
-/// Resolve the winning profile for an app context. Shared by the foreground
-/// watcher and the dispatch/preview path so they can never disagree again.
+/// Natural (no-override) profile resolution — the plain `app mapping > fallback` rule.
+/// Production always threads the manual override via
+/// [`select_profile_for_app_context_with_override`]; this thin wrapper exists for the
+/// tests that exercise the no-override path.
+#[cfg(test)]
 pub(crate) fn select_profile_for_app_context<'a>(
     config: &'a AppConfig,
     exe: &str,
     title: &str,
     process_path: Option<&str>,
 ) -> ProfileSelection<'a> {
+    select_profile_for_app_context_with_override(config, exe, title, process_path, None)
+}
+
+/// Like [`select_profile_for_app_context`], but honours a runtime manual profile
+/// override set by a ProfileSwitch action (audit F003). When the override names an
+/// existing, enabled profile it wins over app-mapping and fallback; otherwise the
+/// normal `app mapping > fallback` logic applies. Both the OSD indicator and the
+/// dispatch path call THIS one function with the same override, so they can never
+/// disagree (the very drift the module note above warns about).
+pub(crate) fn select_profile_for_app_context_with_override<'a>(
+    config: &'a AppConfig,
+    exe: &str,
+    title: &str,
+    process_path: Option<&str>,
+    override_profile_id: Option<&str>,
+) -> ProfileSelection<'a> {
+    if let Some(id) = override_profile_id {
+        // `find_profile` returns Some only for an existing, enabled profile, so a
+        // stale/disabled override gracefully falls through to app-mapping below.
+        if let Some(profile) = find_profile(config, id) {
+            return ProfileSelection {
+                matched_mapping: None,
+                profile: Some(profile),
+                used_fallback: false,
+                candidates: matching_app_mappings(config, exe, title, process_path),
+                reason: format!("Manual profile override `{}`.", profile.id),
+            };
+        }
+    }
+
     let fallback_profile = config
         .profiles
         .iter()
@@ -126,13 +159,33 @@ pub(crate) fn select_profile_for_app_context<'a>(
     }
 }
 
+/// Test-only wrapper: natural resolution with no manual override (see the
+/// `_with_override` form, which production uses).
+#[cfg(test)]
 pub fn resolve_profile_for_app_context(
     config: &AppConfig,
     exe: &str,
     title: &str,
     process_path: Option<&str>,
 ) -> ProfileResolutionSummary {
-    let selection = select_profile_for_app_context(config, exe, title, process_path);
+    resolve_profile_for_app_context_with_override(config, exe, title, process_path, None)
+}
+
+/// [`resolve_profile_for_app_context`] threaded with a manual profile override (F003).
+pub fn resolve_profile_for_app_context_with_override(
+    config: &AppConfig,
+    exe: &str,
+    title: &str,
+    process_path: Option<&str>,
+    override_profile_id: Option<&str>,
+) -> ProfileResolutionSummary {
+    let selection = select_profile_for_app_context_with_override(
+        config,
+        exe,
+        title,
+        process_path,
+        override_profile_id,
+    );
     ProfileResolutionSummary {
         matched_app_mapping_id: selection.matched_mapping.map(|mapping| mapping.id.clone()),
         resolved_profile_id: selection.profile.map(|profile| profile.id.clone()),
@@ -154,8 +207,28 @@ pub fn resolve_input_preview(
     title: &str,
     process_path: Option<&str>,
 ) -> ResolvedInputPreview {
+    resolve_input_preview_with_override(config, encoded_key, exe, title, process_path, None)
+}
+
+/// [`resolve_input_preview`] threaded with a manual profile override (F003). The live
+/// dispatch path passes the active override so the binding that fires belongs to the
+/// switched-to profile.
+pub fn resolve_input_preview_with_override(
+    config: &AppConfig,
+    encoded_key: &str,
+    exe: &str,
+    title: &str,
+    process_path: Option<&str>,
+    override_profile_id: Option<&str>,
+) -> ResolvedInputPreview {
     let normalized_key = normalized_encoded_key(encoded_key);
-    let profile_resolution = resolve_profile_for_app_context(config, exe, title, process_path);
+    let profile_resolution = resolve_profile_for_app_context_with_override(
+        config,
+        exe,
+        title,
+        process_path,
+        override_profile_id,
+    );
     let matching_mappings: Vec<&EncoderMapping> = config
         .encoder_mappings
         .iter()
@@ -434,6 +507,40 @@ mod tests {
 
         assert_eq!(summary.resolved_profile_id.as_deref(), Some("review"));
         assert_eq!(summary.matched_app_mapping_id.as_deref(), Some("app-code"));
+    }
+
+    #[test]
+    fn manual_override_beats_app_mapping_and_falls_through_when_invalid() {
+        // Audit F003: a ProfileSwitch override wins over app-mapping when it names a
+        // real, enabled profile, and a stale/missing override gracefully falls back to
+        // the normal `app mapping > fallback` resolution.
+        let config = test_config(vec![app_mapping("app-code", "code.exe", "review", 200, vec![])]);
+
+        // No override: app-mapping wins -> "review".
+        let base = select_profile_for_app_context(&config, "code.exe", "Pull Request", None);
+        assert_eq!(base.profile.map(|p| p.id.as_str()), Some("review"));
+
+        // Valid override -> wins over the app-mapping, not a fallback.
+        let overridden = select_profile_for_app_context_with_override(
+            &config,
+            "code.exe",
+            "Pull Request",
+            None,
+            Some("default"),
+        );
+        assert_eq!(overridden.profile.map(|p| p.id.as_str()), Some("default"));
+        assert!(overridden.matched_mapping.is_none());
+        assert!(!overridden.used_fallback);
+
+        // Stale override (no such profile) -> falls through to the app-mapping.
+        let stale = select_profile_for_app_context_with_override(
+            &config,
+            "code.exe",
+            "Pull Request",
+            None,
+            Some("ghost"),
+        );
+        assert_eq!(stale.profile.map(|p| p.id.as_str()), Some("review"));
     }
 
     #[test]

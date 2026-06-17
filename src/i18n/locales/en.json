@@ -202,6 +202,7 @@
     "injected": "Injected",
     "simulated": "Simulated",
     "noop": "No action",
+    "switched": "Profile switched",
     "modeLive": "Live",
     "modeTest": "Dry run"
   },

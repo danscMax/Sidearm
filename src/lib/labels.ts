@@ -96,6 +96,8 @@ export function labelForExecutionOutcome(outcome: ActionExecutionEvent["outcome"
       return i18n.t("execution.simulated");
     case "noop":
       return i18n.t("execution.noop");
+    case "switched":
+      return i18n.t("execution.switched");
     default:
       return outcome;
   }

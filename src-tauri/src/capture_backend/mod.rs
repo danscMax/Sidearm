@@ -314,8 +314,23 @@ fn process_encoded_key_event(
         return EventOutcome::Handled;
     }
 
+    // Audit F003: read the sticky manual profile override once (set by a ProfileSwitch
+    // action) and feed it to BOTH the foreground-window resolution (indicator, below)
+    // and the key→binding resolution (dispatch, further below), so they resolve under
+    // the same profile. The OSD watcher reads the same override, keeping indicator and
+    // dispatch in lock-step.
+    let manual_profile_override = runtime_store
+        .lock()
+        .ok()
+        .and_then(|store| store.manual_profile_override().map(str::to_owned));
+
     let capture_result =
-        match window_capture::capture_active_window_with_resolution(config, app_name, None) {
+        match window_capture::capture_active_window_with_resolution_with_override(
+            config,
+            app_name,
+            None,
+            manual_profile_override.as_deref(),
+        ) {
             Ok(result) => result,
             Err(message) => {
                 let error = RuntimeErrorEvent {
@@ -365,12 +380,13 @@ fn process_encoded_key_event(
         )
     };
 
-    let preview = resolver::resolve_input_preview(
+    let preview = resolver::resolve_input_preview_with_override(
         config,
         &event.encoded_key,
         &exe,
         &title,
         process_path.as_deref(),
+        manual_profile_override.as_deref(),
     );
 
     match preview.status {
@@ -595,6 +611,18 @@ fn run_fire_and_forget(
                 log_entries.push(("выполнение", warning.clone(), true));
             }
             flush_log_entries(runtime_store, log_entries);
+            // Audit F003: apply the ProfileSwitch side effect HERE (live path only),
+            // never on the Test/dry-run path. Set the sticky override so subsequent
+            // input — and the OSD indicator — resolve under the switched-to profile.
+            if let Some(action_id) = preview.action_id.as_deref() {
+                if let Some(action) = config.actions.iter().find(|a| a.id == action_id) {
+                    if let crate::config::ActionPayload::ProfileSwitch(p) = &action.payload {
+                        if let Ok(mut store) = runtime_store.lock() {
+                            store.set_manual_profile_override(Some(p.target_profile_id.clone()));
+                        }
+                    }
+                }
+            }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
         }
         Err(error) => {

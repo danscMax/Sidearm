@@ -17,7 +17,7 @@ export type RuntimeErrorEventName = "runtime_error";
 
 type ResolutionStatus = "resolved" | "unresolved" | "ambiguous" | "conditionUnmet";
 type ExecutionMode = "dryRun" | "live";
-type ExecutionOutcome = "spawned" | "injected" | "simulated" | "noop";
+type ExecutionOutcome = "spawned" | "injected" | "simulated" | "noop" | "switched";
 
 export interface RuntimeStateSummary {
   status: RuntimeStatus;

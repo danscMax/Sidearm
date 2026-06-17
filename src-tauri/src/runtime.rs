@@ -70,6 +70,10 @@ pub struct RuntimeStore {
     active_config_version: Option<i32>,
     warning_count: usize,
     last_notified_profile_id: Option<String>,
+    /// Runtime manual profile override set by a ProfileSwitch action (audit F003).
+    /// Sticky until the next ProfileSwitch; read by both the OSD indicator and the
+    /// dispatch path through the shared resolver. Ephemeral — never persisted.
+    manual_profile_override: Option<String>,
     capture_in_progress: bool,
     logs: VecDeque<DebugLogEntry>,
     next_log_id: u64,
@@ -93,6 +97,7 @@ impl Default for RuntimeStore {
             active_config_version: None,
             warning_count: 0,
             last_notified_profile_id: None,
+            manual_profile_override: None,
             capture_in_progress: false,
             logs: VecDeque::new(),
             next_log_id: 1,
@@ -115,6 +120,16 @@ impl RuntimeStore {
     ) {
         self.log_sender = Some(sender);
         self.log_send_pending = Some(pending);
+    }
+
+    /// The active manual profile override (audit F003), if a ProfileSwitch set one.
+    pub fn manual_profile_override(&self) -> Option<&str> {
+        self.manual_profile_override.as_deref()
+    }
+
+    /// Set (or clear with `None`) the manual profile override. Sticky until changed.
+    pub fn set_manual_profile_override(&mut self, profile_id: Option<String>) {
+        self.manual_profile_override = profile_id;
     }
 
     pub fn summary(&self) -> RuntimeStateSummary {

@@ -2,7 +2,7 @@ use serde::Serialize;
 use std::{thread, time::Duration};
 
 use crate::config::AppConfig;
-use crate::resolver::select_profile_for_app_context;
+use crate::resolver::select_profile_for_app_context_with_override;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -31,8 +31,20 @@ pub struct WindowCaptureResult {
 
 pub fn capture_active_window_with_resolution(
     config: &AppConfig,
+    app_name: &str,
+    delay_ms: Option<u64>,
+) -> Result<WindowCaptureResult, String> {
+    capture_active_window_with_resolution_with_override(config, app_name, delay_ms, None)
+}
+
+/// [`capture_active_window_with_resolution`] threaded with the manual profile override
+/// (audit F003) so the OSD/active-profile indicator reflects a ProfileSwitch, matching
+/// what the dispatch path fires.
+pub fn capture_active_window_with_resolution_with_override(
+    config: &AppConfig,
     _app_name: &str,
     delay_ms: Option<u64>,
+    manual_profile_override: Option<&str>,
 ) -> Result<WindowCaptureResult, String> {
     if let Some(delay_ms) = delay_ms {
         thread::sleep(Duration::from_millis(delay_ms.min(10_000)));
@@ -58,7 +70,7 @@ pub fn capture_active_window_with_resolution(
             is_elevated: raw_window.is_elevated,
         }
     } else {
-        resolve_capture_result(config, raw_window)
+        resolve_capture_result_with_override(config, raw_window, manual_profile_override)
     };
 
     Ok(capture_result)
@@ -75,15 +87,25 @@ pub(crate) struct RawWindowCapture {
     pub(crate) is_elevated: bool,
 }
 
+#[cfg(test)]
 fn resolve_capture_result(config: &AppConfig, raw_window: RawWindowCapture) -> WindowCaptureResult {
+    resolve_capture_result_with_override(config, raw_window, None)
+}
+
+fn resolve_capture_result_with_override(
+    config: &AppConfig,
+    raw_window: RawWindowCapture,
+    manual_profile_override: Option<&str>,
+) -> WindowCaptureResult {
     // Shared resolver — identical `app mapping > fallback` logic as the
-    // dispatch/preview path, so the active-profile indicator and what actually
-    // fires can never disagree again.
-    let selection = select_profile_for_app_context(
+    // dispatch/preview path (plus the same manual override), so the active-profile
+    // indicator and what actually fires can never disagree again.
+    let selection = select_profile_for_app_context_with_override(
         config,
         &raw_window.exe,
         &raw_window.title,
         Some(&raw_window.process_path),
+        manual_profile_override,
     );
 
     WindowCaptureResult {

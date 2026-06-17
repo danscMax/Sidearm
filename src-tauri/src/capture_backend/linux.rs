@@ -476,8 +476,17 @@ fn run_foreground_watcher(
             continue;
         }
 
-        let capture_result = match window_capture::capture_active_window_with_resolution(
-            &config, &app_name, None,
+        // Audit F003: the indicator must reflect a ProfileSwitch override too,
+        // matching what the dispatch path fires.
+        let manual_profile_override = runtime_store
+            .lock()
+            .ok()
+            .and_then(|store| store.manual_profile_override().map(str::to_owned));
+        let capture_result = match window_capture::capture_active_window_with_resolution_with_override(
+            &config,
+            &app_name,
+            None,
+            manual_profile_override.as_deref(),
         ) {
             Ok(result) => result,
             Err(e) => {

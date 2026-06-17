@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-06-17
+
+A large audit-driven release: one new feature, the English UI fixed, several
+save-breaking bugs repaired, ~25 smaller fixes, and internal modernization. All
+changes were gated (cargo test, clippy `-D warnings`, tsc, vitest, knip) and a
+portable build was smoke-tested.
+
+### Added
+- **Profile switching from a mouse button.** A control bound to a *Profile switch*
+  action now actually changes the active profile at runtime (sticky until the next
+  switch) instead of failing with "not supported". The override is read by both the
+  active-profile indicator and dispatch, so they stay in lock-step.
+
+### Fixed
+- **"Repair clipboard" bindings can be saved again.** A config containing a
+  `repairClipboard` action was wrongly rejected on save/load by the semantic
+  validator (it had no matching arm).
+- **Profiles whose name starts with a digit now save** ("2nd profile", "3D"): the
+  generated id no longer violates the config-schema id pattern.
+- **Empty menu no longer eats your edits** — Save is disabled until the menu has at
+  least one item, instead of letting the backend reject it and roll the draft back.
+- **The English UI is actually English.** Action-type categories, mouse/media
+  options, and workspace/verification labels were hardcoded in Russian and ignored
+  the locale; they now resolve through i18n.
+- **Linux:** the evdev capture backend no longer hangs on stop/exit when idle
+  (non-blocking reads) and no longer recurses unboundedly on device hotplug.
+  *(Verified on Linux: compiles, unit tests pass, and a synthetic-device runtime
+  smoke confirms stop() is responsive.)*
+- ~17 smaller reliability/correctness fixes: global hotkeys firing through open
+  modals, a CSS variable not being cleared, a `sleep`→`send` step carrying the wrong
+  delay, a log-panel StrictMode leak, editing a library snippet, orphan-action
+  pruning on binding duplication, verification-session key correlation, Synapse-import
+  warning suppression and missing size limits, and resolver regex-length limits.
+- **Accessibility:** the profile cards and icon-only header buttons are now
+  keyboard-accessible / labelled; onboarding and autostart-hint text colours meet
+  contrast (no more undefined CSS tokens).
+
+### Changed
+- Single-profile export/import now goes through one consolidated path with
+  consistent filename sanitization (previously two duplicate command pairs).
+- The portable build verifies the WebView2 bootstrapper's Authenticode signature
+  (must be Microsoft-signed) before bundling it.
+- The dependency-audit workflow now ignores 19 transitive, non-exploitable advisories
+  (GTK3 bindings + build tooling) so genuine issues stand out.
+- Internal modernization: migrated the Rust crate to **edition 2024**, upgraded
+  `zip` 0.6 → 2.x on the untrusted-archive parser, and replaced `once_cell::Lazy`
+  with `std::sync::LazyLock`.
+
 ## [0.1.25] — 2026-06-14
 
 ### Fixed

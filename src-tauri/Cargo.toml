@@ -38,7 +38,7 @@ thiserror = "2"
 png = "0.17"
 base64 = "0.22"
 regex = "1"
-zip = { version = "0.6", default-features = false, features = ["deflate"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = { version = "0.31", features = ["serialize"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

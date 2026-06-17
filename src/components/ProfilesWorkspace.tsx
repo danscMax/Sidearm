@@ -1,8 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { open, save } from "@tauri-apps/plugin-dialog";
 import type { AppConfig, ControlId, Layer, Profile } from "../lib/config";
-import type { ProfileExportData } from "../lib/config-editing";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
 import {
@@ -10,10 +8,8 @@ import {
   createAppMappingFromCapture,
   deleteAppMapping,
   duplicateBinding,
-  extractProfileExport,
   findDuplicateAppMapping,
   importProfile,
-  isValidProfileExport,
   removeBinding,
   reorderAppMappingPriority,
   upsertAppMapping,
@@ -21,7 +17,8 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
-import { exportProfileFile, importProfileFile, pickExecutablePath } from "../lib/backend";
+import { pickExecutablePath } from "../lib/backend";
+import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
 import {
   bindingMatchesQuery,
   conflictingBindingIds,
@@ -470,14 +467,12 @@ export function ProfilesWorkspace({
             onClick={async () => {
               if (!activeConfig || !activeProfile) return;
               try {
-                const data = extractProfileExport(activeConfig, activeProfile.id);
-                const json = JSON.stringify(data, null, 2);
-                const path = await save({
-                  title: t("settings.exportDialogTitle"),
-                  defaultPath: `${activeProfile.name}.json`,
-                  filters: [{ name: "JSON", extensions: ["json"] }],
-                });
-                if (path) await exportProfileFile(path, json);
+                await exportProfileToFile(
+                  activeConfig,
+                  activeProfile.id,
+                  activeProfile.name,
+                  t("settings.exportDialogTitle"),
+                );
               } catch {
                 showToast(t("settings.exportProfileError"), "warning");
               }
@@ -489,20 +484,15 @@ export function ProfilesWorkspace({
             type="button"
             className="action-button action-button--small"
             onClick={async () => {
-              const path = await open({
-                title: t("settings.importDialogTitle"),
-                filters: [{ name: "JSON", extensions: ["json"] }],
-                multiple: false,
-              });
-              if (typeof path !== "string" || !activeConfig) return;
+              if (!activeConfig) return;
               try {
-                const json = await importProfileFile(path);
-                const data = JSON.parse(json) as ProfileExportData;
-                if (!isValidProfileExport(data)) {
+                const result = await importProfileFromFile(t("settings.importDialogTitle"));
+                if (result.status === "cancelled") return;
+                if (result.status === "invalid") {
                   showToast(t("settings.invalidProfileError"), "warning");
                   return;
                 }
-                updateDraft((c) => importProfile(c, data));
+                updateDraft((c) => importProfile(c, result.data));
               } catch {
                 showToast(t("settings.readProfileError"), "warning");
               }

@@ -344,6 +344,7 @@ export function ActionPickerModal({
 
             {effectiveCategory === "menu" ? (
               <div className="editor-grid">
+                <p className="notice notice--warning">{t("picker.menuLiveHint")}</p>
                 <MenuItemsEditor
                   items={menuItemsDraft}
                   onChange={setMenuItemsDraft}

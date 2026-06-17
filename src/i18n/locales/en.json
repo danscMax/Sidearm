@@ -699,6 +699,7 @@
     "stepValue": "Value",
     "stepDelay": "Delay (ms, max 30,000)",
     "menuLabel": "Context menu",
+    "menuLiveHint": "A menu is not yet executed live on a physical press — it needs a popup picker. You can still build and save it.",
     "defaultMenu": "Menu",
     "defaultDisabled": "Disabled",
     "defaultAction": "Action",

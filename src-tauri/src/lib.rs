@@ -440,10 +440,9 @@ fn ensure_full_config_import_size(path: &Path) -> Result<(), CommandError> {
 }
 
 // Narrow, purpose-named replacements for the removed generic write_text_file/
-// read_text_file (FIXES P2-2). Two pairs because the two export formats differ:
-// `ProfileExportData` (Profiles view) vs. the encoder-carrying bundle (Settings
-// view). Purpose-named commands keep the IPC surface self-documenting and let
-// each pair's limits evolve independently. The path is always chosen by the user
+// read_text_file (FIXES P2-2). Single-profile `ProfileExportData` transfer
+// commands shared by the Profiles and Settings views. Purpose-named commands
+// keep the IPC surface self-documenting. The path is always chosen by the user
 // via the native save/open dialog; validation here defends against a renderer
 // calling the command directly with an arbitrary path.
 
@@ -457,18 +456,6 @@ async fn export_profile(path: String, contents: String) -> Result<(), CommandErr
 #[tauri::command]
 async fn import_profile(path: String) -> Result<String, CommandError> {
     read_user_json(path, "import_profile").await
-}
-
-/// Export a profile bundle (with encoder mappings) to a user-chosen `.json` file.
-#[tauri::command]
-async fn export_profile_bundle(path: String, contents: String) -> Result<(), CommandError> {
-    write_user_json(path, contents, "export_profile_bundle").await
-}
-
-/// Import a profile bundle (with encoder mappings) from a user-chosen `.json` file.
-#[tauri::command]
-async fn import_profile_bundle(path: String) -> Result<String, CommandError> {
-    read_user_json(path, "import_profile_bundle").await
 }
 
 #[tauri::command]
@@ -2603,8 +2590,6 @@ pub fn run() {
             get_exe_icon,
             export_profile,
             import_profile,
-            export_profile_bundle,
-            import_profile_bundle,
             start_macro_recording,
             record_keystroke,
             stop_macro_recording

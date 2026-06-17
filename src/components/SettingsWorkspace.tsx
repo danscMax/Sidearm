@@ -21,10 +21,9 @@ import {
   deleteProfile,
   duplicateProfile,
   createProfile,
-  extractProfileExport,
   importProfile,
-  isValidProfileExport,
 } from "../lib/config-editing";
+import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
 import { clampPriority } from "../lib/helpers";
 import {
   exportFullConfig,
@@ -34,8 +33,6 @@ import {
   normalizeCommandError,
   openConfigFolder,
   parseSynapseSource,
-  exportProfileBundle,
-  importProfileBundle,
   setAdminAutostart,
   type AdminAutostartStatus,
 } from "../lib/backend";
@@ -235,49 +232,34 @@ export function SettingsWorkspace({
   }
 
   async function handleExport(profile: Profile) {
-    const data = extractProfileExport(activeConfig, profile.id);
-    const defaultName = `${profile.name.replace(/[^a-zA-Z0-9\u0430-\u044F\u0410-\u042F_-]/g, "_")}.profile.json`;
-
-    const filePath = await save({
-      title: t("settings.exportDialogTitle"),
-      defaultPath: defaultName,
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-
-    if (typeof filePath === "string") {
-      try {
-        await exportProfileBundle(filePath, JSON.stringify(data, null, 2));
-      } catch (unknownError) {
-        setError(normalizeCommandError(unknownError));
-      }
+    try {
+      await exportProfileToFile(
+        activeConfig,
+        profile.id,
+        profile.name,
+        t("settings.exportDialogTitle"),
+      );
+    } catch (unknownError) {
+      setError(normalizeCommandError(unknownError));
     }
   }
 
   async function handleImport() {
     setImportError(null);
 
-    const filePath = await open({
-      title: t("settings.importDialogTitle"),
-      filters: [{ name: "JSON", extensions: ["json"] }],
-      multiple: false,
-    });
-
-    if (typeof filePath !== "string") return;
-
     try {
-      const raw = await importProfileBundle(filePath);
-      const data = JSON.parse(raw);
-
-      if (!isValidProfileExport(data)) {
+      const result = await importProfileFromFile(t("settings.importDialogTitle"));
+      if (result.status === "cancelled") return;
+      if (result.status === "invalid") {
         setImportError(t("settings.invalidProfileError"));
         return;
       }
 
       let newId: string | null = null;
       updateDraft((c) => {
-        const result = importProfile(c, data);
-        newId = result.profiles[result.profiles.length - 1]?.id ?? null;
-        return result;
+        const updated = importProfile(c, result.data);
+        newId = updated.profiles[updated.profiles.length - 1]?.id ?? null;
+        return updated;
       });
       if (newId) setSelectedProfileId(newId);
     } catch {

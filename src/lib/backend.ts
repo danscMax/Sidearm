@@ -287,25 +287,16 @@ export async function getExeIcon(exeName: string, processPath?: string): Promise
   return invoke<string | null>("get_exe_icon", { exeName, processPath: processPath ?? null });
 }
 
-// Narrow profile export/import IPC (FIXES P2-2). Two pairs mirror the two
-// distinct export formats: the single-profile `ProfileExportData` (Profiles view)
-// and the encoder-carrying bundle (Settings view). The backend validates the
-// path (absolute + home-scoped + .json) so a compromised renderer cannot reach
-// arbitrary files via these commands.
+// Narrow profile export/import IPC (FIXES P2-2). Single-profile
+// `ProfileExportData` transfer shared by the Profiles and Settings views. The
+// backend validates the path (absolute + home-scoped + .json) so a compromised
+// renderer cannot reach arbitrary files via these commands.
 export async function exportProfileFile(path: string, contents: string): Promise<void> {
   return invoke<void>("export_profile", { path, contents });
 }
 
 export async function importProfileFile(path: string): Promise<string> {
   return invoke<string>("import_profile", { path });
-}
-
-export async function exportProfileBundle(path: string, contents: string): Promise<void> {
-  return invoke<void>("export_profile_bundle", { path, contents });
-}
-
-export async function importProfileBundle(path: string): Promise<string> {
-  return invoke<string>("import_profile_bundle", { path });
 }
 
 export async function exportVerificationSession(

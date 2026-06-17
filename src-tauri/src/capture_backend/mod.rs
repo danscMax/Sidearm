@@ -614,15 +614,12 @@ fn run_fire_and_forget(
             // Audit F003: apply the ProfileSwitch side effect HERE (live path only),
             // never on the Test/dry-run path. Set the sticky override so subsequent
             // input — and the OSD indicator — resolve under the switched-to profile.
-            if let Some(action_id) = preview.action_id.as_deref() {
-                if let Some(action) = config.actions.iter().find(|a| a.id == action_id) {
-                    if let crate::config::ActionPayload::ProfileSwitch(p) = &action.payload {
-                        if let Ok(mut store) = runtime_store.lock() {
+            if let Some(action_id) = preview.action_id.as_deref()
+                && let Some(action) = config.actions.iter().find(|a| a.id == action_id)
+                    && let crate::config::ActionPayload::ProfileSwitch(p) = &action.payload
+                        && let Ok(mut store) = runtime_store.lock() {
                             store.set_manual_profile_override(Some(p.target_profile_id.clone()));
                         }
-                    }
-                }
-            }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
         }
         Err(error) => {
@@ -668,7 +665,7 @@ fn flush_log_entries(runtime_store: &Arc<Mutex<RuntimeStore>>, entries: Vec<(&st
     if entries.is_empty() {
         return;
     }
-    if let Ok(mut store) = runtime_store.lock() {
+    match runtime_store.lock() { Ok(mut store) => {
         for (source, message, is_warn) in entries {
             if is_warn {
                 store.record_warn(source, message);
@@ -676,9 +673,9 @@ fn flush_log_entries(runtime_store: &Arc<Mutex<RuntimeStore>>, entries: Vec<(&st
                 store.record_info(source, message);
             }
         }
-    } else {
+    } _ => {
         log::error!("[capture] runtime_store mutex poisoned while flushing log entries");
-    }
+    }}
 }
 
 fn emit_runtime_error(
@@ -686,7 +683,7 @@ fn emit_runtime_error(
     runtime_store: &Arc<Mutex<RuntimeStore>>,
     event: &RuntimeErrorEvent,
 ) {
-    if let Ok(mut store) = runtime_store.lock() {
+    match runtime_store.lock() { Ok(mut store) => {
         let mut context = Vec::new();
         if let Some(encoded_key) = &event.encoded_key {
             context.push(format!("encodedKey={encoded_key}"));
@@ -704,12 +701,12 @@ fn emit_runtime_error(
             event.category.clone(),
             format!("{}{}", event.message, suffix),
         );
-    } else {
+    } _ => {
         log::error!(
             "[{}] runtime_store mutex poisoned while recording runtime error: {}",
             event.category, event.message
         );
-    }
+    }}
 
     let _ = app.emit(EVENT_RUNTIME_ERROR, event);
 }

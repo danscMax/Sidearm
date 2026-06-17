@@ -168,13 +168,11 @@ fn build_shortcut_cleanup_inputs(
     snapshot: &ModifierSnapshot,
 ) -> Vec<KeyboardInputSpec> {
     let mut cleanup = Vec::new();
-    if !payload.key.trim().is_empty() {
-        if let Ok(pk) = parse_primary_key(&payload.key) {
-            if !is_modifier_vk(pk.code) {
+    if !payload.key.trim().is_empty()
+        && let Ok(pk) = parse_primary_key(&payload.key)
+            && !is_modifier_vk(pk.code) {
                 push_virtual_key_up(&mut cleanup, pk);
             }
-        }
-    }
     cleanup.extend(build_modifier_release_inputs(&extract_pressed_modifiers(
         payload, snapshot,
     )));
@@ -1388,15 +1386,12 @@ fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
             // `hotkeys` (also used for validation), which must remain
             // layout-independent.
             let trimmed = key.trim();
-            if trimmed.chars().count() == 1 {
-                if let Some(ch) = trimmed.chars().next() {
-                    if !ch.is_ascii() {
-                        if let Some(spec) = resolve_char_to_vk(ch) {
+            if trimmed.chars().count() == 1
+                && let Some(ch) = trimmed.chars().next()
+                    && !ch.is_ascii()
+                        && let Some(spec) = resolve_char_to_vk(ch) {
                             return Ok(spec);
                         }
-                    }
-                }
-            }
             Err(err)
         }
     }
@@ -2122,14 +2117,13 @@ pub fn send_mouse_action(
                 key_up: false,
             })
             .collect();
-        if !press_inputs.is_empty() {
-            if let Err(e) = send_keyboard_inputs(&press_inputs) {
+        if !press_inputs.is_empty()
+            && let Err(e) = send_keyboard_inputs(&press_inputs) {
                 // Partial insert can leave modifiers physically down — release
                 // them before bailing (the LIFO release below is skipped on early return).
                 let _ = send_keyboard_inputs(&build_modifier_release_inputs(&mods_to_press));
                 return Err(e);
             }
-        }
         mods_to_press
     } else {
         Vec::new()

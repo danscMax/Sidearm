@@ -177,8 +177,8 @@ pub fn list_backups(config_dir: &Path) -> io::Result<Vec<BackupEntry>> {
     }
 
     let snapshots_dir = config_dir.join(SNAPSHOTS_DIR_NAME);
-    if snapshots_dir.is_dir() {
-        if let Ok(read) = fs::read_dir(&snapshots_dir) {
+    if snapshots_dir.is_dir()
+        && let Ok(read) = fs::read_dir(&snapshots_dir) {
             for e in read.flatten() {
                 let path = e.path();
                 if path.extension().is_some_and(|ext| ext == "json") {
@@ -198,7 +198,6 @@ pub fn list_backups(config_dir: &Path) -> io::Result<Vec<BackupEntry>> {
                 }
             }
         }
-    }
 
     entries.sort_by_key(|e| std::cmp::Reverse(e.modified_ms));
     Ok(entries)

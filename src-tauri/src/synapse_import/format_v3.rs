@@ -249,13 +249,11 @@ fn collect_referenced_macros(
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<ParsedMacro> = Vec::new();
     for b in bindings {
-        if let ParsedAction::Sequence { macro_guid } = &b.action {
-            if seen.insert(macro_guid.clone()) {
-                if let Some(m) = macros_by_guid.get(macro_guid) {
+        if let ParsedAction::Sequence { macro_guid } = &b.action
+            && seen.insert(macro_guid.clone())
+                && let Some(m) = macros_by_guid.get(macro_guid) {
                     out.push(m.clone());
                 }
-            }
-        }
     }
     out
 }
@@ -322,14 +320,12 @@ fn parse_v3_mapping_list(
             }
             Event::End(e) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                if tag == "Mapping" {
-                    if let Some(b) = current_event.take() {
-                        if let Some(binding) = build_binding(b, macros_by_guid, profile_name, warnings)
+                if tag == "Mapping"
+                    && let Some(b) = current_event.take()
+                        && let Some(binding) = build_binding(b, macros_by_guid, profile_name, warnings)
                         {
                             bindings.push(binding);
                         }
-                    }
-                }
                 stack.pop();
             }
             Event::Empty(_) => {
@@ -643,11 +639,10 @@ fn parse_v3_macro(
             }
             Event::End(e) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                if tag == "MacroEvent" {
-                    if let Some(ev) = current.take() {
+                if tag == "MacroEvent"
+                    && let Some(ev) = current.take() {
                         events.push(ev);
                     }
-                }
                 stack.pop();
             }
             Event::Empty(_) => {}
@@ -698,11 +693,10 @@ fn build_macro_steps(
 ) -> Vec<ParsedSequenceStep> {
     let mut normalized: Vec<NormalizedEvent> = Vec::new();
     for ev in events {
-        if let Some(delay_ms) = ev.delay_ms {
-            if delay_ms > 0 {
+        if let Some(delay_ms) = ev.delay_ms
+            && delay_ms > 0 {
                 normalized.push(NormalizedEvent::Delay(delay_ms));
             }
-        }
         if ev.ty != "1" {
             continue;
         }

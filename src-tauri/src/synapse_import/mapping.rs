@@ -235,11 +235,10 @@ pub fn translate_key_token(token: &str) -> Result<String, KeyTranslationError> {
         if let Some(tail) = rest.strip_prefix('F') {
             // Function keys exist only as F1..=F24. Reject F0, F25+ and absurd
             // numbers instead of blindly accepting any digit tail.
-            if let Ok(n) = tail.parse::<u8>() {
-                if (1..=24).contains(&n) {
+            if let Ok(n) = tail.parse::<u8>()
+                && (1..=24).contains(&n) {
                     return Ok(rest.to_string());
                 }
-            }
         }
     }
     Err(KeyTranslationError::Unknown(token.to_string()))

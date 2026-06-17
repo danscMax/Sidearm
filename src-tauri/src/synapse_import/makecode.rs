@@ -145,20 +145,18 @@ static EXTENDED_TABLE: LazyLock<HashMap<u16, &'static str>> = LazyLock::new(|| {
 /// v3 macros that encode Windows-key etc. as base scancodes without the
 /// extended marker, since the base set has no meaning for those codes.
 pub fn makecode_to_key(makecode: u16, is_extended: bool) -> Option<&'static str> {
-    if is_extended {
-        if let Some(k) = EXTENDED_TABLE.get(&makecode) {
+    if is_extended
+        && let Some(k) = EXTENDED_TABLE.get(&makecode) {
             return Some(*k);
         }
-    }
     if let Some(k) = BASE_TABLE.get(&makecode) {
         return Some(*k);
     }
     // Fallback: extended-only keys that showed up as base scancodes.
-    if !is_extended {
-        if let Some(k) = EXTENDED_TABLE.get(&makecode) {
+    if !is_extended
+        && let Some(k) = EXTENDED_TABLE.get(&makecode) {
             return Some(*k);
         }
-    }
     None
 }
 

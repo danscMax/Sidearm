@@ -322,7 +322,7 @@ fn modifier_in_any_encoding(vk: u32, regs: &[HelperRegistration]) -> bool {
 /// injection as the LEFT-side variant (same scan code) and the matching
 /// real key-up (which carries LLKHF_EXTENDED) cannot balance it, leaving
 /// the modifier virtually held.
-unsafe fn replay_modifier_down(vk: u32, scan: u32) {
+unsafe fn replay_modifier_down(vk: u32, scan: u32) { unsafe {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
@@ -345,7 +345,7 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
         },
     };
     SendInput(1, &input, size_of::<INPUT>() as i32);
-}
+}}
 
 /// Replay a complete down+up tap for a modifier via SendInput.  Used by the
 /// solo-tap path (Case C2): the user's real key-up has already arrived but
@@ -357,7 +357,7 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
 ///
 /// Both the down and up events carry `KEYEVENTF_EXTENDEDKEY` for right-side
 /// modifiers; see `replay_modifier_down` rationale.
-unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
+unsafe fn replay_modifier_tap(vk: u32, scan: u32) { unsafe {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
@@ -382,7 +382,7 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
     };
     let inputs = [make(false), make(true)];
     SendInput(2, inputs.as_ptr(), size_of::<INPUT>() as i32);
-}
+}}
 
 /// Force-release a modifier via SendInput key-up.  Used by orphan-replay GC
 /// and by teardown/REHOOK/health-reinstall to balance any prior
@@ -392,7 +392,7 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
 /// the event and passes it through without buffering.  Right-side modifiers
 /// receive `KEYEVENTF_EXTENDEDKEY` so the up matches a prior extended-key
 /// down (same key, not the L-variant with the same scan code).
-unsafe fn replay_modifier_up(vk: u32, scan: u32) {
+unsafe fn replay_modifier_up(vk: u32, scan: u32) { unsafe {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
@@ -415,7 +415,7 @@ unsafe fn replay_modifier_up(vk: u32, scan: u32) {
         },
     };
     SendInput(1, &input, size_of::<INPUT>() as i32);
-}
+}}
 
 /// Maximum age of a pending modifier-down when an F-key match arrives for
 /// it to still be considered Razer encoding.  Razer Naga sends
@@ -960,15 +960,14 @@ impl CaptureBackendHandle {
             replayed_modifier_force_release_ms,
             reader_helper_died,
         );
-        if !registrations.is_empty() && helper.is_none() {
-            if let Ok(mut store) = runtime_store.lock() {
+        if !registrations.is_empty() && helper.is_none()
+            && let Ok(mut store) = runtime_store.lock() {
                 store.record_warn(
                     "перехват",
                     "Не удалось запустить вспомогательный процесс перехвата. \
                      Кнопки с зажатыми модификаторами (Ctrl/Shift) могут не срабатывать.",
                 );
             }
-        }
 
         // Spawn foreground window watcher — detects window switches instantly
         let fg_app = app.clone();
@@ -1202,7 +1201,7 @@ fn process_helper_key_event(
 /// only keys between a modifier-down and modifier-up were suppressed by our
 /// hook.  The events carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our LL hook
 /// passes them through without processing.
-unsafe fn inject_mask_key() {
+unsafe fn inject_mask_key() { unsafe {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
@@ -1229,7 +1228,7 @@ unsafe fn inject_mask_key() {
         inputs.as_ptr(),
         size_of::<INPUT>() as i32,
     );
-}
+}}
 
 /// Inject a VK 0xE8 probe event via SendInput to test hook health.
 /// The event carries `HOOK_PROBE_EXTRA_INFO` so the hook callback can
@@ -1238,7 +1237,7 @@ unsafe fn inject_mask_key() {
 ///
 /// Returns `true` if SendInput accepted the events, `false` if injection
 /// failed (e.g. UIPI blocked it because an elevated window is focused).
-unsafe fn inject_hook_probe() -> bool {
+unsafe fn inject_hook_probe() -> bool { unsafe {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
@@ -1272,7 +1271,7 @@ unsafe fn inject_hook_probe() -> bool {
         );
     }
     inserted > 0
-}
+}}
 
 /// LL keyboard hook callback for the capture helper process.
 /// Matches modifier+F-key combos and buffers the encoded key in HELPER_MATCHES.
@@ -1280,7 +1279,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
     code: i32,
     w_param: usize,
     l_param: isize,
-) -> isize {
+) -> isize { unsafe {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
         CallNextHookEx, PostThreadMessageW, KBDLLHOOKSTRUCT,
     };
@@ -1288,10 +1287,11 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
     // A panic unwinding across this `extern "system"` boundary is UB. Contain any
     // panic in the hook body (RefCell borrows, allocation, FFI) and fall through
     // to CallNextHookEx (don't suppress) instead of unwinding. The closure does
-    // not inherit the `unsafe fn` context, so its body is an explicit `unsafe`.
+    // not inherit the `unsafe fn` context; under edition 2024 each unsafe op inside
+    // it carries its own `unsafe {}` block, so the scope below is a plain block.
     let should_suppress = if code >= 0 {
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || -> bool {
-            unsafe {
+            {
         // Record that the hook callback fired — the health monitor uses this
         // to skip unnecessary SendInput probes when the hook is clearly alive.
         HOOK_HAD_CALLBACK.with(|cell| cell.set(true));
@@ -1725,7 +1725,7 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         return 1;
     }
     CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param)
-}
+}}
 
 /// Entry point for the `--capture-helper` child process.
 /// Reads modifier-combo registrations from stdin (one JSON line),

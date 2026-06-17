@@ -776,11 +776,9 @@ fn migrate_paste_mode(config: &mut AppConfig) {
     for action in &mut config.actions {
         if let ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode, .. }) =
             &mut action.payload
-        {
-            if *paste_mode == PasteMode::ClipboardPaste {
+            && *paste_mode == PasteMode::ClipboardPaste {
                 *paste_mode = PasteMode::SendText;
             }
-        }
     }
     for snippet in &mut config.snippet_library {
         if snippet.paste_mode == PasteMode::ClipboardPaste {
@@ -1114,8 +1112,7 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
             .physical_controls
             .iter()
             .find(|c| c.id == mapping.control_id)
-        {
-            if !ctrl.remappable {
+            && !ctrl.remappable {
                 warnings.push(ValidationWarning {
                     code: "non_remappable_encoder_mapping".into(),
                     message: format!(
@@ -1130,7 +1127,6 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
                     severity: ValidationSeverity::Warning,
                 });
             }
-        }
 
         let normalized_encoded_key = mapping.encoded_key.trim();
         if normalized_encoded_key.is_empty() {

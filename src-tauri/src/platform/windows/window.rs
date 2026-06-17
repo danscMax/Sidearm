@@ -91,7 +91,7 @@ pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
 /// `ERROR_ACCESS_DENIED` for elevated targets (UIPI blocks token access).
 /// We treat access-denied as "elevated" — in all such cases `SendInput`
 /// would also be blocked, so the warning is correct regardless.
-unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
+unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool { unsafe {
     use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
 
     let mut token_handle = std::ptr::null_mut();
@@ -111,7 +111,7 @@ unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HA
     );
     CloseHandle(token_handle);
     ok != 0 && elevation.TokenIsElevated != 0
-}
+}}
 
 /// Check whether the current process itself is running elevated (admin).
 pub(crate) fn is_current_process_elevated() -> bool {

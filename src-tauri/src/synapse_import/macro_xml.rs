@@ -171,11 +171,10 @@ fn build_steps(
 ) -> Vec<ParsedSequenceStep> {
     let mut normalized: Vec<NormalizedEvent> = Vec::new();
     for ev in events {
-        if let Some(delay_ms) = ev.delay_ms {
-            if delay_ms > 0 {
+        if let Some(delay_ms) = ev.delay_ms
+            && delay_ms > 0 {
                 normalized.push(NormalizedEvent::Delay(delay_ms));
             }
-        }
         if ev.ty != "1" {
             continue;
         }
@@ -228,8 +227,8 @@ pub fn parse_macros_in_dir(
             break;
         }
         // Reject oversized files before reading them into memory.
-        if let Ok(meta) = entry.metadata() {
-            if meta.len() > MAX_XML_MACRO_BYTES {
+        if let Ok(meta) = entry.metadata()
+            && meta.len() > MAX_XML_MACRO_BYTES {
                 warnings.push(ImportWarning::new(
                     "macro_xml_too_large",
                     format!(
@@ -239,7 +238,6 @@ pub fn parse_macros_in_dir(
                 ));
                 continue;
             }
-        }
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())

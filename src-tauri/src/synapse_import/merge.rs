@@ -39,12 +39,11 @@ pub fn apply_parsed_into_config(
         });
 
     for profile in &parsed.profiles {
-        if let Some(filter) = &selected {
-            if !filter.contains(profile.synapse_guid.as_str()) {
+        if let Some(filter) = &selected
+            && !filter.contains(profile.synapse_guid.as_str()) {
                 summary.skipped += 1;
                 continue;
             }
-        }
         if options.merge_strategy == MergeStrategy::ReplaceByName {
             remove_profile_by_name(&mut config, &profile.name, &mut warnings);
         }

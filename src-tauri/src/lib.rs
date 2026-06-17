@@ -1912,13 +1912,11 @@ async fn get_exe_icon(
 ) -> Result<Option<String>, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         // 1. Try the known process path first (most reliable — captured from OS)
-        if let Some(ref path) = process_path {
-            if std::path::Path::new(path).exists() {
-                if let Some(b64) = exe_icon::extract_icon_base64(path) {
+        if let Some(ref path) = process_path
+            && std::path::Path::new(path).exists()
+                && let Some(b64) = exe_icon::extract_icon_base64(path) {
                     return Ok(Some(b64));
                 }
-            }
-        }
         // 2. Fall back to API-based search (App Paths registry + SearchPathW)
         let candidates = exe_icon_search_paths(&exe_name);
         for path in &candidates {
@@ -1927,11 +1925,10 @@ async fn get_exe_icon(
             }
         }
         // 3. Try to find path from a running process with this exe name
-        if let Some(path) = find_running_process_path(&exe_name) {
-            if let Some(b64) = exe_icon::extract_icon_base64(&path) {
+        if let Some(path) = find_running_process_path(&exe_name)
+            && let Some(b64) = exe_icon::extract_icon_base64(&path) {
                 return Ok(Some(b64));
             }
-        }
         Ok(None)
     })
     .await
@@ -1954,11 +1951,10 @@ fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
     if let Some(path) = crate::platform::shell::lookup_app_paths_registry(exe_name) {
         paths.push(path);
     }
-    if let Some(path) = crate::platform::shell::search_path_win32(exe_name) {
-        if !paths.contains(&path) {
+    if let Some(path) = crate::platform::shell::search_path_win32(exe_name)
+        && !paths.contains(&path) {
             paths.push(path);
         }
-    }
     paths
 }
 
@@ -2129,18 +2125,14 @@ fn cleanup_old_logs(app: &AppHandle) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "log")
-            || path.to_string_lossy().contains(".log.")
-        {
-            if let Ok(metadata) = entry.metadata() {
-                if let Ok(modified) = metadata.modified() {
-                    if modified < cutoff {
+        if (path.extension().is_some_and(|ext| ext == "log")
+            || path.to_string_lossy().contains(".log."))
+            && let Ok(metadata) = entry.metadata()
+                && let Ok(modified) = metadata.modified()
+                    && modified < cutoff {
                         let _ = fs::remove_file(&path);
                         log::info!("[system] Deleted old log: {}", path.display());
                     }
-                }
-            }
-        }
     }
 }
 
@@ -2178,9 +2170,9 @@ pub fn run() {
     // Symmetric: a switch back to roaming-only would similarly orphan
     // ./data/logs, but in practice the portable folder gets deleted manually.
     let mut orphan_deleted = 0;
-    if app_paths.mode == paths::PathMode::Portable {
-        if let Some(roaming_log_dir) = legacy_local_app_data_log_dir() {
-            if roaming_log_dir.is_dir() && roaming_log_dir != log_target_path {
+    if app_paths.mode == paths::PathMode::Portable
+        && let Some(roaming_log_dir) = legacy_local_app_data_log_dir()
+            && roaming_log_dir.is_dir() && roaming_log_dir != log_target_path {
                 let (d, _) = log_cleanup::sweep(
                     &roaming_log_dir,
                     LOG_RETENTION_DAYS,
@@ -2188,8 +2180,6 @@ pub fn run() {
                 );
                 orphan_deleted = d;
             }
-        }
-    }
 
     // True portable: redirect WebView2 user-data folder into ./data/EBWebView
     // instead of the default %LOCALAPPDATA%\com.sidearm.desktop\EBWebView.
@@ -2199,7 +2189,8 @@ pub fn run() {
     if app_paths.mode == paths::PathMode::Portable {
         let webview_dir = app_paths.config_dir.join("EBWebView");
         let _ = std::fs::create_dir_all(&webview_dir);
-        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir);
+        // TODO: Audit that the environment access only happens in single-threaded code.
+        unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir) };
     }
 
     // Best-effort removal of pre-rebrand orphan directories
@@ -2334,8 +2325,8 @@ pub fn run() {
                 // window on next start.  Keep these in sync with tauri.conf.json.
                 const MIN_W: u32 = 900;
                 const MIN_H: u32 = 600;
-                if let Ok(size) = main_window.inner_size() {
-                    if size.width < MIN_W || size.height < MIN_H {
+                if let Ok(size) = main_window.inner_size()
+                    && (size.width < MIN_W || size.height < MIN_H) {
                         let new_w = size.width.max(MIN_W);
                         let new_h = size.height.max(MIN_H);
                         log::warn!(
@@ -2346,7 +2337,6 @@ pub fn run() {
                             tauri::PhysicalSize { width: new_w, height: new_h },
                         ));
                     }
-                }
             }
 
             // OSD window is created lazily on first profile switch (see show_osd).
@@ -2498,8 +2488,7 @@ pub fn run() {
                         button_state: MouseButtonState::Up,
                         ..
                     } = event
-                    {
-                        if let Some(window) = tray.app_handle().get_webview_window("main") {
+                        && let Some(window) = tray.app_handle().get_webview_window("main") {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
@@ -2507,7 +2496,6 @@ pub fn run() {
                                 let _ = window.set_focus();
                             }
                         }
-                    }
                 })
                 .build(app)?;
 
@@ -2525,8 +2513,8 @@ pub fn run() {
             // Non-fatal: if the shortcut is already registered (e.g. previous
             // instance didn't clean up yet), log a warning and continue.
             if let Err(e) = app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed {
-                    if let Some(window) = app.get_webview_window("main") {
+                if event.state == ShortcutState::Pressed
+                    && let Some(window) = app.get_webview_window("main") {
                         if window.is_visible().unwrap_or(false) {
                             let _ = window.hide();
                         } else {
@@ -2534,7 +2522,6 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
-                }
             }) {
                 log::warn!("[system] Could not register Ctrl+Alt+N shortcut: {e}");
             }

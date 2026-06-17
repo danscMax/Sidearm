@@ -50,8 +50,8 @@ impl AppPaths {
             .map(|dir| dir.join(PORTABLE_MARKER).is_file())
             .unwrap_or(false);
 
-        if marker_present {
-            if let Some(exe) = exe_dir.as_ref() {
+        if marker_present
+            && let Some(exe) = exe_dir.as_ref() {
                 let data_dir = exe.join(DATA_DIR_NAME);
                 match ensure_writable(&data_dir) {
                     Ok(()) => {
@@ -81,7 +81,6 @@ impl AppPaths {
                     }
                 }
             }
-        }
 
         let (config_dir, log_dir, snapshots_dir) = roaming_paths();
         Self {

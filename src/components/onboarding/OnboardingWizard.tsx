@@ -150,14 +150,15 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   }, []);
 
   const goNext = useCallback(() => {
-    setStepIdx((i) => {
-      if (i >= STEPS.length - 1) {
-        complete();
-        return i;
-      }
-      return i + 1;
-    });
-  }, [complete]);
+    // Keep the setState updater pure: decide from the current index in the
+    // closure and run the side effect (complete()) outside it, so StrictMode's
+    // double-invoked updater can't fire complete() twice.
+    if (stepIdx >= STEPS.length - 1) {
+      complete();
+    } else {
+      setStepIdx((i) => i + 1);
+    }
+  }, [stepIdx, complete]);
   const goBack = useCallback(() => setStepIdx((i) => Math.max(0, i - 1)), []);
 
   const saveSynapse = useCallback(async (reveal: boolean): Promise<string | null> => {

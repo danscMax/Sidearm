@@ -1372,7 +1372,7 @@ select::checkmark {
 
 .autostart-row__hint {
   font-size: 0.78rem;
-  color: var(--c-muted, #888);
+  color: var(--c-text-muted);
   line-height: 1.4;
 }
 
@@ -4595,6 +4595,24 @@ input[type="number"] { -moz-appearance: textfield; }
   display: flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* Button reset: this is the keyboard-focusable profile-select control. */
+  appearance: none;
+  border: none;
+  background: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.settings-profile-card__info:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 .settings-profile-card__name {

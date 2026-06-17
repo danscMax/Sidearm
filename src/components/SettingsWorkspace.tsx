@@ -692,15 +692,21 @@ export function SettingsWorkspace({
               <div
                 key={profile.id}
                 className={`settings-profile-card${isActive ? " settings-profile-card--active" : ""}${!profile.enabled ? " settings-profile-card--disabled" : ""}`}
-                onClick={() => setSelectedProfileId(profile.id)}
               >
-                <div className="settings-profile-card__info">
+                {/* Real <button> for keyboard accessibility (Tab focus + Enter/Space);
+                    action buttons stay siblings to avoid nesting button-in-button. */}
+                <button
+                  type="button"
+                  className="settings-profile-card__info"
+                  aria-pressed={isActive}
+                  onClick={() => setSelectedProfileId(profile.id)}
+                >
                   <span className="settings-profile-card__name">{profile.name}</span>
                   <span className="settings-profile-card__meta">
                     {t("settings.priorityMeta", { priority: profile.priority })}
                     {!profile.enabled ? ` \u00B7 ${t("settings.disabledMeta")}` : ""}
                   </span>
-                </div>
+                </button>
                 <div className="settings-profile-card__actions">
                   <button
                     type="button"

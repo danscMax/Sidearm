@@ -2881,6 +2881,60 @@ mod tests {
     }
 
     #[test]
+    fn repair_clipboard_action_with_bad_payload_is_schema_rejected() {
+        // Audit F023: the schema gained an if/then branch + $defs entry for
+        // repairClipboard so its payload is validated like the other action types
+        // (not just the permissive base `payload: { "type": "object" }`). A
+        // repairClipboard action whose payload is missing `strategy` or carries an
+        // unknown strategy must now produce schema errors.
+        let mut config = default_seed_config();
+        config.actions.push(Action {
+            id: "repair-clipboard-bad".into(),
+            action_type: ActionType::RepairClipboard,
+            payload: ActionPayload::RepairClipboard(RepairClipboardActionPayload {
+                strategy: RepairStrategy::Latin1,
+            }),
+            display_name: "Repair clipboard".into(),
+            notes: None,
+            conditions: Vec::new(),
+        });
+        let mut value = serde_json::to_value(&config).expect("serialize config");
+
+        // Find the freshly pushed action in the serialized JSON and corrupt its
+        // payload, then assert the schema now rejects it.
+        let actions = value
+            .get_mut("actions")
+            .and_then(|a| a.as_array_mut())
+            .expect("actions array");
+        let action = actions
+            .iter_mut()
+            .find(|a| a.get("id").and_then(Value::as_str) == Some("repair-clipboard-bad"))
+            .expect("repair-clipboard-bad action present");
+
+        // Unknown strategy → rejected (enum violation).
+        action["payload"] = serde_json::json!({ "strategy": "rot13" });
+        assert!(
+            !collect_schema_errors(&value).is_empty(),
+            "repairClipboard with an unknown strategy must be schema-rejected"
+        );
+
+        // Missing required `strategy` → rejected.
+        let actions = value
+            .get_mut("actions")
+            .and_then(|a| a.as_array_mut())
+            .expect("actions array");
+        let action = actions
+            .iter_mut()
+            .find(|a| a.get("id").and_then(Value::as_str) == Some("repair-clipboard-bad"))
+            .expect("repair-clipboard-bad action present");
+        action["payload"] = serde_json::json!({});
+        assert!(
+            !collect_schema_errors(&value).is_empty(),
+            "repairClipboard with no strategy must be schema-rejected"
+        );
+    }
+
+    #[test]
     fn repair_clipboard_action_passes_semantic_validation() {
         // Audit F001 regression: validate_action lacked a RepairClipboard arm, so a
         // repairClipboard action fell through to the catch-all and validate_config

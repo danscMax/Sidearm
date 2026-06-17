@@ -642,6 +642,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "repairClipboard"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/repairClipboardActionPayload"
+              }
+            }
+          }
         }
       ]
     },
@@ -1062,6 +1078,20 @@
       "type": "object",
       "additionalProperties": false,
       "maxProperties": 0
+    },
+    "repairClipboardActionPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy"
+      ],
+      "properties": {
+        "strategy": {
+          "enum": [
+            "latin1"
+          ]
+        }
+      }
     }
   }
 }

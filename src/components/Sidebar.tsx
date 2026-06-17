@@ -99,16 +99,18 @@ export function Sidebar({
               className="sidebar__add-profile-btn"
               onClick={() => onSwitchMode("settings")}
               title={t("sidebar.settingsTooltip")}
+              aria-label={t("sidebar.settingsTooltip")}
             >
-              ⚙
+              <span aria-hidden="true">⚙</span>
             </button>
             <button
               type="button"
               className="sidebar__add-profile-btn"
               onClick={onCreateProfile}
               title={t("sidebar.addProfileTooltip")}
+              aria-label={t("sidebar.addProfileTooltip")}
             >
-              +
+              <span aria-hidden="true">+</span>
             </button>
           </div>
         </div>

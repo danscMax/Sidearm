@@ -8,8 +8,16 @@
 
 use std::path::Path;
 
+use super::format_v3::{MAX_ENTRY_UNCOMPRESSED, MAX_ZIP_ENTRIES};
 use super::macro_steps::{self, NormalizedEvent};
 use super::types::{ImportWarning, ParsedMacro, ParsedSequenceStep};
+
+/// Per-file size cap for sibling-folder `.xml` macros, reusing the v3 ZIP
+/// per-entry limit so both paths bound a hostile input the same way.
+const MAX_XML_MACRO_BYTES: u64 = MAX_ENTRY_UNCOMPRESSED;
+/// Maximum number of `.xml` macro files processed from a sibling folder,
+/// reusing the v3 ZIP entry-count limit.
+const MAX_XML_MACRO_FILES: usize = MAX_ZIP_ENTRIES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MacroXmlError {
@@ -191,6 +199,12 @@ pub fn parse_macros_in_dir(
     if !dir.is_dir() {
         return Ok(out);
     }
+    // Bound the sibling-folder read the same way the v3 ZIP path is bounded
+    // (format_v3::MAX_ZIP_ENTRIES / MAX_ENTRY_UNCOMPRESSED): the `Макросы/`
+    // folder sits next to a user-chosen export and may be hostile (millions of
+    // files or one multi-gigabyte `.xml`), so cap both the per-file size and the
+    // number of `.xml` files we slurp into memory.
+    let mut xml_seen: usize = 0;
     for entry in std::fs::read_dir(dir)? {
         let Ok(entry) = entry else { continue };
         let path = entry.path();
@@ -201,6 +215,30 @@ pub fn parse_macros_in_dir(
             != Some(true)
         {
             continue;
+        }
+        xml_seen += 1;
+        if xml_seen > MAX_XML_MACRO_FILES {
+            warnings.push(ImportWarning::new(
+                "macro_xml_too_many_files",
+                format!(
+                    "Sibling macro folder `{}` has more than {MAX_XML_MACRO_FILES} `.xml` files; the rest were skipped.",
+                    dir.display()
+                ),
+            ));
+            break;
+        }
+        // Reject oversized files before reading them into memory.
+        if let Ok(meta) = entry.metadata() {
+            if meta.len() > MAX_XML_MACRO_BYTES {
+                warnings.push(ImportWarning::new(
+                    "macro_xml_too_large",
+                    format!(
+                        "Skipped `{}`: exceeds the {MAX_XML_MACRO_BYTES}-byte macro-file limit.",
+                        path.display()
+                    ),
+                ));
+                continue;
+            }
         }
         let name = path
             .file_stem()
@@ -341,6 +379,34 @@ mod tests {
                 .any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms: 250 })),
             "expected a 250ms Sleep step, got {:?}",
             parsed.steps,
+        );
+    }
+
+    #[test]
+    fn parse_macros_in_dir_skips_oversized_xml() {
+        // Audit F037: the sibling-folder reader must bound per-file size the same
+        // way the v3 ZIP path does. An oversized `.xml` is skipped with a warning
+        // and never read into memory, while a normal macro alongside it parses.
+        let dir = tempfile::tempdir().expect("temp dir");
+
+        // A valid macro that should parse normally.
+        let good = dir.path().join("good.xml");
+        std::fs::write(&good, SCREENSHOT).expect("write good macro");
+
+        // An oversized file (sparse, set_len) that must be rejected by size.
+        let big = dir.path().join("big.xml");
+        let f = std::fs::File::create(&big).expect("create big file");
+        f.set_len(MAX_XML_MACRO_BYTES + 1).expect("set len");
+        drop(f);
+
+        let mut warnings = Vec::new();
+        let macros = parse_macros_in_dir(dir.path(), &mut warnings).expect("read dir");
+
+        // The good macro parsed; the oversized one was skipped, not read.
+        assert_eq!(macros.len(), 1, "only the in-budget macro should parse");
+        assert!(
+            warnings.iter().any(|w| w.code == "macro_xml_too_large"),
+            "oversized macro must emit a macro_xml_too_large warning: {warnings:?}"
         );
     }
 }

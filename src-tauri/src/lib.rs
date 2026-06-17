@@ -949,6 +949,10 @@ async fn parse_synapse_source(
     let validated = validate_user_file_path(&path)?;
     tauri::async_runtime::spawn_blocking(
         move || -> Result<synapse_import::ParsedSynapseProfiles, CommandError> {
+            // Bound how much a hostile/corrupt Synapse export can ask the backend
+            // to read, consistent with the other import commands (the JSON import
+            // paths enforce MAX_FULL_CONFIG_IMPORT_BYTES via this same guard).
+            ensure_full_config_import_size(&validated)?;
             synapse_import::parse_synapse_source(&validated).map_err(|e| {
                 CommandError::new(
                     "synapse_parse_failed",
@@ -2624,6 +2628,30 @@ mod tests {
         // At the limit is accepted; one byte over is rejected.
         assert!(full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES));
         assert!(!full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES + 1));
+    }
+
+    #[test]
+    fn ensure_full_config_import_size_rejects_oversized_file() {
+        // Audit F025: parse_synapse_source now bounds the input via this guard,
+        // matching the JSON import commands. A too-large file on disk must be
+        // rejected before it is read into memory. A sparse file (set_len) gives
+        // the desired length without writing 16 MiB.
+        let dir = temp_home();
+        let big = dir.path().join("hostile.synapse4");
+        let file = fs::File::create(&big).expect("create file");
+        file.set_len(MAX_FULL_CONFIG_IMPORT_BYTES + 1)
+            .expect("set len");
+        drop(file);
+
+        let err = ensure_full_config_import_size(&big).expect_err("oversized file must be rejected");
+        assert_eq!(err.code, "import_too_large");
+
+        // A file at the limit is accepted.
+        let small = dir.path().join("ok.synapse4");
+        let file = fs::File::create(&small).expect("create file");
+        file.set_len(MAX_FULL_CONFIG_IMPORT_BYTES).expect("set len");
+        drop(file);
+        assert!(ensure_full_config_import_size(&small).is_ok());
     }
 
     #[test]

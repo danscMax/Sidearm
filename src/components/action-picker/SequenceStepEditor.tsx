@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SequenceStep } from "../../lib/config";
 import {
@@ -28,6 +28,26 @@ export function SequenceStepEditor({
   const [isRecording, setIsRecording] = useState(false);
   const [recordedCount, setRecordedCount] = useState(0);
   const [limitReached, setLimitReached] = useState(false);
+
+  // Stable per-step keys decoupled from array index. SequenceStep is a
+  // persisted/serialized type, so we can't add an id field to it; instead we
+  // keep a parallel id list positionally in sync with `steps`. Without this,
+  // key={index} makes React reconcile controlled <input>s by position, so
+  // deleting/reordering a middle step visually moves focus/caret to a neighbour.
+  const stepKeysRef = useRef<string[]>([]);
+  function newStepKey(): string {
+    return crypto.randomUUID();
+  }
+  // Reconcile the key list to the current step count. Handles initial mount and
+  // wholesale replacement (e.g. macro recording overwrites all steps).
+  if (stepKeysRef.current.length < steps.length) {
+    while (stepKeysRef.current.length < steps.length) {
+      stepKeysRef.current.push(newStepKey());
+    }
+  } else if (stepKeysRef.current.length > steps.length) {
+    stepKeysRef.current.length = steps.length;
+  }
+  const stepKeys = stepKeysRef.current;
 
   /** Hard cap on recorded steps to protect against runaway sequences. */
   const RECORD_LIMIT = 1000;
@@ -83,6 +103,9 @@ export function SequenceStepEditor({
       const recording = await stopMacroRecording();
       setIsRecording(false);
       if (recording.steps.length > 0) {
+        // Wholesale replacement: clear keys so the render-time reconcile mints
+        // fresh ones matching the new step list.
+        stepKeysRef.current = [];
         onUpdate(recording.steps);
       }
     } catch {
@@ -91,11 +114,14 @@ export function SequenceStepEditor({
   }
 
   function addStep(type: SequenceStep["type"]) {
+    stepKeysRef.current.push(newStepKey());
     onUpdate([...steps, createDefaultSequenceStep(type)]);
   }
 
   function removeStep(index: number) {
     if (steps.length <= 1) return;
+    // Drop the key at the same index so the surviving steps keep their keys.
+    stepKeysRef.current.splice(index, 1);
     onUpdate(steps.filter((_, i) => i !== index));
   }
 
@@ -166,7 +192,7 @@ export function SequenceStepEditor({
 
       <div className="stack-list">
         {steps.map((step, index) => (
-          <div className="compound-card" key={index}>
+          <div className="compound-card" key={stepKeys[index]}>
             <div className="compound-card__header">
               <div>
                 <strong>{t("picker.stepTitle", { index: index + 1 })}</strong>

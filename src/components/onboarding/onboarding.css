@@ -1,6 +1,10 @@
 /* First-run onboarding wizard. Full-screen overlay, dark theme, green accent. */
 
 .onb-overlay {
+  /* Onboarding referenced an undefined --c-text-dim and silently fell back to
+     hardcoded blue-grey hexes that drift from the app palette. Alias it to the
+     canonical app token so the wizard inherits the same muted text colour. */
+  --c-text-dim: var(--c-text-muted);
   position: fixed;
   inset: 0;
   z-index: 1000;

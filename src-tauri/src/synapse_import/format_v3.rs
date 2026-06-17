@@ -57,8 +57,8 @@ pub enum SynapseV3Error {
 /// Hard caps for untrusted Synapse `.synapse3` ZIP archives. Real exports are a
 /// few dozen small XML files, so these limits are generous for legitimate input
 /// while rejecting decompression bombs before any entry is read into memory.
-const MAX_ZIP_ENTRIES: usize = 4096;
-const MAX_ENTRY_UNCOMPRESSED: u64 = 16 * 1024 * 1024; // 16 MiB per entry
+pub(crate) const MAX_ZIP_ENTRIES: usize = 4096;
+pub(crate) const MAX_ENTRY_UNCOMPRESSED: u64 = 16 * 1024 * 1024; // 16 MiB per entry
 const MAX_TOTAL_UNCOMPRESSED: u64 = 128 * 1024 * 1024; // 128 MiB total
 
 /// Validate the archive's declared shape (entry count + per-entry and total

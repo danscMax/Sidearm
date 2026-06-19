@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Responsive narrow-window layout instead of a hard 900px floor.** The minimum
+  window width dropped from 900 to 480. Below 860px the sidebar collapses to a
+  56px icon rail (nav icons with hover tooltips + the runtime status dot; brand,
+  profile switcher and labels hide — profiles stay switchable from Settings), and
+  the assignments view stacks the mouse image on top with the two label columns
+  side by side below it. Previously the window simply couldn't be made narrow.
+
 ## [0.2.1] — 2026-06-19
 
 A quality release: a UI-consolidation refactor (shared components/hooks, no

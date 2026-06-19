@@ -15,7 +15,7 @@
         "title": "Sidearm",
         "width": 1280,
         "height": 840,
-        "minWidth": 900,
+        "minWidth": 480,
         "minHeight": 600,
         "dragDropEnabled": false,
         "decorations": false,

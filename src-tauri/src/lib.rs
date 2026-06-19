@@ -2323,8 +2323,11 @@ pub fn run() {
                 // tauri.conf.json — so live resizing could drag the window far
                 // below the design width and break the layout.  Setting it
                 // explicitly here makes the OS clamp interactive resizes.
+                // Below this the sidebar collapses to an icon rail (see the
+                // 860px media query in App.css), so the floor only needs to
+                // keep the rail + content column legible, not the full layout.
                 // Keep in sync with tauri.conf.json and the clamp below.
-                let _ = main_window.set_min_size(Some(tauri::LogicalSize::new(900.0, 600.0)));
+                let _ = main_window.set_min_size(Some(tauri::LogicalSize::new(480.0, 600.0)));
 
                 // Clamp restored size against the config minimums.  The
                 // window-state plugin restores raw saved dimensions and does
@@ -2333,7 +2336,7 @@ pub fn run() {
                 // mid-resize, or from a frame-dropped close-during-drag) would
                 // otherwise leave the user with an unusable title-bar-only
                 // window on next start.  Keep these in sync with tauri.conf.json.
-                const MIN_W: u32 = 900;
+                const MIN_W: u32 = 480;
                 const MIN_H: u32 = 600;
                 if let Ok(size) = main_window.inner_size()
                     && (size.width < MIN_W || size.height < MIN_H) {

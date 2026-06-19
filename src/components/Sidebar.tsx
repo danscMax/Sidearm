@@ -80,9 +80,10 @@ export function Sidebar({
           aria-current={workspaceMode === mode.value ? "page" : undefined}
           className={`nav-item${workspaceMode === mode.value ? " nav-item--active" : ""}`}
           onClick={() => { onSwitchMode(mode.value); }}
+          title={t(`workspace.${mode.value}.label`)}
         >
           {NAV_ICONS[mode.value]}
-          {t(`workspace.${mode.value}.label`)}
+          <span className="nav-item__label">{t(`workspace.${mode.value}.label`)}</span>
         </button>
       ))}
       {workspaceMode !== "settings" ? (

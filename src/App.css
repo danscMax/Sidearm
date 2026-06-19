@@ -2956,27 +2956,58 @@ code {
 }
 
 @media (max-width: 860px) {
+  /* Collapse the sidebar to a slim icon rail so a narrow window keeps a
+     usable layout instead of cramping the content column.  The sidebar stays
+     vertical; only the textual chrome (brand, profile switcher, nav labels,
+     runtime caption) is hidden — nav icons stay, with their `title` acting as
+     the hover tooltip, and the runtime dot stays as a status/toggle. */
   .shell {
-    grid-template-columns: 1fr;
+    grid-template-columns: 56px minmax(0, 1fr);
   }
   .sidebar {
-    position: static;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
-    border-right: 0;
-    border-bottom: 1px solid var(--c-border);
+    padding: 12px 6px;
+    gap: 4px;
   }
-  .sidebar__runtime { margin-top: 0; }
+  .sidebar__brand,
+  .sidebar__sep,
+  .sidebar__section,
+  .nav-item__label,
+  .sidebar__runtime-label,
+  .sidebar__runtime-action {
+    display: none;
+  }
+  .nav-item {
+    justify-content: center;
+    gap: 0;
+    padding: 10px 0;
+  }
+  .nav-item__icon { opacity: 0.9; }
+  .sidebar__runtime {
+    justify-content: center;
+    padding: 12px 0;
+  }
   .workspace--2col {
     grid-template-columns: 1fr;
   }
+  /* Narrow layout for the top/combined views: mouse image on top (spanning the
+     full width), then the two label columns side by side below it.  Reordered
+     with `order` since the DOM is left-labels → visual → right-labels. */
   .mouse-top-layout {
-    grid-template-columns: 1fr;
-    justify-items: center;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
   }
   .mouse-top-layout .mouse-visual {
-    height: min(300px, 40vh);
+    grid-column: 1 / -1;
+    order: -1;
+    justify-self: center;
+    max-width: 240px;
+    max-height: none;
+  }
+  /* Drop the wide-mode top padding that aligned labels with the image edge —
+     here the labels sit below the image. */
+  .mouse-top-layout:has(.mouse-visual--top) .mouse-top-labels,
+  .mouse-top-layout:has(.mouse-visual--combined) .mouse-top-labels {
+    padding-top: 0;
   }
   .mouse-view-panel {
     max-width: 500px;

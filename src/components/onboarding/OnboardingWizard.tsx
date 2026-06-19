@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { changeLanguage } from "../../i18n";
@@ -262,9 +262,29 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                 <div className="onb-step__section-title">{T.welcome.checks}</div>
                 <div className="onb-checks">
                   <CheckRow state={synapseOk} label={T.welcome.cSynapse} hint={hintFor(synapseOk, T)} />
-                  <CheckRow state={elevated} label={T.welcome.cElevated} hint={hintFor(elevated, T)} />
+                  <CheckRow
+                    state={elevated}
+                    label={T.welcome.cElevated}
+                    hint={hintFor(elevated, T)}
+                    action={
+                      elevated === "bad" ? (
+                        <button
+                          type="button"
+                          className="onb-check__action"
+                          onClick={() => void handleRelaunch()}
+                        >
+                          {T.welcome.relaunch}
+                        </button>
+                      ) : undefined
+                    }
+                  />
                   <CheckRow state={readiness} label={T.welcome.cNaga} hint={T.welcome.nagaHint} />
                 </div>
+                {relaunchError ? (
+                  <div className="onb-result">
+                    <span className="onb-check__dot bad" /> {relaunchError}
+                  </div>
+                ) : null}
               </>
             )}
 
@@ -395,13 +415,24 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   );
 }
 
-function CheckRow({ state, label, hint }: { state: CheckState; label: string; hint: string }) {
+function CheckRow({
+  state,
+  label,
+  hint,
+  action,
+}: {
+  state: CheckState;
+  label: string;
+  hint: string;
+  /** Optional inline affordance shown in place of the hint (e.g. a fix button). */
+  action?: ReactNode;
+}) {
   const dot = state === "ok" ? "ok" : state === "bad" ? "bad" : "pending";
   return (
     <div className="onb-check">
       <span className={`onb-check__dot ${dot}`} />
       <span className="onb-check__label">{label}</span>
-      <span className="onb-check__hint">{hint}</span>
+      {action ?? <span className="onb-check__hint">{hint}</span>}
     </div>
   );
 }
@@ -432,6 +463,7 @@ interface Copy {
     cElevated: string;
     cNaga: string;
     nagaHint: string;
+    relaunch: string;
   };
   synapse: {
     title: string;
@@ -469,6 +501,7 @@ const COPY: Record<Lang, Copy> = {
       cElevated: "Sidearm запущен от администратора",
       cNaga: "Готовность",
       nagaHint: "проверим на шаге «Тест»",
+      relaunch: "Перезапустить от админа",
     },
     synapse: {
       title: "Настройка Razer Synapse",
@@ -524,6 +557,7 @@ const COPY: Record<Lang, Copy> = {
       cElevated: "Sidearm running as administrator",
       cNaga: "Readiness",
       nagaHint: "verified in the Test step",
+      relaunch: "Restart as admin",
     },
     synapse: {
       title: "Set up Razer Synapse",

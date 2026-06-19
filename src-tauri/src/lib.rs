@@ -2316,6 +2316,16 @@ pub fn run() {
             if let Some(main_window) = app.get_webview_window("main") {
                 let _ = main_window.set_decorations(false);
 
+                // Re-assert the minimum window size in the OS.  With
+                // decorations:false the borderless window does not get the
+                // standard frame's WM_GETMINMAXINFO clamp, and toggling
+                // decorations above can drop the constraint registered from
+                // tauri.conf.json — so live resizing could drag the window far
+                // below the design width and break the layout.  Setting it
+                // explicitly here makes the OS clamp interactive resizes.
+                // Keep in sync with tauri.conf.json and the clamp below.
+                let _ = main_window.set_min_size(Some(tauri::LogicalSize::new(900.0, 600.0)));
+
                 // Clamp restored size against the config minimums.  The
                 // window-state plugin restores raw saved dimensions and does
                 // NOT re-validate against `minWidth/minHeight` from

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Window can no longer be resized below its usable size.** The borderless
+  window didn't get the OS minimum-size clamp, so dragging it narrow broke the
+  layout (the sidebar piled up full-width over the workspace). The 900×600
+  minimum is now enforced explicitly, so interactive resizes are clamped.
+- **Administrator check is fixable from the welcome step.** The first onboarding
+  screen's "running as administrator" check now offers an inline "Restart as
+  admin" button when it's red, instead of just showing "not found".
 - **Onboarding admin check no longer contradicts itself.** The "administrator
   rights" step claimed "already running as administrator" whenever the
   run-as-admin autostart task existed, even when the current session was not

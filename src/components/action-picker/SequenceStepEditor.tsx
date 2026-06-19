@@ -16,6 +16,7 @@ import {
 import { ChipEditor } from "../ChipEditor";
 import { ExecutablePathField } from "../ExecutablePathField";
 import { DirectoryPathField } from "../DirectoryPathField";
+import { CompoundCard } from "./shared/CompoundCard";
 
 export function SequenceStepEditor({
   steps,
@@ -192,23 +193,14 @@ export function SequenceStepEditor({
 
       <div className="stack-list">
         {steps.map((step, index) => (
-          <div className="compound-card" key={stepKeys[index]}>
-            <div className="compound-card__header">
-              <div>
-                <strong>{t("picker.stepTitle", { index: index + 1 })}</strong>
-                <span className="compound-card__meta">{labelForSequenceStep(step.type)}</span>
-              </div>
-              <button
-                type="button"
-                className="action-button action-button--secondary action-button--small"
-                disabled={steps.length === 1}
-                onClick={() => removeStep(index)}
-              >
-                {t("common.delete")}
-              </button>
-            </div>
-
-            <div className="editor-grid">
+          <CompoundCard
+            key={stepKeys[index]}
+            title={t("picker.stepTitle", { index: index + 1 })}
+            meta={labelForSequenceStep(step.type)}
+            removeLabel={t("common.delete")}
+            canRemove={steps.length !== 1}
+            onRemove={() => removeStep(index)}
+          >
               <label className="field">
                 <span className="field__label">{t("picker.stepType")}</span>
                 <select
@@ -293,8 +285,7 @@ export function SequenceStepEditor({
                   }}
                 />
               </label>
-            </div>
-          </div>
+          </CompoundCard>
         ))}
       </div>
     </div>

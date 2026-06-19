@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import type { ActionCondition } from "../../lib/config";
 import { CONDITION_TYPE_KEYS } from "../../lib/action-picker-helpers";
 import { SelectField } from "../shared";
+import { CompoundCard } from "./shared/CompoundCard";
 
 export function ConditionsEditor({
   conditions,
@@ -31,18 +32,12 @@ export function ConditionsEditor({
       ) : (
         <div className="stack-list">
           {conditions.map((condition, index) => (
-            <div className="compound-card" key={index}>
-              <div className="compound-card__header">
-                <strong>{t("picker.conditionTitle", { index: index + 1 })}</strong>
-                <button
-                  type="button"
-                  className="action-button action-button--secondary action-button--small"
-                  onClick={() => onChange(conditions.filter((_, i) => i !== index))}
-                >
-                  {t("common.delete")}
-                </button>
-              </div>
-              <div className="editor-grid">
+            <CompoundCard
+              key={index}
+              title={t("picker.conditionTitle", { index: index + 1 })}
+              removeLabel={t("common.delete")}
+              onRemove={() => onChange(conditions.filter((_, i) => i !== index))}
+            >
                 <SelectField
                   label={t("picker.conditionType")}
                   value={condition.type}
@@ -74,8 +69,7 @@ export function ConditionsEditor({
                     }
                   />
                 </label>
-              </div>
-            </div>
+            </CompoundCard>
           ))}
           <p className="panel__muted">
             {t("picker.conditionsAllRequired")}

@@ -18,7 +18,7 @@ import {
 import type { AppConfig } from "../../lib/config";
 import type { ActionExecutionEvent, EncodedKeyEvent } from "../../lib/runtime";
 import { NagaIllustration } from "./NagaIllustration";
-import { useModalDismiss } from "../../hooks/useModalDismiss";
+import { ModalShell } from "../shared";
 import "./onboarding.css";
 
 type StepKey = "welcome" | "synapse" | "live" | "admin" | "tryit";
@@ -142,11 +142,11 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     onClose();
   }, [config, applyConfig, onClose]);
 
-  // Keyboard containment + Escape-to-skip, matching the app's other modals.
-  const overlayRef = useRef<HTMLDivElement>(null);
-  const handleModalKeyDown = useModalDismiss(overlayRef, { onClose: complete });
+  // Keyboard containment + Escape-to-skip handled by ModalShell. Auto-focus the
+  // first button on mount.
+  const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    overlayRef.current?.querySelector<HTMLElement>("button")?.focus();
+    cardRef.current?.querySelector<HTMLElement>("button")?.focus();
   }, []);
 
   const goNext = useCallback(() => {
@@ -194,15 +194,14 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   }, [synapseOk, elevated]);
 
   return (
-    <div
-      className="onb-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={T.ariaTitle}
-      ref={overlayRef}
-      onKeyDown={handleModalKeyDown}
+    <ModalShell
+      onClose={complete}
+      backdropClassName="onb-overlay"
+      className="onb-card"
+      dialogRef={cardRef}
+      ariaLabel={T.ariaTitle}
+      dismissOnBackdropClick={false}
     >
-      <div className="onb-card">
         <div className="onb-header">
           <span className="onb-header__title">{T.brand}</span>
           <div className="onb-lang" role="group" aria-label={T.ariaLanguage}>
@@ -355,8 +354,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
             {stepIdx === STEPS.length - 1 ? T.finish : T.next}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalShell>
   );
 }
 

@@ -36,6 +36,11 @@
   --radius-modal: 12px;
   --radius-pill: 999px;
 
+  /* Elevation. --shadow-modal for centered dialogs, --shadow-popover for
+     dropdowns / context menus / toasts anchored to a trigger. */
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.4);
+
   --c-text-on-accent: #0f170f;
   --gradient-primary: linear-gradient(135deg, #9fca69, #6ca84f);
   --font-mono: "Cascadia Code", "Consolas", monospace;
@@ -730,7 +735,7 @@ select::checkmark {
   border-radius: var(--radius-xs);
   border: 1px solid var(--c-card-border);
   background: var(--c-surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -1398,7 +1403,7 @@ select::checkmark {
   border-radius: var(--radius-sm);
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-popover);
 }
 
 .context-menu__item {
@@ -2207,7 +2212,7 @@ code {
   background: var(--c-bg, #1a1f16);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -2525,7 +2530,7 @@ code {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
 }
 
 .action-picker__header {
@@ -2788,7 +2793,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
 }
 
 .confirm-modal h3 {
@@ -2819,7 +2824,7 @@ code {
   max-height: 60vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
   overflow: hidden;
 }
 
@@ -3954,7 +3959,7 @@ code {
   background: var(--c-bg);
   border: 1px solid var(--c-card-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   padding: 4px;
   z-index: 100;
 }
@@ -4316,7 +4321,7 @@ img.profiles__app-card-monogram {
   width: min(520px, 90vw);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
   outline: none;
 }
 
@@ -4863,7 +4868,7 @@ input[type="number"] { -moz-appearance: textfield; }
   background: var(--c-surface, #1e2320);
   color: var(--c-text);
   border: 1px solid var(--c-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   font-size: 0.85rem;
   max-width: 360px;
   animation: toast-in 160ms ease-out;

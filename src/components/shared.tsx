@@ -128,6 +128,9 @@ interface ModalShellProps {
   children: React.ReactNode;
   /** className for the dialog element (e.g. "confirm-modal", "action-picker"). */
   className?: string;
+  /** className for the backdrop. Default "modal-backdrop"; override for a
+   *  full-bleed variant (e.g. the onboarding wizard's "onb-overlay"). */
+  backdropClassName?: string;
   /** Pass the caller's ref when it runs its own auto-focus effect on the dialog. */
   dialogRef?: React.RefObject<HTMLDivElement | null>;
   role?: "dialog" | "alertdialog";
@@ -151,6 +154,7 @@ export function ModalShell({
   onClose,
   children,
   className,
+  backdropClassName = "modal-backdrop",
   dialogRef,
   role = "dialog",
   ariaLabel,
@@ -163,7 +167,7 @@ export function ModalShell({
   const ref = dialogRef ?? fallbackRef;
   const handleKeyDown = useModalDismiss(ref, { onClose, escapeEnabled });
   return (
-    <div className="modal-backdrop" onClick={dismissOnBackdropClick ? onClose : undefined}>
+    <div className={backdropClassName} onClick={dismissOnBackdropClick ? onClose : undefined}>
       <div
         ref={ref}
         role={role}

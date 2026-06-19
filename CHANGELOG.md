@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-06-19
+
+A quality release: a UI-consolidation refactor (shared components/hooks, no
+behavioural change), several onboarding fixes, a window-resize fix, and two
+bugs found by new property-based tests. All gates green (tsc, vitest, knip,
+clippy `-D warnings`) and a portable build was smoke-tested.
+
 ### Fixed
 - **Key-name normalization is robust against reserved names.** `normalizeKeyName`
   used a plain-object lookup, so inputs like `"toString"`/`"valueOf"` returned an

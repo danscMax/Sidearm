@@ -67,7 +67,6 @@ export function Sidebar({
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
-  // Sidebar profile pill-track count via CSSOM (CSP-safe; FIXES P2-3).
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">

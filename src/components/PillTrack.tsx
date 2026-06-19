@@ -51,10 +51,10 @@ export function PillTrack<T extends string>({
         <button
           key={item.key}
           type="button"
+          {...pillProps?.(item)}
           aria-pressed={item.key === active}
           className={`pill-track__pill${item.key === active ? " pill-track__pill--active" : ""}`}
           onClick={() => onSelect(item.key)}
-          {...pillProps?.(item)}
         >
           {item.label}
           {renderTrailing?.(item)}

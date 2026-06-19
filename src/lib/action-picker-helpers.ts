@@ -47,7 +47,11 @@ export function resolveKeyName(event: KeyboardEvent | ReactKeyboardEvent): strin
 }
 
 export function normalizeKeyName(key: string): string {
-  return KEY_NAME_MAP[key] ?? (key.length === 1 ? key.toUpperCase() : key);
+  // Guard against inherited Object.prototype members ("toString", "valueOf", …):
+  // a bare `KEY_NAME_MAP[key]` would return those functions instead of falling
+  // through, so look the key up only as an own property.
+  if (Object.hasOwn(KEY_NAME_MAP, key)) return KEY_NAME_MAP[key];
+  return key.length === 1 ? key.toUpperCase() : key;
 }
 
 /* ─────────────────────────────────────────────────────────
@@ -117,7 +121,9 @@ export function autoName(
     case "sequence":
       return t("picker.autoMacro");
     case "launch":
-      return drafts.launch.target.split(/[/\\]/).pop() ?? t("sequence.launch");
+      // `||` not `??`: an empty target or one ending in a separator yields an
+      // empty-string basename, which must fall back to the default name.
+      return drafts.launch.target.split(/[/\\]/).pop() || t("sequence.launch");
     case "mediaKey":
       return mediaKeyLabel(drafts.media) ?? t("action.type.mediaKey");
     case "profileSwitch": {

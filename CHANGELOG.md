@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Key-name normalization is robust against reserved names.** `normalizeKeyName`
+  used a plain-object lookup, so inputs like `"toString"`/`"valueOf"` returned an
+  inherited `Object.prototype` function instead of the string. Found by
+  property-based testing; now guarded with an own-property check.
+- **Launch actions always get a non-empty default name.** A launch target that
+  was empty or ended in a path separator (e.g. `C:\`) produced an empty
+  auto-generated name (`??` didn't catch the empty-string basename). Found by PBT.
 - **Window can no longer be resized below its usable size.** The borderless
   window didn't get the OS minimum-size clamp, so dragging it narrow broke the
   layout (the sidebar piled up full-width over the workspace). The 900×600

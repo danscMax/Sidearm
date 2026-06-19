@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { listRunningProcesses, normalizeCommandError } from "../lib/backend";
 import type { CommandError, RunningProcessInfo } from "../lib/config";
 import { ModalFooter, ModalHeader, ModalShell } from "./shared";
+import { useListKeyboard } from "../hooks/useListKeyboard";
 
 export interface RunningProcessPickerProps {
   onPick: (process: RunningProcessInfo) => void;
@@ -73,12 +74,28 @@ export function RunningProcessPicker({
     );
   }, [processes, query]);
 
+  const visible = filtered.slice(0, 200);
+  const [activeIndex, setActiveIndex] = useState(0);
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [query]);
+  const handleKeyDown = useListKeyboard({
+    itemCount: visible.length,
+    activeIndex,
+    setActiveIndex,
+    onSelect: (i) => {
+      const proc = visible[i];
+      if (proc) onPick(proc);
+    },
+  });
+
   return (
     <ModalShell
       onClose={onCancel}
       className="confirm-modal process-picker"
       dialogRef={containerRef}
       ariaLabelledby="process-picker-title"
+      onKeyDown={handleKeyDown}
     >
         <ModalHeader title={t("processPicker.title")} id="process-picker-title" />
         <input
@@ -97,12 +114,13 @@ export function RunningProcessPicker({
             <p className="panel__muted">{t("processPicker.empty")}</p>
           ) : (
             <ul className="process-picker__list">
-              {filtered.slice(0, 200).map((p) => (
+              {visible.map((p, idx) => (
                 <li key={`${p.pid}-${p.exe}`}>
                   <button
                     type="button"
-                    className="process-picker__item"
+                    className={`process-picker__item${idx === activeIndex ? " process-picker__item--active" : ""}`}
                     onClick={() => onPick(p)}
+                    onMouseEnter={() => setActiveIndex(idx)}
                     title={p.path || undefined}
                   >
                     <span className="process-picker__exe">{p.exe}</span>

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { Profile } from "../lib/config";
 import { useDismissable } from "../hooks/useDismissable";
+import { useListKeyboard } from "../hooks/useListKeyboard";
 
 export interface ProfileDropdownProps {
   profiles: Profile[];
@@ -47,34 +48,40 @@ export function ProfileDropdown({
   }, []);
   useDismissable(rootRef, closeAndRefocus, open);
 
-  // Navigate with arrows / select with Enter.
+  // Select a profile, close the menu, and return focus to the trigger.
+  const selectProfile = useCallback(
+    (idx: number) => {
+      const profile = profiles[idx];
+      if (!profile) return;
+      onSelectProfile(profile.id);
+      setOpen(false);
+      triggerRef.current?.focus();
+    },
+    [onSelectProfile, profiles],
+  );
+
+  // Arrow / Home / End / Enter via the shared hook (wrap-around for the short
+  // dropdown); Space selects like Enter (dropdown convention).
+  const handleListKey = useListKeyboard({
+    itemCount: profiles.length,
+    activeIndex: focusIndex,
+    setActiveIndex: setFocusIndex,
+    onSelect: selectProfile,
+    wrap: true,
+  });
   useEffect(() => {
     if (!open) return;
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "ArrowDown") {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === " ") {
         e.preventDefault();
-        setFocusIndex((idx) => (idx + 1) % profiles.length);
+        selectProfile(focusIndex);
         return;
       }
-      if (e.key === "ArrowUp") {
-        e.preventDefault();
-        setFocusIndex((idx) =>
-          idx <= 0 ? profiles.length - 1 : idx - 1,
-        );
-        return;
-      }
-      if (e.key === "Enter" || e.key === " ") {
-        if (focusIndex >= 0 && focusIndex < profiles.length) {
-          e.preventDefault();
-          onSelectProfile(profiles[focusIndex].id);
-          setOpen(false);
-          triggerRef.current?.focus();
-        }
-      }
+      handleListKey(e);
     }
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, focusIndex, profiles, onSelectProfile]);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [open, focusIndex, handleListKey, selectProfile]);
 
   // When opening, position focus on the currently-active item.
   useEffect(() => {

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **UI consolidation pass (no behavioural change).** A second duplication audit
+  drove a round of shared-component adoption with no user-facing change beyond
+  consistency: a single `ModalHeader`/`ModalFooter` now back every modal's title
+  and action rows (all headings are `<h2>`; the confirm dialog gained an
+  `aria-labelledby`), a `Notice` component owns the dozen inline status banners,
+  `SelectField`/`Toggle` replaced the remaining hand-rolled `<select>`s and
+  checkboxes, the capture-delay strip reuses the shared `PillTrack`, and the
+  copy/export/delete icons became shared components (fixing a copy-icon that had
+  silently drifted between its two sizes).
+- **Unified list keyboard navigation.** Arrow / Home / End / Enter handling for
+  the profile dropdown and command palette now share one `useListKeyboard` hook
+  (clamp by default, wrap for the dropdown), and the running-process picker gained
+  arrow-key navigation with a highlighted row.
+
 ## [0.2.2] — 2026-06-19
 
 ### Changed

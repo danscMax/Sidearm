@@ -2412,7 +2412,8 @@ code {
   font-family: inherit;
   transition: background 100ms ease, border-color 100ms ease;
 }
-.process-picker__item:hover {
+.process-picker__item:hover,
+.process-picker__item--active {
   background: rgba(125, 182, 73, 0.12);
   border-color: rgba(125, 182, 73, 0.3);
 }

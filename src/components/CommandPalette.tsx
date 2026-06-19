@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./shared";
+import { useListKeyboard } from "../hooks/useListKeyboard";
 
 /* ─────────────────────────────────────────────────────────
    Command Palette
@@ -42,17 +43,15 @@ export function CommandPalette({
   }, [query]);
 
   // Escape is handled by ModalShell's useModalDismiss; this covers list nav.
-  function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, filtered.length - 1));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setActiveIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" && filtered[activeIndex]) {
-      onExecute(filtered[activeIndex].id);
-    }
-  }
+  const handleKeyDown = useListKeyboard({
+    itemCount: filtered.length,
+    activeIndex,
+    setActiveIndex,
+    onSelect: (i) => {
+      const cmd = filtered[i];
+      if (cmd) onExecute(cmd.id);
+    },
+  });
 
   return (
     <ModalShell

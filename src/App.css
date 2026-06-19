@@ -3018,6 +3018,19 @@ code {
   }
 }
 
+/* Tight band near the minimum window width (480px floor): grids that are
+   comfortable at ~800px but cramped near 480px drop to fewer columns. */
+@media (max-width: 560px) {
+  /* Side-view legend is a fixed 4-wide grid (--col-count set inline per row);
+     override the computed track count so cells don't get squeezed unreadable. */
+  .btn-legend__row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .verification-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

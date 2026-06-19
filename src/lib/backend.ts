@@ -207,6 +207,15 @@ export async function getAdminAutostartStatus(): Promise<AdminAutostartStatus> {
 }
 
 /**
+ * Relaunch the current session elevated via ShellExecute "runas" (triggers UAC).
+ * On success the current process exits and a new elevated one starts — this
+ * promise only resolves/rejects when the relaunch is declined or fails.
+ */
+export async function relaunchAsAdmin(): Promise<void> {
+  return invoke<void>("relaunch_as_admin");
+}
+
+/**
  * Enable or disable the Windows Task Scheduler entry that launches Sidearm
  * with administrator privileges at user logon (`RunLevel=Highest`,
  * `Trigger=OnLogon`).  Enabling triggers a UAC prompt — this is the only

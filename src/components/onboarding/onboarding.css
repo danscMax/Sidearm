@@ -123,6 +123,8 @@
   color: var(--c-text-dim, #aab2bb);
   margin: 0 0 18px;
   max-width: 64ch;
+  /* Avoid short orphan last lines (e.g. the admin note). */
+  text-wrap: pretty;
 }
 .onb-step__section-title {
   font-size: 13px;

@@ -10,6 +10,7 @@ import {
   listenActionExecutionEvent,
   listenEncodedKeyEvent,
   normalizeCommandError,
+  relaunchAsAdmin,
   saveBundledSynapseProfile,
   setAdminAutostart,
   setInputCaptureMode,
@@ -70,6 +71,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   // Admin
   const [admin, setAdmin] = useState<AdminAutostartStatus | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
+  const [relaunchError, setRelaunchError] = useState<string | null>(null);
 
   // Finale
   const [fired, setFired] = useState<ActionExecutionEvent | null>(null);
@@ -176,13 +178,27 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   const toggleAdmin = useCallback(async () => {
     setAdminBusy(true);
     try {
+      // Enabling autostart only registers the scheduled task — it does NOT
+      // elevate the current session, so `elevated` stays as-is (the welcome
+      // check only flips to OK after an actual elevated relaunch / next logon).
       const next = await setAdminAutostart(true);
       setAdmin(next);
-      if (next.enabled) setElevated("ok");
     } catch {
       // UAC declined / failed — leave state as-is.
     } finally {
       setAdminBusy(false);
+    }
+  }, []);
+
+  // Relaunch the current session elevated. On success the process exits and a
+  // new elevated one starts; onboarding reopens (flag still false) with the
+  // admin check green. Only the UAC-declined / failure path returns here.
+  const handleRelaunch = useCallback(async () => {
+    setRelaunchError(null);
+    try {
+      await relaunchAsAdmin();
+    } catch (err) {
+      setRelaunchError(normalizeCommandError(err).message);
     }
   }, []);
 
@@ -307,20 +323,41 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
               <>
                 <h2 className="onb-step__title">{T.admin.title}</h2>
                 <p className="onb-step__lead">{T.admin.lead}</p>
-                {elevated === "ok" || admin?.enabled ? (
+                {elevated === "ok" ? (
                   <div className="onb-result">
                     <span className="onb-check__dot ok" /> {T.admin.already}
                   </div>
+                ) : admin?.enabled ? (
+                  <>
+                    <div className="onb-result">
+                      <span className="onb-check__dot ok" /> {T.admin.autostartConfigured}
+                    </div>
+                    <div className="onb-actions">
+                      <button type="button" className="onb-btn primary" onClick={() => void handleRelaunch()}>
+                        {T.admin.relaunch}
+                      </button>
+                    </div>
+                  </>
                 ) : (
-                  <button
-                    type="button"
-                    className="onb-btn primary"
-                    onClick={() => void toggleAdmin()}
-                    disabled={adminBusy}
-                  >
-                    {adminBusy ? T.admin.busy : T.admin.enable}
-                  </button>
+                  <div className="onb-actions">
+                    <button
+                      type="button"
+                      className="onb-btn primary"
+                      onClick={() => void toggleAdmin()}
+                      disabled={adminBusy}
+                    >
+                      {adminBusy ? T.admin.busy : T.admin.enable}
+                    </button>
+                    <button type="button" className="onb-btn ghost" onClick={() => void handleRelaunch()}>
+                      {T.admin.relaunch}
+                    </button>
+                  </div>
                 )}
+                {relaunchError ? (
+                  <div className="onb-result">
+                    <span className="onb-check__dot bad" /> {relaunchError}
+                  </div>
+                ) : null}
                 <p className="onb-step__lead onb-step__lead--note">
                   {T.admin.note}
                 </p>
@@ -407,7 +444,7 @@ interface Copy {
     saved: string;
   };
   live: { title: string; lead: string; waiting: string; last: string; allDone: string };
-  admin: { title: string; lead: string; enable: string; busy: string; already: string; note: string };
+  admin: { title: string; lead: string; enable: string; busy: string; already: string; autostartConfigured: string; relaunch: string; note: string };
   tryit: { title: string; lead: string; waiting: string; fired: string };
 }
 
@@ -456,6 +493,8 @@ const COPY: Record<Lang, Copy> = {
       enable: "Включить автозапуск от администратора",
       busy: "Включение… (подтвердите UAC)",
       already: "Sidearm уже работает с правами администратора.",
+      autostartConfigured: "Автозапуск от администратора настроен — права применятся при следующем входе в систему.",
+      relaunch: "Перезапустить от администратора сейчас",
       note: "Создаётся задача в Планировщике (запуск при входе). Это можно изменить позже в Настройках.",
     },
     tryit: {
@@ -509,6 +548,8 @@ const COPY: Record<Lang, Copy> = {
       enable: "Enable run-as-admin autostart",
       busy: "Enabling… (confirm UAC)",
       already: "Sidearm is already running as administrator.",
+      autostartConfigured: "Run-as-admin autostart is configured — privileges apply at your next sign-in.",
+      relaunch: "Restart as administrator now",
       note: "Creates a Task Scheduler entry (launch at logon). You can change this later in Settings.",
     },
     tryit: {

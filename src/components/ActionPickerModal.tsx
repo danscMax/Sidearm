@@ -13,7 +13,7 @@ import {
   upsertSnippetLibraryItem,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { ModalShell } from "./shared";
+import { CloseButton, ModalShell } from "./shared";
 import {
   autoName,
   buildAction,
@@ -273,7 +273,7 @@ export function ActionPickerModal({
               <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
             ) : null}
           </div>
-          <button type="button" className="action-picker__close" onClick={onCancel} aria-label={t("common.close")}>×</button>
+          <CloseButton onClick={onCancel} ariaLabel={t("common.close")} className="action-picker__close" />
         </div>
 
         <div className="action-picker__body">
@@ -334,7 +334,7 @@ export function ActionPickerModal({
             {effectiveCategory === "sequence" ? (
               <SequenceStepEditor
                 steps={sequenceDraft}
-                onUpdate={setSequenceDraft}
+                onChange={setSequenceDraft}
               />
             ) : null}
 
@@ -384,7 +384,7 @@ export function ActionPickerModal({
             {controlId && selectedLayer ? (
               <SignalCaptureField
                 signalDraft={signalDraft}
-                setSignalDraft={setSignalDraft}
+                onChange={setSignalDraft}
                 isCapturing={isCapturingSignal}
                 setIsCapturing={setIsCapturingSignal}
                 expectedSignal={expectedSignal}

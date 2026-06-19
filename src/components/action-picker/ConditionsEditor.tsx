@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import type { ActionCondition } from "../../lib/config";
 import { CONDITION_TYPE_KEYS } from "../../lib/action-picker-helpers";
+import { SelectField } from "../shared";
+import { CompoundCard } from "./shared/CompoundCard";
 
 export function ConditionsEditor({
   conditions,
@@ -30,38 +32,24 @@ export function ConditionsEditor({
       ) : (
         <div className="stack-list">
           {conditions.map((condition, index) => (
-            <div className="compound-card" key={index}>
-              <div className="compound-card__header">
-                <strong>{t("picker.conditionTitle", { index: index + 1 })}</strong>
-                <button
-                  type="button"
-                  className="action-button action-button--secondary action-button--small"
-                  onClick={() => onChange(conditions.filter((_, i) => i !== index))}
-                >
-                  {t("common.delete")}
-                </button>
-              </div>
-              <div className="editor-grid">
-                <label className="field">
-                  <span className="field__label">{t("picker.conditionType")}</span>
-                  <select
-                    value={condition.type}
-                    onChange={(e) => {
-                      const nextType = e.target.value as ActionCondition["type"];
-                      onChange(
-                        conditions.map((c, i) =>
-                          i === index ? { type: nextType, value: c.value } : c,
-                        ),
-                      );
-                    }}
-                  >
-                    {CONDITION_TYPE_KEYS.map((ct) => (
-                      <option key={ct.value} value={ct.value}>
-                        {t(ct.key)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+            <CompoundCard
+              key={index}
+              title={t("picker.conditionTitle", { index: index + 1 })}
+              removeLabel={t("common.delete")}
+              onRemove={() => onChange(conditions.filter((_, i) => i !== index))}
+            >
+                <SelectField
+                  label={t("picker.conditionType")}
+                  value={condition.type}
+                  options={CONDITION_TYPE_KEYS.map((ct) => ({ value: ct.value, label: t(ct.key) }))}
+                  onChange={(nextType) =>
+                    onChange(
+                      conditions.map((c, i) =>
+                        i === index ? { type: nextType, value: c.value } : c,
+                      ),
+                    )
+                  }
+                />
                 <label className="field">
                   <span className="field__label">{t("picker.conditionValue")}</span>
                   <input
@@ -81,8 +69,7 @@ export function ConditionsEditor({
                     }
                   />
                 </label>
-              </div>
-            </div>
+            </CompoundCard>
           ))}
           <p className="panel__muted">
             {t("picker.conditionsAllRequired")}

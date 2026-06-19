@@ -29,12 +29,18 @@
   --c-danger: #e05555;
   --c-warning: #c49934;
   --c-warning-light: #e7c46f;
+  --c-info: #5c9add;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
   --radius-lg: 12px;
   --radius-modal: 12px;
   --radius-pill: 999px;
+
+  /* Elevation. --shadow-modal for centered dialogs, --shadow-popover for
+     dropdowns / context menus / toasts anchored to a trigger. */
+  --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.4);
 
   --c-text-on-accent: #0f170f;
   --gradient-primary: linear-gradient(135deg, #9fca69, #6ca84f);
@@ -730,7 +736,7 @@ select::checkmark {
   border-radius: var(--radius-xs);
   border: 1px solid var(--c-card-border);
   background: var(--c-surface);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   z-index: 20;
   display: flex;
   flex-direction: column;
@@ -919,10 +925,10 @@ select::checkmark {
 .notice .action-button { margin-top: 10px; }
 
 .notice--subtle  { background: var(--c-card-bg); border-color: var(--c-card-border); }
-.notice--warning { background: rgba(196, 153, 52, 0.12); border-color: rgba(196, 153, 52, 0.26); }
+.notice--warning { background: color-mix(in srgb, var(--c-warning) 12%, transparent); border-color: color-mix(in srgb, var(--c-warning) 26%, transparent); }
 .notice--error   { background: rgba(167, 56, 56, 0.14); border-color: rgba(196, 73, 73, 0.28); }
-.notice--ok      { background: rgba(83, 145, 74, 0.14); border-color: rgba(117, 194, 104, 0.28); }
-.notice--info    { background: rgba(67, 120, 176, 0.14); border-color: rgba(92, 154, 221, 0.28); }
+.notice--ok      { background: rgba(83, 145, 74, 0.14); border-color: color-mix(in srgb, var(--c-ok) 28%, transparent); }
+.notice--info    { background: rgba(67, 120, 176, 0.14); border-color: color-mix(in srgb, var(--c-info) 28%, transparent); }
 
 .notice__meta {
   margin-top: 4px;
@@ -1098,7 +1104,7 @@ select::checkmark {
 }
 
 .action-button--danger:hover:not(:disabled) {
-  background: rgba(224, 85, 85, 0.1);
+  background: color-mix(in srgb, var(--c-danger) 10%, transparent);
 }
 
 .action-button--ghost:hover:not(:disabled) {
@@ -1398,7 +1404,7 @@ select::checkmark {
   border-radius: var(--radius-sm);
   background: var(--c-surface);
   border: 1px solid var(--c-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-popover);
 }
 
 .context-menu__item {
@@ -1423,7 +1429,7 @@ select::checkmark {
 }
 
 .context-menu__item--danger:hover {
-  background: rgba(224, 85, 85, 0.12);
+  background: color-mix(in srgb, var(--c-danger) 12%, transparent);
 }
 
 .context-menu__item--disabled {
@@ -2207,7 +2213,7 @@ code {
   background: var(--c-bg, #1a1f16);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   max-height: 260px;
   overflow-y: auto;
 }
@@ -2249,7 +2255,7 @@ code {
   border-radius: 50%;
   background: var(--c-ok, #75c268);
   /* Contrast ring (dropdown menu bg) — same intent as the pill dot. */
-  box-shadow: 0 0 0 2px var(--c-bg), 0 0 5px rgba(117, 194, 104, 0.7);
+  box-shadow: 0 0 0 2px var(--c-bg), 0 0 5px color-mix(in srgb, var(--c-ok) 70%, transparent);
 }
 
 /* ── Chip editor (titleIncludes / launch args / similar lists of strings) ── */
@@ -2499,7 +2505,7 @@ code {
   background: var(--c-ok);
   /* Contrast ring (sidebar surface) keeps the runtime dot legible on the */
   /* accent-tinted active pill — "active in runtime" must not blend into "selected". */
-  box-shadow: 0 0 0 2px var(--c-surface), 0 0 5px rgba(117, 194, 104, 0.7);
+  box-shadow: 0 0 0 2px var(--c-surface), 0 0 5px color-mix(in srgb, var(--c-ok) 70%, transparent);
   pointer-events: none;
 }
 
@@ -2525,7 +2531,7 @@ code {
   max-height: 80vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
 }
 
 .action-picker__header {
@@ -2788,7 +2794,7 @@ code {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
 }
 
 .confirm-modal h3 {
@@ -2819,7 +2825,7 @@ code {
   max-height: 60vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
   overflow: hidden;
 }
 
@@ -2913,11 +2919,11 @@ code {
 }
 
 .sidebar__runtime--running {
-  border-color: rgba(117, 194, 104, 0.3);
+  border-color: color-mix(in srgb, var(--c-ok) 30%, transparent);
 }
 
 .sidebar__runtime--stopped {
-  border-color: rgba(224, 85, 85, 0.3);
+  border-color: color-mix(in srgb, var(--c-danger) 30%, transparent);
 }
 
 .sidebar__runtime-label {
@@ -2942,7 +2948,7 @@ code {
 
 .sidebar__runtime-dot--running {
   background: var(--c-ok);
-  box-shadow: 0 0 6px rgba(117, 194, 104, 0.5);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--c-ok) 50%, transparent);
 }
 
 .sidebar__runtime-dot--stopped {
@@ -3025,12 +3031,12 @@ code {
 
 .expert-ops__dot--running {
   background: var(--c-ok);
-  box-shadow: 0 0 5px rgba(117, 194, 104, 0.5);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--c-ok) 50%, transparent);
 }
 
 .expert-ops__dot--idle {
   background: var(--c-danger);
-  box-shadow: 0 0 5px rgba(224, 85, 85, 0.4);
+  box-shadow: 0 0 5px color-mix(in srgb, var(--c-danger) 40%, transparent);
 }
 
 .expert-ops__status {
@@ -3093,13 +3099,13 @@ code {
 }
 
 .expert-ops__btn--stop {
-  background: rgba(224, 85, 85, 0.1);
-  border-color: rgba(224, 85, 85, 0.4);
+  background: color-mix(in srgb, var(--c-danger) 10%, transparent);
+  border-color: color-mix(in srgb, var(--c-danger) 40%, transparent);
   color: var(--c-danger);
 }
 
 .expert-ops__btn--stop:hover:not(:disabled) {
-  background: rgba(224, 85, 85, 0.18);
+  background: color-mix(in srgb, var(--c-danger) 18%, transparent);
 }
 
 /* ── Expert layout ── */
@@ -3612,7 +3618,7 @@ code {
   color: var(--c-text);
 }
 .action-picker__test-result--error {
-  border-color: rgba(224, 85, 85, 0.4);
+  border-color: color-mix(in srgb, var(--c-danger) 40%, transparent);
   color: var(--c-danger);
 }
 
@@ -3954,7 +3960,7 @@ code {
   background: var(--c-bg);
   border: 1px solid var(--c-card-border);
   border-radius: var(--radius-sm);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   padding: 4px;
   z-index: 100;
 }
@@ -3982,7 +3988,7 @@ code {
 }
 
 .profile-pill__dropdown-item--danger:hover {
-  background: rgba(224, 85, 85, 0.1);
+  background: color-mix(in srgb, var(--c-danger) 10%, transparent);
   color: var(--c-danger);
 }
 
@@ -4316,7 +4322,7 @@ img.profiles__app-card-monogram {
   width: min(520px, 90vw);
   display: flex;
   flex-direction: column;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
   outline: none;
 }
 
@@ -4654,7 +4660,7 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 .settings-icon-btn--danger:hover {
-  background: rgba(224, 85, 85, 0.12);
+  background: color-mix(in srgb, var(--c-danger) 12%, transparent);
   color: var(--c-danger);
 }
 
@@ -4849,7 +4855,7 @@ input[type="number"] { -moz-appearance: textfield; }
 .log-item--debug,
 .log-item--trace { opacity: 0.5; }
 
-.badge--error { background: rgba(224, 85, 85, 0.7); color: #fff; }
+.badge--error { background: color-mix(in srgb, var(--c-danger) 70%, transparent); color: #fff; }
 .badge--debug { background: rgba(255, 255, 255, 0.08); color: var(--c-text-muted); }
 
 /* ───────────────────────── M1: Toast ───────────────────────── */
@@ -4863,16 +4869,16 @@ input[type="number"] { -moz-appearance: textfield; }
   background: var(--c-surface, #1e2320);
   color: var(--c-text);
   border: 1px solid var(--c-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
   font-size: 0.85rem;
   max-width: 360px;
   animation: toast-in 160ms ease-out;
 }
 /* Toast accent colors derive from the app's semantic tokens (--c-ok / --c-warning
    / notice-info) so toast severity matches every other warning/ok/info surface. */
-.toast--success { border-color: rgba(117, 194, 104, 0.5); }
-.toast--warning { border-color: rgba(196, 153, 52, 0.5); }
-.toast--info    { border-color: rgba(92, 154, 221, 0.5); }
+.toast--success { border-color: color-mix(in srgb, var(--c-ok) 50%, transparent); }
+.toast--warning { border-color: color-mix(in srgb, var(--c-warning) 50%, transparent); }
+.toast--info    { border-color: color-mix(in srgb, var(--c-info) 50%, transparent); }
 
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(8px); }

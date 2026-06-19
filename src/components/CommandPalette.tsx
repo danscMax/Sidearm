@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ModalShell } from "./shared";
 
 /* ─────────────────────────────────────────────────────────
    Command Palette
@@ -40,10 +41,9 @@ export function CommandPalette({
     setActiveIndex(0);
   }, [query]);
 
+  // Escape is handled by ModalShell's useModalDismiss; this covers list nav.
   function handleKeyDown(e: React.KeyboardEvent) {
-    if (e.key === "Escape") {
-      onClose();
-    } else if (e.key === "ArrowDown") {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setActiveIndex((i) => Math.min(i + 1, filtered.length - 1));
     } else if (e.key === "ArrowUp") {
@@ -55,36 +55,39 @@ export function CommandPalette({
   }
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="command-palette" onClick={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
-        <input
-          className="command-palette__input"
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("command.placeholder")}
-          autoFocus
-        />
-        {filtered.length > 0 ? (
-          <ul className="command-palette__list" role="listbox">
-            {filtered.map((cmd, index) => (
-              <li
-                key={cmd.id}
-                role="option"
-                aria-selected={index === activeIndex}
-                className={`command-palette__item${index === activeIndex ? " command-palette__item--active" : ""}`}
-                onClick={() => onExecute(cmd.id)}
-                onMouseEnter={() => setActiveIndex(index)}
-              >
-                <span>{cmd.label}</span>
-                {cmd.shortcut ? <span className="command-palette__shortcut">{cmd.shortcut}</span> : null}
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="command-palette__empty">{t("command.empty")}</div>
-        )}
-      </div>
-    </div>
+    <ModalShell
+      onClose={onClose}
+      className="command-palette"
+      ariaLabel={t("command.placeholder")}
+      onKeyDown={handleKeyDown}
+    >
+      <input
+        className="command-palette__input"
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder={t("command.placeholder")}
+        autoFocus
+      />
+      {filtered.length > 0 ? (
+        <ul className="command-palette__list" role="listbox">
+          {filtered.map((cmd, index) => (
+            <li
+              key={cmd.id}
+              role="option"
+              aria-selected={index === activeIndex}
+              className={`command-palette__item${index === activeIndex ? " command-palette__item--active" : ""}`}
+              onClick={() => onExecute(cmd.id)}
+              onMouseEnter={() => setActiveIndex(index)}
+            >
+              <span>{cmd.label}</span>
+              {cmd.shortcut ? <span className="command-palette__shortcut">{cmd.shortcut}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <div className="command-palette__empty">{t("command.empty")}</div>
+      )}
+    </ModalShell>
   );
 }

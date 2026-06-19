@@ -1,8 +1,7 @@
 import { open } from "@tauri-apps/plugin-dialog";
+import { PathField } from "./PathField";
 
-/** Labelled text input paired with a native "browse for directory" button.
- *  Presentational: the caller owns how the chosen path is stored via `onChange`
- *  (which receives both manual edits and the picked directory). */
+/** Thin wrapper over PathField that browses for a directory. */
 export function DirectoryPathField({
   label,
   value,
@@ -19,28 +18,16 @@ export function DirectoryPathField({
   placeholder?: string;
 }) {
   return (
-    <label className="field">
-      <span className="field__label">{label}</span>
-      <div className="field__row">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-        />
-        <button
-          type="button"
-          className="action-button action-button--small"
-          onClick={async () => {
-            const selected = await open({ title: browseTitle, directory: true, multiple: false });
-            if (typeof selected === "string") {
-              onChange(selected);
-            }
-          }}
-        >
-          {browseLabel}
-        </button>
-      </div>
-    </label>
+    <PathField
+      label={label}
+      value={value}
+      onChange={onChange}
+      browseLabel={browseLabel}
+      placeholder={placeholder}
+      browse={async () => {
+        const selected = await open({ title: browseTitle, directory: true, multiple: false });
+        return typeof selected === "string" ? selected : null;
+      }}
+    />
   );
 }

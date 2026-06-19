@@ -10,6 +10,7 @@ import {
   removeMenuItem,
   updateMenuItem,
 } from "../lib/menu-helpers";
+import { SelectField } from "./shared";
 
 export interface MenuItemsEditorProps {
   items: MenuItem[];
@@ -130,28 +131,24 @@ export function MenuItemsEditor({
           </label>
 
           {item.kind === "action" ? (
-            <label className="field">
-              <span className="field__label">{t("inspector.menuItemActionRef")}</span>
-              <select
-                value={item.actionId}
-                disabled={disabled}
-                onChange={(event) =>
-                  onChange(
-                    updateMenuItem(items, item.id, (currentItem) =>
-                      currentItem.kind === "action"
-                        ? { ...currentItem, actionId: event.target.value }
-                        : currentItem,
-                    ),
-                  )
-                }
-              >
-                {availableActions.map((action) => (
-                  <option key={action.id} value={action.id}>
-                    {action.displayName} ({action.type})
-                  </option>
-                ))}
-              </select>
-            </label>
+            <SelectField
+              label={t("inspector.menuItemActionRef")}
+              value={item.actionId}
+              disabled={disabled}
+              options={availableActions.map((action) => ({
+                value: action.id,
+                label: `${action.displayName} (${action.type})`,
+              }))}
+              onChange={(actionId) =>
+                onChange(
+                  updateMenuItem(items, item.id, (currentItem) =>
+                    currentItem.kind === "action"
+                      ? { ...currentItem, actionId }
+                      : currentItem,
+                  ),
+                )
+              }
+            />
           ) : (
             <>
               <div className="field__header">

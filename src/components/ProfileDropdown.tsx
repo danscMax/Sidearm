@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { Profile } from "../lib/config";
+import { useDismissable } from "../hooks/useDismissable";
 
 export interface ProfileDropdownProps {
   profiles: Profile[];
@@ -38,29 +39,18 @@ export function ProfileDropdown({
 
   const activeProfile = profiles.find((p) => p.id === effectiveProfileId);
 
-  // Close on outside click.
-  useEffect(() => {
-    if (!open) return;
-    function handleClick(e: MouseEvent) {
-      if (!rootRef.current) return;
-      if (!rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    window.addEventListener("mousedown", handleClick);
-    return () => window.removeEventListener("mousedown", handleClick);
-  }, [open]);
+  // Close on outside-click or Escape (shared popover dismiss convention),
+  // returning focus to the trigger.
+  const closeAndRefocus = useCallback(() => {
+    setOpen(false);
+    triggerRef.current?.focus();
+  }, []);
+  useDismissable(rootRef, closeAndRefocus, open);
 
-  // Close on Esc, navigate with arrows.
+  // Navigate with arrows / select with Enter.
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        setOpen(false);
-        triggerRef.current?.focus();
-        return;
-      }
       if (e.key === "ArrowDown") {
         e.preventDefault();
         setFocusIndex((idx) => (idx + 1) % profiles.length);

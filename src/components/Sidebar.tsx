@@ -6,7 +6,7 @@ import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
 import { ProfileDropdown } from "./ProfileDropdown";
-import { useCssVars } from "../hooks/useCssVars";
+import { PillTrack } from "./PillTrack";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
   profiles: (
@@ -67,8 +67,6 @@ export function Sidebar({
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
-  // Sidebar profile pill-track count via CSSOM (CSP-safe; FIXES P2-3).
-  const pillTrackRef = useCssVars<HTMLDivElement>({ "--pill-count": profiles.length });
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -115,42 +113,27 @@ export function Sidebar({
           </div>
         </div>
         {profiles.length <= 3 ? (
-          <div className="pill-track pill-track--sidebar" ref={pillTrackRef}>
-            {(() => {
-              const idx = profiles.findIndex((p) => p.id === effectiveProfileId);
-              return idx >= 0 ? (
-                <div
-                  className="pill-track__indicator"
-                  ref={(el) => {
-                    if (el) el.style.setProperty("--pill-offset", `${idx * 100}%`);
-                  }}
-                />
-              ) : null;
-            })()}
-            {profiles.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                className={`pill-track__pill${p.id === effectiveProfileId ? " pill-track__pill--active" : ""}`}
-                onClick={() => {
-                  startTransition(() => onSelectProfile(p.id));
-                }}
-                onDoubleClick={(e) => {
-                  e.preventDefault();
-                  onSwitchMode("settings");
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setCtxMenu({ x: e.clientX, y: e.clientY, profileId: p.id });
-                }}
-              >
-                {p.name}
-                {runtimeStatus === "running" && runtimeResolvedProfileName === p.name ? (
-                  <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
-                ) : null}
-              </button>
-            ))}
-          </div>
+          <PillTrack
+            className="pill-track--sidebar"
+            active={effectiveProfileId ?? ""}
+            onSelect={(id) => startTransition(() => onSelectProfile(id))}
+            items={profiles.map((p) => ({ key: p.id, label: p.name }))}
+            pillProps={(item) => ({
+              onDoubleClick: (e) => {
+                e.preventDefault();
+                onSwitchMode("settings");
+              },
+              onContextMenu: (e) => {
+                e.preventDefault();
+                setCtxMenu({ x: e.clientX, y: e.clientY, profileId: item.key });
+              },
+            })}
+            renderTrailing={(item) =>
+              runtimeStatus === "running" && runtimeResolvedProfileName === item.label ? (
+                <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
+              ) : null
+            }
+          />
         ) : (
           <ProfileDropdown
             profiles={profiles}

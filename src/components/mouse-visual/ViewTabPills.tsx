@@ -4,6 +4,7 @@
 
 import { useTranslation } from "react-i18next";
 import type { ViewTab } from "../../lib/mouse-visual";
+import { PillTrack } from "../PillTrack";
 
 interface ViewTabPillsProps {
   activeTab: ViewTab;
@@ -12,38 +13,15 @@ interface ViewTabPillsProps {
 
 export function ViewTabPills({ activeTab, onSelect }: ViewTabPillsProps) {
   const { t } = useTranslation();
-  const viewTabs: { key: ViewTab; label: string }[] = [
-    { key: "combined", label: t("visualization.tabAll") },
-    { key: "top", label: t("visualization.tabTop") },
-    { key: "side", label: t("visualization.tabSide") },
-  ];
-  const viewIdx = viewTabs.findIndex((tab) => tab.key === activeTab);
   return (
-    <div
-      className="pill-track"
-      ref={(el) => {
-        if (el) el.style.setProperty("--pill-count", String(viewTabs.length));
-      }}
-    >
-      {viewIdx >= 0 ? (
-        <div
-          className="pill-track__indicator"
-          ref={(el) => {
-            if (el) el.style.setProperty("--pill-offset", `${viewIdx * 100}%`);
-          }}
-        />
-      ) : null}
-      {viewTabs.map((tab) => (
-        <button
-          key={tab.key}
-          type="button"
-          aria-pressed={tab.key === activeTab}
-          className={`pill-track__pill${tab.key === activeTab ? " pill-track__pill--active" : ""}`}
-          onClick={() => onSelect(tab.key)}
-        >
-          {tab.label}
-        </button>
-      ))}
-    </div>
+    <PillTrack
+      active={activeTab}
+      onSelect={onSelect}
+      items={[
+        { key: "combined", label: t("visualization.tabAll") },
+        { key: "top", label: t("visualization.tabTop") },
+        { key: "side", label: t("visualization.tabSide") },
+      ]}
+    />
   );
 }

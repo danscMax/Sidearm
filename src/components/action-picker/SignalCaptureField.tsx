@@ -1,14 +1,15 @@
 import { useTranslation } from "react-i18next";
+import { CaptureRow } from "./shared/CaptureRow";
 
 export function SignalCaptureField({
   signalDraft,
-  setSignalDraft,
+  onChange,
   isCapturing,
   setIsCapturing,
   expectedSignal,
 }: {
   signalDraft: string | null;
-  setSignalDraft: (value: string | null) => void;
+  onChange: (value: string | null) => void;
   isCapturing: boolean;
   setIsCapturing: (capturing: boolean) => void;
   expectedSignal: string | null;
@@ -25,22 +26,12 @@ export function SignalCaptureField({
             </span>
           ) : null}
         </span>
-        <div className="capture-row">
-          <input
-            type="text"
-            readOnly
-            value={signalDraft ?? ""}
-            placeholder={isCapturing ? t("picker.signalCapturing") : t("picker.signalEmpty")}
-            className={isCapturing ? "capture-active" : ""}
-          />
-          <button
-            type="button"
-            className={`action-button${isCapturing ? " action-button--accent" : ""}`}
-            onClick={() => setIsCapturing(!isCapturing)}
-          >
-            {isCapturing ? t("common.cancel") : t("picker.record")}
-          </button>
-        </div>
+        <CaptureRow
+          value={signalDraft ?? ""}
+          placeholder={isCapturing ? t("picker.signalCapturing") : t("picker.signalEmpty")}
+          capturing={isCapturing}
+          onToggle={() => setIsCapturing(!isCapturing)}
+        />
         {isCapturing ? (
           <p className="panel__muted">{t("picker.signalCaptureHint")}</p>
         ) : null}
@@ -51,7 +42,7 @@ export function SignalCaptureField({
           <button
             type="button"
             className="action-button action-button--small action-button--ghost"
-            onClick={() => setSignalDraft(expectedSignal)}
+            onClick={() => onChange(expectedSignal)}
           >
             {t("picker.signalApply")}
           </button>

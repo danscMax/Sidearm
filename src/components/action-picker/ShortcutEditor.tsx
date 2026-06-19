@@ -2,7 +2,8 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { ShortcutActionPayload } from "../../lib/config";
 import { normalizeKeyName, resolveKeyName } from "../../lib/action-picker-helpers";
-import { Toggle } from "../shared";
+import { CaptureRow } from "./shared/CaptureRow";
+import { ModifierRow } from "./shared/ModifierRow";
 
 export function ShortcutEditor({
   draft,
@@ -39,35 +40,17 @@ export function ShortcutEditor({
     <div className="editor-grid" onKeyDown={handleKeyCapture}>
       <label className="field">
         <span className="field__label">{t("picker.keyLabel")}</span>
-        <div className="capture-row">
-          <input
-            type="text"
-            readOnly
-            value={draft.key}
-            placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
-            className={isCapturing ? "capture-active" : ""}
-          />
-          <button
-            type="button"
-            className={`action-button${isCapturing ? " action-button--accent" : ""}`}
-            onClick={() => setIsCapturing(!isCapturing)}
-          >
-            {isCapturing ? t("common.cancel") : t("picker.record")}
-          </button>
-        </div>
+        <CaptureRow
+          value={draft.key}
+          placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
+          capturing={isCapturing}
+          onToggle={() => setIsCapturing(!isCapturing)}
+        />
       </label>
-      <div className="modifier-row">
-        {(["ctrl", "shift", "alt", "win"] as const).map((mod) => (
-          <label key={mod} className="field field--inline">
-            <Toggle
-              checked={draft[mod]}
-              onChange={(checked) => onChange({ ...draft, [mod]: checked })}
-              ariaLabel={mod.charAt(0).toUpperCase() + mod.slice(1)}
-            />
-            <span className="field__label">{mod.charAt(0).toUpperCase() + mod.slice(1)}</span>
-          </label>
-        ))}
-      </div>
+      <ModifierRow
+        value={draft}
+        onChange={(mods) => onChange({ ...draft, ...mods })}
+      />
       <p className="panel__muted">
         {t("picker.modifiersHint")}
       </p>

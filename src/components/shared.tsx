@@ -49,6 +49,35 @@ export function Toggle({
   );
 }
 
+/** Labelled `<select>` wrapped in the shared `field` layout. `options` carry
+ *  already-display-ready labels (the caller translates). */
+export function SelectField<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="field">
+      <span className="field__label">{label}</span>
+      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as T)}>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function ErrorPanel({ error }: { error: CommandError }) {
   return (
     <div className="notice notice--error">
@@ -99,6 +128,9 @@ interface ModalShellProps {
   children: React.ReactNode;
   /** className for the dialog element (e.g. "confirm-modal", "action-picker"). */
   className?: string;
+  /** className for the backdrop. Default "modal-backdrop"; override for a
+   *  full-bleed variant (e.g. the onboarding wizard's "onb-overlay"). */
+  backdropClassName?: string;
   /** Pass the caller's ref when it runs its own auto-focus effect on the dialog. */
   dialogRef?: React.RefObject<HTMLDivElement | null>;
   role?: "dialog" | "alertdialog";
@@ -122,6 +154,7 @@ export function ModalShell({
   onClose,
   children,
   className,
+  backdropClassName = "modal-backdrop",
   dialogRef,
   role = "dialog",
   ariaLabel,
@@ -134,7 +167,7 @@ export function ModalShell({
   const ref = dialogRef ?? fallbackRef;
   const handleKeyDown = useModalDismiss(ref, { onClose, escapeEnabled });
   return (
-    <div className="modal-backdrop" onClick={dismissOnBackdropClick ? onClose : undefined}>
+    <div className={backdropClassName} onClick={dismissOnBackdropClick ? onClose : undefined}>
       <div
         ref={ref}
         role={role}

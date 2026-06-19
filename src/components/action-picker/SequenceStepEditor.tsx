@@ -16,13 +16,14 @@ import {
 import { ChipEditor } from "../ChipEditor";
 import { ExecutablePathField } from "../ExecutablePathField";
 import { DirectoryPathField } from "../DirectoryPathField";
+import { CompoundCard } from "./shared/CompoundCard";
 
 export function SequenceStepEditor({
   steps,
-  onUpdate,
+  onChange,
 }: {
   steps: SequenceStep[];
-  onUpdate: (steps: SequenceStep[]) => void;
+  onChange: (steps: SequenceStep[]) => void;
 }) {
   const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
@@ -106,7 +107,7 @@ export function SequenceStepEditor({
         // Wholesale replacement: clear keys so the render-time reconcile mints
         // fresh ones matching the new step list.
         stepKeysRef.current = [];
-        onUpdate(recording.steps);
+        onChange(recording.steps);
       }
     } catch {
       setIsRecording(false);
@@ -115,18 +116,18 @@ export function SequenceStepEditor({
 
   function addStep(type: SequenceStep["type"]) {
     stepKeysRef.current.push(newStepKey());
-    onUpdate([...steps, createDefaultSequenceStep(type)]);
+    onChange([...steps, createDefaultSequenceStep(type)]);
   }
 
   function removeStep(index: number) {
     if (steps.length <= 1) return;
     // Drop the key at the same index so the surviving steps keep their keys.
     stepKeysRef.current.splice(index, 1);
-    onUpdate(steps.filter((_, i) => i !== index));
+    onChange(steps.filter((_, i) => i !== index));
   }
 
   function updateStep(index: number, next: SequenceStep) {
-    onUpdate(steps.map((s, i) => (i === index ? next : s)));
+    onChange(steps.map((s, i) => (i === index ? next : s)));
   }
 
   return (
@@ -192,23 +193,14 @@ export function SequenceStepEditor({
 
       <div className="stack-list">
         {steps.map((step, index) => (
-          <div className="compound-card" key={stepKeys[index]}>
-            <div className="compound-card__header">
-              <div>
-                <strong>{t("picker.stepTitle", { index: index + 1 })}</strong>
-                <span className="compound-card__meta">{labelForSequenceStep(step.type)}</span>
-              </div>
-              <button
-                type="button"
-                className="action-button action-button--secondary action-button--small"
-                disabled={steps.length === 1}
-                onClick={() => removeStep(index)}
-              >
-                {t("common.delete")}
-              </button>
-            </div>
-
-            <div className="editor-grid">
+          <CompoundCard
+            key={stepKeys[index]}
+            title={t("picker.stepTitle", { index: index + 1 })}
+            meta={labelForSequenceStep(step.type)}
+            removeLabel={t("common.delete")}
+            canRemove={steps.length !== 1}
+            onRemove={() => removeStep(index)}
+          >
               <label className="field">
                 <span className="field__label">{t("picker.stepType")}</span>
                 <select
@@ -293,8 +285,7 @@ export function SequenceStepEditor({
                   }}
                 />
               </label>
-            </div>
-          </div>
+          </CompoundCard>
         ))}
       </div>
     </div>

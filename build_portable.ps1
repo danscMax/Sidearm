@@ -388,9 +388,21 @@ if (Test-Path -LiteralPath $WEBVIEW2_EXE) {
     # The evergreen MicrosoftEdgeWebview2Setup.exe changes hash on every Microsoft
     # update, so a pinned SHA-256 would be brittle — but it is always Microsoft-signed.
     # Refuse to bundle a binary that is unsigned, tampered, or not signed by Microsoft.
-    $sig = Get-AuthenticodeSignature -LiteralPath $WEBVIEW2_EXE
-    $signer = if ($sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '<none>' }
-    if ($sig.Status -eq 'Valid' -and $signer -match 'O=Microsoft Corporation') {
+    # Get-AuthenticodeSignature lives in Microsoft.PowerShell.Security, which does
+    # not always autoload (PS 7 on some machines reports CouldNotAutoloadMatchingModule).
+    # Load it explicitly and fail loudly if unavailable — a silent autoload error
+    # would skip this security gate entirely instead of refusing to bundle.
+    if (-not (Get-Command Get-AuthenticodeSignature -ErrorAction SilentlyContinue)) {
+        try { Import-Module Microsoft.PowerShell.Security -ErrorAction Stop 3>$null 4>$null } catch { }
+    }
+    $sig = $null
+    try {
+        $sig = Get-AuthenticodeSignature -LiteralPath $WEBVIEW2_EXE
+    } catch {
+        Write-Warn "Cannot verify WebView2 signature — NOT bundling it. ($($_.Exception.Message))"
+    }
+    $signer = if ($sig -and $sig.SignerCertificate) { $sig.SignerCertificate.Subject } else { '<none>' }
+    if ($sig -and $sig.Status -eq 'Valid' -and $signer -match 'O=Microsoft Corporation') {
         Copy-Item -LiteralPath $WEBVIEW2_EXE -Destination $resOutDir
         Write-Ok "resources/MicrosoftEdgeWebview2Setup.exe (Authenticode-verified: Microsoft)"
     } else {

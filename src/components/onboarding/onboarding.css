@@ -248,6 +248,22 @@
   border-color: var(--c-border, rgba(255, 255, 255, 0.08));
   color: var(--c-text-dim, #9aa3ad);
 }
+/* Inline layout helpers (replace CSP-blocked inline style attributes). */
+.onb-result__path {
+  margin-left: 6px;
+}
+.onb-result__value {
+  margin: 0 6px;
+}
+.onb-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.onb-step__lead--note {
+  margin-top: 14px;
+  font-size: 12px;
+}
 
 /* Footer */
 .onb-footer {

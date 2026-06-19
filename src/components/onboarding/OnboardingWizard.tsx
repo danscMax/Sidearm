@@ -262,7 +262,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                   <li>{T.synapse.s3}</li>
                   <li>{T.synapse.s4}</li>
                 </ol>
-                <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                <div className="onb-actions">
                   <button type="button" className="onb-btn primary" onClick={() => void saveSynapse(true)}>
                     {T.synapse.save}
                   </button>
@@ -270,7 +270,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                 {synapseSavedPath && (
                   <div className="onb-result">
                     <span className="onb-check__dot ok" />
-                    {T.synapse.saved}: <code style={{ marginLeft: 6 }}>{synapseSavedPath}</code>
+                    {T.synapse.saved}: <code className="onb-result__path">{synapseSavedPath}</code>
                   </div>
                 )}
                 {saveError && (
@@ -321,7 +321,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                     {adminBusy ? T.admin.busy : T.admin.enable}
                   </button>
                 )}
-                <p className="onb-step__lead" style={{ marginTop: 14, fontSize: 12 }}>
+                <p className="onb-step__lead onb-step__lead--note">
                   {T.admin.note}
                 </p>
               </>
@@ -334,7 +334,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                 {fired ? (
                   <div className="onb-result">
                     <span className="onb-check__dot ok" />
-                    {T.tryit.fired}: <strong style={{ margin: "0 6px" }}>{fired.actionPretty}</strong>
+                    {T.tryit.fired}: <strong className="onb-result__value">{fired.actionPretty}</strong>
                     {fired.resolvedProfileName ? `(${fired.resolvedProfileName})` : ""}
                   </div>
                 ) : (

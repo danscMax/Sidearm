@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Onboarding admin check no longer contradicts itself.** The "administrator
+  rights" step claimed "already running as administrator" whenever the
+  run-as-admin autostart task existed, even when the current session was not
+  elevated (so the welcome step showed it red and the admin step showed it
+  green at once). It now distinguishes three states: elevated now, autostart
+  configured (applies at next sign-in), or neither.
+- **Onboarding can elevate the current session.** Added a "Restart as
+  administrator now" button (reusing the existing tray relaunch command) so the
+  red welcome check has a real remedy — the wizard reopens elevated.
+- **Onboarding spacing under strict CSP.** Several inline `style` attributes
+  were silently dropped by the app's `style-src 'self'` policy; moved to CSS
+  classes so first-run spacing renders as intended.
+- **Command palette is now a proper modal** (focus-trap + `aria-modal`),
+  fixing focus escaping the palette.
+- **Portable build no longer crashes on the WebView2 signature check** when the
+  PowerShell security module fails to load — the check now fails closed (warns
+  and skips bundling) instead of aborting.
+
+### Changed
+- **UI consolidation (no behavioural change).** Extracted shared components and
+  hooks to remove drifted re-implementations: `PillTrack` (was 3 hand-rolled
+  pill selectors), `PathField`, `SelectField`, `CompoundCard`, the action-picker
+  `ModifierRow`/`CaptureRow`/`PickerGrid` primitives, and a `useDismissable`
+  popover hook (unifies dropdown/context-menu dismiss). Onboarding and command
+  palette now use the shared `ModalShell`. Status colours and elevation shadows
+  moved onto CSS custom properties (`--shadow-modal`, `--shadow-popover`,
+  `--c-info`, `color-mix`-derived semantic tints).
+
 ## [0.2.0] — 2026-06-17
 
 A large audit-driven release: one new feature, the English UI fixed, several

@@ -12,7 +12,7 @@ import type {
   MergeStrategy,
   ParsedSynapseProfiles,
 } from "../lib/synapse-import";
-import { ModalShell } from "./shared";
+import { ModalFooter, ModalHeader, ModalShell } from "./shared";
 
 export interface SynapseImportModalProps {
   parsed: ParsedSynapseProfiles;
@@ -87,12 +87,10 @@ export function SynapseImportModal({
       escapeEnabled={!submitting}
       dismissOnBackdropClick={!submitting}
     >
-        <header>
-          <h3>{t("synapseImport.title")}</h3>
-          <p className="panel__muted">
-            {t("synapseImport.sourceLabel", { path: parsed.sourcePath })}
-          </p>
-        </header>
+        <ModalHeader
+          title={t("synapseImport.title")}
+          subtitle={t("synapseImport.sourceLabel", { path: parsed.sourcePath })}
+        />
 
         <div className="synapse-import-modal__body">
           {parsed.profiles.length === 0 ? (
@@ -229,7 +227,7 @@ export function SynapseImportModal({
           ) : null}
         </div>
 
-        <footer className="confirm-modal__actions">
+        <ModalFooter>
           <button
             type="button"
             className="action-button action-button--ghost"
@@ -251,7 +249,7 @@ export function SynapseImportModal({
                   bindings: totalBindings,
                 })}
           </button>
-        </footer>
+        </ModalFooter>
     </ModalShell>
   );
 }

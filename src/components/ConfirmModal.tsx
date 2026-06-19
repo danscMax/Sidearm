@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ModalShell } from "./shared";
+import { ModalFooter, ModalHeader, ModalShell } from "./shared";
 
 /* ─────────────────────────────────────────────────────────
    Confirm Modal
@@ -36,11 +36,11 @@ export function ConfirmModal({
       onClose={onCancel}
       className="confirm-modal"
       dialogRef={containerRef}
-      ariaLabel={title}
+      ariaLabelledby="confirm-modal-title"
     >
-      <h3>{title}</h3>
+      <ModalHeader title={title} id="confirm-modal-title" />
       <p>{message}</p>
-      <div className="confirm-modal__actions">
+      <ModalFooter>
         <button
           type="button"
           className="action-button action-button--ghost"
@@ -56,7 +56,7 @@ export function ConfirmModal({
         >
           {confirmLabel ?? t("common.confirm")}
         </button>
-      </div>
+      </ModalFooter>
     </ModalShell>
   );
 }

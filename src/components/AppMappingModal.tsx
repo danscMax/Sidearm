@@ -7,7 +7,7 @@ import { pickExecutablePath } from "../lib/backend";
 import { clampPriority } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { RunningProcessPicker } from "./RunningProcessPicker";
-import { CloseButton, ModalShell } from "./shared";
+import { CloseButton, ModalFooter, ModalShell, Toggle } from "./shared";
 import { ExeIcon } from "./ExeIcon";
 
 interface AppMappingModalProps {
@@ -136,13 +136,11 @@ export function AppMappingModal({
           <div className="rule-modal__inline-row">
             <label className="rule-modal__inline-field">
               <span className="field__label">{t("common.enabled")}</span>
-              <input
-                className="profiles__toggle"
-                type="checkbox"
+              <Toggle
                 checked={mapping.enabled}
-                onChange={(e) =>
+                onChange={(checked) =>
                   updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, enabled: e.target.checked }),
+                    upsertAppMapping(c, { ...mapping, enabled: checked }),
                   )
                 }
               />
@@ -198,7 +196,7 @@ export function AppMappingModal({
         </div>
 
         {/* Footer */}
-        <div className="rule-modal__footer">
+        <ModalFooter className="rule-modal__footer">
           <span className="rule-modal__autosave">{t("ruleModal.autosave")}</span>
           <span className="rule-modal__spacer" />
 
@@ -232,7 +230,7 @@ export function AppMappingModal({
               {t("ruleModal.deleteRule")}
             </button>
           )}
-        </div>
+        </ModalFooter>
       </ModalShell>
       {showProcessPicker ? (
         <RunningProcessPicker

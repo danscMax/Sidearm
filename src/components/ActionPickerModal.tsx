@@ -13,7 +13,7 @@ import {
   upsertSnippetLibraryItem,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { CloseButton, ModalShell } from "./shared";
+import { CloseButton, ModalFooter, ModalShell } from "./shared";
 import {
   autoName,
   buildAction,
@@ -425,7 +425,7 @@ export function ActionPickerModal({
           </p>
         ) : null}
 
-        <div className="action-picker__footer">
+        <ModalFooter className="action-picker__footer">
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>
             {t("common.cancel")}
           </button>
@@ -445,7 +445,7 @@ export function ActionPickerModal({
           >
             {t("common.save")}
           </button>
-        </div>
+        </ModalFooter>
     </ModalShell>
   );
 }

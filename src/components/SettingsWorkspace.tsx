@@ -39,7 +39,7 @@ import {
 import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
 import { PresetsModal } from "./PresetsModal";
-import { Toggle } from "./shared";
+import { Notice, Toggle } from "./shared";
 import { CopyIcon, ExportIcon, TrashIcon } from "./icons";
 
 export interface SettingsWorkspaceProps {
@@ -329,7 +329,7 @@ export function SettingsWorkspace({
         )}
 
         {adminAutostart?.enabled && adminAutostart.pathMismatch && (
-          <div className="notice notice--error mt-12">
+          <Notice variant="error" className="mt-12">
             <p>{t("settings.autostartPathMismatchMsg")}</p>
             <p className="mono-sm">
               {adminAutostart.registeredPath ?? t("settings.autostartPathUnknown")}
@@ -346,7 +346,7 @@ export function SettingsWorkspace({
             >
               {t("settings.autostartReregisterButton")}
             </button>
-          </div>
+          </Notice>
         )}
       </section>
 
@@ -765,9 +765,9 @@ export function SettingsWorkspace({
           </button>
         </div>
         {importError ? (
-          <div className="notice notice--error mt-8">
+          <Notice variant="error" className="mt-8">
             <p>{importError}</p>
-          </div>
+          </Notice>
         ) : null}
       </section>
 

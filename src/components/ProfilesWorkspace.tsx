@@ -27,7 +27,7 @@ import {
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
-import { CloseButton, ModalShell } from "./shared";
+import { CloseButton, ModalShell, Notice, Toggle } from "./shared";
 import { PillTrack } from "./PillTrack";
 import { ExeIcon } from "./ExeIcon";
 import { AppMappingModal } from "./AppMappingModal";
@@ -406,7 +406,7 @@ export function ProfilesWorkspace({
       ) : null}
 
       {layerConflicts.length > 0 ? (
-        <div className="notice notice--warning profiles__conflict-banner">
+        <Notice variant="warning" className="profiles__conflict-banner">
           <strong>{t("conflict.banner", { count: layerConflicts.length })}</strong>
           <ul>
             {layerConflicts.map((g) => (
@@ -418,7 +418,7 @@ export function ProfilesWorkspace({
               </li>
             ))}
           </ul>
-        </div>
+        </Notice>
       ) : null}
 
       {/* ── Mouse visualization ── */}
@@ -712,11 +712,10 @@ export function ProfilesWorkspace({
                     <span className="new-rule__capture-exe">{newRuleExe}</span>
                   </div>
                   <label className="new-rule__title-toggle">
-                    <input
-                      className="profiles__toggle"
-                      type="checkbox"
+                    <Toggle
                       checked={newRuleTitleEnabled}
-                      onChange={(e) => setNewRuleTitleEnabled(e.target.checked)}
+                      onChange={setNewRuleTitleEnabled}
+                      ariaLabel={t("newRule.titleFilter")}
                     />
                     <span>{t("newRule.titleFilter")}</span>
                   </label>

@@ -2328,8 +2328,6 @@ code {
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
   position: relative;
 }
-.presets-modal__header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.presets-modal__header h3 { margin: 0; font-size: 1rem; }
 .presets-modal__subtitle { margin: 0 0 10px; color: var(--c-text-muted); font-size: 0.82rem; line-height: 1.45; }
 .presets-modal__body { flex: 1; overflow-y: auto; min-height: 220px; }
 .presets-modal__grid {
@@ -2521,6 +2519,33 @@ code {
   align-items: center;
   justify-content: center;
   backdrop-filter: blur(6px);
+}
+
+/* Shared modal title row (ModalHeader) and action row (ModalFooter). Per-modal
+   classes layer padding/borders on top via the component's `className` prop. */
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.modal-header__titles { min-width: 0; }
+.modal-header h2 {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--c-text);
+}
+.modal-header__subtitle {
+  margin: 2px 0 0;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  font-weight: 400;
+}
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .modal.action-picker {
@@ -2808,12 +2833,6 @@ code {
   color: var(--c-text);
   font-size: var(--fs-body-sm);
   line-height: 1.5;
-}
-
-.confirm-modal__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
 }
 
 /* ── Command Palette ── */

@@ -57,15 +57,17 @@ export function SelectField<T extends string>({
   options,
   onChange,
   disabled,
+  className,
 }: {
   label: string;
   value: T;
   options: ReadonlyArray<{ value: T; label: string }>;
   onChange: (value: T) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   return (
-    <label className="field">
+    <label className={`field${className ? ` ${className}` : ""}`}>
       <span className="field__label">{label}</span>
       <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as T)}>
         {options.map((opt) => (
@@ -78,9 +80,28 @@ export function SelectField<T extends string>({
   );
 }
 
+/** A status banner (info/warning/ok/error). Owns the shared `notice notice--*`
+ *  class; the lead `<strong>` + body stay the caller's `children`. Replaces the
+ *  dozen inline `<div className="notice notice--*">` blocks. */
+export function Notice({
+  variant,
+  children,
+  className,
+}: {
+  variant: "info" | "warning" | "ok" | "error";
+  children?: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`notice notice--${variant}${className ? ` ${className}` : ""}`}>
+      {children}
+    </div>
+  );
+}
+
 export function ErrorPanel({ error }: { error: CommandError }) {
   return (
-    <div className="notice notice--error">
+    <Notice variant="error">
       <strong>{error.code}</strong>
       <p>{error.message}</p>
       {error.details?.length ? (
@@ -92,7 +113,50 @@ export function ErrorPanel({ error }: { error: CommandError }) {
           ))}
         </ul>
       ) : null}
-    </div>
+    </Notice>
+  );
+}
+
+/** Shared modal title row: an `<h2>` (+ optional subtitle) and an optional
+ *  close button. Always `h2` for consistent heading level / a11y. */
+export function ModalHeader({
+  title,
+  id,
+  subtitle,
+  onClose,
+  closeLabel,
+  className,
+}: {
+  title: React.ReactNode;
+  id?: string;
+  subtitle?: React.ReactNode;
+  onClose?: () => void;
+  closeLabel?: string;
+  className?: string;
+}) {
+  return (
+    <header className={`modal-header${className ? ` ${className}` : ""}`}>
+      <div className="modal-header__titles">
+        <h2 id={id}>{title}</h2>
+        {subtitle ? <p className="modal-header__subtitle">{subtitle}</p> : null}
+      </div>
+      {onClose ? <CloseButton onClick={onClose} ariaLabel={closeLabel ?? ""} /> : null}
+    </header>
+  );
+}
+
+/** Shared modal action row (Cancel / primary / danger buttons). Buttons stay
+ *  the caller's children; this only unifies the `<footer>` wrapper that drifted
+ *  into five different class names. */
+export function ModalFooter({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <footer className={`modal-footer${className ? ` ${className}` : ""}`}>{children}</footer>
   );
 }
 

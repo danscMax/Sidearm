@@ -43,7 +43,7 @@ import { isActionLiveRunnable } from "../lib/action-helpers";
 
 import { ControlPropertiesPanel } from "./ControlPropertiesPanel";
 import { LogPanel } from "./LogPanel";
-import { Fact } from "./shared";
+import { Fact, Notice } from "./shared";
 import type { LogPanelControl } from "../hooks/useLogPanel";
 
 interface DebugRuntimeProps {
@@ -395,7 +395,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                         </div>
 
                         {currentVerificationStep.result !== "pending" ? (
-                          <div className="notice notice--info">
+                          <Notice variant="info">
                             <strong>
                               {t("debug.stepAlreadyDone", { result: labelForVerificationResult(currentVerificationStep.result) })}
                             </strong>
@@ -413,7 +413,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                                 {t("debug.recheck")}
                               </button>
                             </div>
-                          </div>
+                          </Notice>
                         ) : (
                           <>
                             <div className="fact-grid">
@@ -526,7 +526,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     {/* Session complete: summary table */}
                     {verificationSession.activeStepIndex >= verificationSession.steps.length ? (
                       <div className="editor-grid">
-                        <div className="notice notice--ok">
+                        <Notice variant="ok">
                           <strong>{t("debug.sessionComplete")}</strong>
                           <p>
                             {t("debug.summaryMatched", { count: sessionSummary.matched })}
@@ -534,7 +534,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                             {" · "}{t("debug.summaryNoSignal", { count: sessionSummary.noSignal })}
                             {" · "}{t("debug.summarySkipped", { count: sessionSummary.skipped })}
                           </p>
-                        </div>
+                        </Notice>
 
                         <table className="verification-summary-table">
                           <thead>
@@ -579,10 +579,10 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     ) : null}
 
                     {lastVerificationExportPath ? (
-                      <div className="notice notice--ok">
+                      <Notice variant="ok">
                         <strong>{t("debug.reportSaved")}</strong>
                         <p className="panel__path">{lastVerificationExportPath}</p>
-                      </div>
+                      </Notice>
                     ) : null}
 
                     <div className="editor-actions">

@@ -10,7 +10,7 @@ import {
   removeMenuItem,
   updateMenuItem,
 } from "../lib/menu-helpers";
-import { SelectField } from "./shared";
+import { Notice, SelectField, Toggle } from "./shared";
 
 export interface MenuItemsEditorProps {
   items: MenuItem[];
@@ -115,15 +115,14 @@ export function MenuItemsEditor({
 
           <label className="field field--inline">
             <span className="field__label">{t("inspector.menuItemEnabled")}</span>
-            <input
-              type="checkbox"
+            <Toggle
               checked={item.enabled}
               disabled={disabled}
-              onChange={(event) =>
+              onChange={(checked) =>
                 onChange(
                   updateMenuItem(items, item.id, (currentItem) => ({
                     ...currentItem,
-                    enabled: event.target.checked,
+                    enabled: checked,
                   })),
                 )
               }
@@ -214,10 +213,10 @@ export function MenuItemsEditor({
       </div>
 
       {noActionsAvailable ? (
-        <div className="notice notice--warning">
+        <Notice variant="warning">
           <strong>{t("inspector.noActions")}</strong>
           <p>{t("inspector.noActionsBody")}</p>
-        </div>
+        </Notice>
       ) : null}
 
       <div className="stack-list">

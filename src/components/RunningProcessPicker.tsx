@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { listRunningProcesses, normalizeCommandError } from "../lib/backend";
 import type { CommandError, RunningProcessInfo } from "../lib/config";
-import { ModalShell } from "./shared";
+import { ModalFooter, ModalHeader, ModalShell } from "./shared";
 
 export interface RunningProcessPickerProps {
   onPick: (process: RunningProcessInfo) => void;
@@ -80,7 +80,7 @@ export function RunningProcessPicker({
       dialogRef={containerRef}
       ariaLabelledby="process-picker-title"
     >
-        <h3 id="process-picker-title">{t("processPicker.title")}</h3>
+        <ModalHeader title={t("processPicker.title")} id="process-picker-title" />
         <input
           ref={inputRef}
           type="search"
@@ -122,7 +122,7 @@ export function RunningProcessPicker({
           )}
         </div>
 
-        <div className="confirm-modal__actions">
+        <ModalFooter>
           <button
             type="button"
             className="action-button action-button--ghost"
@@ -130,7 +130,7 @@ export function RunningProcessPicker({
           >
             {t("common.cancel")}
           </button>
-        </div>
+        </ModalFooter>
     </ModalShell>
   );
 }

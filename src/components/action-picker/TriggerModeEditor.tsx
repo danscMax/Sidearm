@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { Binding, ControlId, Layer, PhysicalControl, TriggerMode } from "../../lib/config";
+import { SelectField } from "../shared";
 
 export function TriggerModeEditor({
   triggerMode,
@@ -23,19 +24,19 @@ export function TriggerModeEditor({
   const { t } = useTranslation();
   return (
     <>
-      <label className="field mt-12">
-        <span className="field__label">{t("picker.triggerMode")}</span>
-        <select
-          value={triggerMode}
-          onChange={(e) => onChange(e.target.value as TriggerMode)}
-        >
-          <option value="press">{t("picker.triggerPress")}</option>
-          <option value="doublePress">{t("picker.triggerDoublePress")}</option>
-          <option value="triplePress">{t("picker.triggerTriplePress")}</option>
-          <option value="hold">{t("picker.triggerHold")}</option>
-          <option value="chord">{t("picker.triggerChord")}</option>
-        </select>
-      </label>
+      <SelectField
+        className="mt-12"
+        label={t("picker.triggerMode")}
+        value={triggerMode}
+        onChange={onChange}
+        options={[
+          { value: "press", label: t("picker.triggerPress") },
+          { value: "doublePress", label: t("picker.triggerDoublePress") },
+          { value: "triplePress", label: t("picker.triggerTriplePress") },
+          { value: "hold", label: t("picker.triggerHold") },
+          { value: "chord", label: t("picker.triggerChord") },
+        ]}
+      />
 
       {triggerMode === "chord" && controlId ? (
         <div className="field">
@@ -51,22 +52,17 @@ export function TriggerModeEditor({
               {physicalControls.find((c) => c.id === chordPartner)?.defaultName ?? "…"}
             </span>
           </div>
-          <label className="field">
-            <span className="field__label">{t("picker.chordPartner")}</span>
-            <select
-              value={chordPartner}
-              onChange={(e) => setChordPartner(e.target.value as ControlId)}
-            >
-              <option value="">{t("picker.chordPartnerEmpty")}</option>
-              {physicalControls
+          <SelectField<string>
+            label={t("picker.chordPartner")}
+            value={chordPartner}
+            onChange={(v) => setChordPartner(v as ControlId)}
+            options={[
+              { value: "", label: t("picker.chordPartnerEmpty") },
+              ...physicalControls
                 .filter((c) => c.id !== controlId && c.remappable)
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.defaultName}
-                  </option>
-                ))}
-            </select>
-          </label>
+                .map((c) => ({ value: c.id, label: c.defaultName })),
+            ]}
+          />
           {chordPartner && selectedLayer ? (
             (() => {
               const partnerHasChord = bindings.some(

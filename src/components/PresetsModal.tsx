@@ -6,7 +6,7 @@ import type { PresetInfo } from "../lib/backend";
 import { importProfile, isValidProfileExport } from "../lib/config-editing";
 import type { ProfileExportData } from "../lib/config-editing";
 import type { AppConfig, CommandError } from "../lib/config";
-import { CloseButton, ModalShell } from "./shared";
+import { ModalHeader, ModalShell } from "./shared";
 
 export interface PresetsModalProps {
   onCancel: () => void;
@@ -81,10 +81,12 @@ export function PresetsModal({
       dialogRef={containerRef}
       ariaLabelledby="presets-modal-title"
     >
-        <div className="presets-modal__header">
-          <h3 id="presets-modal-title">{t("presets.title")}</h3>
-          <CloseButton onClick={onCancel} ariaLabel={t("common.close")} />
-        </div>
+        <ModalHeader
+          title={t("presets.title")}
+          id="presets-modal-title"
+          onClose={onCancel}
+          closeLabel={t("common.close")}
+        />
 
         <p className="presets-modal__subtitle">{t("presets.subtitle")}</p>
 

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { SequenceStep } from "../../lib/config";
+import { Notice, SelectField } from "../shared";
 import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
@@ -175,7 +176,7 @@ export function SequenceStepEditor({
       </div>
 
       {isRecording ? (
-        <div className="notice notice--warning mb-8">
+        <Notice variant="warning" className="mb-8">
           <strong>
             {t("picker.recordingNotice")}{" "}
             <span className="text-dim">
@@ -183,12 +184,12 @@ export function SequenceStepEditor({
             </span>
           </strong>
           <p>{t("picker.recordingHint")}</p>
-        </div>
+        </Notice>
       ) : null}
       {limitReached ? (
-        <div className="notice notice--warning mb-8">
+        <Notice variant="warning" className="mb-8">
           <strong>{t("picker.recordLimitReached", { max: RECORD_LIMIT })}</strong>
-        </div>
+        </Notice>
       ) : null}
 
       <div className="stack-list">
@@ -201,18 +202,17 @@ export function SequenceStepEditor({
             canRemove={steps.length !== 1}
             onRemove={() => removeStep(index)}
           >
-              <label className="field">
-                <span className="field__label">{t("picker.stepType")}</span>
-                <select
-                  value={step.type}
-                  onChange={(e) => updateStep(index, coerceSequenceStepType(step, e.target.value as SequenceStep["type"]))}
-                >
-                  <option value="send">{t("picker.stepSend")}</option>
-                  <option value="text">{t("picker.stepText")}</option>
-                  <option value="sleep">{t("picker.stepSleep")}</option>
-                  <option value="launch">{t("picker.stepLaunch")}</option>
-                </select>
-              </label>
+              <SelectField
+                label={t("picker.stepType")}
+                value={step.type}
+                onChange={(v) => updateStep(index, coerceSequenceStepType(step, v))}
+                options={[
+                  { value: "send", label: t("picker.stepSend") },
+                  { value: "text", label: t("picker.stepText") },
+                  { value: "sleep", label: t("picker.stepSleep") },
+                  { value: "launch", label: t("picker.stepLaunch") },
+                ]}
+              />
 
               {step.type === "send" || step.type === "text" ? (
                 <label className="field">

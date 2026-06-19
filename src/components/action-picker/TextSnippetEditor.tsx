@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { PasteMode, SnippetLibraryItem } from "../../lib/config";
+import { SelectField, Toggle } from "../shared";
 
 export function TextSnippetEditor({
   draft,
@@ -18,23 +19,18 @@ export function TextSnippetEditor({
   return (
     <div className="editor-grid">
       {library.length > 0 ? (
-        <label className="field">
-          <span className="field__label">{t("snippet.insertFromLibrary")}</span>
-          <select
-            value=""
-            onChange={(e) => {
-              const snippet = library.find((item) => item.id === e.target.value);
-              if (snippet) onChange({ text: snippet.text, pasteMode: snippet.pasteMode });
-            }}
-          >
-            <option value="">{t("snippet.insertPlaceholder")}</option>
-            {library.map((snippet) => (
-              <option key={snippet.id} value={snippet.id}>
-                {snippet.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <SelectField<string>
+          label={t("snippet.insertFromLibrary")}
+          value=""
+          onChange={(id) => {
+            const snippet = library.find((item) => item.id === id);
+            if (snippet) onChange({ text: snippet.text, pasteMode: snippet.pasteMode });
+          }}
+          options={[
+            { value: "", label: t("snippet.insertPlaceholder") },
+            ...library.map((snippet) => ({ value: snippet.id, label: snippet.name })),
+          ]}
+        />
       ) : null}
       <label className="field">
         <span className="field__label">{t("picker.textLabel")}</span>
@@ -46,10 +42,10 @@ export function TextSnippetEditor({
         />
       </label>
       <label className="snippet-save-toggle">
-        <input
-          type="checkbox"
+        <Toggle
           checked={saveToLibrary}
-          onChange={(e) => onToggleSaveToLibrary(e.target.checked)}
+          onChange={onToggleSaveToLibrary}
+          ariaLabel={t("snippet.saveToLibrary")}
         />
         <span>{t("snippet.saveToLibrary")}</span>
       </label>

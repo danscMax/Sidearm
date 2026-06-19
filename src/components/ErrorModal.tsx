@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { ModalShell } from "./shared";
+import { ModalFooter, ModalHeader, ModalShell } from "./shared";
 import type { CommandError } from "../lib/config";
 import {
   formatErrorForClipboard,
@@ -53,9 +53,11 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
       dialogRef={dialogRef}
       ariaLabelledby="error-modal-title"
     >
-        <header className="error-modal__header">
-          <h2 id="error-modal-title">{translated.title}</h2>
-        </header>
+        <ModalHeader
+          title={translated.title}
+          id="error-modal-title"
+          className="error-modal__header"
+        />
 
         <div className="error-modal__body">
           <p className="error-modal__message">{translated.message}</p>
@@ -77,7 +79,7 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
           ) : null}
         </div>
 
-        <footer className="error-modal__footer">
+        <ModalFooter className="error-modal__footer">
           {translated.actions.map((action) => (
             <button
               key={action.kind}
@@ -94,7 +96,7 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
               {t(action.labelKey)}
             </button>
           ))}
-        </footer>
+        </ModalFooter>
     </ModalShell>
   );
 }

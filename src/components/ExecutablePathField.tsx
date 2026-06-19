@@ -1,10 +1,9 @@
 import { pickExecutablePath } from "../lib/backend";
+import { PathField } from "./PathField";
 
 const DEFAULT_EXE_EXTENSIONS = ["exe", "lnk", "bat", "cmd"];
 
-/** Labelled text input paired with a native "browse for executable" button.
- *  Presentational: the caller owns how the chosen path is stored via `onChange`
- *  (which receives both manual edits and the picked path). */
+/** Thin wrapper over PathField that browses for an executable. */
 export function ExecutablePathField({
   label,
   value,
@@ -25,28 +24,16 @@ export function ExecutablePathField({
   extensions?: string[];
 }) {
   return (
-    <label className="field">
-      <span className="field__label">{label}</span>
-      <div className="field__row">
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-        />
-        <button
-          type="button"
-          className="action-button action-button--small"
-          onClick={async () => {
-            const pick = await pickExecutablePath({ title: browseTitle, filterName, extensions });
-            if (pick) {
-              onChange(pick.path);
-            }
-          }}
-        >
-          {browseLabel}
-        </button>
-      </div>
-    </label>
+    <PathField
+      label={label}
+      value={value}
+      onChange={onChange}
+      browseLabel={browseLabel}
+      placeholder={placeholder}
+      browse={async () => {
+        const pick = await pickExecutablePath({ title: browseTitle, filterName, extensions });
+        return pick?.path ?? null;
+      }}
+    />
   );
 }

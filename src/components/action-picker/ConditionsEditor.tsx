@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { ActionCondition } from "../../lib/config";
 import { CONDITION_TYPE_KEYS } from "../../lib/action-picker-helpers";
+import { SelectField } from "../shared";
 
 export function ConditionsEditor({
   conditions,
@@ -42,26 +43,18 @@ export function ConditionsEditor({
                 </button>
               </div>
               <div className="editor-grid">
-                <label className="field">
-                  <span className="field__label">{t("picker.conditionType")}</span>
-                  <select
-                    value={condition.type}
-                    onChange={(e) => {
-                      const nextType = e.target.value as ActionCondition["type"];
-                      onChange(
-                        conditions.map((c, i) =>
-                          i === index ? { type: nextType, value: c.value } : c,
-                        ),
-                      );
-                    }}
-                  >
-                    {CONDITION_TYPE_KEYS.map((ct) => (
-                      <option key={ct.value} value={ct.value}>
-                        {t(ct.key)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <SelectField
+                  label={t("picker.conditionType")}
+                  value={condition.type}
+                  options={CONDITION_TYPE_KEYS.map((ct) => ({ value: ct.value, label: t(ct.key) }))}
+                  onChange={(nextType) =>
+                    onChange(
+                      conditions.map((c, i) =>
+                        i === index ? { type: nextType, value: c.value } : c,
+                      ),
+                    )
+                  }
+                />
                 <label className="field">
                   <span className="field__label">{t("picker.conditionValue")}</span>
                   <input

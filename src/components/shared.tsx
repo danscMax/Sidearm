@@ -49,6 +49,35 @@ export function Toggle({
   );
 }
 
+/** Labelled `<select>` wrapped in the shared `field` layout. `options` carry
+ *  already-display-ready labels (the caller translates). */
+export function SelectField<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  options: ReadonlyArray<{ value: T; label: string }>;
+  onChange: (value: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="field">
+      <span className="field__label">{label}</span>
+      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value as T)}>
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export function ErrorPanel({ error }: { error: CommandError }) {
   return (
     <div className="notice notice--error">

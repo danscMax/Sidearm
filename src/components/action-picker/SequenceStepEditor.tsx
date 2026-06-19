@@ -19,10 +19,10 @@ import { DirectoryPathField } from "../DirectoryPathField";
 
 export function SequenceStepEditor({
   steps,
-  onUpdate,
+  onChange,
 }: {
   steps: SequenceStep[];
-  onUpdate: (steps: SequenceStep[]) => void;
+  onChange: (steps: SequenceStep[]) => void;
 }) {
   const { t } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
@@ -106,7 +106,7 @@ export function SequenceStepEditor({
         // Wholesale replacement: clear keys so the render-time reconcile mints
         // fresh ones matching the new step list.
         stepKeysRef.current = [];
-        onUpdate(recording.steps);
+        onChange(recording.steps);
       }
     } catch {
       setIsRecording(false);
@@ -115,18 +115,18 @@ export function SequenceStepEditor({
 
   function addStep(type: SequenceStep["type"]) {
     stepKeysRef.current.push(newStepKey());
-    onUpdate([...steps, createDefaultSequenceStep(type)]);
+    onChange([...steps, createDefaultSequenceStep(type)]);
   }
 
   function removeStep(index: number) {
     if (steps.length <= 1) return;
     // Drop the key at the same index so the surviving steps keep their keys.
     stepKeysRef.current.splice(index, 1);
-    onUpdate(steps.filter((_, i) => i !== index));
+    onChange(steps.filter((_, i) => i !== index));
   }
 
   function updateStep(index: number, next: SequenceStep) {
-    onUpdate(steps.map((s, i) => (i === index ? next : s)));
+    onChange(steps.map((s, i) => (i === index ? next : s)));
   }
 
   return (

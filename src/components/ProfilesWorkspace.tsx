@@ -28,6 +28,7 @@ import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
 import { CloseButton, ModalShell } from "./shared";
+import { PillTrack } from "./PillTrack";
 import { ExeIcon } from "./ExeIcon";
 import { AppMappingModal } from "./AppMappingModal";
 
@@ -688,23 +689,16 @@ export function ProfilesWorkspace({
                 </button>
                 <div className="new-rule__delay-row">
                   <span className="new-rule__delay-label">{t("newRule.delayLabel")}</span>
-                  <div className="new-rule__delay-pills">
-                    {[
-                      { value: 1000, label: "1с" },
-                      { value: 2000, label: "2с" },
-                      { value: 3000, label: "3с" },
-                      { value: 5000, label: "5с" },
-                    ].map((opt) => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        className={`new-rule__delay-pill${captureDelayMs === opt.value ? " new-rule__delay-pill--active" : ""}`}
-                        onClick={() => setCaptureDelayMs(opt.value)}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
+                  <PillTrack
+                    items={[
+                      { key: "1000", label: "1с" },
+                      { key: "2000", label: "2с" },
+                      { key: "3000", label: "3с" },
+                      { key: "5000", label: "5с" },
+                    ]}
+                    active={String(captureDelayMs)}
+                    onSelect={(k) => setCaptureDelayMs(Number(k))}
+                  />
                 </div>
                 <p className="new-rule__capture-hint">
                   {t("newRule.captureHelp")}

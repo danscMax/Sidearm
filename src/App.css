@@ -4119,35 +4119,6 @@ code {
   white-space: nowrap;
 }
 
-.new-rule__delay-pills {
-  display: flex;
-  gap: 2px;
-  border-radius: var(--radius-xs);
-  overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-}
-
-.new-rule__delay-pill {
-  padding: 3px 10px;
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  border: none;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--c-text-muted);
-  cursor: pointer;
-  transition: background 100ms, color 100ms;
-}
-
-.new-rule__delay-pill:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--c-text);
-}
-
-.new-rule__delay-pill--active {
-  background: rgba(159, 202, 105, 0.2);
-  color: var(--c-accent);
-}
-
 .new-rule__capture-hint {
   font-size: var(--fs-micro);
   color: var(--c-text-muted);

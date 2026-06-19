@@ -40,6 +40,7 @@ import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
 import { PresetsModal } from "./PresetsModal";
 import { Toggle } from "./shared";
+import { CopyIcon, ExportIcon, TrashIcon } from "./icons";
 
 export interface SettingsWorkspaceProps {
   activeConfig: AppConfig;
@@ -653,7 +654,7 @@ export function SettingsWorkspace({
                 className="action-button action-button--secondary action-button--small"
                 onClick={() => handleDuplicate(activeProfile.id)}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5" fill="var(--c-surface-alt)"/></svg>
+                <CopyIcon />
                 {t("inspector.copyLabel")}
               </button>
               <button
@@ -661,7 +662,7 @@ export function SettingsWorkspace({
                 className="action-button action-button--secondary action-button--small"
                 onClick={() => { void handleExport(activeProfile); }}
               >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                <ExportIcon />
                 {t("common.export")}
               </button>
               {sortedProfiles.length > 1 ? (
@@ -670,7 +671,7 @@ export function SettingsWorkspace({
                   className="action-button action-button--small action-button--danger"
                   onClick={() => handleDelete(activeProfile)}
                 >
-                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <TrashIcon />
                   {t("common.delete")}
                 </button>
               ) : null}
@@ -714,7 +715,7 @@ export function SettingsWorkspace({
                     onClick={(e) => { e.stopPropagation(); handleDuplicate(profile.id); }}
                     title={t("inspector.copyLabel")}
                   >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><rect x="5" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="5" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>
+                    <CopyIcon size={12} />
                   </button>
                   <button
                     type="button"
@@ -722,7 +723,7 @@ export function SettingsWorkspace({
                     onClick={(e) => { e.stopPropagation(); void handleExport(profile); }}
                     title={t("common.export")}
                   >
-                    <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M8 1v9M5 7l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                    <ExportIcon size={12} />
                   </button>
                   {sortedProfiles.length > 1 ? (
                     <button
@@ -731,7 +732,7 @@ export function SettingsWorkspace({
                       onClick={(e) => { e.stopPropagation(); handleDelete(profile); }}
                       title={t("common.delete")}
                     >
-                      <svg width="12" height="12" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M5.33 4V2.67a1.33 1.33 0 011.34-1.34h2.66a1.33 1.33 0 011.34 1.34V4M6 7.33v4M10 7.33v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M3.33 4l.67 9.33a1.33 1.33 0 001.33 1.34h5.34a1.33 1.33 0 001.33-1.34L12.67 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      <TrashIcon size={12} />
                     </button>
                   ) : null}
                 </div>

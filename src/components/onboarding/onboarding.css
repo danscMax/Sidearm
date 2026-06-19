@@ -157,7 +157,7 @@
   flex: 0 0 auto;
 }
 .onb-check__dot.ok { background: var(--c-ok, #5ec27a); box-shadow: 0 0 10px rgba(94, 194, 122, 0.6); }
-.onb-check__dot.warn { background: #e0b341; box-shadow: 0 0 10px rgba(224, 179, 65, 0.5); }
+.onb-check__dot.warn { background: var(--c-warning); box-shadow: 0 0 10px rgba(224, 179, 65, 0.5); }
 .onb-check__dot.bad { background: var(--c-danger, #e0594b); box-shadow: 0 0 10px rgba(224, 89, 75, 0.5); }
 .onb-check__dot.pending { background: var(--c-border, #5a626c); }
 .onb-check__label { font-size: 14px; color: var(--c-text, #e8edf2); }

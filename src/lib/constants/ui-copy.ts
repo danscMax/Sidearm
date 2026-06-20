@@ -73,8 +73,9 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
 export const ALL_ACTION_TYPES = Object.keys(ACTION_TYPE_LABELS) as ActionType[];
 
 /** Per-type picker glyph. A `Record` so a new `ActionType` fails to compile
- *  until it is given an icon, exactly like `ACTION_TYPE_LABELS`. */
-export const ACTION_TYPE_ICONS: Record<ActionType, string> = {
+ *  until it is given an icon, exactly like `ACTION_TYPE_LABELS`. Local to this
+ *  file (only `ACTION_CATEGORIES` reads it) so it isn't a dangling export. */
+const ACTION_TYPE_ICONS: Record<ActionType, string> = {
   shortcut: "KB",
   mouseAction: "MS",
   textSnippet: "Tx",

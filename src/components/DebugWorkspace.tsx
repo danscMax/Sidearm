@@ -43,7 +43,7 @@ import { isActionLiveRunnable } from "../lib/action-helpers";
 
 import { ControlPropertiesPanel } from "./ControlPropertiesPanel";
 import { LogPanel } from "./LogPanel";
-import { Fact, Notice } from "./shared";
+import { Fact, Notice, SelectField } from "./shared";
 import type { LogPanelControl } from "../hooks/useLogPanel";
 
 interface DebugRuntimeProps {
@@ -236,10 +236,10 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
         ) : null}
 
         {lastRuntimeError ? (
-          <div className="notice notice--error mt-10" title={t("debug.lastRuntimeError")}>
+          <Notice variant="error" className="mt-10" title={t("debug.lastRuntimeError")}>
             <strong>{lastRuntimeError.category}</strong>
             <p>{lastRuntimeError.message}</p>
-          </div>
+          </Notice>
         ) : null}
       </div>
 
@@ -287,23 +287,16 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                           {t("debug.sessionSetupMeta")}
                         </span>
                       </div>
-                      <label className="field verification-session__scope">
-                        <span className="field__label">{t("debug.scopeLabel")}</span>
-                        <select
-                          value={verificationScope}
-                          onChange={(event) => {
-                            setVerificationScope(
-                              event.target.value as VerificationSessionScope,
-                            );
-                          }}
-                        >
-                          {verificationScopeCopy.map((scope) => (
-                            <option key={scope.value} value={scope.value}>
-                              {t(scope.label)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <SelectField
+                        className="verification-session__scope"
+                        label={t("debug.scopeLabel")}
+                        value={verificationScope}
+                        onChange={(value) => setVerificationScope(value)}
+                        options={verificationScopeCopy.map((scope) => ({
+                          value: scope.value,
+                          label: t(scope.label),
+                        }))}
+                      />
                     </div>
 
                     <p className="panel__muted">

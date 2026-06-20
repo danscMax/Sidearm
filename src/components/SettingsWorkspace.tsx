@@ -41,7 +41,7 @@ import { BackupList } from "./BackupList";
 import { PresetsModal } from "./PresetsModal";
 import { Notice, Toggle } from "./shared";
 import { PillTrack } from "./PillTrack";
-import { CopyIcon, ExportIcon, TrashIcon } from "./icons";
+import { CopyIcon, ExportIcon, ImportIcon, TrashIcon } from "./icons";
 
 export interface SettingsWorkspaceProps {
   activeConfig: AppConfig;
@@ -704,7 +704,7 @@ export function SettingsWorkspace({
             className="action-button action-button--secondary"
             onClick={() => { void handleImport(); }}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 10V1M5 4l3-3 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/><path d="M2 11v2a2 2 0 002 2h8a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            <ImportIcon />
             {t("settings.importProfileButton")}
           </button>
           <button

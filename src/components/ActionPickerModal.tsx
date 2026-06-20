@@ -13,7 +13,7 @@ import {
   upsertSnippetLibraryItem,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { CloseButton, ModalFooter, ModalShell } from "./shared";
+import { CloseButton, ModalFooter, ModalShell, Notice } from "./shared";
 import {
   autoName,
   buildAction,
@@ -344,7 +344,7 @@ export function ActionPickerModal({
 
             {effectiveCategory === "menu" ? (
               <div className="editor-grid">
-                <p className="notice notice--warning">{t("picker.menuLiveHint")}</p>
+                <Notice variant="warning">{t("picker.menuLiveHint")}</Notice>
                 <MenuItemsEditor
                   items={menuItemsDraft}
                   onChange={setMenuItemsDraft}

@@ -87,13 +87,16 @@ export function Notice({
   variant,
   children,
   className,
+  title,
 }: {
   variant: "info" | "warning" | "ok" | "error";
   children?: React.ReactNode;
   className?: string;
+  /** Optional native tooltip on the banner. */
+  title?: string;
 }) {
   return (
-    <div className={`notice notice--${variant}${className ? ` ${className}` : ""}`}>
+    <div className={`notice notice--${variant}${className ? ` ${className}` : ""}`} title={title}>
       {children}
     </div>
   );

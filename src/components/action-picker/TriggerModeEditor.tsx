@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { Binding, ControlId, Layer, PhysicalControl, TriggerMode } from "../../lib/config";
-import { SelectField } from "../shared";
+import { Notice, SelectField } from "../shared";
 
 export function TriggerModeEditor({
   triggerMode,
@@ -73,9 +73,9 @@ export function TriggerModeEditor({
                   b.enabled,
               );
               return partnerHasChord ? null : (
-                <p className="notice notice--warning chord-warning">
+                <Notice variant="warning" className="chord-warning">
                   {t("picker.chordWarnNoPartnerBinding")}
-                </p>
+                </Notice>
               );
             })()
           ) : null}

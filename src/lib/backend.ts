@@ -375,6 +375,17 @@ export async function listenRuntimeErrorEvent(
   return listenEvent(eventName, onPayload);
 }
 
+/** OS file-drop onto the window. Wraps the raw `tauri://drag-drop` event so the
+ *  `@tauri-apps/api/event` import stays confined to this module (the single IPC
+ *  home); callers receive just the dropped paths. */
+export async function listenDragDrop(
+  onDrop: (paths: string[]) => void,
+): Promise<UnlistenFn> {
+  return listenEvent<{ paths: string[] }>("tauri://drag-drop", (payload) => {
+    onDrop(payload.paths ?? []);
+  });
+}
+
 /* ─────────────────────────────────────────────────────────
    Macro Recording IPC
    ───────────────────────────────────────────────────────── */

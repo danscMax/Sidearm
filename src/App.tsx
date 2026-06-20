@@ -36,12 +36,12 @@ import {
   listBackups,
   normalizeCommandError,
   openConfigFolder,
+  listenDragDrop,
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
-import { listen } from "@tauri-apps/api/event";
 import {
   createProfile,
   duplicateProfile,
@@ -108,8 +108,8 @@ function App() {
   // Tauri v2 file-drop event; looks like a hint the user wants to import a Synapse file.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
-    void listen<{ paths: string[] }>("tauri://drag-drop", async (event) => {
-      const path = event.payload?.paths?.[0];
+    void listenDragDrop(async (paths) => {
+      const path = paths[0];
       if (typeof path !== "string") return;
       const lower = path.toLowerCase();
       if (!lower.endsWith(".synapse4") && !lower.endsWith(".synapse3")) return;

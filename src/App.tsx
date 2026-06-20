@@ -40,6 +40,7 @@ import {
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
+import { labelForLayer } from "./lib/labels";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -829,7 +830,7 @@ function App() {
           config={activeConfig}
           bindingId={actionPickerBindingId}
           controlLabel={selectedControl?.defaultName}
-          layerLabel={selectedLayer === "hypershift" ? "Hypershift" : "Стандартный"}
+          layerLabel={labelForLayer(selectedLayer)}
           controlId={selectedControlId ?? undefined}
           selectedLayer={selectedLayer}
           onSave={(nextConfig) => {

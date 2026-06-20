@@ -7,11 +7,15 @@ export function CaptureRow({
   placeholder,
   capturing,
   onToggle,
+  recordLabel,
 }: {
   value: string;
   placeholder: string;
   capturing: boolean;
   onToggle: () => void;
+  /** Idle button label; distinguishes co-located capture rows (key vs signal).
+   *  Defaults to the generic "Record". */
+  recordLabel?: string;
 }) {
   const { t } = useTranslation();
   return (
@@ -28,7 +32,7 @@ export function CaptureRow({
         className={`action-button${capturing ? " action-button--accent" : ""}`}
         onClick={onToggle}
       >
-        {capturing ? t("common.cancel") : t("picker.record")}
+        {capturing ? t("common.cancel") : (recordLabel ?? t("picker.record"))}
       </button>
     </div>
   );

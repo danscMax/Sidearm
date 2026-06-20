@@ -631,6 +631,8 @@
     "keyCapturing": "Press a key...",
     "keyEmpty": "Not set",
     "record": "Record",
+    "recordKey": "Record key",
+    "recordSignal": "Record signal",
     "modifiersHint": "You can leave the key field empty and assign only Ctrl, Alt, Shift, Win, or a combination.",
     "mouseModifiersHint": "Modifiers are held during the action. For example, Ctrl + Scroll up = zoom.",
     "textLabel": "Text",

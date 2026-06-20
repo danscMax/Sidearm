@@ -31,6 +31,7 @@ export function SignalCaptureField({
           placeholder={isCapturing ? t("picker.signalCapturing") : t("picker.signalEmpty")}
           capturing={isCapturing}
           onToggle={() => setIsCapturing(!isCapturing)}
+          recordLabel={t("picker.recordSignal")}
         />
         {isCapturing ? (
           <p className="panel__muted">{t("picker.signalCaptureHint")}</p>

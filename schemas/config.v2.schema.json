@@ -1026,6 +1026,33 @@
         }
       }
     },
+    "mouseActionKind": {
+      "type": "string",
+      "enum": [
+        "leftClick",
+        "rightClick",
+        "middleClick",
+        "doubleClick",
+        "scrollUp",
+        "scrollDown",
+        "scrollLeft",
+        "scrollRight",
+        "mouseBack",
+        "mouseForward"
+      ]
+    },
+    "mediaKeyKind": {
+      "type": "string",
+      "enum": [
+        "playPause",
+        "nextTrack",
+        "prevTrack",
+        "stop",
+        "volumeUp",
+        "volumeDown",
+        "mute"
+      ]
+    },
     "mouseActionPayload": {
       "type": "object",
       "additionalProperties": false,
@@ -1034,7 +1061,7 @@
       ],
       "properties": {
         "action": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/mouseActionKind"
         },
         "ctrl": {
           "type": "boolean"
@@ -1058,7 +1085,7 @@
       ],
       "properties": {
         "key": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/mediaKeyKind"
         }
       }
     },

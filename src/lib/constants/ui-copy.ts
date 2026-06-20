@@ -100,29 +100,43 @@ export const ACTION_CATEGORIES: ActionCategory[] = ALL_ACTION_TYPES.map((actionT
   actionType,
 }));
 
-/** Mouse-action options. `label` is an i18n KEY (`mouseAction.${value}`);
- *  resolve with `t(opt.label)` / `i18n.t(opt.label)` at render time. */
-export const MOUSE_ACTION_OPTIONS: Array<{ value: MouseActionKind; label: string }> = [
-  { value: "leftClick", label: "mouseAction.leftClick" },
-  { value: "rightClick", label: "mouseAction.rightClick" },
-  { value: "middleClick", label: "mouseAction.middleClick" },
-  { value: "doubleClick", label: "mouseAction.doubleClick" },
-  { value: "scrollUp", label: "mouseAction.scrollUp" },
-  { value: "scrollDown", label: "mouseAction.scrollDown" },
-  { value: "scrollLeft", label: "mouseAction.scrollLeft" },
-  { value: "scrollRight", label: "mouseAction.scrollRight" },
-  { value: "mouseBack", label: "mouseAction.mouseBack" },
-  { value: "mouseForward", label: "mouseAction.mouseForward" },
-];
+/** Per-kind i18n KEY map (the SoT). `MOUSE_ACTION_OPTIONS` derives from it, so a
+ *  new `MouseActionKind` fails to compile until labelled — the FE mirror of the Rust
+ *  `MouseActionKind::ALL` guarded by `mouse_action_kind_set_matches_schema_enum`. */
+const MOUSE_ACTION_LABELS: Record<MouseActionKind, string> = {
+  leftClick: "mouseAction.leftClick",
+  rightClick: "mouseAction.rightClick",
+  middleClick: "mouseAction.middleClick",
+  doubleClick: "mouseAction.doubleClick",
+  scrollUp: "mouseAction.scrollUp",
+  scrollDown: "mouseAction.scrollDown",
+  scrollLeft: "mouseAction.scrollLeft",
+  scrollRight: "mouseAction.scrollRight",
+  mouseBack: "mouseAction.mouseBack",
+  mouseForward: "mouseAction.mouseForward",
+};
 
-/** Media-key options. `label` is an i18n KEY (`mediaKey.${value}`); resolve
- *  with `t(opt.label)` / `i18n.t(opt.label)` at render time. */
-export const MEDIA_KEY_OPTIONS: Array<{ value: MediaKeyKind; label: string }> = [
-  { value: "playPause", label: "mediaKey.playPause" },
-  { value: "nextTrack", label: "mediaKey.nextTrack" },
-  { value: "prevTrack", label: "mediaKey.prevTrack" },
-  { value: "stop", label: "mediaKey.stop" },
-  { value: "volumeUp", label: "mediaKey.volumeUp" },
-  { value: "volumeDown", label: "mediaKey.volumeDown" },
-  { value: "mute", label: "mediaKey.mute" },
-];
+/** Derived from `MOUSE_ACTION_LABELS` (order = literal order). `label` is an i18n
+ *  KEY; resolve with `t(opt.label)` / `i18n.t(opt.label)` at render time. */
+export const MOUSE_ACTION_OPTIONS: Array<{ value: MouseActionKind; label: string }> = (
+  Object.keys(MOUSE_ACTION_LABELS) as MouseActionKind[]
+).map((value) => ({ value, label: MOUSE_ACTION_LABELS[value] }));
+
+/** Per-kind i18n KEY map (the SoT). `MEDIA_KEY_OPTIONS` derives from it, so a new
+ *  `MediaKeyKind` fails to compile until labelled — the FE mirror of the Rust
+ *  `MediaKeyKind::ALL` guarded by `media_key_kind_set_matches_schema_enum`. */
+const MEDIA_KEY_LABELS: Record<MediaKeyKind, string> = {
+  playPause: "mediaKey.playPause",
+  nextTrack: "mediaKey.nextTrack",
+  prevTrack: "mediaKey.prevTrack",
+  stop: "mediaKey.stop",
+  volumeUp: "mediaKey.volumeUp",
+  volumeDown: "mediaKey.volumeDown",
+  mute: "mediaKey.mute",
+};
+
+/** Derived from `MEDIA_KEY_LABELS` (order = literal order). `label` is an i18n
+ *  KEY; resolve with `t(opt.label)` / `i18n.t(opt.label)` at render time. */
+export const MEDIA_KEY_OPTIONS: Array<{ value: MediaKeyKind; label: string }> = (
+  Object.keys(MEDIA_KEY_LABELS) as MediaKeyKind[]
+).map((value) => ({ value, label: MEDIA_KEY_LABELS[value] }));

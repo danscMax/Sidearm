@@ -735,6 +735,42 @@ pub enum MouseActionKind {
     MouseForward,
 }
 
+impl MouseActionKind {
+    /// Every variant, in UI order. Test-only: `mouse_action_kind_set_matches_schema_enum`
+    /// iterates this and asserts it equals `$defs.mouseActionKind.enum` in the schema.
+    /// The always-on `match` below forces a new variant to be added here and to the
+    /// schema. Mirrors `ActionType::ALL`.
+    #[cfg(test)]
+    const ALL: [MouseActionKind; 10] = [
+        MouseActionKind::LeftClick,
+        MouseActionKind::RightClick,
+        MouseActionKind::MiddleClick,
+        MouseActionKind::DoubleClick,
+        MouseActionKind::ScrollUp,
+        MouseActionKind::ScrollDown,
+        MouseActionKind::ScrollLeft,
+        MouseActionKind::ScrollRight,
+        MouseActionKind::MouseBack,
+        MouseActionKind::MouseForward,
+    ];
+}
+
+// Compile-time exhaustiveness: adding a MouseActionKind variant breaks this match
+// (no `_` arm), forcing you to also update `MouseActionKind::ALL` above and
+// `$defs.mouseActionKind.enum` in schemas/config.v2.schema.json.
+const _: fn(MouseActionKind) = |k| match k {
+    MouseActionKind::LeftClick
+    | MouseActionKind::RightClick
+    | MouseActionKind::MiddleClick
+    | MouseActionKind::DoubleClick
+    | MouseActionKind::ScrollUp
+    | MouseActionKind::ScrollDown
+    | MouseActionKind::ScrollLeft
+    | MouseActionKind::ScrollRight
+    | MouseActionKind::MouseBack
+    | MouseActionKind::MouseForward => {}
+};
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MouseActionPayload {
@@ -760,6 +796,36 @@ pub enum MediaKeyKind {
     VolumeDown,
     Mute,
 }
+
+impl MediaKeyKind {
+    /// Every variant, in UI order. Test-only: `media_key_kind_set_matches_schema_enum`
+    /// iterates this and asserts it equals `$defs.mediaKeyKind.enum` in the schema.
+    /// The always-on `match` below forces a new variant to be added here and to the
+    /// schema. Mirrors `ActionType::ALL`.
+    #[cfg(test)]
+    const ALL: [MediaKeyKind; 7] = [
+        MediaKeyKind::PlayPause,
+        MediaKeyKind::NextTrack,
+        MediaKeyKind::PrevTrack,
+        MediaKeyKind::Stop,
+        MediaKeyKind::VolumeUp,
+        MediaKeyKind::VolumeDown,
+        MediaKeyKind::Mute,
+    ];
+}
+
+// Compile-time exhaustiveness: adding a MediaKeyKind variant breaks this match
+// (no `_` arm), forcing you to also update `MediaKeyKind::ALL` above and
+// `$defs.mediaKeyKind.enum` in schemas/config.v2.schema.json.
+const _: fn(MediaKeyKind) = |k| match k {
+    MediaKeyKind::PlayPause
+    | MediaKeyKind::NextTrack
+    | MediaKeyKind::PrevTrack
+    | MediaKeyKind::Stop
+    | MediaKeyKind::VolumeUp
+    | MediaKeyKind::VolumeDown
+    | MediaKeyKind::Mute => {}
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -4284,6 +4350,77 @@ mod edge_proptests {
         assert_eq!(
             rust, schema_enum,
             "ActionType (Rust) and config.v2.schema.json $defs.actionType.enum drifted apart"
+        );
+    }
+
+    /// MouseActionKind (Rust) and `$defs.mouseActionKind.enum` must list the SAME
+    /// set — the sibling of `action_type_set_matches_schema_enum`. The schema `$ref`
+    /// from `mouseActionPayload.action` validates a saved value against this enum, and
+    /// the FE `MOUSE_ACTION_OPTIONS` derives from `Record<MouseActionKind>`, so the
+    /// three layers cannot drift. Strings come from serde (the wire SoT), not a
+    /// hand-written `as_str`, so serde stays the single source of the wire name.
+    #[test]
+    fn mouse_action_kind_set_matches_schema_enum() {
+        let schema: Value =
+            serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
+        let schema_enum: std::collections::BTreeSet<String> =
+            schema["$defs"]["mouseActionKind"]["enum"]
+                .as_array()
+                .expect("$defs.mouseActionKind.enum is an array")
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .expect("mouseActionKind.enum values are strings")
+                        .to_string()
+                })
+                .collect();
+        let rust: std::collections::BTreeSet<String> = MouseActionKind::ALL
+            .iter()
+            .map(|k| {
+                serde_json::to_value(k)
+                    .expect("serialize MouseActionKind")
+                    .as_str()
+                    .expect("MouseActionKind serializes to a string")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            rust, schema_enum,
+            "MouseActionKind (Rust) and config.v2.schema.json $defs.mouseActionKind.enum drifted apart"
+        );
+    }
+
+    /// MediaKeyKind (Rust) and `$defs.mediaKeyKind.enum` must list the SAME set — the
+    /// sibling of `action_type_set_matches_schema_enum`. Same three-layer arrangement
+    /// as `mouse_action_kind_set_matches_schema_enum` above.
+    #[test]
+    fn media_key_kind_set_matches_schema_enum() {
+        let schema: Value =
+            serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
+        let schema_enum: std::collections::BTreeSet<String> =
+            schema["$defs"]["mediaKeyKind"]["enum"]
+                .as_array()
+                .expect("$defs.mediaKeyKind.enum is an array")
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .expect("mediaKeyKind.enum values are strings")
+                        .to_string()
+                })
+                .collect();
+        let rust: std::collections::BTreeSet<String> = MediaKeyKind::ALL
+            .iter()
+            .map(|k| {
+                serde_json::to_value(k)
+                    .expect("serialize MediaKeyKind")
+                    .as_str()
+                    .expect("MediaKeyKind serializes to a string")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(
+            rust, schema_enum,
+            "MediaKeyKind (Rust) and config.v2.schema.json $defs.mediaKeyKind.enum drifted apart"
         );
     }
 

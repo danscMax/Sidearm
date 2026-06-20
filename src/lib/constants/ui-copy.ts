@@ -66,34 +66,38 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
   repairClipboard: "action.type.repairClipboard",
 };
 
-export const editableActionTypes: Array<{
-  value: ActionType;
-  label: string;
-}> = [
-  { value: "shortcut", label: ACTION_TYPE_LABELS.shortcut },
-  { value: "mouseAction", label: ACTION_TYPE_LABELS.mouseAction },
-  { value: "textSnippet", label: ACTION_TYPE_LABELS.textSnippet },
-  { value: "sequence", label: ACTION_TYPE_LABELS.sequence },
-  { value: "launch", label: ACTION_TYPE_LABELS.launch },
-  { value: "mediaKey", label: ACTION_TYPE_LABELS.mediaKey },
-  { value: "profileSwitch", label: ACTION_TYPE_LABELS.profileSwitch },
-  { value: "menu", label: ACTION_TYPE_LABELS.menu },
-  { value: "disabled", label: ACTION_TYPE_LABELS.disabled },
-  { value: "repairClipboard", label: ACTION_TYPE_LABELS.repairClipboard },
-];
+/** All action-type discriminators, derived from the SoT label map so a new
+ *  `ActionType` (which must be added to `ACTION_TYPE_LABELS` — a compile-guarded
+ *  `Record`) automatically appears in every list below. The FE mirror of the
+ *  Rust `ActionType::ALL` guarded by `action_type_set_matches_schema_enum`. */
+export const ALL_ACTION_TYPES = Object.keys(ACTION_TYPE_LABELS) as ActionType[];
 
-export const ACTION_CATEGORIES: ActionCategory[] = [
-  { id: "shortcut", icon: "KB", label: ACTION_TYPE_LABELS.shortcut, actionType: "shortcut" },
-  { id: "mouseAction", icon: "MS", label: ACTION_TYPE_LABELS.mouseAction, actionType: "mouseAction" },
-  { id: "textSnippet", icon: "Tx", label: ACTION_TYPE_LABELS.textSnippet, actionType: "textSnippet" },
-  { id: "sequence", icon: "Sq", label: ACTION_TYPE_LABELS.sequence, actionType: "sequence" },
-  { id: "launch", icon: "Ex", label: ACTION_TYPE_LABELS.launch, actionType: "launch" },
-  { id: "mediaKey", icon: "Md", label: ACTION_TYPE_LABELS.mediaKey, actionType: "mediaKey" },
-  { id: "profileSwitch", icon: "Pf", label: ACTION_TYPE_LABELS.profileSwitch, actionType: "profileSwitch" },
-  { id: "menu", icon: "Mn", label: ACTION_TYPE_LABELS.menu, actionType: "menu" },
-  { id: "disabled", icon: "—", label: ACTION_TYPE_LABELS.disabled, actionType: "disabled" },
-  { id: "repairClipboard", icon: "Rb", label: ACTION_TYPE_LABELS.repairClipboard, actionType: "repairClipboard" },
-];
+/** Per-type picker glyph. A `Record` so a new `ActionType` fails to compile
+ *  until it is given an icon, exactly like `ACTION_TYPE_LABELS`. */
+export const ACTION_TYPE_ICONS: Record<ActionType, string> = {
+  shortcut: "KB",
+  mouseAction: "MS",
+  textSnippet: "Tx",
+  sequence: "Sq",
+  launch: "Ex",
+  mediaKey: "Md",
+  profileSwitch: "Pf",
+  menu: "Mn",
+  disabled: "—",
+  repairClipboard: "Rb",
+};
+
+/** Derived from `ALL_ACTION_TYPES` — structurally cannot drift from the type set. */
+export const editableActionTypes: Array<{ value: ActionType; label: string }> =
+  ALL_ACTION_TYPES.map((value) => ({ value, label: ACTION_TYPE_LABELS[value] }));
+
+/** Derived from `ALL_ACTION_TYPES` — structurally cannot drift from the type set. */
+export const ACTION_CATEGORIES: ActionCategory[] = ALL_ACTION_TYPES.map((actionType) => ({
+  id: actionType,
+  icon: ACTION_TYPE_ICONS[actionType],
+  label: ACTION_TYPE_LABELS[actionType],
+  actionType,
+}));
 
 /** Mouse-action options. `label` is an i18n KEY (`mouseAction.${value}`);
  *  resolve with `t(opt.label)` / `i18n.t(opt.label)` at render time. */

@@ -16,6 +16,7 @@ import type {
 } from "./config";
 import { ACTION_CATEGORIES } from "./constants";
 import { mediaKeyLabel, modifierLabels, mouseActionLabel } from "./action-helpers";
+import { assertNever } from "./assertNever";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -137,7 +138,7 @@ export function autoName(
     case "repairClipboard":
       return t("action.type.repairClipboard");
     default:
-      return t("picker.defaultAction");
+      return assertNever(actionType);
   }
 }
 
@@ -235,7 +236,7 @@ export function buildAction(params: {
       case "repairClipboard":
         return { id: actionId, type: "repairClipboard" as const, payload: { strategy: "latin1" as const }, displayName };
       default:
-        return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, displayName: t("picker.defaultDisabled") };
+        return assertNever(actionType);
     }
   })();
 

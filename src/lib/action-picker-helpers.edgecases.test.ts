@@ -1,7 +1,7 @@
 import * as fc from "fast-check";
 import { describe, it, expect } from "vitest";
 import type { TFunction } from "i18next";
-import type { ActionType, Profile } from "./config";
+import type { Profile } from "./config";
 import { makeAction } from "./test-fixtures";
 import {
   autoName,
@@ -12,6 +12,7 @@ import {
   resolveKeyName,
   type PickerDrafts,
 } from "./action-picker-helpers";
+import { ALL_ACTION_TYPES } from "./constants";
 
 // Identity translate stub — returns the key so a non-empty key always yields a
 // non-empty string (matches action-picker-helpers.test.ts).
@@ -37,19 +38,6 @@ function makeDrafts(overrides: Partial<PickerDrafts> = {}): PickerDrafts {
     ...overrides,
   };
 }
-
-const ALL_ACTION_TYPES: ActionType[] = [
-  "shortcut",
-  "mouseAction",
-  "textSnippet",
-  "sequence",
-  "launch",
-  "mediaKey",
-  "profileSwitch",
-  "menu",
-  "disabled",
-  "repairClipboard",
-];
 
 // Strings that exercise unicode, whitespace, emoji, RTL, BOM and length limits.
 const arbEdgyString = fc.oneof(

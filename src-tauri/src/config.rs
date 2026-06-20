@@ -528,7 +528,43 @@ impl ActionType {
             ActionType::RepairClipboard => "repairClipboard",
         }
     }
+
+    /// Every variant, in declaration order. Test-only: the set-equality guard
+    /// `action_type_set_matches_schema_enum` iterates this and asserts it equals
+    /// `$defs.actionType.enum` in `schemas/config.v2.schema.json`. The always-on
+    /// `match` below forces a new variant to be added here and to the schema
+    /// (a missed schema entry is a save-breaker).
+    #[cfg(test)]
+    const ALL: [ActionType; 10] = [
+        ActionType::Shortcut,
+        ActionType::TextSnippet,
+        ActionType::Sequence,
+        ActionType::Launch,
+        ActionType::Menu,
+        ActionType::MouseAction,
+        ActionType::MediaKey,
+        ActionType::ProfileSwitch,
+        ActionType::Disabled,
+        ActionType::RepairClipboard,
+    ];
 }
+
+// Compile-time exhaustiveness: adding an ActionType variant breaks this match
+// (no `_` arm), forcing you to also update `ActionType::ALL` above and
+// `$defs.actionType.enum` in schemas/config.v2.schema.json — the JSON contract a
+// saved config is validated against, where a missed entry is a save-breaker.
+const _: fn(ActionType) = |a| match a {
+    ActionType::Shortcut
+    | ActionType::TextSnippet
+    | ActionType::Sequence
+    | ActionType::Launch
+    | ActionType::Menu
+    | ActionType::MouseAction
+    | ActionType::MediaKey
+    | ActionType::ProfileSwitch
+    | ActionType::Disabled
+    | ActionType::RepairClipboard => {}
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -4226,6 +4262,29 @@ mod edge_proptests {
                 id.as_str()
             );
         }
+    }
+
+    /// ActionType (Rust) and `$defs.actionType.enum` in config.v2.schema.json must
+    /// list the SAME set. The schema is the contract a saved config is validated
+    /// against; a variant in one but not the other is a save-breaker (this is how
+    /// `repairClipboard` once broke saving). The per-variant tests above only cover
+    /// known cases — this closes the whole class against a future added/renamed type.
+    #[test]
+    fn action_type_set_matches_schema_enum() {
+        let schema: Value =
+            serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
+        let schema_enum: std::collections::BTreeSet<&str> = schema["$defs"]["actionType"]["enum"]
+            .as_array()
+            .expect("$defs.actionType.enum is an array")
+            .iter()
+            .map(|v| v.as_str().expect("actionType.enum values are strings"))
+            .collect();
+        let rust: std::collections::BTreeSet<&str> =
+            ActionType::ALL.iter().map(|a| a.as_str()).collect();
+        assert_eq!(
+            rust, schema_enum,
+            "ActionType (Rust) and config.v2.schema.json $defs.actionType.enum drifted apart"
+        );
     }
 
     /// Layer::as_str() must match its serde JSON representation.

@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Input placeholders meet WCAG AA contrast.** `.field` input/textarea placeholders
+  used `rgba(226,236,218,0.45)` (~3.8:1 on the dark surface, below the 4.5:1 floor);
+  they now use `--c-text-muted`, matching the search/palette placeholders.
+
 ### Changed
+- **All settings segment-controls use the shared `PillTrack`.** The six OSD and
+  capture-tuning toggles (duration / position / font size / animation / stale-GC
+  window / force-release window) were hand-rolled `action-button` groups — a third
+  segment-control style alongside the pill tabs. They now reuse `PillTrack` for a
+  consistent look and animated indicator.
 - **UI consolidation pass (no behavioural change).** A second duplication audit
   drove a round of shared-component adoption with no user-facing change beyond
   consistency: a single `ModalHeader`/`ModalFooter` now back every modal's title

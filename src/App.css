@@ -1028,7 +1028,8 @@ select::checkmark {
   accent-color: var(--c-accent);
 }
 
-.field input::placeholder { color: rgba(226, 236, 218, 0.45); }
+.field input::placeholder,
+.field textarea::placeholder { color: var(--c-text-muted); }
 
 .field input:focus,
 .field select:focus,
@@ -4721,11 +4722,6 @@ input[type="number"] { -moz-appearance: textfield; }
   letter-spacing: 0.02em;
 }
 
-.osd-settings-row__buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
 
 .osd-preview-area {
   display: flex;

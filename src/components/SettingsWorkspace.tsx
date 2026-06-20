@@ -40,6 +40,7 @@ import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { BackupList } from "./BackupList";
 import { PresetsModal } from "./PresetsModal";
 import { Notice, Toggle } from "./shared";
+import { PillTrack } from "./PillTrack";
 import { CopyIcon, ExportIcon, TrashIcon } from "./icons";
 
 export interface SettingsWorkspaceProps {
@@ -410,89 +411,57 @@ export function SettingsWorkspace({
           {/* Duration */}
           <div className="osd-settings-row">
             <span className="osd-settings-row__label">{t("settings.osdDuration")}</span>
-            <div className="osd-settings-row__buttons">
-              {([1000, 1500, 2000, 3000, 5000] as const).map((ms) => (
-                <button
-                  key={ms}
-                  type="button"
-                  className={`action-button action-button--small${osd.osdDurationMs === ms ? "" : " action-button--ghost"}`}
-                  onClick={() => updateSettings({ osdDurationMs: ms })}
-                >
-                  {ms >= 1000 ? `${ms / 1000}` : ms}
-                  {"\u0441"}
-                </button>
-              ))}
-            </div>
+            <PillTrack
+              items={[1000, 1500, 2000, 3000, 5000].map((ms) => ({
+                key: String(ms),
+                label: `${ms / 1000}\u0441`,
+              }))}
+              active={String(osd.osdDurationMs)}
+              onSelect={(k) => updateSettings({ osdDurationMs: Number(k) })}
+            />
           </div>
 
           {/* Position */}
           <div className="osd-settings-row">
             <span className="osd-settings-row__label">{t("settings.osdPosition")}</span>
-            <div className="osd-settings-row__buttons">
-              {(
-                [
-                  ["topLeft", t("settings.osdPositionTopLeft")],
-                  ["topRight", t("settings.osdPositionTopRight")],
-                  ["bottomLeft", t("settings.osdPositionBottomLeft")],
-                  ["bottomRight", t("settings.osdPositionBottomRight")],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`action-button action-button--small${osd.osdPosition === value ? "" : " action-button--ghost"}`}
-                  onClick={() => updateSettings({ osdPosition: value as OsdPosition })}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <PillTrack
+              items={[
+                { key: "topLeft", label: t("settings.osdPositionTopLeft") },
+                { key: "topRight", label: t("settings.osdPositionTopRight") },
+                { key: "bottomLeft", label: t("settings.osdPositionBottomLeft") },
+                { key: "bottomRight", label: t("settings.osdPositionBottomRight") },
+              ]}
+              active={osd.osdPosition}
+              onSelect={(k) => updateSettings({ osdPosition: k as OsdPosition })}
+            />
           </div>
 
           {/* Font size */}
           <div className="osd-settings-row">
             <span className="osd-settings-row__label">{t("settings.osdFontSize")}</span>
-            <div className="osd-settings-row__buttons">
-              {(
-                [
-                  ["small", t("settings.osdFontSmall")],
-                  ["medium", t("settings.osdFontMedium")],
-                  ["large", t("settings.osdFontLarge")],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`action-button action-button--small${osd.osdFontSize === value ? "" : " action-button--ghost"}`}
-                  onClick={() => updateSettings({ osdFontSize: value as OsdFontSize })}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <PillTrack
+              items={[
+                { key: "small", label: t("settings.osdFontSmall") },
+                { key: "medium", label: t("settings.osdFontMedium") },
+                { key: "large", label: t("settings.osdFontLarge") },
+              ]}
+              active={osd.osdFontSize}
+              onSelect={(k) => updateSettings({ osdFontSize: k as OsdFontSize })}
+            />
           </div>
 
           {/* Animation */}
           <div className="osd-settings-row">
             <span className="osd-settings-row__label">{t("settings.osdAnimation")}</span>
-            <div className="osd-settings-row__buttons">
-              {(
-                [
-                  ["slideIn", t("settings.osdAnimSlideIn")],
-                  ["fadeIn", t("settings.osdAnimFadeIn")],
-                  ["none", t("settings.osdAnimNone")],
-                ] as const
-              ).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  className={`action-button action-button--small${osd.osdAnimation === value ? "" : " action-button--ghost"}`}
-                  onClick={() => updateSettings({ osdAnimation: value as OsdAnimation })}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <PillTrack
+              items={[
+                { key: "slideIn", label: t("settings.osdAnimSlideIn") },
+                { key: "fadeIn", label: t("settings.osdAnimFadeIn") },
+                { key: "none", label: t("settings.osdAnimNone") },
+              ]}
+              active={osd.osdAnimation}
+              onSelect={(k) => updateSettings({ osdAnimation: k as OsdAnimation })}
+            />
           </div>
         </div>
       </section>
@@ -521,26 +490,16 @@ export function SettingsWorkspace({
           <span className="osd-settings-row__label">
             {t("settings.modifierStaleGcLabel")}
           </span>
-          <div className="osd-settings-row__buttons">
-            {([1000, 3000, 5000, 10000] as const).map((ms) => {
-              const current = osd.modifierStaleGcMs ?? 5000;
-              const active = current === ms;
-              return (
-                <button
-                  key={ms}
-                  type="button"
-                  className={`action-button action-button--small${active ? "" : " action-button--ghost"}`}
-                  onClick={() =>
-                    updateSettings({
-                      modifierStaleGcMs: ms === 5000 ? undefined : ms,
-                    })
-                  }
-                >
-                  {t("settings.modifierStaleGcOption", { seconds: ms / 1000 })}
-                </button>
-              );
-            })}
-          </div>
+          <PillTrack
+            items={[1000, 3000, 5000, 10000].map((ms) => ({
+              key: String(ms),
+              label: t("settings.modifierStaleGcOption", { seconds: ms / 1000 }),
+            }))}
+            active={String(osd.modifierStaleGcMs ?? 5000)}
+            onSelect={(k) =>
+              updateSettings({ modifierStaleGcMs: Number(k) === 5000 ? undefined : Number(k) })
+            }
+          />
         </div>
         <p className="panel__muted help-sm-y">
           {t("settings.replayedForceReleaseHelp")}
@@ -549,26 +508,18 @@ export function SettingsWorkspace({
           <span className="osd-settings-row__label">
             {t("settings.replayedForceReleaseLabel")}
           </span>
-          <div className="osd-settings-row__buttons">
-            {([5000, 15000, 30000, 60000] as const).map((ms) => {
-              const current = osd.replayedModifierForceReleaseMs ?? 30000;
-              const active = current === ms;
-              return (
-                <button
-                  key={ms}
-                  type="button"
-                  className={`action-button action-button--small${active ? "" : " action-button--ghost"}`}
-                  onClick={() =>
-                    updateSettings({
-                      replayedModifierForceReleaseMs: ms === 30000 ? undefined : ms,
-                    })
-                  }
-                >
-                  {t("settings.replayedForceReleaseOption", { seconds: ms / 1000 })}
-                </button>
-              );
-            })}
-          </div>
+          <PillTrack
+            items={[5000, 15000, 30000, 60000].map((ms) => ({
+              key: String(ms),
+              label: t("settings.replayedForceReleaseOption", { seconds: ms / 1000 }),
+            }))}
+            active={String(osd.replayedModifierForceReleaseMs ?? 30000)}
+            onSelect={(k) =>
+              updateSettings({
+                replayedModifierForceReleaseMs: Number(k) === 30000 ? undefined : Number(k),
+              })
+            }
+          />
         </div>
       </section>
 

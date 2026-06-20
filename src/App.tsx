@@ -399,6 +399,18 @@ function App() {
     } else if (e.ctrlKey && e.key === "k") {
       e.preventDefault();
       setCommandPaletteOpen((open) => !open);
+    } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key === "n") {
+      // Ctrl+N: new profile (Ctrl+Alt+N is the OS-global show/hide toggle).
+      e.preventDefault();
+      executeCommand("new-profile");
+    } else if (e.ctrlKey && e.shiftKey && !e.altKey && e.key === "A") {
+      // Ctrl+Shift+A: add rule
+      e.preventDefault();
+      executeCommand("add-rule");
+    } else if (e.ctrlKey && e.shiftKey && !e.altKey && e.key === "C") {
+      // Ctrl+Shift+C: capture the active window
+      e.preventDefault();
+      executeCommand("capture-window");
     } else if (e.key === "Escape") {
       if (commandPaletteOpen) {
         setCommandPaletteOpen(false);
@@ -450,6 +462,53 @@ function App() {
 
   function switchWorkspaceMode(nextMode: WorkspaceMode) {
     startTransition(() => { setWorkspaceMode(nextMode); });
+  }
+
+  /** Single dispatch for command-palette commands, shared by the palette and
+   *  the keyboard shortcuts in handleKeyDown (keeps the two in lockstep). */
+  function executeCommand(commandId: string) {
+    switch (commandId) {
+      case "undo":
+        handleUndoWithToast();
+        break;
+      case "redo":
+        handleRedoWithToast();
+        break;
+      case "reload":
+        void refreshConfig();
+        break;
+      case "new-profile":
+        handleCreateProfile();
+        break;
+      case "duplicate-profile":
+        handleDuplicateActiveProfile();
+        break;
+      case "add-rule":
+        switchWorkspaceMode("profiles");
+        setAddRuleSignal(true);
+        break;
+      case "open-config-folder":
+        void openConfigFolder();
+        break;
+      case "capture-window":
+        void handleCaptureActiveWindow();
+        break;
+      case "tab-profiles":
+        switchWorkspaceMode("profiles");
+        break;
+      case "tab-debug":
+        switchWorkspaceMode("debug");
+        break;
+      case "tab-settings":
+        switchWorkspaceMode("settings");
+        break;
+      case "layer-standard":
+        setSelectedLayer("standard");
+        break;
+      case "layer-hypershift":
+        setSelectedLayer("hypershift");
+        break;
+    }
   }
 
   function handleCreateProfile() {
@@ -842,48 +901,7 @@ function App() {
           onClose={() => setCommandPaletteOpen(false)}
           onExecute={(commandId) => {
             setCommandPaletteOpen(false);
-            switch (commandId) {
-              case "undo":
-                handleUndoWithToast();
-                break;
-              case "redo":
-                handleRedoWithToast();
-                break;
-              case "reload":
-                void refreshConfig();
-                break;
-              case "new-profile":
-                handleCreateProfile();
-                break;
-              case "duplicate-profile":
-                handleDuplicateActiveProfile();
-                break;
-              case "add-rule":
-                switchWorkspaceMode("profiles");
-                setAddRuleSignal(true);
-                break;
-              case "open-config-folder":
-                void openConfigFolder();
-                break;
-              case "capture-window":
-                void handleCaptureActiveWindow();
-                break;
-              case "tab-profiles":
-                switchWorkspaceMode("profiles");
-                break;
-              case "tab-debug":
-                switchWorkspaceMode("debug");
-                break;
-              case "tab-settings":
-                switchWorkspaceMode("settings");
-                break;
-              case "layer-standard":
-                setSelectedLayer("standard");
-                break;
-              case "layer-hypershift":
-                setSelectedLayer("hypershift");
-                break;
-            }
+            executeCommand(commandId);
           }}
         />
       ) : null}

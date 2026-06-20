@@ -146,11 +146,10 @@ export function activeVerificationStep(
   return session.steps[session.activeStepIndex] ?? null;
 }
 
-export function restartVerificationStep(
-  session: VerificationSession,
-  now: number,
-): VerificationSession {
-  return updateStep(session, session.activeStepIndex, (step) => ({
+/** Reset a step's observation/resolution fields to the pending state, stamping a
+ *  fresh start time. Single source for restart/reopen. */
+function blankStep(step: VerificationSessionStep, now: number): VerificationSessionStep {
+  return {
     ...step,
     startedAt: now,
     observedEncodedKey: null,
@@ -162,7 +161,14 @@ export function restartVerificationStep(
     resolvedControlId: null,
     resolvedLayer: null,
     result: "pending",
-  }));
+  };
+}
+
+export function restartVerificationStep(
+  session: VerificationSession,
+  now: number,
+): VerificationSession {
+  return updateStep(session, session.activeStepIndex, (step) => blankStep(step, now));
 }
 
 export function captureVerificationObservation(
@@ -357,19 +363,7 @@ export function reopenVerificationStep(
     completedAt: null,
   };
 
-  return updateStep(navigated, stepIndex, (step) => ({
-    ...step,
-    startedAt: Date.now(),
-    observedEncodedKey: null,
-    observedAt: null,
-    observedBackend: null,
-    activeExe: null,
-    activeWindowTitle: null,
-    resolutionStatus: null,
-    resolvedControlId: null,
-    resolvedLayer: null,
-    result: "pending",
-  }));
+  return updateStep(navigated, stepIndex, (step) => blankStep(step, Date.now()));
 }
 
 export function createVerificationSessionExport(

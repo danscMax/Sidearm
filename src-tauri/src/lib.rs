@@ -2089,7 +2089,7 @@ fn check_crash_sentinel(app: &AppHandle) {
 
     // Write new sentinel with current timestamp
     let _ = fs::create_dir_all(&log_dir);
-    let timestamp = chrono_like_timestamp();
+    let timestamp = epoch_seconds_string();
     let _ = fs::write(&sentinel, timestamp);
 }
 
@@ -2100,40 +2100,14 @@ fn remove_crash_sentinel(app: &AppHandle) {
     let _ = fs::remove_file(sentinel);
 }
 
-/// Simple timestamp without external crates.
-fn chrono_like_timestamp() -> String {
+/// Unix epoch seconds as a string — used for the crash sentinel. Not a calendar
+/// timestamp; for a civil YYYY-MM-DD date see `backup::today_date_string`.
+fn epoch_seconds_string() -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    // Return Unix timestamp — good enough for crash diagnostics
     format!("{now}")
-}
-
-/// Delete log files older than 30 days from the log directory.
-fn cleanup_old_logs(app: &AppHandle) {
-    let log_dir = resolve_log_dir(app);
-    if !log_dir.exists() {
-        return;
-    }
-
-    let cutoff = std::time::SystemTime::now()
-        - std::time::Duration::from_secs(30 * 24 * 60 * 60);
-
-    let Ok(entries) = fs::read_dir(&log_dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if (path.extension().is_some_and(|ext| ext == "log")
-            || path.to_string_lossy().contains(".log."))
-            && let Ok(metadata) = entry.metadata()
-                && let Ok(modified) = metadata.modified()
-                    && modified < cutoff {
-                        let _ = fs::remove_file(&path);
-                        log::info!("[system] Deleted old log: {}", path.display());
-                    }
-    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2357,7 +2331,6 @@ pub fn run() {
             // startup flash when WebView2 wasn't ready yet.
 
             check_crash_sentinel(app.handle());
-            cleanup_old_logs(app.handle());
             log::info!(
                 "[system] Sidearm v{} started",
                 app.package_info().version

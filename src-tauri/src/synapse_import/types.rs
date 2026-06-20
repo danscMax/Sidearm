@@ -73,6 +73,43 @@ pub enum ParsedAction {
     },
 }
 
+/// Join active modifier flags (canonical Ctrl→Shift→Alt→Win order) with a key
+/// into a `+`-separated chord string. `on_empty` supplies the fallback when both
+/// the modifier set and the key are empty. Single source for the import-preview
+/// label (`default_label_for`), the action display name (`merge::shortcut_pretty`),
+/// and macro step values (`macro_steps::emit_send`) — a reorder here stays in sync
+/// across all three.
+pub(crate) fn format_chord(
+    ctrl: bool,
+    shift: bool,
+    alt: bool,
+    win: bool,
+    key: &str,
+    on_empty: impl FnOnce() -> String,
+) -> String {
+    let mut parts: Vec<&str> = Vec::new();
+    if ctrl {
+        parts.push("Ctrl");
+    }
+    if shift {
+        parts.push("Shift");
+    }
+    if alt {
+        parts.push("Alt");
+    }
+    if win {
+        parts.push("Win");
+    }
+    let mut s = parts.join("+");
+    if !key.is_empty() {
+        if !s.is_empty() {
+            s.push('+');
+        }
+        s.push_str(key);
+    }
+    if s.is_empty() { on_empty() } else { s }
+}
+
 /// Build a human-readable label for a parsed action, used as the binding's
 /// default name in the import preview. Shared by the v3 and v4 parsers (canon).
 pub fn default_label_for(control_id: &str, action: &ParsedAction) -> String {
@@ -83,33 +120,7 @@ pub fn default_label_for(control_id: &str, action: &ParsedAction) -> String {
             shift,
             alt,
             win,
-        } => {
-            let mut parts = Vec::new();
-            if *ctrl {
-                parts.push("Ctrl");
-            }
-            if *shift {
-                parts.push("Shift");
-            }
-            if *alt {
-                parts.push("Alt");
-            }
-            if *win {
-                parts.push("Win");
-            }
-            let mut s = parts.join("+");
-            if !key.is_empty() {
-                if !s.is_empty() {
-                    s.push('+');
-                }
-                s.push_str(key);
-            }
-            if s.is_empty() {
-                control_id.to_string()
-            } else {
-                s
-            }
-        }
+        } => format_chord(*ctrl, *shift, *alt, *win, key, || control_id.to_string()),
         ParsedAction::TextSnippet { text } => {
             let snippet: String = text.chars().take(24).collect();
             format!("«{snippet}»")

@@ -38,7 +38,14 @@ pub fn sweep(log_dir: &Path, max_age_days: u64, max_files: usize) -> (usize, usi
         .filter_map(Result::ok)
         .filter_map(|entry| {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) != Some(LOG_EXTENSION) {
+            // Match both the active `*.log` and KeepAll-rotated files. tauri-plugin-log
+            // with RotationStrategy::KeepAll can produce rotated names whose final
+            // extension is no longer "log" (e.g. `app.log.2026-06-19`), which an
+            // extension-only check would miss — a `.log.` substring catches those.
+            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            let is_log = path.extension().and_then(|s| s.to_str()) == Some(LOG_EXTENSION)
+                || name.contains(".log.");
+            if !is_log {
                 return None;
             }
             let mtime = entry.metadata().and_then(|m| m.modified()).ok()?;
@@ -130,6 +137,24 @@ mod tests {
         let (deleted, _) = sweep(temp.path(), 7, 100);
         assert_eq!(deleted, 1);
         assert!(other.exists());
+    }
+
+    #[test]
+    fn removes_keepall_rotated_dotlog_files() {
+        // tauri-plugin-log KeepAll can rotate to `name.log.<suffix>`, whose
+        // extension is no longer "log". The widened predicate must still sweep them.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let rotated = touch(
+            temp.path(),
+            "Sidearm.log.2026-06-01",
+            Duration::from_secs(30 * 86400),
+        );
+        let active = touch(temp.path(), "Sidearm.log", Duration::from_secs(60));
+
+        let (deleted, _) = sweep(temp.path(), 7, 100);
+        assert_eq!(deleted, 1);
+        assert!(!rotated.exists(), "rotated *.log.<suffix> should be swept");
+        assert!(active.exists(), "fresh active log should survive");
     }
 
     #[test]

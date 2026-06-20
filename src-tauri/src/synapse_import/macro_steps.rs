@@ -133,24 +133,14 @@ fn emit_send(
         }
     };
 
-    let mut parts: Vec<&str> = Vec::new();
-    if mods.ctrl {
-        parts.push("Ctrl");
-    }
-    if mods.shift {
-        parts.push("Shift");
-    }
-    if mods.alt {
-        parts.push("Alt");
-    }
-    if mods.win {
-        parts.push("Win");
-    }
-    let value = if parts.is_empty() {
-        key_name
-    } else {
-        format!("{}+{key_name}", parts.join("+"))
-    };
+    let value = super::types::format_chord(
+        mods.ctrl,
+        mods.shift,
+        mods.alt,
+        mods.win,
+        &key_name,
+        || key_name.clone(),
+    );
 
     steps.push(ParsedSequenceStep::Send { value });
 }

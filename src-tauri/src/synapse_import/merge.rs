@@ -450,17 +450,7 @@ fn parse_mouse_action_kind(s: &str) -> Option<MouseActionKind> {
 }
 
 fn shortcut_pretty(key: &str, ctrl: bool, shift: bool, alt: bool, win: bool) -> String {
-    let mut parts = Vec::new();
-    if ctrl { parts.push("Ctrl"); }
-    if shift { parts.push("Shift"); }
-    if alt { parts.push("Alt"); }
-    if win { parts.push("Win"); }
-    let mut s = parts.join("+");
-    if !key.is_empty() {
-        if !s.is_empty() { s.push('+'); }
-        s.push_str(key);
-    }
-    if s.is_empty() { "—".to_string() } else { s }
+    super::types::format_chord(ctrl, shift, alt, win, key, || "—".to_string())
 }
 
 /// Generate a schema-valid ID matching `^[a-z][a-z0-9-]*$`.

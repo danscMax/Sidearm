@@ -21,6 +21,8 @@
     "cancel": "Cancel",
     "confirm": "Confirm",
     "delete": "Delete",
+    "moveUp": "Move up",
+    "moveDown": "Move down",
     "save": "Save",
     "close": "Close",
     "enabled": "Enabled",

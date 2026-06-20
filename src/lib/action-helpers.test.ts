@@ -16,6 +16,7 @@ import {
   coerceSequenceStepType,
   setSequenceStepDelay,
   modifierLabels,
+  swapItems,
 } from "./action-helpers";
 import { makeConfig, makeAction, makeSnippetMap, emptySnippets } from "./test-fixtures";
 
@@ -696,5 +697,27 @@ describe("modifierLabels", () => {
 
   it("returns an empty array when no modifier is set", () => {
     expect(modifierLabels({})).toEqual([]);
+  });
+});
+
+describe("swapItems", () => {
+  it("swaps two items and leaves the originals untouched", () => {
+    const src = ["a", "b", "c"];
+    expect(swapItems(src, 0, 2)).toEqual(["c", "b", "a"]);
+    expect(src).toEqual(["a", "b", "c"]);
+  });
+
+  it("keeps two parallel arrays aligned (lockstep reorder)", () => {
+    const steps = ["s0", "s1", "s2"];
+    const keys = ["k0", "k1", "k2"];
+    // Move step 0 down one: swap with index 1 in BOTH arrays.
+    expect(swapItems(steps, 0, 1)).toEqual(["s1", "s0", "s2"]);
+    expect(swapItems(keys, 0, 1)).toEqual(["k1", "k0", "k2"]);
+  });
+
+  it("returns an unchanged copy for out-of-range indices", () => {
+    const src = ["a", "b"];
+    expect(swapItems(src, 0, 5)).toEqual(["a", "b"]);
+    expect(swapItems(src, -1, 0)).toEqual(["a", "b"]);
   });
 });

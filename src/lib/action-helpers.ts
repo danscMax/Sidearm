@@ -302,3 +302,13 @@ export function setSequenceStepDelay(
     delayMs: clamped,
   };
 }
+
+/** Return a copy of `arr` with items `i` and `j` swapped. Out-of-range
+ *  indices yield an unchanged copy. Used to reorder sequence steps and their
+ *  parallel key list in lockstep. */
+export function swapItems<T>(arr: readonly T[], i: number, j: number): T[] {
+  const next = arr.slice();
+  if (i < 0 || j < 0 || i >= next.length || j >= next.length) return next;
+  [next[i], next[j]] = [next[j], next[i]];
+  return next;
+}

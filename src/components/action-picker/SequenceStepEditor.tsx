@@ -6,6 +6,7 @@ import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
   setSequenceStepDelay,
+  swapItems,
 } from "../../lib/action-helpers";
 import { labelForSequenceStep } from "../../lib/labels";
 import { normalizeKeyName, resolveKeyName } from "../../lib/action-picker-helpers";
@@ -127,6 +128,15 @@ export function SequenceStepEditor({
     onChange(steps.filter((_, i) => i !== index));
   }
 
+  function moveStep(index: number, dir: -1 | 1) {
+    const target = index + dir;
+    if (target < 0 || target >= steps.length) return;
+    // Swap the step and its parallel key in lockstep so the caret/focus follow
+    // the moved row instead of staying on whatever lands at the old index.
+    stepKeysRef.current = swapItems(stepKeysRef.current, index, target);
+    onChange(swapItems(steps, index, target));
+  }
+
   function updateStep(index: number, next: SequenceStep) {
     onChange(steps.map((s, i) => (i === index ? next : s)));
   }
@@ -201,6 +211,12 @@ export function SequenceStepEditor({
             removeLabel={t("common.delete")}
             canRemove={steps.length !== 1}
             onRemove={() => removeStep(index)}
+            onMoveUp={() => moveStep(index, -1)}
+            onMoveDown={() => moveStep(index, 1)}
+            canMoveUp={index > 0}
+            canMoveDown={index < steps.length - 1}
+            moveUpLabel={t("common.moveUp")}
+            moveDownLabel={t("common.moveDown")}
           >
               <SelectField
                 label={t("picker.stepType")}

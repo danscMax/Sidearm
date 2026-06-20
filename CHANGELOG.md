@@ -7,12 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-06-20
+
+### Added
+- **Reorder macro steps.** Sequence-action steps can now be moved up or down
+  with ↑/↓ controls on each step card; previously they could only be added,
+  edited or deleted.
+- **Keyboard shortcuts for common commands.** New profile (Ctrl+N), add rule
+  (Ctrl+Shift+A) and capture active window (Ctrl+Shift+C) now have shortcuts,
+  surfaced in the command palette.
+
 ### Fixed
 - **Input placeholders meet WCAG AA contrast.** `.field` input/textarea placeholders
   used `rgba(226,236,218,0.45)` (~3.8:1 on the dark surface, below the 4.5:1 floor);
   they now use `--c-text-muted`, matching the search/palette placeholders.
 
 ### Changed
+- **Distinct labels for the two capture buttons.** In the shortcut-action editor
+  the key-capture and signal-capture rows both showed a generic “Record” button;
+  they are now “Record key” / “Record signal” so it is clear which records what.
 - **All settings segment-controls use the shared `PillTrack`.** The six OSD and
   capture-tuning toggles (duration / position / font size / animation / stale-GC
   window / force-release window) were hand-rolled `action-button` groups — a third

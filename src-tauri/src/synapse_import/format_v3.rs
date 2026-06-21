@@ -21,7 +21,7 @@ use std::path::Path;
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-use super::macro_steps::{self, NormalizedEvent};
+use super::macro_xml;
 use super::makecode;
 use super::mapping::{
     input_id_to_control_id, mouse_action_from_assignment, parse_modifier_string,
@@ -29,7 +29,7 @@ use super::mapping::{
 };
 use super::types::{
     default_label_for, ImportWarning, ParsedAction, ParsedBinding, ParsedMacro,
-    ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
+    ParsedProfile, ParsedSynapseProfiles, SourceKind,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -127,10 +127,26 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
     for name in &names {
         if name.starts_with("Macros/") && name.ends_with(".xml") {
             let raw = read_file(&mut archive, name)?;
-            match parse_v3_macro(&raw, &mut warnings) {
+            // Route the in-ZIP macro through the shared, depth-aware XML parser
+            // (`macro_xml::parse_macro_xml_str`) so v3 ZIP macros honor `<Number>`
+            // (seconds) delays and reject empty/guidless bodies — the same
+            // behavior the sibling-`Макросы/`-folder path already has. The
+            // fallback name mirrors that caller: the entry's file stem, which for
+            // `Macros/{macroGuid}.xml` is the macro GUID.
+            let fallback_name = Path::new(name)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("macro")
+                .to_string();
+            match macro_xml::parse_macro_xml_str(&raw, fallback_name, &mut warnings) {
                 Ok(m) => {
                     macros_by_guid.insert(m.synapse_guid.clone(), m);
                 }
+                // Previously `parse_v3_macro` returned Ok with empty steps and a
+                // synthesized guid for an empty body; the shared parser instead
+                // returns `Err(MacroXmlError::Shape)` for a macro with no events
+                // and no guid. Skip such macros with a warning rather than
+                // aborting the whole import (accepted behavior change).
                 Err(e) => warnings.push(
                     ImportWarning::new(
                         "v3_macro_parse_failed",
@@ -607,110 +623,6 @@ fn parse_v3_profile_meta(xml: &str) -> Result<(String, String), quick_xml::Error
     Ok((guid, name))
 }
 
-#[derive(Default)]
-struct V3MacroEvent {
-    ty: String,
-    makecode: Option<u16>,
-    state: Option<u8>,
-    delay_ms: Option<u32>,
-}
-
-fn parse_v3_macro(
-    xml: &str,
-    warnings: &mut Vec<ImportWarning>,
-) -> Result<ParsedMacro, quick_xml::Error> {
-    let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
-    let mut stack: Vec<String> = Vec::new();
-    let mut name = String::new();
-    let mut guid = String::new();
-    let mut events: Vec<V3MacroEvent> = Vec::new();
-    let mut current: Option<V3MacroEvent> = None;
-    let mut buf = Vec::new();
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                stack.push(tag.clone());
-                if tag == "MacroEvent" {
-                    current = Some(V3MacroEvent::default());
-                }
-            }
-            Event::End(e) => {
-                let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
-                if tag == "MacroEvent"
-                    && let Some(ev) = current.take() {
-                        events.push(ev);
-                    }
-                stack.pop();
-            }
-            Event::Empty(_) => {}
-            Event::Text(t) => {
-                let text = t.unescape()?.into_owned();
-                let leaf = stack.last().cloned();
-                let leaf = leaf.as_deref();
-                if let Some(ev) = current.as_mut() {
-                    match leaf {
-                        Some("Type") => ev.ty = text,
-                        Some("Makecode") => ev.makecode = text.parse().ok(),
-                        Some("State") => ev.state = text.parse().ok(),
-                        Some("Delay") => ev.delay_ms = text.parse().ok(),
-                        _ => {}
-                    }
-                } else {
-                    // Outside MacroEvent — root-level fields.
-                    if leaf == Some("Name") {
-                        name = text;
-                    } else if leaf == Some("Guid") {
-                        guid = text;
-                    }
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    let steps = build_macro_steps(&name, &events, warnings);
-    if guid.is_empty() {
-        guid = format!("v3-macro-{name}");
-    }
-    Ok(ParsedMacro {
-        synapse_guid: guid,
-        name,
-        steps,
-    })
-}
-
-/// Normalize v3 macro events into the shared [`macro_steps`] builder. Each event
-/// may carry an inter-event delay (emitted as a `Sleep`) plus a key down/up.
-fn build_macro_steps(
-    macro_name: &str,
-    events: &[V3MacroEvent],
-    warnings: &mut Vec<ImportWarning>,
-) -> Vec<ParsedSequenceStep> {
-    let mut normalized: Vec<NormalizedEvent> = Vec::new();
-    for ev in events {
-        if let Some(delay_ms) = ev.delay_ms
-            && delay_ms > 0 {
-                normalized.push(NormalizedEvent::Delay(delay_ms));
-            }
-        if ev.ty != "1" {
-            continue;
-        }
-        let Some(makecode_val) = ev.makecode else { continue };
-        let state = ev.state.unwrap_or(0);
-        normalized.push(NormalizedEvent::Key {
-            makecode: makecode_val,
-            is_extended: state >= 2,
-            is_down: state % 2 == 0,
-        });
-    }
-    macro_steps::build(&normalized, macro_name, warnings)
-}
-
 // ============================================================================
 // ZIP helpers
 // ============================================================================
@@ -877,6 +789,10 @@ mod tests {
 #[cfg(test)]
 mod edge_proptests {
     use super::*;
+    // `ParsedSequenceStep` is no longer used by production code in this file
+    // (the v3 macro normalizer was deleted in R8); it is still asserted on in the
+    // `<Number>`-delay regression test below.
+    use super::super::types::ParsedSequenceStep;
     use proptest::prelude::*;
 
     // -----------------------------------------------------------------------
@@ -987,17 +903,24 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Null & empty: parse_v3_macro with empty XML → empty steps, empty guid
+    // Null & empty: an empty in-ZIP macro body is now rejected.
+    //
+    // R8 routes the in-ZIP v3 macro through `macro_xml::parse_macro_xml_str`,
+    // which returns `Err(MacroXmlError::Shape)` for a body with no events and no
+    // guid (the old `parse_v3_macro` instead returned Ok with empty steps and a
+    // synthesized `v3-macro-{name}` guid). The call site turns that Err into a
+    // skipped macro plus a `v3_macro_parse_failed` warning — the accepted
+    // behavior change. This asserts the new contract directly.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn null_empty_macro_xml_returns_empty_steps() {
+    fn empty_macro_xml_is_shape_error_and_skipped() {
         let mut w = Vec::new();
-        let res = parse_v3_macro("<Macro></Macro>", &mut w);
-        let parsed = res.expect("empty macro xml should not fail");
-        assert!(parsed.steps.is_empty());
-        // Fallback guid uses "v3-macro-{name}".
-        assert!(parsed.synapse_guid.starts_with("v3-macro-"));
+        let res = macro_xml::parse_macro_xml_str("<Macro></Macro>", "v3-macro".into(), &mut w);
+        assert!(
+            matches!(res, Err(macro_xml::MacroXmlError::Shape)),
+            "empty in-ZIP macro must now be a Shape error, got {res:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1019,66 +942,40 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Overflow: Makecode overflow in v3 macro XML (value > u16::MAX)
+    // R8 gain: a v3-style in-ZIP macro with a `<Number>` (seconds) delay now
+    // produces a Sleep step. The old `parse_v3_macro` had no `<Number>` branch
+    // and silently dropped such delays; routing through the shared, depth-aware
+    // `macro_xml::parse_macro_xml_str` honors them (it converts seconds→ms).
+    //
+    // The makecode-overflow, delay-overflow, and u32::MAX-delay-clamp paths that
+    // the deleted `parse_v3_macro` tests covered are exercised identically by the
+    // routed parser's own tests in `macro_xml`
+    // (`overflow_makecode_beyond_u16_is_skipped`,
+    // `overflow_delay_beyond_u32_is_dropped_silently`,
+    // `overflow_delay_u32_max_is_clamped`), so they are not duplicated here.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn overflow_v3_macro_makecode_too_large_is_skipped() {
-        let xml = format!(
-            r#"<Macro><Name>M</Name><MacroEvents>
-              <MacroEvent><Type>1</Type><Makecode>{}</Makecode><State>0</State></MacroEvent>
-              <MacroEvent><Type>1</Type><Makecode>{}</Makecode><State>1</State></MacroEvent>
-            </MacroEvents><Guid>g-v3</Guid></Macro>"#,
-            u64::MAX, u64::MAX
-        );
+    fn v3_macro_number_seconds_delay_now_produces_sleep_step() {
+        // Mirrors a real in-ZIP `Macros/{guid}.xml` body: nested <KeyEvent> for
+        // keys (as the routed parser reads them) and a `<Number>` delay event.
+        // 0.5 s must surface as a 500 ms Sleep — previously dropped by v3.
+        let xml = r#"<Macro><Name>N</Name><MacroEvents>
+              <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent></MacroEvent>
+              <MacroEvent><Type>0</Type><Number>0.5</Number></MacroEvent>
+              <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>1</State></KeyEvent></MacroEvent>
+            </MacroEvents><Guid>g-num</Guid></Macro>"#;
         let mut w = Vec::new();
-        let parsed = parse_v3_macro(&xml, &mut w).expect("should not fail");
-        // Out-of-range makecode → parse::<u16> fails → event skipped → no Send steps.
-        assert!(parsed.steps.is_empty());
-    }
-
-    // -----------------------------------------------------------------------
-    // Overflow: v3 macro Delay overflow beyond u32 → parse fails, dropped
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn overflow_v3_macro_delay_too_large_is_dropped() {
-        let xml = format!(
-            r#"<Macro><Name>D</Name><MacroEvents>
-              <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
-            </MacroEvents><Guid>g-dv3</Guid></Macro>"#,
-            u64::MAX
-        );
-        let mut w = Vec::new();
-        let parsed = parse_v3_macro(&xml, &mut w).expect("should not fail");
-        // Out-of-range delay → parse::<u32> fails → None → not pushed.
-        assert!(parsed.steps.is_empty());
-    }
-
-    // -----------------------------------------------------------------------
-    // Overflow: v3 macro with u32::MAX delay value → clamped (never persisted
-    // raw) with a `macro_delay_clamped` warning, so it can't hang the runtime.
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn overflow_v3_macro_u32_max_delay_clamped() {
-        let xml = format!(
-            r#"<Macro><Name>D</Name><MacroEvents>
-              <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
-            </MacroEvents><Guid>g-dmax</Guid></Macro>"#,
-            u32::MAX
-        );
-        let mut w = Vec::new();
-        let parsed = parse_v3_macro(&xml, &mut w).unwrap();
-        let sleep = parsed.steps.iter().find_map(|s| match s {
-            ParsedSequenceStep::Sleep { delay_ms } => Some(*delay_ms),
-            _ => None,
-        });
+        let parsed =
+            macro_xml::parse_macro_xml_str(xml, "v3-macro".into(), &mut w).expect("should parse");
         assert!(
-            matches!(sleep, Some(ms) if ms > 0 && ms < u32::MAX),
-            "u32::MAX delay must be clamped to a Sleep below the raw value; got {sleep:?}"
+            parsed
+                .steps
+                .iter()
+                .any(|s| matches!(s, ParsedSequenceStep::Sleep { delay_ms: 500 })),
+            "expected a 500ms Sleep from <Number>0.5</Number>, got {:?}",
+            parsed.steps
         );
-        assert!(w.iter().any(|x| x.code == "macro_delay_clamped"));
     }
 
     // -----------------------------------------------------------------------
@@ -1119,16 +1016,13 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Property: parse_v3_macro never panics on arbitrary XML strings
+    // Property: parsers never panic on arbitrary XML strings. The in-ZIP macro
+    // parser is now `macro_xml::parse_macro_xml_str`, whose own
+    // `prop_parse_never_panics_on_arbitrary_str` covers that path; here we keep
+    // the v3-specific profile-meta and mapping-list fuzzers.
     // -----------------------------------------------------------------------
 
     proptest! {
-        #[test]
-        fn prop_parse_v3_macro_never_panics(s in ".*") {
-            let mut w = Vec::new();
-            let _ = parse_v3_macro(&s, &mut w);
-        }
-
         #[test]
         fn prop_parse_v3_profile_meta_never_panics(s in ".*") {
             let _ = parse_v3_profile_meta(&s);
@@ -1145,5 +1039,8 @@ mod edge_proptests {
 
     // Concurrency: N/A — all functions are pure; ZIP archive parsing (I/O) is
     //              not tested here (requires real files).
-    // Temporal:    macro delay tests above cover u32::MAX and overflow paths.
+    // Temporal:    in-ZIP macro delay handling (u32::MAX clamp, overflow drop,
+    //              `<Number>` seconds) is now owned by the routed
+    //              `macro_xml::parse_macro_xml_str` and covered by its tests; the
+    //              `<Number>`-delay gain is additionally pinned above.
 }

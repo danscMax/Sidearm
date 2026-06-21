@@ -176,6 +176,20 @@ fn build_steps(
                 normalized.push(NormalizedEvent::Delay(delay_ms));
             }
         if ev.ty != "1" {
+            // `Type` mirrors the v4 integer convention (0=delay, 1=key, 2=mouse;
+            // see `format_v4::event_type`). Mouse events were already dropped
+            // silently here; surface the same `macro_mouse_event_skipped` warning
+            // that the v4 path emits so the in-ZIP/sibling-XML paths have equal
+            // visibility. Other non-key types still skip without a warning. This
+            // changes no produced steps — only adds the warning.
+            if ev.ty == "2" {
+                warnings.push(ImportWarning::new(
+                    "macro_mouse_event_skipped",
+                    format!(
+                        "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only."
+                    ),
+                ));
+            }
             continue;
         }
         let Some(makecode_val) = ev.makecode else { continue };
@@ -378,6 +392,47 @@ mod tests {
             "expected a 250ms Sleep step, got {:?}",
             parsed.steps,
         );
+    }
+
+    #[test]
+    fn mouse_event_emits_skip_warning_but_no_step() {
+        // R7: a `<Type>2</Type>` mouse event must surface a
+        // `macro_mouse_event_skipped` warning (same code/shape as the v4 path)
+        // while still producing no step — mouse events were already dropped, so
+        // only visibility changes. The surrounding key down/up still yields one
+        // Send step, proving the mouse event is the only thing skipped.
+        let xml = r#"<Macro><Name>M</Name><MacroEvents>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent></MacroEvent>
+            <MacroEvent><Type>2</Type><MouseEvent><MouseButton>1</MouseButton><State>0</State></MouseEvent></MacroEvent>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>1</State></KeyEvent></MacroEvent>
+        </MacroEvents><Guid>g-mouse</Guid></Macro>"#;
+        let mut warnings = Vec::new();
+        let parsed = parse_macro_xml_str(xml, "M".into(), &mut warnings).unwrap();
+        assert!(
+            warnings.iter().any(|w| w.code == "macro_mouse_event_skipped"),
+            "mouse event must emit macro_mouse_event_skipped, got {warnings:?}"
+        );
+        // The mouse event produced no Send/Sleep; only the A key-down/up remains.
+        assert_eq!(parsed.steps.len(), 1, "only the key Send step should remain");
+        assert!(matches!(&parsed.steps[0], ParsedSequenceStep::Send { value } if value == "A"));
+    }
+
+    #[test]
+    fn non_key_non_mouse_event_skips_silently() {
+        // R7 guard: a non-"1"/non-"2" type (here the v4 "actionBar" UI marker)
+        // must still skip WITHOUT a mouse warning — the warning is gated to "2".
+        let xml = r#"<Macro><Name>A</Name><MacroEvents>
+            <MacroEvent><Type>actionBar</Type><selected>false</selected></MacroEvent>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent></MacroEvent>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>1</State></KeyEvent></MacroEvent>
+        </MacroEvents><Guid>g-ab</Guid></Macro>"#;
+        let mut warnings = Vec::new();
+        let parsed = parse_macro_xml_str(xml, "A".into(), &mut warnings).unwrap();
+        assert!(
+            !warnings.iter().any(|w| w.code == "macro_mouse_event_skipped"),
+            "actionBar must not emit a mouse warning, got {warnings:?}"
+        );
+        assert_eq!(parsed.steps.len(), 1);
     }
 
     #[test]

@@ -354,48 +354,28 @@ fn decode_profile(
 
     for raw in &payload.mappings {
         if let Some(b) = transform_mapping(raw, &env.name, false, warnings) {
-            if let ParsedAction::Sequence { macro_guid } = &b.action {
-                if let Some(m) = macros_by_guid.get(macro_guid) {
-                    if used_guids.insert(macro_guid.clone()) {
-                        referenced_macros.push(m.clone());
-                    }
-                } else {
-                    warnings.push(
-                        ImportWarning::new(
-                            "macro_reference_missing",
-                            format!(
-                                "Binding references macro guid `{}` but the macro is not present in this file.",
-                                macro_guid
-                            ),
-                        )
-                        .with_context(env.name.clone()),
-                    );
-                }
-            }
+            resolve_macro_ref(
+                &b,
+                macros_by_guid,
+                &mut used_guids,
+                &mut referenced_macros,
+                &env.name,
+                warnings,
+            );
             bindings.push(b);
         }
     }
     if let Some(side_panel) = &payload.side_panel {
         for raw in &side_panel.twelve_button {
             if let Some(b) = transform_mapping(raw, &env.name, true, warnings) {
-                if let ParsedAction::Sequence { macro_guid } = &b.action {
-                    if let Some(m) = macros_by_guid.get(macro_guid) {
-                        if used_guids.insert(macro_guid.clone()) {
-                            referenced_macros.push(m.clone());
-                        }
-                    } else {
-                        warnings.push(
-                            ImportWarning::new(
-                                "macro_reference_missing",
-                                format!(
-                                    "Binding references macro guid `{}` but the macro is not present.",
-                                    macro_guid
-                                ),
-                            )
-                            .with_context(env.name.clone()),
-                        );
-                    }
-                }
+                resolve_macro_ref(
+                    &b,
+                    macros_by_guid,
+                    &mut used_guids,
+                    &mut referenced_macros,
+                    &env.name,
+                    warnings,
+                );
                 bindings.push(b);
             }
         }
@@ -409,6 +389,39 @@ fn decode_profile(
         bindings,
         macros: referenced_macros,
     })
+}
+
+/// Resolve a single binding's macro reference (if it is a `Sequence`): dedup-insert
+/// the referenced macro into `used_guids`/`referenced_macros`, or push a
+/// `macro_reference_missing` warning (scoped to `profile_name`) when the guid is not
+/// present in the file. Shared by the top-level and side-panel binding loops so the
+/// dedup/ordering/warning behaviour stays identical between them.
+fn resolve_macro_ref(
+    b: &ParsedBinding,
+    macros_by_guid: &HashMap<String, ParsedMacro>,
+    used_guids: &mut std::collections::HashSet<String>,
+    referenced_macros: &mut Vec<ParsedMacro>,
+    profile_name: &str,
+    warnings: &mut Vec<ImportWarning>,
+) {
+    if let ParsedAction::Sequence { macro_guid } = &b.action {
+        if let Some(m) = macros_by_guid.get(macro_guid) {
+            if used_guids.insert(macro_guid.clone()) {
+                referenced_macros.push(m.clone());
+            }
+        } else {
+            warnings.push(
+                ImportWarning::new(
+                    "macro_reference_missing",
+                    format!(
+                        "Binding references macro guid `{}` but the macro is not present in this file.",
+                        macro_guid
+                    ),
+                )
+                .with_context(profile_name.to_string()),
+            );
+        }
+    }
 }
 
 /// Transform one `RawMapping` into a `ParsedBinding`. Returns `None` for

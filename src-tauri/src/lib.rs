@@ -382,21 +382,29 @@ async fn write_user_json(
     .map_err(|e| CommandError::internal(format!("{op} task failed: {e}")))?
 }
 
+/// Stat `path` and reject it when its length exceeds `max_bytes`, returning a
+/// [`CommandError`] tagged with `code` (the FE maps on the code). Shared by the
+/// per-profile and full-config import guards; run inside their blocking tasks.
+fn check_import_size(path: &Path, max_bytes: u64, code: &'static str) -> Result<(), CommandError> {
+    let len = fs::metadata(path)
+        .map_err(|e| CommandError::internal(format!("Failed to stat import file: {e}")))?
+        .len();
+    if len > max_bytes {
+        return Err(CommandError::new(
+            code,
+            format!("File exceeds the {max_bytes}-byte import limit."),
+            None,
+        ));
+    }
+    Ok(())
+}
+
 /// Shared body for the narrow profile-import commands: validate the JSON path,
 /// enforce the size cap, then read the contents back as a string.
 async fn read_user_json(path: String, op: &'static str) -> Result<String, CommandError> {
     let validated_path = validate_user_json_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let len = fs::metadata(&validated_path)
-            .map_err(|e| CommandError::internal(format!("Failed to stat file: {e}")))?
-            .len();
-        if len > MAX_IMPORT_BYTES {
-            return Err(CommandError::new(
-                "file_too_large",
-                format!("File exceeds the {MAX_IMPORT_BYTES}-byte import limit."),
-                None,
-            ));
-        }
+        check_import_size(&validated_path, MAX_IMPORT_BYTES, "file_too_large")?;
         fs::read_to_string(&validated_path)
             .map_err(|e| CommandError::internal(format!("Failed to read file: {e}")))
     })
@@ -404,27 +412,12 @@ async fn read_user_json(path: String, op: &'static str) -> Result<String, Comman
     .map_err(|e| CommandError::internal(format!("{op} task failed: {e}")))?
 }
 
-/// Pure size check for full-config imports — extracted for unit testing.
-fn full_config_import_size_ok(len: u64) -> bool {
-    len <= MAX_FULL_CONFIG_IMPORT_BYTES
-}
-
 /// Enforce [`MAX_FULL_CONFIG_IMPORT_BYTES`] on a full-config import file before
 /// it is read into memory. Mirrors the per-profile cap in `read_user_json`, but
 /// guards the full-config preview/apply paths, which read the file directly and
 /// bypass `read_user_json`. Run inside the import command's blocking task.
 fn ensure_full_config_import_size(path: &Path) -> Result<(), CommandError> {
-    let len = fs::metadata(path)
-        .map_err(|e| CommandError::internal(format!("Failed to stat import file: {e}")))?
-        .len();
-    if !full_config_import_size_ok(len) {
-        return Err(CommandError::new(
-            "import_too_large",
-            format!("Import file exceeds the {MAX_FULL_CONFIG_IMPORT_BYTES}-byte limit."),
-            None,
-        ));
-    }
-    Ok(())
+    check_import_size(path, MAX_FULL_CONFIG_IMPORT_BYTES, "import_too_large")
 }
 
 // Narrow, purpose-named replacements for the removed generic write_text_file/
@@ -2583,12 +2576,27 @@ mod tests {
     }
 
     #[test]
-    fn full_config_import_size_boundary() {
-        assert!(full_config_import_size_ok(0));
-        assert!(full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES - 1));
-        // At the limit is accepted; one byte over is rejected.
-        assert!(full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES));
-        assert!(!full_config_import_size_ok(MAX_FULL_CONFIG_IMPORT_BYTES + 1));
+    fn check_import_size_boundary() {
+        // Boundary check for the shared import-size guard, against real files on
+        // disk. A sparse file (set_len) gives the desired length without writing
+        // the bytes. At the limit is accepted; one byte over is rejected with the
+        // supplied error code (the FE maps on the code).
+        let dir = temp_home();
+        let cap = 1024u64;
+
+        let at_limit = dir.path().join("at_limit.bin");
+        let file = fs::File::create(&at_limit).expect("create file");
+        file.set_len(cap).expect("set len");
+        drop(file);
+        assert!(check_import_size(&at_limit, cap, "import_too_large").is_ok());
+
+        let over = dir.path().join("over.bin");
+        let file = fs::File::create(&over).expect("create file");
+        file.set_len(cap + 1).expect("set len");
+        drop(file);
+        let err = check_import_size(&over, cap, "import_too_large")
+            .expect_err("oversized file must be rejected");
+        assert_eq!(err.code, "import_too_large");
     }
 
     #[test]

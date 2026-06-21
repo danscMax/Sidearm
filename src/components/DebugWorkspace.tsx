@@ -25,8 +25,8 @@ import type {
   VerificationStepResult,
 } from "../lib/verification-session";
 import { verificationScopeCopy } from "../lib/constants";
-import { controlName } from "../lib/helpers";
 import {
+  displayNameForControl,
   formatTimestamp,
   labelForExecutionMode,
   labelForExecutionOutcome,
@@ -215,9 +215,12 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             />
             <Fact
               label={t("debug.control")}
-              value={lastResolutionPreview.controlId
-                ? controlName(activeConfig.physicalControls, lastResolutionPreview.controlId)
-                : t("common.na")}
+              value={(() => {
+                const cid = lastResolutionPreview.controlId;
+                if (!cid) return t("common.na");
+                const control = activeConfig.physicalControls.find((c) => c.id === cid);
+                return control ? displayNameForControl(control, "raw") : cid;
+              })()}
             />
             <Fact label={t("debug.result")} value={labelForPreviewStatus(lastResolutionPreview.status)} />
             {lastResolutionPreview.actionId ? (

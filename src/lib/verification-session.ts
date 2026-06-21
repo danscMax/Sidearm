@@ -7,6 +7,7 @@ import type {
 } from "./config";
 import type { EncodedKeyEvent, ResolvedInputPreview, WindowCaptureResult } from "./runtime";
 import { expectedEncodedKeyForControl } from "./config-editing";
+import { displayNameForControl } from "./labels";
 
 export type VerificationSessionScope = "currentFamily" | "all";
 export type VerificationStepResult =
@@ -105,7 +106,7 @@ export function createVerificationSession(
   const startedAt = Date.now();
   const steps = controls.map((control, index) => ({
     controlId: control.id,
-    controlLabel: control.synapseName ?? control.defaultName,
+    controlLabel: displayNameForControl(control, "synapse"),
     family: control.family,
     layer,
     capabilityStatus: control.capabilityStatus,

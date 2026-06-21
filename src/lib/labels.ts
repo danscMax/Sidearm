@@ -199,7 +199,22 @@ const CONTROL_ID_TO_I18N_KEY: Partial<Record<ControlId, string>> = {
   top_special_03: "control.name.special03",
 };
 
-export function displayNameForControl(control: PhysicalControl): string {
+/**
+ * Resolve a control's human-readable name in one of three modes:
+ *  - `i18n` (default): localized name from CONTROL_ID_TO_I18N_KEY, else defaultName.
+ *  - `synapse`: the Synapse-reported name, else defaultName.
+ *  - `raw`: the raw defaultName (no localization, no Synapse override).
+ */
+export function displayNameForControl(
+  control: PhysicalControl,
+  mode: "i18n" | "synapse" | "raw" = "i18n",
+): string {
+  if (mode === "synapse") {
+    return control.synapseName ?? control.defaultName;
+  }
+  if (mode === "raw") {
+    return control.defaultName;
+  }
   const key = CONTROL_ID_TO_I18N_KEY[control.id];
   return key ? i18n.t(key) : control.defaultName;
 }

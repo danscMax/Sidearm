@@ -574,6 +574,11 @@ select::checkmark {
 /* MouseVisualizationSvg: cursor, SVG glow (2 booleans → 3 states), root, no-select */
 .mouse-svg__btn { cursor: pointer; }
 .mouse-svg__btn--grab { cursor: grab; }
+/* Search-dim + conflict ring for the schematic view, mirroring the photo
+   view's .mouse-visual__hotspot--dimmed / --conflict. An SVG <g> can't take a
+   box-shadow or ::after badge, so the amber conflict cue is a drop-shadow. */
+.mouse-svg__btn--dimmed { opacity: 0.25; }
+.mouse-svg__btn--conflict { filter: drop-shadow(0 0 3px rgba(234, 179, 8, 0.9)); }
 .mouse-svg__glow { transition: filter 180ms ease; }
 .mouse-svg__glow--on { filter: drop-shadow(0 0 6px rgba(var(--layer-rgb, 159, 202, 105), 0.4)); }
 .mouse-svg__glow--selected { filter: drop-shadow(0 0 10px rgba(var(--layer-rgb, 159, 202, 105), 0.5)); }

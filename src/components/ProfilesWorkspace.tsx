@@ -18,7 +18,6 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
-import { pickExecutablePath } from "../lib/backend";
 import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
 import {
   bindingMatchesQuery,
@@ -26,11 +25,13 @@ import {
   findShortcutConflicts,
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
+import { displayNameForControl } from "../lib/labels";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
 import { CloseButton, ModalShell, Notice, Toggle } from "./shared";
 import { PillTrack } from "./PillTrack";
 import { ExeIcon } from "./ExeIcon";
+import { ExeMatchField } from "./ExeMatchField";
 import { AppMappingModal } from "./AppMappingModal";
 
 export interface ProfilesWorkspaceProps {
@@ -182,11 +183,14 @@ export function ProfilesWorkspace({
     const controlsById = new Map(activeConfig.physicalControls.map((c) => [c.id, c]));
     return activeConfig.bindings
       .filter((b) => bindingMatchesQuery(b, actionsById.get(b.actionId) ?? null, searchQuery))
-      .map((b) => ({
-        binding: b,
-        profileName: profilesById.get(b.profileId)?.name ?? b.profileId,
-        controlName: controlsById.get(b.controlId)?.defaultName ?? b.controlId,
-      }));
+      .map((b) => {
+        const control = controlsById.get(b.controlId);
+        return {
+          binding: b,
+          profileName: profilesById.get(b.profileId)?.name ?? b.profileId,
+          controlName: control ? displayNameForControl(control, "raw") : b.controlId,
+        };
+      });
   }, [activeConfig, searchQuery, searchAllProfiles]);
 
   const selectedAppMappings = useMemo(
@@ -602,38 +606,23 @@ export function ProfilesWorkspace({
               </p>
             </div>
             <div className="rule-modal__body">
-              <div className="field">
-                <span className="field__label">{t("newRule.exe")}</span>
-                <div className="field__row">
-                  <input
-                    type="text"
-                    autoFocus
-                    value={newRuleExe}
-                    placeholder="chrome.exe, telegram.exe..."
-                    onChange={(e) => { setNewRuleExe(e.target.value); setNewRuleCapturedTitle(""); }}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newRuleExe.trim()) handleConfirmNewRule();
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="action-button action-button--small"
-                    onClick={async () => {
-                      const pick = await pickExecutablePath({
-                        title: t("newRule.browseTitle"),
-                        filterName: t("newRule.browseFilter"),
-                        extensions: ["exe", "lnk"],
-                      });
-                      if (pick) {
-                        setNewRuleExe(pick.name);
-                        setNewRuleCapturedTitle("");
-                      }
-                    }}
-                  >
-                    {t("common.browse")}
-                  </button>
-                </div>
-              </div>
+              <ExeMatchField
+                label={t("newRule.exe")}
+                exe={newRuleExe}
+                placeholder="chrome.exe, telegram.exe..."
+                browseTitle={t("newRule.browseTitle")}
+                browseFilter={t("newRule.browseFilter")}
+                browseLabel={t("common.browse")}
+                autoFocus
+                onEnter={handleConfirmNewRule}
+                onChange={(exe, processPath) => {
+                  setNewRuleExe(exe);
+                  // Behaviour fix: capture the full path from Browse so the new
+                  // rule stores processPath (typing clears it back to empty).
+                  setNewRuleCapturedProcessPath(processPath ?? "");
+                  setNewRuleCapturedTitle("");
+                }}
+              />
 
               <div
                 className="new-rule__dropzone"

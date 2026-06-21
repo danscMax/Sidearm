@@ -1,9 +1,4 @@
-import type { AppConfig, AppMapping, ControlId, PhysicalControl } from "./config";
-
-/** Look up human-readable button name from its ControlId, falling back to the raw ID. */
-export function controlName(controls: readonly PhysicalControl[], id: string): string {
-  return controls.find((c) => c.id === id)?.defaultName ?? id;
-}
+import type { AppConfig, AppMapping, ControlId } from "./config";
 
 export function resolveInitialProfileId(config: AppConfig): string | null {
   return (

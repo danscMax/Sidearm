@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import i18n from "../i18n";
 import type {
   Action,
   ActionCondition,
@@ -32,6 +33,7 @@ import {
   updateControlCapabilityStatus,
   createProfile,
   deleteProfile,
+  duplicateProfile,
   duplicateBinding,
   copyBindingFromLayer,
   removeBinding,
@@ -610,7 +612,7 @@ describe("coerceActionType", () => {
     }
   });
 
-  it("coerces to sequence with 'Replace me' when displayName is empty", () => {
+  it("coerces to sequence with the i18n default text when displayName is empty", () => {
     const action = makeAction({
       id: "a",
       type: "disabled",
@@ -623,11 +625,12 @@ describe("coerceActionType", () => {
     const coerced = result.actions.find((a) => a.id === "a");
     if (coerced?.type === "sequence") {
       const step = coerced.payload.steps[0]!;
-      expect(step.type === "text" && step.value).toBe("Replace me");
+      // Empty displayName now falls back to the localized default, not a hardcoded literal.
+      expect(step.type === "text" && step.value).toBe(i18n.t("sequence.defaultText"));
     }
   });
 
-  it("coerces to launch", () => {
+  it("coerces to launch with the i18n default target", () => {
     const action = makeAction({ id: "a", type: "disabled", payload: {} as Record<string, never> });
     const config = configWithAction(action);
 
@@ -635,7 +638,8 @@ describe("coerceActionType", () => {
     const coerced = result.actions.find((a) => a.id === "a");
     expect(coerced?.type).toBe("launch");
     if (coerced?.type === "launch") {
-      expect(coerced.payload.target).toContain("App.exe");
+      // launch now seeds its target from the shared defaultPayloadFor (i18n default path).
+      expect(coerced.payload.target).toBe(i18n.t("sequence.defaultLaunch"));
     }
   });
 
@@ -669,7 +673,7 @@ describe("coerceActionType", () => {
     expect(placeholder?.id).toContain("action-menu-target");
   });
 
-  it("coerces to mouseAction", () => {
+  it("coerces to mouseAction (bare leftClick from a non-shortcut source)", () => {
     const action = makeAction({ id: "a", type: "disabled", payload: {} as Record<string, never> });
     const config = configWithAction(action);
 
@@ -678,6 +682,33 @@ describe("coerceActionType", () => {
     expect(coerced?.type).toBe("mouseAction");
     if (coerced?.type === "mouseAction") {
       expect(coerced.payload.action).toBe("leftClick");
+      // No modifier-bearing source → no carried modifiers (defaults to false).
+      expect(coerced.payload.ctrl).toBe(false);
+      expect(coerced.payload.shift).toBe(false);
+      expect(coerced.payload.alt).toBe(false);
+      expect(coerced.payload.win).toBe(false);
+    }
+  });
+
+  it("coerces a shortcut WITH modifiers to mouseAction, carrying the modifiers", () => {
+    // DECIDED FORK: converting Ctrl+Shift+A (shortcut) to a mouse action should
+    // preserve the keyboard modifiers so the result is e.g. Ctrl+Shift+LeftClick.
+    const action = makeAction({
+      id: "a",
+      type: "shortcut",
+      payload: { key: "A", ctrl: true, shift: true, alt: false, win: true },
+    });
+    const config = configWithAction(action);
+
+    const result = coerceActionType(config, "a", "mouseAction");
+    const coerced = result.actions.find((a) => a.id === "a");
+    expect(coerced?.type).toBe("mouseAction");
+    if (coerced?.type === "mouseAction") {
+      expect(coerced.payload.action).toBe("leftClick");
+      expect(coerced.payload.ctrl).toBe(true);
+      expect(coerced.payload.shift).toBe(true);
+      expect(coerced.payload.alt).toBe(false);
+      expect(coerced.payload.win).toBe(true);
     }
   });
 
@@ -2312,5 +2343,25 @@ describe("importProfile", () => {
         encodedKey: "F17",
       }),
     );
+  });
+});
+
+describe("duplicateProfile", () => {
+  it("normalizes the cloned appMapping exe to lowercase", () => {
+    // Mirrors importProfile: a duplicated profile must store its appMapping exe
+    // canonically (lowercase) so the duplicate check and case-insensitive
+    // runtime resolver agree.
+    const source = makeProfile({ id: "src", name: "Source" });
+    const mapping = makeAppMapping({ id: "app-x", profileId: "src", exe: "Notepad.EXE" });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [source],
+      appMappings: [mapping],
+    };
+
+    const { config: result, newProfileId } = duplicateProfile(config, "src");
+    const cloned = result.appMappings.find((m) => m.profileId === newProfileId);
+    expect(cloned).toBeDefined();
+    expect(cloned!.exe).toBe("notepad.exe");
   });
 });

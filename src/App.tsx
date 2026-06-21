@@ -41,7 +41,7 @@ import {
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
-import { labelForLayer } from "./lib/labels";
+import { displayNameForControl, labelForLayer } from "./lib/labels";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -824,7 +824,7 @@ function App() {
         <ActionPickerModal
           config={activeConfig}
           bindingId={actionPickerBindingId}
-          controlLabel={selectedControl?.defaultName}
+          controlLabel={selectedControl ? displayNameForControl(selectedControl, "raw") : undefined}
           layerLabel={labelForLayer(selectedLayer)}
           controlId={selectedControlId ?? undefined}
           selectedLayer={selectedLayer}

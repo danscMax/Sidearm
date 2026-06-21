@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { Binding, ControlId, Layer, PhysicalControl, TriggerMode } from "../../lib/config";
+import { displayNameForControl } from "../../lib/labels";
 import { Notice, SelectField } from "../shared";
 
 export function TriggerModeEditor({
@@ -45,11 +46,17 @@ export function TriggerModeEditor({
           </p>
           <div className="chord-preview">
             <span className="chord-preview__key">
-              {physicalControls.find((c) => c.id === controlId)?.defaultName ?? controlId}
+              {(() => {
+                const control = physicalControls.find((c) => c.id === controlId);
+                return control ? displayNameForControl(control, "raw") : controlId;
+              })()}
             </span>
             <span className="chord-preview__plus">+</span>
             <span className="chord-preview__key chord-preview__key--partner">
-              {physicalControls.find((c) => c.id === chordPartner)?.defaultName ?? "…"}
+              {(() => {
+                const partner = physicalControls.find((c) => c.id === chordPartner);
+                return partner ? displayNameForControl(partner, "raw") : "…";
+              })()}
             </span>
           </div>
           <SelectField<string>
@@ -60,7 +67,7 @@ export function TriggerModeEditor({
               { value: "", label: t("picker.chordPartnerEmpty") },
               ...physicalControls
                 .filter((c) => c.id !== controlId && c.remappable)
-                .map((c) => ({ value: c.id, label: c.defaultName })),
+                .map((c) => ({ value: c.id, label: displayNameForControl(c, "raw") })),
             ]}
           />
           {chordPartner && selectedLayer ? (

@@ -5,6 +5,7 @@ import { Notice, SelectField } from "../shared";
 import {
   coerceSequenceStepType,
   createDefaultSequenceStep,
+  modifierLabels,
   setSequenceStepDelay,
   swapItems,
 } from "../../lib/action-helpers";
@@ -66,13 +67,16 @@ export function SequenceStepEditor({
       e.stopPropagation();
 
       const rawKey = resolveKeyName(e);
-      const parts: string[] = [];
-      if (e.ctrlKey) parts.push("Ctrl");
-      if (e.altKey) parts.push("Alt");
-      if (e.shiftKey) parts.push("Shift");
+      // Canonical Ctrl→Shift→Alt→Win order (+ Win, previously missing) via the
+      // shared modifierLabels helper, so recorded chords match the rest of the UI.
+      const mods = modifierLabels({
+        ctrl: e.ctrlKey,
+        shift: e.shiftKey,
+        alt: e.altKey,
+        win: e.metaKey,
+      });
       const keyName = normalizeKeyName(rawKey);
-      parts.push(keyName);
-      const formatted = parts.join("+");
+      const formatted = [...mods, keyName].join("+");
 
       void recordKeystroke(formatted);
       setRecordedCount((c) => c + 1);

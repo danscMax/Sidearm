@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Action, Binding, ControlId, Layer } from "../lib/config";
+import type { ControlId } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { displayNameForControl, resolveControlBadge, surfacePrimaryLabel } from "../lib/labels";
 import {
@@ -9,6 +9,7 @@ import {
   COMBINED_RIGHT_BUTTONS,
   HEAT_TINT,
   heatIntensity,
+  type MouseVisualizationProps,
   TOP_LEFT_BUTTONS,
   TOP_RIGHT_BUTTONS,
   type ViewTab,
@@ -17,20 +18,6 @@ import { useControlInteractions } from "../hooks/useControlInteractions";
 import { LabelColumn } from "./mouse-visual/LabelColumn";
 import { LayerPills } from "./mouse-visual/LayerPills";
 import { ViewTabPills } from "./mouse-visual/ViewTabPills";
-
-interface MouseVisualizationProps {
-  entries: ControlSurfaceEntry[];
-  selectedLayer: Layer;
-  multiSelectedControlIds: Set<ControlId>;
-  onSelectControl: (id: ControlId) => void;
-  onToggleMultiSelect: (id: ControlId) => void;
-  onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
-  onSelectLayer: (layer: Layer) => void;
-  onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
-  executionCounts?: Map<string, number>;
-  heatmapEnabled?: boolean;
-  onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
-}
 
 /* ── Layout constants for the SVG illustration ── */
 
@@ -251,6 +238,8 @@ export function MouseVisualizationSvg({
   entries,
   selectedLayer,
   multiSelectedControlIds,
+  matchedControlIds,
+  conflictBindingIds,
   onSelectControl,
   onToggleMultiSelect,
   onOpenActionPicker,
@@ -359,6 +348,10 @@ export function MouseVisualizationSvg({
     const isSelected = entry?.isSelected || multiSelectedControlIds.has(id);
     const isHovered = hoveredId === id;
     const isDragOver = dragOverId === id;
+    // Mirror the photo view: dim controls outside the active search match, and
+    // ring controls whose binding conflicts with another on the same layer.
+    const isDimmed = matchedControlIds != null && !matchedControlIds.has(id);
+    const hasConflict = !!entry?.binding && (conflictBindingIds?.has(entry.binding.id) ?? false);
     const colors = buttonColors(entry, isSelected, isHovered);
     const heat = heatFill(id);
     const fillColor = heat ?? colors.fill;
@@ -372,7 +365,9 @@ export function MouseVisualizationSvg({
     return (
       <g
         key={id}
-        className={`mouse-svg__btn${hasDragBinding ? " mouse-svg__btn--grab" : ""}`}
+        className={`mouse-svg__btn${hasDragBinding ? " mouse-svg__btn--grab" : ""}${
+          isDimmed ? " mouse-svg__btn--dimmed" : ""
+        }${hasConflict ? " mouse-svg__btn--conflict" : ""}`}
         data-control-id={id}
         {...getInteractionProps(id)}
       >

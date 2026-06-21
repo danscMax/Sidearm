@@ -21,6 +21,7 @@ import {
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import {
+  displayNameForControl,
   formatTimestamp,
   labelForCapability,
   labelForControlFamily,
@@ -96,7 +97,7 @@ export function ControlPropertiesPanel({
       {/* ── Identity & metadata ── */}
       <div className="props-header">
         <div className="props-header__title">
-          <h2>{selectedControl.defaultName}</h2>
+          <h2>{displayNameForControl(selectedControl, "raw")}</h2>
           {selectedEncoder?.encodedKey ? (
             <code className="props-header__signal">{selectedEncoder.encodedKey}</code>
           ) : (

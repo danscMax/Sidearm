@@ -5,12 +5,36 @@
 // forked copies.
 
 import i18n from "../i18n";
-import type { ControlId, TriggerMode } from "./config";
+import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
 import { ACTION_CATEGORIES } from "./constants";
 import { displayNameForControl } from "./labels";
 
 export type ViewTab = "top" | "side" | "combined";
+
+/**
+ * Shared prop contract for both mouse-layout visualizers (photo + schematic).
+ * Declared once here so the schematic view can't silently drift from the photo
+ * view — e.g. omitting `matchedControlIds`/`conflictBindingIds` and losing the
+ * search-dim / conflict-highlight overlays.
+ */
+export interface MouseVisualizationProps {
+  entries: ControlSurfaceEntry[];
+  selectedLayer: Layer;
+  multiSelectedControlIds: Set<ControlId>;
+  /** If set, controls not in the set are visually dimmed. Null = no filter. */
+  matchedControlIds?: Set<ControlId> | null;
+  /** Binding IDs that conflict with another binding on the same layer. */
+  conflictBindingIds?: Set<string>;
+  onSelectControl: (id: ControlId) => void;
+  onToggleMultiSelect: (id: ControlId) => void;
+  onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
+  onSelectLayer: (layer: Layer) => void;
+  onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
+  executionCounts?: Map<string, number>;
+  heatmapEnabled?: boolean;
+  onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
+}
 
 /** Localized short labels for the trigger-mode badges that carry words. */
 export interface TriggerBadgeLabels {

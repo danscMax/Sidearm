@@ -1,5 +1,6 @@
 import type {
   Action,
+  ActionType,
   AppConfig,
   LaunchActionPayload,
   MenuActionPayload,
@@ -238,6 +239,43 @@ export function createDefaultSequenceStep(stepType: SequenceStep["type"]): Seque
       return { type: "sleep", delayMs: SEQUENCE_STEP_DEFAULT_SLEEP_MS };
     case "launch":
       return { type: "launch", value: i18n.t("sequence.defaultLaunch") };
+  }
+}
+
+/** Precise payload type for a specific ActionType, derived from the `Action`
+ *  discriminated union so literal callers get an exact (not union) payload. */
+type PayloadFor<T extends ActionType> = Extract<Action, { type: T }>["payload"];
+
+/**
+ * Canonical DEFAULT payload for a given ActionType — the single source the
+ * action-builders share so a "new mouseAction" (etc.) means the same thing in
+ * every entry point. Special cases that depend on surrounding config (menu
+ * items, profileSwitch target, carried modifiers) are layered on by the caller;
+ * this returns the base, config-independent shape.
+ */
+export function defaultPayloadFor<T extends ActionType>(actionType: T): PayloadFor<T>;
+export function defaultPayloadFor(actionType: ActionType): Action["payload"] {
+  switch (actionType) {
+    case "shortcut":
+      return { key: "A", ctrl: false, shift: false, alt: false, win: false };
+    case "mouseAction":
+      return { action: "leftClick", ctrl: false, shift: false, alt: false, win: false };
+    case "textSnippet":
+      return { source: "inline", text: "", pasteMode: "sendText", tags: [] };
+    case "sequence":
+      return { steps: [createDefaultSequenceStep("send")] };
+    case "launch":
+      return { target: i18n.t("sequence.defaultLaunch") };
+    case "mediaKey":
+      return { key: "playPause" };
+    case "profileSwitch":
+      return { targetProfileId: "" };
+    case "menu":
+      return { items: [] };
+    case "disabled":
+      return {} as Record<string, never>;
+    case "repairClipboard":
+      return { strategy: "latin1" };
   }
 }
 

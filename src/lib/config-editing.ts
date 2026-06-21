@@ -15,6 +15,7 @@ import type {
   SnippetLibraryItem,
 } from "./config";
 import { clampPriority, uniqueStrings } from "./helpers";
+import { defaultPayloadFor } from "./action-helpers";
 
 const PLACEHOLDER_ACTION_NOTE =
   "Created from the shell editor. Replace this placeholder before using it in runtime.";
@@ -312,15 +313,11 @@ export function coerceActionType(
         return {
           ...action,
           type: "shortcut",
-          payload: {
-            key: "A",
-            ctrl: false,
-            shift: false,
-            alt: false,
-            win: false,
-          },
+          payload: defaultPayloadFor("shortcut"),
         };
       case "textSnippet":
+        // Special case: seed the snippet text from the action's display name so
+        // a freshly-converted snippet isn't blank (preserves prior behaviour).
         return {
           ...action,
           type: "textSnippet",
@@ -339,7 +336,7 @@ export function coerceActionType(
             steps: [
               {
                 type: "text",
-                value: action.displayName.trim() || "Replace me",
+                value: action.displayName.trim() || i18n.t("sequence.defaultText"),
               },
             ],
           },
@@ -348,9 +345,7 @@ export function coerceActionType(
         return {
           ...action,
           type: "launch",
-          payload: {
-            target: "C:\\Path\\To\\App.exe",
-          },
+          payload: defaultPayloadFor("launch"),
         };
       case "menu":
         return {
@@ -367,17 +362,30 @@ export function coerceActionType(
             ],
           },
         };
-      case "mouseAction":
+      case "mouseAction": {
+        // DECIDED FORK: carry the source's keyboard modifiers into the new
+        // mouseAction. Only `shortcut` carries modifiers into here (the early
+        // return above rules out source === mouseAction), so read them from it.
+        const carried =
+          action.type === "shortcut"
+            ? {
+                ctrl: action.payload.ctrl,
+                shift: action.payload.shift,
+                alt: action.payload.alt,
+                win: action.payload.win,
+              }
+            : {};
         return {
           ...action,
           type: "mouseAction",
-          payload: { action: "leftClick" },
+          payload: { ...defaultPayloadFor("mouseAction"), action: "leftClick", ...carried },
         };
+      }
       case "mediaKey":
         return {
           ...action,
           type: "mediaKey",
-          payload: { key: "playPause" },
+          payload: defaultPayloadFor("mediaKey"),
         };
       case "profileSwitch":
         return {
@@ -396,7 +404,7 @@ export function coerceActionType(
         return {
           ...action,
           type: "repairClipboard",
-          payload: { strategy: "latin1" },
+          payload: defaultPayloadFor("repairClipboard"),
         };
     }
   })();
@@ -650,6 +658,23 @@ export function expectedEncodedKeyForControl(
   return null;
 }
 
+/** Re-key a set of bindings onto a new profile: fresh random binding ids, the
+ *  new profileId, and actionIds remapped through `actionIdMap` (falling back to
+ *  the original id when unmapped). Shared by duplicateProfile and importProfile,
+ *  which previously had byte-identical copies of this block. */
+function remapBindings(
+  bindings: Binding[],
+  newProfileId: string,
+  actionIdMap: Map<string, string>,
+): Binding[] {
+  return bindings.map((b) => ({
+    ...b,
+    id: makeRandomId("binding"),
+    profileId: newProfileId,
+    actionId: actionIdMap.get(b.actionId) ?? b.actionId,
+  }));
+}
+
 export function duplicateProfile(
   config: AppConfig,
   sourceProfileId: string,
@@ -673,6 +698,10 @@ export function duplicateProfile(
     ...m,
     id: makeRandomId("app"),
     profileId: newId,
+    // Store exe canonically (lowercase) so the duplicate check and the
+    // case-insensitive runtime resolver agree, matching importProfile /
+    // createAppMappingFromCapture.
+    exe: m.exe.trim().toLowerCase(),
   }));
 
   // Clone bindings + actions
@@ -693,12 +722,7 @@ export function duplicateProfile(
     }
   }
 
-  const newBindings = sourceBindings.map((b) => ({
-    ...b,
-    id: makeRandomId("binding"),
-    profileId: newId,
-    actionId: actionIdMap.get(b.actionId) ?? b.actionId,
-  }));
+  const newBindings = remapBindings(sourceBindings, newId, actionIdMap);
 
   return {
     config: {
@@ -1027,12 +1051,7 @@ export function importProfile(
     return { ...structuredClone(a), id };
   });
 
-  const newBindings: Binding[] = data.bindings.map((b) => ({
-    ...b,
-    id: makeRandomId("binding"),
-    profileId: newId,
-    actionId: actionIdMap.get(b.actionId) ?? b.actionId,
-  }));
+  const newBindings: Binding[] = remapBindings(data.bindings, newId, actionIdMap);
 
   const newAppMappings: AppMapping[] = (data.appMappings ?? []).map((m) => ({
     ...m,

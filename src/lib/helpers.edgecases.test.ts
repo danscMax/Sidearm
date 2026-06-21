@@ -13,7 +13,7 @@
  *   - appendToBoundedArray invariants
  *   - parseCommaSeparatedList PBT (distinct from unique version)
  *   - parseOptionalNumber PBT (nominal tests exist; PBT boundaries missing)
- *   - controlName / sortAppMappings PBT
+ *   - sortAppMappings PBT
  *   - Overflow: huge arrays, unicode, nbsp, BOM
  *   - Null & empty: whitespace-only, empty arrays, cap=0 / cap=1
  *
@@ -35,7 +35,6 @@ import {
   appendToBoundedArray,
   sortAppMappings,
   parseOptionalNumber,
-  controlName,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -415,34 +414,6 @@ describe("boundary: sortAppMappings — stable across priorities and exe names",
           expect(twice.map((m) => m.id)).toEqual(once.map((m) => m.id));
         },
       ),
-      { numRuns: 1000 },
-    );
-  });
-});
-
-describe("boundary: controlName — lookup and fallback", () => {
-  it("returns defaultName for known control id", () => {
-    const controls = [
-      {
-        id: "thumb_01" as const,
-        family: "thumbGrid" as const,
-        defaultName: "Thumb 1",
-        remappable: true,
-        capabilityStatus: "verified" as const,
-      },
-    ];
-    expect(controlName(controls, "thumb_01")).toBe("Thumb 1");
-  });
-
-  it("returns raw id as fallback when not found", () => {
-    expect(controlName([], "thumb_99")).toBe("thumb_99");
-  });
-
-  it("returns raw id for empty controls array (PBT)", () => {
-    fc.assert(
-      fc.property(fc.string({ minLength: 1, maxLength: 30 }), (id) => {
-        expect(controlName([], id)).toBe(id);
-      }),
       { numRuns: 1000 },
     );
   });

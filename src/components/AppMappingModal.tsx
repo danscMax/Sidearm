@@ -3,12 +3,12 @@ import { useTranslation } from "react-i18next";
 
 import type { AppConfig, AppMapping } from "../lib/config";
 import { deleteAppMapping, upsertAppMapping } from "../lib/config-editing";
-import { pickExecutablePath } from "../lib/backend";
 import { clampPriority } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { RunningProcessPicker } from "./RunningProcessPicker";
 import { CloseButton, ModalFooter, ModalShell, Toggle } from "./shared";
 import { ExeIcon } from "./ExeIcon";
+import { ExeMatchField } from "./ExeMatchField";
 
 interface AppMappingModalProps {
   mapping: AppMapping;
@@ -62,54 +62,25 @@ export function AppMappingModal({
           </p>
 
           {/* Exe input + Browse */}
-          <div className="field">
-            <span className="field__label">{t("ruleModal.exeLabel")}</span>
-            <div className="field__row">
-              <input
-                ref={exeInputRef}
-                type="text"
-                value={mapping.exe}
-                placeholder="chrome.exe"
-                onChange={(e) =>
-                  updateDraft((c) => upsertAppMapping(c, { ...mapping, exe: e.target.value, processPath: undefined }))
-                }
-              />
-              <button
-                type="button"
-                className="action-button action-button--small"
-                onClick={async () => {
-                  const pick = await pickExecutablePath({
-                    title: t("newRule.browseTitle"),
-                    filterName: t("newRule.browseFilter"),
-                    extensions: ["exe", "lnk"],
-                  });
-                  if (pick) {
-                    updateDraft((c) =>
-                      upsertAppMapping(c, { ...mapping, exe: pick.name, processPath: pick.path }),
-                    );
-                  }
-                }}
-              >
-                {t("common.browse")}
-              </button>
-              <button
-                type="button"
-                className="action-button action-button--small"
-                onClick={() => setShowProcessPicker(true)}
-                title={t("ruleModal.pickRunningTooltip")}
-              >
-                {t("ruleModal.pickRunning")}
-              </button>
-            </div>
-            {mapping.processPath ? (
-              <p
-                className="field__description field__description--mono"
-                title={mapping.processPath}
-              >
-                {mapping.processPath}
-              </p>
-            ) : null}
-          </div>
+          <ExeMatchField
+            label={t("ruleModal.exeLabel")}
+            exe={mapping.exe}
+            processPath={mapping.processPath}
+            showProcessPath
+            placeholder="chrome.exe"
+            browseTitle={t("newRule.browseTitle")}
+            browseFilter={t("newRule.browseFilter")}
+            browseLabel={t("common.browse")}
+            inputRef={exeInputRef}
+            onPickRunning={() => setShowProcessPicker(true)}
+            pickRunningLabel={t("ruleModal.pickRunning")}
+            pickRunningTooltip={t("ruleModal.pickRunningTooltip")}
+            onChange={(exe, processPath) =>
+              updateDraft((c) =>
+                upsertAppMapping(c, { ...mapping, exe, processPath: processPath || undefined }),
+              )
+            }
+          />
 
           {/* Title filters */}
           <div className="field">

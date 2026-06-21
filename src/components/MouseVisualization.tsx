@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Action, Binding, ControlId, Layer } from "../lib/config";
-import type { ControlSurfaceEntry } from "../lib/constants";
+import type { ControlId } from "../lib/config";
 import { topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
 import { displayNameForControl, resolveControlBadge, surfacePrimaryLabel } from "../lib/labels";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
@@ -9,6 +8,7 @@ import {
   actionLabel,
   COMBINED_LEFT_BUTTONS,
   COMBINED_RIGHT_BUTTONS,
+  type MouseVisualizationProps,
   TOP_LEFT_BUTTONS,
   TOP_RIGHT_BUTTONS,
   type TriggerBadgeLabels,
@@ -21,24 +21,6 @@ import { LayerPills } from "./mouse-visual/LayerPills";
 import { ViewTabPills } from "./mouse-visual/ViewTabPills";
 
 type VisualMode = "photo" | "schematic";
-
-interface MouseVisualizationProps {
-  entries: ControlSurfaceEntry[];
-  selectedLayer: Layer;
-  multiSelectedControlIds: Set<ControlId>;
-  /** If set, controls not in the set are visually dimmed. Null = no filter. */
-  matchedControlIds?: Set<ControlId> | null;
-  /** Binding IDs that conflict with another binding on the same layer. */
-  conflictBindingIds?: Set<string>;
-  onSelectControl: (id: ControlId) => void;
-  onToggleMultiSelect: (id: ControlId) => void;
-  onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
-  onSelectLayer: (layer: Layer) => void;
-  onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
-  executionCounts?: Map<string, number>;
-  heatmapEnabled?: boolean;
-  onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
-}
 
 /** Side view: 4 columns × 3 rows matching the physical thumb-grid layout. */
 const SIDE_LEGEND_GRID: ControlId[][] = [
@@ -99,6 +81,8 @@ export function MouseVisualization({
           entries={entries}
           selectedLayer={selectedLayer}
           multiSelectedControlIds={multiSelectedControlIds}
+          matchedControlIds={matchedControlIds}
+          conflictBindingIds={conflictBindingIds}
           onSelectControl={onSelectControl}
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}

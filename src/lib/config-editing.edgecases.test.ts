@@ -19,6 +19,7 @@
 
 import * as fc from "fast-check";
 import { describe, it, expect } from "vitest";
+import i18n from "../i18n";
 import type {
   Action,
   AppConfig,
@@ -896,7 +897,8 @@ describe("invariant: coerceActionType — name collision when only one action ex
     if (coerced?.type === "sequence") {
       const step = coerced.payload.steps[0];
       if (step && step.type === "text") {
-        expect(step.value).toBe("Replace me");
+        // All-whitespace displayName falls back to the localized default text.
+        expect(step.value).toBe(i18n.t("sequence.defaultText"));
       }
     }
   });

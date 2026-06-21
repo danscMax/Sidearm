@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
 import { topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
-import { displayNameForControl, surfacePrimaryLabel } from "../lib/labels";
+import { displayNameForControl, resolveControlBadge, surfacePrimaryLabel } from "../lib/labels";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
 import {
   actionLabel,
@@ -165,7 +165,7 @@ export function MouseVisualization({
           draggable={!!entry.binding && !!entry.action}
           {...getInteractionProps(entry.control.id)}
         >
-          {pos.label}
+          {resolveControlBadge(pos.label)}
         </button>
       );
     });
@@ -183,7 +183,7 @@ export function MouseVisualization({
         side={side}
         interaction={interaction}
         multiSelectedControlIds={multiSelectedControlIds}
-        badgeFor={(id) => hotspots[id]?.label ?? id}
+        badgeFor={(id) => resolveControlBadge(hotspots[id]?.label ?? id)}
         actionLabelFor={(entry) => actionLabel(entry, { triggerLabels })}
         unassignedLabel={t("visualization.unassigned")}
         executionCounts={executionCounts}
@@ -221,7 +221,7 @@ export function MouseVisualization({
                   controlId={controlId}
                   interaction={interaction}
                   selected={selected}
-                  badge={hotspots[controlId]?.label ?? controlId}
+                  badge={resolveControlBadge(hotspots[controlId]?.label ?? controlId)}
                   label={actionLabel(entry, { triggerLabels })}
                   tooltip={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
                     entry.binding,

@@ -7,6 +7,17 @@ import { ModalFooter, ModalHeader, ModalShell } from "./shared";
    Confirm Modal
    ───────────────────────────────────────────────────────── */
 
+/** The confirmation-modal descriptor App owns and threads to children via
+ *  `setConfirmModal`. Single source for every `setConfirmModal` / `showConfirmModal`
+ *  prop shape. */
+export interface ConfirmModalRequest {
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  danger?: boolean;
+  onConfirm: () => void;
+}
+
 export function ConfirmModal({
   title,
   message,
@@ -14,14 +25,7 @@ export function ConfirmModal({
   danger,
   onConfirm,
   onCancel,
-}: {
-  title: string;
-  message: string;
-  confirmLabel?: string;
-  danger?: boolean;
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
+}: ConfirmModalRequest & { onCancel: () => void }) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);

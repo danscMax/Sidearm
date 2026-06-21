@@ -1,5 +1,6 @@
 import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
+import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, ControlId, Layer, Profile } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
@@ -43,13 +44,7 @@ export interface ProfilesWorkspaceProps {
   viewState: ViewState;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   setCaptureDelayMs: (ms: number) => void;
-  setConfirmModal: (modal: {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    danger?: boolean;
-    onConfirm: () => void;
-  } | null) => void;
+  setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   handleCaptureActiveWindow: () => Promise<void>;
   setProfileSyncSuppressed: (suppressed: boolean) => void;
   familySections: FamilySection[];
@@ -690,12 +685,10 @@ export function ProfilesWorkspace({
                 <div className="new-rule__delay-row">
                   <span className="new-rule__delay-label">{t("newRule.delayLabel")}</span>
                   <PillTrack
-                    items={[
-                      { key: "1000", label: "1с" },
-                      { key: "2000", label: "2с" },
-                      { key: "3000", label: "3с" },
-                      { key: "5000", label: "5с" },
-                    ]}
+                    items={[1000, 2000, 3000, 5000].map((ms) => ({
+                      key: String(ms),
+                      label: `${ms / 1000}${t("common.secondsShort")}`,
+                    }))}
                     active={String(captureDelayMs)}
                     onSelect={(k) => setCaptureDelayMs(Number(k))}
                   />

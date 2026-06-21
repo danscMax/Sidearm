@@ -226,20 +226,18 @@ export function withMenuPayload(
 
 /** Default payloads for a new/converted sequence step (single source). */
 const SEQUENCE_STEP_DEFAULT_SEND = "Ctrl+C";
-const SEQUENCE_STEP_DEFAULT_TEXT = "Замените этот текст";
 const SEQUENCE_STEP_DEFAULT_SLEEP_MS = 100;
-const SEQUENCE_STEP_DEFAULT_LAUNCH = "C:\\Путь\\К\\Программе.exe";
 
 export function createDefaultSequenceStep(stepType: SequenceStep["type"]): SequenceStep {
   switch (stepType) {
     case "send":
       return { type: "send", value: SEQUENCE_STEP_DEFAULT_SEND };
     case "text":
-      return { type: "text", value: SEQUENCE_STEP_DEFAULT_TEXT };
+      return { type: "text", value: i18n.t("sequence.defaultText") };
     case "sleep":
       return { type: "sleep", delayMs: SEQUENCE_STEP_DEFAULT_SLEEP_MS };
     case "launch":
-      return { type: "launch", value: SEQUENCE_STEP_DEFAULT_LAUNCH };
+      return { type: "launch", value: i18n.t("sequence.defaultLaunch") };
   }
 }
 
@@ -263,7 +261,7 @@ export function coerceSequenceStepType(
     case "text":
       return {
         type: "text",
-        value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_TEXT,
+        value: "value" in step ? step.value : i18n.t("sequence.defaultText"),
         // Audit F012: see "send" above — don't reinterpret a sleep duration as a delay.
         delayMs: step.type === "sleep" ? undefined : "delayMs" in step ? step.delayMs : undefined,
       };
@@ -275,7 +273,7 @@ export function coerceSequenceStepType(
     case "launch":
       return {
         type: "launch",
-        value: "value" in step ? step.value : SEQUENCE_STEP_DEFAULT_LAUNCH,
+        value: "value" in step ? step.value : i18n.t("sequence.defaultLaunch"),
         args: step.type === "launch" ? step.args : undefined,
         workingDir: step.type === "launch" ? step.workingDir : undefined,
         delayMs: "delayMs" in step ? step.delayMs : undefined,

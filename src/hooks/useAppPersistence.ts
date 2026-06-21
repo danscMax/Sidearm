@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 
 import { loadConfig, normalizeCommandError, saveConfig } from "../lib/backend";
+import i18n from "../i18n";
 import type {
   AppConfig,
   CommandError,
@@ -77,7 +78,7 @@ export function useAppPersistence(
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
-  const activePath = lastSave?.path ?? snapshot?.path ?? "Пока не загружен";
+  const activePath = lastSave?.path ?? snapshot?.path ?? i18n.t("common.notLoadedYet");
 
   // Best-effort flush on unmount / window close. Previously this cleanup
   // wiped the pending queue without writing — if the user closed the app

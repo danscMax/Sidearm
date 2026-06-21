@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import type {
   Action,
   ActionType,
@@ -656,7 +657,7 @@ export function duplicateProfile(
   const source = config.profiles.find((p) => p.id === sourceProfileId);
   if (!source) return { config, newProfileId: "" };
 
-  const newName = `${source.name} (копия)`;
+  const newName = i18n.t("profile.duplicateName", { name: source.name });
   const newId = nextUniqueId(
     config.profiles.map((p) => p.id),
     makeProfileId(newName),
@@ -1016,7 +1017,7 @@ export function importProfile(
   const existingIds = config.profiles.map((p) => p.id);
   const newId = nextUniqueId(existingIds, makeProfileId(data.profile.name));
   const newName = existingIds.includes(data.profile.id)
-    ? `${data.profile.name} (импорт)`
+    ? i18n.t("profile.importName", { name: data.profile.name })
     : data.profile.name;
 
   const actionIdMap = new Map<string, string>();

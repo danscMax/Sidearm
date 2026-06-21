@@ -46,9 +46,12 @@ function fkeyToButton(encodedKey: string): number | null {
 }
 
 export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWizardProps) {
-  const { i18n } = useTranslation();
+  const { t, i18n } = useTranslation();
   const lang: Lang = i18n.language?.startsWith("en") ? "en" : "ru";
-  const T = COPY[lang];
+  // Onboarding copy lives in locales/{ru,en}.json under `onboarding.*` (single
+  // source of truth). Pull the whole nested block as one object so the JSX below
+  // keeps its `T.section.key` shape; re-resolves on language switch.
+  const T = t("onboarding", { returnObjects: true }) as unknown as Copy;
 
   const [stepIdx, setStepIdx] = useState(0);
   const step = STEPS[stepIdx];
@@ -479,118 +482,3 @@ interface Copy {
   admin: { title: string; lead: string; enable: string; busy: string; already: string; autostartConfigured: string; relaunch: string; note: string };
   tryit: { title: string; lead: string; waiting: string; fired: string };
 }
-
-const COPY: Record<Lang, Copy> = {
-  ru: {
-    brand: "Настройка Sidearm",
-    ariaTitle: "Настройка Sidearm",
-    ariaLanguage: "Язык",
-    ariaNaga: "Сетка кнопок Razer Naga",
-    skip: "Пропустить настройку",
-    back: "Назад",
-    next: "Далее",
-    finish: "Готово",
-    checkOk: "готово",
-    checkBad: "не найдено",
-    checkPending: "проверка…",
-    welcome: {
-      title: "Добро пожаловать в Sidearm",
-      lead: "Sidearm превращает кнопки Razer Naga в удобные действия для каждого приложения. Пройдём настройку за пару минут: подготовим Razer Synapse, проверим железо вживую и зальём готовый профиль.",
-      checks: "Проверка окружения",
-      cSynapse: "Razer Synapse установлен",
-      cElevated: "Sidearm запущен от администратора",
-      cNaga: "Готовность",
-      nagaHint: "проверим на шаге «Тест»",
-      relaunch: "Перезапустить от админа",
-    },
-    synapse: {
-      title: "Настройка Razer Synapse",
-      lead: "Чтобы Sidearm видел кнопки мыши, Naga должна слать F13–F24. Мы подготовили готовый профиль Synapse — сохраните его и импортируйте в Razer Synapse.",
-      s1: "Нажмите «Сохранить профиль» — файл ляжет в Загрузки и откроется папка.",
-      s2: "Откройте Razer Synapse → раздел «Профили».",
-      s3: "Импортируйте сохранённый файл Sidearm_profile.synapse4 и сделайте его активным.",
-      s4: "Готово — Naga теперь шлёт F13–F24. Проверим это на следующем шаге.",
-      save: "Сохранить профиль",
-      saved: "Сохранено",
-    },
-    live: {
-      title: "Живой тест железа",
-      lead: "Нажимайте кнопки на боковой панели Naga — они должны загораться здесь. Так мы убедимся, что Synapse реально шлёт F-клавиши.",
-      waiting: "Ждём нажатий… нажмите любую кнопку Naga.",
-      last: "Поймана клавиша",
-      allDone: "Отлично — все 12 кнопок отвечают!",
-    },
-    admin: {
-      title: "Работа в окнах с правами администратора",
-      lead: "В окнах вроде Диспетчера задач Windows блокирует ввод от обычных программ (UIPI). Чтобы Naga работала и там, запускайте Sidearm от администратора.",
-      enable: "Включить автозапуск от администратора",
-      busy: "Включение… (подтвердите UAC)",
-      already: "Sidearm уже работает с правами администратора.",
-      autostartConfigured: "Автозапуск от администратора настроен — права применятся при следующем входе в систему.",
-      relaunch: "Перезапустить от администратора сейчас",
-      note: "Создаётся задача в Планировщике (запуск при входе). Это можно изменить позже в Настройках.",
-    },
-    tryit: {
-      title: "Попробуйте!",
-      lead: "Переключитесь в любое приложение и нажмите кнопку Naga. Как только действие сработает — увидите его здесь.",
-      waiting: "Ждём первое действие…",
-      fired: "Сработало",
-    },
-  },
-  en: {
-    brand: "Sidearm setup",
-    ariaTitle: "Sidearm onboarding",
-    ariaLanguage: "Language",
-    ariaNaga: "Razer Naga thumb grid",
-    skip: "Skip setup",
-    back: "Back",
-    next: "Next",
-    finish: "Done",
-    checkOk: "ready",
-    checkBad: "not found",
-    checkPending: "checking…",
-    welcome: {
-      title: "Welcome to Sidearm",
-      lead: "Sidearm turns your Razer Naga buttons into per-app actions. Setup takes a couple of minutes: prepare Razer Synapse, verify the hardware live, and load a ready-made profile.",
-      checks: "Environment check",
-      cSynapse: "Razer Synapse installed",
-      cElevated: "Sidearm running as administrator",
-      cNaga: "Readiness",
-      nagaHint: "verified in the Test step",
-      relaunch: "Restart as admin",
-    },
-    synapse: {
-      title: "Set up Razer Synapse",
-      lead: "For Sidearm to see your mouse buttons, the Naga must emit F13–F24. We ship a ready Synapse profile — save it and import it into Razer Synapse.",
-      s1: "Click “Save profile” — the file lands in Downloads and the folder opens.",
-      s2: "Open Razer Synapse → Profiles.",
-      s3: "Import the saved Sidearm_profile.synapse4 and make it active.",
-      s4: "Done — the Naga now emits F13–F24. We'll verify that next.",
-      save: "Save profile",
-      saved: "Saved",
-    },
-    live: {
-      title: "Live hardware test",
-      lead: "Press the buttons on the Naga side panel — they should light up here. This confirms Synapse is really emitting the F-keys.",
-      waiting: "Waiting for presses… press any Naga button.",
-      last: "Captured key",
-      allDone: "Nice — all 12 buttons respond!",
-    },
-    admin: {
-      title: "Working in administrator windows",
-      lead: "In windows like Task Manager, Windows blocks input from normal programs (UIPI). To make the Naga work there too, run Sidearm as administrator.",
-      enable: "Enable run-as-admin autostart",
-      busy: "Enabling… (confirm UAC)",
-      already: "Sidearm is already running as administrator.",
-      autostartConfigured: "Run-as-admin autostart is configured — privileges apply at your next sign-in.",
-      relaunch: "Restart as administrator now",
-      note: "Creates a Task Scheduler entry (launch at logon). You can change this later in Settings.",
-    },
-    tryit: {
-      title: "Try it!",
-      lead: "Switch to any app and press a Naga button. As soon as an action fires, you'll see it here.",
-      waiting: "Waiting for the first action…",
-      fired: "Fired",
-    },
-  },
-};

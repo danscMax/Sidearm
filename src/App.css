@@ -30,6 +30,7 @@
   --c-warning: #c49934;
   --c-warning-light: #e7c46f;
   --c-info: #5c9add;
+  --c-hypershift: #e8943a;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
@@ -336,8 +337,8 @@ select::picker(select) {
    a washed-out light-green stripe with unreadable white text on it. */
 select option,
 select optgroup {
-  background-color: var(--c-bg, #1a1f16);
-  color: var(--c-text-bright, #f0f2ec);
+  background-color: var(--c-bg);
+  color: var(--c-text-bright);
 }
 select option:hover,
 select option:focus {
@@ -345,11 +346,11 @@ select option:focus {
      Matching the tint used on .nav-item--active keeps the dropdown
      consistent with the rest of the sidebar. */
   background-color: rgba(125, 182, 73, 0.22);
-  color: var(--c-text-bright, #f0f2ec);
+  color: var(--c-text-bright);
 }
 select option:checked {
-  background-color: var(--c-bg, #1a1f16);
-  color: var(--c-accent, #9fca69);
+  background-color: var(--c-bg);
+  color: var(--c-accent);
   font-weight: 600;
 }
 select option:disabled {
@@ -390,7 +391,7 @@ select::checkmark {
 }
 
 .pill-track__indicator--hypershift {
-  background: #e8943a;
+  background: var(--c-hypershift);
 }
 
 .pill-track__pill {
@@ -424,7 +425,7 @@ select::checkmark {
 
 /* Hypershift active pill uses orange */
 .pill-track__indicator--hypershift ~ .pill-track__pill--active {
-  color: #e8943a;
+  color: var(--c-hypershift);
 }
 
 .sidebar__status {
@@ -1390,7 +1391,7 @@ select::checkmark {
 
 .autostart-row--sub {
   padding-left: 16px;
-  border-left: 2px solid var(--c-accent-dim, #335);
+  border-left: 2px solid var(--c-accent-dim);
 }
 
 
@@ -1640,7 +1641,7 @@ select::checkmark {
 .mouse-visual-tabs {
   /* Layer accent (consumed by the SVG fills, hotspot/legend highlights and layer
      pills below). Driven by data-layer={selectedLayer} on this root. */
-  --layer-accent: #9fca69;
+  --layer-accent: var(--c-accent);
   --layer-rgb: 159, 202, 105;
   --layer-border-rgb: 180, 226, 125;
   display: flex;
@@ -1651,7 +1652,7 @@ select::checkmark {
 }
 
 .mouse-visual-tabs[data-layer="hypershift"] {
-  --layer-accent: #e8943a;
+  --layer-accent: var(--c-hypershift);
   --layer-rgb: 232, 148, 58;
   --layer-border-rgb: 255, 190, 100;
 }
@@ -1882,7 +1883,7 @@ select::checkmark {
   font-size: 0.65rem;
   font-weight: 600;
   font-family: var(--font-mono, monospace);
-  color: var(--c-accent, #9fca69);
+  color: var(--c-accent);
   pointer-events: none;
   line-height: 1;
 }
@@ -2211,7 +2212,7 @@ code {
   list-style: none;
   margin: 0;
   padding: 4px;
-  background: var(--c-bg, #1a1f16);
+  background: var(--c-bg);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-popover);
@@ -2237,7 +2238,7 @@ code {
   color: var(--c-text-bright);
 }
 .profile-dropdown__item--active {
-  color: var(--c-accent, #9fca69);
+  color: var(--c-accent);
   font-weight: 600;
 }
 .profile-dropdown__item--active.profile-dropdown__item--focused {
@@ -2254,7 +2255,7 @@ code {
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--c-ok, #75c268);
+  background: var(--c-ok);
   /* Contrast ring (dropdown menu bg) — same intent as the pill dot. */
   box-shadow: 0 0 0 2px var(--c-bg), 0 0 5px color-mix(in srgb, var(--c-ok) 70%, transparent);
 }
@@ -2272,7 +2273,7 @@ code {
   cursor: text;
 }
 .chip-editor:focus-within {
-  border-color: var(--c-accent, #9fca69);
+  border-color: var(--c-accent);
 }
 .chip-editor--disabled { opacity: 0.6; pointer-events: none; }
 .chip-editor__chip {
@@ -2316,7 +2317,7 @@ code {
 /* ── Running-process picker modal ── */
 /* ── Presets modal ── */
 .presets-modal {
-  background: var(--c-panel, #1a1f16);
+  background: var(--c-surface);
   color: var(--c-text-bright);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-md, 12px);
@@ -2365,7 +2366,7 @@ code {
 .presets-modal__card-cta {
   align-self: flex-end;
   font-size: 0.74rem;
-  color: var(--c-accent, #9fca69);
+  color: var(--c-accent);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   margin-top: 4px;
@@ -4881,8 +4882,8 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 /* Level coloring */
-.log-item--error { color: var(--c-danger, #ef4444); }
-.log-item--warn  { color: var(--c-warning-light, #eab308); }
+.log-item--error { color: var(--c-danger); }
+.log-item--warn  { color: var(--c-warning-light); }
 .log-item--debug,
 .log-item--trace { opacity: 0.5; }
 
@@ -4897,7 +4898,7 @@ input[type="number"] { -moz-appearance: textfield; }
   z-index: 1100;
   padding: 10px 16px;
   border-radius: var(--radius-sm);
-  background: var(--c-surface, #1e2320);
+  background: var(--c-surface);
   color: var(--c-text);
   border: 1px solid var(--c-border);
   box-shadow: var(--shadow-popover);
@@ -5063,7 +5064,7 @@ input[type="number"] { -moz-appearance: textfield; }
 .synapse-binding-list__control { font-family: var(--font-mono, ui-monospace, monospace); }
 .synapse-binding-list__kind { opacity: 0.6; }
 .synapse-import-warnings { margin-top: 16px; font-size: 0.8rem; }
-.synapse-import-warnings summary { cursor: pointer; color: var(--c-warning-light, #eab308); }
+.synapse-import-warnings summary { cursor: pointer; color: var(--c-warning-light); }
 .synapse-import-warnings ul { margin: 8px 0 0; padding-left: 18px; }
 .synapse-import-warnings li { margin-bottom: 4px; }
 .synapse-import-warnings code {
@@ -5110,7 +5111,7 @@ input[type="number"] { -moz-appearance: textfield; }
   border: 1px solid rgba(104, 197, 127, 0.35);
 }
 .layer-badge--hypershift {
-  color: #e8943a;
+  color: var(--c-hypershift);
   background: rgba(232, 148, 58, 0.1);
   border: 1px solid rgba(232, 148, 58, 0.35);
 }
@@ -5120,14 +5121,14 @@ input[type="number"] { -moz-appearance: textfield; }
   max-width: 320px;
   padding: 5px 10px;
   font-size: 0.82rem;
-  background: var(--c-surface, #1e2320);
+  background: var(--c-surface);
   color: var(--c-text);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-xs);
 }
 .profiles-workspace__search:focus {
   outline: none;
-  border-color: var(--c-accent, #68c57f);
+  border-color: var(--c-accent);
 }
 .profiles-workspace__search-meta {
   font-size: 0.72rem;
@@ -5148,7 +5149,7 @@ input[type="number"] { -moz-appearance: textfield; }
   right: -6px;
   font-size: 0.72rem;
   color: #eab308;
-  background: var(--c-bg, #1a1f16);
+  background: var(--c-bg);
   border-radius: 50%;
   width: 14px;
   height: 14px;

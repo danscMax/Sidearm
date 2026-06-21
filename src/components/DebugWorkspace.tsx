@@ -34,7 +34,7 @@ import {
   labelForVerificationResult,
 } from "../lib/labels";
 import {
-  controlPhysicalHint,
+  controlPhysicalHintFor,
   describeVerificationSessionSuggestion,
   dotLabel,
   verificationResultColor,
@@ -382,7 +382,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                             {t("debug.pressButton", { label: currentVerificationStep.controlLabel })}
                           </h3>
                           <p className="verification-instruction__hint">
-                            {controlPhysicalHint[currentVerificationStep.controlId] ??
+                            {controlPhysicalHintFor(currentVerificationStep.controlId) ??
                               t("debug.unknownHint")}
                           </p>
                         </div>

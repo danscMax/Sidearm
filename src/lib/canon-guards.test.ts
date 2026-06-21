@@ -28,6 +28,16 @@ const ENTRIES = Object.entries(sources)
 
 const TSX = ENTRIES.filter(([path]) => path.endsWith(".tsx"));
 
+// Stylesheets, for the design-token fallback guard below.
+const cssSources = import.meta.glob("../**/*.css", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+const CSS = Object.entries(cssSources).map(
+  ([path, content]) => [toSrcRel(path), content] as const,
+);
+
 describe("canon adoption guards", () => {
   it("scans the source tree", () => {
     expect(ENTRIES.length).toBeGreaterThan(50);
@@ -63,6 +73,32 @@ describe("canon adoption guards", () => {
   it("@tauri-apps/api/event imported only by the backend IPC home", () => {
     const offenders = ENTRIES.filter(
       ([p, c]) => /@tauri-apps\/api\/event/.test(c) && p !== "lib/backend.ts",
+    ).map(([p]) => p);
+    expect(offenders).toEqual([]);
+  });
+
+  it("no Cyrillic literals outside i18n locales (UI copy lives in locales/*.json)", () => {
+    // The locale JSON files are the single source of UI copy; any Cyrillic in a
+    // .ts/.tsx source is an un-migrated literal that would break under `en`. Two
+    // documented exceptions: a regex char-class that permits Cyrillic in profile
+    // names (not copy), and the "Русский" language endonym shown in its own
+    // script by the language switcher (stripped here, not whitelisted per-file,
+    // so any OTHER stray Cyrillic in that file still fails).
+    const endonym = /Русский/g;
+    const offenders = ENTRIES.filter(
+      ([p, c]) =>
+        p !== "lib/profile-transfer.ts" &&
+        /[А-Яа-яЁё]/.test(c.replace(endonym, "")),
+    ).map(([p]) => p);
+    expect(offenders).toEqual([]);
+  });
+
+  it("no hardcoded hex fallback in CSS var() (use the token, not a stale literal)", () => {
+    // `var(--token, #abc)` lets a literal silently diverge from the real token
+    // and masks an undefined token. Cascade fallbacks `var(--a, var(--b))` and
+    // token definitions (`--x: #abc;`) are fine — only `#hex` fallbacks fail.
+    const offenders = CSS.filter(([, c]) =>
+      /var\(--[a-z-]+,\s*#[0-9a-fA-F]{3,8}\)/.test(c),
     ).map(([p]) => p);
     expect(offenders).toEqual([]);
   });

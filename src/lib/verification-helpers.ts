@@ -1,3 +1,4 @@
+import i18n from "../i18n";
 import type { ControlId } from "./config";
 import type {
   VerificationSession,
@@ -12,16 +13,16 @@ export function describeVerificationAlignment(
 ): { title: string; body: string; noticeClass: string } {
   if (!expectedEncodedKey && !configuredEncodedKey) {
     return {
-      title: "Ожидаемый сигнал ещё не задан",
-      body: "Для этой кнопки пока не задан ожидаемый сигнал. Нажмите кнопку на мыши, чтобы зафиксировать сигнал, или создайте его вручную.",
+      title: i18n.t("verification.align.noConfigTitle"),
+      body: i18n.t("verification.align.noConfigBody"),
       noticeClass: "notice--info",
     };
   }
 
   if (!configuredEncodedKey && expectedEncodedKey) {
     return {
-      title: "Ожидаемый сигнал известен, но ещё не настроен",
-      body: `Создайте сигнал «${expectedEncodedKey}», сохраните конфигурацию, запустите перехват и затем нажмите физическую кнопку для проверки.`,
+      title: i18n.t("verification.align.notConfiguredTitle"),
+      body: i18n.t("verification.align.notConfiguredBody", { key: expectedEncodedKey }),
       noticeClass: "notice--warning",
     };
   }
@@ -32,8 +33,11 @@ export function describeVerificationAlignment(
     expectedEncodedKey !== configuredEncodedKey
   ) {
     return {
-      title: "Настроенный сигнал расходится с ожидаемым",
-      body: `Сейчас конфигурация использует \`${configuredEncodedKey}\`, хотя план проверки ожидает \`${expectedEncodedKey}\`. Это может быть специально, но требует явного подтверждения.`,
+      title: i18n.t("verification.align.mismatchTitle"),
+      body: i18n.t("verification.align.mismatchBody", {
+        configured: configuredEncodedKey,
+        expected: expectedEncodedKey,
+      }),
       noticeClass: "notice--warning",
     };
   }
@@ -45,8 +49,8 @@ export function describeVerificationAlignment(
     observedMatchesSelectedControl
   ) {
     return {
-      title: "Наблюдаемый сигнал совпадает с настроенным",
-      body: `Последнее событие перехвата сообщило \`${observedEncodedKey}\` для этой кнопки и слоя. Это сильный сигнал, что настройку можно пометить как подтверждённую.`,
+      title: i18n.t("verification.align.okTitle"),
+      body: i18n.t("verification.align.okBody", { observed: observedEncodedKey }),
       noticeClass: "notice--ok",
     };
   }
@@ -58,15 +62,18 @@ export function describeVerificationAlignment(
     observedMatchesSelectedControl
   ) {
     return {
-      title: "Наблюдаемый сигнал отличается от настроенного",
-      body: `Последнее событие перехвата сообщило \`${observedEncodedKey}\`, но конфигурация сейчас ожидает \`${configuredEncodedKey}\`. Сначала приведите сигнал в порядок, потом доверяйте живому выполнению.`,
+      title: i18n.t("verification.align.observedDiffTitle"),
+      body: i18n.t("verification.align.observedDiffBody", {
+        observed: observedEncodedKey,
+        configured: configuredEncodedKey,
+      }),
       noticeClass: "notice--warning",
     };
   }
 
   return {
-    title: "Настроенный сигнал готов к проверке",
-    body: "Сохраните текущую конфигурацию, запустите перехват и нажмите выбранную физическую кнопку. Следующее событие покажет, воспроизводится ли сигнал.",
+    title: i18n.t("verification.align.readyTitle"),
+    body: i18n.t("verification.align.readyBody"),
     noticeClass: "notice--subtle",
   };
 }
@@ -78,44 +85,53 @@ export function describeVerificationSessionSuggestion(
 ): string {
   switch (result) {
     case "matched":
-      return `Наблюдаемый сигнал \`${step.observedEncodedKey}\` совпал с настроенным и выглядит как корректное попадание в текущую кнопку.`;
+      return i18n.t("verification.suggest.matched", { observed: step.observedEncodedKey });
     case "mismatched":
       return step.observedEncodedKey
-        ? `Сейчас пришёл \`${step.observedEncodedKey}\`, но этого недостаточно для чистого совпадения с ожидаемой конфигурацией.`
-        : "Наблюдение не дало чистого совпадения.";
+        ? i18n.t("verification.suggest.mismatchedWithKey", { observed: step.observedEncodedKey })
+        : i18n.t("verification.suggest.mismatchedNoKey");
     case "noSignal":
-      return "После старта шага приложение пока не увидело нового сигнала. Проверьте runtime, сохранённую конфигурацию и саму кнопку.";
+      return i18n.t("verification.suggest.noSignal");
     case "skipped":
-      return "Шаг пропущен пользователем.";
+      return i18n.t("verification.suggest.skipped");
   }
 }
 
-export const controlPhysicalHint: Partial<Record<ControlId, string>> = {
-  thumb_01: "Нижний левый на боковой клавиатуре (ряд 1, столбец 1)",
-  thumb_02: "Второй снизу, левый столбец (ряд 2, столбец 1)",
-  thumb_03: "Верхний левый на боковой клавиатуре (ряд 3, столбец 1)",
-  thumb_04: "Нижний во втором столбце (ряд 1, столбец 2)",
-  thumb_05: "Средний во втором столбце (ряд 2, столбец 2)",
-  thumb_06: "Верхний во втором столбце (ряд 3, столбец 2)",
-  thumb_07: "Нижний в третьем столбце (ряд 1, столбец 3)",
-  thumb_08: "Средний в третьем столбце (ряд 2, столбец 3)",
-  thumb_09: "Верхний в третьем столбце (ряд 3, столбец 3)",
-  thumb_10: "Нижний правый на боковой клавиатуре (ряд 1, столбец 4)",
-  thumb_11: "Второй снизу, правый столбец (ряд 2, столбец 4)",
-  thumb_12: "Верхний правый на боковой клавиатуре (ряд 3, столбец 4)",
-  mouse_left: "Левая кнопка мыши (основной клик)",
-  mouse_right: "Правая кнопка мыши",
-  mouse_4: "Боковая кнопка «Назад» (ближняя к большому пальцу сверху)",
-  mouse_5: "Боковая кнопка «Вперёд» (дальняя от большого пальца сверху)",
-  top_aux_01: "Кнопка рядом с колесом (предположительно DPI+)",
-  top_aux_02: "Вторая кнопка рядом с колесом (предположительно DPI−)",
-  wheel_up: "Прокрутка колеса вверх",
-  wheel_down: "Прокрутка колеса вниз",
-  wheel_click: "Нажатие на колесо (средний клик)",
-  wheel_left: "Наклон колеса влево",
-  wheel_right: "Наклон колеса вправо",
-  hypershift_button: "Кнопка Hypershift (нижняя на корпусе, под большим пальцем)",
+/** i18n KEY per control with a physical-location hint. Mirrors the
+ *  `control.hint.*` namespace; a control absent here has no hint. */
+const CONTROL_HINT_KEYS: Partial<Record<ControlId, string>> = {
+  thumb_01: "control.hint.thumb_01",
+  thumb_02: "control.hint.thumb_02",
+  thumb_03: "control.hint.thumb_03",
+  thumb_04: "control.hint.thumb_04",
+  thumb_05: "control.hint.thumb_05",
+  thumb_06: "control.hint.thumb_06",
+  thumb_07: "control.hint.thumb_07",
+  thumb_08: "control.hint.thumb_08",
+  thumb_09: "control.hint.thumb_09",
+  thumb_10: "control.hint.thumb_10",
+  thumb_11: "control.hint.thumb_11",
+  thumb_12: "control.hint.thumb_12",
+  mouse_left: "control.hint.mouse_left",
+  mouse_right: "control.hint.mouse_right",
+  mouse_4: "control.hint.mouse_4",
+  mouse_5: "control.hint.mouse_5",
+  top_aux_01: "control.hint.top_aux_01",
+  top_aux_02: "control.hint.top_aux_02",
+  wheel_up: "control.hint.wheel_up",
+  wheel_down: "control.hint.wheel_down",
+  wheel_click: "control.hint.wheel_click",
+  wheel_left: "control.hint.wheel_left",
+  wheel_right: "control.hint.wheel_right",
+  hypershift_button: "control.hint.hypershift_button",
 };
+
+/** Physical-location hint for a control, resolved via i18n. `undefined` for
+ *  controls without a hint (preserves the old `Partial<Record>` semantics). */
+export function controlPhysicalHintFor(controlId: ControlId): string | undefined {
+  const key = CONTROL_HINT_KEYS[controlId];
+  return key ? i18n.t(key) : undefined;
+}
 
 export function dotLabel(controlId: string): string {
   const thumbMatch = controlId.match(/^thumb_(\d+)$/);

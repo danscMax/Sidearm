@@ -36,7 +36,9 @@
     "create": "Create",
     "duplicate": "Duplicate",
     "edit": "Edit",
-    "optional": "optional"
+    "optional": "optional",
+    "secondsShort": "s",
+    "notLoadedYet": "Not loaded yet"
   },
   "app": {
     "name": "Sidearm",
@@ -146,6 +148,32 @@
       "needsValidation": "Needs validation",
       "reserved": "Reserved",
       "partiallyRemappable": "Partial"
+    },
+    "hint": {
+      "thumb_01": "Bottom-left on the thumb grid (row 1, column 1)",
+      "thumb_02": "Second from bottom, left column (row 2, column 1)",
+      "thumb_03": "Top-left on the thumb grid (row 3, column 1)",
+      "thumb_04": "Bottom of the second column (row 1, column 2)",
+      "thumb_05": "Middle of the second column (row 2, column 2)",
+      "thumb_06": "Top of the second column (row 3, column 2)",
+      "thumb_07": "Bottom of the third column (row 1, column 3)",
+      "thumb_08": "Middle of the third column (row 2, column 3)",
+      "thumb_09": "Top of the third column (row 3, column 3)",
+      "thumb_10": "Bottom-right on the thumb grid (row 1, column 4)",
+      "thumb_11": "Second from bottom, right column (row 2, column 4)",
+      "thumb_12": "Top-right on the thumb grid (row 3, column 4)",
+      "mouse_left": "Left mouse button (primary click)",
+      "mouse_right": "Right mouse button",
+      "mouse_4": "Side «Back» button (closer to the thumb, upper)",
+      "mouse_5": "Side «Forward» button (farther from the thumb, upper)",
+      "top_aux_01": "Button next to the wheel (presumably DPI+)",
+      "top_aux_02": "Second button next to the wheel (presumably DPI−)",
+      "wheel_up": "Wheel scroll up",
+      "wheel_down": "Wheel scroll down",
+      "wheel_click": "Wheel click (middle click)",
+      "wheel_left": "Wheel tilt left",
+      "wheel_right": "Wheel tilt right",
+      "hypershift_button": "Hypershift button (bottom of the body, under the thumb)"
     }
   },
   "layer": {
@@ -217,7 +245,9 @@
     "send": "Send shortcut",
     "text": "Type text",
     "sleep": "Delay",
-    "launch": "Launch"
+    "launch": "Launch",
+    "defaultText": "Replace this text",
+    "defaultLaunch": "C:\\Path\\To\\Program.exe"
   },
   "configWaiting": {
     "eyebrow": "Waiting for config",
@@ -238,7 +268,33 @@
     "scopeCurrentFamily": "Current group",
     "scopeCurrentFamilyDesc": "Only buttons from the selected group: thumb grid, top panel, wheel, or system controls.",
     "scopeAll": "Entire layer",
-    "scopeAllDesc": "All controls in the current layer, one by one."
+    "scopeAllDesc": "All controls in the current layer, one by one.",
+    "align": {
+      "noConfigTitle": "No expected signal yet",
+      "noConfigBody": "No expected signal is set for this button yet. Press a mouse button to capture a signal, or create one manually.",
+      "notConfiguredTitle": "Expected signal known, but not configured yet",
+      "notConfiguredBody": "Create the signal «{{key}}», save the configuration, start capture, then press the physical button to verify.",
+      "mismatchTitle": "Configured signal differs from the expected one",
+      "mismatchBody": "The configuration currently uses `{{configured}}`, while the verification plan expects `{{expected}}`. This may be intentional, but needs explicit confirmation.",
+      "okTitle": "Observed signal matches the configured one",
+      "okBody": "The last capture event reported `{{observed}}` for this button and layer. That's a strong signal you can mark the setup as confirmed.",
+      "observedDiffTitle": "Observed signal differs from the configured one",
+      "observedDiffBody": "The last capture event reported `{{observed}}`, but the configuration currently expects `{{configured}}`. Fix the signal first, then trust live execution.",
+      "readyTitle": "Configured signal is ready to verify",
+      "readyBody": "Save the current configuration, start capture, and press the selected physical button. The next event will show whether the signal reproduces."
+    },
+    "suggest": {
+      "matched": "The observed signal `{{observed}}` matched the configured one and looks like a correct hit on the current button.",
+      "mismatchedWithKey": "Got `{{observed}}` just now, but that's not enough for a clean match against the expected configuration.",
+      "mismatchedNoKey": "The observation didn't produce a clean match.",
+      "noSignal": "After starting the step the app hasn't seen a new signal yet. Check the runtime, the saved configuration, and the button itself.",
+      "skipped": "Step skipped by the user."
+    },
+    "reset": {
+      "title": "Reset session?",
+      "message": "All verification results will be lost.",
+      "confirm": "Reset"
+    }
   },
   "verificationScope": {
     "currentFamily": {
@@ -343,7 +399,10 @@
     "searchMeta": "Found: {{count}}",
     "searchAllProfiles": "All profiles",
     "searchNoResults": "No matching bindings in any profile.",
-    "dblClickSettings": "Double-click to open profile settings"
+    "dblClickSettings": "Double-click to open profile settings",
+    "defaultName": "New profile",
+    "duplicateName": "{{name}} (copy)",
+    "importName": "{{name}} (imported)"
   },
   "newRule": {
     "title": "New rule",
@@ -848,6 +907,62 @@
     "unknown": {
       "title": "An unexpected error occurred",
       "hint": "Copy the details and attach them to a report if the error persists."
+    }
+  },
+  "onboarding": {
+    "brand": "Sidearm setup",
+    "ariaTitle": "Sidearm onboarding",
+    "ariaLanguage": "Language",
+    "ariaNaga": "Razer Naga thumb grid",
+    "skip": "Skip setup",
+    "back": "Back",
+    "next": "Next",
+    "finish": "Done",
+    "checkOk": "ready",
+    "checkBad": "not found",
+    "checkPending": "checking…",
+    "welcome": {
+      "title": "Welcome to Sidearm",
+      "lead": "Sidearm turns your Razer Naga buttons into per-app actions. Setup takes a couple of minutes: prepare Razer Synapse, verify the hardware live, and load a ready-made profile.",
+      "checks": "Environment check",
+      "cSynapse": "Razer Synapse installed",
+      "cElevated": "Sidearm running as administrator",
+      "cNaga": "Readiness",
+      "nagaHint": "verified in the Test step",
+      "relaunch": "Restart as admin"
+    },
+    "synapse": {
+      "title": "Set up Razer Synapse",
+      "lead": "For Sidearm to see your mouse buttons, the Naga must emit F13–F24. We ship a ready Synapse profile — save it and import it into Razer Synapse.",
+      "s1": "Click “Save profile” — the file lands in Downloads and the folder opens.",
+      "s2": "Open Razer Synapse → Profiles.",
+      "s3": "Import the saved Sidearm_profile.synapse4 and make it active.",
+      "s4": "Done — the Naga now emits F13–F24. We'll verify that next.",
+      "save": "Save profile",
+      "saved": "Saved"
+    },
+    "live": {
+      "title": "Live hardware test",
+      "lead": "Press the buttons on the Naga side panel — they should light up here. This confirms Synapse is really emitting the F-keys.",
+      "waiting": "Waiting for presses… press any Naga button.",
+      "last": "Captured key",
+      "allDone": "Nice — all 12 buttons respond!"
+    },
+    "admin": {
+      "title": "Working in administrator windows",
+      "lead": "In windows like Task Manager, Windows blocks input from normal programs (UIPI). To make the Naga work there too, run Sidearm as administrator.",
+      "enable": "Enable run-as-admin autostart",
+      "busy": "Enabling… (confirm UAC)",
+      "already": "Sidearm is already running as administrator.",
+      "autostartConfigured": "Run-as-admin autostart is configured — privileges apply at your next sign-in.",
+      "relaunch": "Restart as administrator now",
+      "note": "Creates a Task Scheduler entry (launch at logon). You can change this later in Settings."
+    },
+    "tryit": {
+      "title": "Try it!",
+      "lead": "Switch to any app and press a Naga button. As soon as an action fires, you'll see it here.",
+      "waiting": "Waiting for the first action…",
+      "fired": "Fired"
     }
   }
 }

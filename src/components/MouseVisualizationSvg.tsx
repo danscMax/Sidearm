@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Action, Binding, ControlId, Layer } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
-import { displayNameForControl, surfacePrimaryLabel } from "../lib/labels";
+import { displayNameForControl, resolveControlBadge, surfacePrimaryLabel } from "../lib/labels";
 import {
   actionLabel,
   COMBINED_LEFT_BUTTONS,
@@ -50,7 +50,7 @@ type SvgButtonDef = {
 const TOP_BUTTONS: SvgButtonDef[] = [
   {
     id: "mouse_left",
-    label: "ЛКМ",
+    label: "control.name.mouseLeft",
     // Left click: left half of mouse top
     path: "M 80 4 C 55 4, 30 22, 22 60 L 22 200 L 168 200 L 168 4 Z",
     lx: 95,
@@ -58,7 +58,7 @@ const TOP_BUTTONS: SvgButtonDef[] = [
   },
   {
     id: "mouse_right",
-    label: "ПКМ",
+    label: "control.name.mouseRight",
     // Right click: right half of mouse top (not always intercepted, included for visual)
     path: "M 172 4 L 172 200 L 318 200 L 318 60 C 310 22, 285 4, 260 4 Z",
     lx: 245,
@@ -229,8 +229,8 @@ const SIDE_RIGHT_BUTTONS: ControlId[] = [
 
 /** Short badge labels used inside hotspot labels in the legend. */
 const HOTSPOT_LABELS: Partial<Record<ControlId, string>> = {
-  mouse_left: "ЛКМ",
-  mouse_right: "ПКМ",
+  mouse_left: "control.name.mouseLeft",
+  mouse_right: "control.name.mouseRight",
   top_aux_01: "D+",
   top_aux_02: "D\u2212",
   mouse_4: "\u2190",
@@ -438,7 +438,7 @@ export function MouseVisualizationSvg({
         <path d={btn.path} rx={4} />,
         btn.lx,
         btn.ly,
-        btn.label,
+        resolveControlBadge(btn.label),
         btn.id === "mouse_left" || btn.id === "mouse_right" ? 14 : 10,
       ),
     );
@@ -514,7 +514,7 @@ export function MouseVisualizationSvg({
         side={side}
         interaction={interaction}
         multiSelectedControlIds={multiSelectedControlIds}
-        badgeFor={(id) => HOTSPOT_LABELS[id] ?? id}
+        badgeFor={(id) => resolveControlBadge(HOTSPOT_LABELS[id] ?? id)}
         actionLabelFor={(entry) => actionLabel(entry)}
         unassignedLabel={t("visualization.unassigned")}
         executionCounts={executionCounts}

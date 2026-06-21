@@ -1,5 +1,7 @@
 import { useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { CommandError } from "../lib/config";
+import { translateCommandError } from "../lib/errors";
 import { useModalDismiss } from "../hooks/useModalDismiss";
 
 export function Fact({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
@@ -103,13 +105,16 @@ export function Notice({
 }
 
 export function ErrorPanel({ error }: { error: CommandError }) {
+  const { t } = useTranslation();
+  const translated = translateCommandError(error, t);
   return (
     <Notice variant="error">
-      <strong>{error.code}</strong>
-      <p>{error.message}</p>
-      {error.details?.length ? (
+      <strong>{translated.title}</strong>
+      <p>{translated.message}</p>
+      {translated.hint ? <p className="notice__hint">{translated.hint}</p> : null}
+      {translated.details?.length ? (
         <ul>
-          {error.details.map((detail) => (
+          {translated.details.map((detail) => (
             <li key={detail}>
               <code>{detail}</code>
             </li>

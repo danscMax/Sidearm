@@ -26,7 +26,7 @@
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--c-surface, #16191d);
+  background: var(--c-surface);
   border: 1px solid var(--c-border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-lg, 16px);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
@@ -45,7 +45,7 @@
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--c-accent, #9fca69);
+  color: var(--c-accent);
   margin-right: auto;
 }
 .onb-lang {
@@ -57,27 +57,27 @@
 .onb-lang button {
   border: 0;
   background: transparent;
-  color: var(--c-text-dim, #9aa3ad);
+  color: var(--c-text-dim);
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
 }
 .onb-lang button.is-active {
-  background: var(--c-accent, #9fca69);
+  background: var(--c-accent);
   color: #0c0f12;
 }
 .onb-skip {
   border: 0;
   background: transparent;
-  color: var(--c-text-dim, #9aa3ad);
+  color: var(--c-text-dim);
   font-size: 12px;
   cursor: pointer;
   padding: 4px 8px;
   border-radius: var(--radius-sm, 8px);
 }
 .onb-skip:hover {
-  color: var(--c-text, #e8edf2);
+  color: var(--c-text);
   background: rgba(255, 255, 255, 0.05);
 }
 
@@ -97,11 +97,11 @@
   transition: transform 0.2s ease, background 0.2s ease;
 }
 .onb-dot.is-done {
-  background: var(--c-accent, #9fca69);
+  background: var(--c-accent);
   cursor: pointer;
 }
 .onb-dot.is-current {
-  background: var(--c-accent, #9fca69);
+  background: var(--c-accent);
   transform: scale(1.35);
 }
 
@@ -115,12 +115,12 @@
   font-size: 24px;
   font-weight: 700;
   margin: 4px 0 6px;
-  color: var(--c-text, #e8edf2);
+  color: var(--c-text);
 }
 .onb-step__lead {
   font-size: 14px;
   line-height: 1.55;
-  color: var(--c-text-dim, #aab2bb);
+  color: var(--c-text-dim);
   margin: 0 0 18px;
   max-width: 64ch;
   /* Avoid short orphan last lines (e.g. the admin note). */
@@ -131,7 +131,7 @@
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--c-text-dim, #9aa3ad);
+  color: var(--c-text-dim);
   margin: 18px 0 8px;
 }
 
@@ -156,12 +156,12 @@
   border-radius: 50%;
   flex: 0 0 auto;
 }
-.onb-check__dot.ok { background: var(--c-ok, #5ec27a); box-shadow: 0 0 10px rgba(94, 194, 122, 0.6); }
+.onb-check__dot.ok { background: var(--c-ok); box-shadow: 0 0 10px rgba(94, 194, 122, 0.6); }
 .onb-check__dot.warn { background: var(--c-warning); box-shadow: 0 0 10px rgba(224, 179, 65, 0.5); }
-.onb-check__dot.bad { background: var(--c-danger, #e0594b); box-shadow: 0 0 10px rgba(224, 89, 75, 0.5); }
-.onb-check__dot.pending { background: var(--c-border, #5a626c); }
-.onb-check__label { font-size: 14px; color: var(--c-text, #e8edf2); }
-.onb-check__hint { font-size: 12px; color: var(--c-text-dim, #8b939c); margin-left: auto; text-align: right; }
+.onb-check__dot.bad { background: var(--c-danger); box-shadow: 0 0 10px rgba(224, 89, 75, 0.5); }
+.onb-check__dot.pending { background: var(--c-border); }
+.onb-check__label { font-size: 14px; color: var(--c-text); }
+.onb-check__hint { font-size: 12px; color: var(--c-text-dim); margin-left: auto; text-align: right; }
 /* Inline fix action shown in place of the hint (e.g. "Restart as admin"). */
 .onb-check__action {
   margin-left: auto;
@@ -171,19 +171,19 @@
   padding: 5px 12px;
   border-radius: var(--radius-pill, 999px);
   cursor: pointer;
-  color: var(--c-accent, #9fca69);
-  background: color-mix(in srgb, var(--c-accent, #9fca69) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--c-accent, #9fca69) 40%, transparent);
+  color: var(--c-accent);
+  background: color-mix(in srgb, var(--c-accent) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-accent) 40%, transparent);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 .onb-check__action:hover {
-  background: color-mix(in srgb, var(--c-accent, #9fca69) 20%, transparent);
-  border-color: var(--c-accent, #9fca69);
+  background: color-mix(in srgb, var(--c-accent) 20%, transparent);
+  border-color: var(--c-accent);
 }
 
 /* Numbered instructions */
 .onb-steps-list { margin: 0; padding-left: 20px; }
-.onb-steps-list li { font-size: 14px; line-height: 1.7; color: var(--c-text, #dfe5ea); }
+.onb-steps-list li { font-size: 14px; line-height: 1.7; color: var(--c-text); }
 .onb-kbd {
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
@@ -217,7 +217,7 @@
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.10);
-  color: var(--c-text-dim, #8b939c);
+  color: var(--c-text-dim);
   transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease,
     box-shadow 0.15s ease, color 0.15s ease;
 }
@@ -227,17 +227,17 @@
   font-weight: 600;
   letter-spacing: 0.04em;
   margin-top: 2px;
-  color: var(--c-accent, #9fca69);
+  color: var(--c-accent);
 }
 .onb-naga__btn.is-detected {
   background: rgba(159, 202, 105, 0.14);
   border-color: rgba(159, 202, 105, 0.55);
-  color: var(--c-text, #e8edf2);
+  color: var(--c-text);
 }
 .onb-naga__btn.is-active {
   transform: scale(0.92);
-  background: var(--c-accent, #9fca69);
-  border-color: var(--c-accent, #9fca69);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
   color: #0c0f12;
   box-shadow: 0 0 22px rgba(159, 202, 105, 0.7);
 }
@@ -246,9 +246,9 @@
   text-align: center;
   margin-top: 14px;
   font-size: 14px;
-  color: var(--c-text-dim, #9aa3ad);
+  color: var(--c-text-dim);
 }
-.onb-live-readout strong { color: var(--c-accent, #9fca69); }
+.onb-live-readout strong { color: var(--c-accent); }
 
 /* Result / success banner */
 .onb-result {
@@ -259,14 +259,14 @@
   border-radius: var(--radius-md, 12px);
   background: rgba(94, 194, 122, 0.10);
   border: 1px solid rgba(94, 194, 122, 0.4);
-  color: var(--c-text, #e8edf2);
+  color: var(--c-text);
   font-size: 14px;
   margin-top: 12px;
 }
 .onb-result.is-pending {
   background: rgba(255, 255, 255, 0.03);
   border-color: var(--c-border, rgba(255, 255, 255, 0.08));
-  color: var(--c-text-dim, #9aa3ad);
+  color: var(--c-text-dim);
 }
 /* Inline layout helpers (replace CSP-blocked inline style attributes). */
 .onb-result__path {
@@ -297,7 +297,7 @@
 .onb-btn {
   border: 1px solid var(--c-border, rgba(255, 255, 255, 0.14));
   background: rgba(255, 255, 255, 0.04);
-  color: var(--c-text, #e8edf2);
+  color: var(--c-text);
   font-size: 14px;
   font-weight: 600;
   padding: 9px 18px;
@@ -308,11 +308,11 @@
 .onb-btn:hover { background: rgba(255, 255, 255, 0.08); }
 .onb-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .onb-btn.primary {
-  background: var(--c-accent, #9fca69);
-  border-color: var(--c-accent, #9fca69);
+  background: var(--c-accent);
+  border-color: var(--c-accent);
   color: #0c0f12;
 }
-.onb-btn.primary:hover { filter: brightness(1.06); background: var(--c-accent, #9fca69); }
+.onb-btn.primary:hover { filter: brightness(1.06); background: var(--c-accent); }
 .onb-btn.ghost { background: transparent; }
 
 /* Step enter transition (direction-aware classes set in JS) */

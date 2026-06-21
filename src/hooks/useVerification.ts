@@ -7,6 +7,8 @@ import {
   exportVerificationSession,
   normalizeCommandError,
 } from "../lib/backend";
+import i18n from "../i18n";
+import type { ConfirmModalRequest } from "../components/ConfirmModal";
 import type {
   AppConfig,
   CommandError,
@@ -57,12 +59,7 @@ export interface VerificationControl {
   handleVerificationNotesChange: (notes: string) => void;
   handleNavigateVerificationStep: (stepIndex: number) => void;
   handleReopenVerificationStep: (stepIndex: number) => void;
-  handleResetVerificationSession: (showConfirmModal: (modal: {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    onConfirm: () => void;
-  }) => void) => void;
+  handleResetVerificationSession: (showConfirmModal: (modal: ConfirmModalRequest) => void) => void;
   handleExportVerificationSession: () => Promise<void>;
 
   // Callbacks for runtime hook integration
@@ -263,18 +260,13 @@ export function useVerification(deps: {
     });
   }
 
-  function handleResetVerificationSession(showConfirmModal: (modal: {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    onConfirm: () => void;
-  }) => void) {
+  function handleResetVerificationSession(showConfirmModal: (modal: ConfirmModalRequest) => void) {
     const hasResults = verificationSession?.steps.some((s) => s.result !== "pending") ?? false;
     if (hasResults) {
       showConfirmModal({
-        title: "Сбросить сессию?",
-        message: "Все результаты проверки будут потеряны.",
-        confirmLabel: "Сбросить",
+        title: i18n.t("verification.reset.title"),
+        message: i18n.t("verification.reset.message"),
+        confirmLabel: i18n.t("verification.reset.confirm"),
         onConfirm: () => {
           startTransition(() => {
             setVerificationSession(null);

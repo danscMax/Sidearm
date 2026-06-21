@@ -204,6 +204,14 @@ export function displayNameForControl(control: PhysicalControl): string {
   return key ? i18n.t(key) : control.defaultName;
 }
 
+/** Resolve a hotspot/region badge that may be an i18n key (`control.name.*`)
+ *  or a literal glyph. The static hotspot tables store keys for the two mouse
+ *  buttons (language-specific) and glyphs (▲ ● ← 1…12, language-neutral) for the
+ *  rest. Shared by both mouse-visualization components. */
+export function resolveControlBadge(label: string): string {
+  return label.startsWith("control.name.") ? i18n.t(label) : label;
+}
+
 export function surfacePrimaryLabel(binding: Binding | null, action: Action | null): string {
   if (!binding) {
     return i18n.t("binding.notAssigned");

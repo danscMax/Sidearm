@@ -289,27 +289,15 @@ fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     Ok(resolve_app_paths(app).config_dir.clone())
 }
 
-/// Atomically copy `src` → `dst`: stream into a temp file in dst's directory,
-/// fsync, then rename over `dst`. A crash/IO error mid-copy leaves `dst`
-/// untouched (old content or absent) — never a truncated config. Mirrors the
-/// NamedTempFile+persist pattern in `config::write_config_to_path`.
-/// NOTE: the temp file MUST live in dst's parent dir so `persist()` is an atomic
-/// same-volume rename, not a degraded copy+delete that loses atomicity.
+/// Atomically copy `src` → `dst` by streaming into a temp file via the shared
+/// `config::persist_atomically` (temp in dst's dir, fsync, atomic same-volume
+/// rename). A crash/IO error mid-copy leaves `dst` untouched — never truncated.
 fn atomic_copy_file(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
-    let dir = dst.parent().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "destination has no parent directory",
-        )
-    })?;
-    let mut tmp = tempfile::NamedTempFile::new_in(dir)?;
-    {
+    config::persist_atomically(dst, |file| {
         let mut reader = fs::File::open(src)?;
-        std::io::copy(&mut reader, tmp.as_file_mut())?;
-    }
-    tmp.as_file().sync_all()?;
-    tmp.persist(dst).map_err(|e| e.error)?;
-    Ok(())
+        std::io::copy(&mut reader, file)?;
+        Ok(())
+    })
 }
 
 fn resolve_log_dir(app: &AppHandle) -> PathBuf {

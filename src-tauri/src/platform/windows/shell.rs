@@ -102,6 +102,35 @@ pub(crate) fn search_path_win32(exe_name: &str) -> Option<String> {
     }
 }
 
+/// Extract the NUL-terminated exe file name from a `PROCESSENTRY32W`'s `szExeFile`.
+fn exe_name_from_entry(sz_exe_file: &[u16]) -> String {
+    let len = sz_exe_file
+        .iter()
+        .position(|&c| c == 0)
+        .unwrap_or(sz_exe_file.len());
+    String::from_utf16_lossy(&sz_exe_file[..len])
+}
+
+/// Read a process's full image path by PID. `None` if the process can't be
+/// opened (permission denied / already exited) or the image-name query fails.
+fn query_process_path(pid: u32) -> Option<String> {
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let mut path_buf = vec![0u16; 512];
+        let mut path_len = path_buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(process, 0, path_buf.as_mut_ptr(), &mut path_len);
+        CloseHandle(process);
+        if ok != 0 {
+            Some(String::from_utf16_lossy(&path_buf[..path_len as usize]))
+        } else {
+            None
+        }
+    }
+}
+
 /// Find the full path of a running process by exe name.
 ///
 /// Uses `CreateToolhelp32Snapshot` + `QueryFullProcessImageNameW`.
@@ -122,33 +151,12 @@ pub(crate) fn find_running_process_path(exe_name: &str) -> Option<String> {
 
         let target = exe_name.to_ascii_lowercase();
         loop {
-            let name_len = entry
-                .szExeFile
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(entry.szExeFile.len());
-            let name =
-                String::from_utf16_lossy(&entry.szExeFile[..name_len]).to_ascii_lowercase();
-
-            if name == target {
-                let process =
-                    OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
-                if !process.is_null() {
-                    let mut path_buf = vec![0u16; 512];
-                    let mut path_len = path_buf.len() as u32;
-                    let ok = QueryFullProcessImageNameW(
-                        process,
-                        0,
-                        path_buf.as_mut_ptr(),
-                        &mut path_len,
-                    );
-                    CloseHandle(process);
-                    if ok != 0 {
-                        let path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
-                        CloseHandle(snapshot);
-                        return Some(path);
-                    }
-                }
+            let name = exe_name_from_entry(&entry.szExeFile).to_ascii_lowercase();
+            if name == target
+                && let Some(path) = query_process_path(entry.th32ProcessID)
+            {
+                CloseHandle(snapshot);
+                return Some(path);
             }
 
             if Process32NextW(snapshot, &mut entry) == 0 {
@@ -189,34 +197,9 @@ pub(crate) fn list_running_processes() -> Vec<RunningProcess> {
         }
 
         loop {
-            let name_len = entry
-                .szExeFile
-                .iter()
-                .position(|&c| c == 0)
-                .unwrap_or(entry.szExeFile.len());
-            let exe = String::from_utf16_lossy(&entry.szExeFile[..name_len]);
-
-            let mut full_path = String::new();
-            let process =
-                OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, entry.th32ProcessID);
-            if !process.is_null() {
-                let mut path_buf = vec![0u16; 512];
-                let mut path_len = path_buf.len() as u32;
-                let ok = QueryFullProcessImageNameW(
-                    process,
-                    0,
-                    path_buf.as_mut_ptr(),
-                    &mut path_len,
-                );
-                if ok != 0 {
-                    full_path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
-                }
-                CloseHandle(process);
-            }
-
             out.push(RunningProcess {
-                exe,
-                path: full_path,
+                exe: exe_name_from_entry(&entry.szExeFile),
+                path: query_process_path(entry.th32ProcessID).unwrap_or_default(),
                 pid: entry.th32ProcessID,
             });
 

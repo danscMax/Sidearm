@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../i18n";
+import type { ConfirmModalRequest } from "./ConfirmModal";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import {
   enable as enableAutostart,
@@ -49,13 +50,7 @@ export interface SettingsWorkspaceProps {
   effectiveProfileId: string | null;
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
   setSelectedProfileId: (id: string | null) => void;
-  setConfirmModal: (modal: {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    danger?: boolean;
-    onConfirm: () => void;
-  } | null) => void;
+  setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   refreshConfig: () => void;
   setError: (error: CommandError | null) => void;
   onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;

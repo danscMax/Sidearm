@@ -20,6 +20,8 @@ all wired into `.github/workflows/ci.yml` (`npm test` + `cargo test`).
 | Notice / banner | `shared.tsx` `Notice` | `canon-guards.test.ts:56` — raw `notice notice--` className fails outside `Notice`. |
 | Inline styles (CSP) | CSSOM via `useCssVars`/ref | `canon-guards.test.ts:36` — `style={{` fails CI (`style-src` has no `'unsafe-inline'`). |
 | IPC event listening | `src/lib/backend.ts` | `canon-guards.test.ts:63` — `@tauri-apps/api/event` import allowed only in `backend.ts`. |
+| **UI copy** (all user-facing text) | `src/i18n/locales/{ru,en}.json` (`t(key)` / `i18n.t(key)`) | `canon-guards.test.ts` — Cyrillic literals in `.ts/.tsx` fail CI (2 documented exceptions: profile-name regex, "Русский" endonym). Components resolve via `t`; plain modules via `i18n.t`. |
+| Design **color tokens** | `src/App.css :root` `--c-*` (+ `onboarding.css` `--c-text-dim` alias) | `canon-guards.test.ts` — `var(--token, #hex)` fallback fails CI (a stale literal that drifts / masks an undefined token). Cascade `var(--a, var(--b))` + token defs are fine. |
 | Tauri command result | `src-tauri/src/command_error.rs` `CommandError` | Applied to all `#[tauri::command]`s by convention. |
 | Directory resolution | `src-tauri/src/paths.rs` | Single source of truth; no ad-hoc path building. |
 | OS-specific code | `#[cfg(target_os = "windows")]` modules | Compile-gated; CI rust-job runs on `windows-latest`. |
@@ -37,4 +39,3 @@ Touch **all four** or a guard fails (which is the point):
 
 - **One-off inline `<svg>` glyphs** (nav in `Sidebar.tsx`, undo/redo in `Toolbar.tsx`, view-toggle in `MouseVisualization.tsx`, dropzone in `ProfilesWorkspace.tsx`): each used once, not duplicated → no drift risk. `icons.tsx` exists only because Copy/Export/Trash were duplicated at two sizes *and had drifted*. A blanket svg guard would need a whitelist for structural SVG (`MouseVisualizationSvg.tsx`), window chrome (`TitleBar.tsx`), and primitives (`shared.tsx`) — noise devs would disable.
 - **Window controls** (`TitleBar.tsx` min/max/close): a deliberate boundary outside the design system.
-- **Hardcoded hex in `App.css`** + OnboardingWizard copy + ErrorPanel i18n: cosmetic backlog, intentionally below the enforcement cap.

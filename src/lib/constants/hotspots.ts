@@ -4,7 +4,7 @@ import type { HotspotPosition } from "./types";
 /** Hotspot positions for the TOP-DOWN photo (naga-top.jpg).
  *  Measured via hotspot-test.html click calibration. */
 export const topViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
-  mouse_left:        { left: 25.5, top: 10, label: "ЛКМ" },
+  mouse_left:        { left: 25.5, top: 10, label: "control.name.mouseLeft" },
   wheel_up:          { left: 45.5, top: 13.5, label: "▲", size: "sm" },
   wheel_click:       { left: 45.5, top: 22, label: "●", size: "sm" },
   wheel_down:        { left: 45.5, top: 31, label: "▼", size: "sm" },
@@ -50,7 +50,7 @@ export const combinedViewHotspots: Partial<Record<ControlId, HotspotPosition>> =
   thumb_11:          { left: 31.5, top: 62, label: "11", size: "sm" },
   thumb_12:          { left: 37, top: 60.5, label: "12", size: "sm" },
   // Top panel
-  mouse_left:        { left: 41.5, top: 12, label: "ЛКМ", size: "sm" },
+  mouse_left:        { left: 41.5, top: 12, label: "control.name.mouseLeft", size: "sm" },
   top_aux_01:        { left: 33, top: 13, label: "D+", size: "sm" },
   top_aux_02:        { left: 35, top: 22.5, label: "D−", size: "sm" },
   wheel_up:          { left: 52, top: 15, label: "▲", size: "sm" },

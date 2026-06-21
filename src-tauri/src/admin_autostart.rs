@@ -164,7 +164,8 @@ mod win {
         CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
     };
     use windows::Win32::System::TaskScheduler::{
-        ITaskService, TaskScheduler, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
+        ITaskFolder, ITaskService, TaskScheduler, TASK_CREATE_OR_UPDATE,
+        TASK_LOGON_INTERACTIVE_TOKEN,
     };
     use windows::Win32::System::Variant::VARIANT;
 
@@ -243,9 +244,9 @@ mod win {
         )
     }
 
-    pub fn register_task_elevated(name: &str, xml: &str) -> Result<(), String> {
-        let _guard = ComGuard::init()?;
-        let service = create_elevated_service()?;
+    /// Connect an `ITaskService` and return the root `\` task folder. Shared
+    /// preamble for register/delete/query (each supplies its own service).
+    fn connect_root_folder(service: &ITaskService) -> Result<ITaskFolder, String> {
         unsafe {
             service
                 .Connect(
@@ -255,9 +256,17 @@ mod win {
                     &VARIANT::default(),
                 )
                 .map_err(|e| format!("ITaskService::Connect: {e}"))?;
-            let root = service
+            service
                 .GetFolder(&BSTR::from("\\"))
-                .map_err(|e| format!("GetFolder: {e}"))?;
+                .map_err(|e| format!("GetFolder: {e}"))
+        }
+    }
+
+    pub fn register_task_elevated(name: &str, xml: &str) -> Result<(), String> {
+        let _guard = ComGuard::init()?;
+        let service = create_elevated_service()?;
+        let root = connect_root_folder(&service)?;
+        unsafe {
             root.RegisterTask(
                 &BSTR::from(name),
                 &BSTR::from(xml),
@@ -275,18 +284,8 @@ mod win {
     pub fn delete_task_elevated(name: &str) -> Result<(), String> {
         let _guard = ComGuard::init()?;
         let service = create_elevated_service()?;
+        let root = connect_root_folder(&service)?;
         unsafe {
-            service
-                .Connect(
-                    &VARIANT::default(),
-                    &VARIANT::default(),
-                    &VARIANT::default(),
-                    &VARIANT::default(),
-                )
-                .map_err(|e| format!("Connect: {e}"))?;
-            let root = service
-                .GetFolder(&BSTR::from("\\"))
-                .map_err(|e| format!("GetFolder: {e}"))?;
             match root.DeleteTask(&BSTR::from(name), 0) {
                 Ok(()) => Ok(()),
                 Err(e) if e.code().0 as u32 == HR_FILE_NOT_FOUND => Ok(()),
@@ -298,18 +297,8 @@ mod win {
     pub fn query_registered_path() -> Result<Option<String>, String> {
         let _guard = ComGuard::init()?;
         let service = create_local_service().map_err(|e| format!("create service: {e}"))?;
+        let root = connect_root_folder(&service)?;
         unsafe {
-            service
-                .Connect(
-                    &VARIANT::default(),
-                    &VARIANT::default(),
-                    &VARIANT::default(),
-                    &VARIANT::default(),
-                )
-                .map_err(|e| format!("Connect: {e}"))?;
-            let root = service
-                .GetFolder(&BSTR::from("\\"))
-                .map_err(|e| format!("GetFolder: {e}"))?;
             match root.GetTask(&BSTR::from(TASK_NAME)) {
                 Ok(task) => {
                     let xml: BSTR = task.Xml().map_err(|e| format!("IRegisteredTask::Xml: {e}"))?;

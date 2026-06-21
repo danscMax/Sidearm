@@ -103,7 +103,11 @@ impl ChordDetector {
             // window, so the exact boundary stays Pending (chord-able) in both
             // paths. See finding F006.
             Some(pending) if !self.within_window(pending.received_at, now) => {
-                let key = self.pending.take().unwrap().encoded_key;
+                let key = self
+                    .pending
+                    .take()
+                    .expect("pending is Some: guarded by the match arm")
+                    .encoded_key;
                 ChordResult::SingleKey(key)
             }
             Some(_) => ChordResult::Pending,

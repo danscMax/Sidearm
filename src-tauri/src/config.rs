@@ -981,6 +981,26 @@ pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, Con
     Ok(config)
 }
 
+/// Write `dst` atomically: create a temp file in `dst`'s directory, fill it via
+/// `fill`, fsync, then rename over `dst`. A crash/IO error mid-write leaves `dst`
+/// untouched. Shared skeleton for config saves and `lib::atomic_copy_file`.
+pub(crate) fn persist_atomically(
+    dst: &Path,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let dir = dst.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "destination has no parent directory",
+        )
+    })?;
+    let mut tmp = NamedTempFile::new_in(dir)?;
+    fill(tmp.as_file_mut())?;
+    tmp.as_file().sync_all()?;
+    tmp.persist(dst).map_err(|e| e.error)?;
+    Ok(())
+}
+
 fn write_config_to_path(
     config_dir: &Path,
     config: &AppConfig,
@@ -996,28 +1016,14 @@ fn write_config_to_path(
     let serialized = serde_json::to_string_pretty(config)
         .map_err(|error| ConfigStoreError::Serialize(error.to_string()))?;
 
-    let mut temp_file =
-        NamedTempFile::new_in(config_dir).map_err(|error| io_error(Some(config_dir), error))?;
-    temp_file
-        .write_all(serialized.as_bytes())
-        .map_err(|error| io_error(Some(temp_file.path()), error))?;
-    temp_file
-        .write_all(b"\n")
-        .map_err(|error| io_error(Some(temp_file.path()), error))?;
-    temp_file
-        .flush()
-        .map_err(|error| io_error(Some(temp_file.path()), error))?;
-    temp_file
-        .as_file()
-        .sync_all()
-        .map_err(|error| io_error(Some(temp_file.path()), error))?;
-
-    temp_file
-        .persist(&config_path)
-        .map_err(|error| ConfigStoreError::Io {
-            path: Some(path_string(&config_path)),
-            message: format!("Failed to replace config atomically: {}", error.error),
-        })?;
+    persist_atomically(&config_path, |file| {
+        file.write_all(serialized.as_bytes())?;
+        file.write_all(b"\n")
+    })
+    .map_err(|error| ConfigStoreError::Io {
+        path: Some(path_string(&config_path)),
+        message: format!("Failed to write config atomically: {error}"),
+    })?;
 
     // Daily snapshot — best-effort, never fails the save.
     if let Err(err) = crate::backup::write_daily_snapshot_and_prune(config_dir) {

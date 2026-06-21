@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { ConfirmModalRequest } from "./components/ConfirmModal";
 import { useAppPersistence } from "./hooks/useAppPersistence";
 import { useLogPanel } from "./hooks/useLogPanel";
 import { useRuntime } from "./hooks/useRuntime";
@@ -260,13 +261,7 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");
   const [actionPickerOpen, setActionPickerOpen] = useState(false);
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
-  const [confirmModal, setConfirmModal] = useState<{
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    danger?: boolean;
-    onConfirm: () => void;
-  } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<ConfirmModalRequest | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
@@ -514,7 +509,7 @@ function App() {
 
   function handleCreateProfile() {
     if (!workingConfig) return;
-    const nextConfig = createProfile(workingConfig, "Новый профиль");
+    const nextConfig = createProfile(workingConfig, t("profile.defaultName"));
     const nextProfile = nextConfig.profiles.find(
       (profile) =>
         !workingConfig.profiles.some(

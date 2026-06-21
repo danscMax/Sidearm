@@ -7,6 +7,7 @@ import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
 import { ProfileDropdown } from "./ProfileDropdown";
 import { PillTrack } from "./PillTrack";
+import type { ConfirmModalRequest } from "./ConfirmModal";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
   profiles: (
@@ -57,13 +58,7 @@ export function Sidebar({
   runtimeStatus: "running" | "stopped" | string;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   setSelectedProfileId: (id: string | null) => void;
-  setConfirmModal: (modal: {
-    title: string;
-    message: string;
-    confirmLabel?: string;
-    danger?: boolean;
-    onConfirm: () => void;
-  } | null) => void;
+  setConfirmModal: (modal: ConfirmModalRequest | null) => void;
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);

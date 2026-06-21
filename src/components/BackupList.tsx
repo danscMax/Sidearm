@@ -4,18 +4,12 @@ import { useTranslation } from "react-i18next";
 import type { BackupEntry, CommandError } from "../lib/config";
 import { listBackups, restoreConfigFromBackup } from "../lib/backend";
 import { normalizeCommandError } from "../lib/backend";
+import type { ConfirmModalRequest } from "./ConfirmModal";
 
 export interface BackupListProps {
   onRestored: () => void;
   setError: (error: CommandError | null) => void;
-  setConfirmModal: (
-    modal: {
-      title: string;
-      message: string;
-      confirmLabel: string;
-      onConfirm: () => void;
-    } | null,
-  ) => void;
+  setConfirmModal: (modal: ConfirmModalRequest | null) => void;
 }
 
 export function BackupList({

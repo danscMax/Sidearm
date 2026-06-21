@@ -378,7 +378,7 @@ export function coerceActionType(
         return {
           ...action,
           type: "mouseAction",
-          payload: { ...defaultPayloadFor("mouseAction"), action: "leftClick", ...carried },
+          payload: { ...defaultPayloadFor("mouseAction"), ...carried },
         };
       }
       case "mediaKey":

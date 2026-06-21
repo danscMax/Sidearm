@@ -380,7 +380,7 @@ export function MouseVisualizationSvg({
           {/* Hit area / visible shape */}
           <g
             fill={fillColor}
-            stroke={isDragOver ? "var(--c-accent, #9fca69)" : colors.stroke}
+            stroke={isDragOver ? "var(--c-accent)" : colors.stroke}
             strokeWidth={isDragOver ? 3 : isSelected ? 2.5 : isHovered ? 2 : 1.5}
             strokeDasharray={isDragOver ? "6 3" : colors.strokeDasharray}
           >

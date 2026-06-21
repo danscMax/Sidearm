@@ -196,6 +196,42 @@ pub fn send_hotkey_string(
     send_shortcut(&payload, encoding_mods)
 }
 
+/// RAII guard for an open Win32 clipboard. Construct via [`with_clipboard_open`],
+/// which performs the standard 10×/20ms `OpenClipboard(null)` retry; `Drop`
+/// guarantees `CloseClipboard` runs exactly once however the caller's body
+/// returns (value, `?`, or panic). Centralizes the open-retry + close that five
+/// clipboard sites previously hand-inlined.
+#[cfg(target_os = "windows")]
+struct ClipboardGuard;
+
+#[cfg(target_os = "windows")]
+impl Drop for ClipboardGuard {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::System::DataExchange::CloseClipboard() };
+    }
+}
+
+/// Open the clipboard (10 retries, 20ms apart), run `f` while it is open, then
+/// close it on drop. Returns `Err("OpenClipboard failed after 10 retries")` if
+/// every retry fails (in which case `f` never runs and the clipboard is not
+/// closed), otherwise `Ok(f())`.
+#[cfg(target_os = "windows")]
+fn with_clipboard_open<T>(f: impl FnOnce() -> T) -> Result<T, String> {
+    use std::{ptr, thread, time::Duration};
+    use windows_sys::Win32::System::DataExchange::OpenClipboard;
+
+    for attempt in 0..10u32 {
+        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
+            let _guard = ClipboardGuard;
+            return Ok(f());
+        }
+        if attempt + 1 < 10 {
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+    Err("OpenClipboard failed after 10 retries".into())
+}
+
 /// Lightweight clipboard-paste: save CF_UNICODETEXT → set text → Ctrl+V → restore.
 ///
 /// Intentionally does NOT call OleInitialize and only touches CF_UNICODETEXT.
@@ -213,8 +249,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         Foundation::GlobalFree,
         System::{
             DataExchange::{
-                CloseClipboard, EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
-                OpenClipboard, SetClipboardData,
+                EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, SetClipboardData,
             },
             Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
             Ole::CF_UNICODETEXT,
@@ -222,19 +257,6 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
     };
 
     const RESTORE_DELAY: Duration = Duration::from_millis(150);
-
-    // --- helper: open clipboard with retry ---
-    let open = || -> Result<(), String> {
-        for attempt in 0..10u32 {
-            if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
-                return Ok(());
-            }
-            if attempt + 1 < 10 {
-                thread::sleep(Duration::from_millis(20));
-            }
-        }
-        Err("OpenClipboard failed after 10 retries".into())
-    };
 
     // --- helper: read CF_UNICODETEXT from an already-open clipboard ---
     let read_text = || -> Option<String> {
@@ -286,30 +308,29 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
 
     // --- helper: best-effort restore ---
     let restore = |original: &str| {
-        if open().is_ok() {
+        let _ = with_clipboard_open(|| {
             unsafe { EmptyClipboard() };
             let _ = write_text(original);
-            unsafe { CloseClipboard() };
-        }
+        });
     };
 
     // 1. Open clipboard and save current text
-    open()?;
-    let saved_text = read_text();
-    unsafe { CloseClipboard() };
+    let saved_text = with_clipboard_open(read_text)?;
 
     // 2. Stage our text
-    open()?;
-    unsafe { EmptyClipboard() };
-    if let Err(e) = write_text(text) {
-        unsafe { CloseClipboard() };
-        if let Some(ref original) = saved_text {
-            restore(original);
+    let staged = with_clipboard_open(|| {
+        unsafe { EmptyClipboard() };
+        write_text(text).map(|()| unsafe { GetClipboardSequenceNumber() })
+    })?;
+    let seq = match staged {
+        Ok(seq) => seq,
+        Err(e) => {
+            if let Some(ref original) = saved_text {
+                restore(original);
+            }
+            return Err(e);
         }
-        return Err(e);
-    }
-    let seq = unsafe { GetClipboardSequenceNumber() };
-    unsafe { CloseClipboard() };
+    };
 
     // 3. Inject Ctrl+V (clears encoding modifiers first)
     if let Err(e) = send_hotkey_string("Ctrl+V", &ALL_MODIFIERS) {
@@ -506,70 +527,48 @@ fn describe_unrepairable(s: &str) -> String {
 /// Read the clipboard's Unicode text (best-effort); `None` if empty/non-text.
 #[cfg(target_os = "windows")]
 fn clipboard_get_text() -> Option<String> {
-    use std::{ptr, thread, time::Duration};
     use windows_sys::Win32::System::{
-        DataExchange::{CloseClipboard, GetClipboardData, OpenClipboard},
+        DataExchange::GetClipboardData,
         Memory::{GlobalLock, GlobalUnlock},
         Ole::CF_UNICODETEXT,
     };
-    for attempt in 0..10u32 {
-        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
-            let text = unsafe {
-                let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
-                if handle.is_null() {
-                    None
-                } else {
-                    let locked = GlobalLock(handle);
-                    if locked.is_null() {
-                        None
-                    } else {
-                        let wide = locked as *const u16;
-                        let mut len = 0usize;
-                        while *wide.add(len) != 0 {
-                            len += 1;
-                        }
-                        let t = String::from_utf16_lossy(std::slice::from_raw_parts(wide, len));
-                        let _ = GlobalUnlock(handle);
-                        Some(t)
-                    }
+    with_clipboard_open(|| unsafe {
+        let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
+        if handle.is_null() {
+            None
+        } else {
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                None
+            } else {
+                let wide = locked as *const u16;
+                let mut len = 0usize;
+                while *wide.add(len) != 0 {
+                    len += 1;
                 }
-            };
-            unsafe { CloseClipboard() };
-            return text;
+                let t = String::from_utf16_lossy(std::slice::from_raw_parts(wide, len));
+                let _ = GlobalUnlock(handle);
+                Some(t)
+            }
         }
-        if attempt + 1 < 10 {
-            thread::sleep(Duration::from_millis(20));
-        }
-    }
-    None
+    })
+    .ok()
+    .flatten()
 }
 
 /// Replace the clipboard's text with `text` (CF_UNICODETEXT).
 #[cfg(target_os = "windows")]
 fn clipboard_set_text(text: &str) -> Result<(), String> {
-    use std::{ptr, thread, time::Duration};
+    use std::ptr;
     use windows_sys::Win32::{
         Foundation::GlobalFree,
         System::{
-            DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData},
+            DataExchange::{EmptyClipboard, SetClipboardData},
             Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
             Ole::CF_UNICODETEXT,
         },
     };
-    let mut opened = false;
-    for attempt in 0..10u32 {
-        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
-            opened = true;
-            break;
-        }
-        if attempt + 1 < 10 {
-            thread::sleep(Duration::from_millis(20));
-        }
-    }
-    if !opened {
-        return Err("OpenClipboard failed after 10 retries".into());
-    }
-    let result = unsafe {
+    with_clipboard_open(|| unsafe {
         EmptyClipboard();
         let encoded: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
         let byte_len = encoded.len() * std::mem::size_of::<u16>();
@@ -592,9 +591,7 @@ fn clipboard_set_text(text: &str) -> Result<(), String> {
                 }
             }
         }
-    };
-    unsafe { CloseClipboard() };
-    result
+    })?
 }
 
 #[cfg(target_os = "linux")]
@@ -655,43 +652,30 @@ fn standard_clipboard_format_name(id: u32) -> String {
 /// conservatively rather than risk clobbering unknown content.
 #[cfg(target_os = "windows")]
 fn clipboard_nontext_format_labels() -> Option<Vec<String>> {
-    use std::{ptr, thread, time::Duration};
     use windows_sys::Win32::System::DataExchange::{
-        CloseClipboard, EnumClipboardFormats, GetClipboardFormatNameW, OpenClipboard,
+        EnumClipboardFormats, GetClipboardFormatNameW,
     };
 
-    let mut opened = false;
-    for attempt in 0..10u32 {
-        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
-            opened = true;
-            break;
-        }
-        if attempt + 1 < 10 {
-            thread::sleep(Duration::from_millis(20));
-        }
-    }
-    if !opened {
-        return None;
-    }
-
-    let mut labels = Vec::new();
-    unsafe {
-        let mut fmt = EnumClipboardFormats(0);
-        while fmt != 0 {
-            if is_nontext_clipboard_format(fmt) {
-                let mut name = [0u16; 80];
-                let len = GetClipboardFormatNameW(fmt, name.as_mut_ptr(), name.len() as i32);
-                labels.push(if len > 0 {
-                    format!("{fmt}:{}", String::from_utf16_lossy(&name[..len as usize]))
-                } else {
-                    standard_clipboard_format_name(fmt)
-                });
+    with_clipboard_open(|| {
+        let mut labels = Vec::new();
+        unsafe {
+            let mut fmt = EnumClipboardFormats(0);
+            while fmt != 0 {
+                if is_nontext_clipboard_format(fmt) {
+                    let mut name = [0u16; 80];
+                    let len = GetClipboardFormatNameW(fmt, name.as_mut_ptr(), name.len() as i32);
+                    labels.push(if len > 0 {
+                        format!("{fmt}:{}", String::from_utf16_lossy(&name[..len as usize]))
+                    } else {
+                        standard_clipboard_format_name(fmt)
+                    });
+                }
+                fmt = EnumClipboardFormats(fmt);
             }
-            fmt = EnumClipboardFormats(fmt);
         }
-        CloseClipboard();
-    }
-    Some(labels)
+        labels
+    })
+    .ok()
 }
 
 /// Read the clipboard, repair UTF-8-as-Latin-1 mojibake if present, and write the
@@ -844,11 +828,10 @@ fn run_clipboard_copy_diagnostic(payload: &ShortcutActionPayload, seq_before: u3
 /// are logged and swallowed — never affects the copy.
 #[cfg(target_os = "windows")]
 fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
-    use std::{ptr, thread, time::Duration};
     use windows_sys::Win32::System::{
         DataExchange::{
-            CloseClipboard, EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
-            GetClipboardSequenceNumber, OpenClipboard,
+            EnumClipboardFormats, GetClipboardData, GetClipboardFormatNameW,
+            GetClipboardSequenceNumber,
         },
         Memory::{GlobalLock, GlobalSize, GlobalUnlock},
         Ole::{CF_TEXT, CF_UNICODETEXT},
@@ -857,120 +840,123 @@ fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
     let seq_after = unsafe { GetClipboardSequenceNumber() };
     let changed = seq_before != seq_after;
 
-    let mut opened = false;
-    for attempt in 0..10u32 {
-        if unsafe { OpenClipboard(ptr::null_mut()) } != 0 {
-            opened = true;
-            break;
-        }
-        if attempt + 1 < 10 {
-            thread::sleep(Duration::from_millis(20));
-        }
-    }
-    if !opened {
-        log::warn!(
-            "{tag} seq {seq_before}->{seq_after} changed={changed} — OpenClipboard failed; no snapshot"
-        );
-        return;
-    }
-
-    // Raw bytes (GlobalSize-bounded) of an arbitrary clipboard format.
-    let grab = |fmt: u32, cap: usize| -> Option<Vec<u8>> {
-        unsafe {
-            let handle = GetClipboardData(fmt);
-            if handle.is_null() {
-                return None;
-            }
-            let size = GlobalSize(handle);
-            if size == 0 {
-                return None;
-            }
-            let locked = GlobalLock(handle);
-            if locked.is_null() {
-                return None;
-            }
-            let n = (size as usize).min(cap);
-            let bytes = std::slice::from_raw_parts(locked as *const u8, n).to_vec();
-            let _ = GlobalUnlock(handle);
-            Some(bytes)
-        }
-    };
-
-    // Formats the source actually placed.
-    let mut formats: Vec<(u32, Option<String>)> = Vec::new();
-    unsafe {
-        let mut fmt = EnumClipboardFormats(0);
-        while fmt != 0 {
-            let mut name = [0u16; 80];
-            let len = GetClipboardFormatNameW(fmt, name.as_mut_ptr(), name.len() as i32);
-            let name = (len > 0).then(|| String::from_utf16_lossy(&name[..len as usize]));
-            formats.push((fmt, name));
-            fmt = EnumClipboardFormats(fmt);
-        }
-    }
-    let formats_label = formats
-        .iter()
-        .map(|(id, name)| match name {
-            Some(name) => format!("{id}:{name}"),
-            None => id.to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    // CF_UNICODETEXT — the canonical Unicode payload. The u16 hex reveals whether
-    // Cyrillic is intact (U+04xx) or mojibake (Ð/Ñ… = U+00Dx).
-    let unicode = unsafe {
-        let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
-        if handle.is_null() {
-            None
-        } else {
-            let locked = GlobalLock(handle);
-            if locked.is_null() {
-                None
-            } else {
-                let wide = locked as *const u16;
-                let mut len = 0usize;
-                while len < 16_384 && *wide.add(len) != 0 {
-                    len += 1;
+    // Read every format we care about while the clipboard is open, returning the
+    // assembled values; the guard closes the clipboard on drop before we log.
+    type Snapshot = (
+        String,
+        Option<(usize, String, String)>,
+        Option<Vec<u8>>,
+        Vec<(String, Vec<u8>)>,
+    );
+    let snapshot = with_clipboard_open(|| -> Snapshot {
+        // Raw bytes (GlobalSize-bounded) of an arbitrary clipboard format.
+        let grab = |fmt: u32, cap: usize| -> Option<Vec<u8>> {
+            unsafe {
+                let handle = GetClipboardData(fmt);
+                if handle.is_null() {
+                    return None;
                 }
-                let units = std::slice::from_raw_parts(wide, len);
-                let preview = String::from_utf16_lossy(units)
-                    .chars()
-                    .take(40)
-                    .collect::<String>()
-                    .replace('\n', "\\n")
-                    .replace('\r', "\\r");
-                let hex = units
-                    .iter()
-                    .take(32)
-                    .map(|unit| format!("{unit:04X}"))
-                    .collect::<Vec<_>>()
-                    .join(" ");
+                let size = GlobalSize(handle);
+                if size == 0 {
+                    return None;
+                }
+                let locked = GlobalLock(handle);
+                if locked.is_null() {
+                    return None;
+                }
+                let n = (size as usize).min(cap);
+                let bytes = std::slice::from_raw_parts(locked as *const u8, n).to_vec();
                 let _ = GlobalUnlock(handle);
-                Some((len, preview, hex))
+                Some(bytes)
+            }
+        };
+
+        // Formats the source actually placed.
+        let mut formats: Vec<(u32, Option<String>)> = Vec::new();
+        unsafe {
+            let mut fmt = EnumClipboardFormats(0);
+            while fmt != 0 {
+                let mut name = [0u16; 80];
+                let len = GetClipboardFormatNameW(fmt, name.as_mut_ptr(), name.len() as i32);
+                let name = (len > 0).then(|| String::from_utf16_lossy(&name[..len as usize]));
+                formats.push((fmt, name));
+                fmt = EnumClipboardFormats(fmt);
             }
         }
-    };
+        let formats_label = formats
+            .iter()
+            .map(|(id, name)| match name {
+                Some(name) => format!("{id}:{name}"),
+                None => id.to_string(),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
 
-    let ansi = grab(u32::from(CF_TEXT), 64);
-
-    // Custom text-ish formats (Chromium/VS Code "text/plain;charset=utf-8", HTML) —
-    // prime suspects for UTF-8 bytes mislabeled / read as CP1251 by a paste target.
-    let custom: Vec<(String, Vec<u8>)> = formats
-        .iter()
-        .filter_map(|(id, name)| {
-            let name = name.as_ref()?;
-            let lname = name.to_ascii_lowercase();
-            let texty = lname.contains("text") || lname.contains("utf") || lname.contains("html");
-            if *id >= 0xC000 && texty {
-                grab(*id, 64).map(|bytes| (name.clone(), bytes))
-            } else {
+        // CF_UNICODETEXT — the canonical Unicode payload. The u16 hex reveals whether
+        // Cyrillic is intact (U+04xx) or mojibake (Ð/Ñ… = U+00Dx).
+        let unicode = unsafe {
+            let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
+            if handle.is_null() {
                 None
+            } else {
+                let locked = GlobalLock(handle);
+                if locked.is_null() {
+                    None
+                } else {
+                    let wide = locked as *const u16;
+                    let mut len = 0usize;
+                    while len < 16_384 && *wide.add(len) != 0 {
+                        len += 1;
+                    }
+                    let units = std::slice::from_raw_parts(wide, len);
+                    let preview = String::from_utf16_lossy(units)
+                        .chars()
+                        .take(40)
+                        .collect::<String>()
+                        .replace('\n', "\\n")
+                        .replace('\r', "\\r");
+                    let hex = units
+                        .iter()
+                        .take(32)
+                        .map(|unit| format!("{unit:04X}"))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    let _ = GlobalUnlock(handle);
+                    Some((len, preview, hex))
+                }
             }
-        })
-        .collect();
+        };
 
-    unsafe { CloseClipboard() };
+        let ansi = grab(u32::from(CF_TEXT), 64);
+
+        // Custom text-ish formats (Chromium/VS Code "text/plain;charset=utf-8", HTML) —
+        // prime suspects for UTF-8 bytes mislabeled / read as CP1251 by a paste target.
+        let custom: Vec<(String, Vec<u8>)> = formats
+            .iter()
+            .filter_map(|(id, name)| {
+                let name = name.as_ref()?;
+                let lname = name.to_ascii_lowercase();
+                let texty = lname.contains("text") || lname.contains("utf") || lname.contains("html");
+                if *id >= 0xC000 && texty {
+                    grab(*id, 64).map(|bytes| (name.clone(), bytes))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        (formats_label, unicode, ansi, custom)
+    });
+
+    let (formats_label, unicode, ansi, custom) = match snapshot {
+        Ok(values) => values,
+        Err(_) => {
+            log::warn!(
+                "{tag} seq {seq_before}->{seq_after} changed={changed} — OpenClipboard failed; no snapshot"
+            );
+            return;
+        }
+    };
 
     let hex = |bytes: &[u8]| {
         bytes

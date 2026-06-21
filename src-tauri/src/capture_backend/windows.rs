@@ -313,6 +313,46 @@ fn modifier_in_any_encoding(vk: u32, regs: &[HelperRegistration]) -> bool {
     regs.iter().any(|r| r.modifiers_mask & mask_bit != 0)
 }
 
+/// Build a keyboard `INPUT` event (`INPUT_KEYBOARD` / `KEYBDINPUT`) with the
+/// given virtual key, scan code, flags, and `dwExtraInfo` marker (`time` is
+/// always 0). Shared by the modifier-replay and mask/probe injection sites so
+/// the INPUT/KEYBDINPUT assembly lives in one place. Pure struct construction —
+/// no `unsafe` needed (writing a union is safe; only reading it is `unsafe`).
+fn make_key_input(
+    vk: u16,
+    scan: u16,
+    flags: u32,
+    extra: usize,
+) -> windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+    };
+    INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: vk,
+                wScan: scan,
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: extra,
+            },
+        },
+    }
+}
+
+/// Send a batch of `INPUT` events via `SendInput`, returning the number the OS
+/// accepted (a no-op returning 0 for an empty slice). Centralizes the
+/// `size_of::<INPUT>()` argument that every injection site repeated.
+fn send_inputs(inputs: &[windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT]) -> u32 {
+    use std::mem::size_of;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT};
+    if inputs.is_empty() {
+        return 0;
+    }
+    unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) }
+}
+
 /// Replay a buffered modifier-down event via SendInput.
 /// Uses INTERNAL_SENDINPUT_EXTRA_INFO so our LL hook recognizes replayed
 /// events and passes them through without re-buffering.
@@ -322,30 +362,21 @@ fn modifier_in_any_encoding(vk: u32, regs: &[HelperRegistration]) -> bool {
 /// injection as the LEFT-side variant (same scan code) and the matching
 /// real key-up (which carries LLKHF_EXTENDED) cannot balance it, leaving
 /// the modifier virtually held.
-unsafe fn replay_modifier_down(vk: u32, scan: u32) { unsafe {
-    use std::mem::size_of;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    };
+unsafe fn replay_modifier_down(vk: u32, scan: u32) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_EXTENDEDKEY;
     let flags = if is_extended_modifier_vk(vk) {
         KEYEVENTF_EXTENDEDKEY
     } else {
         0
     };
-    let input = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk as u16,
-                wScan: scan as u16,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
-            },
-        },
-    };
-    SendInput(1, &input, size_of::<INPUT>() as i32);
-}}
+    let input = make_key_input(
+        vk as u16,
+        scan as u16,
+        flags,
+        crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+    );
+    send_inputs(&[input]);
+}
 
 /// Replay a complete down+up tap for a modifier via SendInput.  Used by the
 /// solo-tap path (Case C2): the user's real key-up has already arrived but
@@ -357,32 +388,26 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) { unsafe {
 ///
 /// Both the down and up events carry `KEYEVENTF_EXTENDEDKEY` for right-side
 /// modifiers; see `replay_modifier_down` rationale.
-unsafe fn replay_modifier_tap(vk: u32, scan: u32) { unsafe {
-    use std::mem::size_of;
+unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-        KEYEVENTF_KEYUP,
+        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
     };
     let extended_bit = if is_extended_modifier_vk(vk) {
         KEYEVENTF_EXTENDEDKEY
     } else {
         0
     };
-    let make = |key_up: bool| INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk as u16,
-                wScan: scan as u16,
-                dwFlags: extended_bit | if key_up { KEYEVENTF_KEYUP } else { 0 },
-                time: 0,
-                dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
-            },
-        },
+    let make = |key_up: bool| {
+        make_key_input(
+            vk as u16,
+            scan as u16,
+            extended_bit | if key_up { KEYEVENTF_KEYUP } else { 0 },
+            crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+        )
     };
     let inputs = [make(false), make(true)];
-    SendInput(2, inputs.as_ptr(), size_of::<INPUT>() as i32);
-}}
+    send_inputs(&inputs);
+}
 
 /// Force-release a modifier via SendInput key-up.  Used by orphan-replay GC
 /// and by teardown/REHOOK/health-reinstall to balance any prior
@@ -392,30 +417,22 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) { unsafe {
 /// the event and passes it through without buffering.  Right-side modifiers
 /// receive `KEYEVENTF_EXTENDEDKEY` so the up matches a prior extended-key
 /// down (same key, not the L-variant with the same scan code).
-unsafe fn replay_modifier_up(vk: u32, scan: u32) { unsafe {
-    use std::mem::size_of;
+unsafe fn replay_modifier_up(vk: u32, scan: u32) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-        KEYEVENTF_KEYUP,
+        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
     };
     let mut flags = KEYEVENTF_KEYUP;
     if is_extended_modifier_vk(vk) {
         flags |= KEYEVENTF_EXTENDEDKEY;
     }
-    let input = INPUT {
-        r#type: INPUT_KEYBOARD,
-        Anonymous: INPUT_0 {
-            ki: KEYBDINPUT {
-                wVk: vk as u16,
-                wScan: scan as u16,
-                dwFlags: flags,
-                time: 0,
-                dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
-            },
-        },
-    };
-    SendInput(1, &input, size_of::<INPUT>() as i32);
-}}
+    let input = make_key_input(
+        vk as u16,
+        scan as u16,
+        flags,
+        crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+    );
+    send_inputs(&[input]);
+}
 
 /// Maximum age of a pending modifier-down when an F-key match arrives for
 /// it to still be considered Razer encoding.  Razer Naga sends
@@ -1201,34 +1218,21 @@ fn process_helper_key_event(
 /// only keys between a modifier-down and modifier-up were suppressed by our
 /// hook.  The events carry `INTERNAL_SENDINPUT_EXTRA_INFO` so our LL hook
 /// passes them through without processing.
-unsafe fn inject_mask_key() { unsafe {
-    use std::mem::size_of;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    };
+unsafe fn inject_mask_key() {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_KEYUP;
 
-    let make_input = |key_up: bool| -> INPUT {
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_MASK_KEY,
-                    wScan: 0,
-                    dwFlags: if key_up { KEYEVENTF_KEYUP } else { 0 },
-                    time: 0,
-                    dwExtraInfo: crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
-                },
-            },
-        }
+    let make_input = |key_up: bool| {
+        make_key_input(
+            VK_MASK_KEY,
+            0,
+            if key_up { KEYEVENTF_KEYUP } else { 0 },
+            crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+        )
     };
 
     let inputs = [make_input(false), make_input(true)];
-    SendInput(
-        inputs.len() as u32,
-        inputs.as_ptr(),
-        size_of::<INPUT>() as i32,
-    );
-}}
+    send_inputs(&inputs);
+}
 
 /// Inject a VK 0xE8 probe event via SendInput to test hook health.
 /// The event carries `HOOK_PROBE_EXTRA_INFO` so the hook callback can
@@ -1237,33 +1241,20 @@ unsafe fn inject_mask_key() { unsafe {
 ///
 /// Returns `true` if SendInput accepted the events, `false` if injection
 /// failed (e.g. UIPI blocked it because an elevated window is focused).
-unsafe fn inject_hook_probe() -> bool { unsafe {
-    use std::mem::size_of;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    };
+unsafe fn inject_hook_probe() -> bool {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::KEYEVENTF_KEYUP;
 
-    let make_input = |key_up: bool| -> INPUT {
-        INPUT {
-            r#type: INPUT_KEYBOARD,
-            Anonymous: INPUT_0 {
-                ki: KEYBDINPUT {
-                    wVk: VK_PROBE_KEY,
-                    wScan: 0,
-                    dwFlags: if key_up { KEYEVENTF_KEYUP } else { 0 },
-                    time: 0,
-                    dwExtraInfo: HOOK_PROBE_EXTRA_INFO,
-                },
-            },
-        }
+    let make_input = |key_up: bool| {
+        make_key_input(
+            VK_PROBE_KEY,
+            0,
+            if key_up { KEYEVENTF_KEYUP } else { 0 },
+            HOOK_PROBE_EXTRA_INFO,
+        )
     };
 
     let inputs = [make_input(false), make_input(true)];
-    let inserted = SendInput(
-        inputs.len() as u32,
-        inputs.as_ptr(),
-        size_of::<INPUT>() as i32,
-    );
+    let inserted = send_inputs(&inputs);
     if inserted == 0 {
         log::debug!(
             "[capture-helper] SendInput probe failed (UIPI?): {}",
@@ -1271,7 +1262,7 @@ unsafe fn inject_hook_probe() -> bool { unsafe {
         );
     }
     inserted > 0
-}}
+}
 
 /// LL keyboard hook callback for the capture helper process.
 /// Matches modifier+F-key combos and buffers the encoded key in HELPER_MATCHES.

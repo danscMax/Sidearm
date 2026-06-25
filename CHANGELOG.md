@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-25
+
+### Added
+- **Redesigned Settings page.** The single endless-scroll settings panel is now
+  organised into five tabs — App, Notifications, Profiles, Backups, Advanced —
+  with a vertical tab rail. Surfaces gained depth (layered cards + subtle
+  shadows) and accent colour is now disciplined: green marks only the primary
+  action, an enabled toggle or the selected segment.
+- **Corner picker for OSD position.** The notification position is now chosen on
+  a 2×2 mini-screen with four corner targets instead of a flat segmented list.
+- **Live OSD notification preview.** The Notifications tab renders a sample toast
+  in the current size, position and animation instead of an empty box.
+
+### Fixed
+- **OSD notification no longer clips or runs off-screen on mixed-DPI
+  multi-monitor setups.** Moving the notification window onto the cursor's
+  monitor fired `WM_DPICHANGED`, which rescaled it after sizing — clipping the
+  text on a lower-DPI monitor and overflowing the screen edge on a higher-DPI
+  one. The window is now anchored on the target monitor before it is sized, so
+  the computed size sticks.
+
+### Changed
+- **Advanced settings tucked away.** Interception-tuning fields keep their depth
+  but moved under an Advanced tab with long explanations collapsed into “?”
+  hints; the raw `CONSUMED`/`REPLAYED` terms left the visible labels.
+- **Cleaner profile list and backups.** The all-profiles list dropped its
+  per-card icon actions (duplicate/export/delete now live only in the editor),
+  and backups are grouped into auto-copies vs dated snapshots with restore
+  de-emphasised.
+
 ## [0.2.3] — 2026-06-20
 
 ### Added

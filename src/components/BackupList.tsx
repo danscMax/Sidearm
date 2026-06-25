@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { BackupEntry, CommandError } from "../lib/config";
@@ -12,6 +12,8 @@ export interface BackupListProps {
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
 }
 
+const SNAPSHOT_COLLAPSE_THRESHOLD = 3;
+
 export function BackupList({
   onRestored,
   setError,
@@ -20,6 +22,7 @@ export function BackupList({
   const { t } = useTranslation();
   const [entries, setEntries] = useState<BackupEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showAllSnapshots, setShowAllSnapshots] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -36,6 +39,13 @@ export function BackupList({
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  // Auto backups: rolling + last-known-good. Daily snapshots: dated snapshots.
+  const { autoEntries, snapshotEntries } = useMemo(() => {
+    const auto = entries.filter((e) => e.kind.kind !== "snapshot");
+    const snapshots = entries.filter((e) => e.kind.kind === "snapshot");
+    return { autoEntries: auto, snapshotEntries: snapshots };
+  }, [entries]);
 
   function handleRestore(entry: BackupEntry) {
     setConfirmModal({
@@ -62,35 +72,67 @@ export function BackupList({
     return <p className="panel__muted">{t("backup.empty")}</p>;
   }
 
+  const visibleSnapshots = showAllSnapshots
+    ? snapshotEntries
+    : snapshotEntries.slice(0, SNAPSHOT_COLLAPSE_THRESHOLD);
+  const hiddenSnapshotCount = snapshotEntries.length - visibleSnapshots.length;
+
+  const renderGroup = (groupEntries: BackupEntry[]) =>
+    groupEntries.map((entry) => (
+      <div
+        key={entry.path}
+        className={`backup-item backup-item--${entry.kind.kind}`}
+      >
+        <div className="backup-item__main">
+          <span className="backup-item__label">{describeEntry(entry, t)}</span>
+          <span className="backup-item__meta">
+            {formatDate(entry.modifiedMs)} · {formatBytes(entry.bytes)}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="backup-item__restore"
+          onClick={() => handleRestore(entry)}
+        >
+          {t("backup.restoreButton")}
+        </button>
+      </div>
+    ));
+
   return (
-    <table className="backup-list">
-      <thead>
-        <tr>
-          <th>{t("backup.column.type")}</th>
-          <th>{t("backup.column.modified")}</th>
-          <th>{t("backup.column.size")}</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        {entries.map((entry) => (
-          <tr key={entry.path}>
-            <td>{describeEntry(entry, t)}</td>
-            <td>{formatDate(entry.modifiedMs)}</td>
-            <td>{formatBytes(entry.bytes)}</td>
-            <td>
-              <button
-                type="button"
-                className="action-button action-button--small"
-                onClick={() => handleRestore(entry)}
-              >
-                {t("backup.restoreButton")}
-              </button>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="backup-groups">
+      {autoEntries.length > 0 ? (
+        <div className="backup-group">
+          <div className="backup-group__title">{t("backup.groupAuto")}</div>
+          <div className="backup-group__items">{renderGroup(autoEntries)}</div>
+        </div>
+      ) : null}
+
+      {snapshotEntries.length > 0 ? (
+        <div className="backup-group">
+          <div className="backup-group__title">{t("backup.groupSnapshots")}</div>
+          <div className="backup-group__items">{renderGroup(visibleSnapshots)}</div>
+          {hiddenSnapshotCount > 0 ? (
+            <button
+              type="button"
+              className="backup-group__expander"
+              onClick={() => setShowAllSnapshots(true)}
+            >
+              {t("backup.showAll", { count: hiddenSnapshotCount })}
+            </button>
+          ) : null}
+          {showAllSnapshots && snapshotEntries.length > SNAPSHOT_COLLAPSE_THRESHOLD ? (
+            <button
+              type="button"
+              className="backup-group__expander"
+              onClick={() => setShowAllSnapshots(false)}
+            >
+              {t("backup.showFewer")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

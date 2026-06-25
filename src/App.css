@@ -42,6 +42,9 @@
      dropdowns / context menus / toasts anchored to a trigger. */
   --shadow-modal: 0 16px 48px rgba(0, 0, 0, 0.5);
   --shadow-popover: 0 8px 24px rgba(0, 0, 0, 0.4);
+  /* Card elevation: raised settings/section cards above the page background. */
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.25);
+  --shadow-card-hover: 0 6px 18px rgba(0, 0, 0, 0.32);
 
   --c-text-on-accent: #0f170f;
   --gradient-primary: linear-gradient(135deg, #9fca69, #6ca84f);
@@ -60,6 +63,9 @@
   --c-text-subtle: rgba(226, 236, 218, 0.45);
   --space-xs: 4px;
   --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
 }
 
 * { box-sizing: border-box; }
@@ -387,7 +393,9 @@ select::checkmark {
   border-radius: var(--radius-pill);
   transform: translateX(var(--pill-offset, 0));
   transition: transform 280ms cubic-bezier(0.4, 0, 0.2, 1);
-  opacity: 0.22;
+  /* Solid accent fill behind the active pill — clearly "selected", not a faint
+     wash. The active pill's text flips to --c-text-on-accent for contrast. */
+  opacity: 1;
 }
 
 .pill-track__indicator--hypershift {
@@ -416,16 +424,16 @@ select::checkmark {
 }
 
 .pill-track__pill--active {
-  color: var(--c-accent);
+  color: var(--c-text-on-accent);
 }
 
 .pill-track--layer .pill-track__pill--active {
-  color: var(--c-accent);
+  color: var(--c-text-on-accent);
 }
 
-/* Hypershift active pill uses orange */
+/* Hypershift active pill: solid orange fill, text flips to on-accent too. */
 .pill-track__indicator--hypershift ~ .pill-track__pill--active {
-  color: var(--c-hypershift);
+  color: var(--c-text-on-accent);
 }
 
 .sidebar__status {
@@ -607,9 +615,11 @@ select::checkmark {
   align-items: center;
   gap: 12px;
   padding: 10px 24px;
-  background: rgba(13, 22, 17, 0.92);
+  background: rgba(13, 22, 17, 0.98);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--c-border);
+  position: relative;
+  z-index: 5;
 }
 
 .toolbar__title {
@@ -4561,34 +4571,83 @@ img.profiles__app-card-monogram {
 
 /* ── Settings workspace ── */
 
-.settings-workspace {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px 24px;
-  max-width: none;
+/* Tabbed shell: a vertical tab rail + a content column. */
+.settings-shell {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  gap: var(--space-xl);
+  padding: var(--space-xl);
+  align-items: start;
 }
 
-/* Settings section card */
+.settings-shell__rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+  position: sticky;
+  top: var(--space-xl);
+}
+
+.settings-shell__content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
+  min-width: 0;
+}
+
+/* Narrow width: rail collapses to a horizontal strip above the content. */
+@media (max-width: 720px) {
+  .settings-shell {
+    grid-template-columns: 1fr;
+  }
+  .settings-shell__rail {
+    flex-direction: row;
+    flex-wrap: wrap;
+    position: static;
+  }
+  .settings-shell__rail .nav-item {
+    width: auto;
+  }
+}
+
+/* Settings section card — level 2 surface (card) raised above the page (level 1,
+   --c-bg) with a soft shadow. Insets/previews inside use --c-surface-alt (level 3). */
 .settings-section {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-md);
-  padding: 20px;
+  padding: var(--space-xl);
+  box-shadow: var(--shadow-card);
 }
 
 .settings-section__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  gap: var(--space-md);
+  margin-bottom: var(--space-lg);
 }
 
+/* One stronger header style shared by all peer section headers. */
 .settings-section__title {
-  font-size: 0.7rem;
+  font-size: var(--fs-body-sm);
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.01em;
+  color: var(--c-text-bright);
+}
+
+/* Section "master" toggle: explicit label so its scope is unambiguous, instead
+   of a bare switch floating in the header. */
+.settings-section__master {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm);
+  cursor: pointer;
+}
+
+.settings-section__master-label {
+  font-size: var(--fs-caption);
+  font-weight: 600;
   color: var(--c-text-muted);
 }
 
@@ -4763,45 +4822,50 @@ input[type="number"] { -moz-appearance: textfield; }
 .osd-preview-area {
   display: flex;
   width: 100%;
-  height: 64px;
-  background: rgba(0, 0, 0, 0.25);
+  height: 88px;
+  background: var(--c-surface-alt);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-sm);
-  padding: 8px;
+  padding: var(--space-md);
   overflow: hidden;
 }
 
-.osd-preview-bubble {
+/* A realistic sample toast (styled like the real Toast.tsx) inside the preview
+   "screen". It is statically positioned (overrides the toast's position:fixed)
+   so the surrounding flex container can place it per osdPosition. */
+.osd-preview-toast {
+  position: static;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 12px;
-  background: #1a1f16;
-  border-radius: 4px;
-  color: #e8eae4;
-  font-family: "Segoe UI", sans-serif;
+  margin: 0;
+  padding: 6px 12px;
+  max-width: 100%;
   white-space: nowrap;
+  font-size: var(--osd-preview-fs, 12px);
   opacity: 0;
 }
 
-.osd-preview-bubble__label {
+.osd-preview-toast__label {
   font-weight: 500;
-  color: rgba(159, 202, 105, 0.85);
+  color: var(--c-accent);
 }
 
-.osd-preview-bubble__name {
+.osd-preview-toast__name {
   font-weight: 700;
+  color: var(--c-text-bright);
 }
 
-.osd-preview-bubble--slide {
+.osd-preview-toast.osd-preview-bubble--slide {
   animation: osd-preview-slide 350ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-.osd-preview-bubble--fade {
+.osd-preview-toast.osd-preview-bubble--fade {
   animation: osd-preview-fade 600ms ease-out forwards;
 }
 
-.osd-preview-bubble--none {
+.osd-preview-toast.osd-preview-bubble--none {
+  animation: none;
   opacity: 1;
 }
 
@@ -4813,6 +4877,58 @@ input[type="number"] { -moz-appearance: textfield; }
 @keyframes osd-preview-fade {
   0%   { opacity: 0; }
   100% { opacity: 1; }
+}
+
+/* ── OSD position corner picker (2×2 "screen") ── */
+.corner-picker {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  width: 132px;
+  height: 84px;
+  padding: 6px;
+  gap: 6px;
+  background: var(--c-surface-alt);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+}
+
+.corner-picker__corner {
+  display: flex;
+  border: 1px dashed var(--c-card-border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  cursor: pointer;
+  padding: 4px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.corner-picker__corner[data-corner="topLeft"] { align-items: flex-start; justify-content: flex-start; }
+.corner-picker__corner[data-corner="topRight"] { align-items: flex-start; justify-content: flex-end; }
+.corner-picker__corner[data-corner="bottomLeft"] { align-items: flex-end; justify-content: flex-start; }
+.corner-picker__corner[data-corner="bottomRight"] { align-items: flex-end; justify-content: flex-end; }
+
+.corner-picker__corner:hover {
+  border-color: var(--c-border-hover);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.corner-picker__corner--active {
+  border-style: solid;
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+
+.corner-picker__dot {
+  width: 14px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--c-card-border);
+}
+
+.corner-picker__corner--active .corner-picker__dot {
+  background: var(--c-accent);
 }
 
 /* ── Log Panel ── */
@@ -5023,26 +5139,103 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 
 /* ───────────────────────── M1: Backup list ───────────────────────── */
-.backup-list {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.82rem;
+.backup-groups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-lg);
 }
-.backup-list th,
-.backup-list td {
-  text-align: left;
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--c-border);
+
+.backup-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
 }
-.backup-list th {
+
+.backup-group__title {
+  font-size: var(--fs-caption);
+  font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--c-text-muted);
-  font-weight: 500;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 0.7rem;
 }
-.backup-list tbody tr:last-child td { border-bottom: none; }
-.backup-list td:last-child { text-align: right; }
+
+.backup-group__items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+/* Backup row: inset surface (level 3), type distinguished by a left accent edge. */
+.backup-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: 8px 12px;
+  border-radius: var(--radius-xs);
+  background: var(--c-surface-alt);
+  border-left: 3px solid var(--c-card-border);
+}
+
+.backup-item--lastKnownGood { border-left-color: var(--c-ok); }
+.backup-item--rolling { border-left-color: var(--c-info); }
+.backup-item--snapshot { border-left-color: var(--c-card-border); }
+
+.backup-item__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.backup-item__label {
+  font-size: var(--fs-body-sm);
+  font-weight: 600;
+  color: var(--c-text-bright);
+}
+
+.backup-item__meta {
+  font-size: var(--fs-micro);
+  color: var(--c-text-muted);
+}
+
+/* De-emphasised "Restore": neutral by default, accent only on hover. */
+.backup-item__restore {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.backup-item__restore:hover {
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+}
+
+.backup-group__expander {
+  align-self: flex-start;
+  margin-top: 2px;
+  padding: 4px 8px;
+  border: none;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: var(--radius-xs);
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.backup-group__expander:hover {
+  color: var(--c-text-bright);
+  background: rgba(255, 255, 255, 0.05);
+}
 
 /* ───────────────────────── M3: Synapse import modal ───────────────────────── */
 .synapse-import-modal { width: min(720px, 95vw); max-height: 80vh; display: flex; flex-direction: column; }

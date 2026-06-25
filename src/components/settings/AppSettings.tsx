@@ -1,0 +1,143 @@
+import { useTranslation } from "react-i18next";
+import { changeLanguage } from "../../i18n";
+import type { AppConfig, CommandError, Settings } from "../../lib/config";
+import { Notice, Toggle } from "../shared";
+import { useAutostartStatus } from "./useAutostartStatus";
+
+export interface AppSettingsProps {
+  activeConfig: AppConfig;
+  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
+  updateSettings: (patch: Partial<Settings>) => void;
+  setError: (error: CommandError | null) => void;
+}
+
+/** Application tab: autostart (incl. admin sub-toggle), language, clipboard repair. */
+export function AppSettings({
+  activeConfig,
+  updateDraft,
+  updateSettings,
+  setError,
+}: AppSettingsProps) {
+  const { t, i18n } = useTranslation();
+  const osd = activeConfig.settings;
+  const {
+    adminAutostart,
+    autostartBusy,
+    runAtLogon,
+    handleRunAtLogonToggle,
+    handleRunAsAdminToggle,
+  } = useAutostartStatus(updateDraft, setError);
+
+  return (
+    <>
+      {/* Autostart */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.autostartHeader")}</span>
+        </div>
+
+        <div className="autostart-row">
+          <div className="autostart-row__main">
+            <div className="autostart-row__title">{t("settings.autostartRunAtLogonTitle")}</div>
+            <div className="autostart-row__hint">
+              {t("settings.autostartRunAtLogonHint")}
+            </div>
+          </div>
+          <div className="autostart-row__control">
+            <Toggle
+              checked={runAtLogon}
+              onChange={(checked) => void handleRunAtLogonToggle(checked)}
+              disabled={autostartBusy}
+              ariaLabel={t("settings.autostartRunAtLogonTitle")}
+            />
+          </div>
+        </div>
+
+        {adminAutostart?.supported && (
+          <div
+            className={`autostart-row autostart-row--sub${runAtLogon ? "" : " autostart-row--disabled"}`}
+          >
+            <div className="autostart-row__main">
+              <div className="autostart-row__title">{t("settings.autostartAdminTitle")}</div>
+              <div className="autostart-row__hint">
+                {runAtLogon
+                  ? t("settings.autostartAdminHintEnabled")
+                  : t("settings.autostartAdminHintDisabled")}
+              </div>
+            </div>
+            <div className="autostart-row__control">
+              <Toggle
+                checked={adminAutostart.enabled}
+                onChange={(checked) => void handleRunAsAdminToggle(checked)}
+                disabled={autostartBusy || !runAtLogon}
+                ariaLabel={t("settings.autostartAdminTitle")}
+              />
+            </div>
+          </div>
+        )}
+
+        {adminAutostart?.enabled && adminAutostart.pathMismatch && (
+          <Notice variant="error" className="mt-12">
+            <p>{t("settings.autostartPathMismatchMsg")}</p>
+            <p className="mono-sm">
+              {adminAutostart.registeredPath ?? t("settings.autostartPathUnknown")}
+            </p>
+            <p>{t("settings.autostartCurrentPath")}</p>
+            <p className="mono-sm">
+              {adminAutostart.currentExe}
+            </p>
+            <button
+              type="button"
+              className="action-button action-button--secondary action-button--small mt-8"
+              onClick={() => void handleRunAsAdminToggle(true)}
+              disabled={autostartBusy}
+            >
+              {t("settings.autostartReregisterButton")}
+            </button>
+          </Notice>
+        )}
+      </section>
+
+      {/* Language selector */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.languageHeader")}</span>
+        </div>
+        <div className="settings-actions">
+          <button
+            type="button"
+            aria-pressed={i18n.language === "ru"}
+            className={`action-button action-button--small${i18n.language === "ru" ? "" : " action-button--ghost"}`}
+            onClick={() => changeLanguage("ru")}
+          >
+            Русский
+          </button>
+          <button
+            type="button"
+            aria-pressed={i18n.language === "en"}
+            className={`action-button action-button--small${i18n.language === "en" ? "" : " action-button--ghost"}`}
+            onClick={() => changeLanguage("en")}
+          >
+            English
+          </button>
+        </div>
+      </section>
+
+      {/* Clipboard repair (OSC 52 mojibake workaround) */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.repairClipboardHeader")}</span>
+          <label className="settings-section__master">
+            <span className="settings-section__master-label">{t("settings.sectionEnableLabel")}</span>
+            <Toggle
+              checked={osd.repairClipboardOnCopy ?? false}
+              onChange={(checked) => updateSettings({ repairClipboardOnCopy: checked })}
+              ariaLabel={t("settings.repairClipboardHeader")}
+            />
+          </label>
+        </div>
+        <p className="panel__muted help-sm">{t("settings.repairClipboardHelp")}</p>
+      </section>
+    </>
+  );
+}

@@ -30,7 +30,10 @@ export function Toolbar({
         onClick={onOpenCommandPalette}
         title={`${t("toolbar.commandPalette")} (${t("toolbar.shortcut")})`}
       >
-        <span className="toolbar__icon">⌘</span>
+        <svg className="toolbar__icon" width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M10.6 10.6L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
         <span>{t("toolbar.commandPalette")}</span>
         <span className="toolbar__shortcut">{t("toolbar.shortcut")}</span>
       </button>
@@ -53,7 +56,7 @@ export function Toolbar({
           className="toolbar__icon-btn"
           onClick={onUndo}
           disabled={undoCount === 0}
-          title={t("toolbar.undo")}
+          title={undoCount > 0 ? `${t("toolbar.undo")} (${undoCount})` : t("toolbar.undo")}
           aria-label={t("toolbar.undo")}
         >
           <svg width="15" height="15" viewBox="0 0 16 16" fill="none">

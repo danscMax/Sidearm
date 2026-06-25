@@ -165,7 +165,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     // Multiply by DPI scale factor to convert.
     let dpi_scale = {
         #[cfg(target_os = "windows")]
-        { crate::platform::display::get_dpi_scale() }
+        { crate::platform::display::get_cursor_monitor_dpi_scale() }
         #[cfg(target_os = "linux")]
         { crate::platform::display::get_dpi_scale() }
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -180,7 +180,7 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     // Measure label (weight 500) and name (weight 700) separately
     let label_width = measure_text_width("Профиль:", "Segoe UI", font_px, 500);
     let name_width = measure_text_width(profile_name, "Segoe UI", font_px, 700);
-    let logical_padding = 16 + 8 + 16 + 4; // left-pad + gap + right-pad + rounding safety
+    let logical_padding = 16 + 8 + 16 + 8; // left-pad + gap + right-pad + safety (GDI vs WebView2)
     let logical_width = label_width + name_width + logical_padding;
 
     // Convert to physical pixels for Tauri

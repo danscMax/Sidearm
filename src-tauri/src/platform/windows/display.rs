@@ -10,7 +10,10 @@ use windows_sys::Win32::{
         DEFAULT_PITCH, DEFAULT_QUALITY, LOGPIXELSX, MONITORINFO, MONITOR_DEFAULTTONEAREST,
         OUT_DEFAULT_PRECIS,
     },
-    UI::WindowsAndMessaging::GetCursorPos,
+    UI::{
+        HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
+        WindowsAndMessaging::GetCursorPos,
+    },
 };
 
 use crate::config::OsdPosition;
@@ -22,6 +25,26 @@ pub(crate) fn get_dpi_scale() -> f64 {
         let dpi = GetDeviceCaps(hdc, LOGPIXELSX as i32);
         ReleaseDC(std::ptr::null_mut(), hdc);
         dpi as f64 / 96.0
+    }
+}
+
+/// DPI scale of the monitor under the cursor — i.e. the monitor the OSD is
+/// shown on (it is positioned via `MonitorFromPoint(cursor)`). On mixed-DPI
+/// multi-monitor setups this differs from the primary monitor's DPI, so sizing
+/// the OSD window with the primary scale clipped the text. Falls back to the
+/// primary scale if the per-monitor query fails.
+pub(crate) fn get_cursor_monitor_dpi_scale() -> f64 {
+    unsafe {
+        let mut pt = std::mem::zeroed();
+        GetCursorPos(&mut pt);
+        let hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+        let mut dpi_x: u32 = 0;
+        let mut dpi_y: u32 = 0;
+        if GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == 0 && dpi_x > 0 {
+            dpi_x as f64 / 96.0
+        } else {
+            get_dpi_scale()
+        }
     }
 }
 

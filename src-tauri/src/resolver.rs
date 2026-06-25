@@ -1,8 +1,32 @@
+use std::sync::OnceLock;
+
 use serde::Serialize;
 
 use crate::config::{AppConfig, AppMapping, EncoderMapping, Profile, TriggerMode};
 
 const REGEX_PREFIX: &str = "regex:";
+
+/// Normalize a process path for app-mapping comparison. MSIX/Store apps install
+/// under `…\WindowsApps\<Name>_<Version>_<Arch>__<Hash>\…`, where `<Version>`
+/// bumps on every Store update. Pinning the full path therefore breaks the
+/// mapping after any update — the exact bug behind Windows Terminal not being
+/// recognized (and the accumulation of one mapping per WT version). For
+/// WindowsApps paths we strip the version token so every build of one package
+/// compares equal. Non-packaged paths are returned unchanged. Always lowercased
+/// (the comparison was already case-insensitive).
+// ponytail: strips the first `_<digits.dots>_` inside a WindowsApps path — real
+// package monikers put the version right there. Tighten to `_<ver>_<arch>__`
+// only if some package name ever trips this.
+fn normalize_process_path(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if !lower.contains("\\windowsapps\\") {
+        return lower;
+    }
+    static MSIX_VERSION: OnceLock<regex::Regex> = OnceLock::new();
+    let re = MSIX_VERSION
+        .get_or_init(|| regex::Regex::new(r"_\d+(?:\.\d+)+_").expect("static MSIX version regex"));
+    re.replace(&lower, "_*_").into_owned()
+}
 
 #[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -378,12 +402,13 @@ pub(crate) fn matching_app_mappings<'a>(
         .filter(|mapping| mapping.exe.eq_ignore_ascii_case(exe))
         .filter(|mapping| match mapping.process_path.as_deref() {
             // A mapping that pins a full process path only matches when the
-            // active process path matches it (case-insensitive). Mappings
-            // without a pinned path (the common case) are unaffected — this
-            // keeps the behaviour additive for existing configs.
-            Some(pinned) => {
-                process_path.is_some_and(|active| active.eq_ignore_ascii_case(pinned))
-            }
+            // active process path matches it. Both sides are normalized so that
+            // MSIX/Store apps (Windows Terminal) match across version updates,
+            // which embed the version in the WindowsApps path. Mappings without
+            // a pinned path (the common case) are unaffected — this keeps the
+            // behaviour additive for existing configs.
+            Some(pinned) => process_path
+                .is_some_and(|active| normalize_process_path(active) == normalize_process_path(pinned)),
             None => true,
         })
         .filter(|mapping| {
@@ -794,6 +819,32 @@ mod tests {
         // Without a known process path, pinned-path mappings do not match.
         let none = matching_app_mappings(&config, "python.exe", "", None);
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn matching_ignores_msix_version_in_pinned_path() {
+        // A Windows Terminal mapping pinned to one Store version must still match
+        // a DIFFERENT version of the same package — the WindowsApps path embeds
+        // the version, which bumps on every update.
+        let mut wt = app_mapping("wt", "windowsterminal.exe", "code", 200, vec![]);
+        wt.process_path = Some(
+            "C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal_1.24.10621.0_x64__8wekyb3d8bbwe\\WindowsTerminal.exe".into(),
+        );
+        let config = test_config(vec![wt]);
+
+        // Active WT is a newer build (different version) of the same package.
+        let active = "C:\\Program Files\\WindowsApps\\Microsoft.WindowsTerminal_1.24.99999.0_x64__8wekyb3d8bbwe\\WindowsTerminal.exe";
+        let matches = matching_app_mappings(&config, "windowsterminal.exe", "", Some(active));
+        assert_eq!(
+            matches.first().map(|m| m.id.as_str()),
+            Some("wt"),
+            "WT mapping must survive a version bump in the MSIX path"
+        );
+
+        // A genuinely different package (same exe name) must NOT match.
+        let other_pkg = "C:\\Program Files\\WindowsApps\\Contoso.OtherTerminal_1.0.0.0_x64__abcdefghijklm\\WindowsTerminal.exe";
+        let no_match = matching_app_mappings(&config, "windowsterminal.exe", "", Some(other_pkg));
+        assert!(no_match.is_empty(), "different package must not match");
     }
 }
 

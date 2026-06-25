@@ -1947,6 +1947,131 @@ describe("removeBinding", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Rescue of inline snippet text on prune (never silently lose user content)
+// ---------------------------------------------------------------------------
+
+describe("rescues inline snippet text to the library before pruning", () => {
+  function inlineSnippet(id: string, text: string, displayName = "Snippet"): Action {
+    return {
+      id,
+      type: "textSnippet",
+      payload: { source: "inline", text, pasteMode: "clipboardPaste", tags: [] },
+      displayName,
+    };
+  }
+
+  it("preserves an orphaned inline snippet's text when removeBinding prunes it", () => {
+    const action = inlineSnippet("a-snip", "My long prompt", "Long Prompt");
+    const binding = makeBinding({ id: "b-snip", actionId: "a-snip" });
+    const config: AppConfig = { ...createMinimalConfig(), bindings: [binding], actions: [action] };
+
+    const result = removeBinding(config, "b-snip");
+
+    expect(result.actions).toHaveLength(0); // still pruned from actions
+    expect(result.snippetLibrary).toHaveLength(1);
+    expect(result.snippetLibrary[0]!.text).toBe("My long prompt");
+    expect(result.snippetLibrary[0]!.name).toBe("Long Prompt");
+  });
+
+  it("does not rescue a shortcut action", () => {
+    const action = makeAction({ id: "a-sc" });
+    const binding = makeBinding({ id: "b-sc", actionId: "a-sc" });
+    const config: AppConfig = { ...createMinimalConfig(), bindings: [binding], actions: [action] };
+
+    const result = removeBinding(config, "b-sc");
+    expect(result.snippetLibrary).toHaveLength(0);
+  });
+
+  it("does not rescue an empty/whitespace snippet", () => {
+    const action = inlineSnippet("a-empty", "   ");
+    const binding = makeBinding({ id: "b-empty", actionId: "a-empty" });
+    const config: AppConfig = { ...createMinimalConfig(), bindings: [binding], actions: [action] };
+
+    const result = removeBinding(config, "b-empty");
+    expect(result.snippetLibrary).toHaveLength(0);
+  });
+
+  it("dedupes: does not add when identical text already in the library", () => {
+    const action = inlineSnippet("a-dup", "Same text");
+    const binding = makeBinding({ id: "b-dup", actionId: "a-dup" });
+    const existing: SnippetLibraryItem = {
+      id: "snippet-existing",
+      name: "Existing",
+      text: "Same text",
+      pasteMode: "clipboardPaste",
+      tags: [],
+    };
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      bindings: [binding],
+      actions: [action],
+      snippetLibrary: [existing],
+    };
+
+    const result = removeBinding(config, "b-dup");
+    expect(result.snippetLibrary).toHaveLength(1);
+  });
+
+  it("does not rescue a library-ref snippet (text already lives in the library)", () => {
+    const action: Action = {
+      id: "a-ref",
+      type: "textSnippet",
+      payload: { source: "libraryRef", snippetId: "snippet-x" },
+      displayName: "Ref",
+    };
+    const binding = makeBinding({ id: "b-ref", actionId: "a-ref" });
+    const config: AppConfig = { ...createMinimalConfig(), bindings: [binding], actions: [action] };
+
+    const result = removeBinding(config, "b-ref");
+    expect(result.snippetLibrary).toHaveLength(0);
+  });
+
+  it("preserves an orphaned snippet when its profile is deleted", () => {
+    const action = inlineSnippet("a-prof", "Profile snippet");
+    const binding = makeBinding({ id: "b-prof", profileId: "prof-x", actionId: "a-prof" });
+    const profile = makeProfile({ id: "prof-x" });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [profile],
+      bindings: [binding],
+      actions: [action],
+    };
+
+    const result = deleteProfile(config, "prof-x");
+    expect(result.actions).toHaveLength(0);
+    expect(result.snippetLibrary.map((s) => s.text)).toContain("Profile snippet");
+  });
+
+  it("preserves the replaced target's inline snippet when duplicateBinding overwrites it", () => {
+    const source = inlineSnippet("a-src", "Source text", "Src");
+    const target = inlineSnippet("a-tgt", "Target text to keep", "Tgt");
+    const srcBinding = makeBinding({
+      id: "b-src",
+      profileId: "prof",
+      controlId: "thumb_01" as ControlId,
+      actionId: "a-src",
+    });
+    const tgtBinding = makeBinding({
+      id: "b-tgt",
+      profileId: "prof",
+      controlId: "thumb_05" as ControlId,
+      actionId: "a-tgt",
+    });
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [makeProfile({ id: "prof" })],
+      bindings: [srcBinding, tgtBinding],
+      actions: [source, target],
+    };
+
+    const result = duplicateBinding(config, "b-src", "thumb_05" as ControlId);
+    // a-tgt is orphaned by the overwrite, but its text must be preserved.
+    expect(result.actions.some((a) => a.id === "a-tgt")).toBe(false);
+    expect(result.snippetLibrary.map((s) => s.text)).toContain("Target text to keep");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // extractProfileExport
 // ---------------------------------------------------------------------------
 

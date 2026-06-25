@@ -58,10 +58,18 @@ export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
   if (!binding) return config;
   const nextBindings = config.bindings.filter((b) => b.id !== bindingId);
   const actionStillReferenced = nextBindings.some((b) => b.actionId === binding.actionId);
-  const nextActions = actionStillReferenced
-    ? config.actions
-    : config.actions.filter((a) => a.id !== binding.actionId);
-  return { ...config, bindings: nextBindings, actions: nextActions };
+  if (actionStillReferenced) {
+    return { ...config, bindings: nextBindings };
+  }
+  // The action is now orphaned. Preserve any inline snippet text in the library
+  // before dropping it, so user-authored content is never silently lost.
+  const dropped = config.actions.filter((a) => a.id === binding.actionId);
+  return {
+    ...config,
+    bindings: nextBindings,
+    actions: config.actions.filter((a) => a.id !== binding.actionId),
+    snippetLibrary: rescueDroppedSnippets(dropped, config.snippetLibrary),
+  };
 }
 
 export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfig {
@@ -473,34 +481,35 @@ export interface CreateAppMappingResult {
   newMappingId: string;
 }
 
-export function createAppMappingFromCapture(
+/**
+ * Insert a new app-mapping built from a full draft — the unified rule card uses
+ * this for "create". Assigns a unique id, trims+lowercases the exe, clamps the
+ * priority, and drops empty title filters. Throws if the exe is empty.
+ * {@link createAppMappingFromCapture} is the single-title convenience wrapper.
+ */
+export function createAppMapping(
   config: AppConfig,
-  profileId: string,
-  priority: number,
-  exe: string,
-  title: string,
-  includeTitleFilter: boolean,
-  processPath?: string,
+  draft: Omit<AppMapping, "id">,
 ): CreateAppMappingResult {
-  const normalizedExe = exe.trim().toLowerCase();
+  const normalizedExe = draft.exe.trim().toLowerCase();
   if (!normalizedExe) {
     throw new Error("exe must not be empty");
   }
-  const clampedPriority = clampPriority(priority);
   const baseId = makeAppMappingId(normalizedExe);
   const nextId = nextUniqueId(
     config.appMappings.map((mapping) => mapping.id),
     baseId,
   );
+  const titleIncludes = (draft.titleIncludes ?? [])
+    .map((title) => title.trim())
+    .filter((title) => title.length > 0);
   const nextMapping: AppMapping = {
+    ...draft,
     id: nextId,
     exe: normalizedExe,
-    processPath: processPath || undefined,
-    profileId,
-    enabled: true,
-    priority: clampedPriority,
-    titleIncludes:
-      includeTitleFilter && title.trim() ? [title.trim()] : undefined,
+    processPath: draft.processPath || undefined,
+    priority: clampPriority(draft.priority),
+    titleIncludes: titleIncludes.length > 0 ? titleIncludes : undefined,
   };
 
   return {
@@ -510,6 +519,26 @@ export function createAppMappingFromCapture(
     },
     newMappingId: nextId,
   };
+}
+
+export function createAppMappingFromCapture(
+  config: AppConfig,
+  profileId: string,
+  priority: number,
+  exe: string,
+  title: string,
+  includeTitleFilter: boolean,
+  processPath?: string,
+): CreateAppMappingResult {
+  return createAppMapping(config, {
+    exe,
+    processPath,
+    profileId,
+    enabled: true,
+    priority,
+    titleIncludes:
+      includeTitleFilter && title.trim() ? [title.trim()] : undefined,
+  });
 }
 
 /** Result of {@link ensurePlaceholderBinding}: the (possibly unchanged) config
@@ -764,13 +793,18 @@ export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
 
   // Remove orphaned actions no longer referenced by any remaining binding
   // (menu-aware: nested action refs are preserved).
-  const nextActions = pruneOrphanActions(config.actions, nextBindings);
+  const { actions: nextActions, snippetLibrary } = pruneActionsPreservingSnippets(
+    config.actions,
+    nextBindings,
+    config.snippetLibrary,
+  );
 
   return {
     ...config,
     profiles: config.profiles.filter((p) => p.id !== profileId),
     bindings: nextBindings,
     actions: nextActions,
+    snippetLibrary,
     appMappings: config.appMappings.filter((m) => m.profileId !== profileId),
   };
 }
@@ -820,12 +854,17 @@ export function duplicateBinding(
   // action, that action would otherwise be orphaned. Prune it the same way
   // removeBinding/deleteProfile do (menu-aware), so duplication can't leak
   // dangling actions into the config.
-  const nextActions = pruneOrphanActions([...config.actions, newAction], nextBindings);
+  const { actions: nextActions, snippetLibrary } = pruneActionsPreservingSnippets(
+    [...config.actions, newAction],
+    nextBindings,
+    config.snippetLibrary,
+  );
 
   return {
     ...config,
     actions: nextActions,
     bindings: nextBindings,
+    snippetLibrary,
   };
 }
 
@@ -944,10 +983,8 @@ export function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): voi
   }
 }
 
-/** Drop actions that no binding references (directly or via a menu payload).
- *  `nextBindings` is the binding set that should survive; actions reachable from
- *  it — including nested menu action refs — are kept, the rest are pruned. */
-function pruneOrphanActions(actions: Action[], nextBindings: Binding[]): Action[] {
+/** Action ids reachable from `nextBindings`, directly or via nested menu refs. */
+function computeReferencedActionIds(actions: Action[], nextBindings: Binding[]): Set<string> {
   const referencedActionIds = new Set(nextBindings.map((b) => b.actionId));
   // Live iteration: collectMenuActionRefs may add ids that themselves point at
   // menu actions, and `for...of` over a Set visits entries added mid-iteration.
@@ -957,7 +994,71 @@ function pruneOrphanActions(actions: Action[], nextBindings: Binding[]): Action[
       collectMenuActionRefs(action.payload.items, referencedActionIds);
     }
   }
-  return actions.filter((a) => referencedActionIds.has(a.id));
+  return referencedActionIds;
+}
+
+/** Before discarding actions, preserve any inline text-snippet content in the
+ *  snippet library so user-authored text is never silently lost when a binding
+ *  is reassigned/removed or its profile deleted. Deduped by exact text. */
+function rescueDroppedSnippets(
+  dropped: Action[],
+  snippetLibrary: SnippetLibraryItem[],
+): SnippetLibraryItem[] {
+  let library = snippetLibrary;
+  for (const action of dropped) {
+    if (action.type !== "textSnippet" || action.payload.source !== "inline") {
+      continue;
+    }
+    const text = action.payload.text;
+    if (!text.trim()) {
+      continue;
+    }
+    // Already preserved somewhere — don't pile up duplicates of the same text.
+    if (library.some((snippet) => snippet.text === text)) {
+      continue;
+    }
+    const name = action.displayName.trim() || text.trim().slice(0, 40);
+    const id = nextUniqueId(
+      library.map((snippet) => snippet.id),
+      makeSnippetId(name),
+    );
+    library = [
+      ...library,
+      {
+        id,
+        name,
+        text,
+        pasteMode: action.payload.pasteMode,
+        tags: uniqueStrings(action.payload.tags),
+        notes: action.notes,
+      },
+    ];
+  }
+  return library;
+}
+
+/** Drop actions that no binding references (directly or via a menu payload),
+ *  preserving dropped inline snippet text in the library. `nextBindings` is the
+ *  binding set that should survive; reachable actions are kept, the rest pruned. */
+function pruneActionsPreservingSnippets(
+  actions: Action[],
+  nextBindings: Binding[],
+  snippetLibrary: SnippetLibraryItem[],
+): { actions: Action[]; snippetLibrary: SnippetLibraryItem[] } {
+  const referencedActionIds = computeReferencedActionIds(actions, nextBindings);
+  const kept: Action[] = [];
+  const dropped: Action[] = [];
+  for (const action of actions) {
+    if (referencedActionIds.has(action.id)) {
+      kept.push(action);
+    } else {
+      dropped.push(action);
+    }
+  }
+  return {
+    actions: kept,
+    snippetLibrary: rescueDroppedSnippets(dropped, snippetLibrary),
+  };
 }
 
 function normalizeControlToken(controlId: ControlId): string {

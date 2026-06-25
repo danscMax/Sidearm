@@ -133,7 +133,16 @@ export function ActionPickerModal({
   const [shortcutDraft, setShortcutDraft] = useState(initial.shortcut);
   const [mouseDraft, setMouseDraft] = useState(initial.mouse);
   const [textDraft, setTextDraft] = useState(initial.text);
-  const [saveSnippetToLibrary, setSaveSnippetToLibrary] = useState(false);
+  // Default ON so snippet text lands in the durable library, not only inline on
+  // the button — inline-only text is silently lost when the button is later
+  // reassigned. Snippets already backed by the library don't need re-saving.
+  const [saveSnippetToLibrary, setSaveSnippetToLibrary] = useState(
+    () =>
+      !(
+        existingAction?.type === "textSnippet" &&
+        existingAction.payload.source === "libraryRef"
+      ),
+  );
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [testRunning, setTestRunning] = useState(false);
   const [launchDraft, setLaunchDraft] = useState(initial.launch);

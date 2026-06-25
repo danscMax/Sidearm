@@ -11,8 +11,10 @@ export interface ChipEditorProps {
 
 /**
  * Array-of-strings editor with chip/pill rendering. Enter adds the current
- * input as a new chip; Backspace on an empty input removes the last chip.
- * Used for `appMapping.titleIncludes` and the launch-step args list.
+ * input as a new chip; Backspace on an empty input removes the last chip;
+ * clicking a chip edits it IN PLACE (Enter/blur commits, Escape cancels,
+ * emptying it removes the chip). Used for `appMapping.titleIncludes` and the
+ * launch-step args list.
  */
 export function ChipEditor({
   values,
@@ -23,6 +25,8 @@ export function ChipEditor({
 }: ChipEditorProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState("");
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editDraft, setEditDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   function commit() {
@@ -40,28 +44,97 @@ export function ChipEditor({
     onChange(values.filter((_, i) => i !== index));
   }
 
+  function startEdit(index: number) {
+    if (disabled) return;
+    setEditingIndex(index);
+    setEditDraft(values[index]);
+  }
+
+  function commitEdit() {
+    if (editingIndex === null) return;
+    const trimmed = editDraft.trim();
+    const next = [...values];
+    if (!trimmed) {
+      // Emptied → drop the chip.
+      next.splice(editingIndex, 1);
+    } else if (values.some((v, i) => i !== editingIndex && v === trimmed)) {
+      // Edited into an existing value → drop this duplicate.
+      next.splice(editingIndex, 1);
+    } else {
+      next[editingIndex] = trimmed;
+    }
+    onChange(next);
+    setEditingIndex(null);
+    setEditDraft("");
+  }
+
+  function cancelEdit() {
+    setEditingIndex(null);
+    setEditDraft("");
+  }
+
   return (
     <div
       className={`chip-editor${disabled ? " chip-editor--disabled" : ""}`}
-      onClick={() => inputRef.current?.focus()}
+      onClick={() => {
+        if (editingIndex === null) inputRef.current?.focus();
+      }}
       role="group"
       aria-label={ariaLabel}
     >
       {values.map((v, i) => (
         <span key={`${i}-${v}`} className="chip-editor__chip">
-          <span className="chip-editor__chip-label">{v}</span>
-          <button
-            type="button"
-            className="chip-editor__chip-remove"
-            onClick={(e) => {
-              e.stopPropagation();
-              removeAt(i);
-            }}
-            aria-label={t("common.delete")}
-            disabled={disabled}
-          >
-            ×
-          </button>
+          {editingIndex === i ? (
+            <input
+              className="chip-editor__chip-edit"
+              type="text"
+              value={editDraft}
+              size={Math.max(editDraft.length, 4)}
+              autoFocus
+              disabled={disabled}
+              aria-label={ariaLabel}
+              onClick={(e) => e.stopPropagation()}
+              onChange={(e) => setEditDraft(e.target.value)}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  commitEdit();
+                } else if (e.key === "Escape") {
+                  e.preventDefault();
+                  cancelEdit();
+                }
+              }}
+              onBlur={commitEdit}
+            />
+          ) : (
+            <>
+              <button
+                type="button"
+                className="chip-editor__chip-label chip-editor__chip-edit-btn"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startEdit(i);
+                }}
+                disabled={disabled}
+                title={t("common.edit")}
+              >
+                {v}
+              </button>
+              <button
+                type="button"
+                className="chip-editor__chip-remove"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  removeAt(i);
+                }}
+                aria-label={t("common.delete")}
+                disabled={disabled}
+              >
+                ×
+              </button>
+            </>
+          )}
         </span>
       ))}
       <input

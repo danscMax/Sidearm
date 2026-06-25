@@ -428,6 +428,7 @@
     "priorityLabel": "Priority",
     "priorityTooltip": "Higher number = higher priority. When multiple rules match, the one with the highest priority wins.",
     "moveProfileHelp": "Move the rule to a different profile.",
+    "profileChooseHelp": "The profile this app switches to. Click to choose another.",
     "autosave": "Changes are saved automatically",
     "deleteConfirm": "Delete for sure?",
     "deleteRule": "Delete rule",

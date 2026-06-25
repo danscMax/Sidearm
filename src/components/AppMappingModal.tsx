@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { AppConfig, AppMapping } from "../lib/config";
-import { deleteAppMapping, upsertAppMapping } from "../lib/config-editing";
+import type { AppMapping, Profile } from "../lib/config";
 import { clampPriority } from "../lib/helpers";
 import { ChipEditor } from "./ChipEditor";
 import { RunningProcessPicker } from "./RunningProcessPicker";
@@ -11,27 +10,50 @@ import { ExeIcon } from "./ExeIcon";
 import { ExeMatchField } from "./ExeMatchField";
 
 interface AppMappingModalProps {
-  mapping: AppMapping;
-  profileName: string;
-  activeConfig: AppConfig;
-  updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
+  /** "create" holds a local draft and commits via `onCreate`; "edit" autosaves
+   *  every change through `onChange`. */
+  mode: "create" | "edit";
+  /** The mapping being edited (edit) or the working draft (create). */
+  value: AppMapping;
+  /** Report a changed mapping. Edit mode persists; create mode updates the draft. */
+  onChange: (next: AppMapping) => void;
+  /** Profiles offered in the profile selector. */
+  profiles: Profile[];
   onClose: () => void;
+  /** Edit mode: human-readable current profile name for the header. */
+  profileName?: string;
+  /** Edit mode: delete this rule. */
+  onDelete?: () => void;
+  /** Create mode: commit the draft as a new rule. */
+  onCreate?: () => void;
+  /** Create mode: the active-window capture block (rendered in the body). */
+  captureSlot?: ReactNode;
 }
 
+/**
+ * Unified app-rule card — the single surface for BOTH creating and editing an
+ * app→profile mapping. Create mode adds a capture block and a "Create" button
+ * over a local draft; edit mode autosaves each field. One form, no second screen.
+ */
 export function AppMappingModal({
-  mapping,
-  profileName,
-  activeConfig,
-  updateDraft,
+  mode,
+  value,
+  onChange,
+  profiles,
   onClose,
+  profileName,
+  onDelete,
+  onCreate,
+  captureSlot,
 }: AppMappingModalProps) {
   const { t } = useTranslation();
+  const isCreate = mode === "create";
   const containerRef = useRef<HTMLDivElement>(null);
   const exeInputRef = useRef<HTMLInputElement>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [showProcessPicker, setShowProcessPicker] = useState(false);
 
-  // Auto-focus the first editable field (the exe input) on mount
+  // Auto-focus the first editable field (the exe input) on mount.
   useEffect(() => {
     exeInputRef.current?.focus();
   }, []);
@@ -42,30 +64,41 @@ export function AppMappingModal({
         onClose={onClose}
         className="rule-modal"
         dialogRef={containerRef}
-        ariaLabel={`${mapping.exe}`}
+        ariaLabel={isCreate ? t("newRule.title") : value.exe}
       >
         <CloseButton onClick={onClose} ariaLabel={t("common.close")} />
 
         {/* Header */}
-        <div className="rule-modal__header">
-          <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
-          <div>
-            <span className="rule-modal__title">{mapping.exe}</span>
-            <span className="rule-modal__profile-name">{t("ruleModal.profileLabel", { name: profileName })}</span>
+        {isCreate ? (
+          <div className="rule-modal__header">
+            <span className="rule-modal__title">{t("newRule.title")}</span>
+            <p className="rule-modal__subtitle">{t("newRule.subtitle")}</p>
           </div>
-        </div>
+        ) : (
+          <div className="rule-modal__header">
+            <ExeIcon exe={value.exe} processPath={value.processPath} className="profiles__app-card-monogram" />
+            <div>
+              <span className="rule-modal__title">{value.exe}</span>
+              <span className="rule-modal__profile-name">
+                {t("ruleModal.profileLabel", { name: profileName ?? "" })}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Body */}
         <div className="rule-modal__body">
-          <p className="rule-modal__description">
-            {t("ruleModal.description", { name: profileName })}
-          </p>
+          {!isCreate ? (
+            <p className="rule-modal__description">
+              {t("ruleModal.description", { name: profileName ?? "" })}
+            </p>
+          ) : null}
 
-          {/* Exe input + Browse */}
+          {/* Exe input + Browse + pick-running */}
           <ExeMatchField
             label={t("ruleModal.exeLabel")}
-            exe={mapping.exe}
-            processPath={mapping.processPath}
+            exe={value.exe}
+            processPath={value.processPath}
             showProcessPath
             placeholder="chrome.exe"
             browseTitle={t("newRule.browseTitle")}
@@ -75,32 +108,30 @@ export function AppMappingModal({
             onPickRunning={() => setShowProcessPicker(true)}
             pickRunningLabel={t("ruleModal.pickRunning")}
             pickRunningTooltip={t("ruleModal.pickRunningTooltip")}
+            onEnter={isCreate ? onCreate : undefined}
             onChange={(exe, processPath) =>
-              updateDraft((c) =>
-                upsertAppMapping(c, { ...mapping, exe, processPath: processPath || undefined }),
-              )
+              onChange({ ...value, exe, processPath: processPath || undefined })
             }
           />
+
+          {/* Capture block (create only) */}
+          {isCreate ? captureSlot : null}
 
           {/* Title filters */}
           <div className="field">
             <span className="field__label">{t("ruleModal.titleLabel")}</span>
             <ChipEditor
-              values={mapping.titleIncludes ?? []}
+              values={value.titleIncludes ?? []}
               onChange={(vals) =>
-                updateDraft((c) =>
-                  upsertAppMapping(c, {
-                    ...mapping,
-                    titleIncludes: vals.length > 0 ? vals : undefined,
-                  }),
-                )
+                onChange({
+                  ...value,
+                  titleIncludes: vals.length > 0 ? vals : undefined,
+                })
               }
               placeholder={t("common.optional")}
               ariaLabel={t("ruleModal.titleLabel")}
             />
-            <p className="field__description">
-              {t("ruleModal.titleHelp")}
-            </p>
+            <p className="field__description">{t("ruleModal.titleHelp")}</p>
           </div>
 
           {/* Toggle + Priority row */}
@@ -108,22 +139,15 @@ export function AppMappingModal({
             <label className="rule-modal__inline-field">
               <span className="field__label">{t("common.enabled")}</span>
               <Toggle
-                checked={mapping.enabled}
-                onChange={(checked) =>
-                  updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, enabled: checked }),
-                  )
-                }
+                checked={value.enabled}
+                onChange={(checked) => onChange({ ...value, enabled: checked })}
               />
             </label>
 
             <label className="rule-modal__inline-field">
               <span className="field__label">
                 {t("ruleModal.priorityLabel")}
-                <span
-                  className="field__hint"
-                  title={t("ruleModal.priorityTooltip")}
-                >
+                <span className="field__hint" title={t("ruleModal.priorityTooltip")}>
                   ?
                 </span>
               </span>
@@ -131,75 +155,85 @@ export function AppMappingModal({
                 type="number"
                 min={0}
                 max={9999}
-                value={mapping.priority}
+                value={value.priority}
                 className="profiles__priority-input"
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   const clamped = Number.isFinite(v) ? clampPriority(v) : 0;
-                  updateDraft((c) => upsertAppMapping(c, { ...mapping, priority: clamped }));
+                  onChange({ ...value, priority: clamped });
                 }}
               />
             </label>
           </div>
 
-          {/* Move to another profile */}
+          {/* Profile selector */}
           <div className="field">
             <span className="field__label">{t("debug.profile")}</span>
             <select
-              value={mapping.profileId}
+              value={value.profileId}
               onChange={(e) => {
                 const newProfileId = e.target.value;
-                if (newProfileId !== mapping.profileId) {
-                  updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, profileId: newProfileId }),
-                  );
+                if (newProfileId !== value.profileId) {
+                  onChange({ ...value, profileId: newProfileId });
                 }
               }}
             >
-              {activeConfig.profiles.map((p) => (
+              {profiles.map((p) => (
                 <option key={p.id} value={p.id}>{p.name}</option>
               ))}
             </select>
             <p className="field__description">
-              {t("ruleModal.moveProfileHelp")}
+              {isCreate ? t("ruleModal.profileChooseHelp") : t("ruleModal.moveProfileHelp")}
             </p>
           </div>
         </div>
 
         {/* Footer */}
         <ModalFooter className="rule-modal__footer">
-          <span className="rule-modal__autosave">{t("ruleModal.autosave")}</span>
-          <span className="rule-modal__spacer" />
-
-          {confirmingDelete ? (
-            <div className="rule-modal__delete-confirm">
-              {t("ruleModal.deleteConfirm")}
-              <button
-                type="button"
-                className="action-button action-button--small action-button--ghost profiles__delete-btn"
-                onClick={() => {
-                  updateDraft((c) => deleteAppMapping(c, mapping.id));
-                  onClose();
-                }}
-              >
-                {t("common.yes")}
-              </button>
-              <button
-                type="button"
-                className="action-button action-button--small action-button--ghost"
-                onClick={() => setConfirmingDelete(false)}
-              >
-                {t("common.no")}
-              </button>
-            </div>
-          ) : (
+          {isCreate ? (
             <button
               type="button"
-              className="action-button action-button--ghost profiles__delete-btn"
-              onClick={() => setConfirmingDelete(true)}
+              className="action-button action-button--accent"
+              disabled={!value.exe.trim()}
+              onClick={onCreate}
             >
-              {t("ruleModal.deleteRule")}
+              {t("common.create")}
             </button>
+          ) : (
+            <>
+              <span className="rule-modal__autosave">{t("ruleModal.autosave")}</span>
+              <span className="rule-modal__spacer" />
+              {confirmingDelete ? (
+                <div className="rule-modal__delete-confirm">
+                  {t("ruleModal.deleteConfirm")}
+                  <button
+                    type="button"
+                    className="action-button action-button--small action-button--ghost profiles__delete-btn"
+                    onClick={() => {
+                      onDelete?.();
+                      onClose();
+                    }}
+                  >
+                    {t("common.yes")}
+                  </button>
+                  <button
+                    type="button"
+                    className="action-button action-button--small action-button--ghost"
+                    onClick={() => setConfirmingDelete(false)}
+                  >
+                    {t("common.no")}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="action-button action-button--ghost profiles__delete-btn"
+                  onClick={() => setConfirmingDelete(true)}
+                >
+                  {t("ruleModal.deleteRule")}
+                </button>
+              )}
+            </>
           )}
         </ModalFooter>
       </ModalShell>
@@ -207,13 +241,11 @@ export function AppMappingModal({
         <RunningProcessPicker
           onCancel={() => setShowProcessPicker(false)}
           onPick={(proc) => {
-            updateDraft((c) =>
-              upsertAppMapping(c, {
-                ...mapping,
-                exe: proc.exe.toLowerCase(),
-                processPath: proc.path || undefined,
-              }),
-            );
+            onChange({
+              ...value,
+              exe: proc.exe.toLowerCase(),
+              processPath: proc.path || undefined,
+            });
             setShowProcessPicker(false);
           }}
         />

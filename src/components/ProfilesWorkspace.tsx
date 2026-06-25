@@ -1,11 +1,12 @@
 import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
-import type { AppConfig, ControlId, Layer, Profile } from "../lib/config";
+import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { WindowCaptureResult } from "../lib/runtime";
 import {
   copyBindingFromLayer,
+  createAppMapping,
   createAppMappingFromCapture,
   deleteAppMapping,
   duplicateBinding,
@@ -28,11 +29,10 @@ import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
-import { CloseButton, ModalShell, Notice, Toggle } from "./shared";
-import { PillTrack } from "./PillTrack";
+import { Notice } from "./shared";
 import { ExeIcon } from "./ExeIcon";
-import { ExeMatchField } from "./ExeMatchField";
 import { AppMappingModal } from "./AppMappingModal";
+import { CaptureControls } from "./CaptureControls";
 
 export interface ProfilesWorkspaceProps {
   activeConfig: AppConfig;
@@ -117,11 +117,10 @@ export function ProfilesWorkspace({
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [captureCountdown, setCaptureCountdown] = useState<number | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [newRuleOpen, setNewRuleOpen] = useState(false);
-  const [newRuleExe, setNewRuleExe] = useState("");
-  const [newRuleCapturedTitle, setNewRuleCapturedTitle] = useState("");
-  const [newRuleCapturedProcessPath, setNewRuleCapturedProcessPath] = useState("");
-  const [newRuleTitleEnabled, setNewRuleTitleEnabled] = useState(false);
+  // Working draft for the unified "create rule" card (null = closed). Held
+  // locally and only committed to the config on "Create"; the same
+  // AppMappingModal renders it as a draft and existing rules as autosaved.
+  const [creatingDraft, setCreatingDraft] = useState<AppMapping | null>(null);
   const [captureForNewRule, setCaptureForNewRule] = useState(false);
   const prevCaptureRef = useRef(lastCapture);
   const [ruleCtxMenu, setRuleCtxMenu] = useState<{ x: number; y: number; mappingId: string } | null>(null);
@@ -135,8 +134,7 @@ export function ProfilesWorkspace({
   // so a later remount (mode switch) doesn't reopen it.
   useEffect(() => {
     if (addRuleSignal) {
-      setNewRuleOpen(true);
-      setNewRuleExe("");
+      openCreateRule();
       onAddRuleHandled();
     }
   }, [addRuleSignal]);
@@ -237,10 +235,20 @@ export function ProfilesWorkspace({
       lastCapture !== prevCaptureRef.current &&
       !lastCapture.ignored
     ) {
+      const cap = lastCapture;
       setCaptureForNewRule(false);
-      setNewRuleExe(lastCapture.exe);
-      setNewRuleCapturedTitle(lastCapture.title);
-      setNewRuleCapturedProcessPath(lastCapture.processPath);
+      setCreatingDraft((draft) =>
+        draft
+          ? {
+              ...draft,
+              exe: cap.exe,
+              processPath: cap.processPath || undefined,
+              // Pre-fill the captured window title as an editable chip; the user
+              // can tweak or remove it (empty = match any window of this app).
+              titleIncludes: cap.title ? [cap.title] : draft.titleIncludes,
+            }
+          : draft,
+      );
     }
     prevCaptureRef.current = lastCapture;
   }, [lastCapture, captureForNewRule]);
@@ -283,56 +291,53 @@ export function ProfilesWorkspace({
     await handleCaptureWithCountdown();
   }
 
-  function handleConfirmNewRule() {
-    const exe = newRuleExe.trim().toLowerCase();
-    if (!exe) return;
-    const title = newRuleTitleEnabled ? newRuleCapturedTitle : "";
-    const processPath = newRuleCapturedProcessPath || undefined;
-    setNewRuleOpen(false);
-    setNewRuleExe("");
-    setNewRuleCapturedTitle("");
-    setNewRuleCapturedProcessPath("");
-    setNewRuleTitleEnabled(false);
-    handleCreateRule(exe, title, newRuleTitleEnabled && !!title, processPath);
+  function openCreateRule() {
+    if (!activeProfile) return;
+    setCreatingDraft({
+      id: "",
+      exe: "",
+      processPath: undefined,
+      titleIncludes: undefined,
+      profileId: activeProfile.id,
+      enabled: true,
+      priority: activeProfile.priority,
+    });
   }
 
-  function handleCreateRule(exe: string, title: string, withTitleFilter: boolean, processPath?: string) {
-    if (!activeProfile) return;
-    const duplicate = findDuplicateAppMapping(activeConfig, activeProfile.id, exe);
+  function handleCreateFromDraft() {
+    const draft = creatingDraft;
+    if (!draft) return;
+    const exe = draft.exe.trim().toLowerCase();
+    if (!exe) return;
+    const commit = () => {
+      updateDraft((config) =>
+        createAppMapping(config, {
+          exe,
+          processPath: draft.processPath,
+          profileId: draft.profileId,
+          enabled: draft.enabled,
+          priority: draft.priority,
+          titleIncludes: draft.titleIncludes,
+        }).config,
+      );
+      setCreatingDraft(null);
+    };
+    // Duplicate check against the CHOSEN profile (the user may have changed it
+    // in the card's profile selector before pressing Create).
+    const duplicate = findDuplicateAppMapping(activeConfig, draft.profileId, exe);
     if (duplicate) {
       setConfirmModal({
         title: t("confirm.duplicateRuleTitle"),
         message: t("confirm.duplicateRuleMessage", { exe: duplicate.exe }),
         confirmLabel: t("common.create"),
         onConfirm: () => {
-          doCreateRule(exe, title, withTitleFilter, processPath);
+          commit();
           setConfirmModal(null);
         },
       });
       return;
     }
-    doCreateRule(exe, title, withTitleFilter, processPath);
-  }
-
-  function doCreateRule(exe: string, title: string, withTitleFilter: boolean, processPath?: string) {
-    if (!activeProfile) return;
-    let newId: string | null = null;
-    updateDraft((config) => {
-      const result = createAppMappingFromCapture(
-        config,
-        activeProfile.id,
-        activeProfile.priority,
-        exe,
-        title,
-        withTitleFilter,
-        processPath,
-      );
-      newId = result.newMappingId;
-      return result.config;
-    });
-    if (newId) {
-      startTransition(() => setEditingMappingId(newId));
-    }
+    commit();
   }
 
   return (
@@ -577,7 +582,7 @@ export function ProfilesWorkspace({
           <button
             type="button"
             className="profiles__add-card"
-            onClick={() => { setNewRuleOpen(true); setNewRuleExe(""); }}
+            onClick={openCreateRule}
             title={t("profile.addRuleTooltip")}
           >
             {t("profile.addRule")}
@@ -592,146 +597,41 @@ export function ProfilesWorkspace({
         </div>
       ) : null}
 
-      {/* ── New rule dialog ── */}
-      {newRuleOpen ? (
-        <ModalShell
-          onClose={() => setNewRuleOpen(false)}
-          className="rule-modal rule-modal--compact"
-        >
-            <CloseButton onClick={() => setNewRuleOpen(false)} ariaLabel={t("common.close")} />
-            <div className="rule-modal__header">
-              <span className="rule-modal__title">{t("newRule.title")}</span>
-              <p className="rule-modal__subtitle">
-                {t("newRule.subtitle")}
-              </p>
-            </div>
-            <div className="rule-modal__body">
-              <ExeMatchField
-                label={t("newRule.exe")}
-                exe={newRuleExe}
-                placeholder="chrome.exe, telegram.exe..."
-                browseTitle={t("newRule.browseTitle")}
-                browseFilter={t("newRule.browseFilter")}
-                browseLabel={t("common.browse")}
-                autoFocus
-                onEnter={handleConfirmNewRule}
-                onChange={(exe, processPath) => {
-                  setNewRuleExe(exe);
-                  // Behaviour fix: capture the full path from Browse so the new
-                  // rule stores processPath (typing clears it back to empty).
-                  setNewRuleCapturedProcessPath(processPath ?? "");
-                  setNewRuleCapturedTitle("");
-                }}
-              />
-
-              <div
-                className="new-rule__dropzone"
-                onDragOver={(e) => {
-                  e.preventDefault();
-                  e.dataTransfer.dropEffect = "copy";
-                }}
-                onDragEnter={(e) => {
-                  e.preventDefault();
-                  (e.currentTarget as HTMLElement).classList.add("new-rule__dropzone--active");
-                }}
-                onDragLeave={(e) => {
-                  if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                    (e.currentTarget as HTMLElement).classList.remove("new-rule__dropzone--active");
-                  }
-                }}
-                onDrop={(e) => {
-                  (e.currentTarget as HTMLElement).classList.remove("new-rule__dropzone--active");
-                  e.preventDefault();
-                  const file = e.dataTransfer.files[0];
-                  if (file) {
-                    const name = file.name.replace(/\.lnk$/i, ".exe").toLowerCase();
-                    if (name.endsWith(".exe")) {
-                      setNewRuleExe(name);
-                      setNewRuleCapturedTitle("");
-                    }
-                  }
-                }}
-              >
-                <svg className="new-rule__dropzone-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7 10 12 15 17 10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                <span>{t("newRule.dropzone")}</span>
-              </div>
-
-              <div className="new-rule__divider">{t("newRule.divider")}</div>
-
-              <div className="new-rule__capture">
-                <button
-                  type="button"
-                  className="action-button action-button--accent new-rule__capture-btn"
-                  onClick={() => { void handleCaptureForDialog(); }}
-                  disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
-                >
-                  {captureCountdown !== null ? t("newRule.captureCountdown", { countdown: captureCountdown }) : t("newRule.captureButton")}
-                </button>
-                <div className="new-rule__delay-row">
-                  <span className="new-rule__delay-label">{t("newRule.delayLabel")}</span>
-                  <PillTrack
-                    items={[1000, 2000, 3000, 5000].map((ms) => ({
-                      key: String(ms),
-                      label: `${ms / 1000}${t("common.secondsShort")}`,
-                    }))}
-                    active={String(captureDelayMs)}
-                    onSelect={(k) => setCaptureDelayMs(Number(k))}
-                  />
-                </div>
-                <p className="new-rule__capture-hint">
-                  {t("newRule.captureHelp")}
-                </p>
-              </div>
-
-              {newRuleExe && newRuleCapturedTitle ? (
-                <div className="new-rule__capture-result">
-                  <div className="new-rule__capture-result-row">
-                    <ExeIcon exe={newRuleExe} processPath={newRuleCapturedProcessPath || undefined} className="profiles__app-card-monogram" />
-                    <span className="new-rule__capture-exe">{newRuleExe}</span>
-                  </div>
-                  <label className="new-rule__title-toggle">
-                    <Toggle
-                      checked={newRuleTitleEnabled}
-                      onChange={setNewRuleTitleEnabled}
-                      ariaLabel={t("newRule.titleFilter")}
-                    />
-                    <span>{t("newRule.titleFilter")}</span>
-                  </label>
-                  {newRuleTitleEnabled ? (
-                    <div className="new-rule__title-detail">
-                      <span className="new-rule__title-value">{newRuleCapturedTitle}</span>
-                      <p className="new-rule__title-hint">
-                        {t("newRule.titleFilterHelp")}
-                      </p>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-            <div className="rule-modal__footer">
-              <button
-                type="button"
-                className="action-button action-button--accent"
-                disabled={!newRuleExe.trim()}
-                onClick={handleConfirmNewRule}
-              >
-                {t("common.create")}
-              </button>
-            </div>
-        </ModalShell>
+      {/* ── Create-rule card (unified with the editor) ── */}
+      {creatingDraft ? (
+        <AppMappingModal
+          mode="create"
+          value={creatingDraft}
+          onChange={setCreatingDraft}
+          profiles={activeConfig.profiles}
+          onClose={() => setCreatingDraft(null)}
+          onCreate={handleCreateFromDraft}
+          captureSlot={
+            <CaptureControls
+              countdown={captureCountdown}
+              delayMs={captureDelayMs}
+              onSelectDelay={setCaptureDelayMs}
+              onCapture={() => { void handleCaptureForDialog(); }}
+              onDropExe={(name) =>
+                setCreatingDraft((d) =>
+                  d ? { ...d, exe: name, processPath: undefined, titleIncludes: undefined } : d,
+                )
+              }
+              disabled={viewState === "loading" || viewState === "saving" || captureCountdown !== null}
+            />
+          }
+        />
       ) : null}
 
-      {/* ── Rule editor modal ── */}
+      {/* ── Rule editor card ── */}
       {editingMapping ? (
         <AppMappingModal
-          mapping={editingMapping}
+          mode="edit"
+          value={editingMapping}
+          onChange={(next) => updateDraft((c) => upsertAppMapping(c, next))}
+          profiles={activeConfig.profiles}
           profileName={activeProfile?.name ?? ""}
-          activeConfig={activeConfig}
-          updateDraft={updateDraft}
+          onDelete={() => updateDraft((c) => deleteAppMapping(c, editingMapping.id))}
           onClose={() => setEditingMappingId(null)}
         />
       ) : null}

@@ -2318,6 +2318,37 @@ code {
   font-size: 0.82rem;
   padding: 2px 4px;
 }
+/* Chip label as a click-to-edit button. */
+.chip-editor__chip-edit-btn {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.chip-editor__chip-edit-btn:hover { text-decoration: underline; }
+/* Inline edit field shown in place of a chip label while editing. */
+.chip-editor__chip-edit {
+  background: rgba(0, 0, 0, 0.28);
+  border: none;
+  outline: none;
+  color: var(--c-text-bright);
+  font-size: 0.78rem;
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+
+/* Rule-card <select> reads clearly as a dropdown: explicit chevron + room. */
+.rule-modal__body select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239fca69' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 34px;
+  cursor: pointer;
+}
 
 /* ── Running-process picker modal ── */
 /* ── Presets modal ── */

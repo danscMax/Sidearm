@@ -193,14 +193,34 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
          logical={logical_width} dpi={dpi_scale} physical_w={win_width} h={height}"
     );
 
-    // --- Size → read actual outer size → Position → Show ---
+    // --- Anchor on target monitor → Size → read outer size → Position → Show ---
+    // Order matters on mixed-DPI multi-monitor setups: moving a window across
+    // monitors fires WM_DPICHANGED and Windows rescales it by target_dpi/source_dpi.
+    // If we sized the window while it was still parked on the primary monitor and
+    // only moved it afterwards, that move would silently rescale our physical size —
+    // clipping the text on a lower-DPI monitor, overflowing the screen edge on a
+    // higher-DPI one. So we move onto the cursor's monitor FIRST (letting the DPI
+    // change settle) using a rough anchor, then set the physical size — which now
+    // sticks because no further cross-monitor move follows.
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        let (ax, ay) = crate::platform::display::position_osd_on_monitor(
+            &settings.osd_position,
+            win_width,
+            height,
+            margin,
+        );
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: ax, y: ay }));
+    }
+
     let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize {
         width: win_width as u32,
         height: height as u32,
     }));
 
-    // Read back actual outer size (includes any window frame/border added
-    // by the OS or WebView2).  This is what we need for positioning.
+    // Read back actual outer size (includes any window frame/border added by the
+    // OS or WebView2) now that the window lives in its final DPI context, then
+    // place it precisely at the chosen corner.
     let outer = w
         .outer_size()
         .unwrap_or(tauri::PhysicalSize {
@@ -209,6 +229,8 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
         });
     let ow = outer.width as i32;
     let oh = outer.height as i32;
+
+    log::debug!("[osd] readback outer_w={ow} outer_h={oh} (computed win_w={win_width})");
 
     #[cfg(any(target_os = "windows", target_os = "linux"))]
     {

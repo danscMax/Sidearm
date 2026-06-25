@@ -146,6 +146,14 @@ export function useAppPersistence(
       onAutoSavedRef.current?.();
     } catch (unknownError) {
       const normalized = normalizeCommandError(unknownError);
+      // Another Sidearm instance wrote config.json after we loaded it (e.g. the
+      // elevated autostart instance vs a manual launch). Don't surface an error
+      // or roll back — reload the newer config from disk so we adopt its edits
+      // instead of clobbering them. Prevents the concurrent-instance data loss.
+      if (normalized.code === "config_changed_on_disk") {
+        await refreshConfig();
+        return;
+      }
       const rollbackTarget = lastPersistedConfigRef.current;
       startTransition(() => {
         setError(normalized);

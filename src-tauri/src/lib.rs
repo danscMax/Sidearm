@@ -33,6 +33,12 @@ use std::{
 /// Initial value `false` (window closes) until config is loaded.
 type MinimizeToTray = Arc<AtomicBool>;
 
+/// Fingerprint of the `config.json` this process last loaded or saved. Read by
+/// `save_config` to detect a concurrent overwrite by ANOTHER Sidearm instance
+/// (e.g. the elevated autostart instance vs a manual launch) and refuse to
+/// clobber its edits. `None` until the first load. See `config::config_file_stamp`.
+type ConfigStamp = Arc<Mutex<Option<u64>>>;
+
 pub use capture_backend::capture_helper_main;
 use capture_backend::RuntimeController;
 use command_error::CommandError;
@@ -499,6 +505,16 @@ async fn export_verification_session(
     })?
 }
 
+/// Record this process's view of the on-disk config fingerprint so a later
+/// `save_config` can detect a concurrent overwrite by another instance.
+/// Best-effort: re-resolves the config dir and stores `None` if unreadable.
+fn record_config_stamp(app: &AppHandle) {
+    if let Ok(dir) = resolve_config_dir(app) {
+        let stamp = config::config_file_stamp(&dir);
+        *app.state::<ConfigStamp>().inner().lock().recover_poison() = stamp;
+    }
+}
+
 #[tauri::command]
 async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
@@ -511,6 +527,9 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
     // Sync the cached minimize_to_tray flag for the close handler
     app.state::<MinimizeToTray>()
         .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
+    // Remember what we just loaded so save_config can guard against clobbering
+    // a newer config written by a concurrent instance.
+    record_config_stamp(&app);
 
     Ok(response)
 }
@@ -530,15 +549,22 @@ async fn save_config(
     config: AppConfig,
 ) -> Result<SaveConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
-    let result =
-        tauri::async_runtime::spawn_blocking(move || save_config_to_store(&config_dir, config))
-            .await
-            .map_err(|error| CommandError::internal(format!("save_config task failed: {error}")))?
-            .map_err(CommandError::from)?;
+    // What this process believes is currently on disk. If another instance has
+    // written config.json since, the guarded save below returns
+    // `config_changed_on_disk` instead of clobbering those edits.
+    let expected_stamp = *app.state::<ConfigStamp>().inner().lock().recover_poison();
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        save_config_to_store(&config_dir, config, expected_stamp)
+    })
+    .await
+    .map_err(|error| CommandError::internal(format!("save_config task failed: {error}")))?
+    .map_err(CommandError::from)?;
 
     // Sync the cached minimize_to_tray flag for the close handler
     app.state::<MinimizeToTray>()
         .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
+    // We just wrote the file — adopt its new fingerprint as our baseline.
+    record_config_stamp(&app);
 
     let is_running = {
         let store = runtime_store
@@ -675,7 +701,7 @@ async fn restore_config_from_backup(
         move || -> Result<LoadConfigResponse, CommandError> {
             let config =
                 read_and_migrate_config_file(&backup_pb).map_err(CommandError::from)?;
-            save_config_to_store(&config_dir_for_task, config).map_err(CommandError::from)?;
+            save_config_to_store(&config_dir_for_task, config, None).map_err(CommandError::from)?;
             load_or_initialize_config(&config_dir_for_task).map_err(CommandError::from)
         },
     )
@@ -684,6 +710,9 @@ async fn restore_config_from_backup(
 
     app.state::<MinimizeToTray>()
         .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
+    // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
+    // the next save_config does not falsely report a concurrent change.
+    record_config_stamp(&app);
 
     Ok(response)
 }
@@ -810,7 +839,7 @@ async fn import_full_config_apply(
                     merge_configs_by_id(base, imported)
                 }
             };
-            save_config_to_store(&config_dir_for_task, final_config).map_err(CommandError::from)
+            save_config_to_store(&config_dir_for_task, final_config, None).map_err(CommandError::from)
         },
     )
     .await
@@ -818,6 +847,9 @@ async fn import_full_config_apply(
 
     app.state::<MinimizeToTray>()
         .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
+    // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
+    // the next save_config does not falsely report a concurrent change.
+    record_config_stamp(&app);
 
     Ok(result)
 }
@@ -915,6 +947,9 @@ async fn accept_portable_migration(
 
     app.state::<MinimizeToTray>()
         .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
+    // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
+    // the next save_config does not falsely report a concurrent change.
+    record_config_stamp(&app);
 
     Ok(response)
 }
@@ -2510,6 +2545,7 @@ pub fn run() {
         })
         .manage(app_paths_for_setup)
         .manage(Arc::new(AtomicBool::new(false)) as MinimizeToTray)
+        .manage(Arc::new(Mutex::new(None)) as ConfigStamp)
         .manage(runtime_store.clone())
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .manage(Arc::new(Mutex::new(MacroRecorder::new())))

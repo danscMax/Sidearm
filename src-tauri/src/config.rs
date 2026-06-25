@@ -4,6 +4,7 @@ use serde_json::Value;
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    hash::{Hash, Hasher},
     io::Write,
     path::{Path, PathBuf},
     sync::OnceLock,
@@ -40,6 +41,12 @@ pub enum ConfigStoreError {
     Serialize(String),
     #[error("Config validation failed.")]
     InvalidConfig { errors: Vec<String> },
+    // Another Sidearm instance changed config.json since this process loaded it.
+    // Returned by `save_config` to prevent a stale instance from blindly
+    // overwriting (clobbering) the other instance's edits — the caller reloads
+    // from disk instead. See the concurrent-instance clobber bug.
+    #[error("Config was modified by another instance.")]
+    ConcurrentModification,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -931,15 +938,48 @@ pub fn load_or_initialize_config(
     })
 }
 
+/// A cheap content fingerprint of the on-disk `config.json`, used to detect
+/// concurrent modification by another Sidearm instance before a blind
+/// overwrite. Returns `None` when the file is absent or unreadable (treated as
+/// "no conflict": the writer simply creates it).
+// ponytail: DefaultHasher (non-crypto) is enough for change-detection — a hash
+// collision merely misses one guard (degrades to the old overwrite behavior),
+// it can never corrupt. Swap for an on-disk version field only if collisions
+// ever actually matter.
+pub fn config_file_stamp(config_dir: &Path) -> Option<u64> {
+    let bytes = fs::read(config_dir.join(CONFIG_FILE_NAME)).ok()?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    bytes.hash(&mut hasher);
+    Some(hasher.finish())
+}
+
+/// Persist `config` to `config_dir`. When `expected_stamp` is `Some`, the save
+/// is guarded against concurrent modification: if the on-disk file's current
+/// fingerprint differs from `expected_stamp`, another instance wrote it since
+/// the caller loaded it, so we return [`ConfigStoreError::ConcurrentModification`]
+/// instead of clobbering those edits. Pass `None` to force an unconditional
+/// overwrite (explicit restore/import/migration).
 pub fn save_config(
     config_dir: &Path,
     config: AppConfig,
+    expected_stamp: Option<u64>,
 ) -> Result<SaveConfigResponse, ConfigStoreError> {
     fs::create_dir_all(config_dir).map_err(|error| io_error(Some(config_dir), error))?;
     let schema_value = serde_json::to_value(&config)
         .map_err(|error| ConfigStoreError::Serialize(error.to_string()))?;
     validate_config_schema_value(&schema_value)?;
     let warnings = validate_config(&config)?;
+
+    // Concurrency guard: refuse to overwrite if another instance changed the
+    // file since the caller loaded it. Checked as late as possible (right
+    // before the write) to keep the race window minimal; `None` opts out.
+    if let Some(expected) = expected_stamp
+        && let Some(current) = config_file_stamp(config_dir)
+        && current != expected
+    {
+        return Err(ConfigStoreError::ConcurrentModification);
+    }
+
     let backup_path = write_config_to_path(config_dir, &config)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
@@ -3105,7 +3145,8 @@ mod tests {
         let temp_dir = tempdir().expect("temp dir");
         let first = load_or_initialize_config(temp_dir.path()).expect("seed load");
 
-        let response = save_config(temp_dir.path(), first.config).expect("save should succeed");
+        let response =
+            save_config(temp_dir.path(), first.config, None).expect("save should succeed");
 
         let bak1 = temp_dir.path().join("config.bak.1");
         assert_eq!(response.backup_path, Some(path_string(&bak1)));
@@ -3130,7 +3171,7 @@ mod tests {
     fn daily_snapshot_written_on_save() {
         let temp_dir = tempdir().expect("temp dir");
         let first = load_or_initialize_config(temp_dir.path()).expect("seed");
-        save_config(temp_dir.path(), first.config).expect("save");
+        save_config(temp_dir.path(), first.config, None).expect("save");
 
         let snapshots_dir = temp_dir.path().join("snapshots");
         assert!(snapshots_dir.is_dir());
@@ -3148,7 +3189,7 @@ mod tests {
         let mut config = default_seed_config();
         config.bindings[0].label = String::new();
 
-        let result = save_config(temp_dir.path(), config);
+        let result = save_config(temp_dir.path(), config, None);
 
         match result {
             Err(ConfigStoreError::SchemaViolation { errors }) => {
@@ -3170,7 +3211,7 @@ mod tests {
         let duplicate_key = config.encoder_mappings[0].encoded_key.clone();
         config.encoder_mappings[1].encoded_key = duplicate_key;
 
-        let result = save_config(temp_dir.path(), config);
+        let result = save_config(temp_dir.path(), config, None);
 
         match result {
             Err(ConfigStoreError::InvalidConfig { errors }) => {
@@ -3192,7 +3233,7 @@ mod tests {
         config.encoder_mappings[0].encoded_key = "Ctrl+Alt+Shift+F13".into();
         config.encoder_mappings[12].encoded_key = " ctrl + alt + shift + f13 ".into();
 
-        let result = save_config(temp_dir.path(), config);
+        let result = save_config(temp_dir.path(), config, None);
 
         match result {
             Err(ConfigStoreError::InvalidConfig { errors }) => {
@@ -3208,12 +3249,45 @@ mod tests {
     }
 
     #[test]
+    fn save_with_stale_stamp_rejects_concurrent_overwrite() {
+        let temp_dir = tempdir().expect("temp dir");
+        let first = load_or_initialize_config(temp_dir.path()).expect("seed");
+        // Baseline fingerprint after the seed write.
+        let stamp = config_file_stamp(temp_dir.path()).expect("stamp exists");
+
+        // Simulate ANOTHER instance writing the file (changes the on-disk bytes).
+        let mut other = first.config.clone();
+        other.settings.theme = "synapse-dark".into();
+        save_config(temp_dir.path(), other, None).expect("other instance save");
+
+        // Our save still carries the OLD stamp → must be refused, not clobber.
+        let result = save_config(temp_dir.path(), first.config.clone(), Some(stamp));
+        assert!(
+            matches!(result, Err(ConfigStoreError::ConcurrentModification)),
+            "stale-stamp save must be rejected, got {result:?}"
+        );
+
+        // The other instance's change survived (no clobber).
+        let loaded = load_or_initialize_config(temp_dir.path()).expect("reload");
+        assert_eq!(loaded.config.settings.theme, "synapse-dark");
+    }
+
+    #[test]
+    fn save_with_matching_stamp_succeeds() {
+        let temp_dir = tempdir().expect("temp dir");
+        let first = load_or_initialize_config(temp_dir.path()).expect("seed");
+        let stamp = config_file_stamp(temp_dir.path()).expect("stamp exists");
+        // Matching stamp → no concurrent change → save proceeds.
+        save_config(temp_dir.path(), first.config, Some(stamp)).expect("save should succeed");
+    }
+
+    #[test]
     fn save_and_load_preserves_trigger_mode() {
         let temp_dir = tempdir().expect("temp dir");
         let mut config = default_seed_config();
         config.bindings[0].trigger_mode = Some(TriggerMode::Hold);
 
-        save_config(temp_dir.path(), config.clone()).expect("save should succeed");
+        save_config(temp_dir.path(), config.clone(), None).expect("save should succeed");
 
         let loaded = load_or_initialize_config(temp_dir.path()).expect("load should succeed");
         assert_eq!(loaded.config.bindings[0].trigger_mode, Some(TriggerMode::Hold));

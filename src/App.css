@@ -4821,6 +4821,7 @@ input[type="number"] { -moz-appearance: textfield; }
 
 .osd-preview-area {
   display: flex;
+  flex-direction: column;
   width: 100%;
   height: 88px;
   background: var(--c-surface-alt);
@@ -4844,6 +4845,10 @@ input[type="number"] { -moz-appearance: textfield; }
   white-space: nowrap;
   font-size: var(--osd-preview-fs, 12px);
   opacity: 0;
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-popover);
 }
 
 .osd-preview-toast__label {

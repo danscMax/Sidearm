@@ -256,34 +256,6 @@ export function ProfileSettings({
                     {!profile.enabled ? ` · ${t("settings.disabledMeta")}` : ""}
                   </span>
                 </button>
-                <div className="settings-profile-card__actions">
-                  <button
-                    type="button"
-                    className="settings-icon-btn"
-                    onClick={(e) => { e.stopPropagation(); handleDuplicate(profile.id); }}
-                    title={t("inspector.copyLabel")}
-                  >
-                    <CopyIcon size={12} />
-                  </button>
-                  <button
-                    type="button"
-                    className="settings-icon-btn"
-                    onClick={(e) => { e.stopPropagation(); void handleExport(profile); }}
-                    title={t("common.export")}
-                  >
-                    <ExportIcon size={12} />
-                  </button>
-                  {sortedProfiles.length > 1 ? (
-                    <button
-                      type="button"
-                      className="settings-icon-btn settings-icon-btn--danger"
-                      onClick={(e) => { e.stopPropagation(); handleDelete(profile); }}
-                      title={t("common.delete")}
-                    >
-                      <TrashIcon size={12} />
-                    </button>
-                  ) : null}
-                </div>
               </div>
             );
           })}

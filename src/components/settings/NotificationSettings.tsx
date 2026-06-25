@@ -68,8 +68,7 @@ export function NotificationSettings({
         >
           <div
             key={previewKey}
-            className={`toast toast--info osd-preview-toast ${previewAnimClass}`}
-            role="status"
+            className={`osd-preview-toast ${previewAnimClass}`}
             ref={(el) => {
               if (el) el.style.setProperty("--osd-preview-fs", `${previewFontPx}px`);
             }}

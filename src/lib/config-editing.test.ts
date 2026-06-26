@@ -26,6 +26,7 @@ import {
   upsertSnippetLibraryItem,
   removeSnippetLibraryItem,
   snippetReferencingActions,
+  dedupeSnippetLibrary,
   mergeSnippetLibrary,
   upsertEncoderMapping,
   coerceActionType,
@@ -459,6 +460,48 @@ describe("reorderAppMappingPriority", () => {
     const before = config.appMappings.map((m) => ({ ...m }));
     reorderAppMappingPriority(config, "c", "a");
     expect(config.appMappings).toEqual(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// dedupeSnippetLibrary
+// ---------------------------------------------------------------------------
+
+describe("dedupeSnippetLibrary", () => {
+  it("merges snippets identical in name+text+pasteMode and re-points libraryRef actions", () => {
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [
+        makeSnippetLibraryItem({ id: "s1", name: "Greet", text: "hi", pasteMode: "sendText" }),
+        makeSnippetLibraryItem({ id: "s2", name: "Greet", text: "hi", pasteMode: "sendText" }),
+        makeSnippetLibraryItem({ id: "s3", name: "Bye", text: "bye", pasteMode: "sendText" }),
+      ],
+      actions: [
+        { id: "a1", type: "textSnippet" as const, payload: { source: "libraryRef" as const, snippetId: "s2" }, displayName: "Btn" },
+      ],
+    };
+
+    const { config: result, removed } = dedupeSnippetLibrary(config);
+
+    expect(removed).toBe(1);
+    expect(result.snippetLibrary.map((s) => s.id)).toEqual(["s1", "s3"]);
+    const a1 = result.actions.find((a) => a.id === "a1")!;
+    expect(a1.type === "textSnippet" && a1.payload.source === "libraryRef" && a1.payload.snippetId).toBe("s1");
+  });
+
+  it("is a no-op when there are no duplicates", () => {
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [
+        makeSnippetLibraryItem({ id: "s1", name: "A", text: "a", pasteMode: "sendText" }),
+        makeSnippetLibraryItem({ id: "s2", name: "A", text: "different", pasteMode: "sendText" }),
+      ],
+    };
+
+    const { config: result, removed } = dedupeSnippetLibrary(config);
+
+    expect(removed).toBe(0);
+    expect(result).toBe(config);
   });
 });
 
@@ -1251,6 +1294,39 @@ describe("deleteProfile", () => {
     expect(result.settings.lastSelectedProfileId).toBeUndefined();
     const sw = result.actions.find((a) => a.id === "sw")!;
     expect(sw.type === "profileSwitch" && sw.payload.targetProfileId).toBe("work");
+  });
+
+  it("picks the highest-priority enabled profile as the new fallback when 2+ remain", () => {
+    const main = makeProfile({ id: "main", name: "Main", priority: 5, enabled: true });
+    const game = makeProfile({ id: "game", name: "Game", priority: 10, enabled: true });
+    const work = makeProfile({ id: "work", name: "Work", priority: 50, enabled: true });
+    const base = createMinimalConfig();
+    const config = {
+      ...base,
+      settings: { ...base.settings, fallbackProfileId: "main" },
+      profiles: [main, game, work],
+    };
+
+    const result = deleteProfile(config, "main");
+
+    // "work" (priority 50) beats "game" (priority 10) — primacy = highest priority.
+    expect(result.settings.fallbackProfileId).toBe("work");
+  });
+
+  it("prefers an enabled profile over a higher-priority disabled one for the fallback", () => {
+    const main = makeProfile({ id: "main", name: "Main", priority: 5, enabled: true });
+    const off = makeProfile({ id: "off", name: "Off", priority: 99, enabled: false });
+    const work = makeProfile({ id: "work", name: "Work", priority: 10, enabled: true });
+    const base = createMinimalConfig();
+    const config = {
+      ...base,
+      settings: { ...base.settings, fallbackProfileId: "main" },
+      profiles: [main, off, work],
+    };
+
+    const result = deleteProfile(config, "main");
+
+    expect(result.settings.fallbackProfileId).toBe("work");
   });
 
   it("preserves actions that are referenced by other profiles", () => {

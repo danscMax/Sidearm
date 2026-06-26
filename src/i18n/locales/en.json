@@ -66,7 +66,7 @@
     "profiles": {
       "label": "Assignments",
       "heading": "Assignments",
-      "body": "Profiles, buttons, and application rules.",
+      "body": "Buttons and rules of the selected profile.",
       "meta": "Button assignments"
     },
     "debug": {
@@ -78,7 +78,7 @@
     "settings": {
       "label": "Settings",
       "heading": "Settings",
-      "body": "Profiles, priorities, and general app settings.",
+      "body": "Profile properties: name, priority, default profile.",
       "meta": "Profile settings"
     }
   },
@@ -190,7 +190,7 @@
       "sequence": "Macro",
       "launch": "Launch",
       "mediaKey": "Media",
-      "profileSwitch": "Profile",
+      "profileSwitch": "Switch profile",
       "menu": "Menu",
       "disabled": "Disabled",
       "repairClipboard": "Repair clipboard"
@@ -456,7 +456,7 @@
     "profileTitle": "Profile: {{name}}",
     "nameLabel": "Name",
     "priorityLabel": "Priority",
-    "priorityTooltip": "Higher number = higher priority. When multiple rules match, the profile with the highest priority wins.",
+    "priorityTooltip": "Default priority for this profile's new rules and its order in the list. A profile is not activated by priority — it's switched on by app rules, the switch-profile button, or its «default» status.",
     "enabledLabel": "Enabled",
     "descriptionLabel": "Description",
     "descriptionPlaceholder": "Optional description",
@@ -466,6 +466,9 @@
     "allProfilesHeader": "ALL PROFILES",
     "priorityMeta": "Priority: {{priority}}",
     "disabledMeta": "Disabled",
+    "defaultBadge": "default",
+    "makeDefault": "Set as default profile",
+    "defaultReassigned": "“{{name}}” is now the default profile.",
     "createProfile": "+ New profile",
     "importProfileButton": "Import profile",
     "presetsButton": "Presets…",
@@ -535,7 +538,7 @@
     "sectionEnableLabel": "Enable",
     "tabApp": "Application",
     "tabNotifications": "Notifications",
-    "tabProfiles": "Profiles",
+    "tabProfiles": "Manage profiles",
     "tabSnippets": "Library",
     "tabBackup": "Backups",
     "tabAdvanced": "Advanced"
@@ -820,6 +823,11 @@
     "copyName": "{{name}} (copy)",
     "addButton": "Add snippet",
     "importButton": "Import",
+    "dedupeButton": "Remove duplicates",
+    "dedupeNone": "No exact duplicates found.",
+    "dedupeDone_one": "Removed {{count}} duplicate.",
+    "dedupeDone_other": "Removed {{count}} duplicates.",
+    "selectHint": "Select a snippet on the left to edit it.",
     "exportDialogTitle": "Export snippet library",
     "exportFileName": "snippet-library",
     "importDialogTitle": "Import snippet library",

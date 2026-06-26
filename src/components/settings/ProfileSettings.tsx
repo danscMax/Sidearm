@@ -48,6 +48,11 @@ export function ProfileSettings({
   const sortedProfiles = [...activeConfig.profiles].sort(
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
   );
+  const defaultProfileId = activeConfig.settings.fallbackProfileId;
+
+  function handleSetDefault(id: string) {
+    updateDraft((c) => ({ ...c, settings: { ...c.settings, fallbackProfileId: id } }));
+  }
 
   function handleCreateProfile() {
     const nextConfig = createProfile(activeConfig, t("settings.newProfile"));
@@ -71,13 +76,23 @@ export function ProfileSettings({
   }
 
   function handleDelete(profile: Profile) {
+    const wasDefault = profile.id === defaultProfileId;
     setConfirmModal({
       title: t("settings.deleteConfirmTitle"),
       message: t("settings.deleteConfirmMessage", { name: profile.name }),
       confirmLabel: t("common.delete"),
       danger: true,
       onConfirm: () => {
-        updateDraft((c) => deleteProfile(c, profile.id));
+        updateDraft((c) => {
+          const next = deleteProfile(c, profile.id);
+          // Deleting the default profile reassigns it — name the new default so
+          // the change isn't silent (the old auto-pick surprised users).
+          if (wasDefault) {
+            const newDefault = next.profiles.find((p) => p.id === next.settings.fallbackProfileId);
+            if (newDefault) showToast(t("settings.defaultReassigned", { name: newDefault.name }), "info");
+          }
+          return next;
+        });
         setSelectedProfileId(null);
         setConfirmModal(null);
       },
@@ -241,6 +256,7 @@ export function ProfileSettings({
         <div className="settings-profile-list">
           {sortedProfiles.map((profile) => {
             const isActive = profile.id === effectiveProfileId;
+            const isDefault = profile.id === defaultProfileId;
             return (
               <div
                 key={profile.id}
@@ -257,8 +273,22 @@ export function ProfileSettings({
                   <span className="settings-profile-card__name">{profile.name}</span>
                   <span className="settings-profile-card__meta">
                     {t("settings.priorityMeta", { priority: profile.priority })}
+                    {isDefault ? ` · ${t("settings.defaultBadge")}` : ""}
                     {!profile.enabled ? ` · ${t("settings.disabledMeta")}` : ""}
                   </span>
+                </button>
+                {/* Default-profile star: the catch-all used when no app rule
+                    matches (writes settings.fallbackProfileId). */}
+                <button
+                  type="button"
+                  className={`profile-default-star${isDefault ? " profile-default-star--on" : ""}`}
+                  aria-pressed={isDefault}
+                  disabled={isDefault || !profile.enabled}
+                  title={isDefault ? t("settings.defaultBadge") : t("settings.makeDefault")}
+                  aria-label={isDefault ? t("settings.defaultBadge") : t("settings.makeDefault")}
+                  onClick={() => handleSetDefault(profile.id)}
+                >
+                  {isDefault ? "★" : "☆"}
                 </button>
               </div>
             );

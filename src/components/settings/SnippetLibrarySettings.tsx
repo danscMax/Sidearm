@@ -7,6 +7,7 @@ import {
   removeSnippetLibraryItem,
   snippetReferencingActions,
   mergeSnippetLibrary,
+  dedupeSnippetLibrary,
   makeSnippetId,
   nextUniqueId,
 } from "../../lib/config-editing";
@@ -56,11 +57,27 @@ export function SnippetLibrarySettings({
       );
   }, [library, query]);
 
-  // Move focus into the editor when a snippet is selected/added — the editor
-  // renders above the list, so without this focus stays at the click point.
+  // Focus the editor's name field when a snippet is selected — but with
+  // preventScroll so the master-detail list never jumps (the editor is its own
+  // sticky pane; scrolling it into view would yank the page on every click).
   useEffect(() => {
-    if (selectedId) nameInputRef.current?.focus();
+    if (selectedId) nameInputRef.current?.focus({ preventScroll: true });
   }, [selectedId]);
+
+  function handleDedupe() {
+    let removed = 0;
+    updateDraft((c) => {
+      const result = dedupeSnippetLibrary(c);
+      removed = result.removed;
+      return result.config;
+    });
+    showToast(
+      removed > 0
+        ? t("snippetLibrary.dedupeDone", { count: removed })
+        : t("snippetLibrary.dedupeNone"),
+      removed > 0 ? "success" : "info",
+    );
+  }
 
   function patch(id: string, fields: Partial<SnippetLibraryItem>, coalesceKey?: string) {
     updateDraft(
@@ -160,9 +177,96 @@ export function SnippetLibrarySettings({
   }
 
   return (
-    <>
-      {selected ? (
-        <section className="settings-section">
+    <div className="snippet-library">
+      {/* LEFT: roster (own scroll) + actions. Selecting a row only changes the
+          right pane, so the list never jumps. */}
+      <div className="snippet-library__list-pane">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("snippet.eyebrow")}</span>
+          <span className="settings-section__count">{library.length}</span>
+        </div>
+
+        {library.length === 0 ? (
+          <p className="panel__muted">{t("snippetLibrary.emptyList")}</p>
+        ) : (
+          <>
+            {library.length > 1 ? (
+              <input
+                className="action-picker__search"
+                type="search"
+                placeholder={t("snippetLibrary.searchPlaceholder")}
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                autoComplete="off"
+              />
+            ) : null}
+            <div className="settings-profile-list snippet-library__list">
+              {visible.map((snippet) => {
+                const refs = snippetReferencingActions(activeConfig, snippet.id).length;
+                const preview = snippet.text.replace(/\s+/g, " ").trim().slice(0, 48);
+                return (
+                  <div
+                    key={snippet.id}
+                    className={`settings-profile-card${snippet.id === selectedId ? " settings-profile-card--active" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="settings-profile-card__info"
+                      aria-pressed={snippet.id === selectedId}
+                      onClick={() => setSelectedId(snippet.id)}
+                    >
+                      <span className="settings-profile-card__name">{snippet.name}</span>
+                      <span className="settings-profile-card__meta">
+                        {preview || t("snippetLibrary.emptyPreview")}
+                      </span>
+                      <span className="settings-profile-card__meta">
+                        {t("snippet.usageCount", { count: refs })}
+                      </span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        <div className="settings-actions mt-12">
+          <button type="button" className="action-button" onClick={handleAdd}>
+            {t("snippetLibrary.addButton")}
+          </button>
+          {library.length > 1 ? (
+            <button
+              type="button"
+              className="action-button action-button--secondary"
+              onClick={handleDedupe}
+            >
+              {t("snippetLibrary.dedupeButton")}
+            </button>
+          ) : null}
+          {library.length > 0 ? (
+            <button
+              type="button"
+              className="action-button action-button--secondary"
+              onClick={() => { void handleExport(); }}
+            >
+              <ExportIcon />
+              {t("common.export")}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={() => { void handleImport(); }}
+          >
+            <ImportIcon />
+            {t("snippetLibrary.importButton")}
+          </button>
+        </div>
+      </div>
+
+      {/* RIGHT: sticky editor for the selected snippet (or an empty hint). */}
+      <div className="snippet-library__editor-pane">
+        {selected ? (
           <div className="settings-editor">
             <div className="settings-editor__title">{selected.name}</div>
 
@@ -230,83 +334,12 @@ export function SnippetLibrarySettings({
               </button>
             </div>
           </div>
-        </section>
-      ) : null}
-
-      <section className="settings-section">
-        <div className="settings-section__header">
-          <span className="settings-section__title">{t("snippet.eyebrow")}</span>
-          <span className="settings-section__count">{library.length}</span>
-        </div>
-
-        {library.length === 0 ? (
-          <p className="panel__muted">{t("snippetLibrary.emptyList")}</p>
         ) : (
-          <>
-            {library.length > 1 ? (
-              <input
-                className="action-picker__search"
-                type="search"
-                placeholder={t("snippetLibrary.searchPlaceholder")}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                autoComplete="off"
-              />
-            ) : null}
-            <div className="settings-profile-list">
-              {visible.map((snippet) => {
-                const refs = snippetReferencingActions(activeConfig, snippet.id).length;
-                const preview = snippet.text.replace(/\s+/g, " ").trim().slice(0, 48);
-                return (
-                  <div
-                    key={snippet.id}
-                    className={`settings-profile-card${snippet.id === selectedId ? " settings-profile-card--active" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className="settings-profile-card__info"
-                      aria-pressed={snippet.id === selectedId}
-                      onClick={() => setSelectedId(snippet.id)}
-                    >
-                      <span className="settings-profile-card__name">{snippet.name}</span>
-                      <span className="settings-profile-card__meta">
-                        {preview || t("snippetLibrary.emptyPreview")}
-                      </span>
-                      <span className="settings-profile-card__meta">
-                        {t("snippet.usageCount", { count: refs })}
-                      </span>
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </>
+          <p className="panel__muted snippet-library__empty-hint">
+            {t("snippetLibrary.selectHint")}
+          </p>
         )}
-
-        <div className="settings-actions mt-12">
-          <button type="button" className="action-button" onClick={handleAdd}>
-            {t("snippetLibrary.addButton")}
-          </button>
-          {library.length > 0 ? (
-            <button
-              type="button"
-              className="action-button action-button--secondary"
-              onClick={() => { void handleExport(); }}
-            >
-              <ExportIcon />
-              {t("common.export")}
-            </button>
-          ) : null}
-          <button
-            type="button"
-            className="action-button action-button--secondary"
-            onClick={() => { void handleImport(); }}
-          >
-            <ImportIcon />
-            {t("snippetLibrary.importButton")}
-          </button>
-        </div>
-      </section>
-    </>
+      </div>
+    </div>
   );
 }

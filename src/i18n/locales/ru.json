@@ -70,7 +70,7 @@
     "profiles": {
       "label": "Назначения",
       "heading": "Назначения",
-      "body": "Профили, кнопки и правила для приложений.",
+      "body": "Кнопки и правила выбранного профиля.",
       "meta": "Назначения кнопок"
     },
     "debug": {
@@ -82,7 +82,7 @@
     "settings": {
       "label": "Настройки",
       "heading": "Настройки",
-      "body": "Профили, приоритеты и общие параметры приложения.",
+      "body": "Свойства профилей: имя, приоритет, профиль по умолчанию.",
       "meta": "Настройки профилей"
     }
   },
@@ -194,7 +194,7 @@
       "sequence": "Макрос",
       "launch": "Запуск",
       "mediaKey": "Медиа",
-      "profileSwitch": "Профиль",
+      "profileSwitch": "Переключить профиль",
       "menu": "Меню",
       "disabled": "Отключено",
       "repairClipboard": "Починить буфер"
@@ -460,7 +460,7 @@
     "profileTitle": "Профиль: {{name}}",
     "nameLabel": "Имя",
     "priorityLabel": "Приоритет",
-    "priorityTooltip": "Чем выше число, тем выше приоритет. При совпадении нескольких правил побеждает профиль с наибольшим приоритетом.",
+    "priorityTooltip": "Приоритет по умолчанию для новых правил этого профиля и порядок в списке. Сам профиль не активируется приоритетом — его включают правила приложений, кнопка переключения или статус «по умолчанию».",
     "enabledLabel": "Включён",
     "descriptionLabel": "Описание",
     "descriptionPlaceholder": "Необязательное описание",
@@ -470,6 +470,9 @@
     "allProfilesHeader": "ВСЕ ПРОФИЛИ",
     "priorityMeta": "Приоритет: {{priority}}",
     "disabledMeta": "Отключён",
+    "defaultBadge": "по умолчанию",
+    "makeDefault": "Сделать профилем по умолчанию",
+    "defaultReassigned": "Профилем по умолчанию стал «{{name}}».",
     "createProfile": "+ Новый профиль",
     "importProfileButton": "Импорт профиля",
     "presetsButton": "Пресеты…",
@@ -539,7 +542,7 @@
     "sectionEnableLabel": "Включить",
     "tabApp": "Приложение",
     "tabNotifications": "Уведомления",
-    "tabProfiles": "Профили",
+    "tabProfiles": "Управление профилями",
     "tabSnippets": "Библиотека",
     "tabBackup": "Резервные копии",
     "tabAdvanced": "Продвинутое"
@@ -827,6 +830,13 @@
     "copyName": "{{name}} (копия)",
     "addButton": "Добавить фрагмент",
     "importButton": "Импорт",
+    "dedupeButton": "Убрать дубли",
+    "dedupeNone": "Точных дублей не найдено.",
+    "dedupeDone_one": "Удалён {{count}} дубль.",
+    "dedupeDone_few": "Удалено {{count}} дубля.",
+    "dedupeDone_many": "Удалено {{count}} дублей.",
+    "dedupeDone_other": "Удалено {{count}} дублей.",
+    "selectHint": "Выберите фрагмент слева, чтобы отредактировать.",
     "exportDialogTitle": "Экспорт библиотеки фрагментов",
     "exportFileName": "snippet-library",
     "importDialogTitle": "Импорт библиотеки фрагментов",

@@ -337,6 +337,36 @@ export function isValidSnippetLibraryExport(raw: unknown): raw is SnippetLibrary
   return Array.isArray((raw as Record<string, unknown>).snippets);
 }
 
+/** Remove EXACT duplicate snippets (same name + text + paste mode), keeping the
+ *  first occurrence, and re-point any libraryRef actions from a removed
+ *  duplicate to the kept snippet. Returns the new config + how many were merged. */
+export function dedupeSnippetLibrary(config: AppConfig): { config: AppConfig; removed: number } {
+  const seen = new Map<string, string>(); // content key -> kept snippet id
+  const remap = new Map<string, string>(); // removed id -> kept id
+  const kept: SnippetLibraryItem[] = [];
+  for (const snippet of config.snippetLibrary) {
+    const key = `${snippet.name} ${snippet.text} ${snippet.pasteMode}`;
+    const keptId = seen.get(key);
+    if (keptId) {
+      remap.set(snippet.id, keptId);
+    } else {
+      seen.set(key, snippet.id);
+      kept.push(snippet);
+    }
+  }
+  if (remap.size === 0) return { config, removed: 0 };
+
+  const actions = config.actions.map((action) => {
+    if (action.type !== "textSnippet" || action.payload.source !== "libraryRef") return action;
+    const target = remap.get(action.payload.snippetId);
+    return target
+      ? { ...action, payload: { source: "libraryRef" as const, snippetId: target } }
+      : action;
+  });
+
+  return { config: { ...config, snippetLibrary: kept, actions }, removed: remap.size };
+}
+
 /** Merge imported snippets into the library: an identical snippet (same id +
  *  text + paste mode) is skipped; an id collision with different content gets a
  *  fresh unique id; empty-text entries are dropped (the backend rejects them). */
@@ -889,12 +919,14 @@ export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
   // must point at an existing profile).
   let fallbackProfileId = config.settings.fallbackProfileId;
   if (fallbackProfileId === profileId && remainingProfiles.length > 0) {
-    // Prefer an enabled profile (avoids the disabled-fallback warning) and the
-    // lowest priority, which is the catch-all role a fallback should fill.
+    // Auto-pick the HIGHEST-priority enabled profile as the new default — it
+    // matches the "priority = primacy" intuition users have (picking the lowest
+    // surprised them). The explicit default control lets them override; callers
+    // surface which profile became the default so the change is never silent.
     const candidates = remainingProfiles.filter((p) => p.enabled);
     fallbackProfileId = (candidates.length ? candidates : remainingProfiles)
       .slice()
-      .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name))[0]!.id;
+      .sort((a, b) => b.priority - a.priority || a.name.localeCompare(b.name))[0]!.id;
   }
 
   // Retarget surviving profileSwitch actions that pointed at the deleted profile

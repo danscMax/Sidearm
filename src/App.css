@@ -3730,6 +3730,34 @@ code {
   color: var(--c-text);
 }
 
+/* Snippet library tab: master-detail. Roster (own scroll) left, sticky editor
+   right — selecting a row updates only the editor, so the list never jumps. */
+.snippet-library {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) 1fr;
+  gap: 16px;
+  align-items: start;
+}
+.snippet-library__list {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.snippet-library__editor-pane {
+  position: sticky;
+  top: 0;
+}
+.snippet-library__empty-hint {
+  padding: 24px 4px;
+}
+@media (max-width: 760px) {
+  .snippet-library {
+    grid-template-columns: 1fr;
+  }
+  .snippet-library__editor-pane {
+    position: static;
+  }
+}
+
 /* Inline result of the action-picker "Test" (dry-run) button */
 .action-picker__test-result {
   margin: 8px 0 0;
@@ -4778,6 +4806,38 @@ input[type="number"] { -moz-appearance: textfield; }
 .settings-profile-card__actions {
   display: flex;
   gap: 2px;
+}
+
+/* Default-profile star: marks the catch-all profile (settings.fallbackProfileId). */
+.profile-default-star {
+  appearance: none;
+  border: none;
+  background: none;
+  margin: 0;
+  padding: 2px 4px;
+  flex: 0 0 auto;
+  font-size: 1rem;
+  line-height: 1;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+
+.profile-default-star:hover:not(:disabled) {
+  color: var(--c-accent);
+}
+
+.profile-default-star--on {
+  color: var(--c-accent);
+}
+
+.profile-default-star:disabled {
+  cursor: default;
+}
+
+.profile-default-star:focus-visible {
+  outline: 2px solid var(--c-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 
 /* Icon buttons for profile card actions */

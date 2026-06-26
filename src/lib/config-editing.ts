@@ -280,22 +280,88 @@ export function upsertSnippetLibraryItem(
   };
 }
 
+/** Delete a library snippet, re-inlining its text into every button that linked
+ *  to it (source: libraryRef → inline) so no action is left runtime-dead with a
+ *  dangling snippetId. The inverse of {@link promoteInlineSnippetActionToLibrary}. */
 export function removeSnippetLibraryItem(config: AppConfig, snippetId: string): AppConfig {
+  const snippet = config.snippetLibrary.find((s) => s.id === snippetId);
+  const actions = snippet
+    ? config.actions.map((action) =>
+        action.type === "textSnippet" &&
+        action.payload.source === "libraryRef" &&
+        action.payload.snippetId === snippetId
+          ? {
+              ...action,
+              payload: {
+                source: "inline" as const,
+                text: snippet.text,
+                pasteMode: snippet.pasteMode,
+                tags: uniqueStrings(snippet.tags),
+              },
+            }
+          : action,
+      )
+    : config.actions;
+
   return {
     ...config,
-    snippetLibrary: config.snippetLibrary.filter((snippet) => snippet.id !== snippetId),
+    actions,
+    snippetLibrary: config.snippetLibrary.filter((s) => s.id !== snippetId),
   };
 }
 
-/** Actions that resolve their text from this library snippet (source: libraryRef).
- *  Deleting the snippet leaves these actions with no text, so callers warn first. */
-export function snippetReferenceCount(config: AppConfig, snippetId: string): number {
+/** Actions that resolve their text from this library snippet (source: libraryRef). */
+export function snippetReferencingActions(config: AppConfig, snippetId: string): Action[] {
   return config.actions.filter(
     (action) =>
       action.type === "textSnippet" &&
       action.payload.source === "libraryRef" &&
       action.payload.snippetId === snippetId,
-  ).length;
+  );
+}
+
+/** Count of actions linking to this snippet — drives the delete-confirm warning. */
+export function snippetReferenceCount(config: AppConfig, snippetId: string): number {
+  return snippetReferencingActions(config, snippetId).length;
+}
+
+export interface SnippetLibraryExportData {
+  version: number;
+  exportedAt: string;
+  snippets: SnippetLibraryItem[];
+}
+
+/** Structural guard for a parsed snippet-library export envelope. */
+export function isValidSnippetLibraryExport(raw: unknown): raw is SnippetLibraryExportData {
+  if (typeof raw !== "object" || raw === null) return false;
+  return Array.isArray((raw as Record<string, unknown>).snippets);
+}
+
+/** Merge imported snippets into the library: an identical snippet (same id +
+ *  text + paste mode) is skipped; an id collision with different content gets a
+ *  fresh unique id; empty-text entries are dropped (the backend rejects them). */
+export function mergeSnippetLibrary(
+  config: AppConfig,
+  incoming: SnippetLibraryItem[],
+): AppConfig {
+  const existingIds = new Set(config.snippetLibrary.map((s) => s.id));
+  const added: SnippetLibraryItem[] = [];
+  for (const snippet of incoming) {
+    if (!snippet.text?.trim()) continue;
+    const local = config.snippetLibrary.find((s) => s.id === snippet.id);
+    if (local && local.text === snippet.text && local.pasteMode === snippet.pasteMode) continue;
+    const id = local ? nextUniqueId(existingIds, makeSnippetId(snippet.name)) : snippet.id;
+    existingIds.add(id);
+    added.push({
+      id,
+      name: snippet.name,
+      text: snippet.text,
+      pasteMode: snippet.pasteMode,
+      tags: uniqueStrings(snippet.tags ?? []),
+      ...(snippet.notes ? { notes: snippet.notes } : {}),
+    });
+  }
+  return { ...config, snippetLibrary: [...config.snippetLibrary, ...added] };
 }
 
 export function coerceActionType(
@@ -1113,6 +1179,10 @@ export interface ProfileExportData {
   /** Encoder (wheel/dial) mappings for the profile's controls. Optional for
    *  backward compatibility with v2 files and bundled presets that predate it. */
   encoderMappings?: EncoderMapping[];
+  /** Library snippets referenced by the exported actions (source: libraryRef).
+   *  Without these a cross-machine import resolves libraryRef buttons to
+   *  "snippet not found". Optional for back-compat with older export files. */
+  snippetLibrary?: SnippetLibraryItem[];
 }
 
 /** Structural validation for a parsed profile-export envelope. Guards against
@@ -1141,6 +1211,15 @@ export function extractProfileExport(
     bindings.some((b) => b.controlId === e.controlId && b.layer === e.layer),
   );
 
+  // Bundle the library snippets the exported actions link to, so a libraryRef
+  // button still resolves after a cross-machine import.
+  const referencedSnippetIds = new Set(
+    actions
+      .filter((a) => a.type === "textSnippet" && a.payload.source === "libraryRef")
+      .map((a) => (a.payload as { snippetId: string }).snippetId),
+  );
+  const snippetLibrary = config.snippetLibrary.filter((s) => referencedSnippetIds.has(s.id));
+
   return {
     version: 2,
     exportedAt: new Date().toISOString(),
@@ -1149,6 +1228,7 @@ export function extractProfileExport(
     actions,
     appMappings,
     encoderMappings,
+    snippetLibrary,
   };
 }
 
@@ -1163,11 +1243,37 @@ export function importProfile(
     ? i18n.t("profile.importName", { name: data.profile.name })
     : data.profile.name;
 
+  // Merge imported library snippets, minting a fresh id for any that collide
+  // with a local snippet of a different content; libraryRef actions are then
+  // remapped to the resolved id so the link survives the import.
+  const existingSnippetIds = new Set(config.snippetLibrary.map((s) => s.id));
+  const snippetIdMap = new Map<string, string>();
+  const newSnippets: SnippetLibraryItem[] = [];
+  for (const snippet of data.snippetLibrary ?? []) {
+    const local = config.snippetLibrary.find((s) => s.id === snippet.id);
+    if (local && local.text === snippet.text && local.pasteMode === snippet.pasteMode) {
+      // Identical snippet already present — reuse it, import nothing.
+      snippetIdMap.set(snippet.id, local.id);
+      continue;
+    }
+    const id = local
+      ? nextUniqueId(existingSnippetIds, makeSnippetId(snippet.name))
+      : snippet.id;
+    existingSnippetIds.add(id);
+    snippetIdMap.set(snippet.id, id);
+    newSnippets.push({ ...structuredClone(snippet), id });
+  }
+
   const actionIdMap = new Map<string, string>();
   const newActions: Action[] = data.actions.map((a) => {
     const id = makeRandomId("action");
     actionIdMap.set(a.id, id);
-    return { ...structuredClone(a), id };
+    const cloned = structuredClone(a);
+    if (cloned.type === "textSnippet" && cloned.payload.source === "libraryRef") {
+      const remapped = snippetIdMap.get(cloned.payload.snippetId);
+      if (remapped) cloned.payload.snippetId = remapped;
+    }
+    return { ...cloned, id };
   });
 
   const newBindings: Binding[] = remapBindings(data.bindings, newId, actionIdMap);
@@ -1187,6 +1293,7 @@ export function importProfile(
     appMappings: [...config.appMappings, ...newAppMappings],
     bindings: [...config.bindings, ...newBindings],
     actions: [...config.actions, ...newActions],
+    snippetLibrary: [...config.snippetLibrary, ...newSnippets],
     encoderMappings: [
       ...config.encoderMappings,
       ...(data.encoderMappings ?? []).filter(

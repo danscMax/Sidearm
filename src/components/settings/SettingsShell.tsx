@@ -163,6 +163,7 @@ export function SettingsShell({
             activeConfig={activeConfig}
             updateDraft={updateDraft}
             setConfirmModal={setConfirmModal}
+            showToast={showToast}
           />
         ) : null}
 

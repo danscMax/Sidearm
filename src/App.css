@@ -3719,6 +3719,17 @@ code {
   color: var(--c-text-muted);
 }
 
+/* "Linked to library snippet «…»" hint shown when a button references a snippet */
+.snippet-linked-hint {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--c-accent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--c-accent) 8%, transparent);
+  font-size: var(--fs-caption);
+  color: var(--c-text);
+}
+
 /* Inline result of the action-picker "Test" (dry-run) button */
 .action-picker__test-result {
   margin: 8px 0 0;

@@ -113,7 +113,7 @@ export function MenuItemsEditor({
             />
           </label>
 
-          <label className="field field--inline">
+          <div className="field field--inline">
             <span className="field__label">{t("inspector.menuItemEnabled")}</span>
             <Toggle
               checked={item.enabled}
@@ -127,7 +127,7 @@ export function MenuItemsEditor({
                 )
               }
             />
-          </label>
+          </div>
 
           {item.kind === "action" ? (
             <SelectField

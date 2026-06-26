@@ -136,13 +136,14 @@ export function AppMappingModal({
 
           {/* Toggle + Priority row */}
           <div className="rule-modal__inline-row">
-            <label className="rule-modal__inline-field">
+            <div className="rule-modal__inline-field">
               <span className="field__label">{t("common.enabled")}</span>
               <Toggle
                 checked={value.enabled}
                 onChange={(checked) => onChange({ ...value, enabled: checked })}
+                ariaLabel={t("common.enabled")}
               />
-            </label>
+            </div>
 
             <label className="rule-modal__inline-field">
               <span className="field__label">

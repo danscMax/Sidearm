@@ -20,7 +20,10 @@ export interface ProfileSettingsProps {
   activeConfig: AppConfig;
   activeProfile: Profile | null;
   effectiveProfileId: string | null;
-  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
+  updateDraft: (
+    updater: (config: AppConfig) => AppConfig,
+    options?: { immediate?: boolean; coalesceKey?: string },
+  ) => void;
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   setError: (error: CommandError | null) => void;
@@ -132,8 +135,9 @@ export function ProfileSettings({
                   type="text"
                   value={activeProfile.name}
                   onChange={(e) =>
-                    updateDraft((c) =>
-                      upsertProfile(c, { ...activeProfile, name: e.target.value }),
+                    updateDraft(
+                      (c) => upsertProfile(c, { ...activeProfile, name: e.target.value }),
+                      { coalesceKey: `profile-name:${activeProfile.id}` },
                     )
                   }
                   onBlur={(e) => {
@@ -170,7 +174,7 @@ export function ProfileSettings({
               </label>
             </div>
 
-            <label className="field field--inline">
+            <div className="field field--inline">
               <span className="field__label">{t("settings.enabledLabel")}</span>
               <Toggle
                 checked={activeProfile.enabled}
@@ -179,7 +183,7 @@ export function ProfileSettings({
                 }
                 ariaLabel={t("settings.enabledLabel")}
               />
-            </label>
+            </div>
 
             <label className="field">
               <span className="field__label">{t("settings.descriptionLabel")}</span>

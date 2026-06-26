@@ -174,7 +174,7 @@ describe("buildAction", () => {
     }
   });
 
-  it("keeps a libraryRef snippet intact when its text was not edited — audit F039", () => {
+  it("keeps a libraryRef snippet linked while its text was not edited (snippetId carried)", () => {
     const existing = makeAction({
       type: "textSnippet",
       payload: { source: "libraryRef", snippetId: "snip-42" },
@@ -182,8 +182,9 @@ describe("buildAction", () => {
     const action = buildAction({
       effectiveCategory: "textSnippet",
       existingAction: existing,
-      // The picker has no editor for libraryRef, so the text draft stays empty.
-      drafts: makeDrafts({ name: "Renamed", text: { text: "", pasteMode: "sendText" } }),
+      // createInitialDrafts seeds the resolved preview text plus snippetId; an
+      // unedited draft keeps snippetId, so the action stays a libraryRef.
+      drafts: makeDrafts({ name: "Renamed", text: { text: "linked text", pasteMode: "sendText", snippetId: "snip-42" } }),
       t,
       profiles,
     });

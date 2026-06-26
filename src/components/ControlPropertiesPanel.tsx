@@ -143,7 +143,7 @@ export function ControlPropertiesPanel({
             <strong className="props-action__name">{selectedBinding.label}</strong>
             <span className="props-action__detail">{describeActionSummary(selectedAction, snippetById)}</span>
             {updateDraft ? (
-              <label className="props-action__toggle">
+              <div className="props-action__toggle">
                 <Toggle
                   checked={selectedBinding.enabled}
                   onChange={(checked) =>
@@ -152,7 +152,7 @@ export function ControlPropertiesPanel({
                   ariaLabel={t("properties.enabledToggle")}
                 />
                 <span>{selectedBinding.enabled ? t("common.enabled") : t("common.disabled")}</span>
-              </label>
+              </div>
             ) : null}
           </div>
         ) : (

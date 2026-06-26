@@ -40,10 +40,12 @@ export function ConfirmModal({
       onClose={onCancel}
       className="confirm-modal"
       dialogRef={containerRef}
+      role={danger ? "alertdialog" : "dialog"}
       ariaLabelledby="confirm-modal-title"
+      ariaDescribedby="confirm-modal-message"
     >
       <ModalHeader title={title} id="confirm-modal-title" />
-      <p>{message}</p>
+      <p id="confirm-modal-message">{message}</p>
       <ModalFooter>
         <button
           type="button"

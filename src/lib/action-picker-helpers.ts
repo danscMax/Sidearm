@@ -12,6 +12,7 @@ import type {
   Profile,
   SequenceStep,
   ShortcutActionPayload,
+  SnippetLibraryItem,
   TriggerMode,
 } from "./config";
 import { ACTION_CATEGORIES } from "./constants";
@@ -85,7 +86,10 @@ export interface MouseDraft {
 export interface PickerDrafts {
   shortcut: ShortcutActionPayload;
   mouse: MouseDraft;
-  text: { text: string; pasteMode: PasteMode };
+  // `snippetId` set => the action links to a library snippet (source: libraryRef);
+  // `text` then holds the resolved snippet text for preview only. Editing the text
+  // clears `snippetId`, detaching the button into its own inline copy.
+  text: { text: string; pasteMode: PasteMode; snippetId?: string };
   launch: { target: string; args: string[]; workingDir: string };
   media: MediaKeyKind;
   profile: string;
@@ -180,17 +184,17 @@ export function buildAction(params: {
           displayName,
         };
       case "textSnippet": {
-        // Audit F039: the picker has no editor for library-referenced snippets,
-        // so a libraryRef seeds an empty inline draft. Without this guard saving
-        // would overwrite the reference with empty inline text, losing snippetId
-        // and content. When editing a libraryRef and the draft text is still
-        // empty (nothing was typed), keep the original reference intact.
-        if (
-          existingAction?.type === "textSnippet" &&
-          existingAction.payload.source === "libraryRef" &&
-          !drafts.text.text.trim()
-        ) {
-          return { ...existingAction, displayName };
+        // A live snippetId means the button links to a library snippet
+        // (source: libraryRef). Editing the text in the picker clears snippetId
+        // upstream, detaching into an inline copy — so here snippetId is the
+        // single source of truth for link-vs-inline.
+        if (drafts.text.snippetId) {
+          return {
+            id: actionId,
+            type: "textSnippet" as const,
+            payload: { source: "libraryRef" as const, snippetId: drafts.text.snippetId },
+            displayName,
+          };
         }
         // Preserve tags from existing inline payload so editing the text
         // through this picker doesn't silently drop tag metadata that was
@@ -254,12 +258,35 @@ export interface InitialPickerState extends PickerDrafts {
   chordPartner: string;
 }
 
+/** Seed the text draft: a libraryRef action resolves its snippet so the textarea
+ *  previews the linked text and `snippetId` marks it as linked; an inline action
+ *  seeds its own text; anything else starts empty. */
+function seedTextDraft(
+  existingAction: Action | null,
+  snippetLibrary: SnippetLibraryItem[],
+): PickerDrafts["text"] {
+  if (existingAction?.type === "textSnippet") {
+    const payload = existingAction.payload;
+    if (payload.source === "inline") {
+      return { text: payload.text, pasteMode: payload.pasteMode };
+    }
+    const snippet = snippetLibrary.find((s) => s.id === payload.snippetId);
+    return {
+      text: snippet?.text ?? "",
+      pasteMode: snippet?.pasteMode ?? "sendText",
+      snippetId: payload.snippetId,
+    };
+  }
+  return { text: "", pasteMode: "sendText" };
+}
+
 /** Seed every picker draft from the action being edited (or sensible defaults
  *  for a new action). Pure: no React, no storage — just data in, data out. */
 export function createInitialDrafts(
   existingAction: Action | null,
   binding: Binding | null,
   profiles: Profile[],
+  snippetLibrary: SnippetLibraryItem[] = [],
 ): InitialPickerState {
   return {
     shortcut:
@@ -276,10 +303,7 @@ export function createInitialDrafts(
             win: existingAction.payload.win ?? false,
           }
         : { action: "leftClick", ctrl: false, shift: false, alt: false, win: false },
-    text:
-      existingAction?.type === "textSnippet" && existingAction.payload.source === "inline"
-        ? { text: existingAction.payload.text, pasteMode: existingAction.payload.pasteMode }
-        : { text: "", pasteMode: "sendText" },
+    text: seedTextDraft(existingAction, snippetLibrary),
     launch:
       existingAction?.type === "launch"
         ? {
@@ -316,7 +340,9 @@ export function isSaveDisabled(effectiveCategory: string, drafts: PickerDrafts):
     const s = drafts.shortcut;
     return !s.key && !s.ctrl && !s.shift && !s.alt && !s.win;
   }
-  if (effectiveCategory === "textSnippet") return !drafts.text.text.trim();
+  // A library-linked snippet (snippetId set) is always saveable even if the
+  // resolved preview text is momentarily empty; an inline snippet needs content.
+  if (effectiveCategory === "textSnippet") return !drafts.text.snippetId && !drafts.text.text.trim();
   if (effectiveCategory === "launch") return !drafts.launch.target.trim();
   // Audit F005: an empty menu passes the backend schema check only to be rejected by
   // validate_action (menu must have >=1 item), which rolls back the whole draft. Block

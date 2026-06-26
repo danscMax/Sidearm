@@ -46,14 +46,14 @@ export function NotificationSettings({
     <section className="settings-section">
       <div className="settings-section__header">
         <span className="settings-section__title">{t("settings.osdHeader")}</span>
-        <label className="settings-section__master">
+        <div className="settings-section__master">
           <span className="settings-section__master-label">{t("settings.osdEnabled")}</span>
           <Toggle
             checked={osd.osdEnabled}
             onChange={(checked) => updateSettings({ osdEnabled: checked })}
             ariaLabel={t("settings.osdEnabled")}
           />
-        </label>
+        </div>
       </div>
 
       <div

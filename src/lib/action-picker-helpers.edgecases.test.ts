@@ -319,11 +319,9 @@ describe("boundary: buildAction — robustness + invariants (PBT)", () => {
     );
   });
 
-  it("F039: editing a libraryRef snippet with empty draft text keeps the reference", () => {
+  it("a draft carrying snippetId emits a libraryRef regardless of preview text", () => {
     fc.assert(
-      fc.property(fc.string({ minLength: 1, maxLength: 20 }), arbEdgyString, (snippetId, whitespace) => {
-        // Only whitespace-or-empty draft text should preserve the ref.
-        fc.pre(whitespace.trim().length === 0);
+      fc.property(fc.string({ minLength: 1, maxLength: 20 }), arbEdgyString, (snippetId, previewText) => {
         const existing = makeAction({
           id: "lib1",
           type: "textSnippet",
@@ -332,7 +330,8 @@ describe("boundary: buildAction — robustness + invariants (PBT)", () => {
         const action = buildAction({
           effectiveCategory: "textSnippet",
           existingAction: existing,
-          drafts: makeDrafts({ text: { text: whitespace, pasteMode: "sendText" } }),
+          // snippetId set => linked; the preview text is incidental.
+          drafts: makeDrafts({ text: { text: previewText, pasteMode: "sendText", snippetId } }),
           t,
           profiles,
         });
@@ -345,6 +344,35 @@ describe("boundary: buildAction — robustness + invariants (PBT)", () => {
         }
       }),
       { numRuns: 500 },
+    );
+  });
+
+  it("clearing snippetId detaches a libraryRef into an inline copy", () => {
+    fc.assert(
+      fc.property(fc.string({ minLength: 1, maxLength: 40 }), (edited) => {
+        fc.pre(edited.trim().length > 0);
+        const existing = makeAction({
+          id: "lib1",
+          type: "textSnippet",
+          payload: { source: "libraryRef", snippetId: "snip-1" },
+        });
+        const action = buildAction({
+          effectiveCategory: "textSnippet",
+          existingAction: existing,
+          // No snippetId => the user edited the text, detaching to inline.
+          drafts: makeDrafts({ text: { text: edited, pasteMode: "sendText" } }),
+          t,
+          profiles,
+        });
+        expect(action.type).toBe("textSnippet");
+        if (action.type === "textSnippet") {
+          expect(action.payload.source).toBe("inline");
+          if (action.payload.source === "inline") {
+            expect(action.payload.text).toBe(edited);
+          }
+        }
+      }),
+      { numRuns: 200 },
     );
   });
 });

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { CommandError } from "../lib/config";
 import { translateCommandError } from "../lib/errors";
@@ -208,6 +208,7 @@ interface ModalShellProps {
   role?: "dialog" | "alertdialog";
   ariaLabel?: string;
   ariaLabelledby?: string;
+  ariaDescribedby?: string;
   /** Escape-to-close gate (forwarded to useModalDismiss). Default true. */
   escapeEnabled?: boolean;
   /** Whether clicking the backdrop closes the modal. Default true. */
@@ -231,6 +232,7 @@ export function ModalShell({
   role = "dialog",
   ariaLabel,
   ariaLabelledby,
+  ariaDescribedby,
   escapeEnabled = true,
   dismissOnBackdropClick = true,
   onKeyDown,
@@ -238,6 +240,16 @@ export function ModalShell({
   const fallbackRef = useRef<HTMLDivElement | null>(null);
   const ref = dialogRef ?? fallbackRef;
   const handleKeyDown = useModalDismiss(ref, { onClose, escapeEnabled });
+
+  // Restore focus to the element that opened the modal when it unmounts
+  // (WCAG 2.4.3) — closing a dialog must not drop focus to <body>. Centralised
+  // here so every ModalShell consumer gets it for free. If the opener was
+  // removed from the DOM (e.g. a deleted card), .focus() is a harmless no-op.
+  useEffect(() => {
+    const opener = document.activeElement as HTMLElement | null;
+    return () => opener?.focus?.();
+  }, []);
+
   return (
     <div className={backdropClassName} onClick={dismissOnBackdropClick ? onClose : undefined}>
       <div
@@ -246,6 +258,7 @@ export function ModalShell({
         aria-modal="true"
         aria-label={ariaLabel}
         aria-labelledby={ariaLabelledby}
+        aria-describedby={ariaDescribedby}
         tabIndex={-1}
         className={className}
         onClick={(e) => e.stopPropagation()}

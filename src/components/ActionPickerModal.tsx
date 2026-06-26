@@ -6,11 +6,10 @@ import { liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "..
 import {
   expectedEncodedKeyForControl,
   isPlaceholderAction,
-  makeSnippetId,
+  promoteInlineSnippetActionToLibrary,
   upsertAction,
   upsertBinding,
   upsertEncoderMapping,
-  upsertSnippetLibraryItem,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
 import { CloseButton, ModalFooter, ModalShell, Notice } from "./shared";
@@ -127,8 +126,8 @@ export function ActionPickerModal({
 
   // Draft action state per category — seeded once from the edited action/binding
   const initial = useMemo(
-    () => createInitialDrafts(existingAction, binding, config.profiles),
-    [existingAction, binding, config.profiles],
+    () => createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary),
+    [existingAction, binding, config.profiles, config.snippetLibrary],
   );
   const [shortcutDraft, setShortcutDraft] = useState(initial.shortcut);
   const [mouseDraft, setMouseDraft] = useState(initial.mouse);
@@ -198,16 +197,19 @@ export function ActionPickerModal({
     const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
     let nextConfig = upsertAction(config, nextAction);
 
-    // Opt-in: also store this snippet's text in the reusable library.
-    if (saveSnippetToLibrary && effectiveCategory === "textSnippet" && textDraft.text.trim()) {
+    // Opt-in: store this inline snippet in the reusable library AND link the
+    // button to it (source: libraryRef), so later library edits reach the
+    // button. Promote mints a unique snippet id, so same-named snippets no
+    // longer clobber each other. A snippet picked from the library is already a
+    // libraryRef (textDraft.snippetId set), so skip — nothing to promote.
+    if (
+      saveSnippetToLibrary &&
+      effectiveCategory === "textSnippet" &&
+      !textDraft.snippetId &&
+      textDraft.text.trim()
+    ) {
       const snippetName = nameDraft.trim() || nextAction.displayName || textDraft.text.trim().slice(0, 30);
-      nextConfig = upsertSnippetLibraryItem(nextConfig, {
-        id: makeSnippetId(snippetName),
-        name: snippetName,
-        text: textDraft.text,
-        pasteMode: textDraft.pasteMode,
-        tags: [],
-      });
+      nextConfig = promoteInlineSnippetActionToLibrary(nextConfig, nextAction.id, snippetName);
     }
 
     if (binding) {

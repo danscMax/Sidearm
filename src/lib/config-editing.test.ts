@@ -24,6 +24,9 @@ import {
   upsertAppMapping,
   reorderAppMappingPriority,
   upsertSnippetLibraryItem,
+  removeSnippetLibraryItem,
+  snippetReferencingActions,
+  mergeSnippetLibrary,
   upsertEncoderMapping,
   coerceActionType,
   promoteInlineSnippetActionToLibrary,
@@ -488,6 +491,78 @@ describe("upsertSnippetLibraryItem", () => {
     const config = createMinimalConfig();
     upsertSnippetLibraryItem(config, makeSnippetLibraryItem());
     expect(config.snippetLibrary).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removeSnippetLibraryItem (safe delete = re-inline linked actions)
+// ---------------------------------------------------------------------------
+
+describe("removeSnippetLibraryItem", () => {
+  it("removes the snippet and re-inlines every action that linked to it", () => {
+    const snippet = makeSnippetLibraryItem({ text: "Linked body", pasteMode: "sendText", tags: ["a", "a"] });
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [snippet],
+      actions: [
+        { id: "act-1", type: "textSnippet" as const, payload: { source: "libraryRef" as const, snippetId: snippet.id }, displayName: "Btn 1" },
+        { id: "act-2", type: "textSnippet" as const, payload: { source: "libraryRef" as const, snippetId: snippet.id }, displayName: "Btn 2" },
+        { id: "act-3", type: "textSnippet" as const, payload: { source: "inline" as const, text: "untouched", pasteMode: "sendText" as const, tags: [] }, displayName: "Btn 3" },
+      ],
+    };
+
+    const result = removeSnippetLibraryItem(config, snippet.id);
+
+    expect(result.snippetLibrary).toHaveLength(0);
+    const a1 = result.actions.find((a) => a.id === "act-1")!;
+    expect(a1.type === "textSnippet" && a1.payload.source === "inline" && a1.payload.text).toBe("Linked body");
+    if (a1.type === "textSnippet" && a1.payload.source === "inline") {
+      expect(a1.payload.pasteMode).toBe("sendText");
+      expect(a1.payload.tags).toEqual(["a"]); // deduped
+    }
+    // Unrelated inline action is left exactly as-is.
+    const a3 = result.actions.find((a) => a.id === "act-3")!;
+    expect(a3.type === "textSnippet" && a3.payload.source === "inline" && a3.payload.text).toBe("untouched");
+  });
+
+  it("mergeSnippetLibrary skips identical, re-ids content collisions, drops empties", () => {
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [makeSnippetLibraryItem({ id: "snippet-a", name: "A", text: "alpha", pasteMode: "sendText" })],
+    };
+    const incoming = [
+      // Identical to existing snippet-a → skipped.
+      makeSnippetLibraryItem({ id: "snippet-a", name: "A", text: "alpha", pasteMode: "sendText" }),
+      // Same id, different text → re-ided, kept.
+      makeSnippetLibraryItem({ id: "snippet-a", name: "A two", text: "beta", pasteMode: "sendText" }),
+      // Fresh id → kept as-is.
+      makeSnippetLibraryItem({ id: "snippet-b", name: "B", text: "gamma", pasteMode: "sendText" }),
+      // Empty text → dropped.
+      makeSnippetLibraryItem({ id: "snippet-c", name: "C", text: "   ", pasteMode: "sendText" }),
+    ];
+
+    const result = mergeSnippetLibrary(config, incoming);
+
+    const ids = result.snippetLibrary.map((s) => s.id);
+    expect(ids).toContain("snippet-a"); // original kept
+    expect(ids).toContain("snippet-b"); // fresh id kept
+    expect(ids).not.toContain("snippet-c"); // empty dropped
+    // The content-collision got a new unique id (not snippet-a), text preserved.
+    const beta = result.snippetLibrary.find((s) => s.text === "beta")!;
+    expect(beta.id).not.toBe("snippet-a");
+    expect(result.snippetLibrary).toHaveLength(3);
+  });
+
+  it("snippetReferencingActions returns only the actions that link to the snippet", () => {
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [makeSnippetLibraryItem()],
+      actions: [
+        { id: "ref", type: "textSnippet" as const, payload: { source: "libraryRef" as const, snippetId: "snippet-hello" }, displayName: "Ref" },
+        { id: "other", type: "textSnippet" as const, payload: { source: "libraryRef" as const, snippetId: "snippet-other" }, displayName: "Other" },
+      ],
+    };
+    expect(snippetReferencingActions(config, "snippet-hello").map((a) => a.id)).toEqual(["ref"]);
   });
 });
 
@@ -2115,6 +2190,37 @@ describe("extractProfileExport", () => {
     expect(result.bindings).toEqual([binding1, binding2]);
     expect(result.actions).toEqual([action1, action2]);
     expect(result.appMappings).toEqual([appMapping]);
+  });
+
+  it("bundles library snippets referenced by exported libraryRef actions, and re-imports them", () => {
+    const snippet = makeSnippetLibraryItem({ id: "snippet-greet", text: "Hi there", pasteMode: "sendText" });
+    const action = {
+      id: "act-ref",
+      type: "textSnippet" as const,
+      payload: { source: "libraryRef" as const, snippetId: "snippet-greet" },
+      displayName: "Greet",
+    };
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      profiles: [makeProfile({ id: "p1", name: "Gaming" })],
+      bindings: [makeBinding({ id: "b1", profileId: "p1", controlId: "thumb_01", actionId: "act-ref" })],
+      actions: [action],
+      snippetLibrary: [snippet],
+    };
+
+    const exported = extractProfileExport(config, "p1");
+    expect(exported.snippetLibrary).toEqual([snippet]);
+
+    // Import into a fresh config that has no snippets: the snippet comes along
+    // and the imported action still resolves to a present snippet.
+    const imported = importProfile(createMinimalConfig(), exported);
+    expect(imported.snippetLibrary).toHaveLength(1);
+    const importedAction = imported.actions[0]!;
+    expect(importedAction.type === "textSnippet" && importedAction.payload.source).toBe("libraryRef");
+    if (importedAction.type === "textSnippet" && importedAction.payload.source === "libraryRef") {
+      const refId = importedAction.payload.snippetId;
+      expect(imported.snippetLibrary.some((s) => s.id === refId)).toBe(true);
+    }
   });
 
   it("only includes actions referenced by the profile's bindings", () => {

@@ -22,6 +22,14 @@ interface UpdateDraftOptions {
    * the user. Default false — interactive typing should remain debounced.
    */
   immediate?: boolean;
+  /**
+   * Collapse consecutive edits sharing the same key into ONE undo step. Without
+   * it, typing N characters into a name/text field pushes N undo entries,
+   * evicting earlier destructive actions (e.g. a profile delete) out of the
+   * 15-deep stack. Use a per-field key like `snippet-name:<id>`. The first edit
+   * of a run snapshots the pre-edit state; subsequent same-key edits don't push.
+   */
+  coalesceKey?: string;
 }
 
 export interface AppPersistence {
@@ -75,6 +83,9 @@ export function useAppPersistence(
   // in-memory working config when an auto-save fails (schema rejection,
   // backend error, etc.) so the UI cannot diverge from disk.
   const lastPersistedConfigRef = useRef<AppConfig | null>(null);
+  // Last updateDraft coalesce key — consecutive edits with the same key share one
+  // undo step instead of one-per-keystroke (see UpdateDraftOptions.coalesceKey).
+  const lastCoalesceKeyRef = useRef<string | null>(null);
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
@@ -218,7 +229,14 @@ export function useAppPersistence(
     const current = workingConfig;
     if (!current) return;
     const next = updateConfig(current);
-    setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), current]);
+    // Coalesce a run of same-key edits into one undo step: only the first edit
+    // of the run snapshots the pre-edit state; the rest reuse it.
+    const coalesceKey = options?.coalesceKey ?? null;
+    const continuingRun = coalesceKey !== null && coalesceKey === lastCoalesceKeyRef.current;
+    lastCoalesceKeyRef.current = coalesceKey;
+    if (!continuingRun) {
+      setUndoStack((stack) => [...stack.slice(-(MAX_UNDO - 1)), current]);
+    }
     setRedoStack([]);
     setError(null);
     setViewState("ready");
@@ -228,6 +246,7 @@ export function useAppPersistence(
 
   function handleUndo() {
     if (undoStack.length === 0) return;
+    lastCoalesceKeyRef.current = null;
     const previous = undoStack[undoStack.length - 1];
     const current = workingConfig;
     setUndoStack(undoStack.slice(0, -1));
@@ -240,6 +259,7 @@ export function useAppPersistence(
 
   function handleRedo() {
     if (redoStack.length === 0) return;
+    lastCoalesceKeyRef.current = null;
     const next = redoStack[redoStack.length - 1];
     const current = workingConfig;
     setRedoStack(redoStack.slice(0, -1));

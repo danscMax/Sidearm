@@ -320,11 +320,6 @@ export function snippetReferencingActions(config: AppConfig, snippetId: string):
   );
 }
 
-/** Count of actions linking to this snippet — drives the delete-confirm warning. */
-export function snippetReferenceCount(config: AppConfig, snippetId: string): number {
-  return snippetReferencingActions(config, snippetId).length;
-}
-
 export interface SnippetLibraryExportData {
   version: number;
   exportedAt: string;

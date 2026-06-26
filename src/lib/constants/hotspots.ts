@@ -1,7 +1,7 @@
 import type { ControlId } from "../config";
 import type { HotspotPosition } from "./types";
 
-/** Hotspot positions for the TOP-DOWN photo (naga-top.jpg).
+/** Hotspot positions for the TOP-DOWN photo (naga-top.webp).
  *  Measured via hotspot-test.html click calibration. */
 export const topViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
   mouse_left:        { left: 25.5, top: 10, label: "control.name.mouseLeft" },
@@ -15,7 +15,7 @@ export const topViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
   mouse_5:           { left: 60.5, top: 22.5, label: "→", size: "sm" },
 };
 
-/** Hotspot positions for the SIDE photo (naga-side.png).
+/** Hotspot positions for the SIDE photo (naga-side.webp).
  *  Layout: 4 columns × 3 rows. Each column counts bottom-to-top (1→2→3).
  *  Columns go left-to-right (front-to-back of mouse). */
 export const sideViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
@@ -33,7 +33,7 @@ export const sideViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
   thumb_12: { left: 62, top: 28, label: "12" },
 };
 
-/** Hotspot positions for the COMBINED 3/4-angle photo (naga-combined.png).
+/** Hotspot positions for the COMBINED 3/4-angle photo (naga-combined.webp).
  *  Shows all buttons: thumb grid + top panel on one image. */
 export const combinedViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
   // Thumb grid

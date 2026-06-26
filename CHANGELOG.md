@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-26
+
+### Added
+- **Explicit "default profile" control.** The all-profiles list now shows a star
+  on each profile; clicking it sets that profile as the catch-all used when no
+  app rule matches (previously this `fallbackProfileId` had no UI). The current
+  default is marked with a "default" badge.
+- **Dedupe button in the snippet library** merges exact-duplicate snippets (same
+  name + text + paste mode) into one and re-points every linked button to the
+  kept copy.
+
+### Changed
+- **The snippet library editor is now a two-pane master/detail layout** (list on
+  the left, sticky editor on the right). Selecting a snippet to edit no longer
+  yanks the viewport back to the top.
+- **Clearer profile copy.** Honest priority tooltip and renamed
+  profile-switch / tab / workspace labels to reduce the "settings profiles vs.
+  assignment" confusion.
+
+### Fixed
+- **Deleting the default profile now reassigns it predictably.** The new default
+  becomes the highest-priority enabled profile (the old lowest-priority auto-pick
+  surprised users — e.g. "game" winning over a higher-priority "main"), and the
+  app reports by name which profile became the default so the change isn't silent.
+
 ## [0.5.1] — 2026-06-26
 
 ### Fixed

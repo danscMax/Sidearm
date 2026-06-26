@@ -337,6 +337,7 @@ export function ActionPickerModal({
                 library={config.snippetLibrary}
                 saveToLibrary={saveSnippetToLibrary}
                 onToggleSaveToLibrary={setSaveSnippetToLibrary}
+                onPickName={setNameDraft}
               />
             ) : null}
 

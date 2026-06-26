@@ -536,6 +536,7 @@
     "tabApp": "Application",
     "tabNotifications": "Notifications",
     "tabProfiles": "Profiles",
+    "tabSnippets": "Library",
     "tabBackup": "Backups",
     "tabAdvanced": "Advanced"
   },
@@ -807,6 +808,15 @@
     "notFoundBody": "The selected action references a snippet that doesn't exist in the snippet library.",
     "inlineMessage": "The text is currently stored directly inside the action.",
     "empty": "Select a textSnippet action to edit the snippet library."
+  },
+  "snippetLibrary": {
+    "newSnippetName": "New snippet",
+    "addButton": "Add snippet",
+    "emptyList": "The library is empty. Add a snippet or save text from an action.",
+    "pasteModeLabel": "Paste mode",
+    "deleteConfirmTitle": "Delete snippet?",
+    "deleteConfirmMessage": "Delete “{{name}}” from the library?",
+    "deleteConfirmReferenced": "“{{name}}” is used by {{count}} action(s). They will be left with no text. Delete anyway?"
   },
   "toast": {
     "undone": "Change undone",

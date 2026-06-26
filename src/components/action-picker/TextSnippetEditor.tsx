@@ -8,12 +8,16 @@ export function TextSnippetEditor({
   library,
   saveToLibrary,
   onToggleSaveToLibrary,
+  onPickName,
 }: {
   draft: { text: string; pasteMode: PasteMode };
   onChange: (draft: { text: string; pasteMode: PasteMode }) => void;
   library: SnippetLibraryItem[];
   saveToLibrary: boolean;
   onToggleSaveToLibrary: (value: boolean) => void;
+  // Selecting a library snippet also fills the action's name field, matching
+  // the snippet's name — otherwise the picked text lands but the label stays stale.
+  onPickName: (name: string) => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -24,7 +28,10 @@ export function TextSnippetEditor({
           value=""
           onChange={(id) => {
             const snippet = library.find((item) => item.id === id);
-            if (snippet) onChange({ text: snippet.text, pasteMode: snippet.pasteMode });
+            if (snippet) {
+              onChange({ text: snippet.text, pasteMode: snippet.pasteMode });
+              onPickName(snippet.name);
+            }
           }}
           options={[
             { value: "", label: t("snippet.insertPlaceholder") },

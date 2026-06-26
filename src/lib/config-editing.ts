@@ -280,6 +280,24 @@ export function upsertSnippetLibraryItem(
   };
 }
 
+export function removeSnippetLibraryItem(config: AppConfig, snippetId: string): AppConfig {
+  return {
+    ...config,
+    snippetLibrary: config.snippetLibrary.filter((snippet) => snippet.id !== snippetId),
+  };
+}
+
+/** Actions that resolve their text from this library snippet (source: libraryRef).
+ *  Deleting the snippet leaves these actions with no text, so callers warn first. */
+export function snippetReferenceCount(config: AppConfig, snippetId: string): number {
+  return config.actions.filter(
+    (action) =>
+      action.type === "textSnippet" &&
+      action.payload.source === "libraryRef" &&
+      action.payload.snippetId === snippetId,
+  ).length;
+}
+
 export function coerceActionType(
   config: AppConfig,
   actionId: string,
@@ -1070,7 +1088,7 @@ function makePlaceholderEncodedKey(layer: Layer, controlId: ControlId): string {
 }
 
 
-function nextUniqueId(existingIds: string[] | Set<string>, baseId: string): string {
+export function nextUniqueId(existingIds: string[] | Set<string>, baseId: string): string {
   const idSet = existingIds instanceof Set ? existingIds : new Set(existingIds);
   if (!idSet.has(baseId)) {
     return baseId;

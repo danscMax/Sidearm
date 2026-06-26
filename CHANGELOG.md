@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-26
+
+### Added
+- **Snippet library editor.** A new *Library* tab in Settings lets you manage the
+  reusable text-snippet library directly: add, rename, edit the text and paste
+  mode, and delete snippets. Deleting a snippet that is still referenced by
+  actions warns first and shows how many actions would be left without text.
+
+### Fixed
+- **Picking a snippet from the library now also fills the action name.** Selecting
+  an entry in the action picker's "Insert from library" dropdown inserted the
+  snippet's text but left the Name field stale; it now adopts the snippet's name.
+
 ## [0.3.0] — 2026-06-25
 
 ### Added

@@ -6,10 +6,11 @@ import type { ParsedSynapseProfiles } from "../../lib/synapse-import";
 import { AppSettings } from "./AppSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { ProfileSettings } from "./ProfileSettings";
+import { SnippetLibrarySettings } from "./SnippetLibrarySettings";
 import { BackupSettings } from "./BackupSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
 
-type SettingsTab = "app" | "notifications" | "profiles" | "backup" | "advanced";
+type SettingsTab = "app" | "notifications" | "profiles" | "snippets" | "backup" | "advanced";
 
 const TABS: ReadonlyArray<{ id: SettingsTab; labelKey: string; icon: ReactNode }> = [
   {
@@ -39,6 +40,17 @@ const TABS: ReadonlyArray<{ id: SettingsTab; labelKey: string; icon: ReactNode }
       <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
         <circle cx="8" cy="5.5" r="2.6" stroke="currentColor" strokeWidth="1.4" />
         <path d="M3 13a5 5 0 0110 0" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    id: "snippets",
+    labelKey: "settings.tabSnippets",
+    icon: (
+      <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <rect x="2.5" y="2" width="9" height="11" rx="1.4" stroke="currentColor" strokeWidth="1.4" />
+        <path d="M5.5 5.5h3M5.5 8h3M5.5 10.5h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+        <path d="M5.5 4.5V2.8c0-.4.3-.8.8-.8h1.4c.5 0 .8.4.8.8v1.7" stroke="currentColor" strokeWidth="1.3" />
       </svg>
     ),
   },
@@ -143,6 +155,14 @@ export function SettingsShell({
             setConfirmModal={setConfirmModal}
             setError={setError}
             showToast={showToast}
+          />
+        ) : null}
+
+        {tab === "snippets" ? (
+          <SnippetLibrarySettings
+            activeConfig={activeConfig}
+            updateDraft={updateDraft}
+            setConfirmModal={setConfirmModal}
           />
         ) : null}
 

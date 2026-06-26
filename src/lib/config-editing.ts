@@ -873,6 +873,7 @@ export function createProfile(config: AppConfig, preferredName: string): AppConf
 }
 
 export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
+  const remainingProfiles = config.profiles.filter((p) => p.id !== profileId);
   const nextBindings = config.bindings.filter((b) => b.profileId !== profileId);
 
   // Remove orphaned actions no longer referenced by any remaining binding
@@ -883,11 +884,38 @@ export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
     config.snippetLibrary,
   );
 
+  // Repair references to the deleted profile, or the whole-config save fails
+  // backend validation (config.rs: fallbackProfileId + profileSwitch targets
+  // must point at an existing profile).
+  let fallbackProfileId = config.settings.fallbackProfileId;
+  if (fallbackProfileId === profileId && remainingProfiles.length > 0) {
+    // Prefer an enabled profile (avoids the disabled-fallback warning) and the
+    // lowest priority, which is the catch-all role a fallback should fill.
+    const candidates = remainingProfiles.filter((p) => p.enabled);
+    fallbackProfileId = (candidates.length ? candidates : remainingProfiles)
+      .slice()
+      .sort((a, b) => a.priority - b.priority || a.name.localeCompare(b.name))[0]!.id;
+  }
+
+  // Retarget surviving profileSwitch actions that pointed at the deleted profile
+  // to the (possibly new) fallback so they don't reference a missing profile.
+  const retargetedActions = nextActions.map((action) =>
+    action.type === "profileSwitch" && action.payload.targetProfileId === profileId
+      ? { ...action, payload: { ...action.payload, targetProfileId: fallbackProfileId } }
+      : action,
+  );
+
+  const lastSelectedProfileId =
+    config.settings.lastSelectedProfileId === profileId
+      ? undefined
+      : config.settings.lastSelectedProfileId;
+
   return {
     ...config,
-    profiles: config.profiles.filter((p) => p.id !== profileId),
+    settings: { ...config.settings, fallbackProfileId, lastSelectedProfileId },
+    profiles: remainingProfiles,
     bindings: nextBindings,
-    actions: nextActions,
+    actions: retargetedActions,
     snippetLibrary,
     appMappings: config.appMappings.filter((m) => m.profileId !== profileId),
   };

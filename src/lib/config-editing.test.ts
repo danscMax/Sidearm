@@ -1224,6 +1224,35 @@ describe("deleteProfile", () => {
     expect(result.appMappings).toHaveLength(0);
   });
 
+  it("reassigns the fallback and retargets profileSwitch actions when deleting the fallback profile", () => {
+    const main = makeProfile({ id: "main", name: "Main", priority: 100, enabled: true });
+    const work = makeProfile({ id: "work", name: "Work", priority: 10, enabled: true });
+    const switchAction = makeAction({
+      id: "sw",
+      type: "profileSwitch",
+      payload: { targetProfileId: "main" },
+    });
+    const binding = makeBinding({ id: "bw", profileId: "work", actionId: "sw" });
+    const base = createMinimalConfig();
+    const config = {
+      ...base,
+      settings: { ...base.settings, fallbackProfileId: "main", lastSelectedProfileId: "main" },
+      profiles: [main, work],
+      bindings: [binding],
+      actions: [switchAction],
+    };
+
+    const result = deleteProfile(config, "main");
+
+    expect(result.profiles.map((p) => p.id)).toEqual(["work"]);
+    // Dangling references to the deleted profile are repaired so the backend
+    // whole-config validation passes (config.rs fallbackProfileId + profileSwitch).
+    expect(result.settings.fallbackProfileId).toBe("work");
+    expect(result.settings.lastSelectedProfileId).toBeUndefined();
+    const sw = result.actions.find((a) => a.id === "sw")!;
+    expect(sw.type === "profileSwitch" && sw.payload.targetProfileId).toBe("work");
+  });
+
   it("preserves actions that are referenced by other profiles", () => {
     const p1 = makeProfile({ id: "prof-1" });
     const p2 = makeProfile({ id: "prof-2" });

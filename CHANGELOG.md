@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-06-26
+
+### Changed
+- **Smaller download.** The three mouse images (combined/top/side views) were
+  re-encoded from PNG to WebP — ~1.0 MB down to ~59 KB (-94%) with no visible
+  quality loss. The frontend bundle drops from 1.8 MB to ~0.85 MB and the
+  executable from 17.4 MB to 16.5 MB.
+
 ## [0.6.0] — 2026-06-26
 
 ### Added

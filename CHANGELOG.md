@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-26
+
+### Added
+- **The snippet library is now a real source of truth.** Inserting a snippet
+  onto a button (or saving one to the library) links it by reference, so
+  editing the library entry updates every button that uses it. Editing the
+  text on a button detaches it into its own copy. The "used by N actions"
+  counter and the delete warning now reflect reality instead of always showing
+  zero.
+- **Library tab gained tags, notes, name/text search, alphabetical sorting, a
+  text preview on each card, Duplicate, and Export/Import** of the whole
+  library to a `.json` file.
+- **Profile export now bundles the snippets its buttons reference**, so
+  library-linked buttons survive a cross-machine import.
+- **Undo coalescing:** typing into a name or text field now collapses into a
+  single undo step instead of one per keystroke.
+
+### Fixed
+- **Deleting a library snippet no longer breaks the buttons that used it** — the
+  snippet's text is inlined back into each linked action instead of leaving a
+  dangling reference.
+- **Adding a new snippet no longer risks rolling back unsaved edits** (a blank
+  snippet failed whole-config validation).
+- Removed the paste-mode selector, which had no effect at runtime.
+
+### Accessibility
+- Modals restore focus to the element that opened them and describe their body
+  to screen readers; destructive confirmations announce as alert dialogs.
+- Removed invalid nested `<label>` markup around toggles.
+
 ## [0.4.0] — 2026-06-26
 
 ### Added

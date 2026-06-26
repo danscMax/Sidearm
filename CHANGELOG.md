@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-06-26
+
+### Fixed
+- **Deleting a profile no longer fails with "Config validation failed."** When
+  the deleted profile was the fallback (or the target of a profile-switch
+  action), the leftover reference pointed at a missing profile and the whole
+  config was rejected, rolling the deletion back. Deleting now reassigns the
+  fallback to a remaining profile, retargets profile-switch actions to it, and
+  clears a stale last-selected pointer.
+
 ## [0.5.0] — 2026-06-26
 
 ### Added

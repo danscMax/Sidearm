@@ -249,7 +249,8 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         Foundation::GlobalFree,
         System::{
             DataExchange::{
-                EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber, SetClipboardData,
+                EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+                RegisterClipboardFormatW, SetClipboardData,
             },
             Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
             Ole::CF_UNICODETEXT,
@@ -306,6 +307,41 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         }
     };
 
+    // --- helper: hide the staged write from Win+V history / cloud clipboard ---
+    // Same mechanism password managers use: place the documented exclusion
+    // formats alongside the text. Best-effort — a failure here only means the
+    // snippet may surface in history, never a paste failure. Must run while the
+    // clipboard is open, in the same session as the text data.
+    let exclude_from_history = || {
+        let set_dword_format = |name: &str, value: u32| unsafe {
+            let wide: Vec<u16> = name.encode_utf16().chain(std::iter::once(0)).collect();
+            let fmt = RegisterClipboardFormatW(wide.as_ptr());
+            if fmt == 0 {
+                return;
+            }
+            let handle = GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u32>());
+            if handle.is_null() {
+                return;
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                let _ = GlobalFree(handle);
+                return;
+            }
+            *(locked as *mut u32) = value;
+            let _ = GlobalUnlock(handle);
+            // SetClipboardData takes ownership of the handle on success.
+            if SetClipboardData(fmt, handle).is_null() {
+                let _ = GlobalFree(handle);
+            }
+        };
+        // 0 = exclude from clipboard history and cloud sync; the third format
+        // tells every clipboard monitor to skip this entry entirely.
+        set_dword_format("CanIncludeInClipboardHistory", 0);
+        set_dword_format("CanUploadToCloudClipboard", 0);
+        set_dword_format("ExcludeClipboardContentFromMonitorProcessing", 0);
+    };
+
     // --- helper: best-effort restore ---
     let restore = |original: &str| {
         let _ = with_clipboard_open(|| {
@@ -320,7 +356,11 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
     // 2. Stage our text
     let staged = with_clipboard_open(|| {
         unsafe { EmptyClipboard() };
-        write_text(text).map(|()| unsafe { GetClipboardSequenceNumber() })
+        write_text(text).map(|()| {
+            // Keep this staged snippet out of Win+V history and the cloud clipboard.
+            exclude_from_history();
+            unsafe { GetClipboardSequenceNumber() }
+        })
     })?;
     let seq = match staged {
         Ok(seq) => seq,

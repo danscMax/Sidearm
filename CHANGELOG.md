@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-06-28
+
+### Fixed
+- **Pasted text snippets no longer leak into clipboard history.** Long snippets
+  (over 100 characters) are pasted via a brief clipboard write + Ctrl+V to
+  preserve newlines; that staged write used to land in the Windows clipboard
+  history (Win+V) and sync to the cloud clipboard. The staged write is now
+  tagged with the documented exclusion formats (`CanIncludeInClipboardHistory`,
+  `CanUploadToCloudClipboard`, `ExcludeClipboardContentFromMonitorProcessing`) —
+  the same mechanism password managers use — so snippets stay out of history and
+  the cloud. Paste behavior is otherwise unchanged.
+
 ## [0.6.1] — 2026-06-26
 
 ### Changed

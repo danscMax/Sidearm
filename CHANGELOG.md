@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-30
+
+A large UX overhaul: power features for managing profiles and bindings, plus
+visual polish across the app.
+
+### Added
+- **System tray menu.** Switch the active profile, pause/resume interception,
+  and **create a rule for the active window** straight from the tray. The active
+  profile is marked with a native checkmark.
+- **Cross-profile command palette.** `Ctrl/Cmd+K` now searches bindings and
+  snippets across *all* profiles, and shows recent activity when the query is
+  empty. Selecting a result jumps straight to it.
+- **All-rules view.** See every profile's application rules at once, grouped by
+  profile. Drag a rule into another profile to move it (with a confirmation).
+- **Single-binding export / import.** Share one binding as a portable
+  `.sidearm-binding.json` file (referenced snippets travel with it), and import
+  it onto any button.
+- **Copy a binding to another profile** from its right-click menu.
+- **Per-binding throttle** (0–5000 ms) to debounce accidental double-triggers;
+  a throttled press dims the hotspot briefly and is logged in Diagnostics.
+- **Per-binding disable** with a dimmed “OFF” overlay on the hotspot.
+- **Conflict merge.** The duplicate-shortcut banner gains a “Keep this” action
+  that disables the other conflicting bindings in one click.
+- **Per-button recent-activity timeline** and richer hover tooltips.
+- **Snippet export to Markdown / plain text**, in addition to JSON.
+- **Re-run the setup wizard** from Settings → App and the title-bar “?” button.
+- **Configurable device name**, a bottom status strip, and an undo button on
+  toasts.
+
+### Changed
+- Visual polish throughout: two-line hotspot badges (number + signal),
+  larger/higher-contrast hotspots, a search field with icon and clear button,
+  and application-rule cards that show their binding count and priority.
+- A duplicate launch now surfaces the existing window and shows a toast instead
+  of silently doing nothing.
+
+### Fixed
+- **Push-to-talk / held shortcuts** no longer cut off mid-hold — neither during
+  the wireless mouse's key auto-repeat nor during brief RF dropouts while the
+  button is still physically held.
+
+### Notes
+- The per-binding throttle and device-name settings add optional config fields.
+  Configs that don't use them remain fully compatible with 0.6.x; if you set a
+  throttle or device name and later downgrade, that config may not load on the
+  older version (a backup is always kept).
+
 ## [0.6.3] — 2026-06-30
 
 ### Added

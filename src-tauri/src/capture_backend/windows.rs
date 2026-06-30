@@ -872,25 +872,27 @@ impl CaptureBackendHandle {
                 match event_rx.recv_timeout(POLL_INTERVAL) {
                     Ok(event) => {
                         let encoded_key = event.encoded_key.clone();
-                        match process_encoded_key_event(
+                        let is_repeat = event.is_repeat;
+                        let outcome = process_encoded_key_event(
                             &worker_app,
                             &worker_runtime_store,
                             &worker_config,
                             &worker_app_name,
                             event,
                             &mut held_actions,
+                        );
+                        match hold_deadline_update(
+                            outcome,
+                            is_repeat,
+                            held_actions.contains_key(&encoded_key),
                         ) {
-                            EventOutcome::Handled => {
-                                if held_actions.contains_key(&encoded_key) {
-                                    held_last_seen.insert(encoded_key, Instant::now());
-                                } else {
-                                    held_last_seen.remove(&encoded_key);
-                                }
+                            HoldDeadlineUpdate::Refresh => {
+                                held_last_seen.insert(encoded_key, Instant::now());
                             }
-                            // B-F4 Mode B: a tap dropped as an already-held
-                            // duplicate must NOT refresh the deadline, or rapid
-                            // re-taps defer the 2s stale sweep forever.
-                            EventOutcome::DroppedAsHeldDuplicate => {}
+                            HoldDeadlineUpdate::Clear => {
+                                held_last_seen.remove(&encoded_key);
+                            }
+                            HoldDeadlineUpdate::Leave => {}
                         }
                         // B-F4 Mode A: react at once if the helper just died.
                         if worker_helper_died.swap(false, Ordering::SeqCst) {
@@ -2174,6 +2176,46 @@ fn release_dead_helper_holds(
     }
 }
 
+/// What the worker should do to a held encoding's stale-hold recovery deadline
+/// after processing one capture event.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HoldDeadlineUpdate {
+    /// Mark the key seen "now" — it is (still) actively held.
+    Refresh,
+    /// The key is no longer held — drop its deadline entry.
+    Clear,
+    /// Leave the deadline untouched.
+    Leave,
+}
+
+/// Decide how one processed event updates the stale-hold recovery deadline.
+///
+/// The 2s sweep exists only to recover a hold whose key-up was lost (e.g. a
+/// silently-wedged pipeline). A *sustained physical hold* streams OS auto-repeat
+/// events the whole time, so those MUST refresh the deadline — otherwise the
+/// sweep force-releases a live hold mid-press, cutting off push-to-talk (a
+/// held mouse button → Alt+Shift dropping every ~2s). Auto-repeat only flows
+/// while the key is physically down; once released it stops and the sweep can
+/// still recover a genuinely-lost key-up.
+///
+/// A re-tap *duplicate* (a fresh down of an already-held key from a second
+/// source, `is_repeat == false`) must NOT refresh — that preserves B-F4 Mode B
+/// (rapid re-taps after a helper death must not defer the sweep forever).
+fn hold_deadline_update(
+    outcome: EventOutcome,
+    is_repeat: bool,
+    still_held: bool,
+) -> HoldDeadlineUpdate {
+    match outcome {
+        EventOutcome::Handled if still_held => HoldDeadlineUpdate::Refresh,
+        EventOutcome::Handled => HoldDeadlineUpdate::Clear,
+        EventOutcome::DroppedAsHeldDuplicate if is_repeat && still_held => {
+            HoldDeadlineUpdate::Refresh
+        }
+        EventOutcome::DroppedAsHeldDuplicate => HoldDeadlineUpdate::Leave,
+    }
+}
+
 /// Spawns the capture helper child process for modifier-combo hotkeys.
 /// Returns None if there are no modifier combos or if spawning fails (non-fatal).
 fn spawn_capture_helper(
@@ -2649,6 +2691,55 @@ mod helper_death_recovery_tests {
         assert!(released.is_empty());
         assert!(held.is_empty());
         assert!(seen.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod hold_deadline_tests {
+    use super::{hold_deadline_update, HoldDeadlineUpdate};
+    use crate::capture_backend::EventOutcome;
+
+    /// The regression: a sustained physical hold streams auto-repeat events that
+    /// land as already-held duplicates. They MUST refresh the recovery deadline,
+    /// or the 2s stale sweep force-releases a live hold mid-press (push-to-talk
+    /// cut off every ~2s).
+    #[test]
+    fn auto_repeat_of_held_key_refreshes_deadline() {
+        assert_eq!(
+            hold_deadline_update(EventOutcome::DroppedAsHeldDuplicate, true, true),
+            HoldDeadlineUpdate::Refresh,
+        );
+    }
+
+    /// B-F4 Mode B preserved: a re-tap duplicate (fresh down, not a repeat) must
+    /// NOT refresh — rapid re-taps after a helper death must not defer the sweep.
+    #[test]
+    fn retap_duplicate_does_not_refresh_deadline() {
+        assert_eq!(
+            hold_deadline_update(EventOutcome::DroppedAsHeldDuplicate, false, true),
+            HoldDeadlineUpdate::Leave,
+        );
+    }
+
+    #[test]
+    fn handled_while_held_refreshes_and_clears_when_released() {
+        assert_eq!(
+            hold_deadline_update(EventOutcome::Handled, false, true),
+            HoldDeadlineUpdate::Refresh,
+        );
+        assert_eq!(
+            hold_deadline_update(EventOutcome::Handled, false, false),
+            HoldDeadlineUpdate::Clear,
+        );
+    }
+
+    /// A repeat that no longer maps to a held action leaves the deadline alone.
+    #[test]
+    fn repeat_without_active_hold_leaves_deadline() {
+        assert_eq!(
+            hold_deadline_update(EventOutcome::DroppedAsHeldDuplicate, true, false),
+            HoldDeadlineUpdate::Leave,
+        );
     }
 }
 

@@ -199,6 +199,7 @@ fn select_held_key<'a>(
 
 /// Outcome of handling one captured key event, reported back to the worker
 /// loop so it can decide whether to refresh the stale-hold deadline.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) enum EventOutcome {
     /// Event was dispatched, held, released, or otherwise fully handled.
     Handled,

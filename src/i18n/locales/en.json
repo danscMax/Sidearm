@@ -906,6 +906,9 @@
   "instance": {
     "blocked": "Sidearm is already running — duplicate launch ignored"
   },
+  "quickRule": {
+    "failed": "Couldn't detect the active window — focus the target app, then try again."
+  },
   "synapseImport": {
     "button": "Import from Razer Synapse…",
     "parsing": "Parsing…",

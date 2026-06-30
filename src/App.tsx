@@ -41,6 +41,7 @@ import {
   listenSingleInstanceBlocked,
   listenTrayProfileChanged,
   listenQuickRuleStart,
+  listenQuickRuleFailed,
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
@@ -205,6 +206,18 @@ function App() {
     });
     return () => unlisten?.();
   }, [switchWorkspaceMode]);
+
+  // Tray quick-rule found no usable target window (only Sidearm was in front) —
+  // tell the user instead of failing silently.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenQuickRuleFailed(() => {
+      showToast(t("quickRule.failed"), "warning");
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [showToast, t]);
 
   // First-run onboarding: show the full-screen wizard until the user completes
   // or skips it (both set settings.onboardingCompleted = true).

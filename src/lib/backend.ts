@@ -376,6 +376,11 @@ export async function listenQuickRuleStart(
   return listenEvent("quick_rule_start", onCapture);
 }
 
+// Tray quick-rule couldn't determine a target window (only Sidearm was in front).
+export async function listenQuickRuleFailed(onFailed: () => void): Promise<UnlistenFn> {
+  return listenEvent<null>("quick_rule_failed", () => onFailed());
+}
+
 export async function listenWindowResolutionEvent(
   eventName: WindowResolutionEventName,
   onPayload: (payload: WindowCaptureResult) => void,

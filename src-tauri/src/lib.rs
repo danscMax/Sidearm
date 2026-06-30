@@ -52,7 +52,7 @@ use resolver::ResolvedInputPreview;
 use runtime::{
     DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
     EVENT_CONTROL_RESOLVED, EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-    EVENT_QUICK_RULE_START, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
+    EVENT_QUICK_RULE_FAILED, EVENT_QUICK_RULE_START, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
     EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED,
 };
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -2663,7 +2663,7 @@ pub fn run() {
                                 Err(_) => return,
                             };
                             let app_name = app.package_info().name.clone();
-                            let capture = tauri::async_runtime::spawn_blocking(move || {
+                            let live = tauri::async_runtime::spawn_blocking(move || {
                                 let load = load_or_initialize_config(&config_dir).ok()?;
                                 window_capture::capture_active_window_with_resolution(
                                     &load.config,
@@ -2676,11 +2676,24 @@ pub fn run() {
                             .ok()
                             .flatten();
 
-                            let Some(result) = capture else { return };
-                            if result.ignored {
-                                log::info!("[tray] quick-rule capture ignored: {:?}", result.ignore_reason);
+                            // At tray-click time the live foreground IS Sidearm's own
+                            // window (self-ignored), so prefer a non-ignored live
+                            // capture but fall back to the last real foreground window
+                            // recorded by the watcher / tray-icon snapshot.
+                            let result = match live {
+                                Some(r) if !r.ignored => Some(r),
+                                _ => app
+                                    .state::<Arc<Mutex<RuntimeStore>>>()
+                                    .lock()
+                                    .ok()
+                                    .and_then(|store| store.last_foreground_window().cloned()),
+                            };
+
+                            let Some(result) = result else {
+                                log::info!("[tray] quick-rule: no usable foreground window");
+                                let _ = app.emit(EVENT_QUICK_RULE_FAILED, ());
                                 return;
-                            }
+                            };
                             // Surface the studio window so the dialog is visible.
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -2702,19 +2715,57 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click {
-                        button: MouseButton::Left,
-                        button_state: MouseButtonState::Up,
-                        ..
-                    } = event
-                        && let Some(window) = tray.app_handle().get_webview_window("main") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
-                            } else {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                    let TrayIconEvent::Click { button, button_state, .. } = event else {
+                        return;
+                    };
+
+                    // Snapshot the real foreground window the instant the tray is
+                    // clicked — before the right-click context menu steals focus —
+                    // so "create rule for active window" sees the user's app, not
+                    // Sidearm's own window. Best-effort: complements the watcher,
+                    // and works even while interception is paused.
+                    if matches!(button_state, MouseButtonState::Down) {
+                        let app = tray.app_handle().clone();
+                        tauri::async_runtime::spawn(async move {
+                            let config_dir = match resolve_config_dir(&app) {
+                                Ok(dir) => dir,
+                                Err(_) => return,
+                            };
+                            let app_name = app.package_info().name.clone();
+                            let captured = tauri::async_runtime::spawn_blocking(move || {
+                                let load = load_or_initialize_config(&config_dir).ok()?;
+                                window_capture::capture_active_window_with_resolution(
+                                    &load.config,
+                                    &app_name,
+                                    None,
+                                )
+                                .ok()
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+                            if let Some(result) = captured
+                                && !result.ignored
+                                && let Ok(mut store) =
+                                    app.state::<Arc<Mutex<RuntimeStore>>>().lock()
+                            {
+                                store.set_last_foreground_window(result);
                             }
+                        });
+                    }
+
+                    // Left-click toggles the window.
+                    if matches!(button, MouseButton::Left)
+                        && matches!(button_state, MouseButtonState::Up)
+                        && let Some(window) = tray.app_handle().get_webview_window("main")
+                    {
+                        if window.is_visible().unwrap_or(false) {
+                            let _ = window.hide();
+                        } else {
+                            let _ = window.show();
+                            let _ = window.set_focus();
                         }
+                    }
                 })
                 .build(app)?;
 

@@ -698,6 +698,11 @@ pub(crate) fn emit_profile_resolved_and_notify(
     let _ = app.emit(EVENT_PROFILE_RESOLVED, capture_result);
 
     if !capture_result.ignored {
+        // Remember the real foreground window so the tray "create rule" path can
+        // fall back to it (at tray-click time the live foreground is Sidearm).
+        if let Ok(mut store) = runtime_store.lock() {
+            store.set_last_foreground_window(capture_result.clone());
+        }
         let should_notify = runtime_store
             .lock()
             .ok()

@@ -25,6 +25,7 @@ pub const EVENT_SINGLE_INSTANCE_BLOCKED: &str = "single_instance_blocked";
 pub const EVENT_THROTTLE_BLOCKED: &str = "throttle_blocked";
 pub const EVENT_TRAY_PROFILE_CHANGED: &str = "tray_profile_changed";
 pub const EVENT_QUICK_RULE_START: &str = "quick_rule_start";
+pub const EVENT_QUICK_RULE_FAILED: &str = "quick_rule_failed";
 
 const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;
@@ -93,6 +94,11 @@ pub struct RuntimeStore {
     /// Per-binding last live-execution timestamp (ms) for throttle enforcement.
     /// Ephemeral — never persisted. Keyed by binding id.
     throttle_last_exec: std::collections::HashMap<String, u64>,
+    /// Last non-ignored foreground window seen (by the foreground watcher or a
+    /// tray-click snapshot). Used by the tray "create rule for active window"
+    /// path: at the moment the tray menu item fires, the live foreground IS
+    /// Sidearm's own window (self-ignored), so we fall back to this. Ephemeral.
+    last_foreground_window: Option<crate::window_capture::WindowCaptureResult>,
 }
 
 /// Remaining throttle window for a binding: `Some(ms)` when a re-trigger arriving
@@ -127,6 +133,7 @@ impl Default for RuntimeStore {
             log_sender: None,
             log_send_pending: None,
             throttle_last_exec: std::collections::HashMap::new(),
+            last_foreground_window: None,
         }
     }
 }
@@ -154,6 +161,16 @@ impl RuntimeStore {
     /// Set (or clear with `None`) the manual profile override. Sticky until changed.
     pub fn set_manual_profile_override(&mut self, profile_id: Option<String>) {
         self.manual_profile_override = profile_id;
+    }
+
+    /// Record the last non-ignored foreground window (watcher / tray snapshot).
+    pub fn set_last_foreground_window(&mut self, window: crate::window_capture::WindowCaptureResult) {
+        self.last_foreground_window = Some(window);
+    }
+
+    /// The last non-ignored foreground window, for the tray quick-rule fallback.
+    pub fn last_foreground_window(&self) -> Option<&crate::window_capture::WindowCaptureResult> {
+        self.last_foreground_window.as_ref()
     }
 
     /// Throttle gate for a binding's live execution. Returns `Some(remaining_ms)`

@@ -51,8 +51,14 @@ pub fn capture_active_window_with_resolution_with_override(
     }
 
     let raw_window = capture_foreground_window()?;
-    let is_ignored = should_ignore_window(raw_window.pid);
-    let capture_result = if is_ignored {
+    let ignore_reason = if should_ignore_window(raw_window.pid) {
+        Some("Foreground window belongs to the Studio process.")
+    } else if is_shell_chrome_window(&raw_window.exe, &raw_window.title) {
+        Some("Foreground window is the Windows shell (taskbar/tray).")
+    } else {
+        None
+    };
+    let capture_result = if let Some(reason) = ignore_reason {
         WindowCaptureResult {
             hwnd: raw_window.hwnd,
             exe: raw_window.exe,
@@ -60,13 +66,13 @@ pub fn capture_active_window_with_resolution_with_override(
             title: raw_window.title,
             captured_at: raw_window.captured_at,
             ignored: true,
-            ignore_reason: Some("Foreground window belongs to the Studio process.".into()),
+            ignore_reason: Some(reason.into()),
             matched_app_mapping_id: None,
             resolved_profile_id: None,
             resolved_profile_name: None,
             used_fallback_profile: false,
             candidate_app_mapping_ids: Vec::new(),
-            resolution_reason: "Ignored studio-owned window.".into(),
+            resolution_reason: "Ignored non-app window.".into(),
             is_elevated: raw_window.is_elevated,
         }
     } else {
@@ -136,6 +142,20 @@ fn should_ignore_window(foreground_pid: u32) -> bool {
     foreground_pid == std::process::id()
 }
 
+/// Returns true if the foreground is Windows shell chrome (taskbar / tray /
+/// overflow), which becomes the foreground while the tray menu is open. Without
+/// this, the tray "create rule for active window" path records the shell instead
+/// of the user's actual app. The shell runs as explorer.exe with an empty window
+/// title; real File Explorer windows (also explorer.exe) carry a folder title, so
+/// they remain valid targets.
+/// ponytail: title-emptiness heuristic — the desktop "Program Manager" (Progman)
+/// keeps a title and isn't caught, but it isn't the tray-click case. Upgrade to a
+/// GetClassNameW check (Shell_TrayWnd, NotifyIconOverflowWindow, …) if a shell
+/// window ever slips through.
+fn is_shell_chrome_window(exe: &str, title: &str) -> bool {
+    exe == "explorer.exe" && title.trim().is_empty()
+}
+
 fn capture_foreground_window() -> Result<RawWindowCapture, String> {
     #[cfg(target_os = "windows")]
     return crate::platform::window::capture_foreground_window();
@@ -166,6 +186,17 @@ mod tests {
         ControlFamily, ControlId, EncoderMapping, Layer, MappingSource, OsdAnimation, OsdFontSize,
         OsdPosition, PhysicalControl, Profile, Settings, SnippetLibraryItem,
     };
+
+    #[test]
+    fn shell_chrome_is_ignored_but_file_explorer_is_not() {
+        // Taskbar/tray: explorer.exe with an empty title → ignored.
+        assert!(is_shell_chrome_window("explorer.exe", ""));
+        assert!(is_shell_chrome_window("explorer.exe", "   "));
+        // A real File Explorer window carries a folder title → kept.
+        assert!(!is_shell_chrome_window("explorer.exe", "Downloads"));
+        // Other apps are never shell chrome, even with an empty title.
+        assert!(!is_shell_chrome_window("firefox.exe", ""));
+    }
 
     #[test]
     fn prefers_more_specific_title_filtered_mapping() {

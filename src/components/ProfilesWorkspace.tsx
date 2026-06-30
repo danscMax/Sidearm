@@ -583,8 +583,10 @@ export function ProfilesWorkspace({
               }}
             >
               <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
-              <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
-              <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: activeConfig.bindings.filter((b) => b.profileId === mapping.profileId).length, priority: mapping.priority })}</span>
+              <span className="profiles__app-card-body">
+                <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
+                <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: activeConfig.bindings.filter((b) => b.profileId === mapping.profileId).length, priority: mapping.priority })}</span>
+              </span>
               <input
                 className="profiles__toggle"
                 type="checkbox"

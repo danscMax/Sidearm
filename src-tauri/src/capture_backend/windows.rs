@@ -704,6 +704,19 @@ fn drain_expired_replayed_modifiers() -> Vec<(u32, u128)> {
 /// case skip the SendInput — injecting another up could trip applications
 /// that listen for KeyUp without a matching KeyDown.
 ///
+/// True when the OS reports the physical key for `vk` as currently down
+/// (`GetAsyncKeyState` high bit). The stale-hold sweep uses this to avoid
+/// force-releasing a hold whose source button is still physically held but whose
+/// auto-repeat stream paused (e.g. a wireless RF dropout). Thread-agnostic —
+/// queries the global async key state, safe to call from the worker thread.
+fn physical_key_down(vk: u32) -> bool {
+    unsafe {
+        (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32) as u16
+            & 0x8000)
+            != 0
+    }
+}
+
 /// Called from the message pump loop alongside `gc_stale_consumed_modifiers`.
 fn gc_orphan_replayed_modifiers() {
     let expired = drain_expired_replayed_modifiers();
@@ -834,6 +847,13 @@ impl CaptureBackendHandle {
         app_name: String,
     ) -> Result<Self, String> {
         let registrations = build_hotkey_registrations(&config)?;
+        // Map each held encoding back to its source physical VK so the stale-hold
+        // sweep can probe whether the button is still physically down (RF-dropout
+        // tolerance) before force-releasing. Moved into the worker thread below.
+        let hold_source_vks: std::collections::HashMap<String, u32> = registrations
+            .iter()
+            .map(|r| (r.encoded_key.clone(), r.primary_vk))
+            .collect();
         // Bounded keyboard event channel — see the module-level
         // CAPTURE_EVENT_CAPACITY for the OOM rationale.
         let (event_tx, event_rx) =
@@ -865,7 +885,15 @@ impl CaptureBackendHandle {
             // we force-release to recover.
             let mut held_last_seen: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
-            const HOLD_STALE_THRESHOLD: Duration = Duration::from_secs(2);
+            // Generous timeout: a wireless source button can pause its auto-repeat
+            // stream for several seconds mid-hold (RF dropout) while physically
+            // held. 2s force-released those live holds, cutting off push-to-talk.
+            // Before releasing on timeout we ALSO probe the source key's physical
+            // state (see `hold_source_vks` below) so a still-down key survives even
+            // past this window; the timeout is the belt-and-suspenders bound for a
+            // genuinely lost key-up while the helper is alive (helper-death has its
+            // own immediate path).
+            const HOLD_STALE_THRESHOLD: Duration = Duration::from_secs(30);
             const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
             loop {
@@ -917,11 +945,28 @@ impl CaptureBackendHandle {
                             .map(|(k, _)| k.clone())
                             .collect();
                         for key in stale_keys {
+                            // Don't force-release a hold whose source button is
+                            // still physically down — the auto-repeat stream merely
+                            // paused (wireless RF dropout). Probe the OS key state;
+                            // only a genuinely-released key (reports up) or an
+                            // unknown encoding is recovered. The log line records
+                            // what the hardware reported either way.
+                            let source_vk = hold_source_vks.get(&key).copied();
+                            let physically_down = source_vk.map(physical_key_down).unwrap_or(false);
+                            if physically_down {
+                                log::info!(
+                                    "[capture] Stale-hold check for `{key}`: source key \
+                                     (vk={source_vk:?}) still physically DOWN — keeping hold \
+                                     (auto-repeat paused {HOLD_STALE_THRESHOLD:?}, likely RF dropout)"
+                                );
+                                held_last_seen.insert(key, now);
+                                continue;
+                            }
                             if let Some(held) = held_actions.remove(&key) {
                                 log::warn!(
                                     "[capture] Force-releasing stale hold for `{key}` \
-                                     (no key-up within {:?})",
-                                    HOLD_STALE_THRESHOLD,
+                                     (no key-up within {HOLD_STALE_THRESHOLD:?}, source key \
+                                     vk={source_vk:?} reports UP)"
                                 );
                                 if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
                                     log::warn!(

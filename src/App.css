@@ -4473,17 +4473,30 @@ img.profiles__app-card-monogram {
   align-self: center;
 }
 
+/* Name + meta stack vertically and share the flexible middle column between
+   the icon and the toggle. min-width:0 lets the long name ellipsize instead of
+   forcing a per-character wrap that blew the card height up. */
+.profiles__app-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
 .profiles__app-card-name {
   font-weight: 700;
   color: var(--c-text-bright);
   font-size: var(--fs-body-sm);
-  word-break: break-all;
-  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .profiles__app-card-meta {
   font-size: 0.68rem;
   color: var(--c-text-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 

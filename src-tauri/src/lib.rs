@@ -2634,7 +2634,11 @@ pub fn run() {
                         });
                     }
                     other if other.starts_with("profile:") => {
-                        let profile_id = other.trim_start_matches("profile:").to_string();
+                        // Exact single-strip: trim_start_matches would peel a
+                        // leading "profile:" off a profile id that itself began
+                        // with it. starts_with guarantees the prefix is present.
+                        let profile_id =
+                            other.strip_prefix("profile:").unwrap_or(other).to_string();
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
                             // The override is already honored everywhere the resolver

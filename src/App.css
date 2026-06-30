@@ -2972,6 +2972,36 @@ code {
   font-family: var(--font-mono);
 }
 
+/* Cross-profile sections: non-selectable header + per-row label/meta. */
+.command-palette__section {
+  list-style: none;
+  padding: 8px 12px 2px;
+  font-size: var(--fs-micro);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--c-text-muted);
+  cursor: default;
+}
+.command-palette__item {
+  gap: 8px;
+}
+.command-palette__item-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.command-palette__item-meta {
+  font-size: var(--fs-micro);
+  color: var(--c-text-muted);
+  white-space: nowrap;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .command-palette__empty {
   padding: 16px 12px;
   text-align: center;

@@ -1,18 +1,53 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./shared";
 import { useListKeyboard } from "../hooks/useListKeyboard";
+import { filterPaletteResults } from "../lib/command-palette-helpers";
+import type { Action, Binding, SnippetLibraryItem } from "../lib/config";
 
 /* ─────────────────────────────────────────────────────────
-   Command Palette
+   Command Palette — commands + cross-profile bindings/snippets
    ───────────────────────────────────────────────────────── */
+
+type Section = "commands" | "bindings" | "snippets" | "recent";
+
+/** A pre-resolved, clickable recent-activity entry (built by App). */
+export type RecentPaletteItem = {
+  id: string;
+  label: string;
+  meta: string;
+  onSelect: () => void;
+};
+
+type Row = {
+  section: Section;
+  key: string;
+  label: string;
+  shortcut?: string;
+  meta?: string;
+  onSelect: () => void;
+};
 
 export function CommandPalette({
   onClose,
   onExecute,
+  bindings,
+  actionsById,
+  profileNameById,
+  snippets,
+  recent,
+  onSelectBinding,
+  onSelectSnippet,
 }: {
   onClose: () => void;
   onExecute: (commandId: string) => void;
+  bindings: Binding[];
+  actionsById: Map<string, Action>;
+  profileNameById: Map<string, string>;
+  snippets: SnippetLibraryItem[];
+  recent: RecentPaletteItem[];
+  onSelectBinding: (binding: Binding) => void;
+  onSelectSnippet: (snippet: SnippetLibraryItem) => void;
 }) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -34,9 +69,53 @@ export function CommandPalette({
     { id: "layer-hypershift", label: t("command.layerHypershift"), shortcut: "" },
   ];
 
-  const filtered = PALETTE_COMMANDS.filter((cmd) =>
-    cmd.label.toLowerCase().includes(query.toLowerCase()),
-  );
+  const layerLabel = (layer: Binding["layer"]) =>
+    layer === "hypershift" ? t("layer.hypershift") : t("layer.standard");
+
+  // Build the flat list of selectable rows (display order). Section headers are
+  // injected at render time when the section changes; only rows are selectable.
+  const rows: Row[] = useMemo(() => {
+    const results = filterPaletteResults(query, {
+      commands: PALETTE_COMMANDS,
+      bindings,
+      actionsById,
+      snippets,
+    });
+    const out: Row[] = results.commands.map((cmd) => ({
+      section: "commands" as const,
+      key: cmd.id,
+      label: cmd.label,
+      shortcut: cmd.shortcut,
+      onSelect: () => onExecute(cmd.id),
+    }));
+
+    if (query.trim()) {
+      for (const b of results.bindings) {
+        out.push({
+          section: "bindings",
+          key: b.id,
+          label: b.label || actionsById.get(b.actionId)?.displayName || b.controlId,
+          meta: `${profileNameById.get(b.profileId) ?? b.profileId} · ${layerLabel(b.layer)}`,
+          onSelect: () => onSelectBinding(b),
+        });
+      }
+      for (const s of results.snippets) {
+        out.push({
+          section: "snippets",
+          key: s.id,
+          label: s.name,
+          meta: s.text.slice(0, 48).replace(/\s+/g, " "),
+          onSelect: () => onSelectSnippet(s),
+        });
+      }
+    } else {
+      for (const r of recent) {
+        out.push({ section: "recent", key: r.id, label: r.label, meta: r.meta, onSelect: r.onSelect });
+      }
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query, bindings, actionsById, profileNameById, snippets, recent]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -44,14 +123,26 @@ export function CommandPalette({
 
   // Escape is handled by ModalShell's useModalDismiss; this covers list nav.
   const handleKeyDown = useListKeyboard({
-    itemCount: filtered.length,
+    itemCount: rows.length,
     activeIndex,
     setActiveIndex,
     onSelect: (i) => {
-      const cmd = filtered[i];
-      if (cmd) onExecute(cmd.id);
+      rows[i]?.onSelect();
     },
   });
+
+  const sectionLabel = (section: Section) =>
+    t(
+      section === "commands"
+        ? "command.sectionCommands"
+        : section === "bindings"
+          ? "command.sectionBindings"
+          : section === "snippets"
+            ? "command.sectionSnippets"
+            : "command.sectionRecent",
+    );
+
+  let prevSection: Section | null = null;
 
   return (
     <ModalShell
@@ -68,21 +159,33 @@ export function CommandPalette({
         placeholder={t("command.placeholder")}
         autoFocus
       />
-      {filtered.length > 0 ? (
+      {rows.length > 0 ? (
         <ul className="command-palette__list" role="listbox">
-          {filtered.map((cmd, index) => (
-            <li
-              key={cmd.id}
-              role="option"
-              aria-selected={index === activeIndex}
-              className={`command-palette__item${index === activeIndex ? " command-palette__item--active" : ""}`}
-              onClick={() => onExecute(cmd.id)}
-              onMouseEnter={() => setActiveIndex(index)}
-            >
-              <span>{cmd.label}</span>
-              {cmd.shortcut ? <span className="command-palette__shortcut">{cmd.shortcut}</span> : null}
-            </li>
-          ))}
+          {rows.map((row, index) => {
+            const header =
+              row.section !== prevSection ? (
+                <li className="command-palette__section" role="presentation">
+                  {sectionLabel(row.section)}
+                </li>
+              ) : null;
+            prevSection = row.section;
+            return (
+              <Fragment key={`${row.section}:${row.key}`}>
+                {header}
+                <li
+                  role="option"
+                  aria-selected={index === activeIndex}
+                  className={`command-palette__item${index === activeIndex ? " command-palette__item--active" : ""}`}
+                  onClick={() => row.onSelect()}
+                  onMouseEnter={() => setActiveIndex(index)}
+                >
+                  <span className="command-palette__item-label">{row.label}</span>
+                  {row.meta ? <span className="command-palette__item-meta">{row.meta}</span> : null}
+                  {row.shortcut ? <span className="command-palette__shortcut">{row.shortcut}</span> : null}
+                </li>
+              </Fragment>
+            );
+          })}
         </ul>
       ) : (
         <div className="command-palette__empty">{t("command.empty")}</div>

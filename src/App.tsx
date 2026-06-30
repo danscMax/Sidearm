@@ -17,7 +17,7 @@ import { error as logError } from "@tauri-apps/plugin-log";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import { ActionPickerModal } from "./components/ActionPickerModal";
-import { CommandPalette } from "./components/CommandPalette";
+import { CommandPalette, type RecentPaletteItem } from "./components/CommandPalette";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ErrorModal } from "./components/ErrorModal";
@@ -42,7 +42,7 @@ import {
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
-import { displayNameForControl, labelForLayer } from "./lib/labels";
+import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -621,6 +621,43 @@ function App() {
       ),
     [activeConfig],
   );
+  const profileNameById = useMemo(
+    () => new Map<string, string>(activeConfig?.profiles.map((p) => [p.id, p.name]) ?? []),
+    [activeConfig],
+  );
+
+  // Recent activity for the command palette's empty state: newest execution per
+  // control (deduped), resolved into clickable navigation targets. The history
+  // record carries no layer, so navigation lands on the control in the current
+  // view (ponytail: layer-precise recall deferred).
+  const recentPaletteItems = useMemo<RecentPaletteItem[]>(() => {
+    const flat: Array<{ controlId: string; actionPretty: string; executedAt: number; profileName: string }> = [];
+    for (const [controlId, records] of runtime.executionHistory) {
+      for (const rec of records) {
+        flat.push({ controlId, actionPretty: rec.actionPretty, executedAt: rec.executedAt, profileName: rec.profileName });
+      }
+    }
+    flat.sort((a, b) => b.executedAt - a.executedAt);
+    const seen = new Set<string>();
+    const items: RecentPaletteItem[] = [];
+    for (const entry of flat) {
+      if (seen.has(entry.controlId)) continue;
+      seen.add(entry.controlId);
+      items.push({
+        id: entry.controlId,
+        label: entry.actionPretty,
+        meta: `${entry.profileName} · ${relativeTime(entry.executedAt)}`,
+        onSelect: () => {
+          setCommandPaletteOpen(false);
+          startTransition(() => setSelectedControlId(entry.controlId as ControlId));
+          if (workspaceMode !== "profiles") switchWorkspaceMode("profiles");
+        },
+      });
+      if (items.length >= 5) break;
+    }
+    return items;
+  }, [runtime.executionHistory, workspaceMode, switchWorkspaceMode]);
+
   const bindingByControlId = useMemo(
     () =>
       new Map<ControlId, Binding>(
@@ -913,6 +950,24 @@ function App() {
           onExecute={(commandId) => {
             setCommandPaletteOpen(false);
             executeCommand(commandId);
+          }}
+          bindings={activeConfig?.bindings ?? []}
+          actionsById={actionById}
+          profileNameById={profileNameById}
+          snippets={activeConfig?.snippetLibrary ?? []}
+          recent={recentPaletteItems}
+          onSelectBinding={(b) => {
+            setCommandPaletteOpen(false);
+            setSelectedProfileId(b.profileId);
+            setSelectedLayer(b.layer);
+            startTransition(() => setSelectedControlId(b.controlId));
+            if (workspaceMode !== "profiles") switchWorkspaceMode("profiles");
+          }}
+          onSelectSnippet={() => {
+            // ponytail: the snippet library lives in Settings; a precise deep-link
+            // to its tab is deferred — navigate to Settings is enough for v1.
+            setCommandPaletteOpen(false);
+            switchWorkspaceMode("settings");
           }}
         />
       ) : null}

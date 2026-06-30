@@ -574,7 +574,11 @@
     "layerStandard": "Layer: Standard",
     "layerHypershift": "Layer: Hypershift",
     "placeholder": "Type a command...",
-    "empty": "Nothing found"
+    "empty": "Nothing found",
+    "sectionCommands": "Commands",
+    "sectionBindings": "Bindings",
+    "sectionSnippets": "Snippets",
+    "sectionRecent": "Recent"
   },
   "confirm": {
     "deleteProfileTitle": "Delete profile?",

@@ -579,7 +579,11 @@
     "layerStandard": "Слой: Стандартный",
     "layerHypershift": "Слой: Hypershift",
     "placeholder": "Введите команду...",
-    "empty": "Ничего не найдено"
+    "empty": "Ничего не найдено",
+    "sectionCommands": "Команды",
+    "sectionBindings": "Привязки",
+    "sectionSnippets": "Сниппеты",
+    "sectionRecent": "Недавние"
   },
   "confirm": {
     "deleteProfileTitle": "Удалить профиль?",

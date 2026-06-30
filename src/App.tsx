@@ -40,6 +40,7 @@ import {
   listenDragDrop,
   listenSingleInstanceBlocked,
   listenTrayProfileChanged,
+  listenQuickRuleStart,
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
@@ -61,6 +62,7 @@ import type {
 } from "./lib/config";
 import type {
   EncodedKeyEvent,
+  WindowCaptureResult,
 } from "./lib/runtime";
 import {
   controlFamilyOrder,
@@ -182,6 +184,19 @@ function App() {
     return () => unlisten?.();
   }, []);
 
+  // Tray "Create rule for active window" — switch to Profiles and open the
+  // prefilled create-rule dialog.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenQuickRuleStart((capture) => {
+      switchWorkspaceMode("profiles");
+      setQuickRuleCapture(capture);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [switchWorkspaceMode]);
+
   // First-run onboarding: show the full-screen wizard until the user completes
   // or skips it (both set settings.onboardingCompleted = true).
   useEffect(() => {
@@ -291,6 +306,8 @@ function App() {
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
+  // Tray "Create rule for active window" capture, consumed by ProfilesWorkspace.
+  const [quickRuleCapture, setQuickRuleCapture] = useState<WindowCaptureResult | null>(null);
 
 
   useEffect(() => {
@@ -786,6 +803,8 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 addRuleSignal={addRuleSignal}
                 onAddRuleHandled={() => setAddRuleSignal(false)}
+                quickRuleCapture={quickRuleCapture}
+                onQuickRuleHandled={() => setQuickRuleCapture(null)}
                 lastCapture={lastCapture}
                 captureDelayMs={captureDelayMs}
                 viewState={viewState}

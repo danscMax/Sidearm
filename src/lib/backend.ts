@@ -369,6 +369,13 @@ export async function listenTrayProfileChanged(
   return listenEvent("tray_profile_changed", onProfileId);
 }
 
+// Tray "Create rule for active window" captured a window — open a prefilled rule.
+export async function listenQuickRuleStart(
+  onCapture: (capture: WindowCaptureResult) => void,
+): Promise<UnlistenFn> {
+  return listenEvent("quick_rule_start", onCapture);
+}
+
 export async function listenWindowResolutionEvent(
   eventName: WindowResolutionEventName,
   onPayload: (payload: WindowCaptureResult) => void,

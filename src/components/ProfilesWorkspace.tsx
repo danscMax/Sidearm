@@ -43,6 +43,8 @@ export interface ProfilesWorkspaceProps {
   effectiveProfileId: string | null;
   addRuleSignal: boolean;
   onAddRuleHandled: () => void;
+  quickRuleCapture: WindowCaptureResult | null;
+  onQuickRuleHandled: () => void;
   lastCapture: WindowCaptureResult | null;
   captureDelayMs: number;
   viewState: ViewState;
@@ -77,6 +79,8 @@ export function ProfilesWorkspace({
   effectiveProfileId,
   addRuleSignal,
   onAddRuleHandled,
+  quickRuleCapture,
+  onQuickRuleHandled,
   lastCapture,
   captureDelayMs,
   viewState,
@@ -322,6 +326,23 @@ export function ProfilesWorkspace({
     }
     prevCaptureRef.current = lastCapture;
   }, [lastCapture, captureForNewRule]);
+
+  // Quick-rule from the tray: a window was already captured (no countdown), so
+  // open the create-rule dialog prefilled with its exe/path/title.
+  useEffect(() => {
+    if (!quickRuleCapture || !activeProfile) return;
+    const cap = quickRuleCapture;
+    setCreatingDraft({
+      id: "",
+      exe: cap.exe,
+      processPath: cap.processPath || undefined,
+      titleIncludes: cap.title ? [cap.title] : undefined,
+      profileId: activeProfile.id,
+      enabled: true,
+      priority: activeProfile.priority,
+    });
+    onQuickRuleHandled();
+  }, [quickRuleCapture, activeProfile]);
 
   async function handleCaptureWithCountdown() {
     const totalMs = captureDelayMs;

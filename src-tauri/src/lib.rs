@@ -52,8 +52,8 @@ use resolver::ResolvedInputPreview;
 use runtime::{
     DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
     EVENT_CONTROL_RESOLVED, EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-    EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED, EVENT_SINGLE_INSTANCE_BLOCKED,
-    EVENT_TRAY_PROFILE_CHANGED,
+    EVENT_QUICK_RULE_START, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
+    EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED,
 };
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -357,6 +357,13 @@ fn build_tray_menu(
     }
 
     menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "create_rule",
+        "Создать правило для активного окна",
+        true,
+        None::<&str>,
+    )?)?;
     menu.append(&MenuItem::with_id(
         app,
         "toggle_runtime",
@@ -2640,6 +2647,43 @@ pub fn run() {
                             let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
                             rebuild_tray_menu(&app);
                             log::info!("[tray] active profile set to `{profile_id}` from tray");
+                        });
+                    }
+                    "create_rule" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            // Instant foreground-window capture (no countdown), then
+                            // hand the result to the UI to open a prefilled rule dialog.
+                            let config_dir = match resolve_config_dir(&app) {
+                                Ok(dir) => dir,
+                                Err(_) => return,
+                            };
+                            let app_name = app.package_info().name.clone();
+                            let capture = tauri::async_runtime::spawn_blocking(move || {
+                                let load = load_or_initialize_config(&config_dir).ok()?;
+                                window_capture::capture_active_window_with_resolution(
+                                    &load.config,
+                                    &app_name,
+                                    None,
+                                )
+                                .ok()
+                            })
+                            .await
+                            .ok()
+                            .flatten();
+
+                            let Some(result) = capture else { return };
+                            if result.ignored {
+                                log::info!("[tray] quick-rule capture ignored: {:?}", result.ignore_reason);
+                                return;
+                            }
+                            // Surface the studio window so the dialog is visible.
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                            let _ = app.emit(EVENT_QUICK_RULE_START, &result);
+                            log::info!("[tray] quick-rule capture for `{}`", result.exe);
                         });
                     }
                     "quit" => app.exit(0),

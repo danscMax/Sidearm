@@ -403,6 +403,7 @@
     "searchPlaceholder": "Search bindings…",
     "searchMeta": "Found: {{count}}",
     "searchAllProfiles": "All profiles",
+    "allProfilesToggle": "All rules",
     "searchNoResults": "No matching bindings in any profile.",
     "cardMeta": "{{count}} bindings · priority {{priority}}",
     "dblClickSettings": "Double-click to open profile settings",

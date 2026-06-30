@@ -4258,6 +4258,8 @@ code {
   padding: 1px 7px;
   border-radius: var(--radius-pill);
   font-weight: 600;
+  /* Hug the label so the all-rules toggle floats to the right edge. */
+  margin-right: auto;
 }
 
 /* New-rule dialog capture section */
@@ -4391,6 +4393,20 @@ code {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 10px;
+}
+
+/* All-rules view: profile group label spans the full grid row. */
+.profiles__group-header {
+  grid-column: 1 / -1;
+  margin: 6px 0 0;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-text-muted);
+}
+.profiles__group-header:first-child {
+  margin-top: 0;
 }
 
 .profiles__app-card {

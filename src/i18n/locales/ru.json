@@ -407,6 +407,7 @@
     "searchPlaceholder": "Поиск назначений…",
     "searchMeta": "Найдено: {{count}}",
     "searchAllProfiles": "Все профили",
+    "allProfilesToggle": "Все правила",
     "searchNoResults": "Совпадений нет ни в одном профиле.",
     "cardMeta": "{{count}} назначений · приоритет {{priority}}",
     "dblClickSettings": "Двойной клик — открыть настройки профилей",

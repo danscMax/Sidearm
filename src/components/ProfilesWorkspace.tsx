@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { Fragment, startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
@@ -133,6 +133,9 @@ export function ProfilesWorkspace({
   >(null);
   const [bindingSearch, setBindingSearch] = useState("");
   const [searchAllProfiles, setSearchAllProfiles] = useState(false);
+  // All-rules view: list every profile's app rules, grouped by profile, instead
+  // of only the active profile's. Clicking a foreign card switches to its profile.
+  const [allProfilesView, setAllProfilesView] = useState(false);
 
   // Open the new-rule dialog when the command palette requests it, then ack
   // so a later remount (mode switch) doesn't reopen it.
@@ -207,8 +210,25 @@ export function ProfilesWorkspace({
     [activeConfig.appMappings, effectiveProfileId],
   );
 
+  const profilesById = useMemo(
+    () => new Map(activeConfig.profiles.map((p) => [p.id, p])),
+    [activeConfig.profiles],
+  );
+
+  // All-rules view groups every profile's rules in profile-list order, each
+  // group sorted by priority via sortAppMappings (same as the per-profile view).
+  const displayedAppMappings = useMemo(
+    () =>
+      allProfilesView
+        ? activeConfig.profiles.flatMap((p) =>
+            sortAppMappings(activeConfig.appMappings.filter((m) => m.profileId === p.id)),
+          )
+        : selectedAppMappings,
+    [allProfilesView, activeConfig.profiles, activeConfig.appMappings, selectedAppMappings],
+  );
+
   const editingMapping =
-    selectedAppMappings.find((mapping) => mapping.id === editingMappingId) ?? null;
+    activeConfig.appMappings.find((mapping) => mapping.id === editingMappingId) ?? null;
   const surfaceEntries = useMemo(
     () => familySections.flatMap((section) => section.entries),
     [familySections],
@@ -533,23 +553,45 @@ export function ProfilesWorkspace({
       {/* ── Section header ── */}
       <div className="profiles__section-header">
         <span>{t("profile.rulesHeader")}</span>
-        <span className="profiles__section-count">{selectedAppMappings.length}</span>
+        <span className="profiles__section-count">{displayedAppMappings.length}</span>
+        <button
+          type="button"
+          className={`action-button action-button--small${allProfilesView ? " action-button--active" : ""}`}
+          onClick={() => setAllProfilesView((v) => !v)}
+        >
+          {t("profile.allProfilesToggle")}
+        </button>
       </div>
 
       {/* ── Card grid ── */}
       <div className="profiles__card-grid">
-        {selectedAppMappings.map((mapping) => {
+        {displayedAppMappings.map((mapping, index) => {
           const isActive = editingMapping?.id === mapping.id;
           const isDisabled = !mapping.enabled;
           const isDragging = draggingMappingId === mapping.id;
           const isDragOver = dragOverMappingId === mapping.id && draggingMappingId !== mapping.id;
+          // In all-rules view, stamp a profile subheader before the first card of
+          // each profile group (rows are flat; the header spans the full grid row).
+          const showGroupHeader =
+            allProfilesView &&
+            (index === 0 || displayedAppMappings[index - 1].profileId !== mapping.profileId);
           return (
+            <Fragment key={mapping.id}>
+            {showGroupHeader ? (
+              <h4 className="profiles__group-header">
+                {profilesById.get(mapping.profileId)?.name ?? mapping.profileId}
+              </h4>
+            ) : null}
             <button
-              key={mapping.id}
               type="button"
               draggable
               className={`profiles__app-card${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}${isDragging ? " profiles__app-card--dragging" : ""}${isDragOver ? " profiles__app-card--drag-over" : ""}`}
-              onClick={() => setEditingMappingId(mapping.id)}
+              onClick={() => {
+                // Editing a foreign-profile card switches to its profile first so
+                // the editor (scoped to the active profile) resolves the mapping.
+                if (mapping.profileId !== effectiveProfileId) setSelectedProfileId(mapping.profileId);
+                setEditingMappingId(mapping.id);
+              }}
               onContextMenu={(e) => {
                 e.preventDefault();
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
@@ -569,9 +611,18 @@ export function ProfilesWorkspace({
               }}
               onDrop={(e) => {
                 e.preventDefault();
-                if (draggingMappingId && draggingMappingId !== mapping.id) {
+                const dragged = draggingMappingId
+                  ? activeConfig.appMappings.find((m) => m.id === draggingMappingId)
+                  : null;
+                // ponytail: priority reorder is per-profile; cross-profile move is
+                // deferred to 4.2 (needs a confirm). Skip drops across groups.
+                if (
+                  dragged &&
+                  dragged.id !== mapping.id &&
+                  dragged.profileId === mapping.profileId
+                ) {
                   updateDraft((c) =>
-                    reorderAppMappingPriority(c, draggingMappingId, mapping.id),
+                    reorderAppMappingPriority(c, dragged.id, mapping.id),
                   );
                 }
                 setDraggingMappingId(null);
@@ -600,6 +651,7 @@ export function ProfilesWorkspace({
                 }
               />
             </button>
+            </Fragment>
           );
         })}
 
@@ -615,7 +667,7 @@ export function ProfilesWorkspace({
         ) : null}
       </div>
 
-      {selectedAppMappings.length === 0 && activeProfile ? (
+      {displayedAppMappings.length === 0 && activeProfile ? (
         <div className="props-empty">
           <p className="props-empty__icon" aria-hidden="true">⊹</p>
           <p className="props-empty__text">{t("profile.emptyHint")}</p>

@@ -55,7 +55,7 @@ use runtime::{
     EVENT_QUICK_RULE_FAILED, EVENT_QUICK_RULE_START, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
     EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED,
 };
-use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -345,13 +345,15 @@ fn build_tray_menu(
     menu.append(&PredefinedMenuItem::separator(app)?)?;
 
     for profile in profiles {
-        // ● marks the active profile; the padding keeps the others aligned.
-        let marker = if Some(profile.id.as_str()) == active_profile_id { "● " } else { "    " };
-        menu.append(&MenuItem::with_id(
+        // Native checkmark on the active profile — auto-aligned by the OS, unlike
+        // a text "● "/"  " prefix which mis-indents in the proportional menu font.
+        let is_active = Some(profile.id.as_str()) == active_profile_id;
+        menu.append(&CheckMenuItem::with_id(
             app,
             format!("profile:{}", profile.id),
-            format!("{marker}{}", profile.name),
+            &profile.name,
             true,
+            is_active,
             None::<&str>,
         )?)?;
     }

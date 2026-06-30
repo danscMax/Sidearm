@@ -4607,7 +4607,9 @@ img.profiles__app-card-monogram {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 16px 20px;
+  /* Reserve room on the right so the header text never runs under the
+     absolutely-positioned close button (right: 12px, width: 28px). */
+  padding: 16px 48px 16px 20px;
   border-bottom: 1px solid var(--c-border);
   background: rgba(159, 202, 105, 0.04);
 }

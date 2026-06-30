@@ -161,6 +161,15 @@ function App() {
     };
   }, []);
 
+  // Stable identity: effects/memos below depend on this (e.g. the quick-rule
+  // listener). A plain function would change identity every render and make
+  // those effects re-subscribe each time, leaking native event listeners.
+  const switchWorkspaceMode = useCallback((nextMode: WorkspaceMode) => {
+    startTransition(() => {
+      setWorkspaceMode(nextMode);
+    });
+  }, []);
+
   // Single-instance: backend already focused this window; just inform the user
   // a duplicate launch was ignored. The Diagnostics log line comes from Rust.
   useEffect(() => {
@@ -498,9 +507,6 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  function switchWorkspaceMode(nextMode: WorkspaceMode) {
-    startTransition(() => { setWorkspaceMode(nextMode); });
-  }
 
   /** Single dispatch for command-palette commands, shared by the palette and
    *  the keyboard shortcuts in handleKeyDown (keeps the two in lockstep). */

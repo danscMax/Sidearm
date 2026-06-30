@@ -53,6 +53,7 @@ use runtime::{
     DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
     EVENT_CONTROL_RESOLVED, EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
     EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED, EVENT_SINGLE_INSTANCE_BLOCKED,
+    EVENT_TRAY_PROFILE_CHANGED,
 };
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -315,6 +316,109 @@ fn resolve_app_paths(app: &AppHandle) -> Arc<paths::AppPaths> {
 
 fn resolve_config_dir(app: &AppHandle) -> Result<PathBuf, CommandError> {
     Ok(resolve_app_paths(app).config_dir.clone())
+}
+
+/// Build the system-tray context menu from the current config + runtime state.
+/// The active-profile row reflects the manual tray/ProfileSwitch selection
+/// (falling back to the configured fallback profile), not the per-window
+/// auto-resolution which changes with every foreground window.
+fn build_tray_menu(
+    app: &AppHandle,
+    profiles: &[config::Profile],
+    active_profile_id: Option<&str>,
+    is_running: bool,
+    is_elevated: bool,
+) -> tauri::Result<Menu<tauri::Wry>> {
+    let active_name = active_profile_id
+        .and_then(|id| profiles.iter().find(|p| p.id == id))
+        .map(|p| p.name.as_str())
+        .unwrap_or("—");
+
+    let menu = Menu::new(app)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "active_profile",
+        format!("Активный профиль: {active_name}"),
+        false,
+        None::<&str>,
+    )?)?;
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+
+    for profile in profiles {
+        // ● marks the active profile; the padding keeps the others aligned.
+        let marker = if Some(profile.id.as_str()) == active_profile_id { "● " } else { "    " };
+        menu.append(&MenuItem::with_id(
+            app,
+            format!("profile:{}", profile.id),
+            format!("{marker}{}", profile.name),
+            true,
+            None::<&str>,
+        )?)?;
+    }
+
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "toggle_runtime",
+        if is_running { "Приостановить" } else { "Слушать мышь" },
+        true,
+        None::<&str>,
+    )?)?;
+    // "Restart as administrator" only when non-elevated (UIPI blocks SendInput
+    // into elevated foreground windows otherwise).
+    if !is_elevated {
+        menu.append(&MenuItem::with_id(
+            app,
+            "relaunch_as_admin",
+            "Перезапустить от администратора",
+            true,
+            None::<&str>,
+        )?)?;
+    }
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?)?;
+    Ok(menu)
+}
+
+/// Rebuild the tray menu from an in-hand config (no disk IO). Use this from the
+/// save/reload paths where the config is already loaded, to avoid a disk read on
+/// every autosave.
+fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
+    let Some(tray) = app.tray_by_id("sidearm-tray") else {
+        return;
+    };
+
+    let store = app.state::<Arc<Mutex<RuntimeStore>>>();
+    let (is_running, manual_override) = match store.lock() {
+        Ok(store) => (
+            store.is_running(),
+            store.manual_profile_override().map(str::to_owned),
+        ),
+        Err(_) => (false, None),
+    };
+    let active = manual_override
+        .or_else(|| Some(config.settings.fallback_profile_id.clone()))
+        .filter(|id| !id.is_empty());
+    let is_elevated = window_capture::is_current_process_elevated();
+
+    match build_tray_menu(app, &config.profiles, active.as_deref(), is_running, is_elevated) {
+        Ok(menu) => {
+            if let Err(error) = tray.set_menu(Some(menu)) {
+                log::warn!("[tray] set_menu failed: {error}");
+            }
+        }
+        Err(error) => log::warn!("[tray] build_tray_menu failed: {error}"),
+    }
+}
+
+/// Reload config from disk and rebuild the tray menu. Use this from triggers
+/// that have no config in hand (setup, tray profile click, pause toggle).
+fn rebuild_tray_menu(app: &AppHandle) {
+    let config_dir = resolve_app_paths(app).config_dir.clone();
+    match load_or_initialize_config(&config_dir) {
+        Ok(response) => rebuild_tray_menu_from_config(app, &response.config),
+        Err(_) => log::warn!("[tray] menu rebuild skipped — config load failed"),
+    }
 }
 
 /// Atomically copy `src` → `dst` by streaming into a temp file via the shared
@@ -677,6 +781,9 @@ async fn save_config(
             CommandError::internal(format!("Failed to emit config_reloaded event: {error}"))
         })?;
     }
+
+    // Keep the tray's profile list / active marker in sync after a save.
+    rebuild_tray_menu_from_config(&app, &result.config);
 
     Ok(result)
 }
@@ -1249,6 +1356,9 @@ async fn reload_runtime(
     app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
         CommandError::internal(format!("Failed to emit config_reloaded event: {error}"))
     })?;
+
+    // Reflect any profile changes in the tray menu.
+    rebuild_tray_menu_from_config(&app, &load_response.config);
 
     Ok(summary)
 }
@@ -2427,44 +2537,13 @@ pub fn run() {
                 app.package_info().version
             );
 
-            let toggle_item = MenuItem::with_id(app, "toggle_runtime", "Слушать мышь", true, None::<&str>)?;
             let is_elevated = window_capture::is_current_process_elevated();
-            // Build the tray menu. The "Restart as administrator" entry is
-            // shown only when Sidearm itself is non-elevated — that's the
-            // case where UIPI blocks SendInput into elevated foreground
-            // windows (Task Manager, regedit, UAC dialogs).
-            let tray_menu = if is_elevated {
-                Menu::with_items(
-                    app,
-                    &[
-                        &toggle_item,
-                        &PredefinedMenuItem::separator(app)?,
-                        &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
-                    ],
-                )?
-            } else {
-                Menu::with_items(
-                    app,
-                    &[
-                        &toggle_item,
-                        &PredefinedMenuItem::separator(app)?,
-                        &MenuItem::with_id(
-                            app,
-                            "relaunch_as_admin",
-                            "Перезапустить от администратора",
-                            true,
-                            None::<&str>,
-                        )?,
-                        &PredefinedMenuItem::separator(app)?,
-                        &MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?,
-                    ],
-                )?
-            };
+            // Initial menu has no profile rows yet — rebuild_tray_menu (called
+            // right after build, below) loads config and populates them. Keeping
+            // one menu-construction path (build_tray_menu) avoids drift.
+            let tray_menu = build_tray_menu(app.handle(), &[], None, false, is_elevated)?;
 
-            // Store the toggle menu item handle so we can update its text
-            let toggle_item_handle = toggle_item.clone();
-
-            let mut tray_builder = TrayIconBuilder::new();
+            let mut tray_builder = TrayIconBuilder::with_id("sidearm-tray");
             match app.default_window_icon() {
                 Some(icon) => tray_builder = tray_builder.icon(icon.clone()),
                 None => log::warn!("[system] No default window icon available for tray"),
@@ -2475,7 +2554,6 @@ pub fn run() {
                 .on_menu_event(move |app, event| match event.id.as_ref() {
                     "toggle_runtime" => {
                         let app = app.clone();
-                        let toggle_item = toggle_item_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             let runtime_store: tauri::State<'_, Arc<Mutex<RuntimeStore>>> =
                                 app.state();
@@ -2506,7 +2584,7 @@ pub fn run() {
                                         Err(_) => return,
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
-                                    let _ = toggle_item.set_text("Слушать мышь");
+                                    rebuild_tray_menu(&app);
                                 }
                             } else {
                                 let config_dir = resolve_app_paths(&app).config_dir.clone();
@@ -2543,9 +2621,25 @@ pub fn run() {
                                         Err(_) => return,
                                     };
                                     let _ = app.emit(EVENT_RUNTIME_STARTED, &summary);
-                                    let _ = toggle_item.set_text("Приостановить");
+                                    rebuild_tray_menu(&app);
                                 }
                             }
+                        });
+                    }
+                    other if other.starts_with("profile:") => {
+                        let profile_id = other.trim_start_matches("profile:").to_string();
+                        let app = app.clone();
+                        tauri::async_runtime::spawn(async move {
+                            // The override is already honored everywhere the resolver
+                            // runs (dispatch, foreground watcher, OSD) — see runtime.rs.
+                            if let Ok(mut store) =
+                                app.state::<Arc<Mutex<RuntimeStore>>>().lock()
+                            {
+                                store.set_manual_profile_override(Some(profile_id.clone()));
+                            }
+                            let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
+                            rebuild_tray_menu(&app);
+                            log::info!("[tray] active profile set to `{profile_id}` from tray");
                         });
                     }
                     "quit" => app.exit(0),
@@ -2575,6 +2669,10 @@ pub fn run() {
                         }
                 })
                 .build(app)?;
+
+            // Populate the tray menu with the real profile list now that the
+            // tray exists and config can be loaded.
+            rebuild_tray_menu(app.handle());
 
             // Optional global shortcut; never panic in setup if parsing ever
             // regresses. This is the tail of setup, so skipping registration on

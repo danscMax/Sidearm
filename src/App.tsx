@@ -39,6 +39,7 @@ import {
   openConfigFolder,
   listenDragDrop,
   listenSingleInstanceBlocked,
+  listenTrayProfileChanged,
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
@@ -169,6 +170,17 @@ function App() {
     });
     return () => unlisten?.();
   }, [showToast, t]);
+
+  // Tray switched the active profile — mirror the selection into the UI.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenTrayProfileChanged((profileId) => {
+      setSelectedProfileId(profileId);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, []);
 
   // First-run onboarding: show the full-screen wizard until the user completes
   // or skips it (both set settings.onboardingCompleted = true).

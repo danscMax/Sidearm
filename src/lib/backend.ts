@@ -362,6 +362,13 @@ export async function listenThrottleBlocked(
   return listenEvent("throttle_blocked", onPayload);
 }
 
+// Tray switched the active profile (manual override) — sync the UI selection.
+export async function listenTrayProfileChanged(
+  onProfileId: (profileId: string) => void,
+): Promise<UnlistenFn> {
+  return listenEvent("tray_profile_changed", onProfileId);
+}
+
 export async function listenWindowResolutionEvent(
   eventName: WindowResolutionEventName,
   onPayload: (payload: WindowCaptureResult) => void,

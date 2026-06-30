@@ -23,6 +23,7 @@ pub const EVENT_RUNTIME_ERROR: &str = "runtime_error";
 pub const EVENT_DEBUG_LOG_APPENDED: &str = "debug_log_appended";
 pub const EVENT_SINGLE_INSTANCE_BLOCKED: &str = "single_instance_blocked";
 pub const EVENT_THROTTLE_BLOCKED: &str = "throttle_blocked";
+pub const EVENT_TRAY_PROFILE_CHANGED: &str = "tray_profile_changed";
 
 const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;

@@ -1019,6 +1019,117 @@ export function copyBindingFromLayer(
   return duplicateBinding(config, sourceBinding.id, controlId, targetLayer);
 }
 
+// ── Single-binding transfer (.sidearm-binding.json) ─────────────────────────
+
+export interface BindingExportData {
+  version: 1;
+  kind: "binding";
+  exportedAt: string;
+  /** The action behind the binding; its id is regenerated on import. */
+  action: Action;
+  /** The binding minus profile/layer — assigned to the target slot on import. */
+  binding: Omit<Binding, "profileId" | "layer">;
+  /** Snippets referenced by a libraryRef action, carried so import is self-contained. */
+  referencedSnippets: SnippetLibraryItem[];
+}
+
+/** Assemble a portable export envelope for one binding. Null if the binding or
+ *  its action is missing. */
+export function buildBindingExport(config: AppConfig, bindingId: string): BindingExportData | null {
+  const binding = config.bindings.find((b) => b.id === bindingId);
+  if (!binding) return null;
+  const action = config.actions.find((a) => a.id === binding.actionId);
+  if (!action) return null;
+
+  const referencedSnippets: SnippetLibraryItem[] = [];
+  if (action.type === "textSnippet" && action.payload.source === "libraryRef") {
+    const snippetId = action.payload.snippetId;
+    const snippet = config.snippetLibrary.find((s) => s.id === snippetId);
+    if (snippet) referencedSnippets.push(snippet);
+  }
+
+  const { profileId: _profileId, layer: _layer, ...bindingRest } = binding;
+  return {
+    version: 1,
+    kind: "binding",
+    exportedAt: new Date().toISOString(),
+    action,
+    binding: bindingRest,
+    referencedSnippets,
+  };
+}
+
+/** Structural guard for a parsed single-binding export envelope. */
+export function isValidBindingExport(raw: unknown): raw is BindingExportData {
+  if (typeof raw !== "object" || raw === null) return false;
+  const r = raw as Record<string, unknown>;
+  return (
+    r.kind === "binding" &&
+    typeof r.action === "object" &&
+    r.action !== null &&
+    typeof r.binding === "object" &&
+    r.binding !== null &&
+    Array.isArray(r.referencedSnippets)
+  );
+}
+
+/** Apply an imported binding to a target slot: clone the action with a fresh id,
+ *  import any referenced libraryRef snippet (fresh id + re-point), replace any
+ *  existing binding on the slot, and prune the orphaned action. */
+export function applyBindingImport(
+  config: AppConfig,
+  data: BindingExportData,
+  targetProfileId: string,
+  targetLayer: Layer,
+  targetControlId: ControlId,
+): AppConfig {
+  let snippetLibrary = config.snippetLibrary;
+  let action: Action = structuredClone(data.action);
+
+  if (action.type === "textSnippet" && action.payload.source === "libraryRef") {
+    const snippetId = action.payload.snippetId;
+    const ref = data.referencedSnippets.find((s) => s.id === snippetId);
+    if (ref) {
+      const newSnippetId = nextUniqueId(
+        snippetLibrary.map((s) => s.id),
+        makeSnippetId(ref.name),
+      );
+      snippetLibrary = [...snippetLibrary, { ...ref, id: newSnippetId }];
+      action = { ...action, payload: { source: "libraryRef" as const, snippetId: newSnippetId } };
+    }
+  }
+
+  const newActionId = makeRandomId("action");
+  action = { ...action, id: newActionId };
+
+  const filteredBindings = config.bindings.filter(
+    (b) =>
+      !(
+        b.profileId === targetProfileId &&
+        b.layer === targetLayer &&
+        b.controlId === targetControlId
+      ),
+  );
+  const newBinding: Binding = {
+    ...data.binding,
+    id: makeBindingId(targetProfileId, targetLayer, targetControlId),
+    profileId: targetProfileId,
+    layer: targetLayer,
+    controlId: targetControlId,
+    actionId: newActionId,
+    enabled: true,
+  };
+  const nextBindings = [...filteredBindings, newBinding];
+
+  const { actions, snippetLibrary: prunedSnippets } = pruneActionsPreservingSnippets(
+    [...config.actions, action],
+    nextBindings,
+    snippetLibrary,
+  );
+
+  return { ...config, actions, bindings: nextBindings, snippetLibrary: prunedSnippets };
+}
+
 export function makeBindingId(
   profileId: string,
   layer: Layer,

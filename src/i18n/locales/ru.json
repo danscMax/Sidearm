@@ -265,7 +265,18 @@
   "binding": {
     "notAssigned": "Не назначено",
     "disabledSuffix": "отключено",
-    "assigned": "Назначено"
+    "assigned": "Назначено",
+    "exportItem": "Экспорт привязки…",
+    "importItem": "Импорт привязки сюда…",
+    "exportTitle": "Экспорт привязки",
+    "importTitle": "Импорт привязки",
+    "exported": "Привязка экспортирована",
+    "exportError": "Не удалось экспортировать привязку",
+    "imported": "Привязка импортирована",
+    "importError": "Не удалось прочитать файл",
+    "importInvalid": "Это не файл привязки Sidearm",
+    "importConfirm": "Импортировать «{{action}}» на эту кнопку? Связанных сниппетов: {{snippets}}. Существующая привязка на этой кнопке будет заменена.",
+    "importConfirmLabel": "Импортировать"
   },
   "verification": {
     "pending": "Ожидает",

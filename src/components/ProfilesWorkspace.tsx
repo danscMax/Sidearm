@@ -5,6 +5,7 @@ import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/co
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import {
+  applyBindingImport,
   copyBindingFromLayer,
   createAppMapping,
   createAppMappingFromCapture,
@@ -20,6 +21,7 @@ import {
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
 import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
+import { exportBindingToFile, importBindingFromFile } from "../lib/binding-transfer";
 import {
   bindingMatchesQuery,
   conflictingBindingIds,
@@ -117,6 +119,49 @@ export function ProfilesWorkspace({
     setActionPickerBindingId,
     setActionPickerOpen,
   });
+
+  // Export one binding to a portable .sidearm-binding.json file.
+  async function handleExportBinding(bindingId: string) {
+    const binding = activeConfig.bindings.find((b) => b.id === bindingId);
+    const name = (binding?.label?.trim() || "binding").replace(/[^\w.-]+/g, "-").toLowerCase();
+    try {
+      const ok = await exportBindingToFile(activeConfig, bindingId, t("binding.exportTitle"), name);
+      if (ok) showToast(t("binding.exported"), "success");
+    } catch {
+      showToast(t("binding.exportError"), "warning");
+    }
+  }
+
+  // Import a binding from a file onto a target control (with a preview confirm).
+  async function handleImportBinding(controlId: ControlId) {
+    if (!effectiveProfileId) return;
+    let result;
+    try {
+      result = await importBindingFromFile(t("binding.importTitle"));
+    } catch {
+      showToast(t("binding.importError"), "warning");
+      return;
+    }
+    if (result.status === "cancelled") return;
+    if (result.status === "invalid") {
+      showToast(t("binding.importInvalid"), "warning");
+      return;
+    }
+    const { data } = result;
+    setConfirmModal({
+      title: t("binding.importTitle"),
+      message: t("binding.importConfirm", {
+        action: data.action.displayName,
+        snippets: data.referencedSnippets.length,
+      }),
+      confirmLabel: t("binding.importConfirmLabel"),
+      onConfirm: () => {
+        updateDraft((c) => applyBindingImport(c, data, effectiveProfileId, selectedLayer, controlId));
+        showToast(t("binding.imported"), "success");
+        setConfirmModal(null);
+      },
+    });
+  }
 
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
   const [captureCountdown, setCaptureCountdown] = useState<number | null>(null);
@@ -810,6 +855,21 @@ export function ProfilesWorkspace({
                 onClick: () => {
                   if (binding)
                     updateDraft((c) => upsertBinding(c, { ...binding, enabled: !binding.enabled }));
+                },
+              },
+              null,
+              {
+                label: t("binding.exportItem"),
+                disabled: !binding,
+                onClick: () => {
+                  if (binding) void handleExportBinding(binding.id);
+                },
+              },
+              {
+                label: t("binding.importItem"),
+                disabled: !effectiveProfileId,
+                onClick: () => {
+                  void handleImportBinding(cid);
                 },
               },
               null,

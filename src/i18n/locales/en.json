@@ -261,7 +261,18 @@
   "binding": {
     "notAssigned": "Not assigned",
     "disabledSuffix": "disabled",
-    "assigned": "Assigned"
+    "assigned": "Assigned",
+    "exportItem": "Export binding…",
+    "importItem": "Import binding here…",
+    "exportTitle": "Export binding",
+    "importTitle": "Import binding",
+    "exported": "Binding exported",
+    "exportError": "Couldn't export the binding",
+    "imported": "Binding imported",
+    "importError": "Couldn't read the file",
+    "importInvalid": "Not a valid Sidearm binding file",
+    "importConfirm": "Import \"{{action}}\" onto this button? Referenced snippets: {{snippets}}. Any existing binding on this button will be replaced.",
+    "importConfirmLabel": "Import"
   },
   "verification": {
     "pending": "Pending",

@@ -242,6 +242,11 @@ pub struct Settings {
     /// the conservative detector only rewrites unambiguous mojibake.
     #[serde(default)]
     pub repair_clipboard_on_copy: bool,
+    /// User-facing device label shown in the sidebar brand block. `None` falls
+    /// back to a localized "device not recognized" string. Purely cosmetic —
+    /// the runtime never reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -502,6 +507,11 @@ pub struct Binding {
     pub trigger_mode: Option<TriggerMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chord_partner: Option<ControlId>,
+    /// Optional per-binding throttle: ignore re-triggers that arrive within this
+    /// many milliseconds of the last execution. `None`/0 = no throttle. Clamped
+    /// to 0..=5000 in the UI. Off by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub throttle_ms: Option<u32>,
     pub enabled: bool,
 }
 
@@ -1616,6 +1626,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             minimize_to_tray: true,
             debug_logging: true,
             repair_clipboard_on_copy: false,
+            device_name: None,
             osd_enabled: true,
             osd_duration_ms: 2000,
             osd_position: OsdPosition::default(),
@@ -2926,6 +2937,7 @@ fn binding(
         color_tag: None,
         trigger_mode: None,
         chord_partner: None,
+        throttle_ms: None,
         enabled: true,
     }
 }
@@ -3363,6 +3375,7 @@ mod edge_proptests {
             color_tag: None,
             trigger_mode: None,
             chord_partner: None,
+            throttle_ms: None,
             enabled: true,
         }
     }
@@ -3406,6 +3419,35 @@ mod edge_proptests {
         assert!(migrated.contains("\"actionId\"") && migrated.contains("\"displayName\""));
         assert!(!migrated.contains("\"actionRef\""), "legacy binding key must be dropped");
         assert!(!migrated.contains("\"pretty\""), "legacy action key must be dropped");
+    }
+
+    /// The optional `deviceName` (Settings) and `throttleMs` (Binding) fields,
+    /// added without a schema-version bump like every prior optional field, must
+    /// survive the full save contract: serialize → JSON-schema validate →
+    /// deserialize, values intact and new wire names present. Guards against a
+    /// `deny_unknown_fields` / `additionalProperties:false` regression silently
+    /// breaking save the moment a user sets either field.
+    #[test]
+    fn device_name_and_throttle_ms_survive_schema_roundtrip() {
+        let mut config = default_seed_config();
+        config.settings.device_name = Some("Razer Naga V2".into());
+        config
+            .bindings
+            .first_mut()
+            .expect("seed config has at least one binding")
+            .throttle_ms = Some(250);
+
+        let json = serde_json::to_string(&config).expect("serialize");
+        assert!(json.contains("\"deviceName\""), "deviceName must be written");
+        assert!(json.contains("\"throttleMs\""), "throttleMs must be written");
+
+        let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        validate_config_schema_value(&value)
+            .expect("config with deviceName/throttleMs must pass schema validation");
+
+        let loaded: AppConfig = serde_json::from_value(value).expect("deserialize");
+        assert_eq!(loaded.settings.device_name.as_deref(), Some("Razer Naga V2"));
+        assert_eq!(loaded.bindings.first().and_then(|b| b.throttle_ms), Some(250));
     }
 
     // ─── Serialization round-trips ──────────────────────────────────────────
@@ -3466,6 +3508,7 @@ mod edge_proptests {
                 color_tag: None,
                 trigger_mode,
                 chord_partner: None,
+                throttle_ms: None,
                 enabled: true,
             };
             let json = serde_json::to_string(&b).unwrap();

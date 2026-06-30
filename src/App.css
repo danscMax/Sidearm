@@ -4769,6 +4769,26 @@ input[type="number"] { -moz-appearance: textfield; }
   flex-wrap: wrap;
 }
 
+.settings-text-input {
+  width: 100%;
+  max-width: 360px;
+  padding: 7px 10px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-xs);
+  background: var(--c-bg);
+  color: var(--c-text);
+  font-size: var(--fs-caption);
+}
+
+.settings-text-input:focus-visible {
+  outline: none;
+  border-color: var(--c-accent);
+}
+
+.settings-text-input::placeholder {
+  color: var(--c-text-muted);
+}
+
 /* Profile cards in settings */
 .settings-profile-list {
   display: flex;

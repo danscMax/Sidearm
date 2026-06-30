@@ -205,6 +205,10 @@
           "default": false,
           "description": "Auto-repair the clipboard after a copy/cut shortcut if it was garbled by the terminal's OSC 52 path (valid UTF-8 read as Latin-1)."
         },
+        "deviceName": {
+          "type": "string",
+          "description": "User-facing device label shown in the sidebar brand block. Cosmetic only; the runtime never reads it. Absent falls back to a localized 'device not recognized' string."
+        },
         "osdEnabled": {
           "type": "boolean",
           "default": true
@@ -432,6 +436,12 @@
         },
         "chordPartner": {
           "$ref": "#/$defs/controlId"
+        },
+        "throttleMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000,
+          "description": "Optional per-binding throttle in milliseconds: ignore re-triggers within this window of the last execution. Absent or 0 = no throttle."
         },
         "enabled": {
           "type": "boolean"

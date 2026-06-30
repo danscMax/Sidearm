@@ -171,6 +171,7 @@ fn append_profile(
                     color_tag: None,
                     trigger_mode: None,
                     chord_partner: None,
+                    throttle_ms: None,
                     enabled: true,
                 };
                 new_actions.push(action);
@@ -187,6 +188,7 @@ fn append_profile(
                     color_tag: None,
                     trigger_mode: None,
                     chord_partner: None,
+                    throttle_ms: None,
                     enabled: true,
                 };
                 new_bindings.push(binding);

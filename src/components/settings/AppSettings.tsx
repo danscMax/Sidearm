@@ -98,6 +98,25 @@ export function AppSettings({
         )}
       </section>
 
+      {/* Device name */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.deviceNameHeader")}</span>
+        </div>
+        <p className="panel__muted help-sm">{t("settings.deviceNameHelp")}</p>
+        <input
+          className="settings-text-input"
+          type="text"
+          value={osd.deviceName ?? ""}
+          placeholder={t("settings.deviceNamePlaceholder")}
+          onChange={(e) => {
+            const value = e.target.value;
+            updateSettings({ deviceName: value.trim() ? value : undefined });
+          }}
+          aria-label={t("settings.deviceNameHeader")}
+        />
+      </section>
+
       {/* Language selector */}
       <section className="settings-section">
         <div className="settings-section__header">

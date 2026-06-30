@@ -614,6 +614,7 @@ mod tests {
                 minimize_to_tray: false,
                 debug_logging: true,
                 repair_clipboard_on_copy: false,
+                device_name: None,
                 osd_enabled: true,
                 osd_duration_ms: 2000,
                 osd_position: OsdPosition::default(),
@@ -657,6 +658,7 @@ mod tests {
                 color_tag: None,
                 trigger_mode: None,
                 chord_partner: None,
+                throttle_ms: None,
                 enabled: true,
             }],
             actions: vec![Action {
@@ -872,6 +874,7 @@ mod edge_proptests {
                 minimize_to_tray: false,
                 debug_logging: false,
                 repair_clipboard_on_copy: false,
+                device_name: None,
                 osd_enabled: true,
                 osd_duration_ms: 2000,
                 osd_position: OsdPosition::default(),
@@ -915,6 +918,7 @@ mod edge_proptests {
                 color_tag: None,
                 trigger_mode: None,
                 chord_partner: None,
+                throttle_ms: None,
                 enabled: true,
             }],
             actions: vec![Action {

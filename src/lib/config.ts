@@ -135,6 +135,7 @@ export interface Binding {
   enabled: boolean;
   triggerMode?: TriggerMode;
   chordPartner?: ControlId;
+  throttleMs?: number;
 }
 
 export interface ShortcutActionPayload {

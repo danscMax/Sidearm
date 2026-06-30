@@ -108,6 +108,9 @@ export function MouseVisualization({
       if (!pos) return null;
 
       const isAssigned = entry.binding && entry.binding.enabled && entry.action && entry.action.type !== "disabled";
+      // A binding that exists but is toggled off: keep it visually distinct from
+      // an empty (unassigned) hotspot — dim it and stamp an OFF pill.
+      const isDisabled = !!entry.binding && !entry.binding.enabled && !!entry.action;
       const actionType = entry.action?.type;
       const assignedClass = isAssigned
         ? ` mouse-visual__hotspot--assigned mouse-visual__hotspot--type-${actionType}`
@@ -138,7 +141,9 @@ export function MouseVisualization({
             isDragOver ? " mouse-visual__hotspot--dragover" : ""
           }${isDimmed ? " mouse-visual__hotspot--dimmed" : ""}${
             hasConflict ? " mouse-visual__hotspot--conflict" : ""
-          }${isThrottled ? " mouse-visual__hotspot--throttled" : ""}`}
+          }${isThrottled ? " mouse-visual__hotspot--throttled" : ""}${
+            isDisabled ? " mouse-visual__hotspot--disabled" : ""
+          }`}
           ref={(el) => {
             if (el) {
               el.style.setProperty("--hotspot-left", `${pos.left}%`);
@@ -156,6 +161,7 @@ export function MouseVisualization({
           {...getInteractionProps(entry.control.id)}
         >
           {resolveControlBadge(pos.label)}
+          {isDisabled ? <span className="hotspot__off-pill">{t("visualization.offPill")}</span> : null}
         </button>
       );
     });

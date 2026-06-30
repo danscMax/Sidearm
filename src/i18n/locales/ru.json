@@ -590,6 +590,7 @@
   },
   "visualization": {
     "unassigned": "Не назначено",
+    "offPill": "ВЫКЛ",
     "switchPhoto": "Переключить на фото",
     "switchSchematic": "Переключить на схему",
     "schematicAlt": "Razer Naga V2 HyperSpeed — схематический вид",

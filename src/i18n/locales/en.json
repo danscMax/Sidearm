@@ -585,6 +585,7 @@
   },
   "visualization": {
     "unassigned": "Not assigned",
+    "offPill": "OFF",
     "switchPhoto": "Switch to photo",
     "switchSchematic": "Switch to schematic",
     "schematicAlt": "Razer Naga V2 HyperSpeed — schematic view",

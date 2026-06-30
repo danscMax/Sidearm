@@ -5628,6 +5628,26 @@ input[type="number"] { -moz-appearance: textfield; }
   justify-content: center;
 }
 
+/* Per-binding disabled: dimmed hotspot + OFF pill (binding exists but toggled off). */
+.mouse-visual__hotspot--disabled {
+  opacity: 0.45;
+}
+.hotspot__off-pill {
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 6px;
+  background: var(--c-bg);
+  color: var(--c-text-muted);
+  border: 1px solid var(--c-border);
+}
+
 .btn-legend__cell--dimmed {
   opacity: 0.3;
   filter: grayscale(60%);

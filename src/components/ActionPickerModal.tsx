@@ -151,6 +151,7 @@ export function ActionPickerModal({
   const [nameDraft, setNameDraft] = useState(initial.name);
   const [triggerModeDraft, setTriggerModeDraft] = useState(initial.triggerMode);
   const [chordPartnerDraft, setChordPartnerDraft] = useState(initial.chordPartner);
+  const [throttleDraft, setThrottleDraft] = useState(initial.throttleMs);
   const [conditionsDraft, setConditionsDraft] = useState(initial.conditions);
   const [menuItemsDraft, setMenuItemsDraft] = useState(initial.menuItems);
 
@@ -225,6 +226,7 @@ export function ActionPickerModal({
         chordPartner: triggerModeDraft === "chord" && chordPartnerDraft
           ? chordPartnerDraft as ControlId
           : undefined,
+        throttleMs: throttleDraft > 0 ? throttleDraft : undefined,
       });
     }
 
@@ -425,6 +427,25 @@ export function ActionPickerModal({
               physicalControls={config.physicalControls}
               bindings={config.bindings}
             />
+
+            <label className="field mt-12">
+              <span className="field__label">{t("picker.throttleLabel")}</span>
+              <input
+                type="number"
+                min={0}
+                max={5000}
+                step={50}
+                value={throttleDraft}
+                onChange={(e) => {
+                  const parsed = Number(e.target.value);
+                  const clamped = Number.isFinite(parsed)
+                    ? Math.min(5000, Math.max(0, Math.round(parsed)))
+                    : 0;
+                  setThrottleDraft(clamped);
+                }}
+              />
+              <span className="field__hint">{t("picker.throttleHelp")}</span>
+            </label>
           </div>
         </div>
 

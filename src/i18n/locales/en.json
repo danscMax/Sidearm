@@ -759,6 +759,8 @@
     "signalRecommended": "Recommended:",
     "signalApply": "Apply",
     "nameLabel": "Name",
+    "throttleLabel": "Throttle (ms)",
+    "throttleHelp": "Ignore re-triggers within this many ms of the last execution. 0 = off.",
     "conditionsLabel": "Execution conditions",
     "conditionsAdd": "+ Add",
     "conditionsEmpty": "No conditions — action always executes.",

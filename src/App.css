@@ -613,6 +613,7 @@ select::checkmark {
    box-shadow or ::after badge, so the amber conflict cue is a drop-shadow. */
 .mouse-svg__btn--dimmed { opacity: 0.25; }
 .mouse-svg__btn--conflict { filter: drop-shadow(0 0 3px rgba(234, 179, 8, 0.9)); }
+.mouse-svg__btn--throttled { opacity: 0.4; }
 .mouse-svg__glow { transition: filter 180ms ease; }
 .mouse-svg__glow--on { filter: drop-shadow(0 0 6px rgba(var(--layer-rgb, 159, 202, 105), 0.4)); }
 .mouse-svg__glow--selected { filter: drop-shadow(0 0 10px rgba(var(--layer-rgb, 159, 202, 105), 0.5)); }
@@ -5586,6 +5587,14 @@ input[type="number"] { -moz-appearance: textfield; }
 .mouse-visual__hotspot--dimmed {
   opacity: 0.25;
   filter: grayscale(60%);
+}
+
+/* Throttle-blocked: a re-trigger landed inside the binding's throttle window.
+   ponytail: static greyed cue, not a live decrementing countdown — the
+   transient clears itself when the window elapses. */
+.mouse-visual__hotspot--throttled {
+  opacity: 0.4;
+  filter: grayscale(70%);
 }
 .mouse-visual__hotspot--conflict {
   box-shadow: 0 0 0 2px rgba(234, 179, 8, 0.7);

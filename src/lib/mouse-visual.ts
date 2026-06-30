@@ -34,6 +34,7 @@ export interface MouseVisualizationProps {
   onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
   executionCounts?: Map<string, number>;
   executionHistory?: Map<string, ExecutionRecord[]>;
+  throttledControlIds?: Set<string>;
   heatmapEnabled?: boolean;
   onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
 }

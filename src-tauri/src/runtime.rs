@@ -22,6 +22,7 @@ pub const EVENT_ACTION_EXECUTED: &str = "action_executed";
 pub const EVENT_RUNTIME_ERROR: &str = "runtime_error";
 pub const EVENT_DEBUG_LOG_APPENDED: &str = "debug_log_appended";
 pub const EVENT_SINGLE_INSTANCE_BLOCKED: &str = "single_instance_blocked";
+pub const EVENT_THROTTLE_BLOCKED: &str = "throttle_blocked";
 
 const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;
@@ -87,6 +88,25 @@ pub struct RuntimeStore {
     /// this exceeds LOG_SEND_PENDING_CAP. Shared with the bridge thread,
     /// which decrements on each successful drain.
     log_send_pending: Option<Arc<AtomicUsize>>,
+    /// Per-binding last live-execution timestamp (ms) for throttle enforcement.
+    /// Ephemeral — never persisted. Keyed by binding id.
+    throttle_last_exec: std::collections::HashMap<String, u64>,
+}
+
+/// Remaining throttle window for a binding: `Some(ms)` when a re-trigger arriving
+/// `now_ms` is still inside the `throttle_ms` window since `last`, `None` when it
+/// is allowed (no last execution, throttle disabled, or window elapsed).
+pub(crate) fn throttle_remaining(last: Option<u64>, throttle_ms: u32, now_ms: u64) -> Option<u64> {
+    if throttle_ms == 0 {
+        return None;
+    }
+    let last = last?;
+    let elapsed = now_ms.saturating_sub(last);
+    if elapsed < throttle_ms as u64 {
+        Some(throttle_ms as u64 - elapsed)
+    } else {
+        None
+    }
 }
 
 impl Default for RuntimeStore {
@@ -104,6 +124,7 @@ impl Default for RuntimeStore {
             next_log_id: 1,
             log_sender: None,
             log_send_pending: None,
+            throttle_last_exec: std::collections::HashMap::new(),
         }
     }
 }
@@ -131,6 +152,29 @@ impl RuntimeStore {
     /// Set (or clear with `None`) the manual profile override. Sticky until changed.
     pub fn set_manual_profile_override(&mut self, profile_id: Option<String>) {
         self.manual_profile_override = profile_id;
+    }
+
+    /// Throttle gate for a binding's live execution. Returns `Some(remaining_ms)`
+    /// when the trigger lands inside the throttle window (caller should SKIP and
+    /// surface the block) or `None` when allowed — in which case the last-exec
+    /// timestamp is advanced to `now_ms`. A blocked trigger does NOT advance it,
+    /// so the window is measured from the last real execution, not the last tap.
+    pub fn check_execution_throttle(
+        &mut self,
+        binding_id: &str,
+        throttle_ms: u32,
+        now_ms: u64,
+    ) -> Option<u64> {
+        let last = self.throttle_last_exec.get(binding_id).copied();
+        match throttle_remaining(last, throttle_ms, now_ms) {
+            Some(remaining) => Some(remaining),
+            None => {
+                if throttle_ms > 0 {
+                    self.throttle_last_exec.insert(binding_id.to_string(), now_ms);
+                }
+                None
+            }
+        }
     }
 
     pub fn summary(&self) -> RuntimeStateSummary {
@@ -304,6 +348,36 @@ pub(crate) fn timestamp_millis() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn throttle_remaining_gates_within_window() {
+        // No prior execution → always allowed.
+        assert_eq!(throttle_remaining(None, 200, 1000), None);
+        // Disabled throttle → always allowed even with a recent execution.
+        assert_eq!(throttle_remaining(Some(1000), 0, 1010), None);
+        // Inside the window → blocked with the remaining time.
+        assert_eq!(throttle_remaining(Some(1000), 200, 1050), Some(150));
+        // Exactly at the boundary → allowed (elapsed == window).
+        assert_eq!(throttle_remaining(Some(1000), 200, 1200), None);
+        // Past the window → allowed.
+        assert_eq!(throttle_remaining(Some(1000), 200, 1300), None);
+    }
+
+    #[test]
+    fn check_execution_throttle_blocks_then_allows_after_window() {
+        let mut store = RuntimeStore::default();
+        // First press records the timestamp and is allowed.
+        assert_eq!(store.check_execution_throttle("b1", 200, 1000), None);
+        // Rapid re-press inside the window is blocked; the block does NOT advance
+        // the last-exec stamp, so the window stays measured from t=1000.
+        assert_eq!(store.check_execution_throttle("b1", 200, 1100), Some(100));
+        assert_eq!(store.check_execution_throttle("b1", 200, 1150), Some(50));
+        // After the window elapses, it is allowed again and re-stamps.
+        assert_eq!(store.check_execution_throttle("b1", 200, 1250), None);
+        assert_eq!(store.check_execution_throttle("b1", 200, 1300), Some(150));
+        // A different binding is tracked independently.
+        assert_eq!(store.check_execution_throttle("b2", 200, 1300), None);
+    }
 
     #[test]
     fn runtime_store_transitions_between_states() {

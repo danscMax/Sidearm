@@ -12,9 +12,20 @@ use crate::{
     runtime::{
         self, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONTROL_RESOLVED,
         EVENT_ENCODED_KEY_RECEIVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
+        EVENT_THROTTLE_BLOCKED,
     },
     window_capture,
 };
+
+/// Payload for `throttle_blocked`: a binding's re-trigger landed inside its
+/// throttle window and was skipped. The FE greys the hotspot + shows a countdown.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ThrottleBlockedEvent {
+    control_id: Option<String>,
+    binding_id: Option<String>,
+    remaining_ms: u64,
+}
 
 #[cfg(target_os = "windows")]
 mod windows;
@@ -457,6 +468,46 @@ fn process_encoded_key_event(
     let is_hold_shortcut = preview.action_type.as_deref() == Some("shortcut")
         && (preview.trigger_mode == Some(config::TriggerMode::Hold)
             || is_modifier_only_shortcut);
+
+    // Per-binding throttle (tap/press paths only). Hold shortcuts press once and
+    // stay down, so throttling them is meaningless and would break PTT holds.
+    if !is_hold_shortcut
+        && let Some(binding_id) = preview.binding_id.as_deref()
+    {
+        let throttle_ms = config
+            .bindings
+            .iter()
+            .find(|b| b.id == binding_id)
+            .and_then(|b| b.throttle_ms)
+            .unwrap_or(0);
+        if throttle_ms > 0 {
+            let now = runtime::timestamp_millis();
+            let remaining = runtime_store
+                .lock()
+                .ok()
+                .and_then(|mut store| store.check_execution_throttle(binding_id, throttle_ms, now));
+            if let Some(remaining_ms) = remaining {
+                log_entries.push((
+                    "выполнение",
+                    format!(
+                        "[throttle] `{}` пропущен — осталось {} мс.",
+                        preview.encoded_key, remaining_ms
+                    ),
+                    false,
+                ));
+                flush_log_entries(runtime_store, log_entries);
+                let _ = app.emit(
+                    EVENT_THROTTLE_BLOCKED,
+                    &ThrottleBlockedEvent {
+                        control_id: preview.control_id.clone(),
+                        binding_id: Some(binding_id.to_string()),
+                        remaining_ms,
+                    },
+                );
+                return EventOutcome::Handled;
+            }
+        }
+    }
 
     if is_hold_shortcut {
         log::info!(

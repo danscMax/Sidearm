@@ -42,6 +42,7 @@ export function MouseVisualization({
   onContextMenu,
   executionCounts,
   executionHistory,
+  throttledControlIds,
   heatmapEnabled,
   onDropBinding,
 }: MouseVisualizationProps) {
@@ -91,6 +92,7 @@ export function MouseVisualization({
           onContextMenu={onContextMenu}
           executionCounts={executionCounts}
           executionHistory={executionHistory}
+          throttledControlIds={throttledControlIds}
           heatmapEnabled={heatmapEnabled}
           onDropBinding={onDropBinding}
         />
@@ -122,6 +124,7 @@ export function MouseVisualization({
       // the exact press count rides along in the structured tooltip instead of
       // an overflowing in-circle badge.
       const totalCount = executionCounts?.get(entry.control.id) ?? 0;
+      const isThrottled = throttledControlIds?.has(entry.control.id) ?? false;
 
       return (
         <button
@@ -135,7 +138,7 @@ export function MouseVisualization({
             isDragOver ? " mouse-visual__hotspot--dragover" : ""
           }${isDimmed ? " mouse-visual__hotspot--dimmed" : ""}${
             hasConflict ? " mouse-visual__hotspot--conflict" : ""
-          }`}
+          }${isThrottled ? " mouse-visual__hotspot--throttled" : ""}`}
           ref={(el) => {
             if (el) {
               el.style.setProperty("--hotspot-left", `${pos.left}%`);

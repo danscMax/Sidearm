@@ -256,6 +256,7 @@ export function buildAction(params: {
 export interface InitialPickerState extends PickerDrafts {
   triggerMode: TriggerMode;
   chordPartner: string;
+  throttleMs: number;
 }
 
 /** Seed the text draft: a libraryRef action resolves its snippet so the textarea
@@ -326,6 +327,7 @@ export function createInitialDrafts(
     conditions: existingAction?.conditions ?? [],
     triggerMode: binding?.triggerMode ?? "press",
     chordPartner: binding?.chordPartner ?? "",
+    throttleMs: binding?.throttleMs ?? 0,
   };
 }
 

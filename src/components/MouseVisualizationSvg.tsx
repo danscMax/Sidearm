@@ -247,6 +247,7 @@ export function MouseVisualizationSvg({
   onContextMenu,
   executionCounts,
   executionHistory,
+  throttledControlIds,
   heatmapEnabled,
   onDropBinding,
 }: MouseVisualizationProps) {
@@ -352,6 +353,7 @@ export function MouseVisualizationSvg({
     // Mirror the photo view: dim controls outside the active search match, and
     // ring controls whose binding conflicts with another on the same layer.
     const isDimmed = matchedControlIds != null && !matchedControlIds.has(id);
+    const isThrottled = throttledControlIds?.has(id) ?? false;
     const hasConflict = !!entry?.binding && (conflictBindingIds?.has(entry.binding.id) ?? false);
     const colors = buttonColors(entry, isSelected, isHovered);
     const heat = heatFill(id);
@@ -373,7 +375,9 @@ export function MouseVisualizationSvg({
         key={id}
         className={`mouse-svg__btn${hasDragBinding ? " mouse-svg__btn--grab" : ""}${
           isDimmed ? " mouse-svg__btn--dimmed" : ""
-        }${hasConflict ? " mouse-svg__btn--conflict" : ""}`}
+        }${hasConflict ? " mouse-svg__btn--conflict" : ""}${
+          isThrottled ? " mouse-svg__btn--throttled" : ""
+        }`}
         data-control-id={id}
         {...getInteractionProps(id)}
       >

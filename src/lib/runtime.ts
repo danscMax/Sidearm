@@ -102,6 +102,13 @@ export interface ActionExecutionEvent {
   executedAt: number;
 }
 
+/** Emitted when a binding's re-trigger was skipped inside its throttle window. */
+export interface ThrottleBlockedEvent {
+  controlId?: ControlId;
+  bindingId?: string;
+  remainingMs: number;
+}
+
 /** One past execution of a binding, kept FE-only (not persisted) for the
  *  per-control timeline shown in tooltips and the properties panel. */
 export interface ExecutionRecord {

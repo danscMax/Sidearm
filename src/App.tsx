@@ -756,6 +756,7 @@ function App() {
                 setActionPickerOpen={setActionPickerOpen}
                 executionCounts={runtime.executionCounts}
                 executionHistory={runtime.executionHistory}
+                throttledControlIds={runtime.throttledControlIds}
                 heatmapEnabledRef={heatmapEnabledRef}
                 showToast={showToast}
               />

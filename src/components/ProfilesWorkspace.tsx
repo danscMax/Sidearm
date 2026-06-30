@@ -59,6 +59,7 @@ export interface ProfilesWorkspaceProps {
   setActionPickerOpen: (open: boolean) => void;
   executionCounts?: Map<string, number>;
   executionHistory?: Map<string, ExecutionRecord[]>;
+  throttledControlIds?: Set<string>;
   heatmapEnabledRef?: RefObject<boolean>;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
 }
@@ -92,6 +93,7 @@ export function ProfilesWorkspace({
   setActionPickerOpen,
   executionCounts,
   executionHistory,
+  throttledControlIds,
   heatmapEnabledRef,
   showToast,
 }: ProfilesWorkspaceProps) {
@@ -467,6 +469,7 @@ export function ProfilesWorkspace({
           onSelectLayer={onSelectLayer}
           executionCounts={executionCounts}
           executionHistory={executionHistory}
+          throttledControlIds={throttledControlIds}
           heatmapEnabled={heatmapEnabled}
           onDropBinding={handleDropBinding}
         />

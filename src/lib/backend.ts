@@ -32,6 +32,7 @@ import type {
   RuntimeErrorEventName,
   RuntimeEventName,
   RuntimeStateSummary,
+  ThrottleBlockedEvent,
   WindowCaptureResult,
   WindowResolutionEventName,
 } from "./runtime";
@@ -352,6 +353,13 @@ export async function listenSingleInstanceBlocked(
   onBlocked: () => void,
 ): Promise<UnlistenFn> {
   return listenEvent("single_instance_blocked", onBlocked);
+}
+
+/** Fires when a binding's re-trigger was skipped inside its throttle window. */
+export async function listenThrottleBlocked(
+  onPayload: (payload: ThrottleBlockedEvent) => void,
+): Promise<UnlistenFn> {
+  return listenEvent("throttle_blocked", onPayload);
 }
 
 export async function listenWindowResolutionEvent(

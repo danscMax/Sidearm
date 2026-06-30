@@ -16,6 +16,7 @@ import {
   listenEncodedKeyEvent,
   listenRuntimeErrorEvent,
   listenRuntimeEvent,
+  listenThrottleBlocked,
   listenWindowResolutionEvent,
   normalizeCommandError,
   previewResolution,
@@ -35,6 +36,7 @@ import type {
   ResolvedInputPreview,
   RuntimeErrorEvent,
   RuntimeStateSummary,
+  ThrottleBlockedEvent,
   WindowCaptureResult,
 } from "../lib/runtime";
 import { idleRuntimeStateSummary } from "../lib/runtime";
@@ -54,6 +56,8 @@ export interface RuntimeControl {
   lastEncodedKey: EncodedKeyEvent | null;
   executionCounts: Map<string, number>;
   executionHistory: Map<string, ExecutionRecord[]>;
+  /** Controls currently flagged as throttle-blocked (transient, auto-clears). */
+  throttledControlIds: Set<string>;
 
   // Actions
   ensureRuntimeStarted: () => Promise<void>;
@@ -95,6 +99,8 @@ export function useRuntime(deps: {
   const [executionHistory, setExecutionHistory] = useState<Map<string, ExecutionRecord[]>>(
     new Map(),
   );
+  const [throttledControlIds, setThrottledControlIds] = useState<Set<string>>(new Set());
+  const throttleTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -165,6 +171,27 @@ export function useRuntime(deps: {
     });
   });
 
+  // Transiently flag a throttle-blocked control so the visualization can grey it
+  // out; auto-clear once the throttle window elapses (min 150ms so it's visible).
+  const handleThrottleBlocked = useEffectEvent((event: ThrottleBlockedEvent) => {
+    const cid = event.controlId;
+    if (!cid) return;
+    startTransition(() => {
+      setThrottledControlIds((prev) => new Set(prev).add(cid));
+    });
+    const existing = throttleTimersRef.current.get(cid);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      throttleTimersRef.current.delete(cid);
+      setThrottledControlIds((prev) => {
+        const next = new Set(prev);
+        next.delete(cid);
+        return next;
+      });
+    }, Math.max(150, event.remainingMs));
+    throttleTimersRef.current.set(cid, timer);
+  });
+
   // Push-based debug log: backend emits a `debug_log_appended` event for
   // each new entry, so we append locally instead of polling the full buffer.
   // Cap matches DEBUG_LOG_LIMIT on the Rust side (1000).
@@ -194,6 +221,7 @@ export function useRuntime(deps: {
         listenActionExecutionEvent("action_executed", handleActionExecutionEvent),
         listenRuntimeErrorEvent("runtime_error", handleRuntimeErrorEvent),
         listenDebugLogAppendedEvent(handleDebugLogAppended),
+        listenThrottleBlocked(handleThrottleBlocked),
       ]);
 
       if (disposed) {
@@ -216,6 +244,8 @@ export function useRuntime(deps: {
         clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
+      throttleTimersRef.current.forEach((timer) => clearTimeout(timer));
+      throttleTimersRef.current.clear();
       unlistenFns.forEach((unlisten) => {
         void unlisten();
       });
@@ -358,6 +388,7 @@ export function useRuntime(deps: {
     lastEncodedKey,
     executionCounts,
     executionHistory,
+    throttledControlIds,
     ensureRuntimeStarted,
     clearRuntimeError,
     clearExecutionCounts,

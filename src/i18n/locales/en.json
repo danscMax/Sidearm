@@ -272,7 +272,8 @@
     "importError": "Couldn't read the file",
     "importInvalid": "Not a valid Sidearm binding file",
     "importConfirm": "Import \"{{action}}\" onto this button? Referenced snippets: {{snippets}}. Any existing binding on this button will be replaced.",
-    "importConfirmLabel": "Import"
+    "importConfirmLabel": "Import",
+    "transferMenuBlocked": "Menu bindings can't be exported or copied yet — their sub-actions aren't carried."
   },
   "verification": {
     "pending": "Pending",

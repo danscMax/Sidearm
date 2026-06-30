@@ -130,6 +130,14 @@ export function ProfilesWorkspace({
   // Export one binding to a portable .sidearm-binding.json file.
   async function handleExportBinding(bindingId: string) {
     const binding = activeConfig.bindings.find((b) => b.id === bindingId);
+    // menu actions reference child actions by id; the single-binding format
+    // doesn't carry those children, so block transfer rather than ship a
+    // dangling-reference file. ponytail: deep child-cloning deferred.
+    const action = binding ? activeConfig.actions.find((a) => a.id === binding.actionId) : null;
+    if (action?.type === "menu") {
+      showToast(t("binding.transferMenuBlocked"), "warning");
+      return;
+    }
     const name = (binding?.label?.trim() || "binding").replace(/[^\w.-]+/g, "-").toLowerCase();
     try {
       const ok = await exportBindingToFile(activeConfig, bindingId, t("binding.exportTitle"), name);
@@ -163,8 +171,15 @@ export function ProfilesWorkspace({
       }),
       confirmLabel: t("binding.importConfirmLabel"),
       onConfirm: () => {
-        updateDraft((c) => applyBindingImport(c, data, effectiveProfileId, selectedLayer, controlId));
-        showToast(t("binding.imported"), "success");
+        try {
+          updateDraft((c) => applyBindingImport(c, data, effectiveProfileId, selectedLayer, controlId));
+          showToast(t("binding.imported"), "success");
+        } catch {
+          // Defense-in-depth: the structural guard above rejects the realistic
+          // malformed files, but a payload that's well-shaped yet inconsistent
+          // could still throw here — surface it instead of a broken draft.
+          showToast(t("binding.importError"), "warning");
+        }
         setConfirmModal(null);
       },
     });
@@ -889,6 +904,10 @@ export function ProfilesWorkspace({
         const binding = bindingCtxMenu.bindingId
           ? activeConfig.bindings.find((b) => b.id === bindingCtxMenu.bindingId) ?? null
           : null;
+        // menu bindings reference child actions by id that cross-profile copy
+        // doesn't carry/clone, so block their transfer (see handleExportBinding).
+        const isMenuBinding =
+          !!binding && activeConfig.actions.find((a) => a.id === binding.actionId)?.type === "menu";
         const cid = bindingCtxMenu.controlId;
         const otherLayer: Layer = selectedLayer === "hypershift" ? "standard" : "hypershift";
         const otherLayerLabel = otherLayer === "hypershift" ? t("layer.hypershift") : t("layer.standard");
@@ -927,12 +946,15 @@ export function ProfilesWorkspace({
                   label: t("assignments.copyToProfile", { profile: p.name }),
                   disabled: !binding,
                   onClick: () => {
-                    if (binding) {
-                      updateDraft((c) =>
-                        copyBindingBetweenProfiles(c, binding.id, p.id, selectedLayer, cid),
-                      );
-                      showToast(t("assignments.copiedToProfile", { profile: p.name }), "success");
+                    if (!binding) return;
+                    if (isMenuBinding) {
+                      showToast(t("binding.transferMenuBlocked"), "warning");
+                      return;
                     }
+                    updateDraft((c) =>
+                      copyBindingBetweenProfiles(c, binding.id, p.id, selectedLayer, cid),
+                    );
+                    showToast(t("assignments.copiedToProfile", { profile: p.name }), "success");
                   },
                 })),
               {

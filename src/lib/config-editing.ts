@@ -257,10 +257,21 @@ export function moveAppMappingToProfile(
   }
 
   const destProfileId = target.profileId;
-  const moved = { ...dragged, profileId: destProfileId };
   const dest = config.appMappings
     .filter((m) => m.profileId === destProfileId)
     .sort((a, b) => b.priority - a.priority || a.exe.localeCompare(b.exe));
+
+  // appMapping ids are exe-derived, NOT profile-scoped, so the same exe mapped
+  // in two profiles already shares an id. If the destination already maps this
+  // exe, give the moved entry a fresh id — otherwise two identical ids collide
+  // in one profile and the rewrite below would clobber both.
+  const moved = dest.some((m) => m.id === dragged.id)
+    ? {
+        ...dragged,
+        profileId: destProfileId,
+        id: nextUniqueId(config.appMappings.map((m) => m.id), dragged.id),
+      }
+    : { ...dragged, profileId: destProfileId };
 
   const toIdx = dest.findIndex((m) => m.id === targetId);
   const reordered = [...dest];
@@ -273,8 +284,10 @@ export function moveAppMappingToProfile(
   return {
     ...config,
     appMappings: config.appMappings.map((m) => {
-      if (m.id === draggedId) {
-        return { ...moved, priority: priorityById.get(draggedId) ?? moved.priority };
+      // Reference-match the dragged entry: in the collision case another entry
+      // shares its old id, so matching by id would rewrite both.
+      if (m === dragged) {
+        return { ...moved, priority: priorityById.get(moved.id) ?? moved.priority };
       }
       if (m.profileId === destProfileId) {
         return { ...m, priority: priorityById.get(m.id) ?? m.priority };
@@ -1108,18 +1121,33 @@ export function buildBindingExport(config: AppConfig, bindingId: string): Bindin
   };
 }
 
-/** Structural guard for a parsed single-binding export envelope. */
+/** Structural guard for a parsed single-binding export envelope.
+ *
+ * This is a trust boundary — the file is user-supplied (hand-edited or stale).
+ * A shallow "is an object" check let an empty/partial action or binding through,
+ * which then either threw on `action.payload.*` or produced a schema-invalid
+ * binding (missing required `label`) that silently broke the next save. So we
+ * require the fields `applyBindingImport` actually reads or that survive to the
+ * saved record. Per-type payload correctness is left to the schema validator on
+ * save (the final backstop); this just rejects the realistic malformed files. */
 export function isValidBindingExport(raw: unknown): raw is BindingExportData {
   if (typeof raw !== "object" || raw === null) return false;
   const r = raw as Record<string, unknown>;
-  return (
-    r.kind === "binding" &&
-    typeof r.action === "object" &&
-    r.action !== null &&
-    typeof r.binding === "object" &&
-    r.binding !== null &&
-    Array.isArray(r.referencedSnippets)
-  );
+  if (r.kind !== "binding" || !Array.isArray(r.referencedSnippets)) return false;
+
+  const action = r.action as Record<string, unknown> | null;
+  if (typeof action !== "object" || action === null) return false;
+  if (typeof action.type !== "string") return false;
+  if (typeof action.displayName !== "string") return false;
+  if (typeof action.payload !== "object" || action.payload === null) return false;
+
+  const binding = r.binding as Record<string, unknown> | null;
+  if (typeof binding !== "object" || binding === null) return false;
+  // `label` survives import unchanged and is schema-required; id/controlId/etc.
+  // are overwritten by the target slot, so they need not be present here.
+  if (typeof binding.label !== "string") return false;
+
+  return true;
 }
 
 /** Apply an imported binding to a target slot: clone the action with a fresh id,

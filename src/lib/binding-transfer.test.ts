@@ -136,7 +136,37 @@ describe("single-binding transfer round-trip", () => {
   it("rejects an invalid export envelope", () => {
     expect(isValidBindingExport(null)).toBe(false);
     expect(isValidBindingExport({ kind: "snippet" })).toBe(false);
-    expect(isValidBindingExport({ kind: "binding", action: {}, binding: {}, referencedSnippets: [] })).toBe(true);
+    // Empty action/binding used to slip through and break the next save / throw.
+    expect(isValidBindingExport({ kind: "binding", action: {}, binding: {}, referencedSnippets: [] })).toBe(false);
+    // Action without a payload would throw on action.payload.* during import.
+    expect(
+      isValidBindingExport({
+        kind: "binding",
+        action: { type: "textSnippet", displayName: "x" },
+        binding: { label: "L" },
+        referencedSnippets: [],
+      }),
+    ).toBe(false);
+    // Binding without the schema-required label would break the next save.
+    expect(
+      isValidBindingExport({
+        kind: "binding",
+        action: { type: "shortcut", displayName: "x", payload: {} },
+        binding: {},
+        referencedSnippets: [],
+      }),
+    ).toBe(false);
+  });
+
+  it("accepts a well-formed export envelope", () => {
+    expect(
+      isValidBindingExport({
+        kind: "binding",
+        action: { type: "shortcut", displayName: "Paste", payload: { key: "V", ctrl: true } },
+        binding: { label: "Paste", controlId: "thumb_01", actionId: "action-1", enabled: true },
+        referencedSnippets: [],
+      }),
+    ).toBe(true);
   });
 });
 

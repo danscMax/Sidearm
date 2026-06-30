@@ -523,6 +523,24 @@ describe("moveAppMappingToProfile", () => {
     expect(result).toBe(config);
   });
 
+  it("regenerates the id when the destination already maps the same exe", () => {
+    // appMapping ids are exe-derived, so the same exe in two profiles shares an
+    // id. Moving it into the profile that already maps it must not duplicate ids.
+    const config: AppConfig = {
+      ...createMinimalConfig(),
+      appMappings: [
+        makeAppMapping({ id: "app-foo", profileId: "p1", exe: "foo.exe", priority: 10 }),
+        makeAppMapping({ id: "app-bar", profileId: "p2", exe: "bar.exe", priority: 20 }),
+        makeAppMapping({ id: "app-foo", profileId: "p2", exe: "foo.exe", priority: 10 }),
+      ],
+    };
+    const result = moveAppMappingToProfile(config, "app-foo", "app-bar");
+    const ids = result.appMappings.map((m) => m.id);
+    expect(new Set(ids).size).toBe(ids.length); // no duplicate ids
+    expect(result.appMappings.filter((m) => m.profileId === "p1")).toHaveLength(0);
+    expect(result.appMappings.filter((m) => m.profileId === "p2")).toHaveLength(3);
+  });
+
   it("does not mutate the original config", () => {
     const config = crossProfile();
     const before = config.appMappings.map((m) => ({ ...m }));

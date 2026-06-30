@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   applyBindingImport,
   buildBindingExport,
+  copyBindingBetweenProfiles,
   isValidBindingExport,
 } from "./config-editing";
 import type { Action, AppConfig, Binding, ControlId, SnippetLibraryItem } from "./config";
@@ -136,5 +137,53 @@ describe("single-binding transfer round-trip", () => {
     expect(isValidBindingExport(null)).toBe(false);
     expect(isValidBindingExport({ kind: "snippet" })).toBe(false);
     expect(isValidBindingExport({ kind: "binding", action: {}, binding: {}, referencedSnippets: [] })).toBe(true);
+  });
+});
+
+describe("copyBindingBetweenProfiles", () => {
+  it("copies a shortcut binding to another profile, leaving the source intact", () => {
+    const config = minimalConfig({
+      bindings: [binding()],
+      actions: [shortcutAction("action-1", "Paste")],
+    });
+    const out = copyBindingBetweenProfiles(config, "binding-1", "code", "standard", "thumb_01" as ControlId);
+
+    expect(out.bindings.filter((b) => b.profileId === "main")).toHaveLength(1); // source kept
+    const copied = out.bindings.find((b) => b.profileId === "code");
+    expect(copied).toBeDefined();
+    expect(copied!.actionId).not.toBe("action-1");
+    expect(out.actions.find((a) => a.id === copied!.actionId)?.displayName).toBe("Paste");
+  });
+
+  it("keeps a libraryRef snippet SHARED (no duplication) across profiles", () => {
+    const snippet: SnippetLibraryItem = {
+      id: "snip-1",
+      name: "Greeting",
+      text: "Hello",
+      pasteMode: "sendText",
+      tags: [],
+    };
+    const action = {
+      id: "action-1",
+      type: "textSnippet",
+      payload: { source: "libraryRef", snippetId: "snip-1" },
+      displayName: "Greeting",
+    } as Action;
+    const config = minimalConfig({
+      bindings: [binding({ actionId: "action-1" })],
+      actions: [action],
+      snippetLibrary: [snippet],
+    });
+
+    const out = copyBindingBetweenProfiles(config, "binding-1", "code", "standard", "thumb_03" as ControlId);
+
+    // Library global → the copy points at the SAME snippet, not a duplicate.
+    expect(out.snippetLibrary).toHaveLength(1);
+    const copied = out.actions.find((a) => a.id !== "action-1");
+    expect(
+      copied?.type === "textSnippet" && copied.payload.source === "libraryRef"
+        ? copied.payload.snippetId
+        : null,
+    ).toBe("snip-1");
   });
 });

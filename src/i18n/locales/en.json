@@ -835,6 +835,8 @@
   "assignments": {
     "copyBinding": "Copy binding",
     "copyToLayer": "Copy to {{layer}}",
+    "copyToProfile": "Copy to: {{profile}}",
+    "copiedToProfile": "Copied to {{profile}}",
     "enable": "Enable",
     "disable": "Disable",
     "clear": "Clear",

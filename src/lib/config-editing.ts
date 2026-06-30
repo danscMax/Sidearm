@@ -1130,6 +1130,52 @@ export function applyBindingImport(
   return { ...config, actions, bindings: nextBindings, snippetLibrary: prunedSnippets };
 }
 
+/** Copy a binding to the SAME slot in another profile. Clones the action with a
+ *  fresh id; a libraryRef snippet stays pointed at the shared library (the
+ *  snippet library is global, not per-profile). Replaces any existing binding on
+ *  the target slot and prunes the orphaned action. */
+export function copyBindingBetweenProfiles(
+  config: AppConfig,
+  sourceBindingId: string,
+  targetProfileId: string,
+  targetLayer: Layer,
+  targetControlId: ControlId,
+): AppConfig {
+  const binding = config.bindings.find((b) => b.id === sourceBindingId);
+  if (!binding) return config;
+  const action = config.actions.find((a) => a.id === binding.actionId);
+  if (!action) return config;
+
+  const newActionId = nextUniqueId(config.actions.map((a) => a.id), `${action.id}-copy`);
+  const newAction: Action = { ...structuredClone(action), id: newActionId };
+
+  const filteredBindings = config.bindings.filter(
+    (b) =>
+      !(
+        b.profileId === targetProfileId &&
+        b.layer === targetLayer &&
+        b.controlId === targetControlId
+      ),
+  );
+  const newBinding: Binding = {
+    ...binding,
+    id: makeBindingId(targetProfileId, targetLayer, targetControlId),
+    profileId: targetProfileId,
+    layer: targetLayer,
+    controlId: targetControlId,
+    actionId: newActionId,
+  };
+  const nextBindings = [...filteredBindings, newBinding];
+
+  const { actions, snippetLibrary } = pruneActionsPreservingSnippets(
+    [...config.actions, newAction],
+    nextBindings,
+    config.snippetLibrary,
+  );
+
+  return { ...config, actions, bindings: nextBindings, snippetLibrary };
+}
+
 export function makeBindingId(
   profileId: string,
   layer: Layer,

@@ -6,6 +6,7 @@ import type { FamilySection, ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import {
   applyBindingImport,
+  copyBindingBetweenProfiles,
   copyBindingFromLayer,
   createAppMapping,
   createAppMappingFromCapture,
@@ -849,6 +850,22 @@ export function ProfilesWorkspace({
                     );
                 },
               },
+              // Copy to another profile (same button/layer). ponytail: flat items —
+              // fine for the usual 2-4 profiles; swap for a picker modal if it grows.
+              ...activeConfig.profiles
+                .filter((p) => p.id !== effectiveProfileId)
+                .map((p) => ({
+                  label: t("assignments.copyToProfile", { profile: p.name }),
+                  disabled: !binding,
+                  onClick: () => {
+                    if (binding) {
+                      updateDraft((c) =>
+                        copyBindingBetweenProfiles(c, binding.id, p.id, selectedLayer, cid),
+                      );
+                      showToast(t("assignments.copiedToProfile", { profile: p.name }), "success");
+                    }
+                  },
+                })),
               {
                 label: binding?.enabled ? t("assignments.disable") : t("assignments.enable"),
                 disabled: !binding,

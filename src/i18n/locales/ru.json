@@ -840,6 +840,8 @@
   "assignments": {
     "copyBinding": "Копировать назначение",
     "copyToLayer": "Копировать на {{layer}}",
+    "copyToProfile": "Копировать в: {{profile}}",
+    "copiedToProfile": "Скопировано в {{profile}}",
     "enable": "Включить",
     "disable": "Отключить",
     "clear": "Очистить",

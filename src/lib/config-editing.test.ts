@@ -23,6 +23,7 @@ import {
   upsertPhysicalControl,
   upsertAppMapping,
   reorderAppMappingPriority,
+  moveAppMappingToProfile,
   upsertSnippetLibraryItem,
   removeSnippetLibraryItem,
   snippetReferencingActions,
@@ -485,6 +486,47 @@ describe("reorderAppMappingPriority", () => {
     const config = threeMappings();
     const before = config.appMappings.map((m) => ({ ...m }));
     reorderAppMappingPriority(config, "c", "a");
+    expect(config.appMappings).toEqual(before);
+  });
+});
+
+describe("moveAppMappingToProfile", () => {
+  function crossProfile(): AppConfig {
+    return {
+      ...createMinimalConfig(),
+      appMappings: [
+        makeAppMapping({ id: "src", profileId: "p1", exe: "a.exe", priority: 10 }),
+        makeAppMapping({ id: "t1", profileId: "p2", exe: "b.exe", priority: 20 }),
+        makeAppMapping({ id: "t2", profileId: "p2", exe: "c.exe", priority: 10 }),
+      ],
+    };
+  }
+
+  it("re-homes the dragged mapping to the target's profile", () => {
+    const result = moveAppMappingToProfile(crossProfile(), "src", "t1");
+    const src = result.appMappings.find((m) => m.id === "src")!;
+    expect(src.profileId).toBe("p2");
+  });
+
+  it("inserts at the target slot and rebalances destination priorities", () => {
+    const result = moveAppMappingToProfile(crossProfile(), "src", "t1");
+    const dest = result.appMappings
+      .filter((m) => m.profileId === "p2")
+      .sort((x, y) => y.priority - x.priority);
+    expect(dest.map((m) => m.id)).toEqual(["src", "t1", "t2"]);
+    expect(dest.map((m) => m.priority)).toEqual([30, 20, 10]);
+  });
+
+  it("is a no-op when dragged and target share a profile", () => {
+    const config = crossProfile();
+    const result = moveAppMappingToProfile(config, "t1", "t2");
+    expect(result).toBe(config);
+  });
+
+  it("does not mutate the original config", () => {
+    const config = crossProfile();
+    const before = config.appMappings.map((m) => ({ ...m }));
+    moveAppMappingToProfile(config, "src", "t1");
     expect(config.appMappings).toEqual(before);
   });
 });

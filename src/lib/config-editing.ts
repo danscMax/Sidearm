@@ -235,6 +235,55 @@ export function reorderAppMappingPriority(
   };
 }
 
+/**
+ * Move an appMapping to another profile, inserting it at `targetId`'s slot
+ * (which must belong to the destination profile) and rebalancing that
+ * profile's priorities. Only the dragged mapping's profileId/priority change.
+ *
+ * No-op if IDs are missing or already share a profile (use
+ * `reorderAppMappingPriority` for same-profile moves).
+ */
+export function moveAppMappingToProfile(
+  config: AppConfig,
+  draggedId: string,
+  targetId: string,
+): AppConfig {
+  if (draggedId === targetId) return config;
+
+  const dragged = config.appMappings.find((m) => m.id === draggedId);
+  const target = config.appMappings.find((m) => m.id === targetId);
+  if (!dragged || !target || dragged.profileId === target.profileId) {
+    return config;
+  }
+
+  const destProfileId = target.profileId;
+  const moved = { ...dragged, profileId: destProfileId };
+  const dest = config.appMappings
+    .filter((m) => m.profileId === destProfileId)
+    .sort((a, b) => b.priority - a.priority || a.exe.localeCompare(b.exe));
+
+  const toIdx = dest.findIndex((m) => m.id === targetId);
+  const reordered = [...dest];
+  reordered.splice(toIdx === -1 ? dest.length : toIdx, 0, moved);
+
+  const total = reordered.length;
+  const priorityById = new Map<string, number>();
+  reordered.forEach((m, i) => priorityById.set(m.id, (total - i) * 10));
+
+  return {
+    ...config,
+    appMappings: config.appMappings.map((m) => {
+      if (m.id === draggedId) {
+        return { ...moved, priority: priorityById.get(draggedId) ?? moved.priority };
+      }
+      if (m.profileId === destProfileId) {
+        return { ...m, priority: priorityById.get(m.id) ?? m.priority };
+      }
+      return m;
+    }),
+  };
+}
+
 export function upsertAppMapping(config: AppConfig, nextAppMapping: AppMapping): AppConfig {
   const appMappingIndex = config.appMappings.findIndex(
     (mapping) => mapping.id === nextAppMapping.id,

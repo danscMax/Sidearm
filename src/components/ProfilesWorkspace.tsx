@@ -17,6 +17,7 @@ import {
   importProfile,
   removeBinding,
   reorderAppMappingPriority,
+  moveAppMappingToProfile,
   upsertAppMapping,
   upsertBinding,
 } from "../lib/config-editing";
@@ -712,19 +713,35 @@ export function ProfilesWorkspace({
                 const dragged = draggingMappingId
                   ? activeConfig.appMappings.find((m) => m.id === draggingMappingId)
                   : null;
-                // ponytail: priority reorder is per-profile; cross-profile move is
-                // deferred to 4.2 (needs a confirm). Skip drops across groups.
-                if (
-                  dragged &&
-                  dragged.id !== mapping.id &&
-                  dragged.profileId === mapping.profileId
-                ) {
+                setDraggingMappingId(null);
+                setDragOverMappingId(null);
+                if (!dragged || dragged.id === mapping.id) return;
+                if (dragged.profileId === mapping.profileId) {
                   updateDraft((c) =>
                     reorderAppMappingPriority(c, dragged.id, mapping.id),
                   );
+                  return;
                 }
-                setDraggingMappingId(null);
-                setDragOverMappingId(null);
+                // Cross-profile move (only reachable in all-rules view) — re-homes
+                // the rule to another profile, so confirm before committing.
+                const toName =
+                  profilesById.get(mapping.profileId)?.name ?? mapping.profileId;
+                setConfirmModal({
+                  title: t("profile.moveTitle"),
+                  message: t("profile.moveConfirm", {
+                    exe: dragged.exe,
+                    from: profilesById.get(dragged.profileId)?.name ?? dragged.profileId,
+                    to: toName,
+                  }),
+                  confirmLabel: t("profile.moveConfirmLabel"),
+                  onConfirm: () => {
+                    updateDraft((c) =>
+                      moveAppMappingToProfile(c, dragged.id, mapping.id),
+                    );
+                    showToast(t("profile.moved", { to: toName }), "success");
+                    setConfirmModal(null);
+                  },
+                });
               }}
               onDragEnd={() => {
                 setDraggingMappingId(null);

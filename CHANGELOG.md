@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-06-30
+
+### Added
+- **Single-instance enforcement.** Launching Sidearm while it is already running
+  no longer starts a second copy — the existing window is surfaced (restored and
+  focused) instead. This prevents two independent instances from fighting over
+  the keyboard hook or clobbering each other's config (e.g. admin-autostart
+  racing a manual launch). The capture helper subprocess is unaffected.
+
 ## [0.6.2] — 2026-06-28
 
 ### Fixed

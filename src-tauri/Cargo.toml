@@ -1,6 +1,6 @@
 [package]
 name = "sidearm"
-version = "0.6.2"
+version = "0.6.3"
 description = "Desktop workflow studio for multi-button mice"
 authors = ["User"]
 edition = "2024"
@@ -27,6 +27,7 @@ tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
 tauri-plugin-log = "2"
 log = "0.4"
 env_logger = "0.11"

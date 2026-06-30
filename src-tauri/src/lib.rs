@@ -2233,6 +2233,24 @@ pub fn run() {
     let log_rx_for_setup = Mutex::new(Some((log_rx, log_send_pending_for_bridge)));
 
     tauri::Builder::default()
+        // Single-instance guard MUST be the first plugin registered. A second
+        // independent main instance (e.g. admin-autostart racing a manual
+        // launch) would fight over the keyboard hook and clobber config, so we
+        // surface the already-running window instead. The capture helper is
+        // exempt: it returns at main.rs on `--capture-helper` before the Tauri
+        // Builder ever runs, so it never acquires this lock.
+        // ponytail: relaunch_as_admin spawns a fresh elevated Sidearm.exe then
+        // app.exit(0)s immediately, freeing this lock before the elevated
+        // cold-start checks it (the old process wins the race virtually always).
+        // If that race ever flips, pass a sentinel arg and exit here instead of
+        // focusing. Upgrade path noted, not built — no evidence it's needed.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }))
         .plugin(
             tauri_plugin_log::Builder::new()
                 .clear_targets()

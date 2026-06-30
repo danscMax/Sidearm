@@ -1176,6 +1176,26 @@ export function copyBindingBetweenProfiles(
   return { ...config, actions, bindings: nextBindings, snippetLibrary };
 }
 
+/**
+ * Conflict merge: keep one binding of a conflict group enabled and disable the
+ * rest. Non-destructive — actions/snippets are untouched, only `enabled` flips.
+ */
+export function keepBindingDisableOthers(
+  config: AppConfig,
+  groupBindingIds: string[],
+  keepBindingId: string,
+): AppConfig {
+  let next = config;
+  for (const id of groupBindingIds) {
+    if (id === keepBindingId) continue;
+    const binding = next.bindings.find((b) => b.id === id);
+    if (binding && binding.enabled) {
+      next = upsertBinding(next, { ...binding, enabled: false });
+    }
+  }
+  return next;
+}
+
 export function makeBindingId(
   profileId: string,
   layer: Layer,

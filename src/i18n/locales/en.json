@@ -568,7 +568,10 @@
   "conflict": {
     "banner_one": "{{count}} shortcut conflict on this layer",
     "banner_other": "{{count}} shortcut conflicts on this layer",
-    "group": "{{signature}} — {{controls}}"
+    "group": "{{signature}} — {{controls}}",
+    "keepThis": "Keep {{label}}",
+    "kept_one": "Kept {{label}}, disabled {{count}} other",
+    "kept_other": "Kept {{label}}, disabled {{count}} others"
   },
   "command": {
     "undo": "Undo",

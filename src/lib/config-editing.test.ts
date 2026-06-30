@@ -40,6 +40,7 @@ import {
   duplicateProfile,
   duplicateBinding,
   copyBindingFromLayer,
+  keepBindingDisableOthers,
   removeBinding,
   expectedEncodedKeyForControl,
   makeBindingId,
@@ -255,6 +256,31 @@ describe("upsertBinding", () => {
     expect(result.bindings).toHaveLength(2);
     expect(result.bindings[0]).toEqual(existing);
     expect(result.bindings[1]).toEqual(newBinding);
+  });
+});
+
+describe("keepBindingDisableOthers", () => {
+  it("disables every group binding except the kept one", () => {
+    const b1 = makeBinding({ id: "b1", controlId: "thumb_01", enabled: true });
+    const b2 = makeBinding({ id: "b2", controlId: "thumb_02", enabled: true });
+    const b3 = makeBinding({ id: "b3", controlId: "thumb_03", enabled: true });
+    const config = { ...createMinimalConfig(), bindings: [b1, b2, b3] };
+
+    const result = keepBindingDisableOthers(config, ["b1", "b2", "b3"], "b2");
+
+    const byId = new Map(result.bindings.map((b) => [b.id, b]));
+    expect(byId.get("b1")!.enabled).toBe(false);
+    expect(byId.get("b2")!.enabled).toBe(true);
+    expect(byId.get("b3")!.enabled).toBe(false);
+  });
+
+  it("does not mutate the original config", () => {
+    const b1 = makeBinding({ id: "b1", enabled: true });
+    const b2 = makeBinding({ id: "b2", controlId: "thumb_02", enabled: true });
+    const config = { ...createMinimalConfig(), bindings: [b1, b2] };
+
+    keepBindingDisableOthers(config, ["b1", "b2"], "b1");
+    expect(config.bindings.every((b) => b.enabled)).toBe(true);
   });
 });
 

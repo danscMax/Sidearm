@@ -7,6 +7,7 @@ import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import {
   applyBindingImport,
   copyBindingBetweenProfiles,
+  keepBindingDisableOthers,
   copyBindingFromLayer,
   createAppMapping,
   createAppMappingFromCapture,
@@ -214,6 +215,19 @@ export function ProfilesWorkspace({
       ),
     [activeConfig, effectiveProfileId, selectedLayer],
   );
+
+  // Conflict merge: keep one binding enabled, disable the rest of its group.
+  const handleKeepBinding = (
+    bindingIds: string[],
+    keepBindingId: string,
+    keptLabel: string,
+  ) => {
+    updateDraft((c) => keepBindingDisableOthers(c, bindingIds, keepBindingId));
+    showToast(
+      t("conflict.kept", { label: keptLabel, count: bindingIds.length - 1 }),
+      "success",
+    );
+  };
 
   const searchQuery = bindingSearch.trim();
   const matchedControlIds = useMemo(() => {
@@ -520,14 +534,31 @@ export function ProfilesWorkspace({
         <Notice variant="warning" className="profiles__conflict-banner">
           <strong>{t("conflict.banner", { count: layerConflicts.length })}</strong>
           <ul>
-            {layerConflicts.map((g) => (
-              <li key={`${g.layer}:${g.signature}`}>
-                {t("conflict.group", {
-                  signature: g.signature,
-                  controls: g.bindings.map((b) => b.label).join(", "),
-                })}
-              </li>
-            ))}
+            {layerConflicts.map((g) => {
+              const bindingIds = g.bindings.map((b) => b.bindingId);
+              return (
+                <li key={`${g.layer}:${g.signature}`}>
+                  {t("conflict.group", {
+                    signature: g.signature,
+                    controls: g.bindings.map((b) => b.label).join(", "),
+                  })}
+                  <span className="profiles__conflict-actions">
+                    {g.bindings.map((b) => (
+                      <button
+                        key={b.bindingId}
+                        type="button"
+                        className="profiles__conflict-keep"
+                        onClick={() =>
+                          handleKeepBinding(bindingIds, b.bindingId, b.label)
+                        }
+                      >
+                        {t("conflict.keepThis", { label: b.label })}
+                      </button>
+                    ))}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </Notice>
       ) : null}

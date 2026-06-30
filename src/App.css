@@ -3766,6 +3766,25 @@ code {
   margin: 6px 0 0;
   padding-left: 18px;
 }
+.profiles__conflict-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: 8px;
+}
+.profiles__conflict-keep {
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+  cursor: pointer;
+}
+.profiles__conflict-keep:hover {
+  background: var(--c-accent-dim);
+  border-color: var(--c-border-hover);
+}
 
 /* Cross-profile search results list */
 .profiles__search-results {

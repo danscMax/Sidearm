@@ -573,7 +573,11 @@
     "banner_one": "{{count}} конфликт сочетаний на этом слое",
     "banner_few": "{{count}} конфликта сочетаний на этом слое",
     "banner_many": "{{count}} конфликтов сочетаний на этом слое",
-    "group": "{{signature}} — {{controls}}"
+    "group": "{{signature}} — {{controls}}",
+    "keepThis": "Оставить {{label}}",
+    "kept_one": "Оставлен {{label}}, отключён {{count}} другой",
+    "kept_few": "Оставлен {{label}}, отключено {{count}} других",
+    "kept_many": "Оставлен {{label}}, отключено {{count}} других"
   },
   "command": {
     "undo": "Отменить",

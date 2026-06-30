@@ -52,7 +52,7 @@ use resolver::ResolvedInputPreview;
 use runtime::{
     DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
     EVENT_CONTROL_RESOLVED, EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-    EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
+    EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED, EVENT_SINGLE_INSTANCE_BLOCKED,
 };
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -374,17 +374,26 @@ const MAX_FULL_CONFIG_IMPORT_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 /// profiles, autostart scripts, or `.lnk`/`.ps1` files now that the path is no
 /// longer confined to the home directory (preserves the P2-2 fix).
 fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
+    validate_user_path_with_ext(path, &["json"], "File must have a .json extension.")
+}
+
+/// As [`validate_user_file_path`], plus a case-insensitive extension whitelist.
+/// Snippet export reuses this with inert text formats (`md`/`txt`) — still no
+/// executable/shell extensions, preserving the P2-2 fix.
+fn validate_user_path_with_ext(
+    path: &str,
+    allowed: &[&str],
+    reject_message: &'static str,
+) -> Result<PathBuf, CommandError> {
     let validated = validate_user_file_path(path)?;
-    let is_json = validated
+    let ext_ok = validated
         .extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"));
-    if !is_json {
-        return Err(CommandError::new(
-            "invalid_path",
-            "File must have a .json extension.",
-            None,
-        ));
+        .is_some_and(|extension| {
+            allowed.iter().any(|a| extension.eq_ignore_ascii_case(a))
+        });
+    if !ext_ok {
+        return Err(CommandError::new("invalid_path", reject_message, None));
     }
     Ok(validated)
 }
@@ -465,6 +474,28 @@ async fn export_profile(path: String, contents: String) -> Result<(), CommandErr
 #[tauri::command]
 async fn import_profile(path: String) -> Result<String, CommandError> {
     read_user_json(path, "import_profile").await
+}
+
+/// Export the snippet library to a user-chosen `.json` / `.md` / `.txt` file.
+/// Looser extension whitelist than profiles (still inert text only); the FE
+/// serializes the contents per chosen format.
+#[tauri::command]
+async fn export_snippets(path: String, contents: String) -> Result<(), CommandError> {
+    let validated_path = validate_user_path_with_ext(
+        &path,
+        &["json", "md", "txt"],
+        "Snippet export must be a .json, .md, or .txt file.",
+    )?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(parent) = validated_path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| CommandError::internal(format!("Failed to create directory: {e}")))?;
+        }
+        fs::write(&validated_path, contents)
+            .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("export_snippets task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -2250,6 +2281,10 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+            // Surface the blocked duplicate launch: log lands in Diagnostics, the
+            // event drives a toast in the existing window.
+            log::warn!("Duplicate launch ignored — focused the existing window");
+            let _ = app.emit(EVENT_SINGLE_INSTANCE_BLOCKED, ());
         }))
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -2628,6 +2663,7 @@ pub fn run() {
             get_exe_icon,
             export_profile,
             import_profile,
+            export_snippets,
             start_macro_recording,
             record_keystroke,
             stop_macro_recording

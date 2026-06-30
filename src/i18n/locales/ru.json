@@ -597,7 +597,22 @@
     "badgeChord": "Аккорд",
     "tabAll": "Все кнопки",
     "tabTop": "Верхняя панель",
-    "tabSide": "Боковая клавиатура"
+    "tabSide": "Боковая клавиатура",
+    "tipLayer": "Слой: {{layer}}",
+    "tipTrigger": "Триггер: {{mode}}",
+    "tipPressCount": "Нажатий: {{count}}×",
+    "tipRecent": "Недавно: {{times}}",
+    "tipSecondsAgo": "{{count}} с назад",
+    "tipMinutesAgo": "{{count}} мин назад",
+    "tipHoursAgo": "{{count}} ч назад",
+    "tipJustNow": "только что",
+    "recentActivity": "Недавняя активность",
+    "recentActivityCount": "Недавно ({{count}})",
+    "triggerPress": "Нажатие",
+    "triggerDoublePress": "Двойное нажатие",
+    "triggerTriplePress": "Тройное нажатие",
+    "triggerHold": "Удержание",
+    "triggerChord": "Аккорд"
   },
   "inspector": {
     "actionEyebrow": "Действие кнопки",
@@ -871,6 +886,9 @@
     "saveFailedRollback": "Изменение отменено: {{reason}}",
     "undoAction": "Отменить отмену",
     "openConfig": "Открыть папку"
+  },
+  "instance": {
+    "blocked": "Sidearm уже запущен — повторный запуск проигнорирован"
   },
   "synapseImport": {
     "button": "Импорт из Razer Synapse…",

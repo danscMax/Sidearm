@@ -308,6 +308,12 @@ export async function importProfileFile(path: string): Promise<string> {
   return invoke<string>("import_profile", { path });
 }
 
+/** Write the snippet library to a `.json` / `.md` / `.txt` file (looser inert-text
+ *  whitelist than profile export). Path comes from the native save dialog. */
+export async function exportSnippetsFile(path: string, contents: string): Promise<void> {
+  return invoke<void>("export_snippets", { path, contents });
+}
+
 export async function exportVerificationSession(
   filename: string,
   contents: string,
@@ -338,6 +344,14 @@ export async function listenDebugLogAppendedEvent(
   onPayload: (payload: DebugLogEntry) => void,
 ): Promise<UnlistenFn> {
   return listenEvent("debug_log_appended", onPayload);
+}
+
+/** Fires when a duplicate launch was blocked by the single-instance guard;
+ *  the existing window has already been focused backend-side. Payload is unit. */
+export async function listenSingleInstanceBlocked(
+  onBlocked: () => void,
+): Promise<UnlistenFn> {
+  return listenEvent("single_instance_blocked", onBlocked);
 }
 
 export async function listenWindowResolutionEvent(

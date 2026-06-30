@@ -7,6 +7,7 @@
 import i18n from "../i18n";
 import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
+import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
 import { displayNameForControl } from "./labels";
 
@@ -32,6 +33,7 @@ export interface MouseVisualizationProps {
   onSelectLayer: (layer: Layer) => void;
   onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;
   executionCounts?: Map<string, number>;
+  executionHistory?: Map<string, ExecutionRecord[]>;
   heatmapEnabled?: boolean;
   onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
 }

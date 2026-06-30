@@ -31,6 +31,7 @@ import type {
   ActionExecutionEvent,
   DebugLogEntry,
   EncodedKeyEvent,
+  ExecutionRecord,
   ResolvedInputPreview,
   RuntimeErrorEvent,
   RuntimeStateSummary,
@@ -52,6 +53,7 @@ export interface RuntimeControl {
   lastRuntimeError: RuntimeErrorEvent | null;
   lastEncodedKey: EncodedKeyEvent | null;
   executionCounts: Map<string, number>;
+  executionHistory: Map<string, ExecutionRecord[]>;
 
   // Actions
   ensureRuntimeStarted: () => Promise<void>;
@@ -90,6 +92,9 @@ export function useRuntime(deps: {
   const [lastRuntimeError, setLastRuntimeError] = useState<RuntimeErrorEvent | null>(null);
   const [lastEncodedKey, setLastEncodedKey] = useState<EncodedKeyEvent | null>(null);
   const [executionCounts, setExecutionCounts] = useState<Map<string, number>>(new Map());
+  const [executionHistory, setExecutionHistory] = useState<Map<string, ExecutionRecord[]>>(
+    new Map(),
+  );
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -133,6 +138,21 @@ export function useRuntime(deps: {
         setExecutionCounts((prev) => {
           const next = new Map(prev);
           next.set(cid, (next.get(cid) ?? 0) + 1);
+          return next;
+        });
+      }
+      // Timeline is independent of the heatmap toggle: keep the last 10 live
+      // executions per control. Auto-repeats don't re-execute (they return a
+      // held-duplicate), so this fires once per real press — no churn.
+      if (event.mode === "live" && cid) {
+        setExecutionHistory((prev) => {
+          const next = new Map(prev);
+          const record: ExecutionRecord = {
+            actionPretty: event.actionPretty,
+            executedAt: event.executedAt,
+            profileName: event.resolvedProfileName ?? "",
+          };
+          next.set(cid, [...(next.get(cid) ?? []), record].slice(-10));
           return next;
         });
       }
@@ -256,7 +276,10 @@ export function useRuntime(deps: {
   }
 
   function clearExecutionCounts() {
-    startTransition(() => setExecutionCounts(new Map()));
+    startTransition(() => {
+      setExecutionCounts(new Map());
+      setExecutionHistory(new Map());
+    });
   }
 
   async function handleStartRuntime() {
@@ -334,6 +357,7 @@ export function useRuntime(deps: {
     lastRuntimeError,
     lastEncodedKey,
     executionCounts,
+    executionHistory,
     ensureRuntimeStarted,
     clearRuntimeError,
     clearExecutionCounts,

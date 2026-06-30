@@ -21,6 +21,7 @@ pub const EVENT_CONTROL_RESOLVED: &str = "control_resolved";
 pub const EVENT_ACTION_EXECUTED: &str = "action_executed";
 pub const EVENT_RUNTIME_ERROR: &str = "runtime_error";
 pub const EVENT_DEBUG_LOG_APPENDED: &str = "debug_log_appended";
+pub const EVENT_SINGLE_INSTANCE_BLOCKED: &str = "single_instance_blocked";
 
 const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;

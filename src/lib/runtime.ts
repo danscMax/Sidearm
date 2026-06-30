@@ -102,6 +102,14 @@ export interface ActionExecutionEvent {
   executedAt: number;
 }
 
+/** One past execution of a binding, kept FE-only (not persisted) for the
+ *  per-control timeline shown in tooltips and the properties panel. */
+export interface ExecutionRecord {
+  actionPretty: string;
+  executedAt: number;
+  profileName: string;
+}
+
 export interface RuntimeErrorEvent {
   category: string;
   message: string;

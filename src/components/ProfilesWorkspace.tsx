@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
-import type { WindowCaptureResult } from "../lib/runtime";
+import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import {
   copyBindingFromLayer,
   createAppMapping,
@@ -58,6 +58,7 @@ export interface ProfilesWorkspaceProps {
   setActionPickerBindingId: (id: string | null) => void;
   setActionPickerOpen: (open: boolean) => void;
   executionCounts?: Map<string, number>;
+  executionHistory?: Map<string, ExecutionRecord[]>;
   heatmapEnabledRef?: RefObject<boolean>;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
 }
@@ -90,6 +91,7 @@ export function ProfilesWorkspace({
   setActionPickerBindingId,
   setActionPickerOpen,
   executionCounts,
+  executionHistory,
   heatmapEnabledRef,
   showToast,
 }: ProfilesWorkspaceProps) {
@@ -464,6 +466,7 @@ export function ProfilesWorkspace({
           }
           onSelectLayer={onSelectLayer}
           executionCounts={executionCounts}
+          executionHistory={executionHistory}
           heatmapEnabled={heatmapEnabled}
           onDropBinding={handleDropBinding}
         />

@@ -13,6 +13,7 @@ import type {
   ActionExecutionEvent,
   DebugLogEntry,
   EncodedKeyEvent,
+  ExecutionRecord,
   ResolvedInputPreview,
   RuntimeErrorEvent,
   RuntimeStateSummary,
@@ -54,6 +55,7 @@ interface DebugRuntimeProps {
   lastExecution: ActionExecutionEvent | null;
   lastRuntimeError: RuntimeErrorEvent | null;
   lastEncodedKey: EncodedKeyEvent | null;
+  selectedControlHistory?: ExecutionRecord[];
   runtimeSummary: RuntimeStateSummary;
   handlePreviewResolution: () => Promise<void>;
   handleExecutePreviewAction: () => Promise<void>;
@@ -118,6 +120,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
     lastExecution,
     lastRuntimeError,
     lastEncodedKey,
+    selectedControlHistory,
     runtimeSummary,
     handlePreviewResolution,
     handleExecutePreviewAction,
@@ -257,6 +260,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
           selectedLayer={selectedLayer}
           lastEncodedKey={lastEncodedKey}
           lastResolutionPreview={lastResolutionPreview}
+          executionHistory={selectedControlHistory}
           updateDraft={updateDraft}
           verificationSessionActive={!!verificationSession}
         />

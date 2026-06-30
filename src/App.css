@@ -3611,6 +3611,45 @@ code {
   font-style: italic;
 }
 
+/* ── Properties panel: recent-activity timeline ── */
+.props-activity {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.props-activity > summary {
+  cursor: pointer;
+  color: var(--c-text-muted);
+  user-select: none;
+}
+
+.props-activity__list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.props-activity__item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.props-activity__action {
+  color: var(--c-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.props-activity__time {
+  color: var(--c-text-muted);
+  flex-shrink: 0;
+}
+
 /* ── Properties panel: verification section ── */
 .props-verification {
   padding-top: 12px;

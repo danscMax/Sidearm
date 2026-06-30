@@ -10,13 +10,16 @@ import type {
   PasteMode,
   PhysicalControl,
   SequenceStep,
+  TriggerMode,
 } from "./config";
 import type {
   ActionExecutionEvent,
   DebugLogEntry,
+  ExecutionRecord,
   ResolvedInputPreview,
   RuntimeStateSummary,
 } from "./runtime";
+import type { ControlSurfaceEntry } from "./constants/types";
 import type { VerificationStepResult } from "./verification-session";
 import { ACTION_CATEGORIES } from "./constants";
 
@@ -237,4 +240,69 @@ export function surfacePrimaryLabel(binding: Binding | null, action: Action | nu
   }
 
   return binding.label.trim() ? binding.label : (action?.displayName || i18n.t("binding.assigned"));
+}
+
+function labelForTriggerMode(mode: TriggerMode): string {
+  switch (mode) {
+    case "press":
+      return i18n.t("visualization.triggerPress");
+    case "doublePress":
+      return i18n.t("visualization.triggerDoublePress");
+    case "triplePress":
+      return i18n.t("visualization.triggerTriplePress");
+    case "hold":
+      return i18n.t("visualization.triggerHold");
+    case "chord":
+      return i18n.t("visualization.triggerChord");
+  }
+}
+
+/** Coarse "Ns / Nm / Nh ago" for tooltip timelines. Sub-minute → seconds. */
+export function relativeTime(timestamp: number): string {
+  const diffMs = Date.now() - timestamp;
+  if (diffMs < 5000) return i18n.t("visualization.tipJustNow");
+  const seconds = Math.floor(diffMs / 1000);
+  if (seconds < 60) return i18n.t("visualization.tipSecondsAgo", { count: seconds });
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return i18n.t("visualization.tipMinutesAgo", { count: minutes });
+  const hours = Math.floor(minutes / 60);
+  return i18n.t("visualization.tipHoursAgo", { count: hours });
+}
+
+/** Multi-line native-`title` tooltip for a hotspot: name (signal), action,
+ *  layer · trigger, press count, and the most recent executions. Only includes
+ *  lines it has data for, so an unassigned control shows just name + layer. */
+export function buildHotspotTooltip(
+  entry: ControlSurfaceEntry,
+  layer: Layer,
+  history: ExecutionRecord[] | undefined,
+  count: number,
+): string {
+  const signal = entry.mapping?.encodedKey;
+  const lines: string[] = [
+    signal
+      ? `${displayNameForControl(entry.control)} (${signal})`
+      : displayNameForControl(entry.control),
+    surfacePrimaryLabel(entry.binding, entry.action),
+  ];
+
+  const triggerMode = entry.binding?.triggerMode;
+  const triggerLabel = triggerMode ? labelForTriggerMode(triggerMode) : null;
+  lines.push(
+    triggerLabel
+      ? `${i18n.t("visualization.tipLayer", { layer: labelForLayer(layer) })} · ${i18n.t("visualization.tipTrigger", { mode: triggerLabel })}`
+      : i18n.t("visualization.tipLayer", { layer: labelForLayer(layer) }),
+  );
+
+  if (count > 0) {
+    lines.push(i18n.t("visualization.tipPressCount", { count }));
+  }
+
+  const recent = history?.slice(-5).reverse() ?? [];
+  if (recent.length > 0) {
+    const times = recent.map((r) => relativeTime(r.executedAt)).join(", ");
+    lines.push(i18n.t("visualization.tipRecent", { times }));
+  }
+
+  return lines.join("\n");
 }

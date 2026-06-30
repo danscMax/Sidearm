@@ -11,6 +11,7 @@ import type {
 } from "../lib/config";
 import type {
   EncodedKeyEvent,
+  ExecutionRecord,
   ResolvedInputPreview,
 } from "../lib/runtime";
 import {
@@ -25,6 +26,7 @@ import {
   formatTimestamp,
   labelForCapability,
   labelForControlFamily,
+  relativeTime,
 } from "../lib/labels";
 import { describeActionSummary } from "../lib/action-helpers";
 import { describeVerificationAlignment } from "../lib/verification-helpers";
@@ -40,6 +42,8 @@ export interface ControlPropertiesPanelProps {
   selectedLayer?: Layer;
   lastEncodedKey?: EncodedKeyEvent | null;
   lastResolutionPreview?: ResolvedInputPreview | null;
+  /** Recent live executions for the selected control (newest last), FE-only. */
+  executionHistory?: ExecutionRecord[];
   updateDraft?: (updater: (config: AppConfig) => AppConfig) => void;
   verificationSessionActive?: boolean;
 }
@@ -53,6 +57,7 @@ export function ControlPropertiesPanel({
   selectedLayer,
   lastEncodedKey,
   lastResolutionPreview,
+  executionHistory,
   updateDraft,
   verificationSessionActive,
 }: ControlPropertiesPanelProps) {
@@ -159,6 +164,26 @@ export function ControlPropertiesPanel({
           <p className="props-action__empty">{t("properties.actionEmpty")}</p>
         )}
       </div>
+
+      {/* ── Recent activity (FE-only timeline, newest first) ── */}
+      {executionHistory && executionHistory.length > 0 ? (
+        <details className="props-activity">
+          <summary>
+            {t("visualization.recentActivityCount", { count: executionHistory.length })}
+          </summary>
+          <ol className="props-activity__list">
+            {executionHistory
+              .slice()
+              .reverse()
+              .map((record, index) => (
+                <li key={index} className="props-activity__item">
+                  <span className="props-activity__action">{record.actionPretty}</span>
+                  <span className="props-activity__time">{relativeTime(record.executedAt)}</span>
+                </li>
+              ))}
+          </ol>
+        </details>
+      ) : null}
 
       {/* ── Verification workflow ── */}
       {hasVerificationMode && !verificationSessionActive && verificationAlignment ? (

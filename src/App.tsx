@@ -38,6 +38,7 @@ import {
   normalizeCommandError,
   openConfigFolder,
   listenDragDrop,
+  listenSingleInstanceBlocked,
   parseSynapseSource,
   restoreConfigFromBackup,
 } from "./lib/backend";
@@ -156,6 +157,18 @@ function App() {
       cancelled = true;
     };
   }, []);
+
+  // Single-instance: backend already focused this window; just inform the user
+  // a duplicate launch was ignored. The Diagnostics log line comes from Rust.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenSingleInstanceBlocked(() => {
+      showToast(t("instance.blocked"), "info");
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [showToast, t]);
 
   // First-run onboarding: show the full-screen wizard until the user completes
   // or skips it (both set settings.onboardingCompleted = true).
@@ -742,6 +755,7 @@ function App() {
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
                 executionCounts={runtime.executionCounts}
+                executionHistory={runtime.executionHistory}
                 heatmapEnabledRef={heatmapEnabledRef}
                 showToast={showToast}
               />
@@ -778,6 +792,9 @@ function App() {
                   lastExecution,
                   lastRuntimeError,
                   lastEncodedKey,
+                  selectedControlHistory: selectedControl
+                    ? runtime.executionHistory.get(selectedControl.id)
+                    : undefined,
                   runtimeSummary,
                   handlePreviewResolution,
                   handleExecutePreviewAction,

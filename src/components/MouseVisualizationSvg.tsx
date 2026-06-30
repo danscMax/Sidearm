@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ControlId } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
-import { displayNameForControl, resolveControlBadge, surfacePrimaryLabel } from "../lib/labels";
+import { buildHotspotTooltip, resolveControlBadge } from "../lib/labels";
 import {
   actionLabel,
   COMBINED_LEFT_BUTTONS,
@@ -246,6 +246,7 @@ export function MouseVisualizationSvg({
   onSelectLayer,
   onContextMenu,
   executionCounts,
+  executionHistory,
   heatmapEnabled,
   onDropBinding,
 }: MouseVisualizationProps) {
@@ -356,7 +357,12 @@ export function MouseVisualizationSvg({
     const heat = heatFill(id);
     const fillColor = heat ?? colors.fill;
     const title = entry
-      ? `${displayNameForControl(entry.control)} \u00B7 ${surfacePrimaryLabel(entry.binding, entry.action)}`
+      ? buildHotspotTooltip(
+          entry,
+          selectedLayer,
+          executionHistory?.get(id),
+          executionCounts?.get(id) ?? 0,
+        )
       : id;
     const fs = fontSize ?? 10;
     const hasGlow = isSelected || isHovered;

@@ -592,7 +592,22 @@
     "badgeChord": "Chord",
     "tabAll": "All buttons",
     "tabTop": "Top panel",
-    "tabSide": "Thumb grid"
+    "tabSide": "Thumb grid",
+    "tipLayer": "Layer: {{layer}}",
+    "tipTrigger": "Trigger: {{mode}}",
+    "tipPressCount": "Pressed {{count}}×",
+    "tipRecent": "Recent: {{times}}",
+    "tipSecondsAgo": "{{count}}s ago",
+    "tipMinutesAgo": "{{count}}m ago",
+    "tipHoursAgo": "{{count}}h ago",
+    "tipJustNow": "just now",
+    "recentActivity": "Recent activity",
+    "recentActivityCount": "Recent ({{count}})",
+    "triggerPress": "Press",
+    "triggerDoublePress": "Double press",
+    "triggerTriplePress": "Triple press",
+    "triggerHold": "Hold",
+    "triggerChord": "Chord"
   },
   "inspector": {
     "actionEyebrow": "Button action",
@@ -858,6 +873,9 @@
     "saveFailedRollback": "Change reverted: {{reason}}",
     "undoAction": "Redo",
     "openConfig": "Open folder"
+  },
+  "instance": {
+    "blocked": "Sidearm is already running — duplicate launch ignored"
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",

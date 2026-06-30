@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ControlId } from "../lib/config";
 import { topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
-import { displayNameForControl, resolveControlBadge, surfacePrimaryLabel } from "../lib/labels";
+import { buildHotspotTooltip, resolveControlBadge } from "../lib/labels";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
 import {
   actionLabel,
@@ -41,6 +41,7 @@ export function MouseVisualization({
   onSelectLayer,
   onContextMenu,
   executionCounts,
+  executionHistory,
   heatmapEnabled,
   onDropBinding,
 }: MouseVisualizationProps) {
@@ -89,6 +90,7 @@ export function MouseVisualization({
           onSelectLayer={onSelectLayer}
           onContextMenu={onContextMenu}
           executionCounts={executionCounts}
+          executionHistory={executionHistory}
           heatmapEnabled={heatmapEnabled}
           onDropBinding={onDropBinding}
         />
@@ -117,10 +119,9 @@ export function MouseVisualization({
       const hasConflict =
         !!entry.binding && conflictBindingIds?.has(entry.binding.id);
       // Heatmap on the photo is conveyed by the background tint (applyHeatBg);
-      // the exact press count rides along in the tooltip instead of an
-      // overflowing in-circle badge.
-      const heatCount =
-        heatmapEnabled && executionCounts ? (executionCounts.get(entry.control.id) ?? 0) : 0;
+      // the exact press count rides along in the structured tooltip instead of
+      // an overflowing in-circle badge.
+      const totalCount = executionCounts?.get(entry.control.id) ?? 0;
 
       return (
         <button
@@ -142,10 +143,12 @@ export function MouseVisualization({
             }
             applyHeatBg(el, entry.control.id);
           }}
-          title={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
-            entry.binding,
-            entry.action,
-          )}${heatCount > 0 ? ` · ${heatCount}×` : ""}`}
+          title={buildHotspotTooltip(
+            entry,
+            selectedLayer,
+            executionHistory?.get(entry.control.id),
+            totalCount,
+          )}
           draggable={!!entry.binding && !!entry.action}
           {...getInteractionProps(entry.control.id)}
         >
@@ -207,10 +210,12 @@ export function MouseVisualization({
                   selected={selected}
                   badge={resolveControlBadge(hotspots[controlId]?.label ?? controlId)}
                   label={actionLabel(entry, { triggerLabels })}
-                  tooltip={`${displayNameForControl(entry.control)} · ${surfacePrimaryLabel(
-                    entry.binding,
-                    entry.action,
-                  )}`}
+                  tooltip={buildHotspotTooltip(
+                    entry,
+                    selectedLayer,
+                    executionHistory?.get(controlId),
+                    executionCounts?.get(controlId) ?? 0,
+                  )}
                   nativeTooltip
                   contextMenu={false}
                   dimmed={dimmed}

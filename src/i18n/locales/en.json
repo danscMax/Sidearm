@@ -42,7 +42,8 @@
   },
   "app": {
     "name": "Sidearm",
-    "device": "Razer Naga V2 HyperSpeed"
+    "device": "Razer Naga V2 HyperSpeed",
+    "deviceFallback": "Mouse not recognized"
   },
   "titlebar": {
     "minimize": "Minimize",
@@ -61,6 +62,9 @@
     "runtimeTooltip": "Intercepts clicks from the 12-button thumb grid and hotkeys. Disable to temporarily hand control back to Razer Synapse.",
     "stop": "STOP",
     "start": "START"
+  },
+  "statusbar": {
+    "events": "{{count}} events"
   },
   "workspace": {
     "profiles": {
@@ -395,10 +399,12 @@
     "heatmapOff": "Heatmap: off",
     "heatmapEnable": "Enable heatmap",
     "heatmapDisable": "Disable heatmap",
+    "heatmapTooltip": "Brighter button = more frequent presses",
     "searchPlaceholder": "Search bindings…",
     "searchMeta": "Found: {{count}}",
     "searchAllProfiles": "All profiles",
     "searchNoResults": "No matching bindings in any profile.",
+    "cardMeta": "{{count}} bindings · priority {{priority}}",
     "dblClickSettings": "Double-click to open profile settings",
     "defaultName": "New profile",
     "duplicateName": "{{name}} (copy)",
@@ -463,6 +469,7 @@
     "unnamed": "Unnamed profile",
     "renamedToUnnamed": "Profile name cannot be empty — renamed to “Unnamed profile”.",
     "rerunOnboarding": "Re-run onboarding",
+    "onboardingHelp": "Open the setup wizard again to review hardware and configuration steps.",
     "allProfilesHeader": "ALL PROFILES",
     "priorityMeta": "Priority: {{priority}}",
     "disabledMeta": "Disabled",
@@ -845,7 +852,9 @@
   "toast": {
     "undone": "Change undone",
     "redone": "Change redone",
-    "saveFailedRollback": "Change reverted: {{reason}}"
+    "saveFailedRollback": "Change reverted: {{reason}}",
+    "undoAction": "Redo",
+    "openConfig": "Open folder"
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",

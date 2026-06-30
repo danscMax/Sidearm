@@ -4,7 +4,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 
 import { PortableBadge } from "./PortableBadge";
 
-export function TitleBar() {
+export function TitleBar({ onReRunOnboarding }: { onReRunOnboarding?: () => void }) {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
   const appWindow = getCurrentWindow();
@@ -47,6 +47,17 @@ export function TitleBar() {
         {t("app.name")}
       </span>
       <PortableBadge />
+      {onReRunOnboarding && (
+        <button
+          type="button"
+          className="titlebar__btn titlebar__btn--onboarding"
+          onClick={onReRunOnboarding}
+          aria-label={t("settings.rerunOnboarding")}
+          title={t("settings.rerunOnboarding")}
+        >
+          ?
+        </button>
+      )}
       <div className="titlebar__controls">
         <button
           type="button"

@@ -161,11 +161,23 @@ button, input, textarea, select {
   background: #e81123;
   color: #fff;
 }
+.titlebar__btn--onboarding {
+  width: 28px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  opacity: 0.5;
+  transition: opacity 0.12s;
+}
+.titlebar__btn--onboarding:hover {
+  opacity: 1;
+  background: transparent;
+}
 
 /* ── Shell ── */
 .shell {
   display: grid;
   grid-template-columns: 220px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
   height: calc(100vh - 32px);
   overflow: hidden;
 }
@@ -186,8 +198,22 @@ button, input, textarea, select {
 }
 
 .sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 8px 12px 14px;
   margin-bottom: 6px;
+}
+
+.sidebar__logo {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+
+.sidebar__brand-text {
+  min-width: 0;
   color: var(--c-text-muted);
   font-size: var(--fs-caption);
   font-weight: 700;
@@ -1795,17 +1821,18 @@ select::checkmark {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  border: 2px solid rgba(200, 210, 195, 0.35);
-  background: rgba(12, 20, 14, 0.65);
-  color: rgba(220, 230, 210, 0.8);
+  border: 2px solid rgba(200, 210, 195, 0.5);
+  background: rgba(10, 16, 12, 0.82);
+  color: rgba(236, 244, 228, 0.96);
   font-size: var(--fs-micro);
   font-weight: 800;
   line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
   transform: translate(-50%, -50%);
   cursor: pointer;
   transition: background 150ms ease, border-color 150ms ease, transform 150ms ease, box-shadow 150ms ease;
   z-index: 1;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55);
 }
 
 .mouse-visual__hotspot:hover,
@@ -2965,70 +2992,77 @@ code {
   font-weight: 600;
 }
 
-/* ── Runtime status indicator ── */
-.sidebar__runtime {
+/* ── Bottom status strip (window-wide runtime indicator + toggle) ── */
+.status-bar {
+  grid-column: 1 / -1;
+  grid-row: 2;
   display: flex;
   align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 10px 12px;
-  margin-top: auto;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-card-bg);
-  color: var(--c-text);
+  gap: 10px;
+  height: 30px;
+  padding: 0 12px;
+  border-top: 1px solid var(--c-border);
+  background: rgba(10, 16, 13, 0.85);
   font-size: var(--fs-caption);
-  cursor: pointer;
-  transition: background 150ms, border-color 150ms;
+  color: var(--c-text);
 }
 
-.sidebar__runtime:hover {
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.sidebar__runtime--running {
-  border-color: color-mix(in srgb, var(--c-ok) 30%, transparent);
-}
-
-.sidebar__runtime--stopped {
-  border-color: color-mix(in srgb, var(--c-danger) 30%, transparent);
-}
-
-.sidebar__runtime-label {
-  flex: 1;
-  text-align: left;
-}
-
-.sidebar__runtime-action {
-  font-size: var(--fs-micro);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--c-text-muted);
-}
-
-.sidebar__runtime-dot {
+.status-bar__dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.sidebar__runtime-dot--running {
+.status-bar__dot--ok {
   background: var(--c-ok);
   box-shadow: 0 0 6px color-mix(in srgb, var(--c-ok) 50%, transparent);
 }
 
-.sidebar__runtime-dot--stopped {
+.status-bar__dot--warn {
+  background: var(--c-warning);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--c-warning) 50%, transparent);
+}
+
+.status-bar__dot--off {
   background: var(--c-danger);
+}
+
+.status-bar__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text-muted);
+}
+
+.status-bar__toggle {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-xs);
+  background: var(--c-card-bg);
+  color: var(--c-text);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: background 150ms, border-color 150ms;
+}
+
+.status-bar__toggle:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--c-accent);
 }
 
 @media (max-width: 860px) {
   /* Collapse the sidebar to a slim icon rail so a narrow window keeps a
      usable layout instead of cramping the content column.  The sidebar stays
-     vertical; only the textual chrome (brand, profile switcher, nav labels,
-     runtime caption) is hidden — nav icons stay, with their `title` acting as
-     the hover tooltip, and the runtime dot stays as a status/toggle. */
+     vertical; only the textual chrome (brand, profile switcher, nav labels) is
+     hidden — nav icons stay, with their `title` acting as the hover tooltip.
+     Runtime status/toggle lives in the window-wide bottom status strip. */
   .shell {
     grid-template-columns: 56px minmax(0, 1fr);
   }
@@ -3039,9 +3073,7 @@ code {
   .sidebar__brand,
   .sidebar__sep,
   .sidebar__section,
-  .nav-item__label,
-  .sidebar__runtime-label,
-  .sidebar__runtime-action {
+  .nav-item__label {
     display: none;
   }
   .nav-item {
@@ -3050,10 +3082,6 @@ code {
     padding: 10px 0;
   }
   .nav-item__icon { opacity: 0.9; }
-  .sidebar__runtime {
-    justify-content: center;
-    padding: 12px 0;
-  }
   .workspace--2col {
     grid-template-columns: 1fr;
   }
@@ -4412,6 +4440,11 @@ img.profiles__app-card-monogram {
   word-break: break-all;
   min-width: 0;
 }
+.profiles__app-card-meta {
+  font-size: 0.68rem;
+  color: var(--c-text-muted);
+  white-space: nowrap;
+}
 
 
 .profiles__add-card {
@@ -5124,6 +5157,9 @@ input[type="number"] { -moz-appearance: textfield; }
   bottom: 20px;
   right: 20px;
   z-index: 1100;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 10px 16px;
   border-radius: var(--radius-sm);
   background: var(--c-surface);
@@ -5133,6 +5169,23 @@ input[type="number"] { -moz-appearance: textfield; }
   font-size: 0.85rem;
   max-width: 360px;
   animation: toast-in 160ms ease-out;
+}
+.toast__message {
+  flex: 1;
+}
+.toast__action {
+  flex-shrink: 0;
+  padding: 3px 10px;
+  border: 1px solid var(--c-border-hover);
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--c-accent);
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.toast__action:hover {
+  background: rgba(159, 202, 105, 0.12);
 }
 /* Toast accent colors derive from the app's semantic tokens (--c-ok / --c-warning
    / notice-info) so toast severity matches every other warning/ok/info surface. */
@@ -5421,10 +5474,41 @@ input[type="number"] { -moz-appearance: textfield; }
   border: 1px solid rgba(232, 148, 58, 0.35);
 }
 
-.profiles-workspace__search {
+.search-field {
+  position: relative;
+  display: flex;
   flex: 1;
   max-width: 320px;
-  padding: 5px 10px;
+  align-items: center;
+}
+.search-field__icon {
+  position: absolute;
+  left: 8px;
+  color: var(--c-text-muted);
+  pointer-events: none;
+}
+.search-field__clear {
+  position: absolute;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--c-text);
+  font-size: 0.7rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.search-field__clear:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+.profiles-workspace__search {
+  flex: 1;
+  padding: 5px 10px 5px 26px;
   font-size: 0.82rem;
   background: var(--c-surface);
   color: var(--c-text);

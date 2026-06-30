@@ -84,14 +84,14 @@ function App() {
   const toastSeqRef = useRef(0);
   const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
 
-  const showToast = useCallback((message: string, kind?: ToastState["kind"]) => {
+  const showToast = useCallback((message: string, kind?: ToastState["kind"], action?: ToastState["action"]) => {
     toastSeqRef.current += 1;
-    setToast({ id: toastSeqRef.current, message, kind });
+    setToast({ id: toastSeqRef.current, message, kind, action });
   }, []);
 
   const handleAutoSaveFailed = useCallback(
     (reason: string) => {
-      showToast(t("toast.saveFailedRollback", { reason }), "warning");
+      showToast(t("toast.saveFailedRollback", { reason }), "warning", { label: t("toast.openConfig"), onClick: () => { void openConfigFolder(); } });
     },
     [showToast, t],
   );
@@ -132,7 +132,7 @@ function App() {
   const handleUndoWithToast = useCallback(() => {
     if (undoStack.length === 0) return;
     handleUndo();
-    showToast(t("toast.undone"), "info");
+    showToast(t("toast.undone"), "info", { label: t("toast.undoAction"), onClick: () => { handleRedoWithToast(); } });
   }, [undoStack.length, handleUndo, showToast, t]);
 
   const handleRedoWithToast = useCallback(() => {
@@ -680,7 +680,7 @@ function App() {
 
   return (
     <>
-    <TitleBar />
+    <TitleBar onReRunOnboarding={() => updateDraft((c) => ({ ...c, settings: { ...c.settings, onboardingCompleted: false } }))} />
     <main className="shell">
       <Sidebar
         workspaceMode={workspaceMode}
@@ -696,14 +696,11 @@ function App() {
           }));
         }}
         onCreateProfile={handleCreateProfile}
-        onToggleRuntime={() => {
-          if (runtimeSummary.status === "running") void handleStopRuntime();
-          else void handleStartRuntime();
-        }}
         runtimeStatus={runtimeSummary.status}
         updateDraft={updateDraft}
         setSelectedProfileId={setSelectedProfileId}
         setConfirmModal={setConfirmModal}
+        activeConfig={activeConfig}
       />
 
       <div className="content">
@@ -901,6 +898,36 @@ function App() {
           }}
         />
       ) : null}
+
+      {(() => {
+        const running = runtimeSummary.status === "running";
+        const totalEvents = [...runtime.executionCounts.values()].reduce((a, b) => a + b, 0);
+        const lastApp = running && lastCapture?.exe
+          ? lastCapture.exe.replace(/\.exe$/i, "")
+          : null;
+        const dotState = !running ? "off" : runtimeSummary.warningCount > 0 ? "warn" : "ok";
+        return (
+          <footer className="status-bar">
+            <span className={`status-bar__dot status-bar__dot--${dotState}`} aria-hidden="true" />
+            <span className="status-bar__text">
+              {running ? t("sidebar.runtimeActive") : t("sidebar.runtimeStopped")}
+              {running && totalEvents > 0 ? ` · ${t("statusbar.events", { count: totalEvents })}` : ""}
+              {lastApp ? ` · ${lastApp}` : ""}
+            </span>
+            <button
+              type="button"
+              className="status-bar__toggle"
+              title={t("sidebar.runtimeTooltip")}
+              onClick={() => {
+                if (running) void handleStopRuntime();
+                else void handleStartRuntime();
+              }}
+            >
+              {running ? t("sidebar.stop") : t("sidebar.start")}
+            </button>
+          </footer>
+        );
+      })()}
     </main>
     </>
   );

@@ -357,13 +357,29 @@ export function ProfilesWorkspace({
             {t("layer.hypershift")}
           </span>
         </span>
-        <input
-          type="search"
-          className="profiles-workspace__search"
-          placeholder={t("profile.searchPlaceholder")}
-          value={bindingSearch}
-          onChange={(e) => setBindingSearch(e.target.value)}
-        />
+        <span className="search-field">
+          <svg className="search-field__icon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M10.6 10.6L14 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            className="profiles-workspace__search"
+            placeholder={t("profile.searchPlaceholder")}
+            value={bindingSearch}
+            onChange={(e) => setBindingSearch(e.target.value)}
+          />
+          {bindingSearch.length > 0 && (
+            <button
+              type="button"
+              className="search-field__clear"
+              aria-label="Clear search"
+              onClick={() => setBindingSearch("")}
+            >
+              ×
+            </button>
+          )}
+        </span>
         {searchQuery && !searchAllProfiles && matchedControlIds ? (
           <span className="profiles-workspace__search-meta">
             {t("profile.searchMeta", { count: matchedControlIds.size })}
@@ -456,7 +472,7 @@ export function ProfilesWorkspace({
             type="button"
             className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
             onClick={() => setHeatmapEnabled((prev) => !prev)}
-            title={heatmapEnabled ? t("profile.heatmapDisable") : t("profile.heatmapEnable")}
+            title={`${heatmapEnabled ? t("profile.heatmapDisable") : t("profile.heatmapEnable")} · ${t("profile.heatmapTooltip")}`}
           >
             {heatmapEnabled ? t("profile.heatmapOn") : t("profile.heatmapOff")}
           </button>
@@ -562,6 +578,7 @@ export function ProfilesWorkspace({
             >
               <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
               <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
+              <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: activeConfig.bindings.filter((b) => b.profileId === mapping.profileId).length, priority: mapping.priority })}</span>
               <input
                 className="profiles__toggle"
                 type="checkbox"

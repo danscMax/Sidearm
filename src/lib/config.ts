@@ -82,6 +82,7 @@ export interface Settings {
   modifierStaleGcMs?: number;
   replayedModifierForceReleaseMs?: number;
   lastSelectedProfileId?: string;
+  deviceName?: string;
   onboardingCompleted?: boolean;
   onboardingStep?: number;
   repairClipboardOnCopy?: boolean;

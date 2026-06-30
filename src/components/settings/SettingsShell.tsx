@@ -169,7 +169,6 @@ export function SettingsShell({
 
         {tab === "backup" ? (
           <BackupSettings
-            updateDraft={updateDraft}
             setConfirmModal={setConfirmModal}
             refreshConfig={refreshConfig}
             setError={setError}

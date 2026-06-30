@@ -138,6 +138,28 @@ export function AppSettings({
         </div>
         <p className="panel__muted help-sm">{t("settings.repairClipboardHelp")}</p>
       </section>
+
+      {/* Onboarding re-run */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("onboarding.title")}</span>
+        </div>
+        <p className="panel__muted help-sm">{t("settings.onboardingHelp")}</p>
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={() => {
+              updateDraft((c) => ({
+                ...c,
+                settings: { ...c.settings, onboardingCompleted: false },
+              }));
+            }}
+          >
+            {t("settings.rerunOnboarding")}
+          </button>
+        </div>
+      </section>
     </>
   );
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { AppConfig, CommandError } from "../../lib/config";
+import type { CommandError } from "../../lib/config";
 import type { ConfirmModalRequest } from "../ConfirmModal";
 import {
   exportFullConfig,
@@ -15,7 +15,6 @@ import type { ParsedSynapseProfiles } from "../../lib/synapse-import";
 import { BackupList } from "../BackupList";
 
 export interface BackupSettingsProps {
-  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   refreshConfig: () => void;
   setError: (error: CommandError | null) => void;
@@ -23,9 +22,8 @@ export interface BackupSettingsProps {
 }
 
 /** Backups tab: full-config export/import, config folder, Synapse import,
- *  re-onboarding, and the local rolling/snapshot backup list. */
+ *  and the local rolling/snapshot backup list. */
 export function BackupSettings({
-  updateDraft,
   setConfirmModal,
   refreshConfig,
   setError,
@@ -150,18 +148,6 @@ export function BackupSettings({
             }}
           >
             {synapseLoading ? t("synapseImport.parsing") : t("synapseImport.button")}
-          </button>
-          <button
-            type="button"
-            className="action-button action-button--secondary"
-            onClick={() => {
-              updateDraft((c) => ({
-                ...c,
-                settings: { ...c.settings, onboardingCompleted: false },
-              }));
-            }}
-          >
-            {t("settings.rerunOnboarding")}
           </button>
         </div>
       </section>

@@ -46,7 +46,8 @@
   },
   "app": {
     "name": "Sidearm",
-    "device": "Razer Naga V2 HyperSpeed"
+    "device": "Razer Naga V2 HyperSpeed",
+    "deviceFallback": "Мышь не определена"
   },
   "titlebar": {
     "minimize": "Свернуть",
@@ -65,6 +66,9 @@
     "runtimeTooltip": "Перехват кликов 12-кнопочной клавиатуры и горячих клавиш. Отключите, чтобы временно передать управление Razer Synapse.",
     "stop": "СТОП",
     "start": "СТАРТ"
+  },
+  "statusbar": {
+    "events": "{{count}} событий"
   },
   "workspace": {
     "profiles": {
@@ -395,14 +399,16 @@
     "emptyHint": "Правил пока нет. Нажмите «+ Добавить правило», чтобы привязать приложение к этому профилю. При фокусе на привязанное приложение профиль переключится автоматически.",
     "exportProfile": "Экспорт профиля",
     "importProfile": "Импорт профиля",
-    "heatmapOn": "Тепловая карта: вкл",
-    "heatmapOff": "Тепловая карта: выкл",
-    "heatmapEnable": "Включить тепловую карту",
-    "heatmapDisable": "Выключить тепловую карту",
+    "heatmapOn": "Подсветка частоты: вкл",
+    "heatmapOff": "Подсветка частоты: выкл",
+    "heatmapEnable": "Включить подсветку частоты",
+    "heatmapDisable": "Выключить подсветку частоты",
+    "heatmapTooltip": "Чем ярче кнопка — тем чаще нажимаете",
     "searchPlaceholder": "Поиск назначений…",
     "searchMeta": "Найдено: {{count}}",
     "searchAllProfiles": "Все профили",
     "searchNoResults": "Совпадений нет ни в одном профиле.",
+    "cardMeta": "{{count}} назначений · приоритет {{priority}}",
     "dblClickSettings": "Двойной клик — открыть настройки профилей",
     "defaultName": "Новый профиль",
     "duplicateName": "{{name}} (копия)",
@@ -467,6 +473,7 @@
     "unnamed": "Безымянный профиль",
     "renamedToUnnamed": "Имя профиля не может быть пустым — переименован в «Безымянный профиль».",
     "rerunOnboarding": "Пройти онбординг заново",
+    "onboardingHelp": "Открыть мастер настройки, чтобы повторить шаги проверки оборудования и конфигурации.",
     "allProfilesHeader": "ВСЕ ПРОФИЛИ",
     "priorityMeta": "Приоритет: {{priority}}",
     "disabledMeta": "Отключён",
@@ -858,7 +865,9 @@
   "toast": {
     "undone": "Действие отменено",
     "redone": "Действие возвращено",
-    "saveFailedRollback": "Изменение отменено: {{reason}}"
+    "saveFailedRollback": "Изменение отменено: {{reason}}",
+    "undoAction": "Отменить отмену",
+    "openConfig": "Открыть папку"
   },
   "synapseImport": {
     "button": "Импорт из Razer Synapse…",

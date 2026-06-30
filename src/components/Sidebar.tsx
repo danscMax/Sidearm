@@ -41,11 +41,11 @@ export function Sidebar({
   runtimeResolvedProfileName,
   onSelectProfile,
   onCreateProfile,
-  onToggleRuntime,
   runtimeStatus,
   updateDraft,
   setSelectedProfileId,
   setConfirmModal,
+  activeConfig,
 }: {
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
@@ -54,19 +54,30 @@ export function Sidebar({
   runtimeResolvedProfileName: string | null;
   onSelectProfile: (id: string) => void;
   onCreateProfile: () => void;
-  onToggleRuntime: () => void;
   runtimeStatus: "running" | "stopped" | string;
   updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
+  activeConfig?: AppConfig | null;
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
-        {t("app.name")}
-        <strong>{t("app.device")}</strong>
+        <img
+          className="sidebar__logo"
+          src="/assets/icon.png"
+          alt=""
+          aria-hidden="true"
+          width={28}
+          height={28}
+          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+        />
+        <div className="sidebar__brand-text">
+          <span>{t("app.name")}</span>
+          <strong>{activeConfig?.settings?.deviceName ?? t("app.deviceFallback")}</strong>
+        </div>
       </div>
       {workspaceModeCopy.map((mode) => (
         <button
@@ -154,20 +165,6 @@ export function Sidebar({
       </div>
       </>
       ) : null}
-      <button
-        className={`sidebar__runtime sidebar__runtime--${runtimeStatus === "running" ? "running" : "stopped"}`}
-        onClick={onToggleRuntime}
-        type="button"
-        title={t("sidebar.runtimeTooltip")}
-      >
-        <span className={`sidebar__runtime-dot sidebar__runtime-dot--${runtimeStatus === "running" ? "running" : "stopped"}`} />
-        <span className="sidebar__runtime-label">
-          {runtimeStatus === "running" ? t("sidebar.runtimeActive") : t("sidebar.runtimeStopped")}
-        </span>
-        <span className="sidebar__runtime-action">
-          {runtimeStatus === "running" ? t("sidebar.stop") : t("sidebar.start")}
-        </span>
-      </button>
       {ctxMenu ? (
         <ContextMenu
           x={ctxMenu.x}

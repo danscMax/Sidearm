@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-07-01
+
+### Added
+- **Configurable global shortcut.** The system-wide show/hide hotkey (previously
+  hardcoded to `Ctrl+Alt+N`) can now be changed in Settings → App.
+- **Launch folders and URLs.** A launch action can now open a folder or a URL,
+  not just run a program — the target mode is auto-detected from what you enter.
+- **Import: Merge vs Replace.** The import wizard now offers an explicit choice
+  between merging into your current configuration and replacing it, and surfaces
+  import errors inline instead of failing silently.
+
+### Removed
+- Unused notification permission/plugin (one fewer system permission requested).
+
+### Fixed
+- Clearer "no backup available" message with a shortcut to the config folder
+  when there is nothing to restore.
+
 ## [0.7.0] — 2026-06-30
 
 A large UX overhaul: power features for managing profiles and bindings, plus

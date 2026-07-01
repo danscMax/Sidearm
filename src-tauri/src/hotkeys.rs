@@ -30,7 +30,10 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
 
     // Normalize Cyrillic letters to the Latin key at the same physical position
     // (ЙЦУКЕН → QWERTY) so e.g. `Ctrl+С` (Cyrillic) parses as `Ctrl+C`.
-    if trimmed.chars().any(|c| matches!(c, '\u{0400}'..='\u{04FF}')) {
+    if trimmed
+        .chars()
+        .any(|c| matches!(c, '\u{0400}'..='\u{04FF}'))
+    {
         let normalized = normalize_cyrillic_key(trimmed);
         // Guard against infinite recursion: only re-parse if normalization made
         // progress. Cyrillic letters outside the ЙЦУКЕН map are returned
@@ -271,19 +274,40 @@ fn normalize_cyrillic_key(key: &str) -> String {
             // Row 0: Ё → `
             'ё' | 'Ё' => '`',
             // Row 1: Й Ц У К Е Н Г Ш Щ З Х Ъ → Q W E R T Y U I O P [ ]
-            'й' | 'Й' => 'Q', 'ц' | 'Ц' => 'W', 'у' | 'У' => 'E',
-            'к' | 'К' => 'R', 'е' | 'Е' => 'T', 'н' | 'Н' => 'Y',
-            'г' | 'Г' => 'U', 'ш' | 'Ш' => 'I', 'щ' | 'Щ' => 'O',
-            'з' | 'З' => 'P', 'х' | 'Х' => '[', 'ъ' | 'Ъ' => ']',
+            'й' | 'Й' => 'Q',
+            'ц' | 'Ц' => 'W',
+            'у' | 'У' => 'E',
+            'к' | 'К' => 'R',
+            'е' | 'Е' => 'T',
+            'н' | 'Н' => 'Y',
+            'г' | 'Г' => 'U',
+            'ш' | 'Ш' => 'I',
+            'щ' | 'Щ' => 'O',
+            'з' | 'З' => 'P',
+            'х' | 'Х' => '[',
+            'ъ' | 'Ъ' => ']',
             // Row 2: Ф Ы В А П Р О Л Д Ж Э → A S D F G H J K L ; '
-            'ф' | 'Ф' => 'A', 'ы' | 'Ы' => 'S', 'в' | 'В' => 'D',
-            'а' | 'А' => 'F', 'п' | 'П' => 'G', 'р' | 'Р' => 'H',
-            'о' | 'О' => 'J', 'л' | 'Л' => 'K', 'д' | 'Д' => 'L',
-            'ж' | 'Ж' => ';', 'э' | 'Э' => '\'',
+            'ф' | 'Ф' => 'A',
+            'ы' | 'Ы' => 'S',
+            'в' | 'В' => 'D',
+            'а' | 'А' => 'F',
+            'п' | 'П' => 'G',
+            'р' | 'Р' => 'H',
+            'о' | 'О' => 'J',
+            'л' | 'Л' => 'K',
+            'д' | 'Д' => 'L',
+            'ж' | 'Ж' => ';',
+            'э' | 'Э' => '\'',
             // Row 3: Я Ч С М И Т Ь Б Ю → Z X C V B N M , .
-            'я' | 'Я' => 'Z', 'ч' | 'Ч' => 'X', 'с' | 'С' => 'C',
-            'м' | 'М' => 'V', 'и' | 'И' => 'B', 'т' | 'Т' => 'N',
-            'ь' | 'Ь' => 'M', 'б' | 'Б' => ',', 'ю' | 'Ю' => '.',
+            'я' | 'Я' => 'Z',
+            'ч' | 'Ч' => 'X',
+            'с' | 'С' => 'C',
+            'м' | 'М' => 'V',
+            'и' | 'И' => 'B',
+            'т' | 'Т' => 'N',
+            'ь' | 'Ь' => 'M',
+            'б' | 'Б' => ',',
+            'ю' | 'Ю' => '.',
             _ => ch,
         })
         .collect()

@@ -50,37 +50,36 @@ impl AppPaths {
             .map(|dir| dir.join(PORTABLE_MARKER).is_file())
             .unwrap_or(false);
 
-        if marker_present
-            && let Some(exe) = exe_dir.as_ref() {
-                let data_dir = exe.join(DATA_DIR_NAME);
-                match ensure_writable(&data_dir) {
-                    Ok(()) => {
-                        return Self {
-                            mode: PathMode::Portable,
-                            config_dir: data_dir.clone(),
-                            log_dir: data_dir.join(LOG_DIR_NAME),
-                            snapshots_dir: data_dir.join(SNAPSHOTS_DIR_NAME),
-                            exe_dir: Some(exe.clone()),
-                            portable_marker_present: true,
-                            fallback_reason: None,
-                        };
-                    }
-                    Err(err) => {
-                        let (config_dir, log_dir, snapshots_dir) = roaming_paths();
-                        return Self {
-                            mode: PathMode::PortableFallback,
-                            config_dir,
-                            log_dir,
-                            snapshots_dir,
-                            exe_dir: Some(exe.clone()),
-                            portable_marker_present: true,
-                            fallback_reason: Some(format!(
-                                "Portable data directory is not writable: {err}"
-                            )),
-                        };
-                    }
+        if marker_present && let Some(exe) = exe_dir.as_ref() {
+            let data_dir = exe.join(DATA_DIR_NAME);
+            match ensure_writable(&data_dir) {
+                Ok(()) => {
+                    return Self {
+                        mode: PathMode::Portable,
+                        config_dir: data_dir.clone(),
+                        log_dir: data_dir.join(LOG_DIR_NAME),
+                        snapshots_dir: data_dir.join(SNAPSHOTS_DIR_NAME),
+                        exe_dir: Some(exe.clone()),
+                        portable_marker_present: true,
+                        fallback_reason: None,
+                    };
+                }
+                Err(err) => {
+                    let (config_dir, log_dir, snapshots_dir) = roaming_paths();
+                    return Self {
+                        mode: PathMode::PortableFallback,
+                        config_dir,
+                        log_dir,
+                        snapshots_dir,
+                        exe_dir: Some(exe.clone()),
+                        portable_marker_present: true,
+                        fallback_reason: Some(format!(
+                            "Portable data directory is not writable: {err}"
+                        )),
+                    };
                 }
             }
+        }
 
         let (config_dir, log_dir, snapshots_dir) = roaming_paths();
         Self {
@@ -187,9 +186,7 @@ fn roaming_log_dir() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            return PathBuf::from(local)
-                .join(APP_IDENTIFIER)
-                .join(LOG_DIR_NAME);
+            return PathBuf::from(local).join(APP_IDENTIFIER).join(LOG_DIR_NAME);
         }
     }
     #[cfg(target_os = "linux")]
@@ -236,7 +233,10 @@ mod tests {
         assert!(!dir.exists());
         ensure_writable(&dir).expect("ensure_writable");
         assert!(dir.is_dir());
-        assert!(!dir.join(WRITE_PROBE_NAME).exists(), "probe should be removed");
+        assert!(
+            !dir.join(WRITE_PROBE_NAME).exists(),
+            "probe should be removed"
+        );
     }
 
     #[test]

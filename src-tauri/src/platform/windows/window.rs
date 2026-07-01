@@ -7,13 +7,11 @@ use std::path::Path;
 
 use windows_sys::Win32::{
     Foundation::CloseHandle,
-    Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-    },
-    Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION, TOKEN_QUERY},
+    Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow},
+    Security::{GetTokenInformation, TOKEN_ELEVATION, TOKEN_QUERY, TokenElevation},
     System::Threading::{
-        GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW,
     },
     UI::WindowsAndMessaging::{
         GetForegroundWindow, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
@@ -91,27 +89,29 @@ pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
 /// `ERROR_ACCESS_DENIED` for elevated targets (UIPI blocks token access).
 /// We treat access-denied as "elevated" — in all such cases `SendInput`
 /// would also be blocked, so the warning is correct regardless.
-unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool { unsafe {
-    use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
+unsafe fn is_process_elevated(process_handle: windows_sys::Win32::Foundation::HANDLE) -> bool {
+    unsafe {
+        use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
 
-    let mut token_handle = std::ptr::null_mut();
-    if OpenProcessToken(process_handle, TOKEN_QUERY, &mut token_handle) == 0 {
-        let err = std::io::Error::last_os_error();
-        return err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32);
+        let mut token_handle = std::ptr::null_mut();
+        if OpenProcessToken(process_handle, TOKEN_QUERY, &mut token_handle) == 0 {
+            let err = std::io::Error::last_os_error();
+            return err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32);
+        }
+
+        let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
+        let mut return_length = 0u32;
+        let ok = GetTokenInformation(
+            token_handle,
+            TokenElevation,
+            &mut elevation as *mut _ as *mut _,
+            std::mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut return_length,
+        );
+        CloseHandle(token_handle);
+        ok != 0 && elevation.TokenIsElevated != 0
     }
-
-    let mut elevation = TOKEN_ELEVATION { TokenIsElevated: 0 };
-    let mut return_length = 0u32;
-    let ok = GetTokenInformation(
-        token_handle,
-        TokenElevation,
-        &mut elevation as *mut _ as *mut _,
-        std::mem::size_of::<TOKEN_ELEVATION>() as u32,
-        &mut return_length,
-    );
-    CloseHandle(token_handle);
-    ok != 0 && elevation.TokenIsElevated != 0
-}}
+}
 
 /// Check whether the current process itself is running elevated (admin).
 pub(crate) fn is_current_process_elevated() -> bool {

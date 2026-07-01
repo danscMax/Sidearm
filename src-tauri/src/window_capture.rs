@@ -304,6 +304,7 @@ mod tests {
                 osd_animation: OsdAnimation::default(),
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
+                global_shortcut: None,
                 last_selected_profile_id: None,
                 onboarding_completed: false,
                 onboarding_step: None,
@@ -452,13 +453,26 @@ mod edge_proptests {
                 osd_animation: OsdAnimation::default(),
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
+                global_shortcut: None,
                 last_selected_profile_id: None,
                 onboarding_completed: false,
                 onboarding_step: None,
             },
             profiles: vec![
-                Profile { id: "fallback".into(), name: "Fallback".into(), description: None, enabled: true, priority: 0 },
-                Profile { id: "p1".into(), name: "P1".into(), description: None, enabled: true, priority: 100 },
+                Profile {
+                    id: "fallback".into(),
+                    name: "Fallback".into(),
+                    description: None,
+                    enabled: true,
+                    priority: 0,
+                },
+                Profile {
+                    id: "p1".into(),
+                    name: "P1".into(),
+                    description: None,
+                    enabled: true,
+                    priority: 100,
+                },
             ],
             physical_controls: vec![PhysicalControl {
                 id: ControlId::Thumb01,
@@ -542,22 +556,25 @@ mod edge_proptests {
     fn unit_should_ignore_own_pid() {
         // Our own PID must always be ignored
         let own_pid = std::process::id();
-        assert!(should_ignore_window(own_pid),
-            "own process PID must be ignored");
+        assert!(
+            should_ignore_window(own_pid),
+            "own process PID must be ignored"
+        );
     }
 
     #[test]
     fn unit_should_not_ignore_pid_zero() {
         // PID 0 is the Idle process; not our PID
-        assert!(!should_ignore_window(0),
-            "PID 0 should not be ignored");
+        assert!(!should_ignore_window(0), "PID 0 should not be ignored");
     }
 
     #[test]
     fn unit_should_not_ignore_pid_max() {
         // u32::MAX is not a valid real PID, but must not panic and must not equal our PID
-        assert!(!should_ignore_window(u32::MAX),
-            "u32::MAX PID should not be ignored");
+        assert!(
+            !should_ignore_window(u32::MAX),
+            "u32::MAX PID should not be ignored"
+        );
     }
 
     proptest! {
@@ -579,8 +596,10 @@ mod edge_proptests {
     fn unit_resolve_uses_fallback_when_no_mappings() {
         let config = minimal_config(vec![]);
         let result = resolve_capture_result(&config, raw("chrome.exe", "Google"));
-        assert!(result.used_fallback_profile,
-            "no mappings must use fallback profile");
+        assert!(
+            result.used_fallback_profile,
+            "no mappings must use fallback profile"
+        );
         assert_eq!(result.resolved_profile_id.as_deref(), Some("fallback"));
         assert!(result.matched_app_mapping_id.is_none());
     }
@@ -589,7 +608,10 @@ mod edge_proptests {
     fn unit_resolve_matches_exact_exe() {
         let config = minimal_config(vec![mapping("m1", "code.exe", "p1", 100)]);
         let result = resolve_capture_result(&config, raw("code.exe", "Workspace"));
-        assert!(!result.used_fallback_profile, "matching exe must not use fallback");
+        assert!(
+            !result.used_fallback_profile,
+            "matching exe must not use fallback"
+        );
         assert_eq!(result.matched_app_mapping_id.as_deref(), Some("m1"));
         assert_eq!(result.resolved_profile_id.as_deref(), Some("p1"));
     }
@@ -615,7 +637,10 @@ mod edge_proptests {
         let mut raw_cap = raw("explorer.exe", "Desktop");
         raw_cap.is_elevated = true;
         let result = resolve_capture_result(&config, raw_cap);
-        assert!(result.is_elevated, "is_elevated must propagate through resolve_capture_result");
+        assert!(
+            result.is_elevated,
+            "is_elevated must propagate through resolve_capture_result"
+        );
     }
 
     proptest! {
@@ -668,8 +693,10 @@ mod edge_proptests {
     fn unit_resolve_empty_exe_uses_fallback() {
         let config = minimal_config(vec![mapping("m1", "target.exe", "p1", 100)]);
         let result = resolve_capture_result(&config, raw("", ""));
-        assert!(result.used_fallback_profile || result.matched_app_mapping_id.is_none(),
-            "empty exe must not match a mapping requiring 'target.exe'");
+        assert!(
+            result.used_fallback_profile || result.matched_app_mapping_id.is_none(),
+            "empty exe must not match a mapping requiring 'target.exe'"
+        );
     }
 
     #[test]

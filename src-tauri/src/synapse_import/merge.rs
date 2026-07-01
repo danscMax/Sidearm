@@ -33,17 +33,18 @@ pub fn apply_parsed_into_config(
     let mut warnings = parsed.warnings.clone();
     let mut summary = ImportSummary::default();
 
-    let selected: Option<std::collections::HashSet<&str>> =
-        options.selected_profile_guids.as_ref().map(|v| {
-            v.iter().map(String::as_str).collect()
-        });
+    let selected: Option<std::collections::HashSet<&str>> = options
+        .selected_profile_guids
+        .as_ref()
+        .map(|v| v.iter().map(String::as_str).collect());
 
     for profile in &parsed.profiles {
         if let Some(filter) = &selected
-            && !filter.contains(profile.synapse_guid.as_str()) {
-                summary.skipped += 1;
-                continue;
-            }
+            && !filter.contains(profile.synapse_guid.as_str())
+        {
+            summary.skipped += 1;
+            continue;
+        }
         if options.merge_strategy == MergeStrategy::ReplaceByName {
             remove_profile_by_name(&mut config, &profile.name, &mut warnings);
         }
@@ -131,7 +132,10 @@ fn append_profile(
             None => {
                 warnings.push(ImportWarning::new(
                     "control_id_not_in_enum",
-                    format!("Control `{}` is not a known Sidearm control.", pb.control_id),
+                    format!(
+                        "Control `{}` is not a known Sidearm control.",
+                        pb.control_id
+                    ),
                 ));
                 continue;
             }
@@ -224,7 +228,13 @@ fn build_action_from_parsed(
     warnings: &mut Vec<ImportWarning>,
 ) -> BuiltAction {
     match parsed {
-        ParsedAction::Shortcut { key, ctrl, shift, alt, win } => {
+        ParsedAction::Shortcut {
+            key,
+            ctrl,
+            shift,
+            alt,
+            win,
+        } => {
             let id = make_random_id("action");
             let display_name = shortcut_pretty(key, *ctrl, *shift, *alt, *win);
             BuiltAction::New(Action {
@@ -352,7 +362,10 @@ fn build_sequence_action(
         action_type: ActionType::Sequence,
         payload: ActionPayload::Sequence(SequenceActionPayload { steps }),
         display_name: format!("🎬 {}", parsed.name),
-        notes: Some(format!("Imported from Razer Synapse macro `{}`", parsed.name)),
+        notes: Some(format!(
+            "Imported from Razer Synapse macro `{}`",
+            parsed.name
+        )),
         conditions: Vec::new(),
     }
 }
@@ -413,13 +426,17 @@ fn remove_profile_by_name(config: &mut AppConfig, name: &str, warnings: &mut Vec
         .iter()
         .map(|b| b.action_id.clone())
         .collect();
-    config.actions.retain(|a| {
-        !dropped_action_ids.contains(&a.id) || still_referenced.contains(&a.id)
-    });
+    config
+        .actions
+        .retain(|a| !dropped_action_ids.contains(&a.id) || still_referenced.contains(&a.id));
 }
 
 fn unique_profile_name(base: &str, existing: &[Profile]) -> String {
-    let base = if base.trim().is_empty() { "Imported" } else { base };
+    let base = if base.trim().is_empty() {
+        "Imported"
+    } else {
+        base
+    };
     let mut candidate = base.to_string();
     let mut n = 2usize;
     // Each iteration produces a DISTINCT candidate ("base", "base (импорт)",
@@ -575,10 +592,12 @@ mod tests {
         };
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
         assert_eq!(result.config.bindings.len(), 0);
-        assert!(result
-            .warnings
-            .iter()
-            .any(|w| w.code == "unmappable_binding_skipped"));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "unmappable_binding_skipped")
+        );
     }
 
     #[test]
@@ -626,17 +645,23 @@ mod tests {
     fn replace_by_name_removes_existing_profile_and_its_bindings() {
         let mut base = empty_config();
         // Pre-seed base with a profile "Gaming" + 1 binding + 1 action.
-        base.profiles.push(serde_json::from_str(
-            r#"{"id": "old-gaming", "name": "Gaming", "enabled": true, "priority": 5}"#,
-        ).unwrap());
+        base.profiles.push(
+            serde_json::from_str(
+                r#"{"id": "old-gaming", "name": "Gaming", "enabled": true, "priority": 5}"#,
+            )
+            .unwrap(),
+        );
         base.actions.push(serde_json::from_str(
             r#"{"id": "a-old", "type": "shortcut", "pretty": "Old",
                 "payload": {"key": "Q", "ctrl": false, "shift": false, "alt": false, "win": false}}"#
         ).unwrap());
-        base.bindings.push(serde_json::from_str(
-            r#"{"id": "b-old", "profileId": "old-gaming", "layer": "standard",
-                "controlId": "thumb_01", "label": "Old", "actionRef": "a-old", "enabled": true}"#
-        ).unwrap());
+        base.bindings.push(
+            serde_json::from_str(
+                r#"{"id": "b-old", "profileId": "old-gaming", "layer": "standard",
+                "controlId": "thumb_01", "label": "Old", "actionRef": "a-old", "enabled": true}"#,
+            )
+            .unwrap(),
+        );
 
         let parsed = ParsedSynapseProfiles {
             source_kind: super::super::types::SourceKind::SynapseV4,
@@ -691,12 +716,18 @@ mod tests {
         let mut base = empty_config();
         // Two distinct user profiles share the name "Gaming" (names are not
         // unique). Importing a "Gaming" profile must NOT wipe both.
-        base.profiles.push(serde_json::from_str(
-            r#"{"id": "gaming-a", "name": "Gaming", "enabled": true, "priority": 5}"#,
-        ).unwrap());
-        base.profiles.push(serde_json::from_str(
-            r#"{"id": "gaming-b", "name": "Gaming", "enabled": true, "priority": 6}"#,
-        ).unwrap());
+        base.profiles.push(
+            serde_json::from_str(
+                r#"{"id": "gaming-a", "name": "Gaming", "enabled": true, "priority": 5}"#,
+            )
+            .unwrap(),
+        );
+        base.profiles.push(
+            serde_json::from_str(
+                r#"{"id": "gaming-b", "name": "Gaming", "enabled": true, "priority": 6}"#,
+            )
+            .unwrap(),
+        );
 
         let parsed = ParsedSynapseProfiles {
             source_kind: super::super::types::SourceKind::SynapseV4,
@@ -722,10 +753,12 @@ mod tests {
         assert!(!result.config.profiles.iter().any(|p| p.id == "gaming-a"));
         assert!(result.config.profiles.iter().any(|p| p.id == "gaming-b"));
         // The ambiguity was surfaced as a warning.
-        assert!(result
-            .warnings
-            .iter()
-            .any(|w| w.code == "replace_by_name_ambiguous"));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "replace_by_name_ambiguous")
+        );
     }
 
     #[test]
@@ -776,8 +809,8 @@ mod tests {
 mod edge_proptests {
     use super::*;
     use crate::synapse_import::types::{
-        ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile,
-        ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
+        ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile, ParsedSequenceStep,
+        ParsedSynapseProfiles, SourceKind,
     };
     use proptest::prelude::*;
 
@@ -821,7 +854,8 @@ mod edge_proptests {
     fn boundary_empty_parsed_profiles_no_change() {
         let base = empty_config();
         let n_before = base.profiles.len();
-        let result = apply_parsed_into_config(base, minimal_parsed(vec![]), &ImportOptions::default());
+        let result =
+            apply_parsed_into_config(base, minimal_parsed(vec![]), &ImportOptions::default());
         assert_eq!(result.config.profiles.len(), n_before);
         assert_eq!(result.summary.profiles_added, 0);
         assert_eq!(result.summary.bindings_added, 0);
@@ -915,13 +949,24 @@ mod edge_proptests {
                 layer: "standard".into(),
                 source_input_id: "KEY_1".into(),
                 label: "X".into(),
-                action: ParsedAction::Shortcut { key: "A".into(), ctrl: false, shift: false, alt: false, win: false },
+                action: ParsedAction::Shortcut {
+                    key: "A".into(),
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    win: false,
+                },
             }],
             macros: vec![],
         }]);
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
         assert_eq!(result.config.bindings.len(), 0);
-        assert!(result.warnings.iter().any(|w| w.code == "control_id_not_in_enum"));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "control_id_not_in_enum")
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -939,7 +984,13 @@ mod edge_proptests {
                 layer: "not_a_layer".into(),
                 source_input_id: "KEY_1".into(),
                 label: "X".into(),
-                action: ParsedAction::Shortcut { key: "A".into(), ctrl: false, shift: false, alt: false, win: false },
+                action: ParsedAction::Shortcut {
+                    key: "A".into(),
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                    win: false,
+                },
             }],
             macros: vec![],
         }]);
@@ -987,13 +1038,20 @@ mod edge_proptests {
                 layer: "standard".into(),
                 source_input_id: "KEY_1".into(),
                 label: "X".into(),
-                action: ParsedAction::Sequence { macro_guid: "nonexistent-guid".into() },
+                action: ParsedAction::Sequence {
+                    macro_guid: "nonexistent-guid".into(),
+                },
             }],
             macros: vec![], // no macros provided
         }]);
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
         assert_eq!(result.config.bindings.len(), 0);
-        assert!(result.warnings.iter().any(|w| w.code == "sequence_ref_missing"));
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.code == "sequence_ref_missing")
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1003,10 +1061,12 @@ mod edge_proptests {
     #[test]
     fn overflow_large_macro_no_panic() {
         let steps: Vec<ParsedSequenceStep> = (0..10_000)
-            .map(|i| if i % 2 == 0 {
-                ParsedSequenceStep::Send { value: "A".into() }
-            } else {
-                ParsedSequenceStep::Sleep { delay_ms: 50 }
+            .map(|i| {
+                if i % 2 == 0 {
+                    ParsedSequenceStep::Send { value: "A".into() }
+                } else {
+                    ParsedSequenceStep::Sleep { delay_ms: 50 }
+                }
             })
             .collect();
         let base = empty_config();
@@ -1018,7 +1078,9 @@ mod edge_proptests {
                 layer: "standard".into(),
                 source_input_id: "KEY_1".into(),
                 label: "X".into(),
-                action: ParsedAction::Sequence { macro_guid: "m1".into() },
+                action: ParsedAction::Sequence {
+                    macro_guid: "m1".into(),
+                },
             }],
             macros: vec![ParsedMacro {
                 synapse_guid: "m1".into(),
@@ -1047,7 +1109,9 @@ mod edge_proptests {
                 layer: "standard".into(),
                 source_input_id: "KEY_1".into(),
                 label: "X".into(),
-                action: ParsedAction::Sequence { macro_guid: "empty-macro".into() },
+                action: ParsedAction::Sequence {
+                    macro_guid: "empty-macro".into(),
+                },
             }],
             macros: vec![ParsedMacro {
                 synapse_guid: "empty-macro".into(),
@@ -1058,9 +1122,17 @@ mod edge_proptests {
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
         // Binding and action are created; the action must have >= 1 step (schema).
         let binding = &result.config.bindings[0];
-        let action = result.config.actions.iter().find(|a| a.id == binding.action_id).unwrap();
+        let action = result
+            .config
+            .actions
+            .iter()
+            .find(|a| a.id == binding.action_id)
+            .unwrap();
         if let crate::config::ActionPayload::Sequence(seq) = &action.payload {
-            assert!(!seq.steps.is_empty(), "empty macro must have a placeholder step");
+            assert!(
+                !seq.steps.is_empty(),
+                "empty macro must have a placeholder step"
+            );
         } else {
             panic!("expected Sequence payload");
         }
@@ -1077,12 +1149,15 @@ mod edge_proptests {
         // Seed the config with 1001 profiles all named "X".
         let mut base = empty_config();
         for i in 0..1001usize {
-            base.profiles.push(serde_json::from_value(serde_json::json!({
-                "id": format!("p-{i}"),
-                "name": "X",
-                "enabled": true,
-                "priority": i
-            })).unwrap());
+            base.profiles.push(
+                serde_json::from_value(serde_json::json!({
+                    "id": format!("p-{i}"),
+                    "name": "X",
+                    "enabled": true,
+                    "priority": i
+                }))
+                .unwrap(),
+            );
         }
         // Importing "X" should not panic or loop indefinitely.
         let parsed = minimal_parsed(vec![ParsedProfile {
@@ -1109,10 +1184,14 @@ mod edge_proptests {
             bindings: vec![],
             macros: vec![],
         }]);
-        let result = apply_parsed_into_config(base, parsed, &ImportOptions {
-            selected_profile_guids: Some(vec![]),  // empty filter → nothing matches
-            merge_strategy: MergeStrategy::Append,
-        });
+        let result = apply_parsed_into_config(
+            base,
+            parsed,
+            &ImportOptions {
+                selected_profile_guids: Some(vec![]), // empty filter → nothing matches
+                merge_strategy: MergeStrategy::Append,
+            },
+        );
         assert_eq!(result.summary.profiles_added, 0);
         assert_eq!(result.summary.skipped, 1);
     }
@@ -1147,10 +1226,14 @@ mod edge_proptests {
             bindings: vec![],
             macros: vec![],
         }]);
-        let result = apply_parsed_into_config(base, parsed, &ImportOptions {
-            selected_profile_guids: None,
-            merge_strategy: MergeStrategy::ReplaceByName,
-        });
+        let result = apply_parsed_into_config(
+            base,
+            parsed,
+            &ImportOptions {
+                selected_profile_guids: None,
+                merge_strategy: MergeStrategy::ReplaceByName,
+            },
+        );
         assert_eq!(result.config.profiles.len(), before_count + 1);
     }
 

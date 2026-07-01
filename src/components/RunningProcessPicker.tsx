@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { listRunningProcesses, normalizeCommandError } from "../lib/backend";
@@ -28,37 +28,42 @@ export function RunningProcessPicker({
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const mountedRef = useRef(true);
+
+  const loadProcesses = useCallback(async () => {
+    setLoading(true);
+    try {
+      const list = await listRunningProcesses();
+      if (!mountedRef.current) return;
+      // De-duplicate by (exe + path) because Chromium / Electron-style
+      // apps spawn many child processes with the same name.
+      const seen = new Set<string>();
+      const deduped: RunningProcessInfo[] = [];
+      for (const p of list) {
+        if (!p.exe) continue;
+        const key = `${p.exe.toLowerCase()}|${p.path.toLowerCase()}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        deduped.push(p);
+      }
+      deduped.sort((a, b) => a.exe.localeCompare(b.exe, undefined, { sensitivity: "base" }));
+      setProcesses(deduped);
+    } catch (unknownError) {
+      if (mountedRef.current) setError?.(normalizeCommandError(unknownError));
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, [setError]);
 
   useEffect(() => {
-    let cancelled = false;
-    void listRunningProcesses()
-      .then((list) => {
-        if (cancelled) return;
-        // De-duplicate by (exe + path) because Chromium / Electron-style
-        // apps spawn many child processes with the same name.
-        const seen = new Set<string>();
-        const deduped: RunningProcessInfo[] = [];
-        for (const p of list) {
-          if (!p.exe) continue;
-          const key = `${p.exe.toLowerCase()}|${p.path.toLowerCase()}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          deduped.push(p);
-        }
-        deduped.sort((a, b) => a.exe.localeCompare(b.exe, undefined, { sensitivity: "base" }));
-        setProcesses(deduped);
-      })
-      .catch((unknownError) => {
-        if (cancelled) return;
-        setError?.(normalizeCommandError(unknownError));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
     };
-  }, [setError]);
+  }, []);
+
+  useEffect(() => {
+    void loadProcesses();
+  }, [loadProcesses]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -124,10 +129,12 @@ export function RunningProcessPicker({
                     title={p.path || undefined}
                   >
                     <span className="process-picker__exe">{p.exe}</span>
-                    <span className="process-picker__pid">pid {p.pid}</span>
+                    <span className="process-picker__pid">{t("processPicker.pid", { pid: p.pid })}</span>
                     {p.path ? (
                       <span className="process-picker__path">{p.path}</span>
-                    ) : null}
+                    ) : (
+                      <span className="process-picker__path">{t("processPicker.pathUnavailable")}</span>
+                    )}
                   </button>
                 </li>
               ))}
@@ -141,6 +148,16 @@ export function RunningProcessPicker({
         </div>
 
         <ModalFooter>
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            onClick={() => {
+              void loadProcesses();
+            }}
+            disabled={loading}
+          >
+            {loading ? t("common.processing") : t("processPicker.refresh")}
+          </button>
           <button
             type="button"
             className="action-button action-button--ghost"

@@ -10,8 +10,9 @@
 use std::{
     collections::HashMap,
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc,
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -19,7 +20,7 @@ use std::{
 
 use tauri::AppHandle;
 
-use super::{process_encoded_key_event, EncodedKeyEvent, CAPTURE_BACKEND_NAME};
+use super::{CAPTURE_BACKEND_NAME, EncodedKeyEvent, process_encoded_key_event};
 use crate::{
     config::AppConfig,
     runtime::{self, RuntimeStore},
@@ -183,8 +184,7 @@ impl CaptureBackendHandle {
 
         // Bounded keyboard event channel — see Windows backend for rationale.
         const CAPTURE_EVENT_CAPACITY: usize = 10_000;
-        let (event_tx, event_rx) =
-            mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
+        let (event_tx, event_rx) = mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
 
         // --- Worker thread: processes EncodedKeyEvents (same pattern as Windows) ---
         let worker_app = app.clone();
@@ -285,181 +285,179 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
     // tail-call-optimized by rustc, so a device that repeatedly reconnects would
     // grow the stack unbounded. This labeled loop restarts capture in place.
     'capture: loop {
-    let device_paths = find_razer_naga_devices();
+        let device_paths = find_razer_naga_devices();
 
-    if device_paths.is_empty() {
-        log::info!(
-            "[capture] No Razer Naga evdev devices found — waiting for hotplug."
-        );
+        if device_paths.is_empty() {
+            log::info!("[capture] No Razer Naga evdev devices found — waiting for hotplug.");
 
-        // Poll for device connection every 2 seconds until found or stopped.
-        loop {
-            if stop_flag.load(Ordering::SeqCst) {
-                log::info!("[capture] Capture loop stopped while waiting for device.");
-                return;
-            }
-            thread::sleep(std::time::Duration::from_secs(2));
-            let paths = find_razer_naga_devices();
-            if !paths.is_empty() {
-                log::info!(
-                    "[capture] Razer Naga device(s) detected via hotplug: {:?}",
-                    paths
-                );
-                // Restart capture with the found devices.
-                continue 'capture;
-            }
-        }
-    }
-
-    log::info!(
-        "[capture] Found {} Razer Naga device(s): {:?}",
-        device_paths.len(),
-        device_paths
-    );
-
-    // Open the first matching device
-    let device_path = &device_paths[0];
-    let mut device = match evdev::Device::open(device_path) {
-        Ok(d) => d,
-        Err(e) => {
-            log::error!(
-                "[capture] Failed to open evdev device {}: {e}",
-                device_path.display()
-            );
-            return;
-        }
-    };
-
-    // Audit F002: open the device non-blocking so fetch_events() returns WouldBlock
-    // when idle instead of parking the thread until the next event. Without this,
-    // stop() -> thread.join() hangs forever whenever no input arrives after the stop
-    // flag is set (the read loop only re-checks the flag between events). Non-fatal.
-    if let Err(e) = device.set_nonblocking(true) {
-        log::warn!(
-            "[capture] Could not set evdev device non-blocking: {e}. \
-             Stopping capture may be delayed until the next input event."
-        );
-    }
-
-    log::info!(
-        "[capture] Opened evdev device: {} ({})",
-        device.name().unwrap_or("unknown"),
-        device_path.display()
-    );
-
-    // Attempt to grab the device exclusively so other applications don't
-    // see the F13-F24 keys. Non-fatal if grab fails (requires root or
-    // appropriate udev rules).
-    match device.grab() {
-        Ok(()) => {
-            log::info!("[capture] Grabbed evdev device exclusively.");
-        }
-        Err(e) => {
-            log::warn!(
-                "[capture] Could not grab evdev device exclusively: {e}. \
-                 F-key events may be seen by other applications."
-            );
-        }
-    }
-
-    let mut modifier_state = ModifierState::default();
-
-    let mut device_lost = false;
-
-    while !stop_flag.load(Ordering::SeqCst) {
-        // fetch_events() blocks until events are available. We use a
-        // non-blocking poll by reading with a short timeout via the
-        // device's underlying file descriptor. However, evdev's
-        // fetch_events() is blocking, so we use a small sleep + peek
-        // pattern to allow checking the stop flag periodically.
-        let events: Vec<evdev::InputEvent> = match device.fetch_events() {
-            Ok(events) => events.collect(),
-            Err(e) => {
+            // Poll for device connection every 2 seconds until found or stopped.
+            loop {
                 if stop_flag.load(Ordering::SeqCst) {
-                    break;
+                    log::info!("[capture] Capture loop stopped while waiting for device.");
+                    return;
                 }
-                let kind = e.kind();
-                // EAGAIN -- no events ready yet, retry quickly
-                if kind == std::io::ErrorKind::WouldBlock {
-                    thread::sleep(Duration::from_millis(10));
-                    continue;
-                }
-                // ENODEV (os error 19) -- device disconnected.
-                if e.raw_os_error() == Some(19) {
-                    log::warn!(
-                        "[capture] evdev device disconnected ({}). \
-                         Returning to hotplug polling.",
-                        e
+                thread::sleep(std::time::Duration::from_secs(2));
+                let paths = find_razer_naga_devices();
+                if !paths.is_empty() {
+                    log::info!(
+                        "[capture] Razer Naga device(s) detected via hotplug: {:?}",
+                        paths
                     );
-                    device_lost = true;
-                    break;
+                    // Restart capture with the found devices.
+                    continue 'capture;
                 }
-                log::error!("[capture] evdev fetch_events error: {e}");
-                thread::sleep(Duration::from_millis(100));
-                continue;
+            }
+        }
+
+        log::info!(
+            "[capture] Found {} Razer Naga device(s): {:?}",
+            device_paths.len(),
+            device_paths
+        );
+
+        // Open the first matching device
+        let device_path = &device_paths[0];
+        let mut device = match evdev::Device::open(device_path) {
+            Ok(d) => d,
+            Err(e) => {
+                log::error!(
+                    "[capture] Failed to open evdev device {}: {e}",
+                    device_path.display()
+                );
+                return;
             }
         };
 
-        for event in events {
-            let ev_type = event.event_type().0;
-            if ev_type != EV_KEY {
-                continue;
+        // Audit F002: open the device non-blocking so fetch_events() returns WouldBlock
+        // when idle instead of parking the thread until the next event. Without this,
+        // stop() -> thread.join() hangs forever whenever no input arrives after the stop
+        // flag is set (the read loop only re-checks the flag between events). Non-fatal.
+        if let Err(e) = device.set_nonblocking(true) {
+            log::warn!(
+                "[capture] Could not set evdev device non-blocking: {e}. \
+             Stopping capture may be delayed until the next input event."
+            );
+        }
+
+        log::info!(
+            "[capture] Opened evdev device: {} ({})",
+            device.name().unwrap_or("unknown"),
+            device_path.display()
+        );
+
+        // Attempt to grab the device exclusively so other applications don't
+        // see the F13-F24 keys. Non-fatal if grab fails (requires root or
+        // appropriate udev rules).
+        match device.grab() {
+            Ok(()) => {
+                log::info!("[capture] Grabbed evdev device exclusively.");
             }
-
-            let code = event.code();
-            let value = event.value();
-
-            let is_down = value == KEY_PRESS;
-            let is_repeat = value == KEY_REPEAT;
-            let is_up = value == KEY_RELEASE;
-
-            // Track modifier state
-            if modifier_state.apply_event(code, is_down || is_repeat) {
-                continue;
-            }
-
-            // Only process F13-F24 key events
-            let key_name = match evdev_code_to_key_name(code) {
-                Some(name) => name,
-                None => continue,
-            };
-
-            if !is_down && !is_repeat && !is_up {
-                continue;
-            }
-
-            // Build encoded key with modifier prefix
-            let encoded_key = format!("{}{}", modifier_state.prefix(), key_name);
-
-            let event = EncodedKeyEvent {
-                encoded_key,
-                backend: CAPTURE_BACKEND_NAME.to_owned(),
-                received_at: runtime::timestamp_millis(),
-                is_repeat,
-                is_key_up: is_up,
-            };
-
-            // try_send: drop on full bounded channel rather than block evdev reader.
-            // Distinguish between "queue full" (drop event, keep capturing) and
-            // "receiver dropped" (real shutdown, break the loop).
-            match event_tx.try_send(event) {
-                Ok(()) => {}
-                Err(std::sync::mpsc::TrySendError::Full(_)) => continue,
-                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+            Err(e) => {
+                log::warn!(
+                    "[capture] Could not grab evdev device exclusively: {e}. \
+                 F-key events may be seen by other applications."
+                );
             }
         }
-    }
 
-    // Release grab on shutdown
-    let _ = device.ungrab();
+        let mut modifier_state = ModifierState::default();
 
-    if device_lost {
-        // Device disconnected — restart hotplug polling to reconnect.
-        continue 'capture;
-    }
+        let mut device_lost = false;
 
-    log::info!("[capture] evdev capture loop exited.");
-    return;
+        while !stop_flag.load(Ordering::SeqCst) {
+            // fetch_events() blocks until events are available. We use a
+            // non-blocking poll by reading with a short timeout via the
+            // device's underlying file descriptor. However, evdev's
+            // fetch_events() is blocking, so we use a small sleep + peek
+            // pattern to allow checking the stop flag periodically.
+            let events: Vec<evdev::InputEvent> = match device.fetch_events() {
+                Ok(events) => events.collect(),
+                Err(e) => {
+                    if stop_flag.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let kind = e.kind();
+                    // EAGAIN -- no events ready yet, retry quickly
+                    if kind == std::io::ErrorKind::WouldBlock {
+                        thread::sleep(Duration::from_millis(10));
+                        continue;
+                    }
+                    // ENODEV (os error 19) -- device disconnected.
+                    if e.raw_os_error() == Some(19) {
+                        log::warn!(
+                            "[capture] evdev device disconnected ({}). \
+                         Returning to hotplug polling.",
+                            e
+                        );
+                        device_lost = true;
+                        break;
+                    }
+                    log::error!("[capture] evdev fetch_events error: {e}");
+                    thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+            };
+
+            for event in events {
+                let ev_type = event.event_type().0;
+                if ev_type != EV_KEY {
+                    continue;
+                }
+
+                let code = event.code();
+                let value = event.value();
+
+                let is_down = value == KEY_PRESS;
+                let is_repeat = value == KEY_REPEAT;
+                let is_up = value == KEY_RELEASE;
+
+                // Track modifier state
+                if modifier_state.apply_event(code, is_down || is_repeat) {
+                    continue;
+                }
+
+                // Only process F13-F24 key events
+                let key_name = match evdev_code_to_key_name(code) {
+                    Some(name) => name,
+                    None => continue,
+                };
+
+                if !is_down && !is_repeat && !is_up {
+                    continue;
+                }
+
+                // Build encoded key with modifier prefix
+                let encoded_key = format!("{}{}", modifier_state.prefix(), key_name);
+
+                let event = EncodedKeyEvent {
+                    encoded_key,
+                    backend: CAPTURE_BACKEND_NAME.to_owned(),
+                    received_at: runtime::timestamp_millis(),
+                    is_repeat,
+                    is_key_up: is_up,
+                };
+
+                // try_send: drop on full bounded channel rather than block evdev reader.
+                // Distinguish between "queue full" (drop event, keep capturing) and
+                // "receiver dropped" (real shutdown, break the loop).
+                match event_tx.try_send(event) {
+                    Ok(()) => {}
+                    Err(std::sync::mpsc::TrySendError::Full(_)) => continue,
+                    Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
+                }
+            }
+        }
+
+        // Release grab on shutdown
+        let _ = device.ungrab();
+
+        if device_lost {
+            // Device disconnected — restart hotplug polling to reconnect.
+            continue 'capture;
+        }
+
+        log::info!("[capture] evdev capture loop exited.");
+        return;
     } // 'capture loop
 }
 
@@ -500,18 +498,19 @@ fn run_foreground_watcher(
             .lock()
             .ok()
             .and_then(|store| store.manual_profile_override().map(str::to_owned));
-        let capture_result = match window_capture::capture_active_window_with_resolution_with_override(
-            &config,
-            &app_name,
-            None,
-            manual_profile_override.as_deref(),
-        ) {
-            Ok(result) => result,
-            Err(e) => {
-                log::debug!("[capture] Foreground watcher: window capture failed: {e}");
-                continue;
-            }
-        };
+        let capture_result =
+            match window_capture::capture_active_window_with_resolution_with_override(
+                &config,
+                &app_name,
+                None,
+                manual_profile_override.as_deref(),
+            ) {
+                Ok(result) => result,
+                Err(e) => {
+                    log::debug!("[capture] Foreground watcher: window capture failed: {e}");
+                    continue;
+                }
+            };
 
         // Only emit when the foreground window actually changed
         if capture_result.hwnd == last_window_id {

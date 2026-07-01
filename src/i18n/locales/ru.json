@@ -42,7 +42,10 @@
     "edit": "Редактировать",
     "optional": "необязательно",
     "secondsShort": "с",
-    "notLoadedYet": "Пока не загружен"
+    "notLoadedYet": "Пока не загружен",
+    "processing": "Выполняется…",
+    "browseFailed": "Не удалось открыть системный выбор файла.",
+    "clearSearch": "Очистить поиск"
   },
   "app": {
     "name": "Sidearm",
@@ -467,7 +470,10 @@
     "searchPlaceholder": "Фильтр по имени или пути…",
     "loading": "Читаю список процессов…",
     "empty": "Ничего не найдено.",
-    "truncated": "Показано {{shown}} из {{total}}. Сузьте поиск."
+    "truncated": "Показано {{shown}} из {{total}}. Сузьте поиск.",
+    "refresh": "Обновить",
+    "pid": "PID {{pid}}",
+    "pathUnavailable": "Путь недоступен — можно сопоставить только по имени процесса"
   },
   "presets": {
     "title": "Пресеты",
@@ -494,6 +500,9 @@
     "deviceNameHeader": "ИМЯ УСТРОЙСТВА",
     "deviceNameHelp": "Подпись под названием в сайдбаре. Оставьте пустым — покажется «Мышь не определена».",
     "deviceNamePlaceholder": "напр. Razer Naga V2 HyperSpeed",
+    "globalShortcutHeader": "ГЛОБАЛЬНАЯ КЛАВИША",
+    "globalShortcutHelp": "Комбинация, которая показывает или прячет окно Sidearm из любой программы. Оставьте пустым для Ctrl+Alt+N. Изменение применяется после перезапуска.",
+    "globalShortcutPlaceholder": "ctrl+alt+n",
     "allProfilesHeader": "ВСЕ ПРОФИЛИ",
     "priorityMeta": "Приоритет: {{priority}}",
     "disabledMeta": "Отключён",
@@ -519,11 +528,13 @@
     "replaceConfigTitle": "Заменить конфигурацию?",
     "replaceConfigMessage": "Текущая конфигурация будет полностью заменена данными из файла. Это действие нельзя отменить. Продолжить?",
     "replaceConfigConfirm": "Заменить",
+    "mergeConfigConfirm": "Объединить",
     "readConfigError": "Не удалось прочитать файл конфигурации.",
     "importConfig": "Импорт конфигурации",
     "openConfigFolder": "Открыть папку с конфигом",
-    "importHasWarnings": "⚠ Предупреждений: {{count}}",
-    "importSummary": "В файле: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{appMappings}} правил, {{snippets}} сниппетов. {{warnings}} Текущая конфигурация будет полностью заменена. Продолжить?",
+    "importHasWarnings": "Предупреждений: {{count}}",
+    "importSummary": "В файле: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{appMappings}} правил, {{snippets}} сниппетов.",
+    "importModeHint": "«Объединить» добавит данные из файла к текущей конфигурации. «Заменить» полностью перезапишет текущую конфигурацию.",
     "languageHeader": "ЯЗЫК ИНТЕРФЕЙСА",
     "osdHeader": "УВЕДОМЛЕНИЯ",
     "repairClipboardHeader": "Авто-починка буфера",
@@ -769,8 +780,22 @@
     "mouseModifiersHint": "Модификаторы зажимаются на время действия. Например, Ctrl + Скролл вверх = зум.",
     "textLabel": "Текст",
     "textPlaceholder": "Введите текст для ввода...",
+    "longTextClipboardWarning": "Текст длиннее 100 символов будет временно вставлен через буфер обмена, чтобы сохранить переносы строк.",
+    "launchTargetMode": "Тип запуска",
+    "launchMode": {
+      "program": "Программа",
+      "folder": "Папка",
+      "url": "Ссылка"
+    },
     "programLabel": "Программа",
     "launchTargetHint": "Можно также ввести URL (https://…) или путь к папке.",
+    "launchProgramHint": "Запускает выбранную программу или ярлык. Аргументы и рабочая папка применяются только в этом режиме.",
+    "launchFolderLabel": "Папка",
+    "launchFolderPlaceholder": "C:\\Projects",
+    "launchFolderHint": "Откроет папку через системный проводник.",
+    "launchUrlLabel": "Ссылка",
+    "launchUrlPlaceholder": "https://example.com",
+    "launchUrlHint": "Откроет ссылку через приложение по умолчанию.",
     "launchArgsLabel": "Аргументы",
     "launchArgsPlaceholder": "--flag value",
     "launchWorkingDirLabel": "Рабочая папка",
@@ -826,6 +851,7 @@
     "recordingHint": "Нажимайте клавиши. Каждое нажатие будет записано как шаг последовательности.",
     "recordingCount": "({{count}} / {{max}})",
     "recordLimitReached": "Достигнут лимит записи в {{max}} шагов — запись остановлена автоматически. Удалите ненужные шаги или сохраните как есть.",
+    "sequenceLaunchRollbackWarning": "Если шаг запуска откроет программу, а следующий шаг завершится ошибкой, Sidearm не сможет автоматически закрыть уже запущенную программу.",
     "stepTitle": "Шаг {{index}}",
     "stepType": "Тип",
     "stepSend": "Отправка сочетания",
@@ -908,7 +934,8 @@
     "deleteConfirmReferenced_one": "Фрагмент «{{name}}» используют действий: {{count}} ({{actions}}). После удаления их текст станет встроенным (отвяжется от библиотеки). Удалить?",
     "deleteConfirmReferenced_few": "Фрагмент «{{name}}» используют действий: {{count}} ({{actions}}). После удаления их текст станет встроенным (отвяжется от библиотеки). Удалить?",
     "deleteConfirmReferenced_many": "Фрагмент «{{name}}» используют действий: {{count}} ({{actions}}). После удаления их текст станет встроенным (отвяжется от библиотеки). Удалить?",
-    "deleteConfirmReferenced_other": "Фрагмент «{{name}}» используют действий: {{count}} ({{actions}}). После удаления их текст станет встроенным (отвяжется от библиотеки). Удалить?"
+    "deleteConfirmReferenced_other": "Фрагмент «{{name}}» используют действий: {{count}} ({{actions}}). После удаления их текст станет встроенным (отвяжется от библиотеки). Удалить?",
+    "referencesSummary": "{{actions}} и ещё {{count}}"
   },
   "toast": {
     "undone": "Действие отменено",
@@ -934,6 +961,7 @@
     "profileMeta": "{{bindings}} назначений, {{macros}} макросов",
     "warningsHeader": "Предупреждения ({{count}})",
     "warningsMore": "…и ещё {{count}}",
+    "unmappable": "Не переносится",
     "submit": "Импортировать {{profiles}} профил. ({{bindings}} назн.)",
     "submitting": "Импорт…",
     "summaryToast": "Импортировано: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{macros}} макросов",
@@ -950,6 +978,7 @@
       "portable": "Portable",
       "roaming": "Roaming",
       "fallback": "Portable (read-only)",
+      "error": "Пути недоступны",
       "tooltipPrefix": "Конфиг хранится в:"
     }
   },
@@ -986,6 +1015,8 @@
   },
   "errors": {
     "technicalInfo": "Техническая информация",
+    "copySucceeded": "Детали скопированы.",
+    "copyFailed": "Не удалось скопировать детали. Выделите техническую информацию вручную.",
     "actions": {
       "copyDetails": "Скопировать детали",
       "retry": "Попробовать снова",
@@ -1020,6 +1051,10 @@
     "invalidBackupPath": {
       "title": "Недопустимый путь резервной копии",
       "hint": "Путь должен указывать на файл внутри папки конфига."
+    },
+    "backupUnavailable": {
+      "title": "Нет резервной копии",
+      "hint": "Sidearm пока не нашёл ни одной резервной копии для восстановления. Они появятся после первого успешного сохранения конфига."
     },
     "invalidPath": {
       "title": "Недопустимый путь файла",

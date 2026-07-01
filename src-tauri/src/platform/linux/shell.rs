@@ -116,7 +116,9 @@ pub(crate) fn list_running_processes() -> Vec<RunningProcess> {
         if !name_str.chars().all(|c| c.is_ascii_digit()) {
             continue;
         }
-        let Ok(pid) = name_str.parse::<u32>() else { continue };
+        let Ok(pid) = name_str.parse::<u32>() else {
+            continue;
+        };
         let comm_path = entry.path().join("comm");
         let comm = std::fs::read_to_string(&comm_path)
             .ok()

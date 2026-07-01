@@ -43,7 +43,8 @@ pub fn parse_synapse_source(path: &Path) -> Result<ParsedSynapseProfiles, Synaps
     let mut probe = [0u8; 2];
     let mut file = std::fs::File::open(path)
         .map_err(|e| SynapseImportError::Io(path.to_string_lossy().into_owned(), e))?;
-    let bytes = file.read(&mut probe)
+    let bytes = file
+        .read(&mut probe)
         .map_err(|e| SynapseImportError::Io(path.to_string_lossy().into_owned(), e))?;
 
     if bytes >= 2 && probe == *b"PK" {
@@ -73,12 +74,10 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
         match macro_xml::parse_macros_in_dir(cand, &mut extra_warnings) {
             Ok(mut macros) => extra_macros.append(&mut macros),
             Err(e) => {
-                extra_warnings.push(
-                    ImportWarning::new(
-                        "macro_dir_io_error",
-                        format!("Could not read `{}`: {e}", cand.display()),
-                    ),
-                );
+                extra_warnings.push(ImportWarning::new(
+                    "macro_dir_io_error",
+                    format!("Could not read `{}`: {e}", cand.display()),
+                ));
             }
         }
     }

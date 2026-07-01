@@ -1,7 +1,7 @@
 use serde::Serialize;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use tauri::{AppHandle, Emitter};
 
@@ -10,9 +10,8 @@ use crate::{
     executor::{self, RuntimeErrorEvent},
     hotkeys, resolver,
     runtime::{
-        self, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONTROL_RESOLVED,
-        EVENT_ENCODED_KEY_RECEIVED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-        EVENT_THROTTLE_BLOCKED,
+        self, EVENT_ACTION_EXECUTED, EVENT_CONTROL_RESOLVED, EVENT_ENCODED_KEY_RECEIVED,
+        EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR, EVENT_THROTTLE_BLOCKED, RuntimeStore,
     },
     window_capture,
 };
@@ -183,10 +182,7 @@ enum HeldMatch {
 /// treats `"F3"` as a suffix of `"Ctrl+F13"`), and MUST be unique: releasing the
 /// wrong held shortcut leaves the intended one physically stuck, so an ambiguous
 /// base (2+ holds sharing the same base key) refuses to release any.
-fn select_held_key<'a>(
-    held_keys: impl Iterator<Item = &'a str>,
-    encoded_key: &str,
-) -> HeldMatch {
+fn select_held_key<'a>(held_keys: impl Iterator<Item = &'a str>, encoded_key: &str) -> HeldMatch {
     let base = encoded_key.rsplit('+').next().unwrap_or(encoded_key);
     let mut exact: Option<String> = None;
     let mut base_matches: Vec<String> = Vec::new();
@@ -289,10 +285,7 @@ fn process_encoded_key_event(
         if let Some(held) = held_key.and_then(|k| held_actions.remove(&k)) {
             match crate::input_synthesis::send_shortcut_hold_up(&held) {
                 Ok(()) => {
-                    log::info!(
-                        "[capture] Hold-shortcut released for {}",
-                        event.encoded_key
-                    );
+                    log::info!("[capture] Hold-shortcut released for {}", event.encoded_key);
                     log_entries.push((
                         "выполнение",
                         format!("Отпущен удерживаемый шорткат для `{}`.", event.encoded_key),
@@ -306,7 +299,10 @@ fn process_encoded_key_event(
                     );
                     log_entries.push((
                         "выполнение",
-                        format!("Не удалось отпустить шорткат для `{}`: {e}", event.encoded_key),
+                        format!(
+                            "Не удалось отпустить шорткат для `{}`: {e}",
+                            event.encoded_key
+                        ),
                         true,
                     ));
                 }
@@ -318,7 +314,10 @@ fn process_encoded_key_event(
             );
             log_entries.push((
                 "перехват",
-                format!("Отпускание `{}` без активного удержания.", event.encoded_key),
+                format!(
+                    "Отпускание `{}` без активного удержания.",
+                    event.encoded_key
+                ),
                 false,
             ));
         }
@@ -336,26 +335,25 @@ fn process_encoded_key_event(
         .ok()
         .and_then(|store| store.manual_profile_override().map(str::to_owned));
 
-    let capture_result =
-        match window_capture::capture_active_window_with_resolution_with_override(
-            config,
-            app_name,
-            None,
-            manual_profile_override.as_deref(),
-        ) {
-            Ok(result) => result,
-            Err(message) => {
-                let error = RuntimeErrorEvent {
-                    category: "захват окна".into(),
-                    message,
-                    encoded_key: Some(event.encoded_key.clone()),
-                    action_id: None,
-                    created_at: runtime::timestamp_millis(),
-                };
-                emit_runtime_error(app, runtime_store, &error);
-                return EventOutcome::Handled;
-            }
-        };
+    let capture_result = match window_capture::capture_active_window_with_resolution_with_override(
+        config,
+        app_name,
+        None,
+        manual_profile_override.as_deref(),
+    ) {
+        Ok(result) => result,
+        Err(message) => {
+            let error = RuntimeErrorEvent {
+                category: "захват окна".into(),
+                message,
+                encoded_key: Some(event.encoded_key.clone()),
+                action_id: None,
+                created_at: runtime::timestamp_millis(),
+            };
+            emit_runtime_error(app, runtime_store, &error);
+            return EventOutcome::Handled;
+        }
+    };
 
     emit_profile_resolved_and_notify(app, runtime_store, &capture_result, config);
 
@@ -466,14 +464,11 @@ fn process_encoded_key_event(
             .unwrap_or(false);
 
     let is_hold_shortcut = preview.action_type.as_deref() == Some("shortcut")
-        && (preview.trigger_mode == Some(config::TriggerMode::Hold)
-            || is_modifier_only_shortcut);
+        && (preview.trigger_mode == Some(config::TriggerMode::Hold) || is_modifier_only_shortcut);
 
     // Per-binding throttle (tap/press paths only). Hold shortcuts press once and
     // stay down, so throttling them is meaningless and would break PTT holds.
-    if !is_hold_shortcut
-        && let Some(binding_id) = preview.binding_id.as_deref()
-    {
+    if !is_hold_shortcut && let Some(binding_id) = preview.binding_id.as_deref() {
         let throttle_ms = config
             .bindings
             .iter()
@@ -541,7 +536,12 @@ fn process_encoded_key_event(
             let encoding_mods = hotkeys::extract_encoding_modifiers(&event.encoded_key);
             log::info!(
                 "[capture] Hold-shortcut sending: ctrl={} shift={} alt={} win={} key={:?} | encoding_mods={:?}",
-                payload.ctrl, payload.shift, payload.alt, payload.win, payload.key, encoding_mods,
+                payload.ctrl,
+                payload.shift,
+                payload.alt,
+                payload.win,
+                payload.key,
+                encoding_mods,
             );
             match crate::input_synthesis::send_shortcut_hold_down(payload, &encoding_mods) {
                 Ok(held) => {
@@ -617,10 +617,26 @@ fn process_encoded_key_event(
                 "Запрошено удержание, но действие не шорткат; переключение на нажатие.".into(),
                 true,
             ));
-            run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
+            run_fire_and_forget(
+                app,
+                runtime_store,
+                config,
+                &preview,
+                &event,
+                log_entries,
+                is_fg_elevated,
+            );
         }
     } else {
-        run_fire_and_forget(app, runtime_store, config, &preview, &event, log_entries, is_fg_elevated);
+        run_fire_and_forget(
+            app,
+            runtime_store,
+            config,
+            &preview,
+            &event,
+            log_entries,
+            is_fg_elevated,
+        );
     }
 
     EventOutcome::Handled
@@ -635,10 +651,7 @@ fn run_fire_and_forget(
     mut log_entries: Vec<(&str, String, bool)>,
     is_fg_elevated: bool,
 ) {
-    log::info!(
-        "[capture] Dispatching action for {}",
-        preview.encoded_key
-    );
+    log::info!("[capture] Dispatching action for {}", preview.encoded_key);
     match executor::run_preview_action(config, preview) {
         Ok(mut execution) => {
             if is_fg_elevated {
@@ -668,10 +681,11 @@ fn run_fire_and_forget(
             // input — and the OSD indicator — resolve under the switched-to profile.
             if let Some(action_id) = preview.action_id.as_deref()
                 && let Some(action) = config.actions.iter().find(|a| a.id == action_id)
-                    && let crate::config::ActionPayload::ProfileSwitch(p) = &action.payload
-                        && let Ok(mut store) = runtime_store.lock() {
-                            store.set_manual_profile_override(Some(p.target_profile_id.clone()));
-                        }
+                && let crate::config::ActionPayload::ProfileSwitch(p) = &action.payload
+                && let Ok(mut store) = runtime_store.lock()
+            {
+                store.set_manual_profile_override(Some(p.target_profile_id.clone()));
+            }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
         }
         Err(error) => {
@@ -706,7 +720,9 @@ pub(crate) fn emit_profile_resolved_and_notify(
         let should_notify = runtime_store
             .lock()
             .ok()
-            .map(|mut store| store.notify_profile_change(capture_result.resolved_profile_id.as_deref()))
+            .map(|mut store| {
+                store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
+            })
             .unwrap_or(false);
         if should_notify {
             let profile_name = capture_result
@@ -722,17 +738,20 @@ fn flush_log_entries(runtime_store: &Arc<Mutex<RuntimeStore>>, entries: Vec<(&st
     if entries.is_empty() {
         return;
     }
-    match runtime_store.lock() { Ok(mut store) => {
-        for (source, message, is_warn) in entries {
-            if is_warn {
-                store.record_warn(source, message);
-            } else {
-                store.record_info(source, message);
+    match runtime_store.lock() {
+        Ok(mut store) => {
+            for (source, message, is_warn) in entries {
+                if is_warn {
+                    store.record_warn(source, message);
+                } else {
+                    store.record_info(source, message);
+                }
             }
         }
-    } _ => {
-        log::error!("[capture] runtime_store mutex poisoned while flushing log entries");
-    }}
+        _ => {
+            log::error!("[capture] runtime_store mutex poisoned while flushing log entries");
+        }
+    }
 }
 
 fn emit_runtime_error(
@@ -740,37 +759,41 @@ fn emit_runtime_error(
     runtime_store: &Arc<Mutex<RuntimeStore>>,
     event: &RuntimeErrorEvent,
 ) {
-    match runtime_store.lock() { Ok(mut store) => {
-        let mut context = Vec::new();
-        if let Some(encoded_key) = &event.encoded_key {
-            context.push(format!("encodedKey={encoded_key}"));
-        }
-        if let Some(action_id) = &event.action_id {
-            context.push(format!("actionId={action_id}"));
-        }
+    match runtime_store.lock() {
+        Ok(mut store) => {
+            let mut context = Vec::new();
+            if let Some(encoded_key) = &event.encoded_key {
+                context.push(format!("encodedKey={encoded_key}"));
+            }
+            if let Some(action_id) = &event.action_id {
+                context.push(format!("actionId={action_id}"));
+            }
 
-        let suffix = if context.is_empty() {
-            String::new()
-        } else {
-            format!(" ({})", context.join(", "))
-        };
-        store.record_warn(
-            event.category.clone(),
-            format!("{}{}", event.message, suffix),
-        );
-    } _ => {
-        log::error!(
-            "[{}] runtime_store mutex poisoned while recording runtime error: {}",
-            event.category, event.message
-        );
-    }}
+            let suffix = if context.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", context.join(", "))
+            };
+            store.record_warn(
+                event.category.clone(),
+                format!("{}{}", event.message, suffix),
+            );
+        }
+        _ => {
+            log::error!(
+                "[{}] runtime_store mutex poisoned while recording runtime error: {}",
+                event.category,
+                event.message
+            );
+        }
+    }
 
     let _ = app.emit(EVENT_RUNTIME_ERROR, event);
 }
 
 #[cfg(test)]
 mod select_held_key_tests {
-    use super::{select_held_key, HeldMatch};
+    use super::{HeldMatch, select_held_key};
 
     #[test]
     fn exact_match_wins() {
@@ -801,7 +824,10 @@ mod select_held_key_tests {
     #[test]
     fn ambiguous_base_releases_none() {
         let held = ["Alt+F13", "Ctrl+F13"];
-        assert_eq!(select_held_key(held.into_iter(), "F13"), HeldMatch::Ambiguous);
+        assert_eq!(
+            select_held_key(held.into_iter(), "F13"),
+            HeldMatch::Ambiguous
+        );
     }
 
     #[test]
@@ -816,6 +842,9 @@ mod select_held_key_tests {
     #[test]
     fn no_match_returns_none() {
         let held = ["Ctrl+F13"];
-        assert_eq!(select_held_key(held.into_iter(), "Alt+F19"), HeldMatch::None);
+        assert_eq!(
+            select_held_key(held.into_iter(), "Alt+F19"),
+            HeldMatch::None
+        );
     }
 }

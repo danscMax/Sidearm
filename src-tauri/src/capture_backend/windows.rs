@@ -1,14 +1,15 @@
 use serde::{Deserialize, Serialize};
 use std::{
     sync::{
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
-        mpsc, Arc, Mutex,
+        mpsc,
     },
     thread::{self, JoinHandle},
 };
 use tauri::AppHandle;
 
-use super::{process_encoded_key_event, EncodedKeyEvent, EventOutcome, CAPTURE_BACKEND_NAME};
+use super::{CAPTURE_BACKEND_NAME, EncodedKeyEvent, EventOutcome, process_encoded_key_event};
 use crate::{
     config::AppConfig,
     hotkeys,
@@ -16,7 +17,7 @@ use crate::{
     window_capture,
 };
 
-use crate::vk::{classify_modifier_vk, is_modifier_vk, ModifierKind};
+use crate::vk::{ModifierKind, classify_modifier_vk, is_modifier_vk};
 
 const BACKEND_LL_HOOK: &str = "windows-ll-hook";
 
@@ -34,10 +35,18 @@ const MOD_MODIFIER_BITS: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
 /// Build a RegisterHotKey modifier mask from hotkey modifiers.
 fn register_hotkey_mask(mods: &hotkeys::HotkeyModifiers) -> u32 {
     let mut mask = MOD_NOREPEAT;
-    if mods.alt { mask |= MOD_ALT; }
-    if mods.ctrl { mask |= MOD_CONTROL; }
-    if mods.shift { mask |= MOD_SHIFT; }
-    if mods.win { mask |= MOD_WIN; }
+    if mods.alt {
+        mask |= MOD_ALT;
+    }
+    if mods.ctrl {
+        mask |= MOD_CONTROL;
+    }
+    if mods.shift {
+        mask |= MOD_SHIFT;
+    }
+    if mods.win {
+        mask |= MOD_WIN;
+    }
     mask
 }
 
@@ -346,11 +355,17 @@ fn make_key_input(
 /// `size_of::<INPUT>()` argument that every injection site repeated.
 fn send_inputs(inputs: &[windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT]) -> u32 {
     use std::mem::size_of;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT};
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{INPUT, SendInput};
     if inputs.is_empty() {
         return 0;
     }
-    unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), size_of::<INPUT>() as i32) }
+    unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            size_of::<INPUT>() as i32,
+        )
+    }
 }
 
 /// Replay a buffered modifier-down event via SendInput.
@@ -389,9 +404,7 @@ unsafe fn replay_modifier_down(vk: u32, scan: u32) {
 /// Both the down and up events carry `KEYEVENTF_EXTENDEDKEY` for right-side
 /// modifiers; see `replay_modifier_down` rationale.
 unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP};
     let extended_bit = if is_extended_modifier_vk(vk) {
         KEYEVENTF_EXTENDEDKEY
     } else {
@@ -418,9 +431,7 @@ unsafe fn replay_modifier_tap(vk: u32, scan: u32) {
 /// receive `KEYEVENTF_EXTENDEDKEY` so the up matches a prior extended-key
 /// down (same key, not the L-variant with the same scan code).
 unsafe fn replay_modifier_up(vk: u32, scan: u32) {
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
-    };
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP};
     let mut flags = KEYEVENTF_KEYUP;
     if is_extended_modifier_vk(vk) {
         flags |= KEYEVENTF_EXTENDEDKEY;
@@ -614,17 +625,16 @@ fn flush_expired_pending_modifiers() {
     FLUSHING_REPLAYED.with(|cell| cell.set(true));
 
     for pm in &expired {
-        unsafe { replay_modifier_down(pm.vk, pm.scan); }
+        unsafe {
+            replay_modifier_down(pm.vk, pm.scan);
+        }
     }
 
     FLUSHING_REPLAYED.with(|cell| cell.set(false));
 
     HELPER_MATCHES.with(|mc| {
         let mut buf = mc.borrow_mut();
-        buf.push(format!(
-            "DEBUG:mod-replay timeout vks={:?}",
-            replayed_vks,
-        ));
+        buf.push(format!("DEBUG:mod-replay timeout vks={:?}", replayed_vks,));
         for vk in &replayed_vks {
             buf.push(format!(
                 "DEBUG:mod-replayed-tracked vk=0x{:02X} reason=flush-timeout",
@@ -727,15 +737,16 @@ fn gc_orphan_replayed_modifiers() {
     snapshot_modifier_state("before-orphan-gc");
     for (vk, age_ms) in &expired {
         let os_down = unsafe {
-            (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(*vk as i32)
-                as u16
+            (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(*vk as i32) as u16
                 & 0x8000)
                 != 0
         };
         if os_down {
             // scan=0 — we don't have the original buffered scan code at this
             // point, and Windows accepts wVk-only key-up for modifier VKs.
-            unsafe { replay_modifier_up(*vk, 0); }
+            unsafe {
+                replay_modifier_up(*vk, 0);
+            }
             HELPER_MATCHES.with(|mc| {
                 mc.borrow_mut().push(format!(
                     "DEBUG:mod-replayed-force-release vk=0x{:02X} age={}ms reason=orphan-gc",
@@ -761,41 +772,47 @@ fn gc_orphan_replayed_modifiers() {
 /// state-divergence bugs — call from any place where the state may have
 /// shifted unexpectedly.
 fn snapshot_modifier_state(reason: &str) {
-    let pending: Vec<u32> = PENDING_MODIFIERS.with(|cell| {
-        cell.borrow().iter().map(|pm| pm.vk).collect()
-    });
-    let consumed: Vec<u32> = CONSUMED_MODIFIER_VKS.with(|cell| {
-        cell.borrow().keys().copied().collect()
-    });
-    let replayed: Vec<u32> = REPLAYED_AWAITING_UP.with(|cell| {
-        cell.borrow().keys().copied().collect()
-    });
+    let pending: Vec<u32> =
+        PENDING_MODIFIERS.with(|cell| cell.borrow().iter().map(|pm| pm.vk).collect());
+    let consumed: Vec<u32> =
+        CONSUMED_MODIFIER_VKS.with(|cell| cell.borrow().keys().copied().collect());
+    let replayed: Vec<u32> =
+        REPLAYED_AWAITING_UP.with(|cell| cell.borrow().keys().copied().collect());
     let helper_state = HELPER_MODIFIERS.with(|cell| *cell.borrow());
 
     let probe = |vk: u32| -> bool {
         unsafe {
-            (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32)
-                as u16
+            (windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(vk as i32) as u16
                 & 0x8000)
                 != 0
         }
     };
-    let os_lctrl  = probe(VK_LCONTROL);
-    let os_rctrl  = probe(VK_RCONTROL);
-    let os_lmenu  = probe(VK_LMENU);
-    let os_rmenu  = probe(VK_RMENU);
+    let os_lctrl = probe(VK_LCONTROL);
+    let os_rctrl = probe(VK_RCONTROL);
+    let os_lmenu = probe(VK_LMENU);
+    let os_rmenu = probe(VK_RMENU);
     let os_lshift = probe(VK_LSHIFT);
     let os_rshift = probe(VK_RSHIFT);
-    let os_lwin   = probe(VK_LWIN);
-    let os_rwin   = probe(VK_RWIN);
+    let os_lwin = probe(VK_LWIN);
+    let os_rwin = probe(VK_RWIN);
 
     HELPER_MATCHES.with(|cell| {
         cell.borrow_mut().push(format!(
             "DEBUG:state-snapshot reason={reason} pending={pending:?} consumed={consumed:?} \
              replayed={replayed:?} helper={{ctrl:{} alt:{} shift:{} win:{}}} \
              os={{LCtrl:{} RCtrl:{} LAlt:{} RAlt:{} LShift:{} RShift:{} LWin:{} RWin:{}}}",
-            helper_state.ctrl, helper_state.alt, helper_state.shift, helper_state.win,
-            os_lctrl, os_rctrl, os_lmenu, os_rmenu, os_lshift, os_rshift, os_lwin, os_rwin,
+            helper_state.ctrl,
+            helper_state.alt,
+            helper_state.shift,
+            helper_state.win,
+            os_lctrl,
+            os_rctrl,
+            os_lmenu,
+            os_rmenu,
+            os_lshift,
+            os_rshift,
+            os_lwin,
+            os_rwin,
         ));
     });
 }
@@ -803,9 +820,7 @@ fn snapshot_modifier_state(reason: &str) {
 /// Drain ALL entries from `REPLAYED_AWAITING_UP`, returning the VKs.  Pure
 /// state manipulation — no SendInput.  Split out for unit tests.
 fn take_all_replayed_modifiers() -> Vec<u32> {
-    REPLAYED_AWAITING_UP.with(|cell| {
-        cell.borrow_mut().drain().map(|(vk, _)| vk).collect()
-    })
+    REPLAYED_AWAITING_UP.with(|cell| cell.borrow_mut().drain().map(|(vk, _)| vk).collect())
 }
 
 /// Force-release ALL entries in `REPLAYED_AWAITING_UP` via SendInput key-up.
@@ -821,7 +836,9 @@ fn force_release_all_replayed_modifiers(reason: &str) {
         return;
     }
     for vk in &entries {
-        unsafe { replay_modifier_up(*vk, 0); }
+        unsafe {
+            replay_modifier_up(*vk, 0);
+        }
     }
     HELPER_MATCHES.with(|mc| {
         mc.borrow_mut().push(format!(
@@ -856,8 +873,7 @@ impl CaptureBackendHandle {
             .collect();
         // Bounded keyboard event channel — see the module-level
         // CAPTURE_EVENT_CAPACITY for the OOM rationale.
-        let (event_tx, event_rx) =
-            mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
+        let (event_tx, event_rx) = mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
         let helper_event_tx = event_tx.clone();
         // B-F4 Mode A: the helper's stdout reader flips this on EOF (helper
         // process crash). The worker then force-releases every hold whose
@@ -876,8 +892,10 @@ impl CaptureBackendHandle {
             use std::sync::mpsc::RecvTimeoutError;
             use std::time::{Duration, Instant};
 
-            let mut held_actions: std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState> =
-                std::collections::HashMap::new();
+            let mut held_actions: std::collections::HashMap<
+                String,
+                crate::input_synthesis::HeldShortcutState,
+            > = std::collections::HashMap::new();
             // Track when we last observed a capture event for each held
             // encoding.  If we stop hearing from an encoding for this long
             // while it is still marked held, the capture pipeline has lost
@@ -968,10 +986,9 @@ impl CaptureBackendHandle {
                                      (no key-up within {HOLD_STALE_THRESHOLD:?}, source key \
                                      vk={source_vk:?} reports UP)"
                                 );
-                                if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
-                                    log::warn!(
-                                        "[capture] Force-release failed for `{key}`: {e}"
-                                    );
+                                if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held)
+                                {
+                                    log::warn!("[capture] Force-release failed for `{key}`: {e}");
                                 }
                             }
                             held_last_seen.remove(&key);
@@ -984,7 +1001,9 @@ impl CaptureBackendHandle {
             // Channel closed (graceful shutdown) — release all held keys
             for (encoded_key, held) in held_actions.drain() {
                 if let Err(e) = crate::input_synthesis::send_shortcut_hold_up(&held) {
-                    log::warn!("[capture] Failed to release held shortcut `{encoded_key}` on shutdown: {e}");
+                    log::warn!(
+                        "[capture] Failed to release held shortcut `{encoded_key}` on shutdown: {e}"
+                    );
                 }
             }
         });
@@ -1024,14 +1043,16 @@ impl CaptureBackendHandle {
             replayed_modifier_force_release_ms,
             reader_helper_died,
         );
-        if !registrations.is_empty() && helper.is_none()
-            && let Ok(mut store) = runtime_store.lock() {
-                store.record_warn(
-                    "перехват",
-                    "Не удалось запустить вспомогательный процесс перехвата. \
+        if !registrations.is_empty()
+            && helper.is_none()
+            && let Ok(mut store) = runtime_store.lock()
+        {
+            store.record_warn(
+                "перехват",
+                "Не удалось запустить вспомогательный процесс перехвата. \
                      Кнопки с зажатыми модификаторами (Ctrl/Shift) могут не срабатывать.",
-                );
-            }
+            );
+        }
 
         // Spawn foreground window watcher — detects window switches instantly
         let fg_app = app.clone();
@@ -1040,7 +1061,13 @@ impl CaptureBackendHandle {
         let fg_app_name = app_name.clone();
         let (fg_ready_tx, fg_ready_rx) = mpsc::channel::<u32>();
         let foreground_watcher_thread = thread::spawn(move || {
-            run_foreground_watcher(fg_app, fg_runtime_store, fg_config, fg_app_name, fg_ready_tx);
+            run_foreground_watcher(
+                fg_app,
+                fg_runtime_store,
+                fg_config,
+                fg_app_name,
+                fg_ready_tx,
+            );
         });
         let foreground_watcher_thread_id = fg_ready_rx.recv().ok();
 
@@ -1118,9 +1145,7 @@ impl CaptureBackendHandle {
         });
         match done_rx.recv_timeout(std::time::Duration::from_secs(5)) {
             Ok(()) => Ok(()),
-            Err(_) => {
-                Err("Capture threads did not exit within 5s; forcing shutdown.".to_owned())
-            }
+            Err(_) => Err("Capture threads did not exit within 5s; forcing shutdown.".to_owned()),
         }
     }
 
@@ -1317,18 +1342,19 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
     code: i32,
     w_param: usize,
     l_param: isize,
-) -> isize { unsafe {
-    use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, PostThreadMessageW, KBDLLHOOKSTRUCT,
-    };
+) -> isize {
+    unsafe {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{
+            CallNextHookEx, KBDLLHOOKSTRUCT, PostThreadMessageW,
+        };
 
-    // A panic unwinding across this `extern "system"` boundary is UB. Contain any
-    // panic in the hook body (RefCell borrows, allocation, FFI) and fall through
-    // to CallNextHookEx (don't suppress) instead of unwinding. The closure does
-    // not inherit the `unsafe fn` context; under edition 2024 each unsafe op inside
-    // it carries its own `unsafe {}` block, so the scope below is a plain block.
-    let should_suppress = if code >= 0 {
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || -> bool {
+        // A panic unwinding across this `extern "system"` boundary is UB. Contain any
+        // panic in the hook body (RefCell borrows, allocation, FFI) and fall through
+        // to CallNextHookEx (don't suppress) instead of unwinding. The closure does
+        // not inherit the `unsafe fn` context; under edition 2024 each unsafe op inside
+        // it carries its own `unsafe {}` block, so the scope below is a plain block.
+        let should_suppress = if code >= 0 {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || -> bool {
             {
         // Record that the hook callback fired — the health monitor uses this
         // to skip unnecessary SendInput probes when the hook is clearly alive.
@@ -1755,15 +1781,16 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
             }
         }))
         .unwrap_or(false)
-    } else {
-        false
-    };
+        } else {
+            false
+        };
 
-    if should_suppress {
-        return 1;
+        if should_suppress {
+            return 1;
+        }
+        CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param)
     }
-    CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param)
-}}
+}
 
 /// Entry point for the `--capture-helper` child process.
 /// Reads modifier-combo registrations from stdin (one JSON line),
@@ -1782,9 +1809,9 @@ pub fn capture_helper_main() {
         Foundation::{WAIT_FAILED, WAIT_TIMEOUT},
         System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
         UI::WindowsAndMessaging::{
-            DispatchMessageW, MsgWaitForMultipleObjectsEx, PeekMessageW, PostThreadMessageW,
-            SetWindowsHookExW, TranslateMessage, UnhookWindowsHookEx, MSG, MWMO_INPUTAVAILABLE,
-            PM_REMOVE, QS_ALLINPUT, WH_KEYBOARD_LL, WM_QUIT,
+            DispatchMessageW, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
+            PeekMessageW, PostThreadMessageW, QS_ALLINPUT, SetWindowsHookExW, TranslateMessage,
+            UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_QUIT,
         },
     };
 
@@ -1837,9 +1864,7 @@ pub fn capture_helper_main() {
         CONSUMED_MODIFIER_STALE_THRESHOLD.with(|c| {
             c.set(std::time::Duration::from_millis(clamped));
         });
-        log::info!(
-            "[capture-helper] CONSUMED stale threshold set to {clamped} ms."
-        );
+        log::info!("[capture-helper] CONSUMED stale threshold set to {clamped} ms.");
     }
 
     if let Some(ms) = replayed_modifier_force_release_ms {
@@ -1847,9 +1872,7 @@ pub fn capture_helper_main() {
         REPLAYED_AWAITING_UP_THRESHOLD.with(|c| {
             c.set(std::time::Duration::from_millis(clamped));
         });
-        log::info!(
-            "[capture-helper] REPLAYED awaiting-up threshold set to {clamped} ms."
-        );
+        log::info!("[capture-helper] REPLAYED awaiting-up threshold set to {clamped} ms.");
     }
 
     if registrations.is_empty() {
@@ -1909,14 +1932,18 @@ pub fn capture_helper_main() {
             match stdin.lock().read_line(&mut buf) {
                 Ok(0) | Err(_) => {
                     log::info!("[capture-helper] stdin closed, posting WM_QUIT.");
-                    unsafe { PostThreadMessageW(hook_tid, WM_QUIT, 0, 0); }
+                    unsafe {
+                        PostThreadMessageW(hook_tid, WM_QUIT, 0, 0);
+                    }
                     break;
                 }
                 Ok(_) => {
                     let cmd = buf.trim();
                     if cmd == "REHOOK" {
                         log::info!("[capture-helper] REHOOK command received.");
-                        unsafe { PostThreadMessageW(hook_tid, WM_REHOOK, 0, 0); }
+                        unsafe {
+                            PostThreadMessageW(hook_tid, WM_REHOOK, 0, 0);
+                        }
                     } else {
                         log::warn!("[capture-helper] Unknown command: {cmd:?}");
                     }
@@ -1947,13 +1974,8 @@ pub fn capture_helper_main() {
             if pending.is_empty() {
                 HOOK_HEALTH_CHECK_INTERVAL_MS
             } else {
-                let oldest = pending.iter()
-                    .map(|pm| pm.buffered_at)
-                    .min()
-                    .unwrap();
-                let elapsed = std::time::Instant::now()
-                    .duration_since(oldest)
-                    .as_millis() as u32;
+                let oldest = pending.iter().map(|pm| pm.buffered_at).min().unwrap();
+                let elapsed = std::time::Instant::now().duration_since(oldest).as_millis() as u32;
                 let remaining = 20u32.saturating_sub(elapsed);
                 remaining.max(1) // at least 1ms to avoid busy-wait
             }
@@ -1986,97 +2008,104 @@ pub fn capture_helper_main() {
             let was_health_timeout = wait_timeout == HOOK_HEALTH_CHECK_INTERVAL_MS;
 
             if was_health_timeout {
-            // No messages arrived within the interval — run health check.
+                // No messages arrived within the interval — run health check.
 
-            // Fast path: if ANY LL hook callback fired since the last check,
-            // the hook is demonstrably alive — no probe needed.
-            let had_callback = HOOK_HAD_CALLBACK.with(|cell| cell.replace(false));
-            if had_callback {
-                probe_sent = false;
-                consecutive_probe_failures = 0;
-            } else if probe_sent {
-                // We sent a probe last cycle.  Check if the hook saw it.
-                let received = HELPER_PROBE_RECEIVED.with(|cell| cell.replace(false));
-                if received {
-                    // Hook is alive.
+                // Fast path: if ANY LL hook callback fired since the last check,
+                // the hook is demonstrably alive — no probe needed.
+                let had_callback = HOOK_HAD_CALLBACK.with(|cell| cell.replace(false));
+                if had_callback {
                     probe_sent = false;
                     consecutive_probe_failures = 0;
-                } else {
-                    consecutive_probe_failures += 1;
-                    if consecutive_probe_failures >= HOOK_PROBE_FAIL_THRESHOLD {
-                        // Hook is dead — reinstall it.
-                        log::warn!(
-                            "[capture-helper] Hook health probe not received \
+                } else if probe_sent {
+                    // We sent a probe last cycle.  Check if the hook saw it.
+                    let received = HELPER_PROBE_RECEIVED.with(|cell| cell.replace(false));
+                    if received {
+                        // Hook is alive.
+                        probe_sent = false;
+                        consecutive_probe_failures = 0;
+                    } else {
+                        consecutive_probe_failures += 1;
+                        if consecutive_probe_failures >= HOOK_PROBE_FAIL_THRESHOLD {
+                            // Hook is dead — reinstall it.
+                            log::warn!(
+                                "[capture-helper] Hook health probe not received \
                              ({consecutive_probe_failures} consecutive failures) — \
                              hook appears dead.  Reinstalling WH_KEYBOARD_LL..."
-                        );
-                        // Force-release any orphan replayed modifiers BEFORE
-                        // tearing down the hook — otherwise the injected
-                        // modifier-downs we sent stay applied at OS level
-                        // with no balancing up.
-                        force_release_all_replayed_modifiers("health-reinstall");
-                        // Reset modifier-tracking state symmetrically with
-                        // the REHOOK path below.  Any in-flight events when
-                        // the old hook is uninstalled are stale.
-                        let cleared_pending = PENDING_MODIFIERS.with(|cell| {
-                            let n = cell.borrow().len();
-                            cell.borrow_mut().clear();
-                            n
-                        });
-                        let cleared_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
-                            let n = cell.borrow().len();
-                            cell.borrow_mut().clear();
-                            n
-                        });
-                        HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
-                        HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
-                        HELPER_MATCHES.with(|cell| {
-                            cell.borrow_mut().push(format!(
-                                "DEBUG:mod-clear-on-health-reinstall pending={} consumed={}",
-                                cleared_pending, cleared_consumed,
-                            ));
-                        });
-                        unsafe { UnhookWindowsHookEx(hook); }
-                        let new_hook = unsafe {
-                            SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
-                        };
-                        if new_hook.is_null() {
-                            log::error!(
-                                "[capture-helper] Failed to reinstall hook: {}. Exiting.",
-                                std::io::Error::last_os_error()
                             );
-                            break;
-                        }
-                        hook = new_hook;
-                        hook_reinstall_count += 1;
-                        log::info!(
-                            "[capture-helper] Hook reinstalled successfully \
+                            // Force-release any orphan replayed modifiers BEFORE
+                            // tearing down the hook — otherwise the injected
+                            // modifier-downs we sent stay applied at OS level
+                            // with no balancing up.
+                            force_release_all_replayed_modifiers("health-reinstall");
+                            // Reset modifier-tracking state symmetrically with
+                            // the REHOOK path below.  Any in-flight events when
+                            // the old hook is uninstalled are stale.
+                            let cleared_pending = PENDING_MODIFIERS.with(|cell| {
+                                let n = cell.borrow().len();
+                                cell.borrow_mut().clear();
+                                n
+                            });
+                            let cleared_consumed = CONSUMED_MODIFIER_VKS.with(|cell| {
+                                let n = cell.borrow().len();
+                                cell.borrow_mut().clear();
+                                n
+                            });
+                            HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
+                            HELPER_MODIFIERS
+                                .with(|cell| *cell.borrow_mut() = HelperModifierState::default());
+                            HELPER_MATCHES.with(|cell| {
+                                cell.borrow_mut().push(format!(
+                                    "DEBUG:mod-clear-on-health-reinstall pending={} consumed={}",
+                                    cleared_pending, cleared_consumed,
+                                ));
+                            });
+                            unsafe {
+                                UnhookWindowsHookEx(hook);
+                            }
+                            let new_hook = unsafe {
+                                SetWindowsHookExW(
+                                    WH_KEYBOARD_LL,
+                                    Some(helper_ll_keyboard_proc),
+                                    hmod,
+                                    0,
+                                )
+                            };
+                            if new_hook.is_null() {
+                                log::error!(
+                                    "[capture-helper] Failed to reinstall hook: {}. Exiting.",
+                                    std::io::Error::last_os_error()
+                                );
+                                break;
+                            }
+                            hook = new_hook;
+                            hook_reinstall_count += 1;
+                            log::info!(
+                                "[capture-helper] Hook reinstalled successfully \
                              (total reinstalls: {hook_reinstall_count})."
-                        );
-                        consecutive_probe_failures = 0;
+                            );
+                            consecutive_probe_failures = 0;
+                        }
+                        // Re-send probe for the next cycle.
+                        probe_sent = unsafe { inject_hook_probe() };
+                        if probe_sent {
+                            HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
+                        }
                     }
-                    // Re-send probe for the next cycle.
+                } else {
+                    // No callbacks, no probe in-flight — send a probe.
                     probe_sent = unsafe { inject_hook_probe() };
                     if probe_sent {
                         HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
                     }
                 }
-            } else {
-                // No callbacks, no probe in-flight — send a probe.
-                probe_sent = unsafe { inject_hook_probe() };
-                if probe_sent {
-                    HELPER_PROBE_RECEIVED.with(|cell| cell.set(false));
-                }
-            }
             } // was_health_timeout
             // Fall through to pump any messages that may have arrived.
         }
 
         // Pump all pending messages (PeekMessageW is non-blocking).
         loop {
-            let found = unsafe {
-                PeekMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0, PM_REMOVE)
-            };
+            let found =
+                unsafe { PeekMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0, PM_REMOVE) };
             if found == 0 {
                 break;
             }
@@ -2088,7 +2117,9 @@ pub fn capture_helper_main() {
                 force_release_all_replayed_modifiers("wm-quit");
                 // Drain any remaining matches before exiting.
                 let _ = drain_helper_matches(&mut stdout);
-                unsafe { UnhookWindowsHookEx(hook); }
+                unsafe {
+                    UnhookWindowsHookEx(hook);
+                }
                 log::info!("[capture-helper] Hook uninstalled, exiting.");
                 return;
             }
@@ -2097,7 +2128,9 @@ pub fn capture_helper_main() {
                 // Force-release injected-modifier orphans first so their up
                 // events are queued before the hook tears down.
                 force_release_all_replayed_modifiers("rehook");
-                unsafe { UnhookWindowsHookEx(hook); }
+                unsafe {
+                    UnhookWindowsHookEx(hook);
+                }
                 // Reset all modifier-tracking state.  Any events in flight
                 // when the old hook was uninstalled are stale — their
                 // matching up/down may have been dropped.  Better to start
@@ -2129,7 +2162,9 @@ pub fn capture_helper_main() {
             // Drain matches buffered by the hook callback.
             if drain_helper_matches(&mut stdout).is_err() {
                 log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
-                unsafe { UnhookWindowsHookEx(hook); }
+                unsafe {
+                    UnhookWindowsHookEx(hook);
+                }
                 break;
             }
 
@@ -2141,7 +2176,9 @@ pub fn capture_helper_main() {
             // Also drain after dispatch (hooks may fire during DispatchMessageW).
             if drain_helper_matches(&mut stdout).is_err() {
                 log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
-                unsafe { UnhookWindowsHookEx(hook); }
+                unsafe {
+                    UnhookWindowsHookEx(hook);
+                }
                 break;
             }
         }
@@ -2163,7 +2200,9 @@ pub fn capture_helper_main() {
         // Drain any DEBUG lines generated by flush/gc above.
         if drain_helper_matches(&mut stdout).is_err() {
             log::warn!("[capture-helper] stdout pipe broken — parent likely crashed. Exiting.");
-            unsafe { UnhookWindowsHookEx(hook); }
+            unsafe {
+                UnhookWindowsHookEx(hook);
+            }
             break;
         }
 
@@ -2437,7 +2476,7 @@ fn run_hotkey_message_loop(
         System::Threading::GetCurrentThreadId,
         UI::Input::KeyboardAndMouse::{RegisterHotKey, UnregisterHotKey},
         UI::WindowsAndMessaging::{
-            DispatchMessageW, GetMessageW, TranslateMessage, MSG, WM_HOTKEY,
+            DispatchMessageW, GetMessageW, MSG, TranslateMessage, WM_HOTKEY,
         },
     };
 
@@ -2544,9 +2583,7 @@ fn run_foreground_watcher(
     use windows_sys::Win32::{
         System::Threading::GetCurrentThreadId,
         UI::Accessibility::{SetWinEventHook, UnhookWinEvent},
-        UI::WindowsAndMessaging::{
-            DispatchMessageW, GetMessageW, TranslateMessage, MSG,
-        },
+        UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, MSG, TranslateMessage},
     };
 
     // Thread-local storage for the callback to access our context.
@@ -2575,49 +2612,50 @@ fn run_foreground_watcher(
         // panic (heavy capture/emit, poisoned lock, re-entrant borrow) and drop
         // the foreground event instead of unwinding.
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        FG_CTX.with(|cell| {
-            let borrow = cell.borrow();
-            let Some(ctx) = borrow.as_ref() else { return };
+            FG_CTX.with(|cell| {
+                let borrow = cell.borrow();
+                let Some(ctx) = borrow.as_ref() else { return };
 
-            // Skip auto-profile-switching while a manual window capture is
-            // in progress (the user is Alt+Tabbing to the target window).
-            {
-                let is_capturing = ctx
+                // Skip auto-profile-switching while a manual window capture is
+                // in progress (the user is Alt+Tabbing to the target window).
+                {
+                    let is_capturing = ctx
+                        .runtime_store
+                        .lock()
+                        .ok()
+                        .map(|store| store.is_capture_in_progress())
+                        .unwrap_or(false);
+                    if is_capturing {
+                        log::debug!("[capture] Foreground change ignored (capture in progress)");
+                        return;
+                    }
+                }
+
+                // Audit F003: the indicator must reflect a ProfileSwitch override too,
+                // matching what the dispatch path fires.
+                let manual_profile_override = ctx
                     .runtime_store
                     .lock()
                     .ok()
-                    .map(|store| store.is_capture_in_progress())
-                    .unwrap_or(false);
-                if is_capturing {
-                    log::debug!("[capture] Foreground change ignored (capture in progress)");
-                    return;
-                }
-            }
+                    .and_then(|store| store.manual_profile_override().map(str::to_owned));
+                let capture_result =
+                    match window_capture::capture_active_window_with_resolution_with_override(
+                        &ctx.config,
+                        &ctx.app_name,
+                        None,
+                        manual_profile_override.as_deref(),
+                    ) {
+                        Ok(result) => result,
+                        Err(_) => return,
+                    };
 
-            // Audit F003: the indicator must reflect a ProfileSwitch override too,
-            // matching what the dispatch path fires.
-            let manual_profile_override = ctx
-                .runtime_store
-                .lock()
-                .ok()
-                .and_then(|store| store.manual_profile_override().map(str::to_owned));
-            let capture_result = match window_capture::capture_active_window_with_resolution_with_override(
-                &ctx.config,
-                &ctx.app_name,
-                None,
-                manual_profile_override.as_deref(),
-            ) {
-                Ok(result) => result,
-                Err(_) => return,
-            };
-
-            super::emit_profile_resolved_and_notify(
-                &ctx.app,
-                &ctx.runtime_store,
-                &capture_result,
-                &ctx.config,
-            );
-        });
+                super::emit_profile_resolved_and_notify(
+                    &ctx.app,
+                    &ctx.runtime_store,
+                    &capture_result,
+                    &ctx.config,
+                );
+            });
         }));
         if outcome.is_err() {
             log::error!("[capture] winevent_callback panicked; foreground event dropped.");
@@ -2717,8 +2755,14 @@ mod helper_death_recovery_tests {
             "the held entry must be returned for key-up injection"
         );
         assert_eq!(released[0].0, k);
-        assert!(held.is_empty(), "held_actions must be drained on helper death");
-        assert!(seen.is_empty(), "held_last_seen must be cleared on helper death");
+        assert!(
+            held.is_empty(),
+            "held_actions must be drained on helper death"
+        );
+        assert!(
+            seen.is_empty(),
+            "held_last_seen must be cleared on helper death"
+        );
         assert!(
             !held.contains_key(&k),
             "next tap of the same key must not be skipped as already-held"
@@ -2741,7 +2785,7 @@ mod helper_death_recovery_tests {
 
 #[cfg(test)]
 mod hold_deadline_tests {
-    use super::{hold_deadline_update, HoldDeadlineUpdate};
+    use super::{HoldDeadlineUpdate, hold_deadline_update};
     use crate::capture_backend::EventOutcome;
 
     /// The regression: a sustained physical hold streams auto-repeat events that
@@ -2904,7 +2948,10 @@ mod replayed_awaiting_up_tests {
             map.insert(0xA0, Instant::now() - Duration::from_secs(10));
         });
         let expired = drain_expired_replayed_modifiers();
-        assert!(expired.is_empty(), "no entries should expire under 1 h threshold");
+        assert!(
+            expired.is_empty(),
+            "no entries should expire under 1 h threshold"
+        );
         REPLAYED_AWAITING_UP.with(|cell| {
             assert_eq!(cell.borrow().len(), 2);
         });
@@ -2938,7 +2985,8 @@ mod replayed_awaiting_up_tests {
         reset_state();
         REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.set(Duration::from_millis(50)));
         REPLAYED_AWAITING_UP.with(|cell| {
-            cell.borrow_mut().insert(0xA2, Instant::now() - Duration::from_millis(60));
+            cell.borrow_mut()
+                .insert(0xA2, Instant::now() - Duration::from_millis(60));
         });
         let expired = drain_expired_replayed_modifiers();
         assert_eq!(expired.len(), 1);
@@ -2957,7 +3005,11 @@ mod replayed_awaiting_up_tests {
         let threshold = Duration::from_millis(3000);
 
         assert!(should_suppress_repeat_modifier_down(
-            0xA2, false, &map, now + Duration::from_millis(31), threshold,
+            0xA2,
+            false,
+            &map,
+            now + Duration::from_millis(31),
+            threshold,
         ));
     }
 
@@ -2966,7 +3018,11 @@ mod replayed_awaiting_up_tests {
         let map: std::collections::HashMap<u32, Instant> = std::collections::HashMap::new();
         let threshold = Duration::from_millis(3000);
         assert!(!should_suppress_repeat_modifier_down(
-            0xA2, false, &map, Instant::now(), threshold,
+            0xA2,
+            false,
+            &map,
+            Instant::now(),
+            threshold,
         ));
     }
 
@@ -3044,8 +3100,10 @@ mod replayed_awaiting_up_tests {
         FLUSHING_REPLAYED.with(|c| c.set(false));
         PENDING_MODIFIERS.with(|c| c.borrow_mut().clear());
         flush_expired_pending_modifiers();
-        assert!(!FLUSHING_REPLAYED.with(|c| c.get()),
-            "empty flush must leave flag clear");
+        assert!(
+            !FLUSHING_REPLAYED.with(|c| c.get()),
+            "empty flush must leave flag clear"
+        );
     }
 
     // ------------------------------------------------------------------
@@ -3108,12 +3166,16 @@ mod replayed_awaiting_up_tests {
             });
         });
         flush_expired_pending_modifiers();
-        assert!(!FLUSHING_REPLAYED.with(|c| c.get()),
-            "flush must clear FLUSHING_REPLAYED on exit");
+        assert!(
+            !FLUSHING_REPLAYED.with(|c| c.get()),
+            "flush must clear FLUSHING_REPLAYED on exit"
+        );
         // Cleanup: the flush also injected a key-down via SendInput.
         // Force-release it so the unit test doesn't leave the OS in a
         // virtually-held state (the test process IS the OS-visible app).
-        unsafe { replay_modifier_up(0xA0, 0x2A); }
+        unsafe {
+            replay_modifier_up(0xA0, 0x2A);
+        }
         REPLAYED_AWAITING_UP.with(|c| c.borrow_mut().clear());
     }
 }
@@ -3144,7 +3206,12 @@ mod helper_key_event_tests {
         modifiers.apply_vk_event(VK_LCONTROL, true);
         modifiers.apply_vk_event(VK_LSHIFT, true);
         let (suppress, wake, _inject_mask) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress);
         assert!(wake);
@@ -3153,7 +3220,12 @@ mod helper_key_event_tests {
 
         // Simulate F24 up — should emit UP: event
         let (suppress, wake, _inject_mask) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYUP,
         );
         assert!(suppress);
         assert!(wake, "key-up of suppressed key should wake for drain");
@@ -3169,7 +3241,12 @@ mod helper_key_event_tests {
 
         // F24 up without prior down — should not emit
         let (suppress, wake, _inject_mask) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYUP,
         );
         assert!(!suppress);
         assert!(!wake);
@@ -3181,7 +3258,11 @@ mod helper_key_event_tests {
         // Register both bare F24 (mask=0) and Shift+Ctrl+Alt+F24 (mask=0x0007)
         let regs = vec![
             reg("F24", 0, VK_F24),
-            reg("Shift+Ctrl+Alt+F24", MOD_SHIFT | MOD_CONTROL | MOD_ALT, VK_F24),
+            reg(
+                "Shift+Ctrl+Alt+F24",
+                MOD_SHIFT | MOD_CONTROL | MOD_ALT,
+                VK_F24,
+            ),
         ];
         let mut modifiers = HelperModifierState::default();
         let mut suppressions = std::collections::HashMap::new();
@@ -3193,7 +3274,12 @@ mod helper_key_event_tests {
         modifiers.apply_vk_event(VK_LMENU, true);
 
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress);
         assert!(wake);
@@ -3205,14 +3291,23 @@ mod helper_key_event_tests {
         // Both registrations exist but no modifiers are held — bare should win
         let regs = vec![
             reg("F24", 0, VK_F24),
-            reg("Shift+Ctrl+Alt+F24", MOD_SHIFT | MOD_CONTROL | MOD_ALT, VK_F24),
+            reg(
+                "Shift+Ctrl+Alt+F24",
+                MOD_SHIFT | MOD_CONTROL | MOD_ALT,
+                VK_F24,
+            ),
         ];
         let mut modifiers = HelperModifierState::default();
         let mut suppressions = std::collections::HashMap::new();
         let mut matches = Vec::new();
 
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress);
         assert!(wake);
@@ -3230,7 +3325,12 @@ mod helper_key_event_tests {
 
         modifiers.apply_vk_event(VK_LSHIFT, true);
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress, "bare F24 should fire even with extra Shift held");
         assert!(wake);
@@ -3248,7 +3348,12 @@ mod helper_key_event_tests {
 
         // First press
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress);
         assert!(wake);
@@ -3256,7 +3361,12 @@ mod helper_key_event_tests {
 
         // Auto-repeat (same VK, still key-down, already in suppressions)
         let (suppress2, wake2, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress2, "repeat should still be suppressed");
         assert!(wake2, "repeat should wake to emit match");
@@ -3280,13 +3390,23 @@ mod helper_key_event_tests {
 
         // First press — inject_mask should be true (Alt active)
         let (_, _, inject_mask) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(inject_mask, "first press with Alt should inject mask key");
 
         // Repeat — inject_mask should be false
         let (_, _, inject_mask2) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(!inject_mask2, "repeat should NOT inject mask key");
     }
@@ -3300,11 +3420,16 @@ mod helper_key_event_tests {
         let mut suppressions = std::collections::HashMap::new();
         let mut matches = Vec::new();
 
-        modifiers.apply_vk_event(VK_LMENU, true);  // Alt (encoding)
-        modifiers.apply_vk_event(VK_LSHIFT, true);  // Shift (physical, extra)
+        modifiers.apply_vk_event(VK_LMENU, true); // Alt (encoding)
+        modifiers.apply_vk_event(VK_LSHIFT, true); // Shift (physical, extra)
 
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress, "should match with extra physical Shift");
         assert!(wake);
@@ -3327,11 +3452,20 @@ mod helper_key_event_tests {
         modifiers.apply_vk_event(VK_LMENU, true);
 
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(suppress);
         assert!(wake);
-        assert_eq!(matches, vec!["Ctrl+Alt+F24"], "most-specific mask should win");
+        assert_eq!(
+            matches,
+            vec!["Ctrl+Alt+F24"],
+            "most-specific mask should win"
+        );
     }
 
     #[test]
@@ -3344,35 +3478,60 @@ mod helper_key_event_tests {
 
         // 1. First press
         let (s, w, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(s && w);
         assert_eq!(matches.len(), 1);
 
         // 2. Repeat
         let (s, w, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(s && w);
         assert_eq!(matches.len(), 2);
 
         // 3. Another repeat
         let (s, w, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(s && w);
         assert_eq!(matches.len(), 3);
 
         // 4. Release
         let (s, w, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYUP,
         );
         assert!(s && w);
         assert_eq!(matches[3], "UP:F24");
 
         // 5. Suppressions are now empty — another release does nothing
         let (s, w, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYUP,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYUP,
         );
         assert!(!s && !w, "second release should be a no-op");
     }
@@ -3388,14 +3547,24 @@ mod helper_key_event_tests {
 
         // Ctrl down — should pass through
         let (suppress, _, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_LCONTROL, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_LCONTROL,
+            WM_KEYDOWN,
         );
         assert!(!suppress, "modifier key-down must not be suppressed");
         assert!(modifiers.ctrl);
 
         // Ctrl up — should pass through
         let (suppress, _, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_LCONTROL, WM_KEYUP,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_LCONTROL,
+            WM_KEYUP,
         );
         assert!(!suppress, "modifier key-up must not be suppressed");
         assert!(!modifiers.ctrl);
@@ -3412,7 +3581,12 @@ mod helper_key_event_tests {
         modifiers.apply_vk_event(VK_LSHIFT, true); // wrong modifier
 
         let (suppress, wake, _) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, VK_F24, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            VK_F24,
+            WM_KEYDOWN,
         );
         assert!(!suppress, "should not match without required Ctrl");
         assert!(!wake);
@@ -3452,11 +3626,11 @@ mod capture_diag {
     use std::time::{Duration, Instant};
 
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        RegisterHotKey, SendInput, UnregisterHotKey, INPUT, INPUT_KEYBOARD, KEYBDINPUT,
-        KEYEVENTF_KEYUP,
+        INPUT, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, RegisterHotKey, SendInput,
+        UnregisterHotKey,
     };
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        DispatchMessageW, PeekMessageW, MSG, PM_REMOVE, WM_HOTKEY,
+        DispatchMessageW, MSG, PM_REMOVE, PeekMessageW, WM_HOTKEY,
     };
 
     const VK_F13: u16 = 0x7C;
@@ -3634,7 +3808,7 @@ mod capture_diag {
             System::LibraryLoader::GetModuleHandleW,
             UI::Input::KeyboardAndMouse::GetAsyncKeyState,
             UI::WindowsAndMessaging::{
-                CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
+                CallNextHookEx, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
                 WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
             },
         };
@@ -3749,7 +3923,7 @@ mod capture_diag {
         use windows_sys::Win32::{
             System::LibraryLoader::GetModuleHandleW,
             UI::WindowsAndMessaging::{
-                CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, KBDLLHOOKSTRUCT,
+                CallNextHookEx, KBDLLHOOKSTRUCT, SetWindowsHookExW, UnhookWindowsHookEx,
                 WH_KEYBOARD_LL, WM_KEYDOWN, WM_SYSKEYDOWN,
             },
         };
@@ -3857,10 +4031,17 @@ mod edge_proptests {
 
     // Concrete modifier VK codes for generating arbitrary modifier events
     const ALL_MODIFIER_VKS: &[u32] = &[
-        VK_CONTROL, VK_LCONTROL, VK_RCONTROL,
-        VK_MENU, VK_LMENU, VK_RMENU,
-        VK_SHIFT, VK_LSHIFT, VK_RSHIFT,
-        VK_LWIN, VK_RWIN,
+        VK_CONTROL,
+        VK_LCONTROL,
+        VK_RCONTROL,
+        VK_MENU,
+        VK_LMENU,
+        VK_RMENU,
+        VK_SHIFT,
+        VK_LSHIFT,
+        VK_RSHIFT,
+        VK_LWIN,
+        VK_RWIN,
     ];
 
     // The four MOD_* bits we care about
@@ -4067,15 +4248,20 @@ mod edge_proptests {
     #[test]
     fn unit_modifier_state_default_all_flags_zero() {
         let state = HelperModifierState::default();
-        assert_eq!(state.as_modifier_flags(), 0,
-            "default HelperModifierState must produce zero flags");
+        assert_eq!(
+            state.as_modifier_flags(),
+            0,
+            "default HelperModifierState must produce zero flags"
+        );
     }
 
     #[test]
     fn unit_modifier_in_any_encoding_empty_vec_false() {
         for &vk in ALL_MODIFIER_VKS {
-            assert!(!modifier_in_any_encoding(vk, &[]),
-                "empty regs must always return false for vk={vk:#04X}");
+            assert!(
+                !modifier_in_any_encoding(vk, &[]),
+                "empty regs must always return false for vk={vk:#04X}"
+            );
         }
     }
 
@@ -4087,7 +4273,12 @@ mod edge_proptests {
         let mut suppressions = HashMap::new();
         let mut matches = Vec::new();
         let (suppress, _wake, _mask) = process_helper_key_event(
-            &regs, &mut modifiers, &mut suppressions, &mut matches, 0x7C, WM_KEYDOWN,
+            &regs,
+            &mut modifiers,
+            &mut suppressions,
+            &mut matches,
+            0x7C,
+            WM_KEYDOWN,
         );
         assert!(!suppress, "empty regs must not suppress");
         assert!(matches.is_empty(), "empty regs must produce no match");
@@ -4099,9 +4290,10 @@ mod edge_proptests {
         let map: HashMap<u32, Instant> = HashMap::new();
         let threshold = Duration::from_secs(3);
         for &vk in ALL_MODIFIER_VKS {
-            assert!(!should_suppress_repeat_modifier_down(
-                vk, false, &map, Instant::now(), threshold,
-            ), "empty map must never suppress vk={vk:#04X}");
+            assert!(
+                !should_suppress_repeat_modifier_down(vk, false, &map, Instant::now(), threshold,),
+                "empty map must never suppress vk={vk:#04X}"
+            );
         }
     }
 
@@ -4109,7 +4301,10 @@ mod edge_proptests {
     fn unit_drain_expired_empty_returns_empty() {
         reset_replayed_state();
         let result = drain_expired_replayed_modifiers();
-        assert!(result.is_empty(), "draining empty map must return empty vec");
+        assert!(
+            result.is_empty(),
+            "draining empty map must return empty vec"
+        );
     }
 
     #[test]
@@ -4188,16 +4383,23 @@ mod edge_proptests {
         // CAPTURE_EVENT_CAPACITY is now a module-level const, so this test
         // references the real production value by name — a change to an
         // unbounded sentinel or zero is caught here. Assert range [1, 1_000_000].
-        assert!(CAPTURE_EVENT_CAPACITY >= 1,
-            "channel capacity must be at least 1 (nonzero)");
-        assert!(CAPTURE_EVENT_CAPACITY <= 1_000_000,
-            "channel capacity {} is suspiciously large — OOM risk", CAPTURE_EVENT_CAPACITY);
+        assert!(
+            CAPTURE_EVENT_CAPACITY >= 1,
+            "channel capacity must be at least 1 (nonzero)"
+        );
+        assert!(
+            CAPTURE_EVENT_CAPACITY <= 1_000_000,
+            "channel capacity {} is suspiciously large — OOM risk",
+            CAPTURE_EVENT_CAPACITY
+        );
         // Sanity: ~10 µs per event × 10k events = 100ms of burst headroom
         // without the worker being stalled = reasonable bound
         let approx_bytes_per_event: usize = 200; // EncodedKeyEvent is ~80 bytes; 200 is conservative
         let max_memory = CAPTURE_EVENT_CAPACITY * approx_bytes_per_event;
-        assert!(max_memory < 4 * 1024 * 1024,
-            "bounded channel memory footprint {max_memory} bytes must be < 4 MB");
+        assert!(
+            max_memory < 4 * 1024 * 1024,
+            "bounded channel memory footprint {max_memory} bytes must be < 4 MB"
+        );
     }
 
     proptest! {
@@ -4400,11 +4602,16 @@ mod edge_proptests {
         // Verify MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN fits cleanly
         // in u32 without truncation and equals the constant used in the code.
         let computed: u32 = MOD_ALT | MOD_CONTROL | MOD_SHIFT | MOD_WIN;
-        assert_eq!(computed, MOD_MODIFIER_BITS,
-            "MOD_MODIFIER_BITS constant must equal the OR of all four modifier bits");
+        assert_eq!(
+            computed, MOD_MODIFIER_BITS,
+            "MOD_MODIFIER_BITS constant must equal the OR of all four modifier bits"
+        );
         // Ensure no high-bit contamination
-        assert_eq!(computed & 0xFFFF_0000, 0,
-            "modifier bit mask must fit in low 16 bits");
+        assert_eq!(
+            computed & 0xFFFF_0000,
+            0,
+            "modifier bit mask must fit in low 16 bits"
+        );
     }
 
     // Deliberate const range-guard (see note above): asserts catch a future edit
@@ -4415,19 +4622,31 @@ mod edge_proptests {
         // DEFAULT_CONSUMED_MODIFIER_STALE_MS and DEFAULT_REPLAYED_AWAITING_UP_MS
         // are used as Duration::from_millis arguments.  A value of u64::MAX would
         // effectively disable the GC; 0 would fire every cycle.
-        assert!(DEFAULT_CONSUMED_MODIFIER_STALE_MS > 0,
-            "stale-GC threshold must be nonzero (>0 ms)");
-        assert!(DEFAULT_CONSUMED_MODIFIER_STALE_MS <= 60_000,
-            "stale-GC threshold {}ms is unreasonably large (>60s)", DEFAULT_CONSUMED_MODIFIER_STALE_MS);
-        assert!(DEFAULT_REPLAYED_AWAITING_UP_MS > 0,
-            "replayed-up threshold must be nonzero");
-        assert!(DEFAULT_REPLAYED_AWAITING_UP_MS <= 60_000,
-            "replayed-up threshold {}ms is unreasonably large (>60s)", DEFAULT_REPLAYED_AWAITING_UP_MS);
+        assert!(
+            DEFAULT_CONSUMED_MODIFIER_STALE_MS > 0,
+            "stale-GC threshold must be nonzero (>0 ms)"
+        );
+        assert!(
+            DEFAULT_CONSUMED_MODIFIER_STALE_MS <= 60_000,
+            "stale-GC threshold {}ms is unreasonably large (>60s)",
+            DEFAULT_CONSUMED_MODIFIER_STALE_MS
+        );
+        assert!(
+            DEFAULT_REPLAYED_AWAITING_UP_MS > 0,
+            "replayed-up threshold must be nonzero"
+        );
+        assert!(
+            DEFAULT_REPLAYED_AWAITING_UP_MS <= 60_000,
+            "replayed-up threshold {}ms is unreasonably large (>60s)",
+            DEFAULT_REPLAYED_AWAITING_UP_MS
+        );
         // Replayed threshold < stale threshold is the expected ordering:
         // orphan-GC fires before the consumed-GC removes the matching entry,
         // preventing a stuck-modifier window from spanning the full stale window.
-        assert!(DEFAULT_REPLAYED_AWAITING_UP_MS < DEFAULT_CONSUMED_MODIFIER_STALE_MS,
-            "replayed-up threshold should be shorter than consumed-stale threshold to bound stuck-key window");
+        assert!(
+            DEFAULT_REPLAYED_AWAITING_UP_MS < DEFAULT_CONSUMED_MODIFIER_STALE_MS,
+            "replayed-up threshold should be shorter than consumed-stale threshold to bound stuck-key window"
+        );
     }
 
     #[test]
@@ -4437,14 +4656,18 @@ mod edge_proptests {
         // where the tight guard fires AND the stale GC also fires on the same entry.
         let freshness_ms = CONSUMED_MODIFIER_FRESHNESS_WINDOW.as_millis() as u64;
         assert!(freshness_ms > 0, "freshness window must be nonzero");
-        assert!(freshness_ms < DEFAULT_CONSUMED_MODIFIER_STALE_MS,
+        assert!(
+            freshness_ms < DEFAULT_CONSUMED_MODIFIER_STALE_MS,
             "freshness window {freshness_ms}ms must be < stale threshold {}ms",
-            DEFAULT_CONSUMED_MODIFIER_STALE_MS);
+            DEFAULT_CONSUMED_MODIFIER_STALE_MS
+        );
         // Also check Razer chord window is shorter than freshness window:
         // chord detection fires first, then consumed suppression, then GC.
         let chord_ms = RAZER_ENCODING_CHORD_WINDOW.as_millis() as u64;
-        assert!(chord_ms < freshness_ms,
-            "Razer chord window {chord_ms}ms must be < consumed freshness window {freshness_ms}ms");
+        assert!(
+            chord_ms < freshness_ms,
+            "Razer chord window {chord_ms}ms must be < consumed freshness window {freshness_ms}ms"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -4454,20 +4677,28 @@ mod edge_proptests {
     /// Map a 4-bit nibble to a combination of the four MOD_ constants.
     fn build_mask_from_nibble(bits: u32) -> u32 {
         let mut mask = 0u32;
-        if bits & 1 != 0 { mask |= MOD_ALT; }
-        if bits & 2 != 0 { mask |= MOD_CONTROL; }
-        if bits & 4 != 0 { mask |= MOD_SHIFT; }
-        if bits & 8 != 0 { mask |= MOD_WIN; }
+        if bits & 1 != 0 {
+            mask |= MOD_ALT;
+        }
+        if bits & 2 != 0 {
+            mask |= MOD_CONTROL;
+        }
+        if bits & 4 != 0 {
+            mask |= MOD_SHIFT;
+        }
+        if bits & 8 != 0 {
+            mask |= MOD_WIN;
+        }
         mask
     }
 
     /// Convert a MOD_* flags value back to a HelperModifierState.
     fn flags_to_state(flags: u32) -> HelperModifierState {
         HelperModifierState {
-            ctrl:  flags & MOD_CONTROL != 0,
-            alt:   flags & MOD_ALT     != 0,
-            shift: flags & MOD_SHIFT   != 0,
-            win:   flags & MOD_WIN     != 0,
+            ctrl: flags & MOD_CONTROL != 0,
+            alt: flags & MOD_ALT != 0,
+            shift: flags & MOD_SHIFT != 0,
+            win: flags & MOD_WIN != 0,
         }
     }
 }

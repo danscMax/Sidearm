@@ -288,7 +288,7 @@ export function useVerification(deps: {
     }
 
     try {
-      const filename = `naga-verification-${verificationSession.sessionId}.json`;
+      const filename = `sidearm-verification-${verificationSession.sessionId}.json`;
       const report = createVerificationSessionExport(verificationSession);
       const writtenPath = await exportVerificationSession(
         filename,

@@ -5549,7 +5549,7 @@ input[type="number"] { -moz-appearance: textfield; }
 }
 .synapse-binding-list__item {
   display: grid;
-  grid-template-columns: 100px 80px 1fr auto;
+  grid-template-columns: 120px 80px 1fr auto;
   gap: 8px;
   font-size: 0.76rem;
   padding: 3px 0;
@@ -5559,7 +5559,7 @@ input[type="number"] { -moz-appearance: textfield; }
   color: var(--c-text-subtle, rgba(255, 255, 255, 0.3));
   text-decoration: line-through;
 }
-.synapse-binding-list__control { font-family: var(--font-mono, ui-monospace, monospace); }
+.synapse-binding-list__control { color: var(--c-text); }
 .synapse-binding-list__kind { opacity: 0.6; }
 .synapse-import-warnings { margin-top: 16px; font-size: 0.8rem; }
 .synapse-import-warnings summary { cursor: pointer; color: var(--c-warning-light); }

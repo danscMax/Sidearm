@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { CommandError } from "../../lib/config";
+import type { CommandError, ImportMode } from "../../lib/config";
 import type { ConfirmModalRequest } from "../ConfirmModal";
 import {
   exportFullConfig,
@@ -16,7 +16,7 @@ import { BackupList } from "../BackupList";
 
 export interface BackupSettingsProps {
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
-  refreshConfig: () => void;
+  refreshConfig: () => Promise<boolean>;
   setError: (error: CommandError | null) => void;
   onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;
 }
@@ -75,29 +75,48 @@ export function BackupSettings({
               if (typeof path !== "string") return;
               try {
                 const preview = await importFullConfigPreview(path);
-                const warningsSummary = preview.warnings.length > 0
-                  ? t("settings.importHasWarnings", { count: preview.warnings.length })
-                  : "";
+                const applyImport = async (mode: ImportMode) => {
+                  try {
+                    await importFullConfigApply(path, mode);
+                    await refreshConfig();
+                  } catch (unknownError) {
+                    setError(normalizeCommandError(unknownError));
+                    throw unknownError;
+                  }
+                };
                 setConfirmModal({
                   title: t("settings.replaceConfigTitle"),
-                  message: t("settings.importSummary", {
-                    profiles: preview.profileCount,
-                    bindings: preview.bindingCount,
-                    actions: preview.actionCount,
-                    appMappings: preview.appMappingCount,
-                    snippets: preview.snippetCount,
-                    warnings: warningsSummary,
-                  }),
+                  message: (
+                    <>
+                      <p>
+                        {t("settings.importSummary", {
+                          profiles: preview.profileCount,
+                          bindings: preview.bindingCount,
+                          actions: preview.actionCount,
+                          appMappings: preview.appMappingCount,
+                          snippets: preview.snippetCount,
+                        })}
+                      </p>
+                      {preview.warnings.length > 0 ? (
+                        <details className="mt-8">
+                          <summary>{t("settings.importHasWarnings", { count: preview.warnings.length })}</summary>
+                          <ul>
+                            {preview.warnings.map((warning, index) => (
+                              <li key={`${index}-${warning}`}>
+                                <code>{warning}</code>
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      ) : null}
+                      <p className="panel__muted mt-8">{t("settings.importModeHint")}</p>
+                    </>
+                  ),
                   confirmLabel: t("settings.replaceConfigConfirm"),
                   danger: true,
-                  onConfirm: async () => {
-                    try {
-                      await importFullConfigApply(path, "replace");
-                      refreshConfig();
-                    } catch (unknownError) {
-                      setError(normalizeCommandError(unknownError));
-                    }
-                  },
+                  onConfirm: () => applyImport("replace"),
+                  secondaryConfirmLabel: t("settings.mergeConfigConfirm"),
+                  onSecondaryConfirm: () => applyImport("merge"),
                 });
               } catch (unknownError) {
                 setError(normalizeCommandError(unknownError));
@@ -170,7 +189,11 @@ export function BackupSettings({
                     title: modal.title,
                     message: modal.message,
                     confirmLabel: modal.confirmLabel,
+                    danger: modal.danger,
+                    secondaryConfirmLabel: modal.secondaryConfirmLabel,
+                    secondaryDanger: modal.secondaryDanger,
                     onConfirm: modal.onConfirm,
+                    onSecondaryConfirm: modal.onSecondaryConfirm,
                   }
                 : null,
             )

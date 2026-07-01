@@ -222,7 +222,13 @@ mod edge_proptests {
 
     #[test]
     fn boundary_shortcut_empty_key_no_mods_falls_back_to_control_id() {
-        let action = ParsedAction::Shortcut { key: "".into(), ctrl: false, shift: false, alt: false, win: false };
+        let action = ParsedAction::Shortcut {
+            key: "".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+            win: false,
+        };
         let label = default_label_for("thumb_01", &action);
         // All booleans false + empty key → label must be the control_id.
         assert_eq!(label, "thumb_01");
@@ -230,7 +236,13 @@ mod edge_proptests {
 
     #[test]
     fn boundary_shortcut_empty_key_with_ctrl_mod() {
-        let action = ParsedAction::Shortcut { key: "".into(), ctrl: true, shift: false, alt: false, win: false };
+        let action = ParsedAction::Shortcut {
+            key: "".into(),
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+        };
         let label = default_label_for("thumb_01", &action);
         // "Ctrl" alone (no key) — label must not be empty.
         assert_eq!(label, "Ctrl");
@@ -292,7 +304,9 @@ mod edge_proptests {
 
     #[test]
     fn null_sequence_action_label() {
-        let action = ParsedAction::Sequence { macro_guid: "".into() };
+        let action = ParsedAction::Sequence {
+            macro_guid: "".into(),
+        };
         assert_eq!(default_label_for("x", &action), "Macro");
     }
 
@@ -302,7 +316,9 @@ mod edge_proptests {
 
     #[test]
     fn null_unmappable_label_contains_control_id() {
-        let action = ParsedAction::Unmappable { reason: "test".into() };
+        let action = ParsedAction::Unmappable {
+            reason: "test".into(),
+        };
         let label = default_label_for("thumb_05", &action);
         assert_eq!(label, "? thumb_05");
     }
@@ -320,7 +336,11 @@ mod edge_proptests {
         let label = default_label_for("x", &action);
         // Must not panic; must be truncated to 24 chars.
         // Strip the «» guillemets (each is multi-byte in UTF-8).
-        let inner: String = label.chars().skip(1).take(label.chars().count() - 2).collect();
+        let inner: String = label
+            .chars()
+            .skip(1)
+            .take(label.chars().count() - 2)
+            .collect();
         let char_count: usize = inner.chars().count();
         assert_eq!(char_count, 24);
     }

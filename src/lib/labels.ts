@@ -222,6 +222,11 @@ export function displayNameForControl(
   return key ? i18n.t(key) : control.defaultName;
 }
 
+export function displayNameForControlId(controlId: string): string {
+  const key = CONTROL_ID_TO_I18N_KEY[controlId as ControlId];
+  return key ? i18n.t(key) : controlId;
+}
+
 /** Resolve a hotspot/region badge that may be an i18n key (`control.name.*`)
  *  or a literal glyph. The static hotspot tables store keys for the two mouse
  *  buttons (language-specific) and glyphs (▲ ● ← 1…12, language-neutral) for the

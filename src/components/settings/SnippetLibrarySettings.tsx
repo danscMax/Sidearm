@@ -27,6 +27,7 @@ export interface SnippetLibrarySettingsProps {
   ) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
+  selectedSnippetId?: string;
 }
 
 /** Snippets tab: full CRUD over the reusable snippet library — add / rename /
@@ -37,6 +38,7 @@ export function SnippetLibrarySettings({
   updateDraft,
   setConfirmModal,
   showToast,
+  selectedSnippetId,
 }: SnippetLibrarySettingsProps) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -45,6 +47,15 @@ export function SnippetLibrarySettings({
 
   const library = activeConfig.snippetLibrary;
   const selected = library.find((s) => s.id === selectedId) ?? null;
+  const snippetRefCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const action of activeConfig.actions) {
+      if (action.type === "textSnippet" && action.payload.source === "libraryRef") {
+        counts.set(action.payload.snippetId, (counts.get(action.payload.snippetId) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [activeConfig.actions]);
 
   // Alphabetical, then filtered by name/text — a flat insertion-order list
   // doesn't scale to the dozens of snippets this tab is built for.
@@ -53,7 +64,12 @@ export function SnippetLibrarySettings({
     return [...library]
       .sort((a, b) => a.name.localeCompare(b.name))
       .filter(
-        (s) => !q || s.name.toLowerCase().includes(q) || s.text.toLowerCase().includes(q),
+        (s) =>
+          !q ||
+          s.name.toLowerCase().includes(q) ||
+          s.text.toLowerCase().includes(q) ||
+          s.tags.some((tag) => tag.toLowerCase().includes(q)) ||
+          (s.notes ?? "").toLowerCase().includes(q),
       );
   }, [library, query]);
 
@@ -63,6 +79,12 @@ export function SnippetLibrarySettings({
   useEffect(() => {
     if (selectedId) nameInputRef.current?.focus({ preventScroll: true });
   }, [selectedId]);
+
+  useEffect(() => {
+    if (selectedSnippetId && library.some((snippet) => snippet.id === selectedSnippetId)) {
+      setSelectedId(selectedSnippetId);
+    }
+  }, [library, selectedSnippetId]);
 
   function handleDedupe() {
     let removed = 0;
@@ -156,6 +178,14 @@ export function SnippetLibrarySettings({
 
   function handleDelete(snippet: SnippetLibraryItem) {
     const refs = snippetReferencingActions(activeConfig, snippet.id);
+    const visibleRefNames = refs.slice(0, 5).map((a) => a.displayName).join(", ");
+    const refsSummary =
+      refs.length > 5
+        ? t("snippetLibrary.referencesSummary", {
+            actions: visibleRefNames,
+            count: refs.length - 5,
+          })
+        : visibleRefNames;
     setConfirmModal({
       title: t("snippetLibrary.deleteConfirmTitle"),
       message:
@@ -163,7 +193,7 @@ export function SnippetLibrarySettings({
           ? t("snippetLibrary.deleteConfirmReferenced", {
               name: snippet.name,
               count: refs.length,
-              actions: refs.map((a) => a.displayName).join(", "),
+              actions: refsSummary,
             })
           : t("snippetLibrary.deleteConfirmMessage", { name: snippet.name }),
       confirmLabel: t("common.delete"),
@@ -202,7 +232,7 @@ export function SnippetLibrarySettings({
             ) : null}
             <div className="settings-profile-list snippet-library__list">
               {visible.map((snippet) => {
-                const refs = snippetReferencingActions(activeConfig, snippet.id).length;
+                const refs = snippetRefCounts.get(snippet.id) ?? 0;
                 const preview = snippet.text.replace(/\s+/g, " ").trim().slice(0, 48);
                 return (
                   <div

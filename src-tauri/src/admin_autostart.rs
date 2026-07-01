@@ -157,17 +157,17 @@ fn extract_command_from_xml(xml: &str) -> Option<String> {
 
 #[cfg(target_os = "windows")]
 mod win {
-    use super::{extract_command_from_xml, TASK_NAME};
-    use windows::core::{BSTR, GUID, PCWSTR};
+    use super::{TASK_NAME, extract_command_from_xml};
     use windows::Win32::System::Com::{
-        CoCreateInstance, CoGetObject, CoInitializeEx, CoUninitialize, BIND_OPTS, BIND_OPTS3,
-        CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
+        BIND_OPTS, BIND_OPTS3, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
+        CoGetObject, CoInitializeEx, CoUninitialize,
     };
     use windows::Win32::System::TaskScheduler::{
-        ITaskFolder, ITaskService, TaskScheduler, TASK_CREATE_OR_UPDATE,
-        TASK_LOGON_INTERACTIVE_TOKEN,
+        ITaskFolder, ITaskService, TASK_CREATE_OR_UPDATE, TASK_LOGON_INTERACTIVE_TOKEN,
+        TaskScheduler,
     };
     use windows::Win32::System::Variant::VARIANT;
+    use windows::core::{BSTR, GUID, PCWSTR};
 
     const HR_ERROR_CANCELLED: u32 = 0x8007_04C7; // user clicked No on UAC
     const HR_FILE_NOT_FOUND: u32 = 0x8007_0002; // task doesn't exist
@@ -205,7 +205,10 @@ mod win {
             "Elevation:Administrator!new:{{{}}}",
             guid_to_string(&TaskScheduler)
         );
-        let moniker: Vec<u16> = moniker_str.encode_utf16().chain(std::iter::once(0)).collect();
+        let moniker: Vec<u16> = moniker_str
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
 
         // BIND_OPTS3 -> BIND_OPTS2 -> BIND_OPTS is the layout windows-rs exposes.
         let mut bind_opts3 = BIND_OPTS3::default();
@@ -301,7 +304,9 @@ mod win {
         unsafe {
             match root.GetTask(&BSTR::from(TASK_NAME)) {
                 Ok(task) => {
-                    let xml: BSTR = task.Xml().map_err(|e| format!("IRegisteredTask::Xml: {e}"))?;
+                    let xml: BSTR = task
+                        .Xml()
+                        .map_err(|e| format!("IRegisteredTask::Xml: {e}"))?;
                     Ok(extract_command_from_xml(&xml.to_string()))
                 }
                 Err(e) if e.code().0 as u32 == HR_FILE_NOT_FOUND => Ok(None),
@@ -317,7 +322,8 @@ mod tests {
 
     #[test]
     fn extracts_command_from_simple_xml() {
-        let xml = r#"<Task><Actions><Exec><Command>C:\Sidearm.exe</Command></Exec></Actions></Task>"#;
+        let xml =
+            r#"<Task><Actions><Exec><Command>C:\Sidearm.exe</Command></Exec></Actions></Task>"#;
         assert_eq!(
             extract_command_from_xml(xml).as_deref(),
             Some("C:\\Sidearm.exe")

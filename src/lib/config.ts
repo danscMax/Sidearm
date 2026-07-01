@@ -79,6 +79,7 @@ export interface Settings {
   osdPosition: OsdPosition;
   osdFontSize: OsdFontSize;
   osdAnimation: OsdAnimation;
+  globalShortcut?: string;
   modifierStaleGcMs?: number;
   replayedModifierForceReleaseMs?: number;
   lastSelectedProfileId?: string;

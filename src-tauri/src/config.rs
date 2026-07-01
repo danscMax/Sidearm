@@ -14,6 +14,7 @@ use thiserror::Error;
 
 const CONFIG_FILE_NAME: &str = "config.json";
 const SCHEMA_VERSION: i32 = 2;
+pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../schemas/config.v2.schema.json"
@@ -224,6 +225,10 @@ pub struct Settings {
     /// presses a Sidearm action" use case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub replayed_modifier_force_release_ms: Option<u64>,
+    /// Optional user override for the OS-global show/hide shortcut. `None`
+    /// preserves the historical Ctrl+Alt+N default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub global_shortcut: Option<String>,
     /// Last profile the user opened in the sidebar editor. This is **editor
     /// view-state only** — the runtime resolver does NOT use it (resolution is
     /// `app mapping > fallback`). Kept so the UI reopens the last-edited profile.
@@ -895,9 +900,10 @@ fn migrate_paste_mode(config: &mut AppConfig) {
     for action in &mut config.actions {
         if let ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode, .. }) =
             &mut action.payload
-            && *paste_mode == PasteMode::ClipboardPaste {
-                *paste_mode = PasteMode::SendText;
-            }
+            && *paste_mode == PasteMode::ClipboardPaste
+        {
+            *paste_mode = PasteMode::SendText;
+        }
     }
     for snippet in &mut config.snippet_library {
         if snippet.paste_mode == PasteMode::ClipboardPaste {
@@ -922,9 +928,7 @@ pub fn load_or_initialize_config(
         // Mark the current config as last-known-good *after* it has loaded and
         // validated cleanly. Failure is non-fatal — log and continue.
         if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
-            log::warn!(
-                "[config] Failed to update last-known-good marker: {err}"
-            );
+            log::warn!("[config] Failed to update last-known-good marker: {err}");
         }
 
         return Ok(LoadConfigResponse {
@@ -1153,6 +1157,20 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
             config.settings.fallback_profile_id
         ));
     }
+    if let Some(shortcut) = config
+        .settings
+        .global_shortcut
+        .as_deref()
+        .map(str::trim)
+        .filter(|shortcut| !shortcut.is_empty())
+        && shortcut
+            .parse::<tauri_plugin_global_shortcut::Shortcut>()
+            .is_err()
+    {
+        errors.push(format!(
+            "settings.globalShortcut `{shortcut}` is not a valid global shortcut."
+        ));
+    }
     if let Some(profile) = config
         .profiles
         .iter()
@@ -1270,21 +1288,22 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
             .physical_controls
             .iter()
             .find(|c| c.id == mapping.control_id)
-            && !ctrl.remappable {
-                warnings.push(ValidationWarning {
-                    code: "non_remappable_encoder_mapping".into(),
-                    message: format!(
-                        "encoder mapping references non-remappable control `{}`",
-                        mapping.control_id.as_str()
-                    ),
-                    path: Some(format!(
-                        "encoderMappings.{}::{}",
-                        mapping.control_id.as_str(),
-                        mapping.layer.as_str()
-                    )),
-                    severity: ValidationSeverity::Warning,
-                });
-            }
+            && !ctrl.remappable
+        {
+            warnings.push(ValidationWarning {
+                code: "non_remappable_encoder_mapping".into(),
+                message: format!(
+                    "encoder mapping references non-remappable control `{}`",
+                    mapping.control_id.as_str()
+                ),
+                path: Some(format!(
+                    "encoderMappings.{}::{}",
+                    mapping.control_id.as_str(),
+                    mapping.layer.as_str()
+                )),
+                severity: ValidationSeverity::Warning,
+            });
+        }
 
         let normalized_encoded_key = mapping.encoded_key.trim();
         if normalized_encoded_key.is_empty() {
@@ -1477,7 +1496,11 @@ fn validate_menu_items<'a>(
     let mut menu_item_ids = HashSet::new();
     for item in items {
         match item {
-            MenuItem::Action { id, action_id: referenced_id, .. } => {
+            MenuItem::Action {
+                id,
+                action_id: referenced_id,
+                ..
+            } => {
                 if !menu_item_ids.insert(id.clone()) {
                     errors.push(format!(
                         "menu action `{action_id}` contains duplicate menu item id `{id}`."
@@ -1634,6 +1657,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             osd_animation: OsdAnimation::default(),
             modifier_stale_gc_ms: None,
             replayed_modifier_force_release_ms: None,
+            global_shortcut: None,
             last_selected_profile_id: None,
             onboarding_completed: false,
             onboarding_step: None,
@@ -2647,9 +2671,27 @@ fn seed_actions() -> Vec<Action> {
     }
 
     for (profile, layer, control, display_name, notes) in [
-        ("main", Layer::Hypershift, ControlId::Thumb05, "Right Ctrl + Right Shift + -", "Unresolved exact semantics. Preserve as placeholder until device validation confirms whether this is a shortcut or text payload."),
-        ("main", Layer::Hypershift, ControlId::Thumb09, "Copy without paragraphs", "Unresolved exact logic. Preserve as placeholder until the text or sequence behavior is confirmed."),
-        ("code", Layer::Hypershift, ControlId::Thumb12, "Paste Win", "Unresolved exact intent. Preserve as placeholder until the real action is confirmed."),
+        (
+            "main",
+            Layer::Hypershift,
+            ControlId::Thumb05,
+            "Right Ctrl + Right Shift + -",
+            "Unresolved exact semantics. Preserve as placeholder until device validation confirms whether this is a shortcut or text payload.",
+        ),
+        (
+            "main",
+            Layer::Hypershift,
+            ControlId::Thumb09,
+            "Copy without paragraphs",
+            "Unresolved exact logic. Preserve as placeholder until the text or sequence behavior is confirmed.",
+        ),
+        (
+            "code",
+            Layer::Hypershift,
+            ControlId::Thumb12,
+            "Paste Win",
+            "Unresolved exact intent. Preserve as placeholder until the real action is confirmed.",
+        ),
     ] {
         actions.push(disabled_placeholder_action(
             action_id(profile, layer, control),
@@ -3033,7 +3075,10 @@ mod tests {
         });
         let value = serde_json::to_value(&config).expect("serialize config");
         let errors = collect_schema_errors(&value);
-        assert!(errors.is_empty(), "repairClipboard action must be schema-valid: {errors:?}");
+        assert!(
+            errors.is_empty(),
+            "repairClipboard action must be schema-valid: {errors:?}"
+        );
     }
 
     #[test]
@@ -3162,7 +3207,10 @@ mod tests {
 
         let bak1 = temp_dir.path().join("config.bak.1");
         assert_eq!(response.backup_path, Some(path_string(&bak1)));
-        assert!(bak1.exists(), "rolling backup .bak.1 should exist after save");
+        assert!(
+            bak1.exists(),
+            "rolling backup .bak.1 should exist after save"
+        );
     }
 
     #[test]
@@ -3302,7 +3350,10 @@ mod tests {
         save_config(temp_dir.path(), config.clone(), None).expect("save should succeed");
 
         let loaded = load_or_initialize_config(temp_dir.path()).expect("load should succeed");
-        assert_eq!(loaded.config.bindings[0].trigger_mode, Some(TriggerMode::Hold));
+        assert_eq!(
+            loaded.config.bindings[0].trigger_mode,
+            Some(TriggerMode::Hold)
+        );
         // Other bindings remain None
         assert_eq!(loaded.config.bindings[1].trigger_mode, None);
     }
@@ -3411,17 +3462,29 @@ mod edge_proptests {
         // (b) serde aliases map them onto the renamed fields with no data loss
         let loaded: AppConfig =
             serde_json::from_value(legacy_value).expect("legacy config must deserialize");
-        assert_eq!(loaded.bindings, config.bindings, "binding.action_id preserved via alias");
-        assert_eq!(loaded.actions, config.actions, "action.display_name preserved via alias");
+        assert_eq!(
+            loaded.bindings, config.bindings,
+            "binding.action_id preserved via alias"
+        );
+        assert_eq!(
+            loaded.actions, config.actions,
+            "action.display_name preserved via alias"
+        );
 
         // (c) re-serialization migrates the file to the new names, dropping the old
         let migrated = serde_json::to_string(&loaded).expect("re-serialize");
         assert!(migrated.contains("\"actionId\"") && migrated.contains("\"displayName\""));
-        assert!(!migrated.contains("\"actionRef\""), "legacy binding key must be dropped");
-        assert!(!migrated.contains("\"pretty\""), "legacy action key must be dropped");
+        assert!(
+            !migrated.contains("\"actionRef\""),
+            "legacy binding key must be dropped"
+        );
+        assert!(
+            !migrated.contains("\"pretty\""),
+            "legacy action key must be dropped"
+        );
     }
 
-    /// The optional `deviceName` (Settings) and `throttleMs` (Binding) fields,
+    /// The optional `deviceName` / `globalShortcut` (Settings) and `throttleMs` (Binding) fields,
     /// added without a schema-version bump like every prior optional field, must
     /// survive the full save contract: serialize → JSON-schema validate →
     /// deserialize, values intact and new wire names present. Guards against a
@@ -3431,6 +3494,7 @@ mod edge_proptests {
     fn device_name_and_throttle_ms_survive_schema_roundtrip() {
         let mut config = default_seed_config();
         config.settings.device_name = Some("Razer Naga V2".into());
+        config.settings.global_shortcut = Some("ctrl+shift+space".into());
         config
             .bindings
             .first_mut()
@@ -3438,16 +3502,36 @@ mod edge_proptests {
             .throttle_ms = Some(250);
 
         let json = serde_json::to_string(&config).expect("serialize");
-        assert!(json.contains("\"deviceName\""), "deviceName must be written");
-        assert!(json.contains("\"throttleMs\""), "throttleMs must be written");
+        assert!(
+            json.contains("\"deviceName\""),
+            "deviceName must be written"
+        );
+        assert!(
+            json.contains("\"globalShortcut\""),
+            "globalShortcut must be written"
+        );
+        assert!(
+            json.contains("\"throttleMs\""),
+            "throttleMs must be written"
+        );
 
         let value: serde_json::Value = serde_json::from_str(&json).expect("parse");
         validate_config_schema_value(&value)
-            .expect("config with deviceName/throttleMs must pass schema validation");
+            .expect("config with deviceName/globalShortcut/throttleMs must pass schema validation");
 
         let loaded: AppConfig = serde_json::from_value(value).expect("deserialize");
-        assert_eq!(loaded.settings.device_name.as_deref(), Some("Razer Naga V2"));
-        assert_eq!(loaded.bindings.first().and_then(|b| b.throttle_ms), Some(250));
+        assert_eq!(
+            loaded.settings.device_name.as_deref(),
+            Some("Razer Naga V2")
+        );
+        assert_eq!(
+            loaded.settings.global_shortcut.as_deref(),
+            Some("ctrl+shift+space")
+        );
+        assert_eq!(
+            loaded.bindings.first().and_then(|b| b.throttle_ms),
+            Some(250)
+        );
     }
 
     // ─── Serialization round-trips ──────────────────────────────────────────
@@ -3641,7 +3725,10 @@ mod edge_proptests {
     fn validation_empty_actions_and_bindings_is_ok() {
         let cfg = minimal_valid_config();
         let result = validate_config(&cfg);
-        assert!(result.is_ok(), "minimal config (no actions/bindings) must be valid");
+        assert!(
+            result.is_ok(),
+            "minimal config (no actions/bindings) must be valid"
+        );
     }
 
     /// A single valid binding + action pair validates cleanly.
@@ -3714,7 +3801,10 @@ mod edge_proptests {
         let mut cfg = minimal_valid_config();
         cfg.profiles[0].id = "   ".into();
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "whitespace-only profile id must be rejected");
+        assert!(
+            result.is_err(),
+            "whitespace-only profile id must be rejected"
+        );
     }
 
     /// Snippet with blank text is rejected.
@@ -3766,7 +3856,10 @@ mod edge_proptests {
         let mut cfg = minimal_valid_config();
         cfg.encoder_mappings[0].encoded_key = "   ".into();
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "whitespace-only encoded_key must be rejected");
+        assert!(
+            result.is_err(),
+            "whitespace-only encoded_key must be rejected"
+        );
     }
 
     // ─── Null & empty: serde defaults fill optional fields ───────────────────
@@ -3853,7 +3946,10 @@ mod edge_proptests {
         let dup = cfg.encoder_mappings[0].clone();
         cfg.encoder_mappings.push(dup);
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "duplicate encoder mapping tuple must be rejected");
+        assert!(
+            result.is_err(),
+            "duplicate encoder mapping tuple must be rejected"
+        );
     }
 
     proptest! {
@@ -3925,7 +4021,11 @@ mod edge_proptests {
         migrate_paste_mode(&mut cfg);
         match &cfg.actions[0].payload {
             ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode, .. }) => {
-                assert_eq!(*paste_mode, PasteMode::SendText, "should be migrated to SendText");
+                assert_eq!(
+                    *paste_mode,
+                    PasteMode::SendText,
+                    "should be migrated to SendText"
+                );
             }
             _ => panic!("unexpected payload shape"),
         }
@@ -3985,8 +4085,12 @@ mod edge_proptests {
         // Payload must be identical after a second application.
         match (&after_once.actions[0].payload, &cfg.actions[0].payload) {
             (
-                ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode: pm1, .. }),
-                ActionPayload::TextSnippet(TextSnippetPayload::Inline { paste_mode: pm2, .. }),
+                ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+                    paste_mode: pm1, ..
+                }),
+                ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+                    paste_mode: pm2, ..
+                }),
             ) => assert_eq!(pm1, pm2),
             _ => panic!("shape changed"),
         }
@@ -4045,7 +4149,10 @@ mod edge_proptests {
         }];
         let before = cfg.actions[0].payload.clone();
         migrate_paste_mode(&mut cfg);
-        assert_eq!(cfg.actions[0].payload, before, "LibraryRef should be untouched");
+        assert_eq!(
+            cfg.actions[0].payload, before,
+            "LibraryRef should be untouched"
+        );
     }
 
     // ─── Validation totality: never panics on adversarial input ──────────────
@@ -4102,7 +4209,10 @@ mod edge_proptests {
     fn profile_rejects_unknown_fields() {
         let json = r#"{"id":"x","name":"X","enabled":true,"priority":0,"unexpectedKey":true}"#;
         let result: Result<Profile, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "Profile has deny_unknown_fields — unknown key must be rejected");
+        assert!(
+            result.is_err(),
+            "Profile has deny_unknown_fields — unknown key must be rejected"
+        );
     }
 
     /// Binding (deny_unknown_fields) rejects extra JSON keys.
@@ -4113,7 +4223,10 @@ mod edge_proptests {
             "label":"lbl","actionRef":"a1","enabled":true,"unknownField":42
         }"#;
         let result: Result<Binding, _> = serde_json::from_str(json);
-        assert!(result.is_err(), "Binding has deny_unknown_fields — unknown key must be rejected");
+        assert!(
+            result.is_err(),
+            "Binding has deny_unknown_fields — unknown key must be rejected"
+        );
     }
 
     /// AppConfig (deny_unknown_fields) rejects extra top-level JSON keys.
@@ -4124,7 +4237,10 @@ mod edge_proptests {
         let mut v = serde_json::to_value(&cfg).unwrap();
         v["surpriseField"] = serde_json::json!("boom");
         let result: Result<AppConfig, _> = serde_json::from_value(v);
-        assert!(result.is_err(), "AppConfig has deny_unknown_fields — unknown key must fail");
+        assert!(
+            result.is_err(),
+            "AppConfig has deny_unknown_fields — unknown key must fail"
+        );
     }
 
     // ─── Validation cross-references ─────────────────────────────────────────
@@ -4150,7 +4266,10 @@ mod edge_proptests {
         b.profile_id = "no-such-profile".into();
         cfg.bindings = vec![b];
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "missing profile ref in binding must be rejected");
+        assert!(
+            result.is_err(),
+            "missing profile ref in binding must be rejected"
+        );
     }
 
     /// ProfileSwitch action referencing non-existent profile is rejected.
@@ -4168,7 +4287,10 @@ mod edge_proptests {
             conditions: vec![],
         }];
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "profileSwitch to non-existent profile must fail");
+        assert!(
+            result.is_err(),
+            "profileSwitch to non-existent profile must fail"
+        );
     }
 
     /// ProfileSwitch with empty target_profile_id is rejected.
@@ -4204,7 +4326,10 @@ mod edge_proptests {
             compiled_title_regexes: vec![],
         }];
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "app mapping with missing profile must fail");
+        assert!(
+            result.is_err(),
+            "app mapping with missing profile must fail"
+        );
     }
 
     // ─── Validation: action type / payload mismatch ──────────────────────────
@@ -4216,8 +4341,9 @@ mod edge_proptests {
         let mut cfg = minimal_valid_config();
         cfg.actions = vec![Action {
             id: "a1".into(),
-            action_type: ActionType::Shortcut,    // type says Shortcut…
-            payload: ActionPayload::MediaKey(MediaKeyPayload { // …but payload is MediaKey
+            action_type: ActionType::Shortcut, // type says Shortcut…
+            payload: ActionPayload::MediaKey(MediaKeyPayload {
+                // …but payload is MediaKey
                 key: MediaKeyKind::PlayPause,
             }),
             display_name: "mismatch".into(),
@@ -4286,6 +4412,21 @@ mod edge_proptests {
         assert!(result.is_err(), "whitespace launch target must fail");
     }
 
+    #[test]
+    fn validation_accepts_valid_global_shortcut() {
+        let mut cfg = minimal_valid_config();
+        cfg.settings.global_shortcut = Some("ctrl+shift+space".into());
+        validate_config(&cfg).expect("valid global shortcut must pass");
+    }
+
+    #[test]
+    fn validation_rejects_invalid_global_shortcut() {
+        let mut cfg = minimal_valid_config();
+        cfg.settings.global_shortcut = Some("ctrl+alt+".into());
+        let result = validate_config(&cfg);
+        assert!(result.is_err(), "invalid global shortcut must fail");
+    }
+
     // ─── Validation: menu cycles ─────────────────────────────────────────────
 
     /// A menu action that directly references itself (via action_id == own id)
@@ -4312,7 +4453,10 @@ mod edge_proptests {
         }];
         let result = validate_config(&cfg);
         // Expect a cycle error (or at minimum an error).
-        assert!(result.is_err(), "menu self-reference must be detected as a cycle");
+        assert!(
+            result.is_err(),
+            "menu self-reference must be detected as a cycle"
+        );
     }
 
     /// Two menu actions that reference each other form an indirect cycle.
@@ -4373,7 +4517,10 @@ mod edge_proptests {
             compiled_title_regexes: vec![],
         }];
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "empty titleIncludes entry must be rejected");
+        assert!(
+            result.is_err(),
+            "empty titleIncludes entry must be rejected"
+        );
     }
 
     /// AppMapping with a whitespace-only title_includes entry is rejected.
@@ -4391,7 +4538,10 @@ mod edge_proptests {
             compiled_title_regexes: vec![],
         }];
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "whitespace titleIncludes entry must be rejected");
+        assert!(
+            result.is_err(),
+            "whitespace titleIncludes entry must be rejected"
+        );
     }
 
     /// Duplicate title_includes entries emit a warning (not an error).
@@ -4428,7 +4578,9 @@ mod edge_proptests {
         let result = validate_config(&cfg);
         match result {
             Ok(warnings) => assert!(
-                warnings.iter().any(|w| w.code == "disabled_fallback_profile"),
+                warnings
+                    .iter()
+                    .any(|w| w.code == "disabled_fallback_profile"),
                 "expected disabled_fallback_profile warning"
             ),
             Err(e) => panic!("expected Ok(warnings) for disabled fallback, got Err: {e:?}"),
@@ -4446,7 +4598,8 @@ mod edge_proptests {
             // JSON wraps strings in quotes.
             let expected_json = format!("\"{}\"", id.as_str());
             assert_eq!(
-                json, expected_json,
+                json,
+                expected_json,
                 "ControlId::{id:?} as_str() `{}` does not match serde JSON `{json}`",
                 id.as_str()
             );
@@ -4460,8 +4613,7 @@ mod edge_proptests {
     /// known cases — this closes the whole class against a future added/renamed type.
     #[test]
     fn action_type_set_matches_schema_enum() {
-        let schema: Value =
-            serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
+        let schema: Value = serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
         let schema_enum: std::collections::BTreeSet<&str> = schema["$defs"]["actionType"]["enum"]
             .as_array()
             .expect("$defs.actionType.enum is an array")
@@ -4484,8 +4636,7 @@ mod edge_proptests {
     /// hand-written `as_str`, so serde stays the single source of the wire name.
     #[test]
     fn mouse_action_kind_set_matches_schema_enum() {
-        let schema: Value =
-            serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
+        let schema: Value = serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
         let schema_enum: std::collections::BTreeSet<String> =
             schema["$defs"]["mouseActionKind"]["enum"]
                 .as_array()
@@ -4518,8 +4669,7 @@ mod edge_proptests {
     /// as `mouse_action_kind_set_matches_schema_enum` above.
     #[test]
     fn media_key_kind_set_matches_schema_enum() {
-        let schema: Value =
-            serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
+        let schema: Value = serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema is valid JSON");
         let schema_enum: std::collections::BTreeSet<String> =
             schema["$defs"]["mediaKeyKind"]["enum"]
                 .as_array()
@@ -4554,7 +4704,8 @@ mod edge_proptests {
             let json = serde_json::to_string(&layer).expect("serialize Layer");
             let expected_json = format!("\"{}\"", layer.as_str());
             assert_eq!(
-                json, expected_json,
+                json,
+                expected_json,
                 "Layer::{layer:?} as_str() `{}` does not match serde JSON `{json}`",
                 layer.as_str()
             );
@@ -4585,7 +4736,10 @@ mod edge_proptests {
         let dup = cfg.physical_controls[0].clone();
         cfg.physical_controls.push(dup);
         let result = validate_config(&cfg);
-        assert!(result.is_err(), "duplicate physical control must be rejected");
+        assert!(
+            result.is_err(),
+            "duplicate physical control must be rejected"
+        );
     }
 
     // ─── Concurrency: N/A justification ──────────────────────────────────────
@@ -4604,7 +4758,10 @@ mod edge_proptests {
         let cfg = default_seed_config();
         let json = serde_json::to_string_pretty(&cfg).expect("serialize");
         let back: AppConfig = serde_json::from_str(&json).expect("deserialize");
-        assert_eq!(cfg, back, "default seed config must survive a JSON roundtrip unchanged");
+        assert_eq!(
+            cfg, back,
+            "default seed config must survive a JSON roundtrip unchanged"
+        );
     }
 
     /// Deserializing default seed JSON again produces equal AppConfig.
@@ -4623,7 +4780,10 @@ mod edge_proptests {
         let cfg = default_seed_config();
         let v = serde_json::to_value(&cfg).unwrap();
         let errs = collect_schema_errors(&v);
-        assert!(errs.is_empty(), "expected no schema errors for default config, got {errs:?}");
+        assert!(
+            errs.is_empty(),
+            "expected no schema errors for default config, got {errs:?}"
+        );
     }
 
     /// collect_schema_errors on a null value returns at least one error (not a panic).

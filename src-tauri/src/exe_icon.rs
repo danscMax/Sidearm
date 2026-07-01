@@ -10,8 +10,8 @@ use std::ptr;
 
 use base64::Engine as _;
 use windows_sys::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC, BITMAP,
-    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS,
+    BI_RGB, BITMAP, BITMAPINFO, BITMAPINFOHEADER, CreateCompatibleDC, DIB_RGB_COLORS, DeleteDC,
+    DeleteObject, GetDC, GetDIBits, GetObjectW, ReleaseDC,
 };
 use windows_sys::Win32::UI::Shell::ExtractIconExW;
 use windows_sys::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
@@ -35,7 +35,9 @@ struct HIconGuard(HICON);
 impl Drop for HIconGuard {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe { DestroyIcon(self.0); }
+            unsafe {
+                DestroyIcon(self.0);
+            }
         }
     }
 }
@@ -46,7 +48,9 @@ struct GdiObjectGuard(HGDIOBJ);
 impl Drop for GdiObjectGuard {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe { DeleteObject(self.0); }
+            unsafe {
+                DeleteObject(self.0);
+            }
         }
     }
 }
@@ -57,7 +61,9 @@ struct DcGuard(HDC);
 impl Drop for DcGuard {
     fn drop(&mut self) {
         if !self.0.is_null() {
-            unsafe { DeleteDC(self.0); }
+            unsafe {
+                DeleteDC(self.0);
+            }
         }
     }
 }
@@ -93,8 +99,7 @@ fn extract_icon_rgba(exe_path: &str) -> Option<(Vec<u8>, u32, u32)> {
         // 1. Extract HICON
         let mut hicon_large: HICON = ptr::null_mut();
         let mut hicon_small: HICON = ptr::null_mut();
-        let count =
-            ExtractIconExW(wide_path.as_ptr(), 0, &mut hicon_large, &mut hicon_small, 1);
+        let count = ExtractIconExW(wide_path.as_ptr(), 0, &mut hicon_large, &mut hicon_small, 1);
 
         // Clean up both icons via RAII
         let _small_guard = HIconGuard(hicon_small);
@@ -227,7 +232,9 @@ mod tests {
     fn encode_rgba_to_base64_png_roundtrips_dimensions() {
         // 2x2 solid-red RGBA buffer.
         let (width, height) = (2u32, 2u32);
-        let pixels: Vec<u8> = (0..width * height).flat_map(|_| [255u8, 0, 0, 255]).collect();
+        let pixels: Vec<u8> = (0..width * height)
+            .flat_map(|_| [255u8, 0, 0, 255])
+            .collect();
 
         let b64 = encode_rgba_to_base64_png(&pixels, width, height)
             .expect("encoding a valid RGBA buffer should succeed");

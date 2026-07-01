@@ -14,12 +14,12 @@ use serde::Deserialize;
 
 use super::macro_steps::{self, NormalizedEvent};
 use super::mapping::{
-    input_id_to_control_id, mouse_action_from_assignment, parse_modifier_array,
-    translate_key_token, KeyTranslationError,
+    KeyTranslationError, input_id_to_control_id, mouse_action_from_assignment,
+    parse_modifier_array, translate_key_token,
 };
 use super::types::{
-    default_label_for, ImportWarning, ParsedAction, ParsedBinding, ParsedMacro,
-    ParsedProfile, ParsedSequenceStep, ParsedSynapseProfiles, SourceKind,
+    ImportWarning, ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile, ParsedSequenceStep,
+    ParsedSynapseProfiles, SourceKind, default_label_for,
 };
 
 // ============================================================================
@@ -167,7 +167,11 @@ struct KeyEvent {
 
 #[derive(Debug, Deserialize)]
 struct MouseEventRaw {
-    #[serde(default, rename = "MouseButton", deserialize_with = "deserialize_lax_u8")]
+    #[serde(
+        default,
+        rename = "MouseButton",
+        deserialize_with = "deserialize_lax_u8"
+    )]
     #[allow(dead_code)]
     button: u8,
     #[serde(default, rename = "State", deserialize_with = "deserialize_lax_u8")]
@@ -268,8 +272,7 @@ pub fn parse_synapse_v4_str(
     raw: &str,
     source_path: String,
 ) -> Result<ParsedSynapseProfiles, SynapseParseError> {
-    let outer: SynapseV4File =
-        serde_json::from_str(raw).map_err(SynapseParseError::OuterJson)?;
+    let outer: SynapseV4File = serde_json::from_str(raw).map_err(SynapseParseError::OuterJson)?;
 
     if outer.profiles.len() > MAX_V4_PROFILES {
         return Err(SynapseParseError::TooManyProfiles(outer.profiles.len()));
@@ -381,7 +384,11 @@ fn decode_profile(
         }
     }
 
-    let name = if payload.name.is_empty() { env.name.clone() } else { payload.name };
+    let name = if payload.name.is_empty() {
+        env.name.clone()
+    } else {
+        payload.name
+    };
 
     Ok(ParsedProfile {
         synapse_guid: payload.guid,
@@ -455,7 +462,11 @@ fn transform_mapping(
         return None;
     }
 
-    let layer = if raw.is_hyper_shift { "hypershift" } else { "standard" };
+    let layer = if raw.is_hyper_shift {
+        "hypershift"
+    } else {
+        "standard"
+    };
 
     let action = transform_output(raw, profile_name, warnings);
     let label = default_label_for(control_id, &action);
@@ -889,8 +900,14 @@ mod tests {
         let parsed = parse_synapse_v4_str(&outer, "t".into()).expect("parse");
         let prof = &parsed.profiles[0];
         assert_eq!(prof.bindings.len(), 2);
-        assert!(matches!(&prof.bindings[0].action, ParsedAction::TextSnippet { .. }));
-        assert!(matches!(&prof.bindings[1].action, ParsedAction::Sequence { .. }));
+        assert!(matches!(
+            &prof.bindings[0].action,
+            ParsedAction::TextSnippet { .. }
+        ));
+        assert!(matches!(
+            &prof.bindings[1].action,
+            ParsedAction::Sequence { .. }
+        ));
         assert_eq!(prof.macros.len(), 1);
         assert_eq!(prof.macros[0].synapse_guid, "mg");
         // Macro produced one step: A-down + A-up → Send { value: "A" }
@@ -910,7 +927,10 @@ mod edge_proptests {
         let profiles: Vec<String> = profile_payloads
             .iter()
             .map(|(name, inner)| {
-                format!(r#"{{"name": {name:?}, "payload": "{}", "hash": ""}}"#, b64(inner))
+                format!(
+                    r#"{{"name": {name:?}, "payload": "{}", "hash": ""}}"#,
+                    b64(inner)
+                )
             })
             .collect();
         format!(r#"{{"profiles": [{}], "macros": []}}"#, profiles.join(","))
@@ -967,8 +987,12 @@ mod edge_proptests {
         let parsed = res.expect("outer parse should succeed");
         // Empty b64 → inner JSON fails → profile_decode_failed warning.
         assert!(
-            parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"),
-            "expected profile_decode_failed, got {:?}", parsed.warnings
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.code == "profile_decode_failed"),
+            "expected profile_decode_failed, got {:?}",
+            parsed.warnings
         );
     }
 
@@ -983,7 +1007,12 @@ mod edge_proptests {
             b64("null")
         );
         let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
-        assert!(parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"));
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.code == "profile_decode_failed")
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1005,10 +1034,14 @@ mod edge_proptests {
 
     #[test]
     fn overflow_invalid_base64_payload_returns_error_with_warning() {
-        let outer = r#"{"profiles":[{"name":"X","payload":"!!!NOT_BASE64!!!","hash":""}],"macros":[]}"#;
+        let outer =
+            r#"{"profiles":[{"name":"X","payload":"!!!NOT_BASE64!!!","hash":""}],"macros":[]}"#;
         let parsed = parse_synapse_v4_str(outer, "t".into()).unwrap();
         assert!(
-            parsed.warnings.iter().any(|w| w.code == "profile_decode_failed"),
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.code == "profile_decode_failed"),
             "expected profile_decode_failed for invalid b64"
         );
     }
@@ -1114,7 +1147,8 @@ mod edge_proptests {
         let profile_inner = r#"{"guid":"p","name":"P","mappings":[
                {"inputType":"DKMInput","inputID":"DKM_M_01","isHyperShift":false,
                  "outputType":"macroGroup","macroGroup":{"guid":"m"}}
-            ],"sidePanelMappings":{"12ButtonSide":[]}}"#.to_string();
+            ],"sidePanelMappings":{"12ButtonSide":[]}}"#
+            .to_string();
         let outer = format!(
             r#"{{"profiles":[{{"name":"P","payload":"{}","hash":""}}],
                  "macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,
@@ -1167,7 +1201,12 @@ mod edge_proptests {
     #[test]
     fn overflow_deeply_nested_json_payload_no_stack_overflow() {
         // Build {"a":{"a":{"a":...}}} to 1000 depth.
-        let deep: String = (0..1000).map(|_| r#"{"a":"#.to_string()).collect::<Vec<_>>().join("") + "1" + &"}".repeat(1000);
+        let deep: String = (0..1000)
+            .map(|_| r#"{"a":"#.to_string())
+            .collect::<Vec<_>>()
+            .join("")
+            + "1"
+            + &"}".repeat(1000);
         let outer = format!(
             r#"{{"profiles":[{{"name":"X","payload":"{}","hash":""}}],"macros":[]}}"#,
             b64(&deep)

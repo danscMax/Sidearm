@@ -12,6 +12,7 @@ import {
 import { labelForSequenceStep } from "../../lib/labels";
 import { normalizeKeyName, resolveKeyName } from "../../lib/action-picker-helpers";
 import {
+  normalizeCommandError,
   recordKeystroke,
   startMacroRecording,
   stopMacroRecording,
@@ -32,6 +33,7 @@ export function SequenceStepEditor({
   const [isRecording, setIsRecording] = useState(false);
   const [recordedCount, setRecordedCount] = useState(0);
   const [limitReached, setLimitReached] = useState(false);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
 
   // Stable per-step keys decoupled from array index. SequenceStep is a
   // persisted/serialized type, so we can't add an id field to it; instead we
@@ -52,6 +54,9 @@ export function SequenceStepEditor({
     stepKeysRef.current.length = steps.length;
   }
   const stepKeys = stepKeysRef.current;
+  const hasLaunchBeforeLaterStep = steps.some(
+    (step, index) => step.type === "launch" && index < steps.length - 1,
+  );
 
   /** Hard cap on recorded steps to protect against runaway sequences. */
   const RECORD_LIMIT = 1000;
@@ -98,10 +103,11 @@ export function SequenceStepEditor({
     try {
       setRecordedCount(0);
       setLimitReached(false);
+      setRecordingError(null);
       await startMacroRecording();
       setIsRecording(true);
-    } catch {
-      // Silently ignore — recorder might already be in use
+    } catch (unknownError) {
+      setRecordingError(normalizeCommandError(unknownError).message);
     }
   }
 
@@ -115,8 +121,9 @@ export function SequenceStepEditor({
         stepKeysRef.current = [];
         onChange(recording.steps);
       }
-    } catch {
+    } catch (unknownError) {
       setIsRecording(false);
+      setRecordingError(normalizeCommandError(unknownError).message);
     }
   }
 
@@ -203,6 +210,16 @@ export function SequenceStepEditor({
       {limitReached ? (
         <Notice variant="warning" className="mb-8">
           <strong>{t("picker.recordLimitReached", { max: RECORD_LIMIT })}</strong>
+        </Notice>
+      ) : null}
+      {recordingError ? (
+        <Notice variant="error" className="mb-8">
+          <strong>{recordingError}</strong>
+        </Notice>
+      ) : null}
+      {hasLaunchBeforeLaterStep ? (
+        <Notice variant="warning" className="mb-8">
+          <strong>{t("picker.sequenceLaunchRollbackWarning")}</strong>
         </Notice>
       ) : null}
 

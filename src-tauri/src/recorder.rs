@@ -20,8 +20,7 @@ pub struct MacroRecording {
     pub stopped_at: Option<u64>,
 }
 
-#[derive(Debug)]
-#[derive(Default)]
+#[derive(Debug, Default)]
 enum RecorderState {
     #[default]
     Idle,
@@ -45,7 +44,6 @@ struct RecordedEvent {
 pub struct MacroRecorder {
     state: Option<RecorderState>,
 }
-
 
 impl MacroRecorder {
     pub fn new() -> Self {
@@ -135,11 +133,7 @@ fn convert_to_sequence_steps(events: &[RecordedEvent]) -> Vec<SequenceStep> {
             } else {
                 let delta = event.timestamp.saturating_sub(events[i - 1].timestamp);
                 let capped = delta.min(MAX_STEP_DELAY_MS as u64) as u32;
-                if capped > 0 {
-                    Some(capped)
-                } else {
-                    None
-                }
+                if capped > 0 { Some(capped) } else { None }
             };
             SequenceStep::Send {
                 value: event.key.clone(),
@@ -178,7 +172,9 @@ mod tests {
 
         assert_eq!(recording.steps.len(), 1);
         match &recording.steps[0] {
-            SequenceStep::Send { value, delay_ms, .. } => {
+            SequenceStep::Send {
+                value, delay_ms, ..
+            } => {
                 assert_eq!(value, "F13");
                 assert_eq!(*delay_ms, None); // first step has no delay
             }
@@ -198,7 +194,9 @@ mod tests {
         assert_eq!(recording.steps.len(), 3);
         // First step: no delay
         match &recording.steps[0] {
-            SequenceStep::Send { value, delay_ms, .. } => {
+            SequenceStep::Send {
+                value, delay_ms, ..
+            } => {
                 assert_eq!(value, "Ctrl+C");
                 assert_eq!(*delay_ms, None);
             }
@@ -206,7 +204,9 @@ mod tests {
         }
         // Second step: 250ms delay
         match &recording.steps[1] {
-            SequenceStep::Send { value, delay_ms, .. } => {
+            SequenceStep::Send {
+                value, delay_ms, ..
+            } => {
                 assert_eq!(value, "Ctrl+V");
                 assert_eq!(*delay_ms, Some(250));
             }
@@ -214,7 +214,9 @@ mod tests {
         }
         // Third step: 250ms delay
         match &recording.steps[2] {
-            SequenceStep::Send { value, delay_ms, .. } => {
+            SequenceStep::Send {
+                value, delay_ms, ..
+            } => {
                 assert_eq!(value, "Enter");
                 assert_eq!(*delay_ms, Some(250));
             }
@@ -415,7 +417,10 @@ mod edge_proptests {
         let mut recorder = MacroRecorder::new();
         recorder.start(0).unwrap();
         let recording = recorder.stop(100).unwrap();
-        assert!(recording.steps.is_empty(), "empty recording must have no steps");
+        assert!(
+            recording.steps.is_empty(),
+            "empty recording must have no steps"
+        );
         assert_eq!(recording.started_at, 0);
         assert_eq!(recording.stopped_at, Some(100));
     }
@@ -432,7 +437,10 @@ mod edge_proptests {
     #[test]
     fn unit_stop_while_idle_returns_err() {
         let mut recorder = MacroRecorder::new();
-        assert!(recorder.stop(100).is_err(), "stop without start must return Err");
+        assert!(
+            recorder.stop(100).is_err(),
+            "stop without start must return Err"
+        );
     }
 
     #[test]
@@ -460,15 +468,23 @@ mod edge_proptests {
     fn unit_delay_saturating_sub_no_underflow() {
         // We can test convert_to_sequence_steps directly since it's in the same module
         let events = vec![
-            RecordedEvent { key: "A".into(), timestamp: 1000 },
-            RecordedEvent { key: "B".into(), timestamp: 0 }, // earlier timestamp (pathological)
+            RecordedEvent {
+                key: "A".into(),
+                timestamp: 1000,
+            },
+            RecordedEvent {
+                key: "B".into(),
+                timestamp: 0,
+            }, // earlier timestamp (pathological)
         ];
         let steps = convert_to_sequence_steps(&events);
         // saturating_sub(0, 1000) = 0 → capped = 0 → delay_ms = None
         match &steps[1] {
             SequenceStep::Send { delay_ms, .. } => {
-                assert_eq!(*delay_ms, None,
-                    "backward timestamp must produce None delay (saturating_sub prevents underflow)");
+                assert_eq!(
+                    *delay_ms, None,
+                    "backward timestamp must produce None delay (saturating_sub prevents underflow)"
+                );
             }
             _ => panic!("expected Send step"),
         }

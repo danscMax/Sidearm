@@ -1,7 +1,11 @@
 use serde::Serialize;
 use std::{
     collections::VecDeque,
-    sync::{atomic::{AtomicUsize, Ordering}, mpsc::Sender, Arc},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+        mpsc::Sender,
+    },
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -144,11 +148,7 @@ impl RuntimeStore {
     /// receiver thread re-emits the entries as `debug_log_appended` events.
     /// The pending counter is shared with the bridge thread to enforce the
     /// in-flight cap.
-    pub fn set_log_sender(
-        &mut self,
-        sender: Sender<DebugLogEntry>,
-        pending: Arc<AtomicUsize>,
-    ) {
+    pub fn set_log_sender(&mut self, sender: Sender<DebugLogEntry>, pending: Arc<AtomicUsize>) {
         self.log_sender = Some(sender);
         self.log_send_pending = Some(pending);
     }
@@ -164,7 +164,10 @@ impl RuntimeStore {
     }
 
     /// Record the last non-ignored foreground window (watcher / tray snapshot).
-    pub fn set_last_foreground_window(&mut self, window: crate::window_capture::WindowCaptureResult) {
+    pub fn set_last_foreground_window(
+        &mut self,
+        window: crate::window_capture::WindowCaptureResult,
+    ) {
         self.last_foreground_window = Some(window);
     }
 
@@ -189,7 +192,8 @@ impl RuntimeStore {
             Some(remaining) => Some(remaining),
             None => {
                 if throttle_ms > 0 {
-                    self.throttle_last_exec.insert(binding_id.to_string(), now_ms);
+                    self.throttle_last_exec
+                        .insert(binding_id.to_string(), now_ms);
                 }
                 None
             }
@@ -249,8 +253,8 @@ impl RuntimeStore {
 
     /// Returns true if the profile changed (caller should send notification).
     pub fn notify_profile_change(&mut self, profile_id: Option<&str>) -> bool {
-        let changed = profile_id.is_some()
-            && self.last_notified_profile_id.as_deref() != profile_id;
+        let changed =
+            profile_id.is_some() && self.last_notified_profile_id.as_deref() != profile_id;
         if changed {
             self.last_notified_profile_id = profile_id.map(|s| s.to_owned());
         }

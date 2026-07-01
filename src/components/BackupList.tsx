@@ -7,7 +7,7 @@ import { normalizeCommandError } from "../lib/backend";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
 export interface BackupListProps {
-  onRestored: () => void;
+  onRestored: () => void | Promise<unknown>;
   setError: (error: CommandError | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
 }
@@ -55,7 +55,7 @@ export function BackupList({
       onConfirm: async () => {
         try {
           await restoreConfigFromBackup(entry.path);
-          onRestored();
+          await onRestored();
           await refresh();
         } catch (unknownError) {
           setError(normalizeCommandError(unknownError));

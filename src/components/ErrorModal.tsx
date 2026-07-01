@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ModalFooter, ModalHeader, ModalShell } from "./shared";
@@ -19,10 +19,14 @@ export interface ErrorModalProps {
 export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [copyStatus, setCopyStatus] = useState<"ok" | "failed" | null>(null);
+  const [busyAction, setBusyAction] = useState<ErrorActionKind | null>(null);
 
   useEffect(() => {
     if (error) {
       dialogRef.current?.focus();
+      setCopyStatus(null);
+      setBusyAction(null);
     }
   }, [error]);
 
@@ -38,12 +42,18 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
     if (action.kind === "copyDetails") {
       try {
         await navigator.clipboard.writeText(formatErrorForClipboard(error!));
+        setCopyStatus("ok");
       } catch {
-        // Clipboard not available — ignore silently.
+        setCopyStatus("failed");
       }
       return;
     }
-    await onAction?.(action.kind);
+    setBusyAction(action.kind);
+    try {
+      await onAction?.(action.kind);
+    } finally {
+      setBusyAction(null);
+    }
   }
 
   return (
@@ -77,6 +87,11 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
               </ul>
             </details>
           ) : null}
+          {copyStatus ? (
+            <p className="panel__muted">
+              {copyStatus === "ok" ? t("errors.copySucceeded") : t("errors.copyFailed")}
+            </p>
+          ) : null}
         </div>
 
         <ModalFooter className="error-modal__footer">
@@ -84,6 +99,7 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
             <button
               key={action.kind}
               type="button"
+              disabled={busyAction !== null}
               className={
                 action.primary
                   ? "action-button action-button--primary"
@@ -93,7 +109,7 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
               }
               onClick={() => handleAction(action)}
             >
-              {t(action.labelKey)}
+              {busyAction === action.kind ? t("common.processing") : t(action.labelKey)}
             </button>
           ))}
         </ModalFooter>

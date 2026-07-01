@@ -23,8 +23,8 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -39,27 +39,27 @@ type MinimizeToTray = Arc<AtomicBool>;
 /// clobber its edits. `None` until the first load. See `config::config_file_stamp`.
 type ConfigStamp = Arc<Mutex<Option<u64>>>;
 
-pub use capture_backend::capture_helper_main;
 use capture_backend::RuntimeController;
+pub use capture_backend::capture_helper_main;
 use command_error::CommandError;
-use recorder::MacroRecorder;
 use config::{
+    AppConfig, ConfigStoreError, DEFAULT_GLOBAL_SHORTCUT, LoadConfigResponse, SaveConfigResponse,
     load_or_initialize_config, read_and_migrate_config_file, save_config as save_config_to_store,
-    AppConfig, ConfigStoreError, LoadConfigResponse, SaveConfigResponse,
 };
 use executor::{ActionExecutionEvent, RuntimeErrorEvent};
+use recorder::MacroRecorder;
 use resolver::ResolvedInputPreview;
 use runtime::{
-    DebugLogEntry, RuntimeStateSummary, RuntimeStore, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED,
-    EVENT_CONTROL_RESOLVED, EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_RUNTIME_ERROR,
-    EVENT_QUICK_RULE_FAILED, EVENT_QUICK_RULE_START, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
-    EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED,
+    DebugLogEntry, EVENT_ACTION_EXECUTED, EVENT_CONFIG_RELOADED, EVENT_CONTROL_RESOLVED,
+    EVENT_DEBUG_LOG_APPENDED, EVENT_PROFILE_RESOLVED, EVENT_QUICK_RULE_FAILED,
+    EVENT_QUICK_RULE_START, EVENT_RUNTIME_ERROR, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
+    EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED, RuntimeStateSummary, RuntimeStore,
 };
 use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
-use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
+use tauri_plugin_log::{RotationStrategy, Target, TargetKind, TimezoneStrategy};
 use window_capture::WindowCaptureResult;
 
 /// Lock a `Mutex`, recovering from poisoning (a panic in another thread while
@@ -166,11 +166,17 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     // Multiply by DPI scale factor to convert.
     let dpi_scale = {
         #[cfg(target_os = "windows")]
-        { crate::platform::display::get_cursor_monitor_dpi_scale() }
+        {
+            crate::platform::display::get_cursor_monitor_dpi_scale()
+        }
         #[cfg(target_os = "linux")]
-        { crate::platform::display::get_dpi_scale() }
+        {
+            crate::platform::display::get_dpi_scale()
+        }
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-        { 1.0_f64 }
+        {
+            1.0_f64
+        }
     };
 
     let font_px = match settings.osd_font_size {
@@ -211,7 +217,10 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
             height,
             margin,
         );
-        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: ax, y: ay }));
+        let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: ax,
+            y: ay,
+        }));
     }
 
     let _ = w.set_size(tauri::Size::Physical(tauri::PhysicalSize {
@@ -222,12 +231,10 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
     // Read back actual outer size (includes any window frame/border added by the
     // OS or WebView2) now that the window lives in its final DPI context, then
     // place it precisely at the chosen corner.
-    let outer = w
-        .outer_size()
-        .unwrap_or(tauri::PhysicalSize {
-            width: win_width as u32,
-            height: height as u32,
-        });
+    let outer = w.outer_size().unwrap_or(tauri::PhysicalSize {
+        width: win_width as u32,
+        height: height as u32,
+    });
     let ow = outer.width as i32;
     let oh = outer.height as i32;
 
@@ -279,18 +286,31 @@ pub(crate) fn show_osd(app: &AppHandle, profile_name: &str, settings: &config::S
 
 fn measure_text_width(text: &str, font_family: &str, font_size_px: i32, font_weight: i32) -> i32 {
     #[cfg(target_os = "windows")]
-    return crate::platform::display::measure_text_width(text, font_family, font_size_px, font_weight);
+    return crate::platform::display::measure_text_width(
+        text,
+        font_family,
+        font_size_px,
+        font_weight,
+    );
     #[cfg(target_os = "linux")]
-    return crate::platform::display::measure_text_width(text, font_family, font_size_px, font_weight);
+    return crate::platform::display::measure_text_width(
+        text,
+        font_family,
+        font_size_px,
+        font_weight,
+    );
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    { let _ = (text, font_family, font_weight); return font_size_px * 8; }
+    {
+        let _ = (text, font_family, font_weight);
+        return font_size_px * 8;
+    }
 }
 
 /// Create the hidden OSD window (called lazily on first show_osd).
 /// Positioned off-screen and explicitly hidden to prevent any flash.
 fn create_osd_window(app: &AppHandle) {
-    use tauri::WebviewWindowBuilder;
     use tauri::WebviewUrl;
+    use tauri::WebviewWindowBuilder;
 
     if let Ok(w) = WebviewWindowBuilder::new(app, "osd", WebviewUrl::App("/osd.html".into()))
         .title("")
@@ -369,7 +389,11 @@ fn build_tray_menu(
     menu.append(&MenuItem::with_id(
         app,
         "toggle_runtime",
-        if is_running { "Приостановить" } else { "Слушать мышь" },
+        if is_running {
+            "Приостановить"
+        } else {
+            "Слушать мышь"
+        },
         true,
         None::<&str>,
     )?)?;
@@ -385,7 +409,13 @@ fn build_tray_menu(
         )?)?;
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "quit", "Выход", true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "quit",
+        "Выход",
+        true,
+        None::<&str>,
+    )?)?;
     Ok(menu)
 }
 
@@ -410,7 +440,13 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         .filter(|id| !id.is_empty());
     let is_elevated = window_capture::is_current_process_elevated();
 
-    match build_tray_menu(app, &config.profiles, active.as_deref(), is_running, is_elevated) {
+    match build_tray_menu(
+        app,
+        &config.profiles,
+        active.as_deref(),
+        is_running,
+        is_elevated,
+    ) {
         Ok(menu) => {
             if let Err(error) = tray.set_menu(Some(menu)) {
                 log::warn!("[tray] set_menu failed: {error}");
@@ -427,6 +463,24 @@ fn rebuild_tray_menu(app: &AppHandle) {
     match load_or_initialize_config(&config_dir) {
         Ok(response) => rebuild_tray_menu_from_config(app, &response.config),
         Err(_) => log::warn!("[tray] menu rebuild skipped — config load failed"),
+    }
+}
+
+fn configured_global_shortcut(app: &AppHandle) -> String {
+    let config_dir = resolve_app_paths(app).config_dir.clone();
+    match load_or_initialize_config(&config_dir) {
+        Ok(load) => load
+            .config
+            .settings
+            .global_shortcut
+            .filter(|shortcut| !shortcut.trim().is_empty())
+            .unwrap_or_else(|| DEFAULT_GLOBAL_SHORTCUT.to_string()),
+        Err(error) => {
+            log::warn!(
+                "[system] Could not load global shortcut setting; using {DEFAULT_GLOBAL_SHORTCUT}: {error}"
+            );
+            DEFAULT_GLOBAL_SHORTCUT.to_string()
+        }
     }
 }
 
@@ -502,9 +556,7 @@ fn validate_user_path_with_ext(
     let ext_ok = validated
         .extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| {
-            allowed.iter().any(|a| extension.eq_ignore_ascii_case(a))
-        });
+        .is_some_and(|extension| allowed.iter().any(|a| extension.eq_ignore_ascii_case(a)));
     if !ext_ok {
         return Err(CommandError::new("invalid_path", reject_message, None));
     }
@@ -521,12 +573,14 @@ async fn write_user_json(
     let validated_path = validate_user_json_path(&path)?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = validated_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| {
-                CommandError::internal(format!("Failed to create directory: {e}"))
-            })?;
+            fs::create_dir_all(parent)
+                .map_err(|e| CommandError::internal(format!("Failed to create directory: {e}")))?;
         }
-        fs::write(&validated_path, contents)
-            .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))
+        config::persist_atomically(&validated_path, |file| {
+            use std::io::Write as _;
+            file.write_all(contents.as_bytes())
+        })
+        .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))
     })
     .await
     .map_err(|e| CommandError::internal(format!("{op} task failed: {e}")))?
@@ -604,8 +658,11 @@ async fn export_snippets(path: String, contents: String) -> Result<(), CommandEr
             fs::create_dir_all(parent)
                 .map_err(|e| CommandError::internal(format!("Failed to create directory: {e}")))?;
         }
-        fs::write(&validated_path, contents)
-            .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))
+        config::persist_atomically(&validated_path, |file| {
+            use std::io::Write as _;
+            file.write_all(contents.as_bytes())
+        })
+        .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))
     })
     .await
     .map_err(|e| CommandError::internal(format!("export_snippets task failed: {e}")))?
@@ -656,7 +713,11 @@ async fn export_verification_session(
             ))
         })?;
 
-        fs::write(&export_path, contents).map_err(|error| {
+        config::persist_atomically(&export_path, |file| {
+            use std::io::Write as _;
+            file.write_all(contents.as_bytes())
+        })
+        .map_err(|error| {
             CommandError::internal(format!(
                 "Failed to write verification export `{}`: {error}",
                 export_path.display()
@@ -733,9 +794,7 @@ async fn save_config(
     record_config_stamp(&app);
 
     let is_running = {
-        let store = runtime_store
-            .lock()
-            .recover_poison();
+        let store = runtime_store.lock().recover_poison();
         store.is_running()
     };
 
@@ -747,10 +806,7 @@ async fn save_config(
 
             // TOCTOU guard: re-check runtime status after acquiring the controller lock.
             // The runtime may have been stopped between the initial check and lock acquisition.
-            let still_running = runtime_store
-                .lock()
-                .recover_poison()
-                .is_running();
+            let still_running = runtime_store.lock().recover_poison().is_running();
             if !still_running {
                 None
             } else {
@@ -765,18 +821,14 @@ async fn save_config(
         match restart_result {
             Some(Err(message)) => {
                 let stopped_summary = {
-                    let mut store = runtime_store
-                        .lock()
-                        .recover_poison();
+                    let mut store = runtime_store.lock().recover_poison();
                     store.stop()
                 };
                 let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
                 return Err(CommandError::new("runtime_reload_failed", message, None));
             }
             Some(Ok(())) => {
-                let mut store = runtime_store
-                    .lock()
-                    .recover_poison();
+                let mut store = runtime_store.lock().recover_poison();
                 Some(store.reload(result.config.version, result.warnings.len()))
             }
             None => None,
@@ -817,6 +869,7 @@ struct AppPathsInfo {
 #[tauri::command]
 async fn get_app_paths(app: AppHandle) -> Result<AppPathsInfo, CommandError> {
     let paths = resolve_app_paths(&app);
+    let needs_portable_migration_prompt = needs_portable_migration_prompt(&paths);
     Ok(AppPathsInfo {
         mode: paths.mode,
         config_dir: paths.config_dir.to_string_lossy().into_owned(),
@@ -824,8 +877,38 @@ async fn get_app_paths(app: AppHandle) -> Result<AppPathsInfo, CommandError> {
         snapshots_dir: paths.snapshots_dir.to_string_lossy().into_owned(),
         portable_marker_present: paths.portable_marker_present,
         fallback_reason: paths.fallback_reason.clone(),
-        needs_portable_migration_prompt: paths.needs_portable_migration_prompt(),
+        needs_portable_migration_prompt,
     })
+}
+
+fn needs_portable_migration_prompt(paths: &paths::AppPaths) -> bool {
+    if paths.needs_portable_migration_prompt() {
+        return true;
+    }
+    if paths.mode != paths::PathMode::Portable {
+        return false;
+    }
+    if paths
+        .config_dir
+        .join(paths::MIGRATION_DECLINED_MARKER)
+        .exists()
+    {
+        return false;
+    }
+    if !paths::AppPaths::roaming_config_file().exists() {
+        return false;
+    }
+    let portable_config = paths.config_dir.join("config.json");
+    if !portable_config.exists() {
+        return false;
+    }
+    match read_and_migrate_config_file(&portable_config) {
+        Ok(config) => config == config::default_seed_config(),
+        Err(error) => {
+            log::warn!("[portable] migration prompt seed check skipped: {error}");
+            false
+        }
+    }
 }
 
 #[tauri::command]
@@ -842,6 +925,8 @@ async fn list_backups(app: AppHandle) -> Result<Vec<backup::BackupEntry>, Comman
 #[tauri::command]
 async fn restore_config_from_backup(
     app: AppHandle,
+    runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
+    runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
     backup_path: String,
 ) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
@@ -868,8 +953,7 @@ async fn restore_config_from_backup(
     let config_dir_for_task = config_dir.clone();
     let response = tauri::async_runtime::spawn_blocking(
         move || -> Result<LoadConfigResponse, CommandError> {
-            let config =
-                read_and_migrate_config_file(&backup_pb).map_err(CommandError::from)?;
+            let config = read_and_migrate_config_file(&backup_pb).map_err(CommandError::from)?;
             save_config_to_store(&config_dir_for_task, config, None).map_err(CommandError::from)?;
             load_or_initialize_config(&config_dir_for_task).map_err(CommandError::from)
         },
@@ -883,14 +967,61 @@ async fn restore_config_from_backup(
     // the next save_config does not falsely report a concurrent change.
     record_config_stamp(&app);
 
+    let is_running = {
+        let store = runtime_store.lock().recover_poison();
+        store.is_running()
+    };
+
+    if is_running {
+        let restart_result = {
+            let mut controller = runtime_controller
+                .lock()
+                .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
+            let still_running = runtime_store.lock().recover_poison().is_running();
+            if still_running {
+                Some(controller.restart(
+                    app.clone(),
+                    runtime_store.inner().clone(),
+                    response.config.clone(),
+                    app.package_info().name.clone(),
+                ))
+            } else {
+                None
+            }
+        };
+
+        if let Some(restart_result) = restart_result {
+            match restart_result {
+                Ok(()) => {
+                    let summary = {
+                        let mut store = runtime_store.lock().recover_poison();
+                        store.reload(response.config.version, response.warnings.len())
+                    };
+                    app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
+                        CommandError::internal(format!(
+                            "Failed to emit config_reloaded event: {error}"
+                        ))
+                    })?;
+                }
+                Err(message) => {
+                    let stopped_summary = {
+                        let mut store = runtime_store.lock().recover_poison();
+                        store.stop()
+                    };
+                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
+                    return Err(CommandError::new("runtime_reload_failed", message, None));
+                }
+            }
+        }
+    }
+
+    rebuild_tray_menu_from_config(&app, &response.config);
+
     Ok(response)
 }
 
 #[tauri::command]
-async fn export_full_config(
-    app: AppHandle,
-    target_path: String,
-) -> Result<String, CommandError> {
+async fn export_full_config(app: AppHandle, target_path: String) -> Result<String, CommandError> {
     let validated = validate_user_json_path(&target_path)?;
     let config_dir = resolve_config_dir(&app)?;
     let source = config_dir.join("config.json");
@@ -907,7 +1038,7 @@ async fn export_full_config(
                 CommandError::internal(format!("Failed to create export directory: {e}"))
             })?;
         }
-        fs::copy(&source, &validated)
+        atomic_copy_file(&source, &validated)
             .map_err(|e| CommandError::internal(format!("Failed to copy config: {e}")))?;
         Ok(validated.to_string_lossy().into_owned())
     })
@@ -928,9 +1059,7 @@ struct ImportPreview {
 }
 
 #[tauri::command]
-async fn import_full_config_preview(
-    source_path: String,
-) -> Result<ImportPreview, CommandError> {
+async fn import_full_config_preview(source_path: String) -> Result<ImportPreview, CommandError> {
     let validated = validate_user_file_path(&source_path)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<ImportPreview, CommandError> {
         ensure_full_config_import_size(&validated)?;
@@ -987,6 +1116,8 @@ enum ImportMode {
 #[tauri::command]
 async fn import_full_config_apply(
     app: AppHandle,
+    runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
+    runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
     source_path: String,
     mode: ImportMode,
 ) -> Result<SaveConfigResponse, CommandError> {
@@ -997,8 +1128,7 @@ async fn import_full_config_apply(
     let result = tauri::async_runtime::spawn_blocking(
         move || -> Result<SaveConfigResponse, CommandError> {
             ensure_full_config_import_size(&validated)?;
-            let imported =
-                read_and_migrate_config_file(&validated).map_err(CommandError::from)?;
+            let imported = read_and_migrate_config_file(&validated).map_err(CommandError::from)?;
             let final_config = match mode {
                 ImportMode::Replace => imported,
                 ImportMode::Merge => {
@@ -1008,7 +1138,8 @@ async fn import_full_config_apply(
                     merge_configs_by_id(base, imported)
                 }
             };
-            save_config_to_store(&config_dir_for_task, final_config, None).map_err(CommandError::from)
+            save_config_to_store(&config_dir_for_task, final_config, None)
+                .map_err(CommandError::from)
         },
     )
     .await
@@ -1019,6 +1150,56 @@ async fn import_full_config_apply(
     // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
     // the next save_config does not falsely report a concurrent change.
     record_config_stamp(&app);
+
+    let is_running = {
+        let store = runtime_store.lock().recover_poison();
+        store.is_running()
+    };
+
+    if is_running {
+        let restart_result = {
+            let mut controller = runtime_controller
+                .lock()
+                .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
+            let still_running = runtime_store.lock().recover_poison().is_running();
+            if still_running {
+                Some(controller.restart(
+                    app.clone(),
+                    runtime_store.inner().clone(),
+                    result.config.clone(),
+                    app.package_info().name.clone(),
+                ))
+            } else {
+                None
+            }
+        };
+
+        if let Some(restart_result) = restart_result {
+            match restart_result {
+                Ok(()) => {
+                    let summary = {
+                        let mut store = runtime_store.lock().recover_poison();
+                        store.reload(result.config.version, result.warnings.len())
+                    };
+                    app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
+                        CommandError::internal(format!(
+                            "Failed to emit config_reloaded event: {error}"
+                        ))
+                    })?;
+                }
+                Err(message) => {
+                    let stopped_summary = {
+                        let mut store = runtime_store.lock().recover_poison();
+                        store.stop()
+                    };
+                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
+                    return Err(CommandError::new("runtime_reload_failed", message, None));
+                }
+            }
+        }
+    }
+
+    rebuild_tray_menu_from_config(&app, &result.config);
 
     Ok(result)
 }
@@ -1054,7 +1235,9 @@ fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
         app_mappings: merge_by(base.app_mappings, incoming.app_mappings, |m| m.id.clone()),
         bindings: merge_by(base.bindings, incoming.bindings, |b| b.id.clone()),
         actions: merge_by(base.actions, incoming.actions, |a| a.id.clone()),
-        snippet_library: merge_by(base.snippet_library, incoming.snippet_library, |s| s.id.clone()),
+        snippet_library: merge_by(base.snippet_library, incoming.snippet_library, |s| {
+            s.id.clone()
+        }),
     }
 }
 
@@ -1063,19 +1246,15 @@ async fn open_config_folder(app: AppHandle) -> Result<(), CommandError> {
     let config_dir = resolve_config_dir(&app)?;
     let _ = fs::create_dir_all(&config_dir);
     #[cfg(target_os = "windows")]
-    crate::platform::shell::open_in_explorer(&config_dir)
-        .map_err(CommandError::internal)?;
+    crate::platform::shell::open_in_explorer(&config_dir).map_err(CommandError::internal)?;
     #[cfg(target_os = "linux")]
-    crate::platform::shell::open_in_explorer(&config_dir)
-        .map_err(CommandError::internal)?;
+    crate::platform::shell::open_in_explorer(&config_dir).map_err(CommandError::internal)?;
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
     {
         std::process::Command::new("xdg-open")
             .arg(config_dir.as_os_str())
             .spawn()
-            .map_err(|e| {
-                CommandError::internal(format!("Failed to open config folder: {e}"))
-            })?;
+            .map_err(|e| CommandError::internal(format!("Failed to open config folder: {e}")))?;
     }
     Ok(())
 }
@@ -1195,14 +1374,20 @@ const BUNDLED_SYNAPSE_FILENAME: &str = "Sidearm_profile.synapse4";
 /// the absolute path written — the onboarding wizard reuses it as the source
 /// for `parse_synapse_source` when seeding Sidearm's own bindings.
 #[tauri::command]
-async fn save_bundled_synapse_profile(app: AppHandle, reveal: bool) -> Result<String, CommandError> {
+async fn save_bundled_synapse_profile(
+    app: AppHandle,
+    reveal: bool,
+) -> Result<String, CommandError> {
     let dir = app
         .path()
         .download_dir()
         .map_err(|e| CommandError::internal(format!("download_dir: {e}")))?;
     let dest = dir.join(BUNDLED_SYNAPSE_FILENAME);
-    fs::write(&dest, BUNDLED_SYNAPSE_PROFILE)
-        .map_err(|e| CommandError::internal(format!("write bundled profile: {e}")))?;
+    config::persist_atomically(&dest, |file| {
+        use std::io::Write as _;
+        file.write_all(BUNDLED_SYNAPSE_PROFILE)
+    })
+    .map_err(|e| CommandError::internal(format!("write bundled profile: {e}")))?;
     if reveal {
         // Open the containing folder — passing the file itself would make
         // Explorer try to "open" the unknown .synapse4 type.
@@ -1215,8 +1400,7 @@ async fn save_bundled_synapse_profile(app: AppHandle, reveal: bool) -> Result<St
 /// or running? Windows-only signal; returns false on other platforms.
 #[tauri::command]
 async fn check_synapse_installed() -> Result<bool, CommandError> {
-    let running =
-        crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
+    let running = crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
     #[cfg(target_os = "windows")]
     let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
         .is_some()
@@ -1245,9 +1429,7 @@ async fn start_runtime(
     // Guard: if already running, return current state (prevents double spawn
     // from React.StrictMode double-invoking useEffect in dev mode).
     {
-        let store = runtime_store
-            .lock()
-            .recover_poison();
+        let store = runtime_store.lock().recover_poison();
         if store.is_running() {
             log::info!("[system] start_runtime called but already running, skipping");
             return Ok(store.summary());
@@ -1276,9 +1458,7 @@ async fn start_runtime(
     }
 
     let summary = {
-        let mut store = runtime_store
-            .lock()
-            .recover_poison();
+        let mut store = runtime_store.lock().recover_poison();
         store.start(load_response.config.version, load_response.warnings.len())
     };
 
@@ -1305,9 +1485,7 @@ async fn stop_runtime(
     }
 
     let summary = {
-        let mut store = runtime_store
-            .lock()
-            .recover_poison();
+        let mut store = runtime_store.lock().recover_poison();
         store.stop()
     };
 
@@ -1346,9 +1524,7 @@ async fn reload_runtime(
     };
     if let Err(message) = restart_result {
         let stopped_summary = {
-            let mut store = runtime_store
-                .lock()
-                .recover_poison();
+            let mut store = runtime_store.lock().recover_poison();
             store.stop()
         };
         let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
@@ -1356,9 +1532,7 @@ async fn reload_runtime(
     }
 
     let summary = {
-        let mut store = runtime_store
-            .lock()
-            .recover_poison();
+        let mut store = runtime_store.lock().recover_poison();
         store.reload(load_response.config.version, load_response.warnings.len())
     };
 
@@ -1388,9 +1562,7 @@ async fn rehook_capture(
 async fn get_debug_log(
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
 ) -> Result<Vec<DebugLogEntry>, CommandError> {
-    let store = runtime_store
-        .lock()
-        .recover_poison();
+    let store = runtime_store.lock().recover_poison();
 
     Ok(store.logs())
 }
@@ -1410,7 +1582,8 @@ async fn is_running_as_admin() -> Result<bool, CommandError> {
 }
 
 #[tauri::command]
-async fn get_admin_autostart_status() -> Result<admin_autostart::AdminAutostartStatus, CommandError> {
+async fn get_admin_autostart_status() -> Result<admin_autostart::AdminAutostartStatus, CommandError>
+{
     Ok(admin_autostart::query())
 }
 
@@ -1419,7 +1592,9 @@ async fn get_admin_autostart_status() -> Result<admin_autostart::AdminAutostartS
 /// with RunLevel=Highest).  After enabling, the frontend should disable the
 /// regular tauri-plugin-autostart entry to avoid two launchers competing.
 #[tauri::command]
-async fn set_admin_autostart(enabled: bool) -> Result<admin_autostart::AdminAutostartStatus, CommandError> {
+async fn set_admin_autostart(
+    enabled: bool,
+) -> Result<admin_autostart::AdminAutostartStatus, CommandError> {
     let result = if enabled {
         admin_autostart::enable()
     } else {
@@ -1510,11 +1685,9 @@ async fn open_log_directory(app: AppHandle) -> Result<(), CommandError> {
     let log_dir = resolve_log_dir(&app);
     if log_dir.exists() {
         #[cfg(target_os = "windows")]
-        crate::platform::shell::open_in_explorer(&log_dir)
-            .map_err(CommandError::internal)?;
+        crate::platform::shell::open_in_explorer(&log_dir).map_err(CommandError::internal)?;
         #[cfg(target_os = "linux")]
-        crate::platform::shell::open_in_explorer(&log_dir)
-            .map_err(CommandError::internal)?;
+        crate::platform::shell::open_in_explorer(&log_dir).map_err(CommandError::internal)?;
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
         {
             std::process::Command::new("xdg-open")
@@ -1538,9 +1711,7 @@ async fn capture_active_window(
     // Alt+Tabs to the target window, the foreground watcher doesn't change
     // the active profile before the capture completes.
     {
-        let mut store = runtime_store
-            .lock()
-            .recover_poison();
+        let mut store = runtime_store.lock().recover_poison();
         store.set_capture_in_progress(true);
         log::info!("[system] capture_in_progress = true (v2 auto-switching suppressed)");
     }
@@ -1568,9 +1739,7 @@ async fn capture_active_window(
         })??;
 
         {
-            let mut store = runtime_store
-                .lock()
-                .recover_poison();
+            let mut store = runtime_store.lock().recover_poison();
             if result.ignored {
                 store.record_warn(
                     "захват окна",
@@ -1598,9 +1767,7 @@ async fn capture_active_window(
         // Send OSD notification if active profile changed
         if !result.ignored {
             let should_notify = {
-                let mut store = runtime_store
-                    .lock()
-                    .recover_poison();
+                let mut store = runtime_store.lock().recover_poison();
                 store.notify_profile_change(result.resolved_profile_id.as_deref())
             };
             if should_notify {
@@ -1651,14 +1818,22 @@ async fn list_running_processes() -> Result<Vec<RunningProcessInfo>, CommandErro
         {
             crate::platform::shell::list_running_processes()
                 .into_iter()
-                .map(|p| RunningProcessInfo { exe: p.exe, path: p.path, pid: p.pid })
+                .map(|p| RunningProcessInfo {
+                    exe: p.exe,
+                    path: p.path,
+                    pid: p.pid,
+                })
                 .collect()
         }
         #[cfg(target_os = "linux")]
         {
             return crate::platform::shell::list_running_processes()
                 .into_iter()
-                .map(|p| RunningProcessInfo { exe: p.exe, path: p.path, pid: p.pid })
+                .map(|p| RunningProcessInfo {
+                    exe: p.exe,
+                    path: p.path,
+                    pid: p.pid,
+                })
                 .collect();
         }
         #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -1709,7 +1884,14 @@ async fn list_bundled_presets(app: AppHandle) -> Result<Vec<PresetInfo>, Command
     })?;
 
     let mut out: Vec<PresetInfo> = Vec::new();
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                log::warn!("[presets] Skipping unreadable directory entry: {error}");
+                continue;
+            }
+        };
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
@@ -1720,11 +1902,23 @@ async fn list_bundled_presets(app: AppHandle) -> Result<Vec<PresetInfo>, Command
         };
         let bytes = match std::fs::read(&path) {
             Ok(b) => b,
-            Err(_) => continue,
+            Err(error) => {
+                log::warn!(
+                    "[presets] Skipping unreadable preset {}: {error}",
+                    path.display()
+                );
+                continue;
+            }
         };
         let meta: PresetFileMeta = match serde_json::from_slice(&bytes) {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(error) => {
+                log::warn!(
+                    "[presets] Skipping invalid preset {}: {error}",
+                    path.display()
+                );
+                continue;
+            }
         };
         out.push(PresetInfo {
             id,
@@ -1800,9 +1994,7 @@ async fn preview_resolution(
     .map_err(CommandError::from)?;
 
     {
-        let mut store = runtime_store
-            .lock()
-            .recover_poison();
+        let mut store = runtime_store.lock().recover_poison();
         match preview.status {
             resolver::ResolutionStatus::Resolved => store.record_info(
                 "разрешение",
@@ -1815,10 +2007,7 @@ async fn preview_resolution(
             ),
             resolver::ResolutionStatus::Unresolved => store.record_warn(
                 "разрешение",
-                format!(
-                    "Не разрешено `{}`: {}",
-                    preview.encoded_key, preview.reason
-                ),
+                format!("Не разрешено `{}`: {}", preview.encoded_key, preview.reason),
             ),
             resolver::ResolutionStatus::Ambiguous => store.record_warn(
                 "разрешение",
@@ -1878,8 +2067,13 @@ async fn resolve_and_execute_action(
     let title = title.unwrap_or_default();
     let result = tauri::async_runtime::spawn_blocking(move || {
         let load_response = load_or_initialize_config(&config_dir)?;
-        let preview =
-            resolver::resolve_input_preview(&load_response.config, &normalized_key, &exe, &title, None);
+        let preview = resolver::resolve_input_preview(
+            &load_response.config,
+            &normalized_key,
+            &exe,
+            &title,
+            None,
+        );
         let execution = executor_fn(&load_response.config, &preview);
         Ok::<_, ConfigStoreError>((preview, execution))
     })
@@ -1897,9 +2091,7 @@ async fn resolve_and_execute_action(
     match execution {
         Ok(event) => {
             {
-                let mut store = runtime_store
-                    .lock()
-                    .recover_poison();
+                let mut store = runtime_store.lock().recover_poison();
                 match mode {
                     ActionRunMode::DryRun => {
                         let message = format!(
@@ -2005,11 +2197,14 @@ async fn live_test_action(
     action: config::Action,
 ) -> Result<ActionExecutionEvent, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
-    let config = tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
-        .await
-        .map_err(|error| CommandError::internal(format!("live_test_action task failed: {error}")))?
-        .map_err(CommandError::from)?
-        .config;
+    let config =
+        tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
+            .await
+            .map_err(|error| {
+                CommandError::internal(format!("live_test_action task failed: {error}"))
+            })?
+            .map_err(CommandError::from)?
+            .config;
 
     executor::live_test_action(&config, &action).map_err(|error| {
         CommandError::new(
@@ -2026,9 +2221,7 @@ fn emit_runtime_error(
     event: &RuntimeErrorEvent,
 ) -> Result<(), CommandError> {
     {
-        let mut store = runtime_store
-            .lock()
-            .recover_poison();
+        let mut store = runtime_store.lock().recover_poison();
         store.record_warn(
             event.category.clone(),
             format!("{}{}", event.message, runtime_error_context(event)),
@@ -2040,6 +2233,26 @@ fn emit_runtime_error(
     })?;
 
     Ok(())
+}
+
+fn record_startup_runtime_error(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    category: impl Into<String>,
+    message: impl Into<String>,
+) {
+    let event = RuntimeErrorEvent {
+        category: category.into(),
+        message: message.into(),
+        encoded_key: None,
+        action_id: None,
+        created_at: runtime::timestamp_millis(),
+    };
+    {
+        let mut store = runtime_store.lock().recover_poison();
+        store.record_warn(event.category.clone(), event.message.clone());
+    }
+    let _ = app.emit(EVENT_RUNTIME_ERROR, &event);
 }
 
 fn runtime_error_context(event: &RuntimeErrorEvent) -> String {
@@ -2102,9 +2315,10 @@ async fn get_exe_icon(
         // 1. Try the known process path first (most reliable — captured from OS)
         if let Some(ref path) = process_path
             && std::path::Path::new(path).exists()
-                && let Some(b64) = exe_icon::extract_icon_base64(path) {
-                    return Ok(Some(b64));
-                }
+            && let Some(b64) = exe_icon::extract_icon_base64(path)
+        {
+            return Ok(Some(b64));
+        }
         // 2. Fall back to API-based search (App Paths registry + SearchPathW)
         let candidates = exe_icon_search_paths(&exe_name);
         for path in &candidates {
@@ -2114,9 +2328,10 @@ async fn get_exe_icon(
         }
         // 3. Try to find path from a running process with this exe name
         if let Some(path) = find_running_process_path(&exe_name)
-            && let Some(b64) = exe_icon::extract_icon_base64(&path) {
-                return Ok(Some(b64));
-            }
+            && let Some(b64) = exe_icon::extract_icon_base64(&path)
+        {
+            return Ok(Some(b64));
+        }
         Ok(None)
     })
     .await
@@ -2140,9 +2355,10 @@ fn exe_icon_search_paths(exe_name: &str) -> Vec<String> {
         paths.push(path);
     }
     if let Some(path) = crate::platform::shell::search_path_win32(exe_name)
-        && !paths.contains(&path) {
-            paths.push(path);
-        }
+        && !paths.contains(&path)
+    {
+        paths.push(path);
+    }
     paths
 }
 
@@ -2152,7 +2368,10 @@ fn find_running_process_path(exe_name: &str) -> Option<String> {
     #[cfg(target_os = "linux")]
     return crate::platform::shell::find_running_process_path(exe_name);
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-    { let _ = exe_name; return None; }
+    {
+        let _ = exe_name;
+        return None;
+    }
 }
 
 /// Migrate config from the old "com.nagaworkflowstudio.desktop" directory
@@ -2167,7 +2386,9 @@ fn migrate_old_config(app: &AppHandle) {
         return;
     }
     let new_config_dir = app_paths.config_dir.clone();
-    let Some(roaming) = dirs_fallback_roaming() else { return };
+    let Some(roaming) = dirs_fallback_roaming() else {
+        return;
+    };
 
     let old_dir = roaming.join("com.nagaworkflowstudio.desktop");
     let old_config = old_dir.join("config.json");
@@ -2184,18 +2405,48 @@ fn migrate_old_config(app: &AppHandle) {
         return;
     }
 
-    let _ = fs::create_dir_all(&new_config_dir);
+    if let Err(error) = fs::create_dir_all(&new_config_dir) {
+        log::warn!(
+            "[system] Could not create config migration destination {}: {error}",
+            new_config_dir.display()
+        );
+        return;
+    }
     // Copy all json files (config + backups + window-state)
-    if let Ok(entries) = fs::read_dir(&old_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                let dest = new_config_dir.join(entry.file_name());
-                let _ = atomic_copy_file(&path, &dest);
+    match fs::read_dir(&old_dir) {
+        Ok(entries) => {
+            for entry_result in entries {
+                let entry = match entry_result {
+                    Ok(entry) => entry,
+                    Err(error) => {
+                        log::warn!("[system] Skipping unreadable config migration entry: {error}");
+                        continue;
+                    }
+                };
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "json") {
+                    let dest = new_config_dir.join(entry.file_name());
+                    if let Err(error) = atomic_copy_file(&path, &dest) {
+                        log::warn!(
+                            "[system] Could not migrate config file {} to {}: {error}",
+                            path.display(),
+                            dest.display()
+                        );
+                    }
+                }
             }
         }
+        Err(error) => {
+            log::warn!(
+                "[system] Could not read old config directory {}: {error}",
+                old_dir.display()
+            );
+        }
     }
-    log::info!("[system] Migrated config from old directory: {}", old_dir.display());
+    log::info!(
+        "[system] Migrated config from old directory: {}",
+        old_dir.display()
+    );
 }
 
 /// Get %APPDATA% without depending on the Tauri path resolver (which uses the new identifier).
@@ -2224,7 +2475,10 @@ fn cleanup_pre_rebrand_orphans() -> u64 {
         "com.nagaworkflowstudio.desktop",
     ];
     let mut total_bytes = 0u64;
-    for base in [dirs_fallback_local(), dirs_fallback_roaming()].into_iter().flatten() {
+    for base in [dirs_fallback_local(), dirs_fallback_roaming()]
+        .into_iter()
+        .flatten()
+    {
         for id in LEGACY_IDENTIFIERS {
             let path = base.join(id);
             if path.is_dir() {
@@ -2324,8 +2578,11 @@ pub fn run() {
     // Runs before the plugin opens any file so the deletes can't race with the writer.
     const LOG_RETENTION_DAYS: u64 = 7;
     const LOG_RETENTION_MAX_FILES: usize = 50;
-    let (deleted, kept) =
-        log_cleanup::sweep(&log_target_path, LOG_RETENTION_DAYS, LOG_RETENTION_MAX_FILES);
+    let (deleted, kept) = log_cleanup::sweep(
+        &log_target_path,
+        LOG_RETENTION_DAYS,
+        LOG_RETENTION_MAX_FILES,
+    );
 
     // Orphan sweep: when running in portable mode, also sweep any logs left
     // behind by previous roaming-mode runs in %LOCALAPPDATA%\com.sidearm.desktop\logs.
@@ -2334,14 +2591,16 @@ pub fn run() {
     let mut orphan_deleted = 0;
     if app_paths.mode == paths::PathMode::Portable
         && let Some(roaming_log_dir) = legacy_local_app_data_log_dir()
-            && roaming_log_dir.is_dir() && roaming_log_dir != log_target_path {
-                let (d, _) = log_cleanup::sweep(
-                    &roaming_log_dir,
-                    LOG_RETENTION_DAYS,
-                    LOG_RETENTION_MAX_FILES,
-                );
-                orphan_deleted = d;
-            }
+        && roaming_log_dir.is_dir()
+        && roaming_log_dir != log_target_path
+    {
+        let (d, _) = log_cleanup::sweep(
+            &roaming_log_dir,
+            LOG_RETENTION_DAYS,
+            LOG_RETENTION_MAX_FILES,
+        );
+        orphan_deleted = d;
+    }
 
     // True portable: redirect WebView2 user-data folder into ./data/EBWebView
     // instead of the default %LOCALAPPDATA%\com.sidearm.desktop\EBWebView.
@@ -2381,6 +2640,7 @@ pub fn run() {
         Arc::new(Mutex::new(store))
     };
     let log_rx_for_setup = Mutex::new(Some((log_rx, log_send_pending_for_bridge)));
+    let runtime_store_for_setup = runtime_store.clone();
 
     tauri::Builder::default()
         // Single-instance guard MUST be the first plugin registered. A second
@@ -2437,7 +2697,6 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(move |app| {
             // One-time migration from old "com.nagaworkflowstudio.desktop" config dir.
@@ -2467,9 +2726,7 @@ pub fn run() {
             // log::error!()'s — captured by tauri-plugin-log → written to
             // disk → push_log fires another channel entry → snowball. This
             // exact loop caused v0.1.14's 230 GB disk meltdown (53 MB/s).
-            if let Some((rx, pending)) =
-                log_rx_for_setup.lock().recover_poison().take()
-            {
+            if let Some((rx, pending)) = log_rx_for_setup.lock().recover_poison().take() {
                 let app_handle = app.handle().clone();
                 std::thread::Builder::new()
                     .name("debug-log-bridge".into())
@@ -2523,17 +2780,24 @@ pub fn run() {
                 const MIN_W: u32 = 480;
                 const MIN_H: u32 = 600;
                 if let Ok(size) = main_window.inner_size()
-                    && (size.width < MIN_W || size.height < MIN_H) {
-                        let new_w = size.width.max(MIN_W);
-                        let new_h = size.height.max(MIN_H);
-                        log::warn!(
-                            "[window] restored main size {}x{} below minimum {}x{} — clamping to {}x{}",
-                            size.width, size.height, MIN_W, MIN_H, new_w, new_h,
-                        );
-                        let _ = main_window.set_size(tauri::Size::Physical(
-                            tauri::PhysicalSize { width: new_w, height: new_h },
-                        ));
-                    }
+                    && (size.width < MIN_W || size.height < MIN_H)
+                {
+                    let new_w = size.width.max(MIN_W);
+                    let new_h = size.height.max(MIN_H);
+                    log::warn!(
+                        "[window] restored main size {}x{} below minimum {}x{} — clamping to {}x{}",
+                        size.width,
+                        size.height,
+                        MIN_W,
+                        MIN_H,
+                        new_w,
+                        new_h,
+                    );
+                    let _ = main_window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
+                        width: new_w,
+                        height: new_h,
+                    }));
+                }
             }
 
             // OSD window is created lazily on first profile switch (see show_osd).
@@ -2541,10 +2805,7 @@ pub fn run() {
             // startup flash when WebView2 wasn't ready yet.
 
             check_crash_sentinel(app.handle());
-            log::info!(
-                "[system] Sidearm v{} started",
-                app.package_info().version
-            );
+            log::info!("[system] Sidearm v{} started", app.package_info().version);
 
             let is_elevated = window_capture::is_current_process_elevated();
             // Initial menu has no profile rows yet — rebuild_tray_menu (called
@@ -2597,11 +2858,10 @@ pub fn run() {
                                 }
                             } else {
                                 let config_dir = resolve_app_paths(&app).config_dir.clone();
-                                let load_result =
-                                    tauri::async_runtime::spawn_blocking(move || {
-                                        load_or_initialize_config(&config_dir)
-                                    })
-                                    .await;
+                                let load_result = tauri::async_runtime::spawn_blocking(move || {
+                                    load_or_initialize_config(&config_dir)
+                                })
+                                .await;
 
                                 let load_response = match load_result {
                                     Ok(Ok(response)) => response,
@@ -2645,9 +2905,7 @@ pub fn run() {
                         tauri::async_runtime::spawn(async move {
                             // The override is already honored everywhere the resolver
                             // runs (dispatch, foreground watcher, OSD) — see runtime.rs.
-                            if let Ok(mut store) =
-                                app.state::<Arc<Mutex<RuntimeStore>>>().lock()
-                            {
+                            if let Ok(mut store) = app.state::<Arc<Mutex<RuntimeStore>>>().lock() {
                                 store.set_manual_profile_override(Some(profile_id.clone()));
                             }
                             let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
@@ -2717,7 +2975,12 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    let TrayIconEvent::Click { button, button_state, .. } = event else {
+                    let TrayIconEvent::Click {
+                        button,
+                        button_state,
+                        ..
+                    } = event
+                    else {
                         return;
                     };
 
@@ -2778,19 +3041,32 @@ pub fn run() {
             // Optional global shortcut; never panic in setup if parsing ever
             // regresses. This is the tail of setup, so skipping registration on
             // a parse error is safe.
-            let shortcut: Shortcut = match "ctrl+alt+n".parse() {
+            let shortcut_text = configured_global_shortcut(app.handle());
+            let shortcut_label = shortcut_text.trim();
+            let shortcut: Shortcut = match shortcut_label.parse() {
                 Ok(s) => s,
                 Err(e) => {
-                    log::warn!("[system] Could not parse Ctrl+Alt+N shortcut: {e}");
+                    let message =
+                        format!("Не удалось разобрать глобальную клавишу `{shortcut_label}`: {e}");
+                    log::warn!("[system] {message}");
+                    record_startup_runtime_error(
+                        app.handle(),
+                        &runtime_store_for_setup,
+                        "globalShortcut",
+                        message,
+                    );
                     return Ok(());
                 }
             };
 
             // Non-fatal: if the shortcut is already registered (e.g. previous
             // instance didn't clean up yet), log a warning and continue.
-            if let Err(e) = app.global_shortcut().on_shortcut(shortcut, |app, _shortcut, event| {
-                if event.state == ShortcutState::Pressed
-                    && let Some(window) = app.get_webview_window("main") {
+            if let Err(e) = app
+                .global_shortcut()
+                .on_shortcut(shortcut, |app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed
+                        && let Some(window) = app.get_webview_window("main")
+                    {
                         if window.is_visible().unwrap_or(false) {
                             let _ = window.hide();
                         } else {
@@ -2798,8 +3074,18 @@ pub fn run() {
                             let _ = window.set_focus();
                         }
                     }
-            }) {
-                log::warn!("[system] Could not register Ctrl+Alt+N shortcut: {e}");
+                })
+            {
+                let message = format!(
+                    "Не удалось зарегистрировать глобальную клавишу `{shortcut_label}`: {e}"
+                );
+                log::warn!("[system] {message}");
+                record_startup_runtime_error(
+                    app.handle(),
+                    &runtime_store_for_setup,
+                    "globalShortcut",
+                    message,
+                );
             }
 
             Ok(())
@@ -2923,7 +3209,8 @@ mod tests {
             .expect("set len");
         drop(file);
 
-        let err = ensure_full_config_import_size(&big).expect_err("oversized file must be rejected");
+        let err =
+            ensure_full_config_import_size(&big).expect_err("oversized file must be rejected");
         assert_eq!(err.code, "import_too_large");
 
         // A file at the limit is accepted.

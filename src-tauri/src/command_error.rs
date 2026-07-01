@@ -73,9 +73,8 @@ impl From<ConfigStoreError> for CommandError {
             },
             ConfigStoreError::ConcurrentModification => Self {
                 code: "config_changed_on_disk".into(),
-                message:
-                    "Settings were changed by another Sidearm instance; reloading from disk."
-                        .into(),
+                message: "Settings were changed by another Sidearm instance; reloading from disk."
+                    .into(),
                 details: None,
             },
         }

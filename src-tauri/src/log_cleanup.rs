@@ -99,7 +99,11 @@ mod tests {
     #[test]
     fn removes_files_older_than_cutoff() {
         let temp = tempfile::tempdir().expect("tempdir");
-        let old = touch(temp.path(), "Sidearm_old.log", Duration::from_secs(8 * 86400));
+        let old = touch(
+            temp.path(),
+            "Sidearm_old.log",
+            Duration::from_secs(8 * 86400),
+        );
         let fresh = touch(temp.path(), "Sidearm_new.log", Duration::from_secs(60));
 
         let (deleted, kept) = sweep(temp.path(), 7, 100);
@@ -131,8 +135,15 @@ mod tests {
     fn ignores_non_log_files() {
         let temp = tempfile::tempdir().expect("tempdir");
         let other = temp.path().join("config.json");
-        File::create(&other).expect("create").write_all(b"{}").unwrap();
-        touch(temp.path(), "Sidearm_old.log", Duration::from_secs(30 * 86400));
+        File::create(&other)
+            .expect("create")
+            .write_all(b"{}")
+            .unwrap();
+        touch(
+            temp.path(),
+            "Sidearm_old.log",
+            Duration::from_secs(30 * 86400),
+        );
 
         let (deleted, _) = sweep(temp.path(), 7, 100);
         assert_eq!(deleted, 1);

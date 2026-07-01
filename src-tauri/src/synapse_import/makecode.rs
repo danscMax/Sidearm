@@ -6,8 +6,8 @@
 //! base-table byte with a different key — the caller uses `is_extended`
 //! to disambiguate.
 
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 /// Key that a scancode resolves to when the extended-flag is off.
 static BASE_TABLE: LazyLock<HashMap<u16, &'static str>> = LazyLock::new(|| {
@@ -145,18 +145,16 @@ static EXTENDED_TABLE: LazyLock<HashMap<u16, &'static str>> = LazyLock::new(|| {
 /// v3 macros that encode Windows-key etc. as base scancodes without the
 /// extended marker, since the base set has no meaning for those codes.
 pub fn makecode_to_key(makecode: u16, is_extended: bool) -> Option<&'static str> {
-    if is_extended
-        && let Some(k) = EXTENDED_TABLE.get(&makecode) {
-            return Some(*k);
-        }
+    if is_extended && let Some(k) = EXTENDED_TABLE.get(&makecode) {
+        return Some(*k);
+    }
     if let Some(k) = BASE_TABLE.get(&makecode) {
         return Some(*k);
     }
     // Fallback: extended-only keys that showed up as base scancodes.
-    if !is_extended
-        && let Some(k) = EXTENDED_TABLE.get(&makecode) {
-            return Some(*k);
-        }
+    if !is_extended && let Some(k) = EXTENDED_TABLE.get(&makecode) {
+        return Some(*k);
+    }
     None
 }
 
@@ -315,7 +313,11 @@ mod edge_proptests {
             if BASE_TABLE.contains_key(&code) || EXTENDED_TABLE.contains_key(&code) {
                 continue;
             }
-            assert!(makecode_to_key(code, false).is_none(), "code 0x{:02X} should be None", code);
+            assert!(
+                makecode_to_key(code, false).is_none(),
+                "code 0x{:02X} should be None",
+                code
+            );
         }
     }
 

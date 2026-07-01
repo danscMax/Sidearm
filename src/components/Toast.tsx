@@ -16,7 +16,7 @@ export interface ToastProps {
 }
 
 function toastDuration(kind: ToastKind | undefined, hasAction: boolean): number {
-  if (hasAction) return 6000;
+  if (hasAction) return 0;
   if (kind === "warning") return 5500;
   return 3500;
 }
@@ -26,9 +26,10 @@ export function Toast({ toast, onDismiss }: ToastProps) {
 
   useEffect(() => {
     if (!toast) return;
+    if (toast.action) return;
     const timer = setTimeout(onDismiss, durationMs);
     return () => clearTimeout(timer);
-  }, [toast?.id, onDismiss, durationMs]);
+  }, [toast, onDismiss, durationMs]);
 
   if (!toast) return null;
 

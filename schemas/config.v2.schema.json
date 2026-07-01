@@ -200,6 +200,12 @@
           "type": "boolean",
           "default": true
         },
+        "globalShortcut": {
+          "type": "string",
+          "maxLength": 80,
+          "default": "ctrl+alt+n",
+          "description": "Optional OS-global show/hide shortcut override. Empty or absent keeps the built-in Ctrl+Alt+N fallback."
+        },
         "repairClipboardOnCopy": {
           "type": "boolean",
           "default": false,

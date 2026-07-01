@@ -38,7 +38,10 @@
     "edit": "Edit",
     "optional": "optional",
     "secondsShort": "s",
-    "notLoadedYet": "Not loaded yet"
+    "notLoadedYet": "Not loaded yet",
+    "processing": "Working…",
+    "browseFailed": "Could not open the system file picker.",
+    "clearSearch": "Clear search"
   },
   "app": {
     "name": "Sidearm",
@@ -463,7 +466,10 @@
     "searchPlaceholder": "Filter by name or path…",
     "loading": "Reading process list…",
     "empty": "No matches.",
-    "truncated": "Showing {{shown}} of {{total}}. Narrow your search."
+    "truncated": "Showing {{shown}} of {{total}}. Narrow your search.",
+    "refresh": "Refresh",
+    "pid": "PID {{pid}}",
+    "pathUnavailable": "Path unavailable — matching can use the process name only"
   },
   "presets": {
     "title": "Presets",
@@ -490,6 +496,9 @@
     "deviceNameHeader": "DEVICE NAME",
     "deviceNameHelp": "Label shown under the brand in the sidebar. Leave empty to show \"Mouse not recognized\".",
     "deviceNamePlaceholder": "e.g. Razer Naga V2 HyperSpeed",
+    "globalShortcutHeader": "GLOBAL SHORTCUT",
+    "globalShortcutHelp": "Shortcut that shows or hides the Sidearm window from any app. Leave empty for Ctrl+Alt+N. Changes apply after restart.",
+    "globalShortcutPlaceholder": "ctrl+alt+n",
     "allProfilesHeader": "ALL PROFILES",
     "priorityMeta": "Priority: {{priority}}",
     "disabledMeta": "Disabled",
@@ -515,11 +524,13 @@
     "replaceConfigTitle": "Replace configuration?",
     "replaceConfigMessage": "The current configuration will be completely replaced with data from the file. This action cannot be undone. Continue?",
     "replaceConfigConfirm": "Replace",
+    "mergeConfigConfirm": "Merge",
     "readConfigError": "Could not read configuration file.",
     "importConfig": "Import configuration",
     "openConfigFolder": "Open config folder",
-    "importHasWarnings": "⚠ Warnings: {{count}}",
-    "importSummary": "File contains: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{appMappings}} rules, {{snippets}} snippets. {{warnings}} The current config will be fully replaced. Continue?",
+    "importHasWarnings": "Warnings: {{count}}",
+    "importSummary": "File contains: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{appMappings}} rules, {{snippets}} snippets.",
+    "importModeHint": "Merge adds the file contents to the current config. Replace fully overwrites the current config.",
     "languageHeader": "INTERFACE LANGUAGE",
     "osdHeader": "NOTIFICATIONS",
     "repairClipboardHeader": "Auto-repair clipboard",
@@ -763,8 +774,22 @@
     "mouseModifiersHint": "Modifiers are held during the action. For example, Ctrl + Scroll up = zoom.",
     "textLabel": "Text",
     "textPlaceholder": "Enter text to type...",
+    "longTextClipboardWarning": "Text longer than 100 characters is pasted through the clipboard temporarily so line breaks stay intact.",
+    "launchTargetMode": "Launch target type",
+    "launchMode": {
+      "program": "Program",
+      "folder": "Folder",
+      "url": "Link"
+    },
     "programLabel": "Program",
     "launchTargetHint": "You can also enter a URL (https://…) or a folder path.",
+    "launchProgramHint": "Starts the selected program or shortcut. Arguments and working directory apply only in this mode.",
+    "launchFolderLabel": "Folder",
+    "launchFolderPlaceholder": "C:\\Projects",
+    "launchFolderHint": "Opens the folder with the system file manager.",
+    "launchUrlLabel": "Link",
+    "launchUrlPlaceholder": "https://example.com",
+    "launchUrlHint": "Opens the link with the default app.",
     "launchArgsLabel": "Arguments",
     "launchArgsPlaceholder": "--flag value",
     "launchWorkingDirLabel": "Working directory",
@@ -820,6 +845,7 @@
     "recordingHint": "Press keys. Each keystroke will be recorded as a sequence step.",
     "recordingCount": "({{count}} / {{max}})",
     "recordLimitReached": "Recording limit of {{max}} steps reached — stopped automatically. Remove unwanted steps or save as-is.",
+    "sequenceLaunchRollbackWarning": "If a launch step opens a program and a later step fails, Sidearm cannot automatically close the program it already launched.",
     "stepTitle": "Step {{index}}",
     "stepType": "Type",
     "stepSend": "Send shortcut",
@@ -894,7 +920,8 @@
     "deleteConfirmTitle": "Delete snippet?",
     "deleteConfirmMessage": "Delete “{{name}}” from the library?",
     "deleteConfirmReferenced_one": "“{{name}}” is used by {{count}} action ({{actions}}). Their text will be inlined (unlinked from the library). Delete?",
-    "deleteConfirmReferenced_other": "“{{name}}” is used by {{count}} actions ({{actions}}). Their text will be inlined (unlinked from the library). Delete?"
+    "deleteConfirmReferenced_other": "“{{name}}” is used by {{count}} actions ({{actions}}). Their text will be inlined (unlinked from the library). Delete?",
+    "referencesSummary": "{{actions}} and {{count}} more"
   },
   "toast": {
     "undone": "Change undone",
@@ -920,6 +947,7 @@
     "profileMeta": "{{bindings}} bindings, {{macros}} macros",
     "warningsHeader": "Warnings ({{count}})",
     "warningsMore": "…and {{count}} more",
+    "unmappable": "Not importable",
     "submit": "Import {{profiles}} profile(s) ({{bindings}} bindings)",
     "submitting": "Importing…",
     "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros",
@@ -936,6 +964,7 @@
       "portable": "Portable",
       "roaming": "Roaming",
       "fallback": "Portable (read-only)",
+      "error": "Paths unavailable",
       "tooltipPrefix": "Config is stored at:"
     }
   },
@@ -972,6 +1001,8 @@
   },
   "errors": {
     "technicalInfo": "Technical info",
+    "copySucceeded": "Details copied.",
+    "copyFailed": "Could not copy details. Select the technical info manually.",
     "actions": {
       "copyDetails": "Copy details",
       "retry": "Try again",
@@ -1006,6 +1037,10 @@
     "invalidBackupPath": {
       "title": "Invalid backup path",
       "hint": "The path must point to a file inside the config directory."
+    },
+    "backupUnavailable": {
+      "title": "No backup available",
+      "hint": "Sidearm has not found any backup to restore yet. Backups appear after the first successful config save."
     },
     "invalidPath": {
       "title": "Invalid file path",

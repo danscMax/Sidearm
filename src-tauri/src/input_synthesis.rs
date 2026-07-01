@@ -64,7 +64,10 @@ pub fn send_shortcut(
         if payload.alt { "Alt+" } else { "" },
         if payload.win { "Win+" } else { "" },
         payload.key,
-        encoding_mods.ctrl, encoding_mods.shift, encoding_mods.alt, encoding_mods.win,
+        encoding_mods.ctrl,
+        encoding_mods.shift,
+        encoding_mods.alt,
+        encoding_mods.win,
     );
 
     // Opt-in clipboard-copy diagnostic (SIDEARM_CLIPBOARD_DIAG=1): record the
@@ -73,7 +76,11 @@ pub fn send_shortcut(
     #[cfg(target_os = "windows")]
     let clipboard_diag = clipboard_diag_enabled() && is_clipboard_shortcut(payload);
     #[cfg(target_os = "windows")]
-    let clipboard_seq_before = if clipboard_diag { clipboard_sequence_number() } else { 0 };
+    let clipboard_seq_before = if clipboard_diag {
+        clipboard_sequence_number()
+    } else {
+        0
+    };
 
     clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
@@ -88,7 +95,10 @@ pub fn send_shortcut(
     log::info!(
         "[send-shortcut] plan: {} inputs, reused-modifiers={:?}",
         plan.len(),
-        reused_modifiers.iter().map(|m| m.label()).collect::<Vec<_>>(),
+        reused_modifiers
+            .iter()
+            .map(|m| m.label())
+            .collect::<Vec<_>>(),
     );
 
     if let Err(send_error) = send_keyboard_inputs(&plan) {
@@ -170,9 +180,10 @@ fn build_shortcut_cleanup_inputs(
     let mut cleanup = Vec::new();
     if !payload.key.trim().is_empty()
         && let Ok(pk) = parse_primary_key(&payload.key)
-            && !is_modifier_vk(pk.code) {
-                push_virtual_key_up(&mut cleanup, pk);
-            }
+        && !is_modifier_vk(pk.code)
+    {
+        push_virtual_key_up(&mut cleanup, pk);
+    }
     cleanup.extend(build_modifier_release_inputs(&extract_pressed_modifiers(
         payload, snapshot,
     )));
@@ -252,7 +263,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
                 EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
                 RegisterClipboardFormatW, SetClipboardData,
             },
-            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
             Ole::CF_UNICODETEXT,
         },
     };
@@ -416,7 +427,17 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
     std::thread::sleep(std::time::Duration::from_millis(150));
 
     if let Some(original) = saved {
-        let _ = clipboard.set_text(&original);
+        match clipboard.get_text() {
+            Ok(current) if current == text => {
+                let _ = clipboard.set_text(&original);
+            }
+            Ok(_) => {
+                log::debug!("[input] Clipboard changed externally, skipping restore");
+            }
+            Err(_) => {
+                let _ = clipboard.set_text(&original);
+            }
+        }
     }
 
     Ok(())
@@ -604,7 +625,7 @@ fn clipboard_set_text(text: &str) -> Result<(), String> {
         Foundation::GlobalFree,
         System::{
             DataExchange::{EmptyClipboard, SetClipboardData},
-            Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE},
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
             Ole::CF_UNICODETEXT,
         },
     };
@@ -621,7 +642,11 @@ fn clipboard_set_text(text: &str) -> Result<(), String> {
                 let _ = GlobalFree(handle);
                 Err("GlobalLock failed".to_string())
             } else {
-                ptr::copy_nonoverlapping(encoded.as_ptr() as *const u8, locked as *mut u8, byte_len);
+                ptr::copy_nonoverlapping(
+                    encoded.as_ptr() as *const u8,
+                    locked as *mut u8,
+                    byte_len,
+                );
                 let _ = GlobalUnlock(handle);
                 if SetClipboardData(u32::from(CF_UNICODETEXT), handle).is_null() {
                     let _ = GlobalFree(handle);
@@ -692,9 +717,7 @@ fn standard_clipboard_format_name(id: u32) -> String {
 /// conservatively rather than risk clobbering unknown content.
 #[cfg(target_os = "windows")]
 fn clipboard_nontext_format_labels() -> Option<Vec<String>> {
-    use windows_sys::Win32::System::DataExchange::{
-        EnumClipboardFormats, GetClipboardFormatNameW,
-    };
+    use windows_sys::Win32::System::DataExchange::{EnumClipboardFormats, GetClipboardFormatNameW};
 
     with_clipboard_open(|| {
         let mut labels = Vec::new();
@@ -976,7 +999,8 @@ fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
             .filter_map(|(id, name)| {
                 let name = name.as_ref()?;
                 let lname = name.to_ascii_lowercase();
-                let texty = lname.contains("text") || lname.contains("utf") || lname.contains("html");
+                let texty =
+                    lname.contains("text") || lname.contains("utf") || lname.contains("html");
                 if *id >= 0xC000 && texty {
                     grab(*id, 64).map(|bytes| (name.clone(), bytes))
                 } else {
@@ -1024,7 +1048,11 @@ fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
             .collect::<String>()
             .replace('\n', "\\n")
             .replace('\r', "\\r");
-        log::info!("{tag} «{name}» bytes={} utf8=\"{utf8}\" hex=[{}]", bytes.len(), hex(bytes));
+        log::info!(
+            "{tag} «{name}» bytes={} utf8=\"{utf8}\" hex=[{}]",
+            bytes.len(),
+            hex(bytes)
+        );
     }
 }
 
@@ -1111,7 +1139,9 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
             return Err(e);
         }
         if chunk.len() == 2 {
-            std::thread::sleep(std::time::Duration::from_millis(u64::from(inter_key_delay_ms)));
+            std::thread::sleep(std::time::Duration::from_millis(u64::from(
+                inter_key_delay_ms,
+            )));
         }
     }
     Ok(())
@@ -1161,17 +1191,61 @@ fn build_release_all_modifier_inputs() -> Vec<KeyboardInputSpec> {
     // release whichever side is physically down regardless. So this blast is
     // side- and extended-agnostic and needs no extra variants.
     vec![
-        KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_RCONTROL, extended: true,  key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_CONTROL,  extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_LSHIFT,   extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_RSHIFT,   extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_SHIFT,    extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_LMENU,    extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_RMENU,    extended: true,  key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_MENU,     extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_LWIN,     extended: false, key_up: true },
-        KeyboardInputSpec::VirtualKey { code: VK_RWIN,     extended: false, key_up: true },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_LCONTROL,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_RCONTROL,
+            extended: true,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_CONTROL,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_LSHIFT,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_RSHIFT,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_SHIFT,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_LMENU,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_RMENU,
+            extended: true,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_MENU,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_LWIN,
+            extended: false,
+            key_up: true,
+        },
+        KeyboardInputSpec::VirtualKey {
+            code: VK_RWIN,
+            extended: false,
+            key_up: true,
+        },
     ]
 }
 
@@ -1414,10 +1488,11 @@ fn parse_primary_key(key: &str) -> Result<VirtualKeySpec, String> {
             let trimmed = key.trim();
             if trimmed.chars().count() == 1
                 && let Some(ch) = trimmed.chars().next()
-                    && !ch.is_ascii()
-                        && let Some(spec) = resolve_char_to_vk(ch) {
-                            return Ok(spec);
-                        }
+                && !ch.is_ascii()
+                && let Some(spec) = resolve_char_to_vk(ch)
+            {
+                return Ok(spec);
+            }
             Err(err)
         }
     }
@@ -1514,10 +1589,18 @@ const MODIFIER_CLEAR_POLL_MS: u64 = 5;
 fn modifier_reassert_inputs(ctrl_down: bool, alt_down: bool) -> Vec<KeyboardInputSpec> {
     let mut inputs = Vec::new();
     if ctrl_down {
-        inputs.push(KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true });
+        inputs.push(KeyboardInputSpec::VirtualKey {
+            code: VK_LCONTROL,
+            extended: false,
+            key_up: true,
+        });
     }
     if alt_down {
-        inputs.push(KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up: true });
+        inputs.push(KeyboardInputSpec::VirtualKey {
+            code: VK_LMENU,
+            extended: false,
+            key_up: true,
+        });
     }
     inputs
 }
@@ -1555,7 +1638,10 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
         log::debug!(
             "[clear-modifiers] skipped — buffering handles encoding mods \
              (mask: ctrl={} shift={} alt={} win={})",
-            mask.ctrl, mask.shift, mask.alt, mask.win,
+            mask.ctrl,
+            mask.shift,
+            mask.alt,
+            mask.win,
         );
         return Ok(());
     }
@@ -1584,7 +1670,11 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     let pre_state = snapshot_state();
     log::debug!(
         "[clear-modifiers] mask: ctrl={} shift={} alt={} win={} | pre: {}",
-        mask.ctrl, mask.shift, mask.alt, mask.win, pre_state,
+        mask.ctrl,
+        mask.shift,
+        mask.alt,
+        mask.win,
+        pre_state,
     );
 
     let mut release_inputs = Vec::new();
@@ -1637,10 +1727,7 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
                 _ => None,
             })
             .collect();
-        log::debug!(
-            "[clear-modifiers] releasing: [{}]",
-            labels.join(", "),
-        );
+        log::debug!("[clear-modifiers] releasing: [{}]", labels.join(", "),);
         send_keyboard_inputs(&release_inputs)?;
         let post_state = snapshot_state();
         log::debug!("[clear-modifiers] post: {}", post_state);
@@ -1743,8 +1830,8 @@ fn current_modifier_snapshot() -> Result<ModifierSnapshot, String> {
 fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-        KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC,
+        INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP,
+        KEYEVENTF_UNICODE, MAPVK_VK_TO_VSC, MapVirtualKeyW, SendInput,
     };
 
     if inputs.is_empty() {
@@ -1754,7 +1841,11 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
     let summary: Vec<String> = inputs
         .iter()
         .map(|i| match i {
-            KeyboardInputSpec::VirtualKey { code, extended, key_up } => format!(
+            KeyboardInputSpec::VirtualKey {
+                code,
+                extended,
+                key_up,
+            } => format!(
                 "VK(0x{:02X},{}{})",
                 code,
                 if *extended { "ext," } else { "" },
@@ -1767,7 +1858,11 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
             ),
         })
         .collect();
-    log::debug!("[send-keyboard-inputs] sending {} inputs: [{}]", inputs.len(), summary.join(", "));
+    log::debug!(
+        "[send-keyboard-inputs] sending {} inputs: [{}]",
+        inputs.len(),
+        summary.join(", ")
+    );
 
     let windows_inputs: Vec<INPUT> = inputs
         .iter()
@@ -1947,59 +2042,75 @@ fn vk_to_evdev_key(code: u16) -> Option<evdev::KeyCode> {
 /// Reused for all subsequent key injections.
 fn get_virtual_keyboard() -> Result<&'static std::sync::Mutex<evdev::uinput::VirtualDevice>, String>
 {
+    use evdev::{AttributeSet, KeyCode, uinput::VirtualDevice};
     use std::sync::{Mutex, OnceLock};
-    use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode};
 
     static DEVICE: OnceLock<Result<Mutex<VirtualDevice>, String>> = OnceLock::new();
 
-    DEVICE.get_or_init(|| {
-        // Register all keys we might ever need so the device doesn't
-        // need to be recreated when different shortcuts are used.
-        let mut keys = AttributeSet::<KeyCode>::new();
-        // Letters A-Z
-        for code in 0x41u16..=0x5Au16 {
-            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
-        }
-        // Digits 0-9
-        for code in 0x30u16..=0x39u16 {
-            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
-        }
-        // F1-F24
-        for code in 0x70u16..=0x87u16 {
-            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
-        }
-        // Modifiers
-        for code in [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B] {
-            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
-        }
-        // Common special keys
-        for code in [0x08, 0x09, 0x0D, 0x13, 0x14, 0x1B, 0x20, 0x21, 0x22,
-                     0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x2C, 0x2D, 0x2E,
-                     0x5D, 0x90, 0x91] {
-            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
-        }
-        // OEM keys
-        for code in [0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE] {
-            if let Some(k) = vk_to_evdev_key(code) { keys.insert(k); }
-        }
+    DEVICE
+        .get_or_init(|| {
+            // Register all keys we might ever need so the device doesn't
+            // need to be recreated when different shortcuts are used.
+            let mut keys = AttributeSet::<KeyCode>::new();
+            // Letters A-Z
+            for code in 0x41u16..=0x5Au16 {
+                if let Some(k) = vk_to_evdev_key(code) {
+                    keys.insert(k);
+                }
+            }
+            // Digits 0-9
+            for code in 0x30u16..=0x39u16 {
+                if let Some(k) = vk_to_evdev_key(code) {
+                    keys.insert(k);
+                }
+            }
+            // F1-F24
+            for code in 0x70u16..=0x87u16 {
+                if let Some(k) = vk_to_evdev_key(code) {
+                    keys.insert(k);
+                }
+            }
+            // Modifiers
+            for code in [0xA0, 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0x5B] {
+                if let Some(k) = vk_to_evdev_key(code) {
+                    keys.insert(k);
+                }
+            }
+            // Common special keys
+            for code in [
+                0x08, 0x09, 0x0D, 0x13, 0x14, 0x1B, 0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+                0x28, 0x2C, 0x2D, 0x2E, 0x5D, 0x90, 0x91,
+            ] {
+                if let Some(k) = vk_to_evdev_key(code) {
+                    keys.insert(k);
+                }
+            }
+            // OEM keys
+            for code in [
+                0xBA, 0xBB, 0xBC, 0xBD, 0xBE, 0xBF, 0xC0, 0xDB, 0xDC, 0xDD, 0xDE,
+            ] {
+                if let Some(k) = vk_to_evdev_key(code) {
+                    keys.insert(k);
+                }
+            }
 
-        let device = VirtualDevice::builder()
-            .map_err(|e| format!("Failed to create virtual keyboard builder: {e}"))?
-            .name("Sidearm Virtual Keyboard")
-            .with_keys(&keys)
-            .map_err(|e| format!("Failed to configure virtual keyboard keys: {e}"))?
-            .build()
-            .map_err(|e| format!("Failed to build virtual keyboard device: {e}"))?;
+            let device = VirtualDevice::builder()
+                .map_err(|e| format!("Failed to create virtual keyboard builder: {e}"))?
+                .name("Sidearm Virtual Keyboard")
+                .with_keys(&keys)
+                .map_err(|e| format!("Failed to configure virtual keyboard keys: {e}"))?
+                .build()
+                .map_err(|e| format!("Failed to build virtual keyboard device: {e}"))?;
 
-        log::info!("[input] Persistent virtual keyboard device created.");
+            log::info!("[input] Persistent virtual keyboard device created.");
 
-        // Give the compositor time to detect the new device.
-        std::thread::sleep(std::time::Duration::from_millis(200));
+            // Give the compositor time to detect the new device.
+            std::thread::sleep(std::time::Duration::from_millis(200));
 
-        Ok(Mutex::new(device))
-    })
-    .as_ref()
-    .map_err(|e| e.clone())
+            Ok(Mutex::new(device))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
 }
 
 #[cfg(target_os = "linux")]
@@ -2034,10 +2145,15 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
 
                     let value = if *key_up { 0 } else { 1 };
                     let event = InputEvent::new(EventType::KEY.0, key.0, value);
-                    device.emit(&[event])
+                    device
+                        .emit(&[event])
                         .map_err(|e| format!("Failed to emit key event: {e}"))?;
 
-                    std::thread::sleep(if is_modifier { modifier_delay } else { key_delay });
+                    std::thread::sleep(if is_modifier {
+                        modifier_delay
+                    } else {
+                        key_delay
+                    });
                     prev_was_modifier = is_modifier;
                 }
             }
@@ -2103,8 +2219,14 @@ pub fn send_mouse_action(
         "[send-mouse] enter: action={:?} mods=(ctrl={} shift={} alt={} win={}) \
          (encoding_mods: ctrl={} shift={} alt={} win={})",
         payload.action,
-        payload.ctrl, payload.shift, payload.alt, payload.win,
-        encoding_mods.ctrl, encoding_mods.shift, encoding_mods.alt, encoding_mods.win,
+        payload.ctrl,
+        payload.shift,
+        payload.alt,
+        payload.win,
+        encoding_mods.ctrl,
+        encoding_mods.shift,
+        encoding_mods.alt,
+        encoding_mods.win,
     );
     clear_modifiers(encoding_mods)?;
 
@@ -2144,12 +2266,13 @@ pub fn send_mouse_action(
             })
             .collect();
         if !press_inputs.is_empty()
-            && let Err(e) = send_keyboard_inputs(&press_inputs) {
-                // Partial insert can leave modifiers physically down — release
-                // them before bailing (the LIFO release below is skipped on early return).
-                let _ = send_keyboard_inputs(&build_modifier_release_inputs(&mods_to_press));
-                return Err(e);
-            }
+            && let Err(e) = send_keyboard_inputs(&press_inputs)
+        {
+            // Partial insert can leave modifiers physically down — release
+            // them before bailing (the LIFO release below is skipped on early return).
+            let _ = send_keyboard_inputs(&build_modifier_release_inputs(&mods_to_press));
+            return Err(e);
+        }
         mods_to_press
     } else {
         Vec::new()
@@ -2162,7 +2285,11 @@ pub fn send_mouse_action(
     if !pressed_modifiers.is_empty() {
         log::debug!(
             "[send-mouse] releasing modifiers (LIFO): {:?}",
-            pressed_modifiers.iter().rev().map(|m| m.label()).collect::<Vec<_>>(),
+            pressed_modifiers
+                .iter()
+                .rev()
+                .map(|m| m.label())
+                .collect::<Vec<_>>(),
         );
         let release = build_modifier_release_inputs(&pressed_modifiers);
         let _ = send_keyboard_inputs(&release);
@@ -2170,7 +2297,10 @@ pub fn send_mouse_action(
         log::debug!("[send-mouse] no modifiers to release");
     }
 
-    log::debug!("[send-mouse] exit: result={:?}", result.as_ref().map(|_| "ok"));
+    log::debug!(
+        "[send-mouse] exit: result={:?}",
+        result.as_ref().map(|_| "ok")
+    );
     result?;
     Ok(MouseDispatchReport {
         warnings: Vec::new(),
@@ -2186,10 +2316,9 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
     use crate::config::MouseActionKind;
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN,
-        MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
-        MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
-        MOUSEEVENTF_XUP, MOUSEINPUT,
+        INPUT, INPUT_0, INPUT_MOUSE, MOUSEEVENTF_HWHEEL, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP,
+        MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP,
+        MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT, SendInput,
     };
 
     let make_mouse = |flags: u32, mouse_data: i32| -> INPUT {
@@ -2262,40 +2391,41 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
 #[cfg(target_os = "linux")]
 /// Persistent virtual mouse device for uinput injection.
 fn get_virtual_mouse() -> Result<&'static std::sync::Mutex<evdev::uinput::VirtualDevice>, String> {
+    use evdev::{AttributeSet, KeyCode, RelativeAxisCode, uinput::VirtualDevice};
     use std::sync::{Mutex, OnceLock};
-    use evdev::{uinput::VirtualDevice, AttributeSet, KeyCode, RelativeAxisCode};
 
     static DEVICE: OnceLock<Result<Mutex<VirtualDevice>, String>> = OnceLock::new();
 
-    DEVICE.get_or_init(|| {
-        let mut keys = AttributeSet::<KeyCode>::new();
-        keys.insert(KeyCode::BTN_LEFT);
-        keys.insert(KeyCode::BTN_RIGHT);
-        keys.insert(KeyCode::BTN_MIDDLE);
-        keys.insert(KeyCode::BTN_SIDE);
-        keys.insert(KeyCode::BTN_EXTRA);
+    DEVICE
+        .get_or_init(|| {
+            let mut keys = AttributeSet::<KeyCode>::new();
+            keys.insert(KeyCode::BTN_LEFT);
+            keys.insert(KeyCode::BTN_RIGHT);
+            keys.insert(KeyCode::BTN_MIDDLE);
+            keys.insert(KeyCode::BTN_SIDE);
+            keys.insert(KeyCode::BTN_EXTRA);
 
-        let mut axes = AttributeSet::<RelativeAxisCode>::new();
-        axes.insert(RelativeAxisCode::REL_WHEEL);
-        axes.insert(RelativeAxisCode::REL_HWHEEL);
+            let mut axes = AttributeSet::<RelativeAxisCode>::new();
+            axes.insert(RelativeAxisCode::REL_WHEEL);
+            axes.insert(RelativeAxisCode::REL_HWHEEL);
 
-        let device = VirtualDevice::builder()
-            .map_err(|e| format!("Failed to create virtual mouse builder: {e}"))?
-            .name("Sidearm Virtual Mouse")
-            .with_keys(&keys)
-            .map_err(|e| format!("Failed to configure virtual mouse keys: {e}"))?
-            .with_relative_axes(&axes)
-            .map_err(|e| format!("Failed to configure virtual mouse axes: {e}"))?
-            .build()
-            .map_err(|e| format!("Failed to build virtual mouse device: {e}"))?;
+            let device = VirtualDevice::builder()
+                .map_err(|e| format!("Failed to create virtual mouse builder: {e}"))?
+                .name("Sidearm Virtual Mouse")
+                .with_keys(&keys)
+                .map_err(|e| format!("Failed to configure virtual mouse keys: {e}"))?
+                .with_relative_axes(&axes)
+                .map_err(|e| format!("Failed to configure virtual mouse axes: {e}"))?
+                .build()
+                .map_err(|e| format!("Failed to build virtual mouse device: {e}"))?;
 
-        log::info!("[input] Persistent virtual mouse device created.");
-        std::thread::sleep(std::time::Duration::from_millis(200));
+            log::info!("[input] Persistent virtual mouse device created.");
+            std::thread::sleep(std::time::Duration::from_millis(200));
 
-        Ok(Mutex::new(device))
-    })
-    .as_ref()
-    .map_err(|e| e.clone())
+            Ok(Mutex::new(device))
+        })
+        .as_ref()
+        .map_err(|e| e.clone())
 }
 
 #[cfg(target_os = "linux")]
@@ -2308,7 +2438,9 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
         .map_err(|e| format!("Failed to lock virtual mouse: {e}"))?;
 
     let mut emit = |events: &[InputEvent]| -> Result<(), String> {
-        device.emit(events).map_err(|e| format!("Failed to emit mouse event: {e}"))
+        device
+            .emit(events)
+            .map_err(|e| format!("Failed to emit mouse event: {e}"))
     };
 
     match action {
@@ -2332,16 +2464,32 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
             emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_LEFT.0, 0)])?;
         }
         MouseActionKind::ScrollUp => {
-            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_WHEEL.0, 1)])?;
+            emit(&[InputEvent::new(
+                EventType::RELATIVE.0,
+                RelativeAxisCode::REL_WHEEL.0,
+                1,
+            )])?;
         }
         MouseActionKind::ScrollDown => {
-            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_WHEEL.0, -1)])?;
+            emit(&[InputEvent::new(
+                EventType::RELATIVE.0,
+                RelativeAxisCode::REL_WHEEL.0,
+                -1,
+            )])?;
         }
         MouseActionKind::ScrollLeft => {
-            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_HWHEEL.0, -1)])?;
+            emit(&[InputEvent::new(
+                EventType::RELATIVE.0,
+                RelativeAxisCode::REL_HWHEEL.0,
+                -1,
+            )])?;
         }
         MouseActionKind::ScrollRight => {
-            emit(&[InputEvent::new(EventType::RELATIVE.0, RelativeAxisCode::REL_HWHEEL.0, 1)])?;
+            emit(&[InputEvent::new(
+                EventType::RELATIVE.0,
+                RelativeAxisCode::REL_HWHEEL.0,
+                1,
+            )])?;
         }
         MouseActionKind::MouseBack => {
             emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_SIDE.0, 1)])?;
@@ -2372,19 +2520,32 @@ mod tests {
         let codes: Vec<u16> = inputs
             .iter()
             .filter_map(|i| match i {
-                KeyboardInputSpec::VirtualKey { code, key_up: true, .. } => Some(*code),
+                KeyboardInputSpec::VirtualKey {
+                    code, key_up: true, ..
+                } => Some(*code),
                 _ => None,
             })
             .collect();
 
         // All 11 modifier VKs covered, all key-ups.
         for vk in [
-            VK_LCONTROL, VK_RCONTROL, VK_CONTROL,
-            VK_LSHIFT, VK_RSHIFT, VK_SHIFT,
-            VK_LMENU, VK_RMENU, VK_MENU,
-            VK_LWIN, VK_RWIN,
+            VK_LCONTROL,
+            VK_RCONTROL,
+            VK_CONTROL,
+            VK_LSHIFT,
+            VK_RSHIFT,
+            VK_SHIFT,
+            VK_LMENU,
+            VK_RMENU,
+            VK_MENU,
+            VK_LWIN,
+            VK_RWIN,
         ] {
-            assert!(codes.contains(&vk), "missing VK 0x{:02X} in release-all blast", vk);
+            assert!(
+                codes.contains(&vk),
+                "missing VK 0x{:02X} in release-all blast",
+                vk
+            );
         }
         assert_eq!(codes.len(), 11, "should emit exactly 11 modifier VKs");
     }
@@ -2405,8 +2566,14 @@ mod tests {
         // Neither down → nothing to re-assert.
         assert!(modifier_reassert_inputs(false, false).is_empty());
         // Ctrl-only / Alt-only → that modifier's key-up.
-        assert_eq!(codes(&modifier_reassert_inputs(true, false)), vec![(VK_LCONTROL, true)]);
-        assert_eq!(codes(&modifier_reassert_inputs(false, true)), vec![(VK_LMENU, true)]);
+        assert_eq!(
+            codes(&modifier_reassert_inputs(true, false)),
+            vec![(VK_LCONTROL, true)]
+        );
+        assert_eq!(
+            codes(&modifier_reassert_inputs(false, true)),
+            vec![(VK_LMENU, true)]
+        );
         // Both → Ctrl then Alt, both key-ups, never a key-down.
         assert_eq!(
             codes(&modifier_reassert_inputs(true, true)),
@@ -2428,7 +2595,9 @@ mod tests {
         // Copy / cut / clipboard-insert.
         assert!(is_clipboard_shortcut(&mk(true, false, false, false, "C")));
         assert!(is_clipboard_shortcut(&mk(true, false, false, false, "x")));
-        assert!(is_clipboard_shortcut(&mk(true, false, false, false, "Insert")));
+        assert!(is_clipboard_shortcut(&mk(
+            true, false, false, false, "Insert"
+        )));
         // Not a copy combo: paste, bare key, Win-modified, unrelated key.
         assert!(!is_clipboard_shortcut(&mk(true, false, false, false, "V")));
         assert!(!is_clipboard_shortcut(&mk(false, false, false, false, "C")));
@@ -2458,13 +2627,30 @@ mod tests {
     fn nontext_clipboard_format_classifier() {
         // Plain-text formats Windows synthesizes for a text copy are safe to
         // overwrite during a repair.
-        for text_fmt in [1u32 /*CF_TEXT*/, 7 /*CF_OEMTEXT*/, 13 /*CF_UNICODETEXT*/, 16 /*CF_LOCALE*/] {
-            assert!(!is_nontext_clipboard_format(text_fmt), "fmt {text_fmt} must be text");
+        for text_fmt in [
+            1u32, /*CF_TEXT*/
+            7,    /*CF_OEMTEXT*/
+            13,   /*CF_UNICODETEXT*/
+            16,   /*CF_LOCALE*/
+        ] {
+            assert!(
+                !is_nontext_clipboard_format(text_fmt),
+                "fmt {text_fmt} must be text"
+            );
         }
         // Rich/binary formats (and registered HTML/RTF at id >= 0xC000) must be
         // preserved — the repair has to skip when any of these is present.
-        for rich_fmt in [2u32 /*CF_BITMAP*/, 8 /*CF_DIB*/, 17 /*CF_DIBV5*/, 15 /*CF_HDROP*/, 0xC001 /*registered, e.g. "HTML Format"*/] {
-            assert!(is_nontext_clipboard_format(rich_fmt), "fmt {rich_fmt} must be non-text");
+        for rich_fmt in [
+            2u32,   /*CF_BITMAP*/
+            8,      /*CF_DIB*/
+            17,     /*CF_DIBV5*/
+            15,     /*CF_HDROP*/
+            0xC001, /*registered, e.g. "HTML Format"*/
+        ] {
+            assert!(
+                is_nontext_clipboard_format(rich_fmt),
+                "fmt {rich_fmt} must be non-text"
+            );
         }
     }
 
@@ -2595,8 +2781,16 @@ mod tests {
         assert_eq!(
             cleanup,
             vec![
-                KeyboardInputSpec::VirtualKey { code: b'C' as u16, extended: false, key_up: true },
-                KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
+                KeyboardInputSpec::VirtualKey {
+                    code: b'C' as u16,
+                    extended: false,
+                    key_up: true
+                },
+                KeyboardInputSpec::VirtualKey {
+                    code: VK_LCONTROL,
+                    extended: false,
+                    key_up: true
+                },
             ]
         );
     }
@@ -2617,8 +2811,16 @@ mod tests {
         assert_eq!(
             cleanup,
             vec![
-                KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up: true },
-                KeyboardInputSpec::VirtualKey { code: VK_LCONTROL, extended: false, key_up: true },
+                KeyboardInputSpec::VirtualKey {
+                    code: VK_LMENU,
+                    extended: false,
+                    key_up: true
+                },
+                KeyboardInputSpec::VirtualKey {
+                    code: VK_LCONTROL,
+                    extended: false,
+                    key_up: true
+                },
             ]
         );
     }
@@ -2635,11 +2837,20 @@ mod tests {
             win: false,
             raw: Some("^c".into()),
         };
-        let snapshot = ModifierSnapshot { ctrl: true, shift: false, alt: false, win: false };
+        let snapshot = ModifierSnapshot {
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
+        };
         let cleanup = build_shortcut_cleanup_inputs(&payload, &snapshot);
         assert_eq!(
             cleanup,
-            vec![KeyboardInputSpec::VirtualKey { code: b'C' as u16, extended: false, key_up: true }]
+            vec![KeyboardInputSpec::VirtualKey {
+                code: b'C' as u16,
+                extended: false,
+                key_up: true
+            }]
         );
     }
 
@@ -2910,11 +3121,8 @@ mod tests {
             raw: None,
         };
 
-        let (inputs, held) = plan_shortcut_hold_down_inputs(
-            &payload,
-            &ModifierSnapshot::default(),
-        )
-        .unwrap();
+        let (inputs, held) =
+            plan_shortcut_hold_down_inputs(&payload, &ModifierSnapshot::default()).unwrap();
 
         assert!(held.primary_key.is_none());
         assert_eq!(held.pressed_modifier_vks.len(), 2, "Win + Shift injected");
@@ -2959,11 +3167,8 @@ mod tests {
             raw: None,
         };
 
-        let (inputs, _held) = plan_shortcut_hold_down_inputs(
-            &payload,
-            &ModifierSnapshot::default(),
-        )
-        .unwrap();
+        let (inputs, _held) =
+            plan_shortcut_hold_down_inputs(&payload, &ModifierSnapshot::default()).unwrap();
 
         assert_eq!(inputs.len(), 2, "only Ctrl-down + Shift-down, no mask");
         for input in &inputs {
@@ -3046,7 +3251,13 @@ mod edge_proptests {
     // which are pure (return Vec<KeyboardInputSpec>, no OS calls).
     // -----------------------------------------------------------------------
 
-    fn payload_key(key: &str, ctrl: bool, shift: bool, alt: bool, win: bool) -> ShortcutActionPayload {
+    fn payload_key(
+        key: &str,
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+        win: bool,
+    ) -> ShortcutActionPayload {
         ShortcutActionPayload {
             key: key.to_string(),
             ctrl,
@@ -3104,11 +3315,19 @@ mod edge_proptests {
         assert_eq!(inputs.len(), 2, "LF -> VK_RETURN tap = 2 events");
         assert!(matches!(
             inputs[0],
-            KeyboardInputSpec::VirtualKey { code: VK_RETURN, key_up: false, .. }
+            KeyboardInputSpec::VirtualKey {
+                code: VK_RETURN,
+                key_up: false,
+                ..
+            }
         ));
         assert!(matches!(
             inputs[1],
-            KeyboardInputSpec::VirtualKey { code: VK_RETURN, key_up: true, .. }
+            KeyboardInputSpec::VirtualKey {
+                code: VK_RETURN,
+                key_up: true,
+                ..
+            }
         ));
     }
 
@@ -3116,7 +3335,11 @@ mod edge_proptests {
     fn build_text_inputs_crlf_produces_single_vk_return_tap() {
         // CRLF must collapse to one VK_RETURN tap (2 events), not two.
         let inputs = build_text_inputs("\r\n").expect("CRLF must succeed");
-        assert_eq!(inputs.len(), 2, "CRLF must produce exactly one VK_RETURN tap");
+        assert_eq!(
+            inputs.len(),
+            2,
+            "CRLF must produce exactly one VK_RETURN tap"
+        );
     }
 
     #[test]
@@ -3125,7 +3348,11 @@ mod edge_proptests {
         assert_eq!(inputs.len(), 2, "lone CR → one VK_RETURN tap = 2 events");
         assert!(matches!(
             inputs[0],
-            KeyboardInputSpec::VirtualKey { code: VK_RETURN, key_up: false, .. }
+            KeyboardInputSpec::VirtualKey {
+                code: VK_RETURN,
+                key_up: false,
+                ..
+            }
         ));
     }
 
@@ -3213,11 +3440,23 @@ mod edge_proptests {
             );
         }
         // First two are down+up for the high surrogate (0xD83D)
-        assert!(matches!(inputs[0], KeyboardInputSpec::Unicode { key_up: false, .. }));
-        assert!(matches!(inputs[1], KeyboardInputSpec::Unicode { key_up: true, .. }));
+        assert!(matches!(
+            inputs[0],
+            KeyboardInputSpec::Unicode { key_up: false, .. }
+        ));
+        assert!(matches!(
+            inputs[1],
+            KeyboardInputSpec::Unicode { key_up: true, .. }
+        ));
         // Last two are down+up for the low surrogate (0xDE00)
-        assert!(matches!(inputs[2], KeyboardInputSpec::Unicode { key_up: false, .. }));
-        assert!(matches!(inputs[3], KeyboardInputSpec::Unicode { key_up: true, .. }));
+        assert!(matches!(
+            inputs[2],
+            KeyboardInputSpec::Unicode { key_up: false, .. }
+        ));
+        assert!(matches!(
+            inputs[3],
+            KeyboardInputSpec::Unicode { key_up: true, .. }
+        ));
     }
 
     // build_text_inputs must never panic on arbitrary Unicode strings —
@@ -3341,14 +3580,20 @@ mod edge_proptests {
     fn plan_shortcut_no_key_no_modifier_returns_err() {
         let payload = payload_key("", false, false, false, false);
         let result = plan_shortcut_inputs(&payload, &default_snapshot());
-        assert!(result.is_err(), "shortcut with no key and no modifiers must fail");
+        assert!(
+            result.is_err(),
+            "shortcut with no key and no modifiers must fail"
+        );
     }
 
     #[test]
     fn plan_shortcut_no_key_with_ctrl_ok() {
         let payload = payload_key("", true, false, false, false);
         let result = plan_shortcut_inputs(&payload, &default_snapshot());
-        assert!(result.is_ok(), "modifier-only shortcut must plan successfully");
+        assert!(
+            result.is_ok(),
+            "modifier-only shortcut must plan successfully"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -3365,10 +3610,22 @@ mod edge_proptests {
         // pressed: Ctrl and Alt → 2 down + 2 up = 4 events
         assert_eq!(plan.len(), 4);
         // First two are key-downs; last two are key-ups in reverse
-        assert!(matches!(plan[0], KeyboardInputSpec::VirtualKey { key_up: false, .. }));
-        assert!(matches!(plan[1], KeyboardInputSpec::VirtualKey { key_up: false, .. }));
-        assert!(matches!(plan[2], KeyboardInputSpec::VirtualKey { key_up: true, .. }));
-        assert!(matches!(plan[3], KeyboardInputSpec::VirtualKey { key_up: true, .. }));
+        assert!(matches!(
+            plan[0],
+            KeyboardInputSpec::VirtualKey { key_up: false, .. }
+        ));
+        assert!(matches!(
+            plan[1],
+            KeyboardInputSpec::VirtualKey { key_up: false, .. }
+        ));
+        assert!(matches!(
+            plan[2],
+            KeyboardInputSpec::VirtualKey { key_up: true, .. }
+        ));
+        assert!(matches!(
+            plan[3],
+            KeyboardInputSpec::VirtualKey { key_up: true, .. }
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -3385,13 +3642,19 @@ mod edge_proptests {
             win: true,
         };
         let payload = payload_key("A", true, true, true, true);
-        let (plan, reused) = plan_shortcut_inputs(&payload, &snapshot)
-            .expect("all-reused shortcut must plan");
+        let (plan, reused) =
+            plan_shortcut_inputs(&payload, &snapshot).expect("all-reused shortcut must plan");
         assert_eq!(reused.len(), 4, "all four modifiers must be marked reused");
         // Only primary tap emitted: down + up = 2 events
         assert_eq!(plan.len(), 2);
-        assert!(matches!(plan[0], KeyboardInputSpec::VirtualKey { key_up: false, .. }));
-        assert!(matches!(plan[1], KeyboardInputSpec::VirtualKey { key_up: true, .. }));
+        assert!(matches!(
+            plan[0],
+            KeyboardInputSpec::VirtualKey { key_up: false, .. }
+        ));
+        assert!(matches!(
+            plan[1],
+            KeyboardInputSpec::VirtualKey { key_up: true, .. }
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -3403,19 +3666,28 @@ mod edge_proptests {
     fn plan_shortcut_modifier_down_up_codes_symmetric() {
         // Only Shift, from a clean snapshot
         let payload = payload_key("A", false, true, false, false);
-        let (plan, _) = plan_shortcut_inputs(&payload, &default_snapshot())
-            .expect("shift+A must plan");
+        let (plan, _) =
+            plan_shortcut_inputs(&payload, &default_snapshot()).expect("shift+A must plan");
         // Expected: Shift-down, A-down, A-up, Shift-up (4 events)
         assert_eq!(plan.len(), 4);
         let shift_down = match plan[0] {
-            KeyboardInputSpec::VirtualKey { code, key_up: false, .. } => code,
+            KeyboardInputSpec::VirtualKey {
+                code,
+                key_up: false,
+                ..
+            } => code,
             _ => panic!("expected shift key-down first"),
         };
         let shift_up = match plan[3] {
-            KeyboardInputSpec::VirtualKey { code, key_up: true, .. } => code,
+            KeyboardInputSpec::VirtualKey {
+                code, key_up: true, ..
+            } => code,
             _ => panic!("expected shift key-up last"),
         };
-        assert_eq!(shift_down, shift_up, "Shift down/up must use the same VK code");
+        assert_eq!(
+            shift_down, shift_up,
+            "Shift down/up must use the same VK code"
+        );
         assert_eq!(shift_down, VK_LSHIFT);
     }
 

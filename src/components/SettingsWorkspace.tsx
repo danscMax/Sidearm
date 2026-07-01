@@ -4,6 +4,12 @@ import type { AppConfig, CommandError, Profile, Settings } from "../lib/config";
 import type { ParsedSynapseProfiles } from "../lib/synapse-import";
 import { SettingsShell } from "./settings/SettingsShell";
 
+export type SettingsDeepLink = {
+  tab: "snippets";
+  snippetId?: string;
+  nonce: number;
+};
+
 export interface SettingsWorkspaceProps {
   activeConfig: AppConfig;
   activeProfile: Profile | null;
@@ -11,10 +17,11 @@ export interface SettingsWorkspaceProps {
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
-  refreshConfig: () => void;
+  refreshConfig: () => Promise<boolean>;
   setError: (error: CommandError | null) => void;
   onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
+  deepLink?: SettingsDeepLink | null;
 }
 
 /**
@@ -33,6 +40,7 @@ export function SettingsWorkspace({
   setError,
   onRequestSynapseImport,
   showToast,
+  deepLink,
 }: SettingsWorkspaceProps) {
   const updateSettings = useCallback(
     (patch: Partial<Settings>) => {
@@ -57,6 +65,7 @@ export function SettingsWorkspace({
       setError={setError}
       onRequestSynapseImport={onRequestSynapseImport}
       showToast={showToast}
+      deepLink={deepLink}
     />
   );
 }

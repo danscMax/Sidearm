@@ -379,7 +379,7 @@ describe("useVerification", () => {
       const [filename, contents] =
         mockedExportVerificationSession.mock.calls[0];
       expect(filename).toMatch(
-        /^naga-verification-verification-\d+\.json$/,
+        /^sidearm-verification-verification-\d+\.json$/,
       );
       const parsed = JSON.parse(contents);
       expect(parsed.version).toBe(1);

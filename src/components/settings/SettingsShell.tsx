@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, CommandError, Profile, Settings } from "../../lib/config";
 import type { ConfirmModalRequest } from "../ConfirmModal";
@@ -9,6 +9,7 @@ import { ProfileSettings } from "./ProfileSettings";
 import { SnippetLibrarySettings } from "./SnippetLibrarySettings";
 import { BackupSettings } from "./BackupSettings";
 import { AdvancedSettings } from "./AdvancedSettings";
+import type { SettingsDeepLink } from "../SettingsWorkspace";
 
 type SettingsTab = "app" | "notifications" | "profiles" | "snippets" | "backup" | "advanced";
 
@@ -86,10 +87,11 @@ export interface SettingsShellProps {
   updateSettings: (patch: Partial<Settings>) => void;
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
-  refreshConfig: () => void;
+  refreshConfig: () => Promise<boolean>;
   setError: (error: CommandError | null) => void;
   onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
+  deepLink?: SettingsDeepLink | null;
 }
 
 /** Tabbed shell for the Settings page: a vertical tab rail (reusing the
@@ -106,9 +108,14 @@ export function SettingsShell({
   setError,
   onRequestSynapseImport,
   showToast,
+  deepLink,
 }: SettingsShellProps) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<SettingsTab>("app");
+
+  useEffect(() => {
+    if (deepLink?.tab) setTab(deepLink.tab);
+  }, [deepLink]);
 
   return (
     <div className="settings-shell">
@@ -164,6 +171,7 @@ export function SettingsShell({
             updateDraft={updateDraft}
             setConfirmModal={setConfirmModal}
             showToast={showToast}
+            selectedSnippetId={deepLink?.tab === "snippets" ? deepLink.snippetId : undefined}
           />
         ) : null}
 

@@ -74,10 +74,12 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   // Admin
   const [admin, setAdmin] = useState<AdminAutostartStatus | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
+  const [adminError, setAdminError] = useState<string | null>(null);
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
 
   // Finale
   const [fired, setFired] = useState<ActionExecutionEvent | null>(null);
+  const [runtimeSetupError, setRuntimeSetupError] = useState<string | null>(null);
 
   // --- one-time setup: start runtime, run checks, subscribe to live events ---
   useEffect(() => {
@@ -85,7 +87,9 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     let unlistenAction: (() => void) | null = null;
     let cancelled = false;
 
-    void startRuntime().catch(() => {});
+    void startRuntime()
+      .then(() => !cancelled && setRuntimeSetupError(null))
+      .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
     void checkSynapseInstalled()
       .then((ok) => !cancelled && setSynapseOk(ok ? "ok" : "bad"))
       .catch(() => !cancelled && setSynapseOk("bad"));
@@ -94,7 +98,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
       .catch(() => !cancelled && setElevated("bad"));
     void getAdminAutostartStatus()
       .then((s) => !cancelled && setAdmin(s))
-      .catch(() => {});
+      .catch((err) => !cancelled && setAdminError(normalizeCommandError(err).message));
 
     void listenEncodedKeyEvent("encoded_key_received", (e: EncodedKeyEvent) => {
       if (e.isKeyUp) return;
@@ -111,17 +115,21 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
       setLabels((prev) => (prev[btn] ? prev : { ...prev, [btn]: e.encodedKey }));
       if (activeTimer.current) window.clearTimeout(activeTimer.current);
       activeTimer.current = window.setTimeout(() => setActiveBtn(null), 220);
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlistenKey = fn;
-    });
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlistenKey = fn;
+      })
+      .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
 
     void listenActionExecutionEvent("action_executed", (e: ActionExecutionEvent) => {
       setFired(e);
-    }).then((fn) => {
-      if (cancelled) fn();
-      else unlistenAction = fn;
-    });
+    })
+      .then((fn) => {
+        if (cancelled) fn();
+        else unlistenAction = fn;
+      })
+      .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
 
     return () => {
       cancelled = true;
@@ -180,14 +188,15 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
 
   const toggleAdmin = useCallback(async () => {
     setAdminBusy(true);
+    setAdminError(null);
     try {
       // Enabling autostart only registers the scheduled task — it does NOT
       // elevate the current session, so `elevated` stays as-is (the welcome
       // check only flips to OK after an actual elevated relaunch / next logon).
       const next = await setAdminAutostart(true);
       setAdmin(next);
-    } catch {
-      // UAC declined / failed — leave state as-is.
+    } catch (err) {
+      setAdminError(normalizeCommandError(err).message);
     } finally {
       setAdminBusy(false);
     }
@@ -339,6 +348,11 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                     <span className="onb-check__dot ok" /> {T.live.allDone}
                   </div>
                 )}
+                {runtimeSetupError ? (
+                  <div className="onb-result">
+                    <span className="onb-check__dot bad" /> {runtimeSetupError}
+                  </div>
+                ) : null}
               </>
             )}
 
@@ -381,6 +395,11 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                     <span className="onb-check__dot bad" /> {relaunchError}
                   </div>
                 ) : null}
+                {adminError ? (
+                  <div className="onb-result">
+                    <span className="onb-check__dot bad" /> {adminError}
+                  </div>
+                ) : null}
                 <p className="onb-step__lead onb-step__lead--note">
                   {T.admin.note}
                 </p>
@@ -400,6 +419,11 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                 ) : (
                   <div className="onb-result is-pending">{T.tryit.waiting}</div>
                 )}
+                {runtimeSetupError ? (
+                  <div className="onb-result">
+                    <span className="onb-check__dot bad" /> {runtimeSetupError}
+                  </div>
+                ) : null}
               </>
             )}
           </div>

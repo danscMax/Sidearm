@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LogPanelControl } from "../hooks/useLogPanel";
-import { openLogDirectory } from "../lib/backend";
+import { normalizeCommandError, openLogDirectory } from "../lib/backend";
 
 export interface LogPanelProps {
   logPanel: LogPanelControl;
@@ -22,6 +22,7 @@ function formatTime(timestamp: number): string {
 
 export function LogPanel({ logPanel }: LogPanelProps) {
   const { t } = useTranslation();
+  const [openFolderError, setOpenFolderError] = useState<string | null>(null);
   const {
     filteredLogs,
     categories,
@@ -74,12 +75,10 @@ export function LogPanel({ logPanel }: LogPanelProps) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `naga-logs-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.download = `sidearm-logs-${new Date().toISOString().slice(0, 10)}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }
-
-  const reversedLogs = [...filteredLogs].reverse();
 
   return (
     <div className="log-panel">
@@ -135,7 +134,10 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             type="button"
             className="action-button action-button--small action-button--secondary"
             onClick={() => {
-              void openLogDirectory();
+              setOpenFolderError(null);
+              void openLogDirectory().catch((unknownError) => {
+                setOpenFolderError(normalizeCommandError(unknownError).message);
+              });
             }}
           >
             {t("log.folder")}
@@ -149,13 +151,16 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           </button>
         </div>
       </div>
-      {reversedLogs.length > 0 ? (
+      {openFolderError ? (
+        <p className="panel__muted log__empty">{openFolderError}</p>
+      ) : null}
+      {filteredLogs.length > 0 ? (
         <ul
           className="log-list log-panel__list"
           ref={listRef}
           onScroll={handleScroll}
         >
-          {reversedLogs.map((entry) => (
+          {filteredLogs.map((entry) => (
             <li key={entry.id} className={`log-item log-item--${entry.level}`}>
               <time className="log-item__time">{formatTime(entry.timestamp)}</time>
               <span className={`badge ${levelClasses[entry.level] ?? "badge--info"}`}>

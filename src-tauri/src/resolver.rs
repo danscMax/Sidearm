@@ -407,8 +407,9 @@ pub(crate) fn matching_app_mappings<'a>(
             // which embed the version in the WindowsApps path. Mappings without
             // a pinned path (the common case) are unaffected — this keeps the
             // behaviour additive for existing configs.
-            Some(pinned) => process_path
-                .is_some_and(|active| normalize_process_path(active) == normalize_process_path(pinned)),
+            Some(pinned) => process_path.is_some_and(|active| {
+                normalize_process_path(active) == normalize_process_path(pinned)
+            }),
             None => true,
         })
         .filter(|mapping| {
@@ -427,9 +428,12 @@ pub(crate) fn matching_app_mappings<'a>(
                             if let Some(Some(re)) = mapping.compiled_title_regexes.get(i) {
                                 re.is_match(&normalized_title)
                             } else if let Some(pattern) = needle.strip_prefix(REGEX_PREFIX) {
-                                crate::config::compile_title_regex(pattern, "app mapping title fallback")
-                                    .map(|re| re.is_match(&normalized_title))
-                                    .unwrap_or(false)
+                                crate::config::compile_title_regex(
+                                    pattern,
+                                    "app mapping title fallback",
+                                )
+                                .map(|re| re.is_match(&normalized_title))
+                                .unwrap_or(false)
                             } else {
                                 false
                             }
@@ -542,7 +546,13 @@ mod tests {
         // Audit F003: a ProfileSwitch override wins over app-mapping when it names a
         // real, enabled profile, and a stale/missing override gracefully falls back to
         // the normal `app mapping > fallback` resolution.
-        let config = test_config(vec![app_mapping("app-code", "code.exe", "review", 200, vec![])]);
+        let config = test_config(vec![app_mapping(
+            "app-code",
+            "code.exe",
+            "review",
+            200,
+            vec![],
+        )]);
 
         // No override: app-mapping wins -> "review".
         let base = select_profile_for_app_context(&config, "code.exe", "Pull Request", None);
@@ -622,6 +632,7 @@ mod tests {
                 osd_animation: OsdAnimation::default(),
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
+                global_shortcut: None,
                 last_selected_profile_id: None,
                 onboarding_completed: false,
                 onboarding_step: None,
@@ -720,7 +731,10 @@ mod tests {
     }
 
     /// Attach the given conditions to every action in the test config.
-    fn with_action_conditions(mut config: AppConfig, conditions: Vec<ActionCondition>) -> AppConfig {
+    fn with_action_conditions(
+        mut config: AppConfig,
+        conditions: Vec<ActionCondition>,
+    ) -> AppConfig {
         for action in &mut config.actions {
             action.conditions = conditions.clone();
         }
@@ -731,7 +745,9 @@ mod tests {
     fn resolve_exe_equals_met_resolves() {
         let config = with_action_conditions(
             test_config(vec![]),
-            vec![ActionCondition::ExeEquals { value: "excel.exe".into() }],
+            vec![ActionCondition::ExeEquals {
+                value: "excel.exe".into(),
+            }],
         );
         let result = resolve_input_preview(&config, "F13", "EXCEL.EXE", "Book1", None);
         assert_eq!(result.status, ResolutionStatus::Resolved);
@@ -741,7 +757,9 @@ mod tests {
     fn resolve_exe_equals_unmet_is_condition_unmet() {
         let config = with_action_conditions(
             test_config(vec![]),
-            vec![ActionCondition::ExeEquals { value: "excel.exe".into() }],
+            vec![ActionCondition::ExeEquals {
+                value: "excel.exe".into(),
+            }],
         );
         let result = resolve_input_preview(&config, "F13", "notepad.exe", "Untitled", None);
         assert_eq!(result.status, ResolutionStatus::ConditionUnmet);
@@ -751,7 +769,9 @@ mod tests {
     fn resolve_exe_not_equals_gates_on_active_exe() {
         let config = with_action_conditions(
             test_config(vec![]),
-            vec![ActionCondition::ExeNotEquals { value: "notepad.exe".into() }],
+            vec![ActionCondition::ExeNotEquals {
+                value: "notepad.exe".into(),
+            }],
         );
         assert_eq!(
             resolve_input_preview(&config, "F13", "notepad.exe", "x", None).status,
@@ -767,7 +787,9 @@ mod tests {
     fn resolve_window_title_contains_gates() {
         let config = with_action_conditions(
             test_config(vec![]),
-            vec![ActionCondition::WindowTitleContains { value: "Inbox".into() }],
+            vec![ActionCondition::WindowTitleContains {
+                value: "Inbox".into(),
+            }],
         );
         assert_eq!(
             resolve_input_preview(&config, "F13", "chrome.exe", "Gmail - Inbox (3)", None).status,
@@ -783,7 +805,9 @@ mod tests {
     fn resolve_window_title_not_contains_gates() {
         let config = with_action_conditions(
             test_config(vec![]),
-            vec![ActionCondition::WindowTitleNotContains { value: "Private".into() }],
+            vec![ActionCondition::WindowTitleNotContains {
+                value: "Private".into(),
+            }],
         );
         assert_eq!(
             resolve_input_preview(&config, "F13", "chrome.exe", "Public Doc", None).status,
@@ -882,6 +906,7 @@ mod edge_proptests {
                 osd_animation: OsdAnimation::default(),
                 modifier_stale_gc_ms: None,
                 replayed_modifier_force_release_ms: None,
+                global_shortcut: None,
                 last_selected_profile_id: None,
                 onboarding_completed: false,
                 onboarding_step: None,
@@ -1071,7 +1096,10 @@ mod edge_proptests {
         mapping.enabled = false;
         let config = minimal_config(vec![mapping]);
         let result = matching_app_mappings(&config, "test.exe", "", None);
-        assert!(result.is_empty(), "disabled mapping must not appear in candidates");
+        assert!(
+            result.is_empty(),
+            "disabled mapping must not appear in candidates"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1094,17 +1122,11 @@ mod edge_proptests {
         config.app_mappings.push(mapping);
 
         // Title contains both → matches
-        assert!(
-            !matching_app_mappings(&config, "app.exe", "Gmail - Inbox", None).is_empty()
-        );
+        assert!(!matching_app_mappings(&config, "app.exe", "Gmail - Inbox", None).is_empty());
         // Title contains only one → does NOT match (ALL must match)
-        assert!(
-            matching_app_mappings(&config, "app.exe", "Gmail - Sent", None).is_empty()
-        );
+        assert!(matching_app_mappings(&config, "app.exe", "Gmail - Sent", None).is_empty());
         // Title contains neither → does not match
-        assert!(
-            matching_app_mappings(&config, "app.exe", "Other App", None).is_empty()
-        );
+        assert!(matching_app_mappings(&config, "app.exe", "Other App", None).is_empty());
     }
 
     // -----------------------------------------------------------------------
@@ -1211,11 +1233,20 @@ mod edge_proptests {
 
     #[test]
     fn normalized_encoded_key_idempotent_for_valid_keys() {
-        let keys = ["F13", "Ctrl+F13", "ctrl+alt+f13", "  F13  ", "CTRL+SHIFT+F13"];
+        let keys = [
+            "F13",
+            "Ctrl+F13",
+            "ctrl+alt+f13",
+            "  F13  ",
+            "CTRL+SHIFT+F13",
+        ];
         for &key in &keys {
             let once = normalized_encoded_key(key);
             let twice = normalized_encoded_key(&once);
-            assert_eq!(once, twice, "normalizing `{key}` twice should be idempotent");
+            assert_eq!(
+                once, twice,
+                "normalizing `{key}` twice should be idempotent"
+            );
         }
     }
 

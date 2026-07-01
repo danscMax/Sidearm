@@ -17,7 +17,7 @@ function exeMonogram(exe: string): string {
 
 /** Renders an exe icon (fetched from backend) with monogram fallback. */
 export function ExeIcon({ exe, processPath, className }: { exe: string; processPath?: string; className: string }) {
-  const cacheKey = exe;
+  const cacheKey = `${exe.toLowerCase()}|${processPath ?? ""}`;
   const [iconSrc, setIconSrc] = useState<string | null>(() => {
     const cached = exeIconCache.get(cacheKey);
     return cached ? `data:image/png;base64,${cached}` : null;

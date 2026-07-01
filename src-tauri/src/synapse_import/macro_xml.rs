@@ -36,8 +36,8 @@ pub fn parse_macro_xml_str(
     fallback_name: String,
     warnings: &mut Vec<ImportWarning>,
 ) -> Result<ParsedMacro, MacroXmlError> {
-    use quick_xml::events::Event;
     use quick_xml::Reader;
+    use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(raw);
     reader.trim_text(true);
@@ -172,9 +172,10 @@ fn build_steps(
     let mut normalized: Vec<NormalizedEvent> = Vec::new();
     for ev in events {
         if let Some(delay_ms) = ev.delay_ms
-            && delay_ms > 0 {
-                normalized.push(NormalizedEvent::Delay(delay_ms));
-            }
+            && delay_ms > 0
+        {
+            normalized.push(NormalizedEvent::Delay(delay_ms));
+        }
         if ev.ty != "1" {
             // `Type` mirrors the v4 integer convention (0=delay, 1=key, 2=mouse;
             // see `format_v4::event_type`). Mouse events were already dropped
@@ -192,7 +193,9 @@ fn build_steps(
             }
             continue;
         }
-        let Some(makecode_val) = ev.makecode else { continue };
+        let Some(makecode_val) = ev.makecode else {
+            continue;
+        };
         let state = ev.state.unwrap_or(0);
         normalized.push(NormalizedEvent::Key {
             makecode: makecode_val,
@@ -224,7 +227,10 @@ pub fn parse_macros_in_dir(
         if !path.is_file() {
             continue;
         }
-        if path.extension().and_then(|s| s.to_str()).map(|s| s.eq_ignore_ascii_case("xml"))
+        if path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.eq_ignore_ascii_case("xml"))
             != Some(true)
         {
             continue;
@@ -242,16 +248,17 @@ pub fn parse_macros_in_dir(
         }
         // Reject oversized files before reading them into memory.
         if let Ok(meta) = entry.metadata()
-            && meta.len() > MAX_XML_MACRO_BYTES {
-                warnings.push(ImportWarning::new(
-                    "macro_xml_too_large",
-                    format!(
-                        "Skipped `{}`: exceeds the {MAX_XML_MACRO_BYTES}-byte macro-file limit.",
-                        path.display()
-                    ),
-                ));
-                continue;
-            }
+            && meta.len() > MAX_XML_MACRO_BYTES
+        {
+            warnings.push(ImportWarning::new(
+                "macro_xml_too_large",
+                format!(
+                    "Skipped `{}`: exceeds the {MAX_XML_MACRO_BYTES}-byte macro-file limit.",
+                    path.display()
+                ),
+            ));
+            continue;
+        }
         let name = path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -409,11 +416,17 @@ mod tests {
         let mut warnings = Vec::new();
         let parsed = parse_macro_xml_str(xml, "M".into(), &mut warnings).unwrap();
         assert!(
-            warnings.iter().any(|w| w.code == "macro_mouse_event_skipped"),
+            warnings
+                .iter()
+                .any(|w| w.code == "macro_mouse_event_skipped"),
             "mouse event must emit macro_mouse_event_skipped, got {warnings:?}"
         );
         // The mouse event produced no Send/Sleep; only the A key-down/up remains.
-        assert_eq!(parsed.steps.len(), 1, "only the key Send step should remain");
+        assert_eq!(
+            parsed.steps.len(),
+            1,
+            "only the key Send step should remain"
+        );
         assert!(matches!(&parsed.steps[0], ParsedSequenceStep::Send { value } if value == "A"));
     }
 
@@ -429,7 +442,9 @@ mod tests {
         let mut warnings = Vec::new();
         let parsed = parse_macro_xml_str(xml, "A".into(), &mut warnings).unwrap();
         assert!(
-            !warnings.iter().any(|w| w.code == "macro_mouse_event_skipped"),
+            !warnings
+                .iter()
+                .any(|w| w.code == "macro_mouse_event_skipped"),
             "actionBar must not emit a mouse warning, got {warnings:?}"
         );
         assert_eq!(parsed.steps.len(), 1);
@@ -477,7 +492,10 @@ mod edge_proptests {
     fn boundary_empty_string_returns_shape_error() {
         let mut w = Vec::new();
         let res = parse_macro_xml_str("", "fallback".into(), &mut w);
-        assert!(matches!(res, Err(MacroXmlError::Shape)), "empty XML must be Shape error, got {res:?}");
+        assert!(
+            matches!(res, Err(MacroXmlError::Shape)),
+            "empty XML must be Shape error, got {res:?}"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -488,7 +506,10 @@ mod edge_proptests {
     fn boundary_whitespace_xml_returns_shape_error() {
         let mut w = Vec::new();
         let res = parse_macro_xml_str("   \n\t  ", "fallback".into(), &mut w);
-        assert!(matches!(res, Err(MacroXmlError::Shape | MacroXmlError::Xml(_))));
+        assert!(matches!(
+            res,
+            Err(MacroXmlError::Shape | MacroXmlError::Xml(_))
+        ));
     }
 
     // -----------------------------------------------------------------------
@@ -591,8 +612,12 @@ mod edge_proptests {
         let parsed = parse_macro_xml_str(xml, "N".into(), &mut w).unwrap();
         // Negative delay should NOT appear as a Sleep step.
         assert!(
-            parsed.steps.iter().all(|s| !matches!(s, ParsedSequenceStep::Sleep { .. })),
-            "negative delay must not produce a Sleep step; steps={:?}", parsed.steps
+            parsed
+                .steps
+                .iter()
+                .all(|s| !matches!(s, ParsedSequenceStep::Sleep { .. })),
+            "negative delay must not produce a Sleep step; steps={:?}",
+            parsed.steps
         );
     }
 
@@ -633,7 +658,7 @@ mod edge_proptests {
             r#"<Macro><Name>D</Name><MacroEvents>
               <MacroEvent><Type>0</Type><Delay>{}</Delay></MacroEvent>
             </MacroEvents><Guid>g-dover</Guid></Macro>"#,
-            u64::MAX  // too big for u32, text.parse::<u32>() will return Err → None
+            u64::MAX // too big for u32, text.parse::<u32>() will return Err → None
         );
         let mut w = Vec::new();
         // Must not panic; the out-of-range delay is simply dropped.
@@ -651,7 +676,8 @@ mod edge_proptests {
               <MacroEvent><Type>1</Type><KeyEvent><Makecode>{}</Makecode><State>0</State></KeyEvent></MacroEvent>
               <MacroEvent><Type>1</Type><KeyEvent><Makecode>{}</Makecode><State>1</State></KeyEvent></MacroEvent>
             </MacroEvents><Guid>g-mover</Guid></Macro>"#,
-            u64::MAX, u64::MAX
+            u64::MAX,
+            u64::MAX
         );
         let mut w = Vec::new();
         // parse::<u16>() will fail → makecode=None → event skipped (no panic).
@@ -672,7 +698,10 @@ mod edge_proptests {
         // an unknown entity is tolerated (kept as raw text) rather than rejected.
         // The contract here is "must not panic"; genuinely broken *structure* is
         // covered by the unclosed-tag test below.
-        assert!(res.is_ok(), "unknown XML entity should be tolerated by quick-xml, not error");
+        assert!(
+            res.is_ok(),
+            "unknown XML entity should be tolerated by quick-xml, not error"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -684,7 +713,10 @@ mod edge_proptests {
         let xml = "<Macro><Name>Unclosed<MacroEvents><MacroEvent><Type>1</Type>";
         let mut w = Vec::new();
         let res = parse_macro_xml_str(xml, "u".into(), &mut w);
-        assert!(matches!(res, Err(MacroXmlError::Xml(_) | MacroXmlError::Shape)));
+        assert!(matches!(
+            res,
+            Err(MacroXmlError::Xml(_) | MacroXmlError::Shape)
+        ));
     }
 
     // -----------------------------------------------------------------------

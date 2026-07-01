@@ -26,7 +26,7 @@ import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
-import { SettingsWorkspace } from "./components/SettingsWorkspace";
+import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
 import { TitleBar } from "./components/TitleBar";
@@ -85,13 +85,15 @@ function App() {
 
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [toast, setToast] = useState<ToastState | null>(null);
+  const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastSeqRef = useRef(0);
   const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
+  const [settingsDeepLink, setSettingsDeepLink] = useState<SettingsDeepLink | null>(null);
 
   const showToast = useCallback((message: string, kind?: ToastState["kind"], action?: ToastState["action"]) => {
     toastSeqRef.current += 1;
-    setToast({ id: toastSeqRef.current, message, kind, action });
+    const next = { id: toastSeqRef.current, message, kind, action };
+    setToasts((current) => [...current.slice(-2), next]);
   }, []);
 
   const handleAutoSaveFailed = useCallback(
@@ -232,14 +234,14 @@ function App() {
       if (kind === "openConfigFolder") {
         try {
           await openConfigFolder();
-        } catch {
-          // swallow — modal stays visible for the user
+        } catch (unknownError) {
+          setError(normalizeCommandError(unknownError));
         }
         return;
       }
       if (kind === "retry") {
         setError(null);
-        void refreshConfig();
+        await refreshConfig();
         return;
       }
       if (kind === "openLastBackup") {
@@ -252,16 +254,22 @@ function App() {
             (b) => b.kind.kind === "lastKnownGood",
           );
           const target = rolling1 ?? lastKnownGood ?? backups[0];
-          if (!target) return;
+          if (!target) {
+            setError({
+              code: "backup_unavailable",
+              message: t("backup.empty"),
+            });
+            return;
+          }
           await restoreConfigFromBackup(target.path);
           setError(null);
-          refreshConfig();
-        } catch {
-          // swallow — modal stays visible for the user
+          await refreshConfig();
+        } catch (unknownError) {
+          setError(normalizeCommandError(unknownError));
         }
       }
     },
-    [refreshConfig, setError],
+    [refreshConfig, setError, t],
   );
 
   const logPanel = useLogPanel();
@@ -299,7 +307,7 @@ function App() {
     async (copyFromRoaming: boolean) => {
       try {
         await acceptPortableMigration(copyFromRoaming);
-        refreshConfig();
+        await refreshConfig();
         // The capture runtime was started with the default-seed config that
         // load_config auto-created during startup, racing with our prompt.
         // After the migration overwrites config.json with the roaming copy
@@ -532,7 +540,9 @@ function App() {
         handleRedoWithToast();
         break;
       case "reload":
-        void refreshConfig();
+        void refreshConfig().catch((unknownError) => {
+          setError(normalizeCommandError(unknownError));
+        });
         break;
       case "new-profile":
         handleCreateProfile();
@@ -545,10 +555,14 @@ function App() {
         setAddRuleSignal(true);
         break;
       case "open-config-folder":
-        void openConfigFolder();
+        void openConfigFolder().catch((unknownError) => {
+          setError(normalizeCommandError(unknownError));
+        });
         break;
       case "capture-window":
-        void handleCaptureActiveWindow();
+        void handleCaptureActiveWindow().catch((unknownError) => {
+          setError(normalizeCommandError(unknownError));
+        });
         break;
       case "tab-profiles":
         switchWorkspaceMode("profiles");
@@ -741,10 +755,7 @@ function App() {
     : null;
   function handleResetVerificationSession() {
     verification.handleResetVerificationSession((modal) => {
-      setConfirmModal({
-        ...modal,
-        onConfirm: () => { modal.onConfirm(); setConfirmModal(null); },
-      });
+      setConfirmModal(modal);
     });
   }
 
@@ -859,6 +870,7 @@ function App() {
                 setError={setError}
                 onRequestSynapseImport={setSynapseParsed}
                 showToast={showToast}
+                deepLink={settingsDeepLink}
               />
             ) : (
               <DebugWorkspace
@@ -953,6 +965,9 @@ function App() {
           confirmLabel={confirmModal.confirmLabel}
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
+          secondaryConfirmLabel={confirmModal.secondaryConfirmLabel}
+          secondaryDanger={confirmModal.secondaryDanger}
+          onSecondaryConfirm={confirmModal.onSecondaryConfirm}
           onCancel={() => setConfirmModal(null)}
         />
       ) : null}
@@ -992,7 +1007,7 @@ function App() {
           setError={setError}
         />
       ) : null}
-      <Toast toast={toast} onDismiss={() => setToast(null)} />
+      <Toast toast={toasts[0] ?? null} onDismiss={() => setToasts((current) => current.slice(1))} />
 
       {commandPaletteOpen ? (
         <CommandPalette
@@ -1013,10 +1028,13 @@ function App() {
             startTransition(() => setSelectedControlId(b.controlId));
             if (workspaceMode !== "profiles") switchWorkspaceMode("profiles");
           }}
-          onSelectSnippet={() => {
-            // ponytail: the snippet library lives in Settings; a precise deep-link
-            // to its tab is deferred — navigate to Settings is enough for v1.
+          onSelectSnippet={(snippet) => {
             setCommandPaletteOpen(false);
+            setSettingsDeepLink({
+              tab: "snippets",
+              snippetId: snippet.id,
+              nonce: Date.now(),
+            });
             switchWorkspaceMode("settings");
           }}
         />

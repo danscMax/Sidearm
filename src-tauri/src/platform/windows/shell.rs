@@ -10,14 +10,14 @@ use windows_sys::Win32::{
     Storage::FileSystem::SearchPathW,
     System::{
         Diagnostics::ToolHelp::{
-            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+            CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW,
             TH32CS_SNAPPROCESS,
         },
         Registry::{
-            RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
-            KEY_QUERY_VALUE, REG_EXPAND_SZ, REG_SZ,
+            HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_QUERY_VALUE, REG_EXPAND_SZ, REG_SZ,
+            RegCloseKey, RegOpenKeyExW, RegQueryValueExW,
         },
-        Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
+        Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW},
     },
 };
 
@@ -26,16 +26,13 @@ use windows_sys::Win32::{
 /// Most installed applications register their full path under:
 ///   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\<exe>`
 pub(crate) fn lookup_app_paths_registry(exe_name: &str) -> Option<String> {
-    let subkey = format!(
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}"
-    );
+    let subkey = format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}");
     let wide_subkey: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
 
     for &hive in &[HKEY_LOCAL_MACHINE, HKEY_CURRENT_USER] {
         let mut hkey = std::ptr::null_mut();
-        let status = unsafe {
-            RegOpenKeyExW(hive, wide_subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey)
-        };
+        let status =
+            unsafe { RegOpenKeyExW(hive, wide_subkey.as_ptr(), 0, KEY_QUERY_VALUE, &mut hkey) };
         if status != 0 || hkey.is_null() {
             continue;
         }
@@ -251,7 +248,10 @@ pub(crate) fn open_target(target: &str) -> Result<(), String> {
         )
     };
     if (result as isize) <= 32 {
-        return Err(format!("ShellExecuteW failed to open `{target}` (code {})", result as isize));
+        return Err(format!(
+            "ShellExecuteW failed to open `{target}` (code {})",
+            result as isize
+        ));
     }
     Ok(())
 }

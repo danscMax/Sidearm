@@ -7,22 +7,33 @@ import type { AppPathsInfo, PathMode } from "../lib/config";
 export function PortableBadge() {
   const { t } = useTranslation();
   const [info, setInfo] = useState<AppPathsInfo | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void getAppPaths()
       .then((paths) => {
-        if (!cancelled) setInfo(paths);
+        if (!cancelled) {
+          setInfo(paths);
+          setError(null);
+        }
       })
       .catch((error) => {
         console.error("getAppPaths failed:", error);
+        if (!cancelled) setError(String(error));
       });
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (!info) return null;
+  if (!info) {
+    return error ? (
+      <span className="portable-badge portable-badge--fallback" title={error}>
+        {t("portable.badge.error")}
+      </span>
+    ) : null;
+  }
 
   const label = labelForMode(info.mode, t);
   const shortPath = truncateMiddle(info.configDir, 32);
@@ -33,7 +44,9 @@ export function PortableBadge() {
       type="button"
       className={`portable-badge portable-badge--${info.mode}`}
       onClick={() => {
-        void openConfigFolder().catch(() => {});
+        void openConfigFolder().catch((unknownError) => {
+          setError(String(unknownError));
+        });
       }}
       title={tooltip}
     >

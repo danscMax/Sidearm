@@ -7,6 +7,7 @@ import {
   normalizeCommandError,
 } from "../lib/backend";
 import { toggleInSet } from "../lib/helpers";
+import { displayNameForControlId } from "../lib/labels";
 import type {
   ImportSummary,
   MergeStrategy,
@@ -147,17 +148,19 @@ export function SynapseImportModal({
                                   : undefined
                               }
                             >
-                              <span className="synapse-binding-list__control">
-                                {b.controlId}
+                              <span className="synapse-binding-list__control" title={b.controlId}>
+                                {displayNameForControlId(b.controlId)}
                               </span>
                               <span className="synapse-binding-list__layer">
-                                {b.layer}
+                                {b.layer === "hypershift" ? t("layer.hypershift") : t("layer.standard")}
                               </span>
                               <span className="synapse-binding-list__label">
                                 {b.label}
                               </span>
                               <span className="synapse-binding-list__kind">
-                                {b.action.kind}
+                                {b.action.kind === "unmappable"
+                                  ? t("synapseImport.unmappable")
+                                  : t(`action.type.${b.action.kind}`)}
                               </span>
                             </li>
                           );
@@ -210,18 +213,11 @@ export function SynapseImportModal({
                 })}
               </summary>
               <ul>
-                {parsed.warnings.slice(0, 20).map((w, i) => (
+                {parsed.warnings.map((w, i) => (
                   <li key={i}>
                     <code>[{w.code}]</code> {w.message}
                   </li>
                 ))}
-                {parsed.warnings.length > 20 ? (
-                  <li className="panel__muted">
-                    {t("synapseImport.warningsMore", {
-                      count: parsed.warnings.length - 20,
-                    })}
-                  </li>
-                ) : null}
               </ul>
             </details>
           ) : null}

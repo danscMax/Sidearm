@@ -18,18 +18,18 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 
-use quick_xml::events::Event;
 use quick_xml::Reader;
+use quick_xml::events::Event;
 
 use super::macro_xml;
 use super::makecode;
 use super::mapping::{
-    input_id_to_control_id, mouse_action_from_assignment, parse_modifier_string,
-    translate_key_token, vk_to_key, KeyTranslationError,
+    KeyTranslationError, input_id_to_control_id, mouse_action_from_assignment,
+    parse_modifier_string, translate_key_token, vk_to_key,
 };
 use super::types::{
-    default_label_for, ImportWarning, ParsedAction, ParsedBinding, ParsedMacro,
-    ParsedProfile, ParsedSynapseProfiles, SourceKind,
+    ImportWarning, ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile, ParsedSynapseProfiles,
+    SourceKind, default_label_for,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -44,9 +44,13 @@ pub enum SynapseV3Error {
     NotSynapseV3,
     #[error("Archive has too many entries ({0}); refusing to read (possible zip bomb).")]
     TooManyEntries(usize),
-    #[error("Archive entry `{0}` is too large ({1} bytes uncompressed); refusing to read (possible zip bomb).")]
+    #[error(
+        "Archive entry `{0}` is too large ({1} bytes uncompressed); refusing to read (possible zip bomb)."
+    )]
     EntryTooLarge(String, u64),
-    #[error("Archive total uncompressed size ({0} bytes) exceeds the limit; refusing to read (possible zip bomb).")]
+    #[error(
+        "Archive total uncompressed size ({0} bytes) exceeds the limit; refusing to read (possible zip bomb)."
+    )]
     ArchiveTooLarge(u64),
 }
 
@@ -238,13 +242,9 @@ fn collect_profile_bindings<R: Read + std::io::Seek>(
         if !raw.contains("<Mappings") {
             continue;
         }
-        if let Err(e) = parse_v3_mapping_list(
-            &raw,
-            macros_by_guid,
-            profile_name,
-            &mut bindings,
-            warnings,
-        ) {
+        if let Err(e) =
+            parse_v3_mapping_list(&raw, macros_by_guid, profile_name, &mut bindings, warnings)
+        {
             warnings.push(
                 ImportWarning::new(
                     "v3_mappings_parse_failed",
@@ -267,9 +267,10 @@ fn collect_referenced_macros(
     for b in bindings {
         if let ParsedAction::Sequence { macro_guid } = &b.action
             && seen.insert(macro_guid.clone())
-                && let Some(m) = macros_by_guid.get(macro_guid) {
-                    out.push(m.clone());
-                }
+            && let Some(m) = macros_by_guid.get(macro_guid)
+        {
+            out.push(m.clone());
+        }
     }
     out
 }
@@ -338,10 +339,10 @@ fn parse_v3_mapping_list(
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 if tag == "Mapping"
                     && let Some(b) = current_event.take()
-                        && let Some(binding) = build_binding(b, macros_by_guid, profile_name, warnings)
-                        {
-                            bindings.push(binding);
-                        }
+                    && let Some(binding) = build_binding(b, macros_by_guid, profile_name, warnings)
+                {
+                    bindings.push(binding);
+                }
                 stack.pop();
             }
             Event::Empty(_) => {
@@ -394,7 +395,11 @@ fn build_binding(
     warnings: &mut Vec<ImportWarning>,
 ) -> Option<ParsedBinding> {
     let (source_input_id, control_id) = resolve_input(&b, profile_name, warnings)?;
-    let layer = if b.is_hypershift { "hypershift" } else { "standard" };
+    let layer = if b.is_hypershift {
+        "hypershift"
+    } else {
+        "standard"
+    };
 
     // Skip hypershift-on-hypershift-button silently (Razer no-op default).
     if control_id == "hypershift_button" && b.output_group == OutputGroup::None {
@@ -441,10 +446,7 @@ fn resolve_input(
             warnings.push(
                 ImportWarning::new(
                     "v3_unmappable_mouse",
-                    format!(
-                        "Mouse input `{}` has no Sidearm equivalent.",
-                        b.mouse_input
-                    ),
+                    format!("Mouse input `{}` has no Sidearm equivalent.", b.mouse_input),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -514,16 +516,16 @@ fn build_shortcut_from_key_group(
     warnings: &mut Vec<ImportWarning>,
 ) -> ParsedAction {
     let mut mods = parse_modifier_string(&b.key_modifier);
-    let key_name: Option<String> = b
-        .key_vk
-        .and_then(vk_to_key)
-        .map(|s| s.to_string())
-        .or_else(|| {
-            // Fallback to scancode via our makecode table.
-            b.key_scancode
-                .and_then(|code| makecode::makecode_to_key(code, false))
-                .map(|s| s.to_string())
-        });
+    let key_name: Option<String> =
+        b.key_vk
+            .and_then(vk_to_key)
+            .map(|s| s.to_string())
+            .or_else(|| {
+                // Fallback to scancode via our makecode table.
+                b.key_scancode
+                    .and_then(|code| makecode::makecode_to_key(code, false))
+                    .map(|s| s.to_string())
+            });
 
     let key = match key_name {
         Some(k) => k,
@@ -696,8 +698,14 @@ mod tests {
         let macros: HashMap<String, ParsedMacro> = HashMap::new();
         let mut bindings: Vec<ParsedBinding> = Vec::new();
         let mut warnings: Vec<ImportWarning> = Vec::new();
-        parse_v3_mapping_list(MAPPING_SAMPLE, &macros, "Test", &mut bindings, &mut warnings)
-            .expect("parse");
+        parse_v3_mapping_list(
+            MAPPING_SAMPLE,
+            &macros,
+            "Test",
+            &mut bindings,
+            &mut warnings,
+        )
+        .expect("parse");
         assert_eq!(bindings.len(), 3);
         // LeftClick → mouse_left → Click → leftClick
         assert_eq!(bindings[0].control_id, "mouse_left");
@@ -708,7 +716,9 @@ mod tests {
         // DKM_M_01 → thumb_01, VK 72 = VK_H → "H", modifiers Ctrl+Shift
         assert_eq!(bindings[1].control_id, "thumb_01");
         match &bindings[1].action {
-            ParsedAction::Shortcut { key, ctrl, shift, .. } => {
+            ParsedAction::Shortcut {
+                key, ctrl, shift, ..
+            } => {
                 assert_eq!(key, "H");
                 assert!(*ctrl);
                 assert!(*shift);
@@ -777,12 +787,18 @@ mod tests {
             Err(SynapseV3Error::ArchiveTooLarge(_))
         ));
         // A realistic small export passes.
-        assert!(enforce_zip_budget(
-            3,
-            [("DeviceInfo.xml", 1_000u64), ("Profiles/p.xml", 2_000), ("Macros/m.xml", 3_000)]
+        assert!(
+            enforce_zip_budget(
+                3,
+                [
+                    ("DeviceInfo.xml", 1_000u64),
+                    ("Profiles/p.xml", 2_000),
+                    ("Macros/m.xml", 3_000)
+                ]
                 .into_iter()
-        )
-        .is_ok());
+            )
+            .is_ok()
+        );
     }
 }
 
@@ -801,10 +817,7 @@ mod edge_proptests {
 
     #[test]
     fn boundary_exactly_max_entries_passes() {
-        assert!(enforce_zip_budget(
-            MAX_ZIP_ENTRIES,
-            std::iter::empty::<(&str, u64)>()
-        ).is_ok());
+        assert!(enforce_zip_budget(MAX_ZIP_ENTRIES, std::iter::empty::<(&str, u64)>()).is_ok());
     }
 
     #[test]
@@ -886,7 +899,10 @@ mod edge_proptests {
     fn null_empty_profile_xml_uses_fallbacks() {
         let (guid, name) = parse_v3_profile_meta("<Profile></Profile>").unwrap();
         // guid starts with "v3-" prefix when empty; name uses the guid.
-        assert!(guid.starts_with("v3-"), "expected fallback guid, got {guid}");
+        assert!(
+            guid.starts_with("v3-"),
+            "expected fallback guid, got {guid}"
+        );
         assert!(!name.is_empty());
     }
 
@@ -899,7 +915,10 @@ mod edge_proptests {
         let xml = "<Profile><Name>Test</Name></Profile>";
         let (guid, name) = parse_v3_profile_meta(xml).unwrap();
         assert_eq!(name, "Test");
-        assert!(guid.starts_with("v3-"), "expected v3-{name} fallback, got {guid}");
+        assert!(
+            guid.starts_with("v3-"),
+            "expected v3-{name} fallback, got {guid}"
+        );
     }
 
     // -----------------------------------------------------------------------

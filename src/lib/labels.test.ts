@@ -20,6 +20,7 @@ import {
   labelForCapability,
   labelForLayer,
   labelForVerificationResult,
+  displayNameForControlId,
   actionCategoryIcon,
   surfacePrimaryLabel,
 } from "./labels";
@@ -164,6 +165,13 @@ describe("labelForEncoderSource", () => {
 
   it("returns placeholder for undefined", () => {
     expect(labelForEncoderSource(undefined)).toBe("н/д");
+  });
+});
+
+describe("displayNameForControlId", () => {
+  it("localizes known control ids and preserves unknown ids", () => {
+    expect(displayNameForControlId("thumb_01")).toBe("Кнопка 1");
+    expect(displayNameForControlId("unknown_control")).toBe("unknown_control");
   });
 });
 

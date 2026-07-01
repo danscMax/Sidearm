@@ -148,16 +148,32 @@ mod edge_proptests {
         let win_group = [VK_LWIN, VK_RWIN];
 
         for &vk in ctrl_group.iter() {
-            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Ctrl), "vk={vk:#04x}");
+            assert_eq!(
+                classify_modifier_vk(vk),
+                Some(ModifierKind::Ctrl),
+                "vk={vk:#04x}"
+            );
         }
         for &vk in shift_group.iter() {
-            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Shift), "vk={vk:#04x}");
+            assert_eq!(
+                classify_modifier_vk(vk),
+                Some(ModifierKind::Shift),
+                "vk={vk:#04x}"
+            );
         }
         for &vk in alt_group.iter() {
-            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Alt), "vk={vk:#04x}");
+            assert_eq!(
+                classify_modifier_vk(vk),
+                Some(ModifierKind::Alt),
+                "vk={vk:#04x}"
+            );
         }
         for &vk in win_group.iter() {
-            assert_eq!(classify_modifier_vk(vk), Some(ModifierKind::Win), "vk={vk:#04x}");
+            assert_eq!(
+                classify_modifier_vk(vk),
+                Some(ModifierKind::Win),
+                "vk={vk:#04x}"
+            );
         }
 
         // Verify no overlap between groups
@@ -229,12 +245,13 @@ mod edge_proptests {
     fn unassigned_vk_range_samples_return_none() {
         // A sample of well-known unassigned/reserved VK codes.
         let unassigned = [
-            0x00u16, 0x07, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40,
-            0x5E, 0x88, 0x97, 0xB8, 0xC1, 0xE0, 0xE8, 0xF5,
+            0x00u16, 0x07, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x40, 0x5E, 0x88, 0x97, 0xB8, 0xC1,
+            0xE0, 0xE8, 0xF5,
         ];
         for &vk in &unassigned {
             assert_eq!(
-                classify_modifier_vk(vk), None,
+                classify_modifier_vk(vk),
+                None,
                 "unassigned vk={vk:#04x} should not classify as a modifier"
             );
         }

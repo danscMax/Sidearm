@@ -22,7 +22,6 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "global-shortcut:allow-register",
-    "notification:default",
     "log:default"
   ]
 }

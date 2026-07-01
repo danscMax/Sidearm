@@ -5,10 +5,10 @@
 use windows_sys::Win32::{
     Foundation::SIZE,
     Graphics::Gdi::{
-        CreateFontW, DeleteObject, GetDC, GetDeviceCaps, GetMonitorInfoW, GetTextExtentPoint32W,
-        MonitorFromPoint, ReleaseDC, SelectObject, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET,
-        DEFAULT_PITCH, DEFAULT_QUALITY, LOGPIXELSX, MONITORINFO, MONITOR_DEFAULTTONEAREST,
-        OUT_DEFAULT_PRECIS,
+        CLIP_DEFAULT_PRECIS, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY,
+        DeleteObject, GetDC, GetDeviceCaps, GetMonitorInfoW, GetTextExtentPoint32W, LOGPIXELSX,
+        MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, OUT_DEFAULT_PRECIS, ReleaseDC,
+        SelectObject,
     },
     UI::{
         HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI},
@@ -57,7 +57,10 @@ pub(crate) fn measure_text_width(
 ) -> i32 {
     unsafe {
         let hdc = GetDC(std::ptr::null_mut());
-        let family_wide: Vec<u16> = font_family.encode_utf16().chain(std::iter::once(0)).collect();
+        let family_wide: Vec<u16> = font_family
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
         let hfont = CreateFontW(
             -font_size_px,
             0,
@@ -110,9 +113,10 @@ pub(crate) fn position_osd_on_monitor(
             OsdPosition::TopLeft => (wa.left + margin, wa.top + margin),
             OsdPosition::TopRight => (wa.right - outer_width - margin, wa.top + margin),
             OsdPosition::BottomLeft => (wa.left + margin, wa.bottom - outer_height - margin),
-            OsdPosition::BottomRight => {
-                (wa.right - outer_width - margin, wa.bottom - outer_height - margin)
-            }
+            OsdPosition::BottomRight => (
+                wa.right - outer_width - margin,
+                wa.bottom - outer_height - margin,
+            ),
         }
     }
 }

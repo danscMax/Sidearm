@@ -5,8 +5,8 @@
 //! 2. Synapse `KEY_*` token → Sidearm keyboard `key` string + modifier booleans
 //! 3. Synapse `outputType` → Sidearm `actionType`
 
-use std::sync::LazyLock;
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use super::types::{ImportWarning, ParsedAction};
 
@@ -37,8 +37,8 @@ pub static THUMB_GRID_V4: LazyLock<HashMap<&'static str, &'static str>> = LazyLo
 pub static THUMB_GRID_DKM: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     let mut m = HashMap::new();
     for (i, thumb) in [
-        "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06",
-        "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
+        "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06", "thumb_07",
+        "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
     ]
     .iter()
     .enumerate()
@@ -236,9 +236,10 @@ pub fn translate_key_token(token: &str) -> Result<String, KeyTranslationError> {
             // Function keys exist only as F1..=F24. Reject F0, F25+ and absurd
             // numbers instead of blindly accepting any digit tail.
             if let Ok(n) = tail.parse::<u8>()
-                && (1..=24).contains(&n) {
-                    return Ok(rest.to_string());
-                }
+                && (1..=24).contains(&n)
+            {
+                return Ok(rest.to_string());
+            }
         }
     }
     Err(KeyTranslationError::Unknown(token.to_string()))
@@ -435,8 +436,20 @@ mod tests {
 
     #[test]
     fn thumb_grid_v4_covers_all_twelve_slots() {
-        for slot in ["KEY_1", "KEY_2", "KEY_3", "KEY_4", "KEY_5", "KEY_6",
-                     "KEY_7", "KEY_8", "KEY_9", "KEY_0", "KEY_HYPEN", "KEY_EQUAL"] {
+        for slot in [
+            "KEY_1",
+            "KEY_2",
+            "KEY_3",
+            "KEY_4",
+            "KEY_5",
+            "KEY_6",
+            "KEY_7",
+            "KEY_8",
+            "KEY_9",
+            "KEY_0",
+            "KEY_HYPEN",
+            "KEY_EQUAL",
+        ] {
             assert!(THUMB_GRID_V4.contains_key(slot), "missing slot: {slot}");
         }
         assert_eq!(THUMB_GRID_V4.len(), 12);
@@ -453,26 +466,50 @@ mod tests {
 
     #[test]
     fn input_id_side_panel_uses_v4_table() {
-        assert_eq!(input_id_to_control_id("KeyInput", "KEY_3", true), Some("thumb_03"));
-        assert_eq!(input_id_to_control_id("KeyInput", "KEY_EQUAL", true), Some("thumb_12"));
+        assert_eq!(
+            input_id_to_control_id("KeyInput", "KEY_3", true),
+            Some("thumb_03")
+        );
+        assert_eq!(
+            input_id_to_control_id("KeyInput", "KEY_EQUAL", true),
+            Some("thumb_12")
+        );
     }
 
     #[test]
     fn input_id_mappings_uses_dkm_for_dkm_input() {
-        assert_eq!(input_id_to_control_id("DKMInput", "DKM_M_01", false), Some("thumb_01"));
+        assert_eq!(
+            input_id_to_control_id("DKMInput", "DKM_M_01", false),
+            Some("thumb_01")
+        );
     }
 
     #[test]
     fn input_id_mouse_buttons() {
-        assert_eq!(input_id_to_control_id("MouseInput", "LeftClick", false), Some("mouse_left"));
-        assert_eq!(input_id_to_control_id("MouseInput", "ScrollDown", false), Some("wheel_down"));
-        assert_eq!(input_id_to_control_id("MouseInput", "Mouse4", false), Some("mouse_4"));
-        assert_eq!(input_id_to_control_id("MouseInput", "Mouse_HS", false), Some("hypershift_button"));
+        assert_eq!(
+            input_id_to_control_id("MouseInput", "LeftClick", false),
+            Some("mouse_left")
+        );
+        assert_eq!(
+            input_id_to_control_id("MouseInput", "ScrollDown", false),
+            Some("wheel_down")
+        );
+        assert_eq!(
+            input_id_to_control_id("MouseInput", "Mouse4", false),
+            Some("mouse_4")
+        );
+        assert_eq!(
+            input_id_to_control_id("MouseInput", "Mouse_HS", false),
+            Some("hypershift_button")
+        );
     }
 
     #[test]
     fn input_id_unknown_returns_none() {
-        assert_eq!(input_id_to_control_id("MouseInput", "NoSuchButton", false), None);
+        assert_eq!(
+            input_id_to_control_id("MouseInput", "NoSuchButton", false),
+            None
+        );
     }
 
     #[test]
@@ -511,10 +548,7 @@ mod tests {
 
     #[test]
     fn parse_modifier_array_folds_to_flags() {
-        let flags = parse_modifier_array(&[
-            "KEY_LEFT_CTRL".into(),
-            "KEY_RIGHT_SHIFT".into(),
-        ]);
+        let flags = parse_modifier_array(&["KEY_LEFT_CTRL".into(), "KEY_RIGHT_SHIFT".into()]);
         assert_eq!(
             flags,
             ModifierFlags {
@@ -529,7 +563,10 @@ mod tests {
     #[test]
     fn translate_mouse_assignment_known_actions() {
         assert_eq!(translate_mouse_assignment("Click"), Some("leftClick"));
-        assert_eq!(translate_mouse_assignment("DoubleClick"), Some("doubleClick"));
+        assert_eq!(
+            translate_mouse_assignment("DoubleClick"),
+            Some("doubleClick")
+        );
         assert_eq!(translate_mouse_assignment("Menu"), None);
     }
 }
@@ -692,7 +729,8 @@ mod edge_proptests {
         // VK_F1=0x70 .. VK_F24=0x87
         for i in 0u16..24 {
             let vk = 0x70 + i;
-            let name = vk_to_key(vk).unwrap_or_else(|| panic!("VK F{} (0x{vk:02X}) should resolve", i + 1));
+            let name = vk_to_key(vk)
+                .unwrap_or_else(|| panic!("VK F{} (0x{vk:02X}) should resolve", i + 1));
             assert_eq!(name, format!("F{}", i + 1));
         }
     }

@@ -35,6 +35,9 @@ import { TriggerModeEditor } from "./action-picker/TriggerModeEditor";
    Action Picker Modal
    ───────────────────────────────────────────────────────── */
 
+const LAST_PICKER_CATEGORY_KEY = "sidearm:lastPickerCategory";
+const LEGACY_LAST_PICKER_CATEGORY_KEY = "naga-studio:lastPickerCategory";
+
 export function ActionPickerModal({
   config,
   bindingId,
@@ -101,22 +104,32 @@ export function ActionPickerModal({
     if (existingAction) {
       return ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut";
     }
-    const lastCategory = localStorage.getItem("naga-studio:lastPickerCategory");
+    const lastCategory =
+      localStorage.getItem(LAST_PICKER_CATEGORY_KEY) ??
+      localStorage.getItem(LEGACY_LAST_PICKER_CATEGORY_KEY);
     return lastCategory && ACTION_CATEGORIES.some((c) => c.id === lastCategory) ? lastCategory : "shortcut";
   });
 
   function setActiveCategoryWithMemory(cat: string) {
     setActiveCategory(cat);
     setNameDraft("");
-    localStorage.setItem("naga-studio:lastPickerCategory", cat);
+    localStorage.setItem(LAST_PICKER_CATEGORY_KEY, cat);
+    localStorage.removeItem(LEGACY_LAST_PICKER_CATEGORY_KEY);
   }
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredCategories = searchQuery.trim()
-    ? ACTION_CATEGORIES.filter((cat) =>
-        t(cat.label).toLowerCase().includes(searchQuery.trim().toLowerCase())
-      )
-    : ACTION_CATEGORIES;
+  const filteredCategories = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return ACTION_CATEGORIES;
+    return ACTION_CATEGORIES.filter((cat) =>
+      [
+        cat.id,
+        cat.actionType,
+        t(cat.label),
+        t(`action.type.${cat.actionType}`),
+      ].some((value) => value.toLowerCase().includes(q)),
+    );
+  }, [searchQuery, t]);
 
   const effectiveCategory = filteredCategories.some((c) => c.id === activeCategory)
     ? activeCategory

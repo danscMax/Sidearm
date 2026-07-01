@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ModalShell } from "./shared";
 import { useListKeyboard } from "../hooks/useListKeyboard";
@@ -53,30 +53,36 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
 
-  const PALETTE_COMMANDS = [
-    { id: "undo", label: t("command.undo"), shortcut: "Ctrl+Z" },
-    { id: "redo", label: t("command.redo"), shortcut: "Ctrl+Y" },
-    { id: "reload", label: t("command.reload"), shortcut: "" },
-    { id: "new-profile", label: t("command.newProfile"), shortcut: "Ctrl+N" },
-    { id: "duplicate-profile", label: t("command.duplicateProfile"), shortcut: "" },
-    { id: "add-rule", label: t("command.addRule"), shortcut: "Ctrl+Shift+A" },
-    { id: "open-config-folder", label: t("command.openConfigFolder"), shortcut: "" },
-    { id: "capture-window", label: t("command.captureWindow"), shortcut: "Ctrl+Shift+C" },
-    { id: "tab-profiles", label: t("command.gotoProfiles"), shortcut: "1" },
-    { id: "tab-debug", label: t("command.gotoDebug"), shortcut: "2" },
-    { id: "tab-settings", label: t("command.gotoSettings"), shortcut: "3" },
-    { id: "layer-standard", label: t("command.layerStandard"), shortcut: "" },
-    { id: "layer-hypershift", label: t("command.layerHypershift"), shortcut: "" },
-  ];
+  const paletteCommands = useMemo(
+    () => [
+      { id: "undo", label: t("command.undo"), shortcut: "Ctrl+Z" },
+      { id: "redo", label: t("command.redo"), shortcut: "Ctrl+Y" },
+      { id: "reload", label: t("command.reload"), shortcut: "" },
+      { id: "new-profile", label: t("command.newProfile"), shortcut: "Ctrl+N" },
+      { id: "duplicate-profile", label: t("command.duplicateProfile"), shortcut: "" },
+      { id: "add-rule", label: t("command.addRule"), shortcut: "Ctrl+Shift+A" },
+      { id: "open-config-folder", label: t("command.openConfigFolder"), shortcut: "" },
+      { id: "capture-window", label: t("command.captureWindow"), shortcut: "Ctrl+Shift+C" },
+      { id: "tab-profiles", label: t("command.gotoProfiles"), shortcut: "1" },
+      { id: "tab-debug", label: t("command.gotoDebug"), shortcut: "2" },
+      { id: "tab-settings", label: t("command.gotoSettings"), shortcut: "3" },
+      { id: "layer-standard", label: t("command.layerStandard"), shortcut: "" },
+      { id: "layer-hypershift", label: t("command.layerHypershift"), shortcut: "" },
+    ],
+    [t],
+  );
 
-  const layerLabel = (layer: Binding["layer"]) =>
-    layer === "hypershift" ? t("layer.hypershift") : t("layer.standard");
+  const layerLabel = useCallback(
+    (layer: Binding["layer"]) =>
+      layer === "hypershift" ? t("layer.hypershift") : t("layer.standard"),
+    [t],
+  );
 
   // Build the flat list of selectable rows (display order). Section headers are
   // injected at render time when the section changes; only rows are selectable.
   const rows: Row[] = useMemo(() => {
     const results = filterPaletteResults(query, {
-      commands: PALETTE_COMMANDS,
+      commands: paletteCommands,
       bindings,
       actionsById,
       snippets,
@@ -114,8 +120,19 @@ export function CommandPalette({
       }
     }
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, bindings, actionsById, profileNameById, snippets, recent]);
+  }, [
+    query,
+    paletteCommands,
+    bindings,
+    actionsById,
+    snippets,
+    onExecute,
+    profileNameById,
+    layerLabel,
+    onSelectBinding,
+    onSelectSnippet,
+    recent,
+  ]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -143,6 +160,10 @@ export function CommandPalette({
     );
 
   let prevSection: Section | null = null;
+  const listboxId = "command-palette-listbox";
+  const activeOptionId = rows[activeIndex]
+    ? `command-palette-option-${activeIndex}`
+    : undefined;
 
   return (
     <ModalShell
@@ -154,13 +175,18 @@ export function CommandPalette({
       <input
         className="command-palette__input"
         type="text"
+        role="combobox"
+        aria-expanded={rows.length > 0}
+        aria-controls={listboxId}
+        aria-activedescendant={activeOptionId}
+        aria-autocomplete="list"
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder={t("command.placeholder")}
         autoFocus
       />
       {rows.length > 0 ? (
-        <ul className="command-palette__list" role="listbox">
+        <ul id={listboxId} className="command-palette__list" role="listbox">
           {rows.map((row, index) => {
             const header =
               row.section !== prevSection ? (
@@ -173,6 +199,7 @@ export function CommandPalette({
               <Fragment key={`${row.section}:${row.key}`}>
                 {header}
                 <li
+                  id={`command-palette-option-${index}`}
                   role="option"
                   aria-selected={index === activeIndex}
                   className={`command-palette__item${index === activeIndex ? " command-palette__item--active" : ""}`}

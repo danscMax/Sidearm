@@ -98,6 +98,26 @@ export function AppSettings({
         )}
       </section>
 
+      {/* Global shortcut */}
+      <section className="settings-section">
+        <div className="settings-section__header">
+          <span className="settings-section__title">{t("settings.globalShortcutHeader")}</span>
+        </div>
+        <p className="panel__muted help-sm">{t("settings.globalShortcutHelp")}</p>
+        <input
+          className="settings-text-input"
+          type="text"
+          value={osd.globalShortcut ?? ""}
+          placeholder={t("settings.globalShortcutPlaceholder")}
+          onChange={(e) => {
+            const value = e.target.value;
+            updateSettings({ globalShortcut: value.trim() ? value : undefined });
+          }}
+          aria-label={t("settings.globalShortcutHeader")}
+          spellCheck={false}
+        />
+      </section>
+
       {/* Device name */}
       <section className="settings-section">
         <div className="settings-section__header">

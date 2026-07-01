@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { PasteMode, SnippetLibraryItem } from "../../lib/config";
-import { SelectField, Toggle } from "../shared";
+import { Notice, SelectField, Toggle } from "../shared";
 
 type TextDraft = { text: string; pasteMode: PasteMode; snippetId?: string };
 
@@ -27,6 +27,7 @@ export function TextSnippetEditor({
   // button into its own inline copy (link-vs-copy semantics).
   const linked = Boolean(draft.snippetId);
   const linkedSnippet = linked ? library.find((s) => s.id === draft.snippetId) : undefined;
+  const usesClipboardFastPath = draft.text.length > 100;
 
   return (
     <div className="editor-grid">
@@ -68,6 +69,11 @@ export function TextSnippetEditor({
           placeholder={t("picker.textPlaceholder")}
         />
       </label>
+      {usesClipboardFastPath ? (
+        <Notice variant="warning">
+          {t("picker.longTextClipboardWarning")}
+        </Notice>
+      ) : null}
 
       {/* The save-to-library toggle only applies to an inline snippet; a linked
           one is already in the library. Outer wrapper is a <div> (not <label>)

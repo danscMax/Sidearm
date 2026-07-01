@@ -90,6 +90,11 @@ const ERROR_MAP: Record<string, ErrorMapEntry> = {
     hintKey: "errors.invalidBackupPath.hint",
     actions: [OPEN_CONFIG_FOLDER, DISMISS],
   },
+  backup_unavailable: {
+    titleKey: "errors.backupUnavailable.title",
+    hintKey: "errors.backupUnavailable.hint",
+    actions: [OPEN_CONFIG_FOLDER, DISMISS],
+  },
   invalid_path: {
     titleKey: "errors.invalidPath.title",
     hintKey: "errors.invalidPath.hint",

@@ -494,7 +494,7 @@ export function ProfilesWorkspace({
             <button
               type="button"
               className="search-field__clear"
-              aria-label="Clear search"
+              aria-label={t("common.clearSearch")}
               onClick={() => setBindingSearch("")}
             >
               ×
@@ -531,6 +531,7 @@ export function ProfilesWorkspace({
                       onSelectLayer(r.binding.layer);
                       startTransition(() => setSelectedControlId(r.binding.controlId));
                       setSearchAllProfiles(false);
+                      setBindingSearch("");
                     }}
                   >
                     <span className="profiles__search-result-profile">{r.profileName}</span>

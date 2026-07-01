@@ -205,22 +205,15 @@ pub fn run_preview_action(
     );
 
     match (&action.action_type, &action.payload) {
-        (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => run_live_shortcut_action(
-            config,
-            action,
-            preview,
-            payload,
-            Some(action_id),
-        ),
+        (ActionType::Shortcut, ActionPayload::Shortcut(payload)) => {
+            run_live_shortcut_action(config, action, preview, payload, Some(action_id))
+        }
         (ActionType::TextSnippet, ActionPayload::TextSnippet(payload)) => {
             run_live_text_snippet_action(config, action, preview, payload, Some(action_id))
         }
-        (ActionType::Launch, ActionPayload::Launch(payload)) => run_live_launch_action(
-            action,
-            preview,
-            payload,
-            Some(action_id),
-        ),
+        (ActionType::Launch, ActionPayload::Launch(payload)) => {
+            run_live_launch_action(action, preview, payload, Some(action_id))
+        }
         (ActionType::Sequence, ActionPayload::Sequence(payload)) => {
             run_live_sequence_action(action, preview, payload, Some(action_id))
         }
@@ -365,10 +358,7 @@ fn summarize_action(
             let target = payload.target.trim();
             let open_via_shell = is_url_target(target) || Path::new(target).is_dir();
             let mut warnings = Vec::new();
-            if !open_via_shell
-                && Path::new(target).is_absolute()
-                && !Path::new(target).exists()
-            {
+            if !open_via_shell && Path::new(target).is_absolute() && !Path::new(target).exists() {
                 warnings.push("Путь к цели запуска не существует.".into());
             }
 
@@ -678,10 +668,7 @@ fn validate_live_sequence(payload: &crate::config::SequenceActionPayload) -> Res
             }
             SequenceStep::Text { value, .. } => {
                 if value.contains('\0') {
-                    return Err(
-                        "Текстовые шаги с NUL-символами не поддерживаются."
-                            .into(),
-                    );
+                    return Err("Текстовые шаги с NUL-символами не поддерживаются.".into());
                 }
             }
             SequenceStep::Send { value, .. } => {
@@ -821,13 +808,13 @@ fn run_live_media_key_action(
 ) -> Result<ActionExecutionEvent, ExecutorError> {
     // Map MediaKeyKind to Windows virtual key codes
     let vk: u16 = match key {
-        MediaKeyKind::PlayPause => 0xB3,   // VK_MEDIA_PLAY_PAUSE
-        MediaKeyKind::NextTrack => 0xB0,   // VK_MEDIA_NEXT_TRACK
-        MediaKeyKind::PrevTrack => 0xB1,   // VK_MEDIA_PREV_TRACK
-        MediaKeyKind::Stop => 0xB2,        // VK_MEDIA_STOP
-        MediaKeyKind::Mute => 0xAD,        // VK_VOLUME_MUTE
-        MediaKeyKind::VolumeDown => 0xAE,  // VK_VOLUME_DOWN
-        MediaKeyKind::VolumeUp => 0xAF,    // VK_VOLUME_UP
+        MediaKeyKind::PlayPause => 0xB3,  // VK_MEDIA_PLAY_PAUSE
+        MediaKeyKind::NextTrack => 0xB0,  // VK_MEDIA_NEXT_TRACK
+        MediaKeyKind::PrevTrack => 0xB1,  // VK_MEDIA_PREV_TRACK
+        MediaKeyKind::Stop => 0xB2,       // VK_MEDIA_STOP
+        MediaKeyKind::Mute => 0xAD,       // VK_VOLUME_MUTE
+        MediaKeyKind::VolumeDown => 0xAE, // VK_VOLUME_DOWN
+        MediaKeyKind::VolumeUp => 0xAF,   // VK_VOLUME_UP
     };
 
     input_synthesis::send_vk_tap(vk).map_err(|message| {
@@ -1032,10 +1019,7 @@ fn spawn_launch_target(
     }
 
     command.spawn().map(|child| child.id()).map_err(|error| {
-        log::error!(
-            "[executor] Launch failed for `{}`: {error}",
-            payload.target
-        );
+        log::error!("[executor] Launch failed for `{}`: {error}", payload.target);
         execution_error(
             "execution_failed",
             "выполнение",
@@ -1054,10 +1038,7 @@ fn validate_launch_request(
         return Err("Цель запуска должна быть абсолютным путём.".into());
     }
     if !target.exists() {
-        return Err(format!(
-            "Цель запуска `{}` не существует.",
-            payload.target
-        ));
+        return Err(format!("Цель запуска `{}` не существует.", payload.target));
     }
     if target.is_dir() {
         return Err(format!(
@@ -1267,8 +1248,8 @@ fn execution_error(
 mod tests {
     use super::*;
     use crate::{
-        config::{default_seed_config, ActionCondition},
-        resolver::{resolve_input_preview, ResolutionStatus},
+        config::{ActionCondition, default_seed_config},
+        resolver::{ResolutionStatus, resolve_input_preview},
     };
 
     #[test]
@@ -1377,7 +1358,10 @@ mod tests {
         let mut config = default_seed_config();
         let target = config.profiles[0].id.clone();
         let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
-        let action_id = preview.action_id.clone().expect("expected resolved action id");
+        let action_id = preview
+            .action_id
+            .clone()
+            .expect("expected resolved action id");
         let action = config
             .actions
             .iter_mut()
@@ -1612,8 +1596,8 @@ mod tests {
 mod edge_proptests {
     use super::*;
     use crate::config::{
-        ActionCondition, MenuItem, SequenceActionPayload, SequenceStep, ShortcutActionPayload,
-        PasteMode,
+        ActionCondition, MenuItem, PasteMode, SequenceActionPayload, SequenceStep,
+        ShortcutActionPayload,
     };
     use proptest::prelude::*;
 
@@ -1631,24 +1615,34 @@ mod edge_proptests {
     }
 
     fn arb_shortcut_payload() -> impl Strategy<Value = ShortcutActionPayload> {
-        (any::<bool>(), any::<bool>(), any::<bool>(), any::<bool>(), ".*").prop_map(
-            |(ctrl, shift, alt, win, key)| ShortcutActionPayload {
+        (
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            ".*",
+        )
+            .prop_map(|(ctrl, shift, alt, win, key)| ShortcutActionPayload {
                 key,
                 ctrl,
                 shift,
                 alt,
                 win,
                 raw: None,
-            },
-        )
+            })
     }
 
     fn leaf_menu_item() -> impl Strategy<Value = MenuItem> {
-        prop_oneof![
-            (".*", ".*", ".*", any::<bool>()).prop_map(|(id, label, action_id, enabled)| {
-                MenuItem::Action { id, label, action_id, enabled }
-            }),
-        ]
+        prop_oneof![(".*", ".*", ".*", any::<bool>()).prop_map(
+            |(id, label, action_id, enabled)| {
+                MenuItem::Action {
+                    id,
+                    label,
+                    action_id,
+                    enabled,
+                }
+            }
+        ),]
     }
 
     // -----------------------------------------------------------------------
@@ -2011,7 +2005,10 @@ mod edge_proptests {
     #[test]
     fn repeat_zero_skips_step() {
         let times = 0u32;
-        assert_eq!(times, 0, "repeat=0 must produce 0 iterations (step skipped)");
+        assert_eq!(
+            times, 0,
+            "repeat=0 must produce 0 iterations (step skipped)"
+        );
     }
 
     proptest! {
@@ -2046,7 +2043,10 @@ mod edge_proptests {
     fn paste_mode_name_total_coverage() {
         for mode in [PasteMode::ClipboardPaste, PasteMode::SendText] {
             let name = paste_mode_name(mode);
-            assert!(!name.is_empty(), "paste_mode_name must return a non-empty string");
+            assert!(
+                !name.is_empty(),
+                "paste_mode_name must return a non-empty string"
+            );
         }
     }
 
@@ -2059,18 +2059,27 @@ mod edge_proptests {
         // key.trim().is_empty() means whitespace-only keys must be omitted.
         let payload = ShortcutActionPayload {
             key: "   \t\n".into(),
-            ctrl: true, shift: false, alt: false, win: false,
+            ctrl: true,
+            shift: false,
+            alt: false,
+            win: false,
             raw: None,
         };
         let s = format_shortcut(&payload);
-        assert_eq!(s, "Ctrl", "whitespace-only key must not appear in shortcut label");
+        assert_eq!(
+            s, "Ctrl",
+            "whitespace-only key must not appear in shortcut label"
+        );
     }
 
     #[test]
     fn format_shortcut_empty_key_no_modifiers_is_empty() {
         let payload = ShortcutActionPayload {
             key: String::new(),
-            ctrl: false, shift: false, alt: false, win: false,
+            ctrl: false,
+            shift: false,
+            alt: false,
+            win: false,
             raw: None,
         };
         assert_eq!(format_shortcut(&payload), "");

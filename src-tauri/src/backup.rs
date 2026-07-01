@@ -10,8 +10,7 @@
 //! least once — distinct from the most recent save.
 
 use std::{
-    fs,
-    io,
+    fs, io,
     path::{Path, PathBuf},
 };
 
@@ -178,26 +177,34 @@ pub fn list_backups(config_dir: &Path) -> io::Result<Vec<BackupEntry>> {
 
     let snapshots_dir = config_dir.join(SNAPSHOTS_DIR_NAME);
     if snapshots_dir.is_dir()
-        && let Ok(read) = fs::read_dir(&snapshots_dir) {
-            for e in read.flatten() {
-                let path = e.path();
-                if path.extension().is_some_and(|ext| ext == "json") {
-                    let date_stem = path
-                        .file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("")
-                        .to_string();
-                    if let Some((bytes, modified_ms)) = entry_meta(&path) {
-                        entries.push(BackupEntry {
-                            path,
-                            kind: BackupKind::Snapshot(date_stem),
-                            bytes,
-                            modified_ms,
-                        });
-                    }
+        && let Ok(read) = fs::read_dir(&snapshots_dir)
+    {
+        for e in read {
+            let e = match e {
+                Ok(e) => e,
+                Err(error) => {
+                    log::warn!("[backup] Skipping unreadable snapshot entry: {error}");
+                    continue;
+                }
+            };
+            let path = e.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                let date_stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                if let Some((bytes, modified_ms)) = entry_meta(&path) {
+                    entries.push(BackupEntry {
+                        path,
+                        kind: BackupKind::Snapshot(date_stem),
+                        bytes,
+                        modified_ms,
+                    });
                 }
             }
         }
+    }
 
     entries.sort_by_key(|e| std::cmp::Reverse(e.modified_ms));
     Ok(entries)
@@ -228,7 +235,7 @@ pub fn check_backup_location(config_dir: &Path, candidate: &Path) -> BackupLocat
         Err(error) => {
             return BackupLocationCheck::Unresolvable(format!(
                 "cannot resolve backup path: {error}"
-            ))
+            ));
         }
     };
     let config_abs = match config_dir.canonicalize() {
@@ -236,7 +243,7 @@ pub fn check_backup_location(config_dir: &Path, candidate: &Path) -> BackupLocat
         Err(error) => {
             return BackupLocationCheck::Unresolvable(format!(
                 "cannot resolve config directory: {error}"
-            ))
+            ));
         }
     };
     if candidate_abs.starts_with(&config_abs) {
@@ -304,7 +311,9 @@ mod tests {
     fn rotate_creates_bak1_on_first_rotation() {
         let temp = tempfile::tempdir().expect("tempdir");
         write_config(temp.path(), "v1");
-        let bak1 = rotate_rolling_backups(temp.path()).expect("rotate").expect("some");
+        let bak1 = rotate_rolling_backups(temp.path())
+            .expect("rotate")
+            .expect("some");
         assert_eq!(bak1, temp.path().join("config.bak.1"));
         assert!(bak1.is_file());
     }
@@ -386,8 +395,7 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let dir = temp.path().to_path_buf();
         for day in 1..=20 {
-            fs::File::create(dir.join(format!("2020-01-{day:02}.json")))
-                .expect("create snap");
+            fs::File::create(dir.join(format!("2020-01-{day:02}.json"))).expect("create snap");
         }
         // Foreign / malformed *.json files must NOT count toward the cap and
         // must NOT evict real snapshots (regression guard for the old
@@ -467,5 +475,4 @@ mod tests {
         // 2020-02-29 (leap day) 00:00:00 UTC
         assert_eq!(ymd_from_unix_secs(1_582_934_400), (2020, 2, 29));
     }
-
 }

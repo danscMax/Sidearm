@@ -133,14 +133,10 @@ fn emit_send(
         }
     };
 
-    let value = super::types::format_chord(
-        mods.ctrl,
-        mods.shift,
-        mods.alt,
-        mods.win,
-        &key_name,
-        || key_name.clone(),
-    );
+    let value =
+        super::types::format_chord(mods.ctrl, mods.shift, mods.alt, mods.win, &key_name, || {
+            key_name.clone()
+        });
 
     steps.push(ParsedSequenceStep::Send { value });
 }
@@ -181,7 +177,11 @@ mod edge_proptests {
     #[test]
     fn boundary_dangling_key_down_is_emitted() {
         let events = vec![
-            NormalizedEvent::Key { makecode: 0x1E, is_extended: false, is_down: true }, // A down
+            NormalizedEvent::Key {
+                makecode: 0x1E,
+                is_extended: false,
+                is_down: true,
+            }, // A down
         ];
         let mut w = Vec::new();
         let steps = build(&events, "m", &mut w);
@@ -220,7 +220,11 @@ mod edge_proptests {
     #[test]
     fn null_only_key_ups_produce_no_steps() {
         let events: Vec<NormalizedEvent> = (0..10)
-            .map(|i| NormalizedEvent::Key { makecode: 0x10 + i, is_extended: false, is_down: false })
+            .map(|i| NormalizedEvent::Key {
+                makecode: 0x10 + i,
+                is_extended: false,
+                is_down: false,
+            })
             .collect();
         let mut w = Vec::new();
         let steps = build(&events, "up-only", &mut w);
@@ -233,7 +237,8 @@ mod edge_proptests {
 
     #[test]
     fn overflow_many_delays_bounded_output() {
-        let events: Vec<NormalizedEvent> = (0..10_000).map(|_| NormalizedEvent::Delay(50)).collect();
+        let events: Vec<NormalizedEvent> =
+            (0..10_000).map(|_| NormalizedEvent::Delay(50)).collect();
         let mut w = Vec::new();
         let steps = build(&events, "flood", &mut w);
         assert_eq!(steps.len(), 10_000);
@@ -266,8 +271,16 @@ mod edge_proptests {
         ];
         for &(code, ext) in modifier_pairs {
             let events = vec![
-                NormalizedEvent::Key { makecode: code, is_extended: ext, is_down: true },
-                NormalizedEvent::Key { makecode: code, is_extended: ext, is_down: false },
+                NormalizedEvent::Key {
+                    makecode: code,
+                    is_extended: ext,
+                    is_down: true,
+                },
+                NormalizedEvent::Key {
+                    makecode: code,
+                    is_extended: ext,
+                    is_down: false,
+                },
             ];
             let mut w = Vec::new();
             let steps = build(&events, "mod-test", &mut w);
@@ -286,10 +299,26 @@ mod edge_proptests {
     fn overflow_overlapping_keys_emit_warning() {
         // Two key-downs without intervening key-ups triggers the "overlapping" path.
         let events = vec![
-            NormalizedEvent::Key { makecode: 0x1E, is_extended: false, is_down: true }, // A
-            NormalizedEvent::Key { makecode: 0x30, is_extended: false, is_down: true }, // B
-            NormalizedEvent::Key { makecode: 0x30, is_extended: false, is_down: false },
-            NormalizedEvent::Key { makecode: 0x1E, is_extended: false, is_down: false },
+            NormalizedEvent::Key {
+                makecode: 0x1E,
+                is_extended: false,
+                is_down: true,
+            }, // A
+            NormalizedEvent::Key {
+                makecode: 0x30,
+                is_extended: false,
+                is_down: true,
+            }, // B
+            NormalizedEvent::Key {
+                makecode: 0x30,
+                is_extended: false,
+                is_down: false,
+            },
+            NormalizedEvent::Key {
+                makecode: 0x1E,
+                is_extended: false,
+                is_down: false,
+            },
         ];
         let mut w = Vec::new();
         let _ = build(&events, "overlap", &mut w);

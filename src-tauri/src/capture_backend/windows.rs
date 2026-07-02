@@ -7,7 +7,7 @@ use std::{
     },
     thread::{self, JoinHandle},
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use super::{CAPTURE_BACKEND_NAME, EncodedKeyEvent, EventOutcome, process_encoded_key_event};
 use crate::{
@@ -101,6 +101,81 @@ fn debug_capture_enabled() -> bool {
     })
 }
 
+// ---------------------------------------------------------------------------
+// Factory-defaults detector
+// ---------------------------------------------------------------------------
+// When the Razer software fails to apply the remap profile (known Synapse 4
+// autostart bug: the RazerAppEngine container starts but the Synapse module
+// never loads) while the Razer driver stack is still installed, every
+// thumb-grid press reaches the LL hook TWICE: a real digit-row keydown
+// (no LLKHF_INJECTED) followed shortly by a SendInput-injected duplicate with
+// the same VK+scancode, re-emitted by the Razer stack. Physical typing never
+// produces that pattern, and Sidearm's own synthesis is excluded upstream via
+// INTERNAL_SENDINPUT_EXTRA_INFO, so the signature reliably means "the mouse is
+// on factory defaults" (measured live 2026-07-02: 12/12 presses matched,
+// real→injected gaps 64-138 ms). On detection the helper emits a single
+// `ALERT:factory-defaults` line so the parent can warn the user instead of
+// silently typing digits into the foreground app.
+
+/// Scancode range of the Naga factory thumb-grid row: `1`..`=` (0x02..=0x0D).
+const DEFAULTS_SC_FIRST: u32 = 0x02;
+const DEFAULTS_SC_LAST: u32 = 0x0D;
+/// Max age of a real keydown for an injected duplicate to pair with it.
+const DEFAULTS_PAIR_WINDOW_MS: u32 = 1_000;
+/// Alert once this many pairs are seen inside DEFAULTS_HIT_WINDOW_MS.
+const DEFAULTS_ALERT_HITS: usize = 3;
+const DEFAULTS_HIT_WINDOW_MS: u32 = 60_000;
+
+const DEFAULTS_SC_COUNT: usize = (DEFAULTS_SC_LAST - DEFAULTS_SC_FIRST + 1) as usize;
+
+#[derive(Default)]
+struct FactoryDefaultsDetector {
+    /// Last REAL keydown per thumb-row scancode: (vk, at_ms).
+    last_real: [Option<(u32, u32)>; DEFAULTS_SC_COUNT],
+    /// Timestamps (ms) of observed real→injected duplicate pairs.
+    hits: Vec<u32>,
+    alerted: bool,
+}
+
+impl FactoryDefaultsDetector {
+    /// Feed a keydown; returns `true` exactly once — when the alert threshold
+    /// is crossed. `now_ms` is any monotonic millisecond clock (the hook uses
+    /// KBDLLHOOKSTRUCT.time; a wrap every 49.7 days at worst drops one pair).
+    fn observe_keydown(&mut self, vk: u32, scan_code: u32, injected: bool, now_ms: u32) -> bool {
+        if !(DEFAULTS_SC_FIRST..=DEFAULTS_SC_LAST).contains(&scan_code) {
+            return false;
+        }
+        let idx = (scan_code - DEFAULTS_SC_FIRST) as usize;
+        if !injected {
+            self.last_real[idx] = Some((vk, now_ms));
+            return false;
+        }
+        let Some((real_vk, real_at)) = self.last_real[idx] else {
+            return false;
+        };
+        if real_vk != vk || now_ms.wrapping_sub(real_at) > DEFAULTS_PAIR_WINDOW_MS {
+            return false;
+        }
+        // Consume the real keydown so injected auto-repeats can't inflate the
+        // hit count from a single physical press.
+        self.last_real[idx] = None;
+        if self.alerted {
+            return false;
+        }
+        self.hits
+            .retain(|t| now_ms.wrapping_sub(*t) <= DEFAULTS_HIT_WINDOW_MS);
+        self.hits.push(now_ms);
+        if self.hits.len() >= DEFAULTS_ALERT_HITS {
+            self.alerted = true;
+            return true;
+        }
+        false
+    }
+}
+
+/// Line pushed to the helper's stdout stream when the detector fires.
+const HELPER_ALERT_FACTORY_DEFAULTS: &str = "ALERT:factory-defaults";
+
 thread_local! {
     static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
         const { std::cell::RefCell::new(Vec::new()) };
@@ -111,6 +186,9 @@ thread_local! {
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
         const { std::cell::RefCell::new(Vec::new()) };
     static HELPER_THREAD_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    /// Factory-defaults signature tracker (see FactoryDefaultsDetector above).
+    static HELPER_DEFAULTS_DETECTOR: std::cell::RefCell<FactoryDefaultsDetector> =
+        std::cell::RefCell::new(FactoryDefaultsDetector::default());
     /// Set to `true` by the hook callback when it receives a probe event
     /// (dwExtraInfo == HOOK_PROBE_EXTRA_INFO).  Consumed by the health monitor.
     static HELPER_PROBE_RECEIVED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -1037,6 +1115,8 @@ impl CaptureBackendHandle {
         let modifier_stale_gc_ms = config.settings.modifier_stale_gc_ms;
         let replayed_modifier_force_release_ms = config.settings.replayed_modifier_force_release_ms;
         let helper = spawn_capture_helper(
+            app.clone(),
+            runtime_store.clone(),
             &registrations,
             helper_event_tx,
             modifier_stale_gc_ms,
@@ -1459,6 +1539,24 @@ unsafe extern "system" fn helper_ll_keyboard_proc(
         // short-circuited above before reaching this block.
         const LLKHF_INJECTED: u32 = 0x10;
         let externally_injected = (kb.flags & LLKHF_INJECTED) != 0;
+
+        // Factory-defaults detection: watch digit-row keydowns (real and
+        // externally-injected) for the Razer "real press + injected duplicate"
+        // signature. Independent of registration matching — digit keys are
+        // never registered, so this is their only observation point.
+        if is_keydown {
+            let defaults_alert = HELPER_DEFAULTS_DETECTOR.with(|cell| {
+                cell.borrow_mut()
+                    .observe_keydown(vk, kb.scanCode, externally_injected, kb.time)
+            });
+            if defaults_alert {
+                HELPER_MATCHES.with(|cell| {
+                    cell.borrow_mut()
+                        .push(HELPER_ALERT_FACTORY_DEFAULTS.to_string())
+                });
+                wake = true;
+            }
+        }
 
         // A real modifier-down arrives while we may have prior state for
         // this VK.  Three paths:
@@ -2303,6 +2401,8 @@ fn hold_deadline_update(
 /// Spawns the capture helper child process for modifier-combo hotkeys.
 /// Returns None if there are no modifier combos or if spawning fails (non-fatal).
 fn spawn_capture_helper(
+    app: AppHandle,
+    runtime_store: Arc<Mutex<RuntimeStore>>,
     registrations: &[RegisteredHotkey],
     event_tx: mpsc::SyncSender<EncodedKeyEvent>,
     modifier_stale_gc_ms: Option<u64>,
@@ -2428,6 +2528,25 @@ fn spawn_capture_helper(
             // SIDEARM_DEBUG_CAPTURE=1 plus a Debug log level to see them.
             if let Some(rest) = trimmed.strip_prefix("DEBUG:") {
                 log::debug!("[helper] {rest}");
+                continue;
+            }
+            // Factory-defaults signature detected by the hook (see
+            // FactoryDefaultsDetector): warn loudly instead of letting the
+            // mouse silently type digits into the foreground app.
+            if trimmed == HELPER_ALERT_FACTORY_DEFAULTS {
+                log::warn!(
+                    "[capture] Мышь шлёт заводские цифры (1-12) вместо настроенных клавиш — \
+                     профиль Razer не применён (Synapse не запустился или бортовая память сброшена)."
+                );
+                if let Ok(mut store) = runtime_store.lock() {
+                    store.record_warn(
+                        "перехват",
+                        "Мышь шлёт заводские цифры (1-12) вместо настроенных клавиш — \
+                         профиль Razer не применён (Synapse не запустился или бортовая \
+                         память сброшена). Кнопки Sidearm не будут срабатывать.",
+                    );
+                }
+                let _ = app.emit(runtime::EVENT_MOUSE_DEFAULTS_SUSPECTED, ());
                 continue;
             }
             let (is_key_up, is_repeat, encoded_key) =
@@ -2720,6 +2839,92 @@ fn run_foreground_watcher(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod factory_defaults_detector_tests {
+    use super::{DEFAULTS_ALERT_HITS, FactoryDefaultsDetector};
+
+    const VK_4: u32 = 0x34;
+    const SC_4: u32 = 0x05;
+
+    /// One physical press in the broken state, timings from the live capture
+    /// (2026-07-02): real down, then the injected duplicate ~64-138ms later.
+    fn feed_pair(d: &mut FactoryDefaultsDetector, vk: u32, sc: u32, at_ms: u32) -> bool {
+        let fired_real = d.observe_keydown(vk, sc, false, at_ms);
+        assert!(!fired_real, "real keydown alone must never fire");
+        d.observe_keydown(vk, sc, true, at_ms + 100)
+    }
+
+    #[test]
+    fn fires_once_after_threshold_pairs() {
+        let mut d = FactoryDefaultsDetector::default();
+        for i in 0..DEFAULTS_ALERT_HITS - 1 {
+            assert!(!feed_pair(&mut d, VK_4, SC_4, 1_000 * (i as u32 + 1)));
+        }
+        assert!(
+            feed_pair(&mut d, VK_4, SC_4, 10_000),
+            "threshold pair fires"
+        );
+        // Once alerted, stays silent (once per helper lifetime).
+        assert!(!feed_pair(&mut d, VK_4, SC_4, 20_000));
+    }
+
+    #[test]
+    fn plain_typing_never_fires() {
+        let mut d = FactoryDefaultsDetector::default();
+        for i in 0..100 {
+            assert!(!d.observe_keydown(VK_4, SC_4, false, i * 50));
+        }
+    }
+
+    #[test]
+    fn injected_only_stream_never_fires() {
+        // Sidearm snippets typing digits are injected-only: no real precursor.
+        let mut d = FactoryDefaultsDetector::default();
+        for i in 0..100 {
+            assert!(!d.observe_keydown(VK_4, SC_4, true, i * 50));
+        }
+    }
+
+    #[test]
+    fn vk_mismatch_or_stale_real_does_not_pair() {
+        let mut d = FactoryDefaultsDetector::default();
+        // Different VK on the same scancode (layout weirdness) — no pair.
+        assert!(!d.observe_keydown(VK_4, SC_4, false, 1_000));
+        assert!(!d.observe_keydown(0x35, SC_4, true, 1_050));
+        // Real older than the pair window — no pair.
+        assert!(!d.observe_keydown(VK_4, SC_4, false, 10_000));
+        assert!(!d.observe_keydown(VK_4, SC_4, true, 12_000));
+    }
+
+    #[test]
+    fn injected_autorepeat_counts_single_press_once() {
+        let mut d = FactoryDefaultsDetector::default();
+        assert!(!d.observe_keydown(VK_4, SC_4, false, 1_000));
+        assert!(!d.observe_keydown(VK_4, SC_4, true, 1_100)); // pair #1
+        // Injected repeats without a fresh real press must not add hits.
+        assert!(!d.observe_keydown(VK_4, SC_4, true, 1_150));
+        assert!(!d.observe_keydown(VK_4, SC_4, true, 1_200));
+    }
+
+    #[test]
+    fn pairs_outside_hit_window_never_accumulate() {
+        // One pair per 70s: each new hit evicts the previous one from the
+        // 60s window, so the threshold is never reached.
+        let mut d = FactoryDefaultsDetector::default();
+        for i in 0..10u32 {
+            assert!(!feed_pair(&mut d, VK_4, SC_4, i * 70_000));
+        }
+    }
+
+    #[test]
+    fn non_digit_scancodes_ignored() {
+        let mut d = FactoryDefaultsDetector::default();
+        // 'Q' (sc 0x10) real + injected duplicate — outside the thumb row.
+        assert!(!d.observe_keydown(0x51, 0x10, false, 1_000));
+        assert!(!d.observe_keydown(0x51, 0x10, true, 1_050));
+    }
+}
 
 #[cfg(test)]
 mod helper_death_recovery_tests {

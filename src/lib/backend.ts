@@ -355,6 +355,15 @@ export async function listenSingleInstanceBlocked(
   return listenEvent("single_instance_blocked", onBlocked);
 }
 
+/** Fires when the capture helper detects the mouse sending factory digits
+ *  (real press + injected duplicate signature) instead of the configured
+ *  keys — the Razer profile is not applied. Payload is unit. */
+export async function listenMouseDefaultsSuspected(
+  onSuspected: () => void,
+): Promise<UnlistenFn> {
+  return listenEvent("mouse_defaults_suspected", onSuspected);
+}
+
 /** Fires when a binding's re-trigger was skipped inside its throttle window. */
 export async function listenThrottleBlocked(
   onPayload: (payload: ThrottleBlockedEvent) => void,

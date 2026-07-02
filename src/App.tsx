@@ -38,6 +38,7 @@ import {
   normalizeCommandError,
   openConfigFolder,
   listenDragDrop,
+  listenMouseDefaultsSuspected,
   listenSingleInstanceBlocked,
   listenTrayProfileChanged,
   listenQuickRuleStart,
@@ -179,6 +180,21 @@ function App() {
     let unlisten: (() => void) | undefined;
     void listenSingleInstanceBlocked(() => {
       showToast(t("instance.blocked"), "info");
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [showToast, t]);
+
+  // Capture helper detected the mouse typing factory digits instead of the
+  // configured keys (Razer profile not applied — Synapse down / onboard slot
+  // reset). Also recorded as a warning in Diagnostics by the backend.
+  // ponytail: toast only — a sticky banner needs a RuntimeStateSummary flag;
+  // add one if users keep missing the toast while the window is closed.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenMouseDefaultsSuspected(() => {
+      showToast(t("mouseDefaults.suspected"), "warning");
     }).then((fn) => {
       unlisten = fn;
     });

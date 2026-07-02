@@ -306,7 +306,7 @@
       "matched": "The observed signal `{{observed}}` matched the configured one and looks like a correct hit on the current button.",
       "mismatchedWithKey": "Got `{{observed}}` just now, but that's not enough for a clean match against the expected configuration.",
       "mismatchedNoKey": "The observation didn't produce a clean match.",
-      "noSignal": "After starting the step the app hasn't seen a new signal yet. Check the runtime, the saved configuration, and the button itself.",
+      "noSignal": "After starting the step the app hasn't seen a new signal yet. Check the runtime, the saved configuration, and the button itself. If no mouse button produces a signal, the Razer profile is likely not applied — make sure Synapse is running, or save the profile to the mouse's onboard memory (exit Synapse via its tray icon once the right profile is active).",
       "skipped": "Step skipped by the user."
     },
     "reset": {
@@ -936,6 +936,9 @@
   },
   "quickRule": {
     "failed": "Couldn't detect the active window — focus the target app, then try again."
+  },
+  "mouseDefaults": {
+    "suspected": "Mouse buttons are typing factory digits (1–12) instead of the configured keys — the Razer profile is not applied. Make sure Synapse is running, or save the profile to the mouse's onboard memory."
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",

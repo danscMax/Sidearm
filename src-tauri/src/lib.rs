@@ -39,6 +39,11 @@ type MinimizeToTray = Arc<AtomicBool>;
 /// clobber its edits. `None` until the first load. See `config::config_file_stamp`.
 type ConfigStamp = Arc<Mutex<Option<u64>>>;
 
+/// Last global shortcut string actually registered with the OS. Lets a save
+/// re-register only when the value changed (see `plan_global_shortcut`),
+/// instead of tearing down the live hotkey on every unrelated save.
+type CurrentGlobalShortcut = Arc<Mutex<Option<String>>>;
+
 use capture_backend::RuntimeController;
 pub use capture_backend::capture_helper_main;
 use command_error::CommandError;
@@ -484,6 +489,104 @@ fn configured_global_shortcut(app: &AppHandle) -> String {
     }
 }
 
+/// The registration change implied by a new desired global shortcut, given what
+/// is currently registered. Pure decision logic (no OS calls) so it is unit-
+/// testable; the caller performs the actual register/unregister side effects.
+#[derive(Debug, PartialEq)]
+pub(crate) enum ShortcutAction {
+    /// Desired == current: re-registering would needlessly drop the live hotkey
+    /// on every unrelated save, so do nothing.
+    NoChange,
+    /// Register `desired`; only once that succeeds, unregister `unregister_previous`
+    /// (None at startup). Registering first means a failed new combo leaves the
+    /// old one live instead of dropping the user's hotkey.
+    Register {
+        desired: String,
+        unregister_previous: Option<String>,
+    },
+}
+
+/// Decide what to do when the configured global shortcut becomes `desired`,
+/// given the currently-registered `current` (`None` before the first register).
+pub(crate) fn plan_global_shortcut(current: Option<&str>, desired: &str) -> ShortcutAction {
+    if current == Some(desired) {
+        ShortcutAction::NoChange
+    } else {
+        ShortcutAction::Register {
+            desired: desired.to_string(),
+            unregister_previous: current.map(str::to_string),
+        }
+    }
+}
+
+/// Show/hide the main window. Shared by the tray left-click and the global
+/// shortcut so the toggle behaves identically from both entry points.
+fn toggle_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+        } else {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+    }
+}
+
+/// (Re)register the OS-global show/hide shortcut to match `desired`. Uses the
+/// last-registered value tracked in `CurrentGlobalShortcut` to skip a no-op
+/// re-register (which would briefly drop the live hotkey). Registers the NEW
+/// combo before unregistering the old one, so a failed new combo (e.g. owned by
+/// another app) leaves the previous hotkey live. Never fatal — failures are
+/// surfaced via `record_startup_runtime_error` (Diagnostics + runtime_error event).
+fn apply_global_shortcut(app: &AppHandle, desired: &str) {
+    let runtime_store = app.state::<Arc<Mutex<RuntimeStore>>>();
+    let current_state = app.state::<CurrentGlobalShortcut>();
+
+    let action = {
+        let current = current_state.lock().recover_poison();
+        plan_global_shortcut(current.as_deref(), desired)
+    };
+    let ShortcutAction::Register {
+        desired,
+        unregister_previous,
+    } = action
+    else {
+        return; // NoChange — leave the live hotkey untouched.
+    };
+
+    let shortcut: Shortcut = match desired.parse() {
+        Ok(s) => s,
+        Err(e) => {
+            let message = format!("Не удалось разобрать глобальную клавишу `{desired}`: {e}");
+            log::warn!("[system] {message}");
+            record_startup_runtime_error(app, runtime_store.inner(), "globalShortcut", message);
+            return;
+        }
+    };
+
+    if let Err(e) = app
+        .global_shortcut()
+        .on_shortcut(shortcut, |app, _shortcut, event| {
+            if event.state == ShortcutState::Pressed {
+                toggle_main_window(app);
+            }
+        })
+    {
+        let message = format!("Не удалось зарегистрировать глобальную клавишу `{desired}`: {e}");
+        log::warn!("[system] {message}");
+        record_startup_runtime_error(app, runtime_store.inner(), "globalShortcut", message);
+        return; // Registration failed — the previous hotkey stays live.
+    }
+
+    // New combo is live; drop the previous one (if any) and remember the new one.
+    if let Some(previous) = unregister_previous
+        && let Ok(prev) = previous.parse::<Shortcut>()
+    {
+        let _ = app.global_shortcut().unregister(prev);
+    }
+    *current_state.lock().recover_poison() = Some(desired);
+}
+
 /// Atomically copy `src` → `dst` by streaming into a temp file via the shared
 /// `config::persist_atomically` (temp in dst's dir, fsync, atomic same-volume
 /// rename). A crash/IO error mid-copy leaves `dst` untouched — never truncated.
@@ -845,6 +948,18 @@ async fn save_config(
 
     // Keep the tray's profile list / active marker in sync after a save.
     rebuild_tray_menu_from_config(&app, &result.config);
+
+    // Apply a changed global shortcut immediately — re-registers only if the
+    // value actually changed, and leaves the old one live if the new combo fails.
+    let desired = result
+        .config
+        .settings
+        .global_shortcut
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_GLOBAL_SHORTCUT);
+    apply_global_shortcut(&app, desired);
 
     Ok(result)
 }
@@ -2640,7 +2755,6 @@ pub fn run() {
         Arc::new(Mutex::new(store))
     };
     let log_rx_for_setup = Mutex::new(Some((log_rx, log_send_pending_for_bridge)));
-    let runtime_store_for_setup = runtime_store.clone();
 
     tauri::Builder::default()
         // Single-instance guard MUST be the first plugin registered. A second
@@ -3019,17 +3133,11 @@ pub fn run() {
                         });
                     }
 
-                    // Left-click toggles the window.
+                    // Left-click toggles the window (shared with the global shortcut).
                     if matches!(button, MouseButton::Left)
                         && matches!(button_state, MouseButtonState::Up)
-                        && let Some(window) = tray.app_handle().get_webview_window("main")
                     {
-                        if window.is_visible().unwrap_or(false) {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
+                        toggle_main_window(tray.app_handle());
                     }
                 })
                 .build(app)?;
@@ -3038,55 +3146,9 @@ pub fn run() {
             // tray exists and config can be loaded.
             rebuild_tray_menu(app.handle());
 
-            // Optional global shortcut; never panic in setup if parsing ever
-            // regresses. This is the tail of setup, so skipping registration on
-            // a parse error is safe.
-            let shortcut_text = configured_global_shortcut(app.handle());
-            let shortcut_label = shortcut_text.trim();
-            let shortcut: Shortcut = match shortcut_label.parse() {
-                Ok(s) => s,
-                Err(e) => {
-                    let message =
-                        format!("Не удалось разобрать глобальную клавишу `{shortcut_label}`: {e}");
-                    log::warn!("[system] {message}");
-                    record_startup_runtime_error(
-                        app.handle(),
-                        &runtime_store_for_setup,
-                        "globalShortcut",
-                        message,
-                    );
-                    return Ok(());
-                }
-            };
-
-            // Non-fatal: if the shortcut is already registered (e.g. previous
-            // instance didn't clean up yet), log a warning and continue.
-            if let Err(e) = app
-                .global_shortcut()
-                .on_shortcut(shortcut, |app, _shortcut, event| {
-                    if event.state == ShortcutState::Pressed
-                        && let Some(window) = app.get_webview_window("main")
-                    {
-                        if window.is_visible().unwrap_or(false) {
-                            let _ = window.hide();
-                        } else {
-                            let _ = window.show();
-                            let _ = window.set_focus();
-                        }
-                    }
-                })
-            {
-                let message = format!(
-                    "Не удалось зарегистрировать глобальную клавишу `{shortcut_label}`: {e}"
-                );
-                log::warn!("[system] {message}");
-                record_startup_runtime_error(
-                    app.handle(),
-                    &runtime_store_for_setup,
-                    "globalShortcut",
-                    message,
-                );
-            }
+            // Register the OS-global show/hide shortcut via the shared helper so
+            // a runtime change (save_config) re-registers exactly the same way.
+            apply_global_shortcut(app.handle(), &configured_global_shortcut(app.handle()));
 
             Ok(())
         })
@@ -3106,6 +3168,7 @@ pub fn run() {
         .manage(app_paths_for_setup)
         .manage(Arc::new(AtomicBool::new(false)) as MinimizeToTray)
         .manage(Arc::new(Mutex::new(None)) as ConfigStamp)
+        .manage(Arc::new(Mutex::new(None)) as CurrentGlobalShortcut)
         .manage(runtime_store.clone())
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .manage(Arc::new(Mutex::new(MacroRecorder::new())))
@@ -3170,6 +3233,42 @@ mod tests {
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")
+    }
+
+    #[test]
+    fn plan_global_shortcut_noop_when_unchanged() {
+        // A save that does not change the shortcut must NOT re-register — that
+        // would needlessly tear down and re-add the OS hotkey on every unrelated
+        // config save (profile switch, binding edit), briefly dropping it.
+        let action = plan_global_shortcut(Some("ctrl+alt+n"), "ctrl+alt+n");
+        assert_eq!(action, ShortcutAction::NoChange);
+    }
+
+    #[test]
+    fn plan_global_shortcut_swaps_and_unregisters_previous_on_change() {
+        // Changing the shortcut registers the new combo and reports the old one
+        // for removal, so the previous hotkey does not stay live as a duplicate.
+        let action = plan_global_shortcut(Some("ctrl+alt+n"), "ctrl+shift+f9");
+        assert_eq!(
+            action,
+            ShortcutAction::Register {
+                desired: "ctrl+shift+f9".to_string(),
+                unregister_previous: Some("ctrl+alt+n".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn plan_global_shortcut_registers_without_previous_at_startup() {
+        // At startup nothing is registered yet, so there is no previous to remove.
+        let action = plan_global_shortcut(None, "ctrl+alt+n");
+        assert_eq!(
+            action,
+            ShortcutAction::Register {
+                desired: "ctrl+alt+n".to_string(),
+                unregister_previous: None,
+            }
+        );
     }
 
     #[test]

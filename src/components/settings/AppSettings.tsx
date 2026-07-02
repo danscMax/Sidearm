@@ -1,6 +1,13 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../../i18n";
 import type { AppConfig, CommandError, Settings } from "../../lib/config";
+import {
+  acceleratorKeyFromCode,
+  serializeAccelerator,
+} from "../../lib/action-picker-helpers";
+import { CaptureRow } from "../action-picker/shared/CaptureRow";
 import { Notice, Toggle } from "../shared";
 import { useAutostartStatus } from "./useAutostartStatus";
 
@@ -27,6 +34,30 @@ export function AppSettings({
     handleRunAtLogonToggle,
     handleRunAsAdminToggle,
   } = useAutostartStatus(updateDraft, setError);
+  const [capturingShortcut, setCapturingShortcut] = useState(false);
+
+  // Capture a pressed chord into a Tauri accelerator string, reusing the same
+  // key-resolution helpers as the binding ShortcutEditor. Modifier-only presses
+  // are ignored so the user can hold Ctrl/Alt before the real key.
+  function handleShortcutCapture(event: ReactKeyboardEvent) {
+    if (!capturingShortcut) return;
+    event.preventDefault();
+    event.stopPropagation();
+    // Use the physical code, not the layout-dependent event.key (which is a
+    // Cyrillic letter for Shift+Alt+T on a Russian layout — invalid for Tauri).
+    const key = acceleratorKeyFromCode(event.code);
+    if (!key) return; // modifier-only or unsupported key — keep waiting.
+    updateSettings({
+      globalShortcut: serializeAccelerator({
+        ctrl: event.ctrlKey,
+        shift: event.shiftKey,
+        alt: event.altKey,
+        win: event.metaKey,
+        key,
+      }),
+    });
+    setCapturingShortcut(false);
+  }
 
   return (
     <>
@@ -104,18 +135,19 @@ export function AppSettings({
           <span className="settings-section__title">{t("settings.globalShortcutHeader")}</span>
         </div>
         <p className="panel__muted help-sm">{t("settings.globalShortcutHelp")}</p>
-        <input
-          className="settings-text-input"
-          type="text"
-          value={osd.globalShortcut ?? ""}
-          placeholder={t("settings.globalShortcutPlaceholder")}
-          onChange={(e) => {
-            const value = e.target.value;
-            updateSettings({ globalShortcut: value.trim() ? value : undefined });
-          }}
-          aria-label={t("settings.globalShortcutHeader")}
-          spellCheck={false}
-        />
+        <div onKeyDown={handleShortcutCapture}>
+          <CaptureRow
+            value={osd.globalShortcut ?? ""}
+            placeholder={
+              capturingShortcut
+                ? t("picker.keyCapturing")
+                : t("settings.globalShortcutPlaceholder")
+            }
+            capturing={capturingShortcut}
+            onToggle={() => setCapturingShortcut(!capturingShortcut)}
+            recordLabel={t("picker.record")}
+          />
+        </div>
       </section>
 
       {/* Device name */}
@@ -181,7 +213,7 @@ export function AppSettings({
       {/* Onboarding re-run */}
       <section className="settings-section">
         <div className="settings-section__header">
-          <span className="settings-section__title">{t("onboarding.title")}</span>
+          <span className="settings-section__title">{t("settings.onboardingHeader")}</span>
         </div>
         <p className="panel__muted help-sm">{t("settings.onboardingHelp")}</p>
         <div className="settings-actions">

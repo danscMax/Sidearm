@@ -7,14 +7,55 @@ import {
   buildAction,
   createInitialDrafts,
   isSaveDisabled,
+  acceleratorKeyFromCode,
   normalizeKeyName,
   resolveKeyName,
+  serializeAccelerator,
   type PickerDrafts,
 } from "./action-picker-helpers";
 
 // Identity translate stub — returns the key so tests can assert which i18n key
 // would be used (same pattern as errors.test.ts).
 const t = ((key: string) => key) as unknown as TFunction;
+
+describe("acceleratorKeyFromCode", () => {
+  it("derives a layout-independent letter from a physical KeyX code", () => {
+    // Physical T on a Russian layout reports event.key="т"; event.code stays
+    // "KeyT" regardless of layout, so the accelerator must come from the code.
+    expect(acceleratorKeyFromCode("KeyT")).toBe("t");
+    expect(acceleratorKeyFromCode("KeyN")).toBe("n");
+  });
+
+  it("derives digits and function keys", () => {
+    expect(acceleratorKeyFromCode("Digit1")).toBe("1");
+    expect(acceleratorKeyFromCode("F13")).toBe("f13");
+  });
+
+  it("returns null for unsupported / modifier codes so they are ignored", () => {
+    expect(acceleratorKeyFromCode("ControlLeft")).toBeNull();
+    expect(acceleratorKeyFromCode("")).toBeNull();
+  });
+});
+
+describe("serializeAccelerator", () => {
+  it("joins modifiers and key into a lowercase Tauri accelerator string", () => {
+    expect(
+      serializeAccelerator({ ctrl: true, alt: true, shift: false, win: false, key: "N" }),
+    ).toBe("ctrl+alt+n");
+  });
+
+  it("maps the Windows/Meta key to super (Tauri token)", () => {
+    expect(
+      serializeAccelerator({ ctrl: false, alt: false, shift: false, win: true, key: "K" }),
+    ).toBe("super+k");
+  });
+
+  it("keeps a stable modifier order ctrl, shift, alt, super", () => {
+    expect(
+      serializeAccelerator({ ctrl: true, shift: true, alt: true, win: true, key: "F13" }),
+    ).toBe("ctrl+shift+alt+super+f13");
+  });
+});
 
 const profiles: Profile[] = [
   { id: "p1", name: "Gaming", enabled: true, priority: 0 },

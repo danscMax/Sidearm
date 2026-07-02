@@ -56,6 +56,39 @@ export function normalizeKeyName(key: string): string {
   return key.length === 1 ? key.toUpperCase() : key;
 }
 
+/** Layout-independent accelerator key derived from a KeyboardEvent.code (physical
+ *  position), so Shift+Alt+T yields "t" on ANY keyboard layout — unlike event.key,
+ *  which is a Cyrillic letter on a Russian layout and invalid for a Tauri shortcut.
+ *  Returns null for modifier-only or unsupported codes so the caller ignores them. */
+export function acceleratorKeyFromCode(code: string): string | null {
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) return letter[1].toLowerCase();
+  const digit = /^Digit([0-9])$/.exec(code);
+  if (digit) return digit[1];
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) return code.toLowerCase();
+  return null;
+}
+
+/** Serialize a captured keyboard chord into a Tauri global-shortcut accelerator
+ *  string (e.g. "ctrl+alt+n"). The Windows/Meta key maps to Tauri's "super"
+ *  token; the key is lowercased. Modifier order is fixed (ctrl, shift, alt, super)
+ *  so equal chords always serialize identically. */
+export function serializeAccelerator(chord: {
+  ctrl: boolean;
+  shift: boolean;
+  alt: boolean;
+  win: boolean;
+  key: string;
+}): string {
+  const parts: string[] = [];
+  if (chord.ctrl) parts.push("ctrl");
+  if (chord.shift) parts.push("shift");
+  if (chord.alt) parts.push("alt");
+  if (chord.win) parts.push("super");
+  parts.push(chord.key.toLowerCase());
+  return parts.join("+");
+}
+
 /* ─────────────────────────────────────────────────────────
    Condition Types
    ───────────────────────────────────────────────────────── */

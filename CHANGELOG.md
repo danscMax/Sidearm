@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] — 2026-07-02
+
+### Added
+- **Factory-defaults detector.** When the Razer software fails to apply the
+  remap profile (a known Synapse 4 autostart bug), the mouse silently types
+  factory digits 1–12 and bindings just stop working. Sidearm now recognizes
+  the driver's re-injection signature at the keyboard-hook level and warns
+  with a toast plus a Diagnostics entry instead of failing silently. The
+  verification wizard's "no signal" hint now also points at Razer Synapse /
+  onboard memory as the likely cause.
+
+### Changed
+- **Global shortcut is captured, not typed.** Settings → App now records the
+  show/hide hotkey from an actual keypress — layout-independent, so it works
+  on Cyrillic layouts — and applies it immediately, without an app restart.
+  An unrelated settings save no longer re-registers (and briefly drops) the
+  live hotkey.
+
 ## [0.7.1] — 2026-07-01
 
 ### Added

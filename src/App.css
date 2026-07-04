@@ -643,6 +643,9 @@ select::checkmark {
 .content__scroll {
   flex: 1;
   overflow-y: overlay;
+  /* Never let stray wide content turn the whole page into a sideways scroller;
+     cards handle their own wrapping/ellipsis. */
+  overflow-x: clip;
   scrollbar-gutter: auto;
 }
 
@@ -826,6 +829,10 @@ select::checkmark {
 /* ── Workspace ── */
 .workspace {
   display: grid;
+  /* minmax(0, …) lets the single column SHRINK below its content's min-content
+     width — otherwise one long nowrap line (log row, mono action id) blows the
+     track past the viewport and the whole page scrolls sideways. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding: 20px 24px 32px;
   align-items: start;
@@ -1015,6 +1022,8 @@ select::checkmark {
 .fact--mono strong {
   font-family: var(--font-mono);
   font-size: 0.75rem;
+  /* Raw ids can be long — break rather than blow the row wide. */
+  overflow-wrap: anywhere;
 }
 
 .fact-grid {
@@ -1626,7 +1635,8 @@ select::checkmark {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  overflow: hidden;
+  /* No overflow:hidden here — it decapitated the hover tooltip bubble on the
+     first rows (labels already ellipsize at .btn-legend__label level). */
 }
 
 .mouse-top-layout:has(.mouse-visual--top) .mouse-top-labels {
@@ -1757,6 +1767,13 @@ select::checkmark {
   max-width: 220px;
   line-height: 1.4;
   animation: tab-fade-in 120ms ease-out;
+}
+
+/* The first rows sit at the very top of the card — an above-the-cell bubble
+   would poke past the container edge and get clipped, so flip it below. */
+.mouse-top-labels .btn-legend__cell:nth-child(-n + 2)[data-tooltip]:hover::after {
+  bottom: auto;
+  top: calc(100% + 6px);
 }
 
 
@@ -3384,8 +3401,15 @@ code {
 
 .debug-testing__bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
+}
+
+.debug-testing__bar .debug-testing__input {
+  /* Let the input shrink so the buttons never clip off-screen; wrap instead. */
+  flex: 1 1 260px;
+  min-width: 200px;
 }
 
 /* Opts into the canonical recipe; monospace + row-fill are the unique bits. */

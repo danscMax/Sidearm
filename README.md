@@ -53,7 +53,7 @@ Sidearm intercepts the key signals your mouse sends (F13--F24, etc.) and maps th
 
 ### Screenshot
 
-![Sidearm main view](docs/screenshots/main-view.png)
+![Sidearm main view](docs/screenshots/main-view-en.png)
 
 ---
 
@@ -231,7 +231,7 @@ Sidearm перехватывает сигналы клавиш (F13--F24 и т.�
 
 ### Скриншот
 
-![Sidearm главный вид](docs/screenshots/main-view.png)
+![Sidearm главный вид](docs/screenshots/main-view-ru.png)
 
 ---
 

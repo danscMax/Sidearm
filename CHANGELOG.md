@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-07-04
+
+### Added
+- Reorder application rules from the keyboard: focus a rule card and press Alt+↑/↓, or use "Raise/Lower priority" in its context menu — priority is no longer mouse-drag only.
+
+### Changed
+- Unified every text field, search box and select onto one input style — a recessed "well" with a consistent accent focus ring — so fields read the same across Settings, Diagnostics and every dialog.
+- Reworked button emphasis: ordinary buttons (Browse, Export, filters) are now quiet, and the accent green is reserved for the single primary action on each screen; toggle buttons show a clear pressed state.
+- Denser, more consistent Settings layout with unified section headers.
+- Diagnostics resolution/execution facts show the action's name instead of its raw internal id.
+- Command palette rows show keyboard shortcuts as key chips and mark the selected row with an accent bar.
+
+### Fixed
+- The event journal no longer shows raw `[date][time][LEVEL][module]` prefixes (or the date as a category) in release builds — the log parser handles the dated release-build format.
+- The Diagnostics screen now adapts to the window width instead of overflowing horizontally; the testing bar wraps instead of clipping its buttons off-screen.
+- Button-legend hover tooltips are no longer clipped on the top rows.
+- The app-rule dialog caps its height and scrolls instead of clipping the header/footer on short windows; its "New rule" title is shown as a proper heading.
+- The action search box no longer shows a duplicate native clear (×); the assignments search field no longer crowds its text against the top edge.
+- Onboarding moves focus to each step's heading (announced by screen readers) without drawing a stray focus outline; the current progress dot is marked, and not-yet-reached dots are disabled.
+
 ## [0.7.3] — 2026-07-04
 
 ### Fixed

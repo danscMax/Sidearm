@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-07-04
+
+### Fixed
+- Escape now dismisses the error dialog instead of silently clearing the background control selection.
+- Merge-mode config import preserves the order of profiles, bindings and snippets instead of randomizing it.
+- Importing a Synapse v3 profile with a bare-modifier key (a button mapped to hold Ctrl/Shift/Alt/Win) now folds it into the modifier flags correctly instead of dropping it.
+- Snippet-library deduplication no longer merges two distinct snippets whose name/text happen to concatenate to the same string.
+- Converting an action to a menu now seeds a fresh placeholder target instead of linking to an unrelated existing action.
+- A transient lock on the rolling backup file (antivirus/indexer) no longer aborts saving the config.
+- Sequence actions are capped at 200 steps so a malformed config cannot block the worker thread indefinitely.
+- Zero-padded Synapse function-key tokens (e.g. `F01`) canonicalize to `F1`; profile priority no longer overflows on import; a sibling `Macros`/`macros` folder is parsed only once.
+- `REG_EXPAND_SZ` App Paths registry values are expanded before the executable existence check.
+
+### Changed
+- Foreground-window process info (path/exe/elevation) is cached per (window, process) on the keystroke dispatch path, skipping redundant process-handle syscalls on repeated / held / auto-repeat keys. The window title is always re-read so it never goes stale.
+- Reduced per-keystroke allocations and redundant lookups on the input hot path (single action lookup, borrowed strings, one lock acquisition, single title/path normalization).
+- Debug-log summaries are no longer built when debug logging is disabled (the production default).
+- Raised subtle and danger text contrast to meet WCAG AA (dark theme); added accessible labels to the action-picker and process-picker search inputs.
+- The "Synapse installed" onboarding check runs off the shared async executor thread.
+
+### Security
+- Hardened the App Paths registry lookup against path traversal in the supplied executable name.
+
 ## [0.7.2] — 2026-07-02
 
 ### Added

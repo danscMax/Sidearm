@@ -1063,9 +1063,16 @@ fn write_config_to_path(
 
     // Rotate .bak.N → .bak.N+1 and copy current config.json → .bak.1 before
     // overwriting. Returns the path to the just-created .bak.1 (or None if
-    // there was no existing config to back up).
-    let backup_path = crate::backup::rotate_rolling_backups(config_dir)
-        .map_err(|error| io_error(Some(config_dir), error))?;
+    // there was no existing config to back up). Best-effort, like the daily
+    // snapshot below: a transient lock on config.bak.1 (AV / indexer / another
+    // process) must not block persisting the user's actual config changes.
+    let backup_path = match crate::backup::rotate_rolling_backups(config_dir) {
+        Ok(path) => path,
+        Err(error) => {
+            log::warn!("[config] Failed to rotate rolling backup: {error}");
+            None
+        }
+    };
 
     let serialized = serde_json::to_string_pretty(config)
         .map_err(|error| ConfigStoreError::Serialize(error.to_string()))?;

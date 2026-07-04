@@ -1533,14 +1533,22 @@ async fn save_bundled_synapse_profile(
 /// or running? Windows-only signal; returns false on other platforms.
 #[tauri::command]
 async fn check_synapse_installed() -> Result<bool, CommandError> {
-    let running = crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
-    #[cfg(target_os = "windows")]
-    let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
-        .is_some()
-        || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
-    #[cfg(not(target_os = "windows"))]
-    let installed = false;
-    Ok(running || installed)
+    // The process-snapshot walk (CreateToolhelp32Snapshot/Process32*) plus the
+    // registry lookups are blocking syscalls; run them off the shared async
+    // executor thread, matching list_running_processes / get_exe_icon.
+    tauri::async_runtime::spawn_blocking(|| {
+        let running =
+            crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
+        #[cfg(target_os = "windows")]
+        let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
+            .is_some()
+            || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
+        #[cfg(not(target_os = "windows"))]
+        let installed = false;
+        running || installed
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("check_synapse_installed task failed: {e}")))
 }
 
 /// Toggle "live capture" mode. While enabled, captured Naga keys are surfaced

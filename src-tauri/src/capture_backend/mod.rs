@@ -379,23 +379,25 @@ fn process_encoded_key_event(
         ));
     }
 
-    // Resolve action — use empty exe/title when ignored (forces fallback profile)
-    let (exe, title, process_path) = if capture_result.ignored {
-        (String::new(), String::new(), None)
+    // Resolve action — use empty exe/title when ignored (forces fallback profile).
+    // Borrow straight from capture_result instead of cloning three Strings per
+    // keystroke; the resolver only needs &str and capture_result outlives them.
+    let (exe, title, process_path): (&str, &str, Option<&str>) = if capture_result.ignored {
+        ("", "", None)
     } else {
         (
-            capture_result.exe.clone(),
-            capture_result.title.clone(),
-            Some(capture_result.process_path.clone()),
+            &capture_result.exe,
+            &capture_result.title,
+            Some(capture_result.process_path.as_str()),
         )
     };
 
     let preview = resolver::resolve_input_preview_with_override(
         config,
         &event.encoded_key,
-        &exe,
-        &title,
-        process_path.as_deref(),
+        exe,
+        title,
+        process_path,
         manual_profile_override.as_deref(),
     );
 
@@ -452,11 +454,15 @@ fn process_encoded_key_event(
     // Modifier-only shortcuts (Ctrl+Alt, Ctrl+Shift, etc.) are forced to hold
     // mode regardless of configured trigger mode — in tap mode they press and
     // immediately release modifiers, which is useless.
+    // Resolve the action once and reuse it below (is_modifier_only + hold branch)
+    // instead of scanning config.actions twice per keystroke.
+    let resolved_action = config
+        .actions
+        .iter()
+        .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
+
     let is_modifier_only_shortcut = preview.action_type.as_deref() == Some("shortcut")
-        && config
-            .actions
-            .iter()
-            .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
+        && resolved_action
             .and_then(|a| match &a.payload {
                 config::ActionPayload::Shortcut(p) => Some(p.key.trim().is_empty()),
                 _ => None,
@@ -523,15 +529,10 @@ fn process_encoded_key_event(
             return EventOutcome::DroppedAsHeldDuplicate;
         }
 
-        let action = config
-            .actions
-            .iter()
-            .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
-
         if let Some(config::Action {
             payload: config::ActionPayload::Shortcut(payload),
             ..
-        }) = action
+        }) = resolved_action
         {
             let encoding_mods = hotkeys::extract_encoding_modifiers(&event.encoded_key);
             log::info!(
@@ -712,18 +713,15 @@ pub(crate) fn emit_profile_resolved_and_notify(
     let _ = app.emit(EVENT_PROFILE_RESOLVED, capture_result);
 
     if !capture_result.ignored {
-        // Remember the real foreground window so the tray "create rule" path can
-        // fall back to it (at tray-click time the live foreground is Sidearm).
-        if let Ok(mut store) = runtime_store.lock() {
+        // Remember the real foreground window (so the tray "create rule" path can
+        // fall back to it — at tray-click time the live foreground is Sidearm) and
+        // decide whether the profile changed, in a single lock acquisition.
+        let should_notify = if let Ok(mut store) = runtime_store.lock() {
             store.set_last_foreground_window(capture_result.clone());
-        }
-        let should_notify = runtime_store
-            .lock()
-            .ok()
-            .map(|mut store| {
-                store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
-            })
-            .unwrap_or(false);
+            store.notify_profile_change(capture_result.resolved_profile_id.as_deref())
+        } else {
+            false
+        };
         if should_notify {
             let profile_name = capture_result
                 .resolved_profile_name

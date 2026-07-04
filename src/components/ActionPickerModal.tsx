@@ -308,6 +308,7 @@ export function ActionPickerModal({
               className="action-picker__search"
               type="text"
               placeholder={t("picker.searchPlaceholder")}
+              aria-label={t("picker.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               autoComplete="off"

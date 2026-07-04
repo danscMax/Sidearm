@@ -1331,14 +1331,32 @@ fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
         incoming: Vec<T>,
         key: F,
     ) -> Vec<T> {
-        let mut map: HashMap<K, T> = HashMap::new();
-        for item in base {
-            map.insert(key(&item), item);
-        }
+        // Order-preserving merge: keep base items in their original order (each
+        // replaced in place when an incoming item shares its id — incoming wins),
+        // then append incoming-only items in their original order. Collecting
+        // HashMap::into_values() would randomize the user's list order (profiles,
+        // bindings, snippets) because HashMap iteration order is unspecified.
+        let mut incoming_map: HashMap<K, T> = HashMap::with_capacity(incoming.len());
+        let mut incoming_order: Vec<K> = Vec::with_capacity(incoming.len());
         for item in incoming {
-            map.insert(key(&item), item);
+            let k = key(&item);
+            if incoming_map.insert(k.clone(), item).is_none() {
+                incoming_order.push(k);
+            }
         }
-        map.into_values().collect()
+        let mut result: Vec<T> = Vec::with_capacity(base.len() + incoming_order.len());
+        for item in base {
+            match incoming_map.remove(&key(&item)) {
+                Some(replacement) => result.push(replacement),
+                None => result.push(item),
+            }
+        }
+        for k in incoming_order {
+            if let Some(item) = incoming_map.remove(&k) {
+                result.push(item);
+            }
+        }
+        result
     }
 
     AppConfig {
@@ -1515,14 +1533,22 @@ async fn save_bundled_synapse_profile(
 /// or running? Windows-only signal; returns false on other platforms.
 #[tauri::command]
 async fn check_synapse_installed() -> Result<bool, CommandError> {
-    let running = crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
-    #[cfg(target_os = "windows")]
-    let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
-        .is_some()
-        || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
-    #[cfg(not(target_os = "windows"))]
-    let installed = false;
-    Ok(running || installed)
+    // The process-snapshot walk (CreateToolhelp32Snapshot/Process32*) plus the
+    // registry lookups are blocking syscalls; run them off the shared async
+    // executor thread, matching list_running_processes / get_exe_icon.
+    tauri::async_runtime::spawn_blocking(|| {
+        let running =
+            crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
+        #[cfg(target_os = "windows")]
+        let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
+            .is_some()
+            || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
+        #[cfg(not(target_os = "windows"))]
+        let installed = false;
+        running || installed
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("check_synapse_installed task failed: {e}")))
 }
 
 /// Toggle "live capture" mode. While enabled, captured Naga keys are surfaced

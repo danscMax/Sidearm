@@ -589,6 +589,24 @@ describe("dedupeSnippetLibrary", () => {
     expect(removed).toBe(0);
     expect(result).toBe(config);
   });
+
+  it("keeps distinct snippets whose space-joined fields would collide (C4)", () => {
+    // {name:"A", text:"B C"} and {name:"A B", text:"C"} both flatten to the
+    // string "A B C sendText" — the old space-joined key merged them. The
+    // structured JSON key keeps their field boundaries distinct.
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [
+        makeSnippetLibraryItem({ id: "s1", name: "A", text: "B C", pasteMode: "sendText" }),
+        makeSnippetLibraryItem({ id: "s2", name: "A B", text: "C", pasteMode: "sendText" }),
+      ],
+    };
+
+    const { config: result, removed } = dedupeSnippetLibrary(config);
+
+    expect(removed).toBe(0);
+    expect(result.snippetLibrary.map((s) => s.id)).toEqual(["s1", "s2"]);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -847,7 +865,7 @@ describe("coerceActionType", () => {
     }
   });
 
-  it("coerces to menu and references an existing action", () => {
+  it("coerces to menu with a fresh placeholder target even when other actions exist (L2)", () => {
     const otherAction = makeAction({ id: "other", displayName: "Other Action" });
     const action = makeAction({ id: "a", type: "disabled", payload: {} as Record<string, never> });
     const config = { ...createMinimalConfig(), actions: [action, otherAction] };
@@ -859,7 +877,12 @@ describe("coerceActionType", () => {
       expect(coerced.payload.items).toHaveLength(1);
       expect(coerced.payload.items[0]!.kind).toBe("action");
       if (coerced.payload.items[0]!.kind === "action") {
-        expect(coerced.payload.items[0]!.actionId).toBe("other");
+        // The first menu item links to a freshly-created placeholder, NOT the
+        // unrelated "other" action that merely happens to already exist (L2 fix).
+        const targetId = coerced.payload.items[0]!.actionId;
+        expect(targetId).not.toBe("other");
+        expect(targetId).toContain("action-menu-target");
+        expect(result.actions.find((a) => a.id === targetId)?.type).toBe("disabled");
       }
     }
   });

@@ -108,6 +108,7 @@ export function RunningProcessPicker({
           type="search"
           className="process-picker__search"
           placeholder={t("processPicker.searchPlaceholder")}
+          aria-label={t("processPicker.searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />

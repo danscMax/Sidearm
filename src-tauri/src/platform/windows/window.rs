@@ -22,6 +22,34 @@ use windows_sys::Win32::{
 use crate::runtime::timestamp_millis;
 use crate::window_capture::RawWindowCapture;
 
+/// Cache of the *expensive* per-process fields (path/exe/elevation) keyed by
+/// (hwnd, pid). The cheap per-call fields — hwnd, pid and especially the title —
+/// are always re-read: a window's title changes while its HWND stays constant
+/// (browser tabs, document switches), so it must never be served stale. The
+/// owning process path/exe/elevation are stable for a live (hwnd, pid), so on a
+/// repeat of the same foreground window (the common case for held / auto-repeat /
+/// macro-spam keystrokes) we skip OpenProcess + QueryFullProcessImageNameW +
+/// OpenProcessToken + GetTokenInformation + two CloseHandle calls — the bulk of
+/// the per-event capture cost on the dispatch hot path (P1).
+struct ProcessInfoCache {
+    hwnd: usize,
+    pid: u32,
+    process_path: String,
+    exe: String,
+    is_elevated: bool,
+}
+
+impl ProcessInfoCache {
+    /// The cached process fields, iff this entry is for the same (hwnd, pid).
+    fn matching(&self, hwnd: usize, pid: u32) -> Option<(String, String, bool)> {
+        (self.hwnd == hwnd && self.pid == pid)
+            .then(|| (self.process_path.clone(), self.exe.clone(), self.is_elevated))
+    }
+}
+
+static PROCESS_INFO_CACHE: std::sync::Mutex<Option<ProcessInfoCache>> =
+    std::sync::Mutex::new(None);
+
 /// Capture information about the current foreground window.
 pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
     unsafe {
@@ -36,43 +64,71 @@ pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
             return Err("Failed to resolve the foreground window process id.".into());
         }
 
+        // Always re-read the title — it changes without an HWND change.
         let title_len = GetWindowTextLengthW(hwnd);
         let mut title_buffer = vec![0u16; (title_len as usize).max(1) + 1];
         let actual_len = GetWindowTextW(hwnd, title_buffer.as_mut_ptr(), title_buffer.len() as i32);
         let title = String::from_utf16_lossy(&title_buffer[..actual_len.max(0) as usize]);
 
-        let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process_handle.is_null() {
-            return Err(format!("Failed to open foreground process {pid}."));
-        }
+        let hwnd_val = hwnd as usize;
 
-        let process_path = {
-            let mut path_buffer = vec![0u16; 260];
-            let mut path_length = path_buffer.len() as u32;
-            let success = QueryFullProcessImageNameW(
-                process_handle,
-                0,
-                path_buffer.as_mut_ptr(),
-                &mut path_length,
-            );
-            if success == 0 {
+        // Fast path: reuse the cached process path/exe/elevation for this exact
+        // (hwnd, pid), skipping the expensive process-handle work below.
+        let cached = PROCESS_INFO_CACHE
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .and_then(|c| c.matching(hwnd_val, pid));
+
+        let (process_path, exe, is_elevated) = match cached {
+            Some(hit) => hit,
+            None => {
+                let process_handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+                if process_handle.is_null() {
+                    return Err(format!("Failed to open foreground process {pid}."));
+                }
+
+                let process_path = {
+                    let mut path_buffer = vec![0u16; 260];
+                    let mut path_length = path_buffer.len() as u32;
+                    let success = QueryFullProcessImageNameW(
+                        process_handle,
+                        0,
+                        path_buffer.as_mut_ptr(),
+                        &mut path_length,
+                    );
+                    if success == 0 {
+                        CloseHandle(process_handle);
+                        return Err("Failed to resolve the foreground process path.".into());
+                    }
+                    String::from_utf16_lossy(&path_buffer[..path_length as usize])
+                };
+
+                let is_elevated = is_process_elevated(process_handle);
                 CloseHandle(process_handle);
-                return Err("Failed to resolve the foreground process path.".into());
+
+                let exe = Path::new(&process_path)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(&process_path)
+                    .to_ascii_lowercase();
+
+                *PROCESS_INFO_CACHE
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ProcessInfoCache {
+                    hwnd: hwnd_val,
+                    pid,
+                    process_path: process_path.clone(),
+                    exe: exe.clone(),
+                    is_elevated,
+                });
+
+                (process_path, exe, is_elevated)
             }
-            String::from_utf16_lossy(&path_buffer[..path_length as usize])
         };
 
-        let is_elevated = is_process_elevated(process_handle);
-        CloseHandle(process_handle);
-
-        let exe = Path::new(&process_path)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or(&process_path)
-            .to_ascii_lowercase();
-
         Ok(RawWindowCapture {
-            hwnd: format!("0x{:X}", hwnd as usize),
+            hwnd: format!("0x{hwnd_val:X}"),
             pid,
             exe,
             process_path,
@@ -144,5 +200,31 @@ pub(crate) fn is_foreground_fullscreen() -> bool {
             && win_rect.top <= rc.top
             && win_rect.right >= rc.right
             && win_rect.bottom >= rc.bottom
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn process_info_cache_matches_only_same_hwnd_and_pid() {
+        let entry = ProcessInfoCache {
+            hwnd: 0x1234,
+            pid: 42,
+            process_path: r"C:\App\app.exe".into(),
+            exe: "app.exe".into(),
+            is_elevated: false,
+        };
+        // Same (hwnd, pid) → hit with the stored process fields.
+        assert_eq!(
+            entry.matching(0x1234, 42),
+            Some((r"C:\App\app.exe".to_string(), "app.exe".to_string(), false))
+        );
+        // Different HWND (window switched) → miss → fresh capture.
+        assert_eq!(entry.matching(0x9999, 42), None);
+        // Same HWND but different PID (handle recycled to a new process) → miss,
+        // so a recycled window never serves another process's path/elevation.
+        assert_eq!(entry.matching(0x1234, 99), None);
     }
 }

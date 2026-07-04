@@ -67,8 +67,17 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
 
     let mut extra_warnings: Vec<ImportWarning> = Vec::new();
     let mut extra_macros: Vec<ParsedMacro> = Vec::new();
+    // On a case-insensitive filesystem (Windows) "Macros" and "macros" resolve to
+    // the same directory; canonicalize so each real dir is parsed once (otherwise
+    // its XML-parse warnings get pushed twice).
+    let mut seen_dirs: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     for cand in &candidates {
         if !cand.is_dir() {
+            continue;
+        }
+        let canonical = cand.canonicalize().unwrap_or_else(|_| cand.clone());
+        if !seen_dirs.insert(canonical) {
             continue;
         }
         match macro_xml::parse_macros_in_dir(cand, &mut extra_warnings) {

@@ -24,8 +24,7 @@ use quick_xml::events::Event;
 use super::macro_xml;
 use super::makecode;
 use super::mapping::{
-    KeyTranslationError, input_id_to_control_id, mouse_action_from_assignment,
-    parse_modifier_string, translate_key_token, vk_to_key,
+    input_id_to_control_id, mouse_action_from_assignment, parse_modifier_string, vk_to_key,
 };
 use super::types::{
     ImportWarning, ParsedAction, ParsedBinding, ParsedMacro, ParsedProfile, ParsedSynapseProfiles,
@@ -547,19 +546,27 @@ fn build_shortcut_from_key_group(
         }
     };
 
-    // Fold modifier-only key tokens back into flags (e.g. VK_CONTROL).
-    if let Ok(()) = {
-        let token = format!("KEY_{}", key.to_ascii_uppercase());
-        match translate_key_token(&token) {
-            Ok(_) => Ok(()),
-            Err(KeyTranslationError::ModifierOnly) => {
-                mods.add_token(&token);
-                Err(KeyTranslationError::ModifierOnly)
-            }
-            Err(other) => Err(other),
-        }
-    } {
-        // translate succeeded as non-modifier, do nothing.
+    // Fold a bare-modifier key (a button mapped to just "hold Ctrl/Shift/Alt/Win")
+    // into the modifier flags and drop it as the shortcut key. `key` here is a
+    // human name from vk_to_key ("Ctrl", "LeftCtrl", "LeftWin", …), NOT a KEY_
+    // token — matching it directly, rather than round-tripping through
+    // translate_key_token's KEY_LEFT_CTRL token format (which these names never
+    // matched, so the fold was dead code and the modifier leaked into `key`).
+    let key_upper = key.to_ascii_uppercase();
+    let bare = key_upper
+        .strip_prefix("LEFT")
+        .or_else(|| key_upper.strip_prefix("RIGHT"))
+        .unwrap_or(&key_upper);
+    if matches!(bare, "CTRL" | "SHIFT" | "ALT" | "WIN" | "GUI") {
+        // add_token folds via substring (CTRL/SHIFT/ALT/WIN/GUI) → correct flag.
+        mods.add_token(&key_upper);
+        return ParsedAction::Shortcut {
+            key: String::new(),
+            ctrl: mods.ctrl,
+            shift: mods.shift,
+            alt: mods.alt,
+            win: mods.win,
+        };
     }
 
     ParsedAction::Shortcut {
@@ -733,6 +740,66 @@ mod tests {
                 assert_eq!(macro_guid, "deadbeef-dead-beef-dead-beefdeadbeef");
             }
             _ => panic!("expected sequence"),
+        }
+    }
+
+    fn key_group_builder(vk: u16) -> MappingBuilder {
+        MappingBuilder {
+            is_hypershift: false,
+            input_type: String::new(),
+            mouse_input: String::new(),
+            dkm_input: String::new(),
+            key_hid_page: None,
+            key_hid_id: None,
+            key_scancode: None,
+            key_vk: Some(vk),
+            key_modifier: String::new(),
+            mouse_assignment: String::new(),
+            macro_guid: String::new(),
+            output_group: OutputGroup::Key,
+        }
+    }
+
+    #[test]
+    fn build_shortcut_folds_bare_modifier_vk_into_flags() {
+        // Regression for the C6 finding: a v3 button mapped to a bare modifier VK
+        // (e.g. "hold Ctrl") must fold into the modifier flag with an empty key,
+        // not leak the modifier's own name into the key field. Previously the
+        // fold was dead code (KEY_CTRL token never matched KEY_LEFT_CTRL).
+        let mut warnings = Vec::new();
+
+        // VK_LCONTROL (0xA2) → "LeftCtrl" → ctrl flag, empty key.
+        match build_shortcut_from_key_group(&key_group_builder(0xA2), "Test", &mut warnings) {
+            ParsedAction::Shortcut {
+                key,
+                ctrl,
+                shift,
+                alt,
+                win,
+            } => {
+                assert_eq!(key, "", "bare modifier must not leak into the key field");
+                assert!(ctrl, "VK_LCONTROL must set ctrl");
+                assert!(!shift && !alt && !win);
+            }
+            other => panic!("expected Shortcut, got {other:?}"),
+        }
+
+        // VK_LWIN (0x5B) → "LeftWin" → win flag.
+        match build_shortcut_from_key_group(&key_group_builder(0x5B), "Test", &mut warnings) {
+            ParsedAction::Shortcut { key, win, .. } => {
+                assert_eq!(key, "");
+                assert!(win, "VK_LWIN must set win");
+            }
+            other => panic!("expected Shortcut, got {other:?}"),
+        }
+
+        // Sanity: a real key (VK_H 0x48) is unaffected — key="H", no modifier.
+        match build_shortcut_from_key_group(&key_group_builder(0x48), "Test", &mut warnings) {
+            ParsedAction::Shortcut { key, ctrl, .. } => {
+                assert_eq!(key, "H");
+                assert!(!ctrl);
+            }
+            other => panic!("expected Shortcut, got {other:?}"),
         }
     }
 

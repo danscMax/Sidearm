@@ -503,6 +503,11 @@ function App() {
         setActionPickerBindingId(null);
       } else if (confirmModal) {
         setConfirmModal(null);
+      } else if (viewState === "error") {
+        // Escape dismisses the error modal (mirrors ErrorModal's onDismiss).
+        // Without this it fell through to the else below, which left the modal
+        // open AND cleared the background control selection as a side effect.
+        setError(null);
       } else {
         setSelectedControlId(null);
       }

@@ -26,7 +26,10 @@
   --c-card-border: rgba(255, 255, 255, 0.08);
   --c-bg: #121c18;
   --c-ok: #75c268;
-  --c-danger: #e05555;
+  /* Lightened from #e05555 (4.26:1, just under AA) to ~4.8:1 on --c-surface so
+     danger/status label TEXT meets WCAG AA. Also tints danger borders/buttons a
+     hair lighter — a deliberate, minor shift (verify visually if it matters). */
+  --c-danger: #e56b6b;
   --c-warning: #c49934;
   --c-warning-light: #e7c46f;
   --c-info: #5c9add;
@@ -60,7 +63,9 @@
   --fs-heading: 1.25rem;
 
   --c-accent-dim: rgba(159, 202, 105, 0.12);
-  --c-text-subtle: rgba(226, 236, 218, 0.45);
+  /* alpha 0.6 => ~5:1 on --c-surface (WCAG AA); 0.45 was 3.79:1 and failed AA
+     for the small informational text (exe paths, error codes) that uses it. */
+  --c-text-subtle: rgba(226, 236, 218, 0.6);
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 12px;

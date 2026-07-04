@@ -71,8 +71,10 @@ export function AppMappingModal({
         {/* Header */}
         {isCreate ? (
           <div className="rule-modal__header">
-            <span className="rule-modal__title">{t("newRule.title")}</span>
-            <p className="rule-modal__subtitle">{t("newRule.subtitle")}</p>
+            <div>
+              <span className="rule-modal__title">{t("newRule.title")}</span>
+              <p className="rule-modal__subtitle">{t("newRule.subtitle")}</p>
+            </div>
           </div>
         ) : (
           <div className="rule-modal__header">

@@ -1055,19 +1055,34 @@ select::checkmark {
   font-size: var(--fs-body-sm);
 }
 
+/* ── Canonical input recipe ─────────────────────────────────────────────
+   Single source of truth for every text field, select, and textarea. New
+   inputs belong in a `.field` (label + control) or carry `.input`. The
+   bespoke classes below opt INTO this recipe and add only their unique
+   overrides (width, mono, flex) further down — never re-declare the
+   fill / border / focus here. ── */
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+.input,
+.capture-row input,
+.settings-text-input,
+.debug-testing__input,
+.profiles__priority-input,
+.action-picker__search {
   width: 100%;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 9px 12px;
+  border: 1px solid var(--c-card-border);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--c-card-bg);
   color: var(--c-text-bright);
-  resize: vertical;
-  transition: outline-color 150ms ease, border-color 150ms ease;
+  font-size: var(--fs-body-sm);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
+
+.field textarea,
+.input--multiline { resize: vertical; }
 
 .field input[type="checkbox"] {
   width: 18px;
@@ -1077,13 +1092,36 @@ select::checkmark {
 }
 
 .field input::placeholder,
-.field textarea::placeholder { color: var(--c-text-muted); }
+.field textarea::placeholder,
+.input::placeholder,
+.capture-row input::placeholder,
+.settings-text-input::placeholder,
+.debug-testing__input::placeholder,
+.profiles__priority-input::placeholder,
+.action-picker__search::placeholder { color: var(--c-text-muted); }
+
+.field input:hover,
+.field select:hover,
+.field textarea:hover,
+.input:hover,
+.capture-row input:hover,
+.settings-text-input:hover,
+.debug-testing__input:hover,
+.profiles__priority-input:hover,
+.action-picker__search:hover { border-color: var(--c-border-hover); }
 
 .field input:focus,
 .field select:focus,
-.field textarea:focus {
-  outline: 2px solid rgba(180, 226, 125, 0.32);
-  outline-offset: 2px;
+.field textarea:focus,
+.input:focus,
+.capture-row input:focus,
+.settings-text-input:focus,
+.debug-testing__input:focus,
+.profiles__priority-input:focus,
+.action-picker__search:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: 0 0 0 3px var(--c-accent-dim);
 }
 
 /* ── Editor ── */
@@ -2694,26 +2732,8 @@ code {
   min-width: 130px;
 }
 
-.action-picker__search {
-  width: 100%;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-surface-alt);
-  color: var(--c-text);
-  font-size: var(--fs-body-sm);
-  transition: border-color 150ms;
-}
-
-.action-picker__search::placeholder {
-  color: var(--c-text-muted);
-}
-
-.action-picker__search:focus {
-  border-color: var(--c-border-hover);
-  outline: none;
-}
+/* Opts into the canonical input recipe; only the list spacing is unique. */
+.action-picker__search { margin-bottom: 8px; }
 
 .action-picker__cat-btn {
   display: flex;
@@ -2798,11 +2818,12 @@ code {
   gap: 8px;
 }
 
-.capture-row input {
-  flex: 1;
-}
+/* Canonical recipe covers fill/border/focus; only the row-fill is unique. */
+.capture-row input { flex: 1; }
 
-.field input.capture-active {
+/* Record-mode pulse — standalone so it works whether or not the input sits
+   inside a `.field` (the global-shortcut CaptureRow in Settings does not). */
+.capture-active {
   border-color: var(--c-accent);
   box-shadow: 0 0 0 2px rgba(159, 202, 105, 0.3);
   animation: capture-pulse 1s ease-in-out infinite;
@@ -3322,28 +3343,10 @@ code {
   align-items: center;
 }
 
+/* Opts into the canonical recipe; monospace + row-fill are the unique bits. */
 .debug-testing__input {
   flex: 1;
-  padding: 10px 16px;
-  font-size: 13px;
-  border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--c-border);
-  color: var(--c-text-bright);
   font-family: var(--font-mono);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.debug-testing__input:focus {
-  outline: none;
-  border-color: var(--c-accent);
-  box-shadow: 0 0 0 3px rgba(159, 202, 105, 0.1);
-}
-
-.debug-testing__input::placeholder {
-  color: var(--c-text-muted);
-  font-family: inherit;
-  opacity: 0.45;
 }
 
 .debug-testing__actions {
@@ -4691,21 +4694,12 @@ img.profiles__app-card-monogram {
 
 /* --- G. Shared utilities --- */
 
+/* Opts into the canonical recipe; narrow + centered + monospace are unique. */
 .profiles__priority-input {
   width: 56px;
-  padding: 4px 6px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--c-text-bright);
-  font-size: var(--fs-caption);
-  font-family: var(--font-mono);
+  padding: 6px 8px;
   text-align: center;
-}
-
-.profiles__priority-input:focus {
-  border-color: var(--c-accent);
-  outline: none;
+  font-family: var(--font-mono);
 }
 
 .profiles__delete-btn {
@@ -4894,25 +4888,8 @@ input[type="number"] { -moz-appearance: textfield; }
   flex-wrap: wrap;
 }
 
-.settings-text-input {
-  width: 100%;
-  max-width: 360px;
-  padding: 7px 10px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-bg);
-  color: var(--c-text);
-  font-size: var(--fs-caption);
-}
-
-.settings-text-input:focus-visible {
-  outline: none;
-  border-color: var(--c-accent);
-}
-
-.settings-text-input::placeholder {
-  color: var(--c-text-muted);
-}
+/* Opts into the canonical recipe; only its max width is unique. */
+.settings-text-input { max-width: 360px; }
 
 /* Profile cards in settings */
 .settings-profile-list {

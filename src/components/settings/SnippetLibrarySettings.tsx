@@ -261,7 +261,7 @@ export function SnippetLibrarySettings({
         )}
 
         <div className="settings-actions mt-12">
-          <button type="button" className="action-button" onClick={handleAdd}>
+          <button type="button" className="action-button action-button--accent" onClick={handleAdd}>
             {t("snippetLibrary.addButton")}
           </button>
           {library.length > 1 ? (

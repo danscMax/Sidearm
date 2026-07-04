@@ -169,7 +169,7 @@ export function SequenceStepEditor({
             <>
               <button
                 type="button"
-                className="action-button action-button--small"
+                className="action-button action-button--small action-button--accent"
                 onClick={() => { void handleStartRecording(); }}
               >
                 {t("picker.recordMacro")}

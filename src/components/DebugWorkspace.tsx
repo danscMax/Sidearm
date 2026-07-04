@@ -176,7 +176,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
           <div className="debug-testing__actions">
             <button
               type="button"
-              className="action-button"
+              className="action-button action-button--accent"
               onClick={() => { void handlePreviewResolution(); }}
               disabled={!resolutionKeyInput.trim()}
               title={t("debug.checkTooltip")}
@@ -318,7 +318,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     <div className="editor-actions">
                       <button
                         type="button"
-                        className="action-button"
+                        className="action-button action-button--accent"
                         onClick={() => {
                           void handleStartVerificationSession();
                         }}

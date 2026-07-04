@@ -178,7 +178,7 @@ export function AppSettings({
           <button
             type="button"
             aria-pressed={i18n.language === "ru"}
-            className={`action-button action-button--small${i18n.language === "ru" ? "" : " action-button--ghost"}`}
+            className={`action-button action-button--small${i18n.language === "ru" ? " action-button--active" : " action-button--ghost"}`}
             onClick={() => changeLanguage("ru")}
           >
             Русский
@@ -186,7 +186,7 @@ export function AppSettings({
           <button
             type="button"
             aria-pressed={i18n.language === "en"}
-            className={`action-button action-button--small${i18n.language === "en" ? "" : " action-button--ghost"}`}
+            className={`action-button action-button--small${i18n.language === "en" ? " action-button--active" : " action-button--ghost"}`}
             onClick={() => changeLanguage("en")}
           >
             English

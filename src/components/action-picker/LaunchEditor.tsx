@@ -45,7 +45,7 @@ export function LaunchEditor({
           <button
             key={mode}
             type="button"
-            className={`action-button action-button--small${targetMode === mode ? "" : " action-button--ghost"}`}
+            className={`action-button action-button--small${targetMode === mode ? " action-button--active" : " action-button--ghost"}`}
             aria-pressed={targetMode === mode}
             onClick={() => handleModeChange(mode)}
           >

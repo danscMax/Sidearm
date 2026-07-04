@@ -465,10 +465,12 @@ export function coerceActionType(
   }
 
   let nextConfig = config;
-  let menuActionRef =
-    config.actions.find((candidate) => candidate.id !== actionId)?.id ?? null;
+  let menuActionRef: string | null = null;
 
-  if (nextType === "menu" && !menuActionRef) {
+  if (nextType === "menu") {
+    // Always seed the first menu item with a fresh placeholder target rather than
+    // linking it to whichever unrelated action happens to be first in the config
+    // (order-dependent and surprising for the user).
     const placeholderActionId = nextUniqueId(
       config.actions.map((candidate) => candidate.id),
       "action-menu-target",

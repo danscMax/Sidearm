@@ -865,7 +865,7 @@ describe("coerceActionType", () => {
     }
   });
 
-  it("coerces to menu and references an existing action", () => {
+  it("coerces to menu with a fresh placeholder target even when other actions exist (L2)", () => {
     const otherAction = makeAction({ id: "other", displayName: "Other Action" });
     const action = makeAction({ id: "a", type: "disabled", payload: {} as Record<string, never> });
     const config = { ...createMinimalConfig(), actions: [action, otherAction] };
@@ -877,7 +877,12 @@ describe("coerceActionType", () => {
       expect(coerced.payload.items).toHaveLength(1);
       expect(coerced.payload.items[0]!.kind).toBe("action");
       if (coerced.payload.items[0]!.kind === "action") {
-        expect(coerced.payload.items[0]!.actionId).toBe("other");
+        // The first menu item links to a freshly-created placeholder, NOT the
+        // unrelated "other" action that merely happens to already exist (L2 fix).
+        const targetId = coerced.payload.items[0]!.actionId;
+        expect(targetId).not.toBe("other");
+        expect(targetId).toContain("action-menu-target");
+        expect(result.actions.find((a) => a.id === targetId)?.type).toBe("disabled");
       }
     }
   });

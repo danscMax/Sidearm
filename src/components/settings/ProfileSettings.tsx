@@ -297,7 +297,7 @@ export function ProfileSettings({
         <div className="settings-actions mt-12">
           <button
             type="button"
-            className="action-button"
+            className="action-button action-button--accent"
             onClick={handleCreateProfile}
           >
             {t("settings.createProfile")}

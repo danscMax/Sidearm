@@ -89,7 +89,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
               key={level}
               type="button"
               aria-pressed={levelFilter === level}
-              className={`action-button action-button--small${levelFilter === level ? "" : " action-button--ghost"}`}
+              className={`action-button action-button--small${levelFilter === level ? " action-button--active" : " action-button--ghost"}`}
               onClick={() => {
                 setLevelFilter(level);
               }}

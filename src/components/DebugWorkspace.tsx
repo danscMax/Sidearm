@@ -176,7 +176,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
           <div className="debug-testing__actions">
             <button
               type="button"
-              className="action-button"
+              className="action-button action-button--accent"
               onClick={() => { void handlePreviewResolution(); }}
               disabled={!resolutionKeyInput.trim()}
               title={t("debug.checkTooltip")}
@@ -227,7 +227,20 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
             />
             <Fact label={t("debug.result")} value={labelForPreviewStatus(lastResolutionPreview.status)} />
             {lastResolutionPreview.actionId ? (
-              <Fact label={t("debug.action")} value={lastResolutionPreview.actionId} mono />
+              // Show the action's human name when it resolves; raw mono id only
+              // as a fallback for dangling references.
+              (() => {
+                const name = activeConfig.actions.find(
+                  (a) => a.id === lastResolutionPreview.actionId,
+                )?.displayName;
+                return (
+                  <Fact
+                    label={t("debug.action")}
+                    value={name ?? lastResolutionPreview.actionId ?? ""}
+                    mono={!name}
+                  />
+                );
+              })()
             ) : null}
           </div>
         ) : null}
@@ -236,7 +249,16 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
           <div className="fact-grid mt-8">
             <Fact label={t("debug.outcome")} value={labelForExecutionOutcome(lastExecution.outcome)} />
             <Fact label={t("debug.mode")} value={labelForExecutionMode(lastExecution.mode)} />
-            <Fact label={t("debug.action")} value={lastExecution.actionId} mono />
+            {(() => {
+              const name = activeConfig.actions.find((a) => a.id === lastExecution.actionId)?.displayName;
+              return (
+                <Fact
+                  label={t("debug.action")}
+                  value={name ?? lastExecution.actionId}
+                  mono={!name}
+                />
+              );
+            })()}
             <Fact label={t("debug.time")} value={formatTimestamp(lastExecution.executedAt)} />
           </div>
         ) : null}
@@ -318,7 +340,7 @@ export function DebugWorkspace(props: DebugWorkspaceProps) {
                     <div className="editor-actions">
                       <button
                         type="button"
-                        className="action-button"
+                        className="action-button action-button--accent"
                         onClick={() => {
                           void handleStartVerificationSession();
                         }}

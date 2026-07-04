@@ -69,13 +69,17 @@ export function ActionPickerModal({
     };
   }, []);
 
-  // Auto-focus first interactive element on mount
+  // Auto-focus the search input on mount (falling back to any interactive
+  // element). Plain DOM order used to land on the close button, opening the
+  // modal with a focus ring on the ✕.
   useEffect(() => {
     const container = modalRef.current;
     if (!container) return;
-    const firstFocusable = container.querySelector<HTMLElement>(
-      'input, button, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
+    const firstFocusable =
+      container.querySelector<HTMLElement>('input[type="text"], input:not([type]), textarea') ??
+      container.querySelector<HTMLElement>(
+        'input, button, select, [tabindex]:not([tabindex="-1"])',
+      );
     firstFocusable?.focus();
   }, []);
 

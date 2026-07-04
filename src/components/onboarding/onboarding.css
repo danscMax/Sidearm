@@ -117,6 +117,12 @@
   margin: 4px 0 6px;
   color: var(--c-text);
 }
+/* The wizard moves programmatic focus to the heading on step change (screen
+   readers announce it) — but a visible focus ring on a heading reads as a
+   glitch to sighted users. */
+.onb-step__title:focus {
+  outline: none;
+}
 .onb-step__lead {
   font-size: 14px;
   line-height: 1.55;

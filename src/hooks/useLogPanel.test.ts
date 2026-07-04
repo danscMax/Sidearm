@@ -59,6 +59,42 @@ describe("useLogPanel", () => {
     );
   });
 
+  it("strips the release-build prefix that includes a leading date group", () => {
+    // Release builds emit [YYYY-MM-DD][HH:MM:SS][LEVEL][module] — the date
+    // group used to break the strip, leaking the raw prefix into the UI and
+    // mis-parsing the date as the category.
+    const { result } = renderHook(() => useLogPanel());
+
+    act(() => {
+      result.current._ingestForTest({
+        level: 3,
+        message:
+          "[2026-07-04][18:49:08][INFO][sidearm_lib::capture_backend] [capture] Hold-shortcut already held for Alt+F24, skipping duplicate",
+      });
+    });
+
+    expect(result.current.logs[0].category).toBe("capture");
+    expect(result.current.logs[0].message).toBe(
+      "Hold-shortcut already held for Alt+F24, skipping duplicate",
+    );
+  });
+
+  it("keeps a body that starts with its own lowercase bracket tokens intact", () => {
+    const { result } = renderHook(() => useLogPanel());
+
+    act(() => {
+      result.current._ingestForTest({
+        level: 4,
+        message: "[warn][retry] connecting",
+      });
+    });
+
+    // No uppercase LEVEL group in the leading run — nothing is stripped; the
+    // first bracket is treated as the category as before.
+    expect(result.current.logs[0].category).toBe("warn");
+    expect(result.current.logs[0].message).toBe("[retry] connecting");
+  });
+
   it("strips plugin prefix and defaults category when no custom bracket", () => {
     const { result } = renderHook(() => useLogPanel());
 

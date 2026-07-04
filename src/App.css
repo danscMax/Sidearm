@@ -24,6 +24,10 @@
   --c-accent: #9fca69;
   --c-card-bg: rgba(255, 255, 255, 0.04);
   --c-card-border: rgba(255, 255, 255, 0.08);
+  /* Input "well" — darker than the card it sits on, with a stronger edge, so a
+     text field reads as recessed/editable. Paired with --shadow-inset. */
+  --c-input-bg: rgba(0, 0, 0, 0.22);
+  --c-input-border: rgba(255, 255, 255, 0.11);
   --c-bg: #121c18;
   --c-ok: #75c268;
   /* Lightened from #e05555 (4.26:1, just under AA) to ~4.8:1 on --c-surface so
@@ -48,6 +52,8 @@
   /* Card elevation: raised settings/section cards above the page background. */
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.25);
   --shadow-card-hover: 0 6px 18px rgba(0, 0, 0, 0.32);
+  /* Inner shadow for recessed input wells. */
+  --shadow-inset: inset 0 1px 2px rgba(0, 0, 0, 0.28);
 
   --c-text-on-accent: #0f170f;
   --gradient-primary: linear-gradient(135deg, #9fca69, #6ca84f);
@@ -637,6 +643,9 @@ select::checkmark {
 .content__scroll {
   flex: 1;
   overflow-y: overlay;
+  /* Never let stray wide content turn the whole page into a sideways scroller;
+     cards handle their own wrapping/ellipsis. */
+  overflow-x: clip;
   scrollbar-gutter: auto;
 }
 
@@ -820,6 +829,10 @@ select::checkmark {
 /* ── Workspace ── */
 .workspace {
   display: grid;
+  /* minmax(0, …) lets the single column SHRINK below its content's min-content
+     width — otherwise one long nowrap line (log row, mono action id) blows the
+     track past the viewport and the whole page scrolls sideways. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
   padding: 20px 24px 32px;
   align-items: start;
@@ -1009,6 +1022,8 @@ select::checkmark {
 .fact--mono strong {
   font-family: var(--font-mono);
   font-size: 0.75rem;
+  /* Raw ids can be long — break rather than blow the row wide. */
+  overflow-wrap: anywhere;
 }
 
 .fact-grid {
@@ -1055,19 +1070,38 @@ select::checkmark {
   font-size: var(--fs-body-sm);
 }
 
+/* ── Canonical input recipe ─────────────────────────────────────────────
+   Single source of truth for every text field, select, and textarea. New
+   inputs belong in a `.field` (label + control) or carry `.input`. The
+   bespoke classes below opt INTO this recipe and add only their unique
+   overrides (width, mono, flex) further down — never re-declare the
+   fill / border / focus here. ── */
 .field input,
 .field select,
-.field textarea {
+.field textarea,
+.input,
+.capture-row input,
+.settings-text-input,
+.debug-testing__input,
+.profiles__priority-input,
+.action-picker__search,
+.profiles-workspace__search {
   width: 100%;
   min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 9px 12px;
+  border: 1px solid var(--c-input-border);
   border-radius: var(--radius-sm);
-  background: rgba(255, 255, 255, 0.06);
+  /* Recessed "well": a darker fill than the card + a soft inner shadow so the
+     field reads unmistakably as an editable input, not a label. */
+  background: var(--c-input-bg);
+  box-shadow: var(--shadow-inset);
   color: var(--c-text-bright);
-  resize: vertical;
-  transition: outline-color 150ms ease, border-color 150ms ease;
+  font-size: var(--fs-body-sm);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
+
+.field textarea,
+.input--multiline { resize: vertical; }
 
 .field input[type="checkbox"] {
   width: 18px;
@@ -1077,13 +1111,39 @@ select::checkmark {
 }
 
 .field input::placeholder,
-.field textarea::placeholder { color: var(--c-text-muted); }
+.field textarea::placeholder,
+.input::placeholder,
+.capture-row input::placeholder,
+.settings-text-input::placeholder,
+.debug-testing__input::placeholder,
+.profiles__priority-input::placeholder,
+.action-picker__search::placeholder,
+.profiles-workspace__search::placeholder { color: var(--c-text-muted); }
+
+.field input:hover,
+.field select:hover,
+.field textarea:hover,
+.input:hover,
+.capture-row input:hover,
+.settings-text-input:hover,
+.debug-testing__input:hover,
+.profiles__priority-input:hover,
+.action-picker__search:hover,
+.profiles-workspace__search:hover { border-color: var(--c-border-hover); }
 
 .field input:focus,
 .field select:focus,
-.field textarea:focus {
-  outline: 2px solid rgba(180, 226, 125, 0.32);
-  outline-offset: 2px;
+.field textarea:focus,
+.input:focus,
+.capture-row input:focus,
+.settings-text-input:focus,
+.debug-testing__input:focus,
+.profiles__priority-input:focus,
+.action-picker__search:focus,
+.profiles-workspace__search:focus {
+  outline: none;
+  border-color: var(--c-accent);
+  box-shadow: var(--shadow-inset), 0 0 0 3px var(--c-accent-dim);
 }
 
 /* ── Editor ── */
@@ -1104,16 +1164,36 @@ select::checkmark {
 }
 
 /* ── Action Button ── */
+/* Buttons are QUIET by default — accent is reserved for the one primary action
+   per screen (--accent / --primary) and for pressed toggle state (--active).
+   The old inverted polarity (bright base, quiet opt-in) made every Browse /
+   Export / toggle read as a CTA. */
 .action-button {
-  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--c-card-border);
   border-radius: var(--radius-sm);
-  padding: 10px 16px;
-  background: var(--gradient-primary);
-  color: var(--c-text-on-accent);
-  font-weight: 700;
+  padding: 9px 15px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--c-text-bright);
+  font-weight: 600;
   cursor: pointer;
   font-size: var(--fs-caption);
-  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease;
+  transition: transform 120ms ease, opacity 120ms ease, background 120ms ease,
+    border-color 120ms ease;
+}
+
+.action-button:hover:not(:disabled) {
+  border-color: var(--c-border-hover);
+}
+
+/* Toggle "on" state — accent-tinted so pressed/unpressed is unmistakable. */
+.action-button--active {
+  background: var(--c-accent-dim);
+  border-color: var(--c-border-active);
+  color: var(--c-accent);
 }
 
 .action-button:disabled {
@@ -1123,17 +1203,20 @@ select::checkmark {
 
 .action-button--secondary {
   background: rgba(255, 255, 255, 0.12);
+  border-color: transparent;
   color: var(--c-text-bright);
 }
 
 .action-button--small {
-  padding: 7px 12px;
+  padding: 6px 12px;
   font-size: var(--fs-caption);
 }
 
 .action-button--accent {
   background: var(--c-accent);
+  border-color: transparent;
   color: var(--c-text-on-accent);
+  font-weight: 700;
 }
 
 .action-button--ghost {
@@ -1144,7 +1227,9 @@ select::checkmark {
 
 .action-button--warning {
   background: var(--c-warning);
+  border-color: transparent;
   color: var(--c-text-on-accent);
+  font-weight: 700;
 }
 
 .action-button--danger {
@@ -1550,7 +1635,8 @@ select::checkmark {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
-  overflow: hidden;
+  /* No overflow:hidden here — it decapitated the hover tooltip bubble on the
+     first rows (labels already ellipsize at .btn-legend__label level). */
 }
 
 .mouse-top-layout:has(.mouse-visual--top) .mouse-top-labels {
@@ -1681,6 +1767,13 @@ select::checkmark {
   max-width: 220px;
   line-height: 1.4;
   animation: tab-fade-in 120ms ease-out;
+}
+
+/* The first rows sit at the very top of the card — an above-the-cell bubble
+   would poke past the container edge and get clipped, so flip it below. */
+.mouse-top-labels .btn-legend__cell:nth-child(-n + 2)[data-tooltip]:hover::after {
+  bottom: auto;
+  top: calc(100% + 6px);
 }
 
 
@@ -2694,26 +2787,8 @@ code {
   min-width: 130px;
 }
 
-.action-picker__search {
-  width: 100%;
-  padding: 8px 12px;
-  margin-bottom: 8px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-surface-alt);
-  color: var(--c-text);
-  font-size: var(--fs-body-sm);
-  transition: border-color 150ms;
-}
-
-.action-picker__search::placeholder {
-  color: var(--c-text-muted);
-}
-
-.action-picker__search:focus {
-  border-color: var(--c-border-hover);
-  outline: none;
-}
+/* Opts into the canonical input recipe; only the list spacing is unique. */
+.action-picker__search { margin-bottom: 8px; }
 
 .action-picker__cat-btn {
   display: flex;
@@ -2798,11 +2873,12 @@ code {
   gap: 8px;
 }
 
-.capture-row input {
-  flex: 1;
-}
+/* Canonical recipe covers fill/border/focus; only the row-fill is unique. */
+.capture-row input { flex: 1; }
 
-.field input.capture-active {
+/* Record-mode pulse — standalone so it works whether or not the input sits
+   inside a `.field` (the global-shortcut CaptureRow in Settings does not). */
+.capture-active {
   border-color: var(--c-accent);
   box-shadow: 0 0 0 2px rgba(159, 202, 105, 0.3);
   animation: capture-pulse 1s ease-in-out infinite;
@@ -2883,8 +2959,9 @@ code {
 
 .action-button--primary {
   background: var(--c-accent);
+  border-color: transparent;
   color: var(--c-text-on-accent);
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .action-button--primary:hover:not(:disabled) {
@@ -2967,14 +3044,20 @@ code {
 
 .command-palette__item:hover,
 .command-palette__item--active {
-  background: rgba(159, 202, 105, 0.12);
+  background: var(--c-accent-dim);
   color: var(--c-text-bright);
+  /* Keep the row's box stable — the inset bar marks selection without a jump. */
+  box-shadow: inset 2px 0 0 var(--c-accent);
 }
 
 .command-palette__shortcut {
   font-size: var(--fs-micro);
   color: var(--c-text-muted);
   font-family: var(--font-mono);
+  padding: 2px 6px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-xs);
+  background: rgba(0, 0, 0, 0.25);
 }
 
 /* Cross-profile sections: non-selectable header + per-row label/meta. */
@@ -3318,32 +3401,21 @@ code {
 
 .debug-testing__bar {
   display: flex;
+  flex-wrap: wrap;
   gap: 12px;
   align-items: center;
 }
 
+.debug-testing__bar .debug-testing__input {
+  /* Let the input shrink so the buttons never clip off-screen; wrap instead. */
+  flex: 1 1 260px;
+  min-width: 200px;
+}
+
+/* Opts into the canonical recipe; monospace + row-fill are the unique bits. */
 .debug-testing__input {
   flex: 1;
-  padding: 10px 16px;
-  font-size: 13px;
-  border-radius: var(--radius-md);
-  background: rgba(0, 0, 0, 0.35);
-  border: 1px solid var(--c-border);
-  color: var(--c-text-bright);
   font-family: var(--font-mono);
-  transition: border-color 0.15s, box-shadow 0.15s;
-}
-
-.debug-testing__input:focus {
-  outline: none;
-  border-color: var(--c-accent);
-  box-shadow: 0 0 0 3px rgba(159, 202, 105, 0.1);
-}
-
-.debug-testing__input::placeholder {
-  color: var(--c-text-muted);
-  font-family: inherit;
-  opacity: 0.45;
 }
 
 .debug-testing__actions {
@@ -4598,6 +4670,9 @@ img.profiles__app-card-monogram {
   border: 1px solid var(--c-border);
   border-radius: var(--radius-modal);
   width: min(520px, 90vw);
+  /* Cap to the viewport and let the body scroll, so a tall form (or a short
+     window) never clips the header/footer off-screen. */
+  max-height: 90vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-modal);
@@ -4658,6 +4733,9 @@ img.profiles__app-card-monogram {
   display: grid;
   gap: 14px;
   padding: 20px;
+  /* Scroll the form, not the whole modal, so header + footer stay pinned. */
+  overflow-y: auto;
+  min-height: 0;
 }
 
 
@@ -4691,21 +4769,12 @@ img.profiles__app-card-monogram {
 
 /* --- G. Shared utilities --- */
 
+/* Opts into the canonical recipe; narrow + centered + monospace are unique. */
 .profiles__priority-input {
   width: 56px;
-  padding: 4px 6px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--c-text-bright);
-  font-size: var(--fs-caption);
-  font-family: var(--font-mono);
+  padding: 6px 8px;
   text-align: center;
-}
-
-.profiles__priority-input:focus {
-  border-color: var(--c-accent);
-  outline: none;
+  font-family: var(--font-mono);
 }
 
 .profiles__delete-btn {
@@ -4813,7 +4882,7 @@ img.profiles__app-card-monogram {
   background: var(--c-surface);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-md);
-  padding: var(--space-xl);
+  padding: 16px 20px;
   box-shadow: var(--shadow-card);
 }
 
@@ -4822,15 +4891,18 @@ img.profiles__app-card-monogram {
   align-items: center;
   justify-content: space-between;
   gap: var(--space-md);
-  margin-bottom: var(--space-lg);
+  margin-bottom: var(--space-sm);
 }
 
-/* One stronger header style shared by all peer section headers. */
+/* One consistent section eyebrow, regardless of how the locale string is cased
+   (some were UPPERCASE, some Title Case). text-transform unifies them; the
+   field + its label below carry the visual weight. */
 .settings-section__title {
-  font-size: var(--fs-body-sm);
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  color: var(--c-text-bright);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--c-text-muted);
 }
 
 /* Section "master" toggle: explicit label so its scope is unambiguous, instead
@@ -4861,7 +4933,7 @@ img.profiles__app-card-monogram {
 .settings-editor {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 10px;
 }
 
 .settings-editor__title {
@@ -4887,6 +4959,14 @@ input[type="number"]::-webkit-outer-spin-button {
 }
 input[type="number"] { -moz-appearance: textfield; }
 
+/* Suppress the native WebKit clear (×) on type=search — we render our own
+   .search-field__clear button, so the native one just overlapped it. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 /* Settings actions row */
 .settings-actions {
   display: flex;
@@ -4894,25 +4974,8 @@ input[type="number"] { -moz-appearance: textfield; }
   flex-wrap: wrap;
 }
 
-.settings-text-input {
-  width: 100%;
-  max-width: 360px;
-  padding: 7px 10px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-bg);
-  color: var(--c-text);
-  font-size: var(--fs-caption);
-}
-
-.settings-text-input:focus-visible {
-  outline: none;
-  border-color: var(--c-accent);
-}
-
-.settings-text-input::placeholder {
-  color: var(--c-text-muted);
-}
+/* Opts into the canonical recipe; only its max width is unique. */
+.settings-text-input { max-width: 360px; }
 
 /* Profile cards in settings */
 .settings-profile-list {
@@ -5651,18 +5714,12 @@ input[type="number"] { -moz-appearance: textfield; }
 .search-field__clear:hover {
   background: rgba(255, 255, 255, 0.22);
 }
+/* Opts into the canonical recipe; leaves room for the leading icon and the
+   trailing clear button, and keeps the compact search font. */
 .profiles-workspace__search {
   flex: 1;
-  padding: 5px 10px 5px 26px;
-  font-size: 0.82rem;
-  background: var(--c-surface);
-  color: var(--c-text);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-xs);
-}
-.profiles-workspace__search:focus {
-  outline: none;
-  border-color: var(--c-accent);
+  padding: 8px 30px 8px 28px;
+  font-size: var(--fs-caption);
 }
 .profiles-workspace__search-meta {
   font-size: 0.72rem;

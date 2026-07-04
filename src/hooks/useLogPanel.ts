@@ -32,23 +32,31 @@ function levelName(level: number): LogPanelEntry["level"] {
   }
 }
 
+const PLUGIN_LOG_LEVELS = new Set(["TRACE", "DEBUG", "INFO", "WARN", "ERROR"]);
+
 /**
  * Parse a log message from tauri-plugin-log.
  *
- * The plugin format is: `[HH:MM:SS][LEVEL][rust::module::path] [category] body`
- * We strip all leading `[…]` groups (timestamp, level, module), then look for
- * our own `[category]` bracket prefix in the remaining text.
+ * The plugin prefix is a leading run of `[…]` groups ending with
+ * `[LEVEL][rust::module::path]`. Dev builds emit `[HH:MM:SS][LEVEL][module]`,
+ * release builds add a date first: `[YYYY-MM-DD][HH:MM:SS][LEVEL][module]`.
+ * We scan the leading run for the uppercase LEVEL group (the reliable signal)
+ * and cut through the module group that follows it — anchoring on LEVEL keeps
+ * a body that legitimately starts with bracket tokens (e.g. `[warn][retry]`)
+ * intact. Then we look for our own `[category]` prefix in what remains.
  */
 function extractCategory(message: string): { category: string; body: string } {
-  // Strip the plugin-added prefix precisely: [timestamp][LEVEL][module::path].
-  // Anchoring on the uppercase LEVEL (the reliable signal) — instead of a generic
-  // "2+ bracket groups" run — avoids eating a message body that legitimately
-  // starts with its own bracket tokens (e.g. `[warn][retry] connecting`), which
-  // the old heuristic mis-parsed. Robust to timestamp-format changes too.
-  const stripped = message.replace(
-    /^\[[^\]]*\]\[(?:TRACE|DEBUG|INFO|WARN|ERROR)\]\[[^\]]*\]\s*/,
-    "",
-  );
+  let stripped = message;
+  const lead = message.match(/^(?:\[[^\]]*\])+/);
+  if (lead) {
+    const groups = lead[0].match(/\[[^\]]*\]/g) ?? [];
+    const levelIdx = groups.findIndex((g) => PLUGIN_LOG_LEVELS.has(g.slice(1, -1)));
+    if (levelIdx !== -1 && levelIdx + 1 < groups.length) {
+      // Everything through the module group (the one right after LEVEL).
+      const cut = groups.slice(0, levelIdx + 2).reduce((n, g) => n + g.length, 0);
+      stripped = message.slice(cut).replace(/^\s+/, "");
+    }
+  }
 
   // Now check for our [category] prefix
   const match = stripped.match(/^\[([^\]]+)\]\s*(.*)/s);

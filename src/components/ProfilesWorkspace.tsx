@@ -515,6 +515,7 @@ export function ProfilesWorkspace({
         <button
           type="button"
           className={`action-button action-button--small${searchAllProfiles ? " action-button--active" : ""}`}
+          aria-pressed={searchAllProfiles}
           onClick={() => setSearchAllProfiles((v) => !v)}
         >
           {t("profile.searchAllProfiles")}
@@ -618,6 +619,7 @@ export function ProfilesWorkspace({
           <button
             type="button"
             className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
+            aria-pressed={heatmapEnabled}
             onClick={() => setHeatmapEnabled((prev) => !prev)}
             title={`${heatmapEnabled ? t("profile.heatmapDisable") : t("profile.heatmapEnable")} · ${t("profile.heatmapTooltip")}`}
           >
@@ -678,6 +680,7 @@ export function ProfilesWorkspace({
         <button
           type="button"
           className={`action-button action-button--small${allProfilesView ? " action-button--active" : ""}`}
+          aria-pressed={allProfilesView}
           onClick={() => setAllProfilesView((v) => !v)}
         >
           {t("profile.allProfilesToggle")}

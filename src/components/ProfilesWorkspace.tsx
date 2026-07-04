@@ -362,15 +362,21 @@ export function ProfilesWorkspace({
   useEffect(() => {
     if (!quickRuleCapture || !activeProfile) return;
     const cap = quickRuleCapture;
-    setCreatingDraft({
-      id: "",
-      exe: cap.exe,
-      processPath: cap.processPath || undefined,
-      titleIncludes: cap.title ? [cap.title] : undefined,
-      profileId: activeProfile.id,
-      enabled: true,
-      priority: activeProfile.priority,
-    });
+    // Don't clobber an already-open create-rule draft with unsaved edits: only
+    // prefill when no draft is currently open (functional update keeps the
+    // existing one). The tray capture is still consumed either way.
+    setCreatingDraft(
+      (prev) =>
+        prev ?? {
+          id: "",
+          exe: cap.exe,
+          processPath: cap.processPath || undefined,
+          titleIncludes: cap.title ? [cap.title] : undefined,
+          profileId: activeProfile.id,
+          enabled: true,
+          priority: activeProfile.priority,
+        },
+    );
     onQuickRuleHandled();
   }, [quickRuleCapture, activeProfile]);
 

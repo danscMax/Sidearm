@@ -40,10 +40,15 @@ function levelName(level: number): LogPanelEntry["level"] {
  * our own `[category]` bracket prefix in the remaining text.
  */
 function extractCategory(message: string): { category: string; body: string } {
-  // Strip plugin-added prefix: [timestamp][LEVEL][module::path]
-  // Requires 2+ consecutive brackets (plugin always adds at least [TIME][LEVEL])
-  // so a single [category] bracket from our code is NOT stripped.
-  const stripped = message.replace(/^(?:\[[^\]]*\]){2,}\s*/, "");
+  // Strip the plugin-added prefix precisely: [timestamp][LEVEL][module::path].
+  // Anchoring on the uppercase LEVEL (the reliable signal) — instead of a generic
+  // "2+ bracket groups" run — avoids eating a message body that legitimately
+  // starts with its own bracket tokens (e.g. `[warn][retry] connecting`), which
+  // the old heuristic mis-parsed. Robust to timestamp-format changes too.
+  const stripped = message.replace(
+    /^\[[^\]]*\]\[(?:TRACE|DEBUG|INFO|WARN|ERROR)\]\[[^\]]*\]\s*/,
+    "",
+  );
 
   // Now check for our [category] prefix
   const match = stripped.match(/^\[([^\]]+)\]\s*(.*)/s);

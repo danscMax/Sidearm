@@ -589,6 +589,24 @@ describe("dedupeSnippetLibrary", () => {
     expect(removed).toBe(0);
     expect(result).toBe(config);
   });
+
+  it("keeps distinct snippets whose space-joined fields would collide (C4)", () => {
+    // {name:"A", text:"B C"} and {name:"A B", text:"C"} both flatten to the
+    // string "A B C sendText" — the old space-joined key merged them. The
+    // structured JSON key keeps their field boundaries distinct.
+    const config = {
+      ...createMinimalConfig(),
+      snippetLibrary: [
+        makeSnippetLibraryItem({ id: "s1", name: "A", text: "B C", pasteMode: "sendText" }),
+        makeSnippetLibraryItem({ id: "s2", name: "A B", text: "C", pasteMode: "sendText" }),
+      ],
+    };
+
+    const { config: result, removed } = dedupeSnippetLibrary(config);
+
+    expect(removed).toBe(0);
+    expect(result.snippetLibrary.map((s) => s.id)).toEqual(["s1", "s2"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

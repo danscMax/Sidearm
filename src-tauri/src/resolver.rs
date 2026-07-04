@@ -395,6 +395,11 @@ pub(crate) fn matching_app_mappings<'a>(
     process_path: Option<&str>,
 ) -> Vec<&'a AppMapping> {
     let normalized_title = title.to_ascii_lowercase();
+    // Normalize the active process path ONCE per call — it is invariant across
+    // all candidate mappings, so recomputing it (lowercase + regex) inside the
+    // per-mapping filter closure below would repeat the same work N times on
+    // every dispatched keystroke.
+    let normalized_active = process_path.map(normalize_process_path);
     let mut matches: Vec<&AppMapping> = config
         .app_mappings
         .iter()
@@ -407,9 +412,9 @@ pub(crate) fn matching_app_mappings<'a>(
             // which embed the version in the WindowsApps path. Mappings without
             // a pinned path (the common case) are unaffected — this keeps the
             // behaviour additive for existing configs.
-            Some(pinned) => process_path.is_some_and(|active| {
-                normalize_process_path(active) == normalize_process_path(pinned)
-            }),
+            Some(pinned) => normalized_active
+                .as_deref()
+                .is_some_and(|active| active == normalize_process_path(pinned)),
             None => true,
         })
         .filter(|mapping| {

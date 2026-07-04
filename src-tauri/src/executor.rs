@@ -1213,13 +1213,29 @@ pub fn evaluate_conditions(conditions: &[ActionCondition], exe: &str, title: &st
         return true;
     }
 
+    // Lowercase the window title at most once per call (only if a title
+    // condition actually references it) and reuse it across conditions, instead
+    // of re-allocating/re-lowering `title` inside every WindowTitle* arm.
+    let title_lower = conditions
+        .iter()
+        .any(|c| {
+            matches!(
+                c,
+                ActionCondition::WindowTitleContains { .. }
+                    | ActionCondition::WindowTitleNotContains { .. }
+            )
+        })
+        .then(|| title.to_lowercase());
+
     conditions.iter().all(|condition| match condition {
-        ActionCondition::WindowTitleContains { value } => {
-            title.to_lowercase().contains(&value.to_lowercase())
-        }
-        ActionCondition::WindowTitleNotContains { value } => {
-            !title.to_lowercase().contains(&value.to_lowercase())
-        }
+        ActionCondition::WindowTitleContains { value } => title_lower
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&value.to_lowercase()),
+        ActionCondition::WindowTitleNotContains { value } => !title_lower
+            .as_deref()
+            .unwrap_or_default()
+            .contains(&value.to_lowercase()),
         ActionCondition::ExeEquals { value } => exe.eq_ignore_ascii_case(value),
         ActionCondition::ExeNotEquals { value } => !exe.eq_ignore_ascii_case(value),
     })

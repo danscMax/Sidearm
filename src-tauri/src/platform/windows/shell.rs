@@ -21,11 +21,52 @@ use windows_sys::Win32::{
     },
 };
 
+/// Expand `%VAR%` placeholders in a REG_EXPAND_SZ string using the process
+/// environment. Unknown / unterminated placeholders are left verbatim. Kept
+/// dependency-free (no `ExpandEnvironmentStringsW`) so it needs no extra
+/// windows-sys feature and is unit-testable off-Windows.
+fn expand_env_placeholders(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(start) = rest.find('%') {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 1..];
+        match after.find('%') {
+            Some(end) => {
+                let var = &after[..end];
+                match std::env::var(var) {
+                    Ok(val) => out.push_str(&val),
+                    Err(_) => {
+                        out.push('%');
+                        out.push_str(var);
+                        out.push('%');
+                    }
+                }
+                rest = &after[end + 1..];
+            }
+            None => {
+                // No closing '%': keep the rest verbatim.
+                out.push('%');
+                out.push_str(after);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Look up the exe path in the Windows App Paths registry.
 ///
 /// Most installed applications register their full path under:
 ///   `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\<exe>`
 pub(crate) fn lookup_app_paths_registry(exe_name: &str) -> Option<String> {
+    // Defense in depth: exe_name reaches here from a frontend-supplied string
+    // (get_exe_icon command). Reject path separators / traversal so a crafted
+    // value can't redirect RegOpenKeyExW to an arbitrary subkey outside App Paths.
+    if exe_name.is_empty() || exe_name.contains(['\\', '/']) || exe_name.contains("..") {
+        return None;
+    }
     let subkey = format!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{exe_name}");
     let wide_subkey: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
 
@@ -58,7 +99,15 @@ pub(crate) fn lookup_app_paths_registry(exe_name: &str) -> Option<String> {
 
         let len = (buf_size as usize) / 2;
         let s = String::from_utf16_lossy(&buf[..len]);
-        let trimmed = s.trim_end_matches('\0').trim_matches('"').to_owned();
+        let mut trimmed = s.trim_end_matches('\0').trim_matches('"').to_owned();
+
+        // REG_EXPAND_SZ values may embed %VAR% placeholders (e.g. %ProgramFiles%\…).
+        // Expand them before the existence check — the raw placeholder never exists,
+        // so the entry would otherwise be silently dropped despite the type check
+        // above deliberately accepting REG_EXPAND_SZ.
+        if value_type == REG_EXPAND_SZ {
+            trimmed = expand_env_placeholders(&trimmed);
+        }
 
         if !trimmed.is_empty() && Path::new(&trimmed).exists() {
             return Some(trimmed);
@@ -254,4 +303,31 @@ pub(crate) fn open_target(target: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn expand_env_placeholders_edges() {
+        // No placeholders → unchanged.
+        assert_eq!(
+            expand_env_placeholders(r"C:\Program Files\App\app.exe"),
+            r"C:\Program Files\App\app.exe"
+        );
+        // Unknown variable → kept verbatim (better than dropping the whole path).
+        assert_eq!(
+            expand_env_placeholders(r"%NO_SUCH_VAR_SIDEARM%\bin"),
+            r"%NO_SUCH_VAR_SIDEARM%\bin"
+        );
+        // Unterminated '%' → kept verbatim.
+        assert_eq!(expand_env_placeholders("100% done"), "100% done");
+        // A real variable expands. SystemRoot is always set on Windows.
+        let sysroot = std::env::var("SystemRoot").expect("SystemRoot set on Windows");
+        assert_eq!(
+            expand_env_placeholders(r"%SystemRoot%\explorer.exe"),
+            format!(r"{sysroot}\explorer.exe")
+        );
+    }
 }

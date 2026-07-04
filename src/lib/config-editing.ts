@@ -402,7 +402,10 @@ export function dedupeSnippetLibrary(config: AppConfig): { config: AppConfig; re
   const remap = new Map<string, string>(); // removed id -> kept id
   const kept: SnippetLibraryItem[] = [];
   for (const snippet of config.snippetLibrary) {
-    const key = `${snippet.name} ${snippet.text} ${snippet.pasteMode}`;
+    // Use a structured key so field boundaries can't shift: a space-joined
+    // string treats {name:"A", text:"B C"} and {name:"A B", text:"C"} as the
+    // same snippet. JSON.stringify keeps the three fields unambiguously separate.
+    const key = JSON.stringify([snippet.name, snippet.text, snippet.pasteMode]);
     const keptId = seen.get(key);
     if (keptId) {
       remap.set(snippet.id, keptId);
@@ -1475,7 +1478,14 @@ export function nextUniqueId(existingIds: string[] | Set<string>, baseId: string
     index += 1;
   }
 
-  return `${baseId}-${index}`;
+  const candidate = `${baseId}-${index}`;
+  // If the bounded search exhausted its window while the candidate is still
+  // taken, fall back to a random suffix instead of returning a colliding id
+  // (callers treat the result as unique and would silently overwrite/alias).
+  if (idSet.has(candidate)) {
+    return `${baseId}-${crypto.randomUUID().slice(0, 8)}`;
+  }
+  return candidate;
 }
 
 export interface ProfileExportData {

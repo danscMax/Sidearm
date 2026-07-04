@@ -1331,14 +1331,32 @@ fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
         incoming: Vec<T>,
         key: F,
     ) -> Vec<T> {
-        let mut map: HashMap<K, T> = HashMap::new();
-        for item in base {
-            map.insert(key(&item), item);
-        }
+        // Order-preserving merge: keep base items in their original order (each
+        // replaced in place when an incoming item shares its id — incoming wins),
+        // then append incoming-only items in their original order. Collecting
+        // HashMap::into_values() would randomize the user's list order (profiles,
+        // bindings, snippets) because HashMap iteration order is unspecified.
+        let mut incoming_map: HashMap<K, T> = HashMap::with_capacity(incoming.len());
+        let mut incoming_order: Vec<K> = Vec::with_capacity(incoming.len());
         for item in incoming {
-            map.insert(key(&item), item);
+            let k = key(&item);
+            if incoming_map.insert(k.clone(), item).is_none() {
+                incoming_order.push(k);
+            }
         }
-        map.into_values().collect()
+        let mut result: Vec<T> = Vec::with_capacity(base.len() + incoming_order.len());
+        for item in base {
+            match incoming_map.remove(&key(&item)) {
+                Some(replacement) => result.push(replacement),
+                None => result.push(item),
+            }
+        }
+        for k in incoming_order {
+            if let Some(item) = incoming_map.remove(&k) {
+                result.push(item);
+            }
+        }
+        result
     }
 
     AppConfig {

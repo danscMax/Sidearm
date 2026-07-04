@@ -1422,10 +1422,22 @@ fn validate_action<'a>(
             }
         },
         (ActionType::Sequence, ActionPayload::Sequence(payload)) => {
+            // Cap total step count so a malformed/malicious config can't block the
+            // worker thread for hours. The executor already clamps per-step delay
+            // (MAX_STEP_DELAY_MS) and repeat (MAX_STEP_REPEAT); this bounds the
+            // multiplier those clamps sit inside. 200 steps * 30s max each is
+            // already a pathological upper bound no legitimate macro approaches.
+            const MAX_SEQUENCE_STEPS: usize = 200;
             if payload.steps.is_empty() {
                 errors.push(format!(
                     "action `{}` sequence must contain at least one step.",
                     action.id
+                ));
+            } else if payload.steps.len() > MAX_SEQUENCE_STEPS {
+                errors.push(format!(
+                    "action `{}` sequence has {} steps; the maximum is {MAX_SEQUENCE_STEPS}.",
+                    action.id,
+                    payload.steps.len()
                 ));
             }
         }
@@ -3738,6 +3750,40 @@ mod edge_proptests {
         cfg.actions = vec![make_shortcut_action("a1")];
         cfg.bindings = vec![make_binding("b1", "a1")];
         assert!(validate_config(&cfg).is_ok());
+    }
+
+    fn make_sequence_action(id: &str, step_count: usize) -> Action {
+        let mut action = make_shortcut_action(id);
+        action.action_type = ActionType::Sequence;
+        action.payload = ActionPayload::Sequence(SequenceActionPayload {
+            steps: (0..step_count)
+                .map(|_| SequenceStep::Sleep { delay_ms: 1 })
+                .collect(),
+        });
+        action
+    }
+
+    /// C2: a Sequence with more than MAX_SEQUENCE_STEPS (200) is rejected so a
+    /// malformed/malicious config can't block the worker thread indefinitely.
+    #[test]
+    fn validation_rejects_oversized_sequence() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_sequence_action("seq", 201)];
+        assert!(
+            validate_config(&cfg).is_err(),
+            "sequence with >200 steps must be rejected"
+        );
+    }
+
+    /// C2: exactly the cap (200 steps) is still accepted.
+    #[test]
+    fn validation_accepts_max_sequence_steps() {
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![make_sequence_action("seq", 200)];
+        assert!(
+            validate_config(&cfg).is_ok(),
+            "sequence with exactly 200 steps must be accepted"
+        );
     }
 
     // ─── Boundary: profile count ─────────────────────────────────────────────

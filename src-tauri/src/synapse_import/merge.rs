@@ -88,13 +88,16 @@ fn append_profile(
     let new_profile_id = make_random_id("profile");
     let new_name = unique_profile_name(&parsed.name, &config.profiles);
 
+    // saturating_add so a pathological existing priority near i32::MAX (e.g. a
+    // hand-edited config) degrades gracefully instead of overflow-panicking in
+    // debug / wrapping to a negative value in release.
     let next_priority = config
         .profiles
         .iter()
         .map(|p| p.priority)
         .max()
         .unwrap_or(0)
-        + 10;
+        .saturating_add(10);
 
     let profile = Profile {
         id: new_profile_id.clone(),

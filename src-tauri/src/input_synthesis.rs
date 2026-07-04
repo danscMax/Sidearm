@@ -1714,23 +1714,27 @@ fn clear_modifiers(mask: &HotkeyModifiers) -> Result<(), String> {
     }
 
     if !release_inputs.is_empty() {
-        let labels: Vec<&str> = release_inputs
-            .iter()
-            .filter_map(|input| match input {
-                KeyboardInputSpec::VirtualKey { code, .. } => match *code {
-                    c if c == VK_LCONTROL => Some("VK_LCONTROL"),
-                    c if c == VK_LSHIFT => Some("VK_LSHIFT"),
-                    c if c == VK_LMENU => Some("VK_LMENU"),
-                    c if c == VK_LWIN => Some("VK_LWIN"),
+        // Same gating rationale as send_keyboard_inputs: build the labels/snapshot
+        // inside the log::debug! args so nothing allocates when Debug is off.
+        log::debug!(
+            "[clear-modifiers] releasing: [{}]",
+            release_inputs
+                .iter()
+                .filter_map(|input| match input {
+                    KeyboardInputSpec::VirtualKey { code, .. } => match *code {
+                        c if c == VK_LCONTROL => Some("VK_LCONTROL"),
+                        c if c == VK_LSHIFT => Some("VK_LSHIFT"),
+                        c if c == VK_LMENU => Some("VK_LMENU"),
+                        c if c == VK_LWIN => Some("VK_LWIN"),
+                        _ => None,
+                    },
                     _ => None,
-                },
-                _ => None,
-            })
-            .collect();
-        log::debug!("[clear-modifiers] releasing: [{}]", labels.join(", "),);
+                })
+                .collect::<Vec<&str>>()
+                .join(", ")
+        );
         send_keyboard_inputs(&release_inputs)?;
-        let post_state = snapshot_state();
-        log::debug!("[clear-modifiers] post: {}", post_state);
+        log::debug!("[clear-modifiers] post: {}", snapshot_state());
     } else {
         log::debug!("[clear-modifiers] nothing to release");
     }
@@ -1838,30 +1842,35 @@ fn send_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
         return Ok(());
     }
 
-    let summary: Vec<String> = inputs
-        .iter()
-        .map(|i| match i {
-            KeyboardInputSpec::VirtualKey {
-                code,
-                extended,
-                key_up,
-            } => format!(
-                "VK(0x{:02X},{}{})",
-                code,
-                if *extended { "ext," } else { "" },
-                if *key_up { "up" } else { "down" },
-            ),
-            KeyboardInputSpec::Unicode { code_unit, key_up } => format!(
-                "U(0x{:04X},{})",
-                code_unit,
-                if *key_up { "up" } else { "down" },
-            ),
-        })
-        .collect();
+    // Build the per-input debug summary INSIDE the log::debug! args so the
+    // Vec<String>/format!/join only runs when Debug logging is actually enabled.
+    // (A separate `let summary = ...` ahead of the macro would allocate on every
+    // SendInput even in production where debug logging is off — this is the
+    // hottest keyboard-injection path.)
     log::debug!(
         "[send-keyboard-inputs] sending {} inputs: [{}]",
         inputs.len(),
-        summary.join(", ")
+        inputs
+            .iter()
+            .map(|i| match i {
+                KeyboardInputSpec::VirtualKey {
+                    code,
+                    extended,
+                    key_up,
+                } => format!(
+                    "VK(0x{:02X},{}{})",
+                    code,
+                    if *extended { "ext," } else { "" },
+                    if *key_up { "up" } else { "down" },
+                ),
+                KeyboardInputSpec::Unicode { code_unit, key_up } => format!(
+                    "U(0x{:04X},{})",
+                    code_unit,
+                    if *key_up { "up" } else { "down" },
+                ),
+            })
+            .collect::<Vec<String>>()
+            .join(", ")
     );
 
     let windows_inputs: Vec<INPUT> = inputs

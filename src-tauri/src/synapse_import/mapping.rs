@@ -234,11 +234,14 @@ pub fn translate_key_token(token: &str) -> Result<String, KeyTranslationError> {
         }
         if let Some(tail) = rest.strip_prefix('F') {
             // Function keys exist only as F1..=F24. Reject F0, F25+ and absurd
-            // numbers instead of blindly accepting any digit tail.
+            // numbers instead of blindly accepting any digit tail. Re-format from
+            // the parsed number so a zero-padded token (KEY_F01) canonicalizes to
+            // "F1", matching the form every other key source (VK_TO_KEY, makecode)
+            // emits.
             if let Ok(n) = tail.parse::<u8>()
                 && (1..=24).contains(&n)
             {
-                return Ok(rest.to_string());
+                return Ok(format!("F{n}"));
             }
         }
     }
@@ -525,6 +528,11 @@ mod tests {
         assert_eq!(translate_key_token("KEY_F1").unwrap(), "F1");
         assert_eq!(translate_key_token("KEY_F13").unwrap(), "F13");
         assert_eq!(translate_key_token("KEY_F24").unwrap(), "F24");
+        // L14: zero-padded F-key tokens canonicalize to the unpadded form so all
+        // key sources (VK_TO_KEY, makecode, this) agree on "F1", not "F01".
+        assert_eq!(translate_key_token("KEY_F01").unwrap(), "F1");
+        assert_eq!(translate_key_token("KEY_F09").unwrap(), "F9");
+        assert_eq!(translate_key_token("KEY_F024").unwrap(), "F24");
     }
 
     #[test]

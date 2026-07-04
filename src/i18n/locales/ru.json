@@ -429,6 +429,8 @@
     "moveConfirm": "Перенести правило для {{exe}} из «{{from}}» в «{{to}}»?",
     "moveConfirmLabel": "Перенести",
     "moved": "Правило перенесено в «{{to}}»",
+    "moveUp": "Поднять приоритет",
+    "moveDown": "Понизить приоритет",
     "dblClickSettings": "Двойной клик — открыть настройки профилей",
     "defaultName": "Новый профиль",
     "duplicateName": "{{name}} (копия)",

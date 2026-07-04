@@ -155,12 +155,18 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     onClose();
   }, [config, applyConfig, onClose]);
 
-  // Keyboard containment + Escape-to-skip handled by ModalShell. Auto-focus the
-  // first button on mount.
+  // Keyboard containment + Escape-to-skip handled by ModalShell.
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    cardRef.current?.querySelector<HTMLElement>("button")?.focus();
-  }, []);
+    // On each step change, move focus to that step's heading so screen readers
+    // announce the new step (the SPA route-change pattern). Headings aren't
+    // focusable by default, so make the current one programmatically focusable.
+    const heading = cardRef.current?.querySelector<HTMLElement>(".onb-step__title");
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus();
+    }
+  }, [stepIdx]);
 
   const goNext = useCallback(() => {
     // Keep the setState updater pure: decide from the current index in the
@@ -259,6 +265,8 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
               key={s}
               type="button"
               aria-label={`${i + 1}/${STEPS.length}`}
+              aria-current={i === stepIdx ? "step" : undefined}
+              disabled={i > stepIdx}
               className={`onb-dot ${i === stepIdx ? "is-current" : i < stepIdx ? "is-done" : ""}`}
               onClick={() => i < stepIdx && setStepIdx(i)}
             />

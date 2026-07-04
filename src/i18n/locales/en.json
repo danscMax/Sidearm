@@ -425,6 +425,8 @@
     "moveConfirm": "Move rule for {{exe}} from {{from}} to {{to}}?",
     "moveConfirmLabel": "Move",
     "moved": "Rule moved to {{to}}",
+    "moveUp": "Raise priority",
+    "moveDown": "Lower priority",
     "dblClickSettings": "Double-click to open profile settings",
     "defaultName": "New profile",
     "duplicateName": "{{name}} (copy)",

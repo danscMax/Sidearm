@@ -691,6 +691,18 @@ export function ProfilesWorkspace({
           const isDisabled = !mapping.enabled;
           const isDragging = draggingMappingId === mapping.id;
           const isDragOver = dragOverMappingId === mapping.id && draggingMappingId !== mapping.id;
+          // Same-profile neighbours for keyboard reorder (Alt+Arrow). Groups are
+          // contiguous and priority-sorted, so a neighbour in the same profile is
+          // just the adjacent card that shares its profileId.
+          const prevSameProfile =
+            index > 0 && displayedAppMappings[index - 1].profileId === mapping.profileId
+              ? displayedAppMappings[index - 1]
+              : null;
+          const nextSameProfile =
+            index < displayedAppMappings.length - 1 &&
+            displayedAppMappings[index + 1].profileId === mapping.profileId
+              ? displayedAppMappings[index + 1]
+              : null;
           // In all-rules view, stamp a profile subheader before the first card of
           // each profile group (rows are flat; the header spans the full grid row).
           const showGroupHeader =
@@ -716,6 +728,19 @@ export function ProfilesWorkspace({
               onContextMenu={(e) => {
                 e.preventDefault();
                 setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
+              }}
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              onKeyDown={(e) => {
+                // Keyboard reorder: Alt+Arrow moves the rule within its profile
+                // group. The card keeps its focus because React keys by mapping.id.
+                if (!e.altKey) return;
+                if (e.key === "ArrowUp" && prevSameProfile) {
+                  e.preventDefault();
+                  updateDraft((c) => reorderAppMappingPriority(c, mapping.id, prevSameProfile.id));
+                } else if (e.key === "ArrowDown" && nextSameProfile) {
+                  e.preventDefault();
+                  updateDraft((c) => reorderAppMappingPriority(c, mapping.id, nextSameProfile.id));
+                }
               }}
               onDragStart={(e) => {
                 setDraggingMappingId(mapping.id);
@@ -854,6 +879,10 @@ export function ProfilesWorkspace({
       {ruleCtxMenu ? (() => {
         const targetMapping = selectedAppMappings.find((m) => m.id === ruleCtxMenu.mappingId);
         if (!targetMapping) return null;
+        const targetIdx = selectedAppMappings.findIndex((m) => m.id === targetMapping.id);
+        const moveUpTarget = targetIdx > 0 ? selectedAppMappings[targetIdx - 1] : null;
+        const moveDownTarget =
+          targetIdx < selectedAppMappings.length - 1 ? selectedAppMappings[targetIdx + 1] : null;
         return (
           <ContextMenu
             x={ruleCtxMenu.x}
@@ -884,6 +913,27 @@ export function ProfilesWorkspace({
                   if (newId) {
                     startTransition(() => setEditingMappingId(newId));
                   }
+                },
+              },
+              null,
+              {
+                label: t("profile.moveUp"),
+                disabled: !moveUpTarget,
+                onClick: () => {
+                  if (moveUpTarget)
+                    updateDraft((c) =>
+                      reorderAppMappingPriority(c, targetMapping.id, moveUpTarget.id),
+                    );
+                },
+              },
+              {
+                label: t("profile.moveDown"),
+                disabled: !moveDownTarget,
+                onClick: () => {
+                  if (moveDownTarget)
+                    updateDraft((c) =>
+                      reorderAppMappingPriority(c, targetMapping.id, moveDownTarget.id),
+                    );
                 },
               },
               null,

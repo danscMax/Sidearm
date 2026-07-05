@@ -101,7 +101,7 @@ The control appears remappable in some form, but behavior may be duplicated, uns
 ## Persistence Implications
 
 - Every row in this catalog should correspond to a `physicalControls[]` entry in config v2.
-- The `controlId` set here must remain in sync with `schemas/config.v2.schema.json`.
+- The `controlId` set here must remain in sync with `schemas/config.v3.schema.json`.
 - If a control name improves later, update `defaultName` or `synapseName`, but preserve `controlId`.
 
 ## Known Catalog Debt

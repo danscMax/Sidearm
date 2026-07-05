@@ -155,7 +155,7 @@ fn append_profile(
             }
         };
 
-        if !bound_controls.insert((layer, control_id)) {
+        if !bound_controls.insert((layer, control_id.clone())) {
             warnings.push(ImportWarning::new(
                 "duplicate_control_binding",
                 format!(
@@ -463,8 +463,13 @@ fn unique_profile_name(base: &str, existing: &[Profile]) -> String {
     candidate
 }
 
+/// Synapse imports are Naga-only: with `ControlId` now an open string type,
+/// membership in the built-in Naga control set is checked explicitly (the
+/// closed enum used to do this via deserialization).
 fn parse_control_id(s: &str) -> Option<ControlId> {
-    serde_json::from_value(serde_json::Value::String(s.to_string())).ok()
+    crate::config::NAGA_CONTROL_IDS
+        .contains(&s)
+        .then(|| ControlId::new(s))
 }
 
 fn parse_mouse_action_kind(s: &str) -> Option<MouseActionKind> {

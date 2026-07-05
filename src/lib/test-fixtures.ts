@@ -1,9 +1,18 @@
 import type {
   Action,
   AppConfig,
+  Device,
   PhysicalControl,
   SnippetLibraryItem,
 } from "./config";
+import { RAZER_NAGA_DEVICE_ID } from "./config";
+
+/** The built-in Naga device every legacy fixture hangs its controls on. */
+const NAGA_DEVICE: Device = {
+  id: RAZER_NAGA_DEVICE_ID,
+  name: "Razer Naga V2 Hyperspeed",
+  builtin: true,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers to build minimal fixtures
@@ -28,9 +37,11 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       { id: "p1", name: "Default", enabled: true, priority: 0 },
       { id: "p2", name: "Gaming", enabled: true, priority: 1 },
     ],
+    devices: [NAGA_DEVICE],
     physicalControls: [
       {
         id: "mouse_4",
+        deviceId: RAZER_NAGA_DEVICE_ID,
         family: "topPanel",
         defaultName: "Mouse 4",
         remappable: true,
@@ -38,6 +49,7 @@ export function makeConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       },
       {
         id: "thumb_01",
+        deviceId: RAZER_NAGA_DEVICE_ID,
         family: "thumbGrid",
         defaultName: "Thumb 1",
         remappable: true,

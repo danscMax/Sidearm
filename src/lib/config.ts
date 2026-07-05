@@ -8,34 +8,13 @@ export type CapabilityStatus =
   | "reserved"
   | "partiallyRemappable";
 
-export type ControlId =
-  | "thumb_01"
-  | "thumb_02"
-  | "thumb_03"
-  | "thumb_04"
-  | "thumb_05"
-  | "thumb_06"
-  | "thumb_07"
-  | "thumb_08"
-  | "thumb_09"
-  | "thumb_10"
-  | "thumb_11"
-  | "thumb_12"
-  | "mouse_left"
-  | "mouse_right"
-  | "top_aux_01"
-  | "top_aux_02"
-  | "mouse_4"
-  | "mouse_5"
-  | "wheel_up"
-  | "wheel_down"
-  | "wheel_click"
-  | "wheel_left"
-  | "wheel_right"
-  | "hypershift_button"
-  | "top_special_01"
-  | "top_special_02"
-  | "top_special_03";
+/** Open control identifier (v3): any device's control is a lowercase token.
+ * The closed Naga set lives in `NAGA_CONTROL_IDS`; membership is enforced by
+ * the Rust `validate_config`, not by this type. */
+export type ControlId = string;
+
+/** Device id of the built-in Razer Naga device (mirrors Rust `RAZER_NAGA_DEVICE_ID`). */
+export const RAZER_NAGA_DEVICE_ID = "razer-naga";
 
 export type MappingSource = "synapse" | "reserved" | "detected";
 
@@ -97,8 +76,27 @@ export interface Profile {
   priority: number;
 }
 
+/** A physical input device; its controls live in `physicalControls` tagged
+ * with `deviceId`. Built-in Naga renders via bundled photos; user devices
+ * carry an optional photo (bare file name in app-data) + hotspots. */
+export interface Device {
+  id: string;
+  name: string;
+  builtin?: boolean;
+  image?: string;
+  hotspots?: DeviceHotspot[];
+}
+
+interface DeviceHotspot {
+  controlId: ControlId;
+  /** Percent of the image width/height, 0..=100. */
+  x: number;
+  y: number;
+}
+
 export interface PhysicalControl {
   id: ControlId;
+  deviceId: string;
   family: ControlFamily;
   defaultName: string;
   synapseName?: string;
@@ -288,6 +286,8 @@ export interface AppConfig {
   version: number;
   settings: Settings;
   profiles: Profile[];
+  /** Declared input devices; the backend guarantees at least one after v2→v3 migration. */
+  devices: Device[];
   physicalControls: PhysicalControl[];
   encoderMappings: EncoderMapping[];
   appMappings: AppMapping[];

@@ -93,7 +93,7 @@ Windows-first desktop app that remaps a programmable mouse (Razer Naga) and keyb
 - Code comments in English.
 - All user-facing text goes through i18next with matching `en.json` + `ru.json` keys — never hardcode UI strings.
 - No AI/assistant attribution anywhere (commits, PRs, code, docs).
-- Config is the source of truth: schema-first (`schemas/config.v2.schema.json` at the repo root, runtime-validated), atomic writes, rolling + daily backups, corrupt-recovery. The TS `AppConfig` (`src/lib/config.ts`) and Rust structs must stay in sync with the schema.
+- Config is the source of truth: schema-first (`schemas/config.v3.schema.json` at the repo root, runtime-validated), atomic writes, rolling + daily backups, corrupt-recovery. The TS `AppConfig` (`src/lib/config.ts`) and Rust structs must stay in sync with the schema.
 - Adding an `ActionType` touches many mirrored sites — see `src/components/action-picker/AGENTS.md`.
 - Fix root causes, not symptoms. Reuse existing shared primitives/helpers before adding new ones.
 

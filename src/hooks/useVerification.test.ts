@@ -45,9 +45,11 @@ const testConfig: AppConfig = {
     osdAnimation: "slideIn",
   },
   profiles: [{ id: "p1", name: "Default", enabled: true, priority: 0 }],
+  devices: [{ id: "razer-naga", name: "Razer Naga V2 Hyperspeed", builtin: true }],
   physicalControls: [
     {
       id: "thumb_01",
+      deviceId: "razer-naga",
       family: "thumbGrid",
       defaultName: "Thumb 1",
       remappable: true,
@@ -55,6 +57,7 @@ const testConfig: AppConfig = {
     },
     {
       id: "thumb_02",
+      deviceId: "razer-naga",
       family: "thumbGrid",
       defaultName: "Thumb 2",
       remappable: true,

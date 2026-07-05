@@ -58,6 +58,7 @@ function createPhysicalControl(
 ): PhysicalControl {
   return {
     id,
+    deviceId: "razer-naga",
     family,
     defaultName: `Default ${id}`,
     synapseName,
@@ -114,6 +115,7 @@ function createTestConfig(): AppConfig {
     version: 1,
     settings: createTestSettings(),
     profiles: [{ id: "default", name: "Default", enabled: true, priority: 10 }],
+    devices: [{ id: "razer-naga", name: "Razer Naga V2 Hyperspeed", builtin: true }],
     physicalControls,
     encoderMappings,
     appMappings: [],

@@ -13,11 +13,11 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const SCHEMA_VERSION: i32 = 2;
+const SCHEMA_VERSION: i32 = 3;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../schemas/config.v2.schema.json"
+    "/../schemas/config.v3.schema.json"
 ));
 
 #[derive(Debug, Error)]
@@ -96,6 +96,10 @@ pub struct AppConfig {
     pub version: i32,
     pub settings: Settings,
     pub profiles: Vec<Profile>,
+    /// Declared input devices. Absent in v2 configs; `migrate_devices` seeds
+    /// the built-in Naga device on load.
+    #[serde(default)]
+    pub devices: Vec<Device>,
     pub physical_controls: Vec<PhysicalControl>,
     pub encoder_mappings: Vec<EncoderMapping>,
     pub app_mappings: Vec<AppMapping>,
@@ -288,132 +292,109 @@ pub enum CapabilityStatus {
     PartiallyRemappable,
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ControlId {
-    #[serde(rename = "thumb_01")]
-    Thumb01,
-    #[serde(rename = "thumb_02")]
-    Thumb02,
-    #[serde(rename = "thumb_03")]
-    Thumb03,
-    #[serde(rename = "thumb_04")]
-    Thumb04,
-    #[serde(rename = "thumb_05")]
-    Thumb05,
-    #[serde(rename = "thumb_06")]
-    Thumb06,
-    #[serde(rename = "thumb_07")]
-    Thumb07,
-    #[serde(rename = "thumb_08")]
-    Thumb08,
-    #[serde(rename = "thumb_09")]
-    Thumb09,
-    #[serde(rename = "thumb_10")]
-    Thumb10,
-    #[serde(rename = "thumb_11")]
-    Thumb11,
-    #[serde(rename = "thumb_12")]
-    Thumb12,
-    #[serde(rename = "mouse_left")]
-    MouseLeft,
-    #[serde(rename = "mouse_right")]
-    MouseRight,
-    #[serde(rename = "top_aux_01")]
-    TopAux01,
-    #[serde(rename = "top_aux_02")]
-    TopAux02,
-    #[serde(rename = "mouse_4")]
-    Mouse4,
-    #[serde(rename = "mouse_5")]
-    Mouse5,
-    #[serde(rename = "wheel_up")]
-    WheelUp,
-    #[serde(rename = "wheel_down")]
-    WheelDown,
-    #[serde(rename = "wheel_click")]
-    WheelClick,
-    #[serde(rename = "wheel_left")]
-    WheelLeft,
-    #[serde(rename = "wheel_right")]
-    WheelRight,
-    #[serde(rename = "hypershift_button")]
-    HypershiftButton,
-    #[serde(rename = "top_special_01")]
-    TopSpecial01,
-    #[serde(rename = "top_special_02")]
-    TopSpecial02,
-    #[serde(rename = "top_special_03")]
-    TopSpecial03,
-}
+/// Open control identifier. Any device's control is a lowercase token
+/// (`thumb_01`, `dev-abc-3`, …); the closed Naga set lives in
+/// [`NAGA_CONTROL_IDS`] and is enforced per-device in `validate_config`,
+/// not by the type system.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(transparent)]
+pub struct ControlId(std::sync::Arc<str>);
 
 impl ControlId {
-    pub const ALL: [Self; 27] = [
-        Self::Thumb01,
-        Self::Thumb02,
-        Self::Thumb03,
-        Self::Thumb04,
-        Self::Thumb05,
-        Self::Thumb06,
-        Self::Thumb07,
-        Self::Thumb08,
-        Self::Thumb09,
-        Self::Thumb10,
-        Self::Thumb11,
-        Self::Thumb12,
-        Self::MouseLeft,
-        Self::MouseRight,
-        Self::TopAux01,
-        Self::TopAux02,
-        Self::Mouse4,
-        Self::Mouse5,
-        Self::WheelUp,
-        Self::WheelDown,
-        Self::WheelClick,
-        Self::WheelLeft,
-        Self::WheelRight,
-        Self::HypershiftButton,
-        Self::TopSpecial01,
-        Self::TopSpecial02,
-        Self::TopSpecial03,
-    ];
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Thumb01 => "thumb_01",
-            Self::Thumb02 => "thumb_02",
-            Self::Thumb03 => "thumb_03",
-            Self::Thumb04 => "thumb_04",
-            Self::Thumb05 => "thumb_05",
-            Self::Thumb06 => "thumb_06",
-            Self::Thumb07 => "thumb_07",
-            Self::Thumb08 => "thumb_08",
-            Self::Thumb09 => "thumb_09",
-            Self::Thumb10 => "thumb_10",
-            Self::Thumb11 => "thumb_11",
-            Self::Thumb12 => "thumb_12",
-            Self::MouseLeft => "mouse_left",
-            Self::MouseRight => "mouse_right",
-            Self::TopAux01 => "top_aux_01",
-            Self::TopAux02 => "top_aux_02",
-            Self::Mouse4 => "mouse_4",
-            Self::Mouse5 => "mouse_5",
-            Self::WheelUp => "wheel_up",
-            Self::WheelDown => "wheel_down",
-            Self::WheelClick => "wheel_click",
-            Self::WheelLeft => "wheel_left",
-            Self::WheelRight => "wheel_right",
-            Self::HypershiftButton => "hypershift_button",
-            Self::TopSpecial01 => "top_special_01",
-            Self::TopSpecial02 => "top_special_02",
-            Self::TopSpecial03 => "top_special_03",
-        }
+    pub fn new(id: impl AsRef<str>) -> Self {
+        Self(std::sync::Arc::from(id.as_ref()))
     }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for ControlId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// Device id of the built-in Razer Naga V2 Hyperspeed device every legacy
+/// (v2) config is migrated onto.
+pub const RAZER_NAGA_DEVICE_ID: &str = "razer-naga";
+
+/// The 27 controls of the built-in Naga device. Source of truth for the
+/// default seed and for the per-device completeness check in `validate_config`.
+pub const NAGA_CONTROL_IDS: [&str; 27] = [
+    "thumb_01",
+    "thumb_02",
+    "thumb_03",
+    "thumb_04",
+    "thumb_05",
+    "thumb_06",
+    "thumb_07",
+    "thumb_08",
+    "thumb_09",
+    "thumb_10",
+    "thumb_11",
+    "thumb_12",
+    "mouse_left",
+    "mouse_right",
+    "top_aux_01",
+    "top_aux_02",
+    "mouse_4",
+    "mouse_5",
+    "wheel_up",
+    "wheel_down",
+    "wheel_click",
+    "wheel_left",
+    "wheel_right",
+    "hypershift_button",
+    "top_special_01",
+    "top_special_02",
+    "top_special_03",
+];
+
+/// A physical input device (mouse, macropad, …) whose controls appear in
+/// `physicalControls` tagged with this device's id. The built-in Naga device
+/// renders through the bundled photos/hotspot tables on the frontend; user
+/// devices carry their own optional photo + hotspots here.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Device {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub builtin: bool,
+    /// Bare file name of the device photo inside the app-data devices dir.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hotspots: Vec<DeviceHotspot>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeviceHotspot {
+    pub control_id: ControlId,
+    /// Percent of the image width, 0..=100.
+    pub x: f64,
+    /// Percent of the image height, 0..=100.
+    pub y: f64,
+}
+
+// f64 has no Eq, but validation rejects non-finite x/y, so equality is total here.
+impl Eq for DeviceHotspot {}
+
+fn default_device_id() -> String {
+    RAZER_NAGA_DEVICE_ID.to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PhysicalControl {
     pub id: ControlId,
+    /// Which device this control belongs to. Defaults to the built-in Naga
+    /// device so v2 configs (which predate devices) deserialize unchanged.
+    #[serde(default = "default_device_id")]
+    pub device_id: String,
     pub family: ControlFamily,
     pub default_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -558,7 +539,7 @@ impl ActionType {
 
     /// Every variant, in declaration order. Test-only: the set-equality guard
     /// `action_type_set_matches_schema_enum` iterates this and asserts it equals
-    /// `$defs.actionType.enum` in `schemas/config.v2.schema.json`. The always-on
+    /// `$defs.actionType.enum` in `schemas/config.v3.schema.json`. The always-on
     /// `match` below forces a new variant to be added here and to the schema
     /// (a missed schema entry is a save-breaker).
     #[cfg(test)]
@@ -578,7 +559,7 @@ impl ActionType {
 
 // Compile-time exhaustiveness: adding an ActionType variant breaks this match
 // (no `_` arm), forcing you to also update `ActionType::ALL` above and
-// `$defs.actionType.enum` in schemas/config.v2.schema.json — the JSON contract a
+// `$defs.actionType.enum` in schemas/config.v3.schema.json — the JSON contract a
 // saved config is validated against, where a missed entry is a save-breaker.
 const _: fn(ActionType) = |a| match a {
     ActionType::Shortcut
@@ -784,7 +765,7 @@ impl MouseActionKind {
 
 // Compile-time exhaustiveness: adding a MouseActionKind variant breaks this match
 // (no `_` arm), forcing you to also update `MouseActionKind::ALL` above and
-// `$defs.mouseActionKind.enum` in schemas/config.v2.schema.json.
+// `$defs.mouseActionKind.enum` in schemas/config.v3.schema.json.
 const _: fn(MouseActionKind) = |k| match k {
     MouseActionKind::LeftClick
     | MouseActionKind::RightClick
@@ -843,7 +824,7 @@ impl MediaKeyKind {
 
 // Compile-time exhaustiveness: adding a MediaKeyKind variant breaks this match
 // (no `_` arm), forcing you to also update `MediaKeyKind::ALL` above and
-// `$defs.mediaKeyKind.enum` in schemas/config.v2.schema.json.
+// `$defs.mediaKeyKind.enum` in schemas/config.v3.schema.json.
 const _: fn(MediaKeyKind) = |k| match k {
     MediaKeyKind::PlayPause
     | MediaKeyKind::NextTrack
@@ -898,6 +879,30 @@ pub struct SnippetLibraryItem {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes: Option<String>,
+}
+
+/// The built-in Razer Naga V2 Hyperspeed device. Its visualization (photos +
+/// hotspot tables) stays bundled on the frontend, keyed off `builtin`.
+pub fn builtin_naga_device() -> Device {
+    Device {
+        id: RAZER_NAGA_DEVICE_ID.to_string(),
+        name: "Razer Naga V2 Hyperspeed".to_string(),
+        builtin: true,
+        image: None,
+        hotspots: Vec::new(),
+    }
+}
+
+/// Migrate a v2 config to v3: declare the built-in Naga device and adopt the
+/// v3 version stamp. Controls without a `deviceId` were already tagged
+/// `razer-naga` by the serde default.
+fn migrate_devices(config: &mut AppConfig) {
+    if config.devices.is_empty() {
+        config.devices.push(builtin_naga_device());
+    }
+    if config.version == 2 {
+        config.version = SCHEMA_VERSION;
+    }
 }
 
 /// Migrate legacy clipboardPaste to sendText (avoids COM/OLE crashes).
@@ -1017,6 +1022,7 @@ fn load_and_validate(
     config_path: &Path,
 ) -> Result<(AppConfig, Vec<ValidationWarning>), ConfigStoreError> {
     let mut config = read_config_from_path(config_path)?;
+    migrate_devices(&mut config);
     migrate_paste_mode(&mut config);
     let warnings = validate_config(&config)?;
     config.compile_title_regexes();
@@ -1152,6 +1158,7 @@ fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreErr
 /// (backup restore, full-config import) so those paths cannot skip migrations.
 pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, ConfigStoreError> {
     let mut config = read_config_from_path(config_path)?;
+    migrate_devices(&mut config);
     migrate_paste_mode(&mut config);
     config.compile_title_regexes();
     Ok(config)
@@ -1318,19 +1325,77 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
         });
     }
 
+    let device_ids = collect_unique_strings(
+        config.devices.iter().map(|device| (&device.id, "devices")),
+        &mut errors,
+    );
+    if config.devices.is_empty() {
+        errors.push("devices must declare at least one device.".to_string());
+    }
+    for device in &config.devices {
+        if device.name.trim().is_empty() {
+            errors.push(format!("device `{}` must have a non-empty name.", device.id));
+        }
+        // The image is a bare file name resolved inside app-data; reject
+        // anything that could escape that directory.
+        if let Some(image) = &device.image
+            && (image.trim().is_empty() || image.contains(['/', '\\']) || image.contains(".."))
+        {
+            errors.push(format!(
+                "device `{}` image must be a bare file name, got `{image}`.",
+                device.id
+            ));
+        }
+    }
+
     let control_set = collect_unique_controls(
         config
             .physical_controls
             .iter()
-            .map(|control| (control.id, "physicalControls")),
+            .map(|control| (control.id.clone(), "physicalControls")),
         &mut errors,
     );
-    for expected_control in ControlId::ALL {
-        if !control_set.contains(&expected_control) {
+    for control in &config.physical_controls {
+        if !device_ids.contains(&control.device_id) {
             errors.push(format!(
-                "physicalControls is missing required control `{}`.",
-                expected_control.as_str()
+                "physicalControls entry `{}` references missing device `{}`.",
+                control.id.as_str(),
+                control.device_id
             ));
+        }
+    }
+    // The built-in Naga device ships a fixed control set: a config that declares
+    // it must contain every one of its controls (same protection legacy v2
+    // configs had when the whole set was mandatory).
+    if config.devices.iter().any(|device| device.id == RAZER_NAGA_DEVICE_ID) {
+        for expected_control in NAGA_CONTROL_IDS {
+            if !control_set.contains(&ControlId::new(expected_control)) {
+                errors.push(format!(
+                    "physicalControls is missing required control `{expected_control}`."
+                ));
+            }
+        }
+    }
+    for device in &config.devices {
+        for hotspot in &device.hotspots {
+            if !control_set.contains(&hotspot.control_id) {
+                errors.push(format!(
+                    "device `{}` hotspot references unknown control `{}`.",
+                    device.id,
+                    hotspot.control_id.as_str()
+                ));
+            }
+            if !hotspot.x.is_finite()
+                || !hotspot.y.is_finite()
+                || !(0.0..=100.0).contains(&hotspot.x)
+                || !(0.0..=100.0).contains(&hotspot.y)
+            {
+                errors.push(format!(
+                    "device `{}` hotspot for `{}` must have finite x/y within 0..=100.",
+                    device.id,
+                    hotspot.control_id.as_str()
+                ));
+            }
         }
     }
 
@@ -1392,6 +1457,24 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
                 binding.id, binding.action_id
             ));
         }
+        // ControlId is an open string type since v3: existence in
+        // physicalControls replaces the closed-enum guarantee.
+        if !control_set.contains(&binding.control_id) {
+            errors.push(format!(
+                "binding `{}` references unknown control `{}`.",
+                binding.id,
+                binding.control_id.as_str()
+            ));
+        }
+        if let Some(partner) = &binding.chord_partner
+            && !control_set.contains(partner)
+        {
+            errors.push(format!(
+                "binding `{}` chord partner references unknown control `{}`.",
+                binding.id,
+                partner.as_str()
+            ));
+        }
         let binding_key = format!(
             "{}::{}::{}",
             binding.profile_id,
@@ -1415,6 +1498,13 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
         );
         if !encoder_keys.insert(key.clone()) {
             errors.push(format!("Duplicate encoder mapping detected for `{key}`."));
+        }
+
+        if !control_set.contains(&mapping.control_id) {
+            errors.push(format!(
+                "encoderMapping `{key}` references unknown control `{}`.",
+                mapping.control_id.as_str()
+            ));
         }
 
         // Warn when encoder mapping references a non-remappable control
@@ -1761,7 +1851,11 @@ fn collect_unique_controls(
 ) -> HashSet<ControlId> {
     let mut values = HashSet::new();
     for (value, collection_name) in items {
-        if !values.insert(value) {
+        if value.as_str().trim().is_empty() {
+            errors.push(format!("{collection_name} contains an empty control id."));
+            continue;
+        }
+        if !values.insert(value.clone()) {
             errors.push(format!(
                 "{collection_name} contains duplicate control `{}`.",
                 value.as_str()
@@ -1809,6 +1903,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             onboarding_step: None,
         },
         profiles: seed_profiles(),
+        devices: vec![builtin_naga_device()],
         physical_controls: seed_physical_controls(),
         encoder_mappings: seed_encoder_mappings(),
         app_mappings: seed_app_mappings(),
@@ -1863,7 +1958,7 @@ fn seed_profiles() -> Vec<Profile> {
 fn seed_physical_controls() -> Vec<PhysicalControl> {
     vec![
         physical_control(
-            ControlId::Thumb01,
+            ControlId::new("thumb_01"),
             ControlFamily::ThumbGrid,
             "Thumb 1",
             Some("Button 1"),
@@ -1872,7 +1967,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             ControlFamily::ThumbGrid,
             "Thumb 2",
             Some("Button 2"),
@@ -1881,7 +1976,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             ControlFamily::ThumbGrid,
             "Thumb 3",
             Some("Button 3"),
@@ -1890,7 +1985,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb04,
+            ControlId::new("thumb_04"),
             ControlFamily::ThumbGrid,
             "Thumb 4",
             Some("Button 4"),
@@ -1899,7 +1994,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             ControlFamily::ThumbGrid,
             "Thumb 5",
             Some("Button 5"),
@@ -1908,7 +2003,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb06,
+            ControlId::new("thumb_06"),
             ControlFamily::ThumbGrid,
             "Thumb 6",
             Some("Button 6"),
@@ -1917,7 +2012,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             ControlFamily::ThumbGrid,
             "Thumb 7",
             Some("Button 7"),
@@ -1926,7 +2021,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             ControlFamily::ThumbGrid,
             "Thumb 8",
             Some("Button 8"),
@@ -1935,7 +2030,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb09,
+            ControlId::new("thumb_09"),
             ControlFamily::ThumbGrid,
             "Thumb 9",
             Some("Button 9"),
@@ -1944,7 +2039,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb10,
+            ControlId::new("thumb_10"),
             ControlFamily::ThumbGrid,
             "Thumb 10",
             Some("Button 10"),
@@ -1953,7 +2048,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             ControlFamily::ThumbGrid,
             "Thumb 11",
             Some("Button 11"),
@@ -1962,7 +2057,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::Thumb12,
+            ControlId::new("thumb_12"),
             ControlFamily::ThumbGrid,
             "Thumb 12",
             Some("Button 12"),
@@ -1971,7 +2066,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Seeded from the working side-grid mapping model."),
         ),
         physical_control(
-            ControlId::MouseLeft,
+            ControlId::new("mouse_left"),
             ControlFamily::TopPanel,
             "Left Click",
             Some("Left Click"),
@@ -1980,7 +2075,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Present in the model, but intentionally reserved in iteration 1."),
         ),
         physical_control(
-            ControlId::MouseRight,
+            ControlId::new("mouse_right"),
             ControlFamily::TopPanel,
             "Right Click",
             Some("Right Click"),
@@ -1991,7 +2086,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             ),
         ),
         physical_control(
-            ControlId::TopAux01,
+            ControlId::new("top_aux_01"),
             ControlFamily::TopPanel,
             "Top Aux 1",
             Some("DPI Stage Up"),
@@ -2000,7 +2095,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Verified: Alt+F23 standard layer confirmed via hardware test."),
         ),
         physical_control(
-            ControlId::TopAux02,
+            ControlId::new("top_aux_02"),
             ControlFamily::TopPanel,
             "Top Aux 2",
             Some("DPI Stage Down"),
@@ -2009,7 +2104,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Verified: Alt+F24 standard layer confirmed via hardware test."),
         ),
         physical_control(
-            ControlId::Mouse4,
+            ControlId::new("mouse_4"),
             ControlFamily::TopPanel,
             "Mouse 4",
             Some("Forward"),
@@ -2018,7 +2113,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Verified: Alt+F13 standard layer confirmed via hardware test."),
         ),
         physical_control(
-            ControlId::Mouse5,
+            ControlId::new("mouse_5"),
             ControlFamily::TopPanel,
             "Mouse 5",
             Some("Back"),
@@ -2027,7 +2122,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Verified: Alt+F14 standard layer confirmed via hardware test."),
         ),
         physical_control(
-            ControlId::WheelUp,
+            ControlId::new("wheel_up"),
             ControlFamily::TopPanel,
             "Wheel Up",
             Some("Scroll Up"),
@@ -2036,7 +2131,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Standard layer: native scroll (not intercepted). Hypershift: Ctrl+Alt+F16."),
         ),
         physical_control(
-            ControlId::WheelDown,
+            ControlId::new("wheel_down"),
             ControlFamily::TopPanel,
             "Wheel Down",
             Some("Scroll Down"),
@@ -2045,7 +2140,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Standard layer: native scroll (not intercepted). Hypershift: Ctrl+Alt+F17."),
         ),
         physical_control(
-            ControlId::WheelClick,
+            ControlId::new("wheel_click"),
             ControlFamily::TopPanel,
             "Wheel Click",
             Some("Middle Click"),
@@ -2054,7 +2149,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Verified: Alt+F15 standard layer confirmed via hardware test."),
         ),
         physical_control(
-            ControlId::WheelLeft,
+            ControlId::new("wheel_left"),
             ControlFamily::TopPanel,
             "Wheel Tilt Left",
             Some("Scroll Left Tilt"),
@@ -2063,7 +2158,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
-            ControlId::WheelRight,
+            ControlId::new("wheel_right"),
             ControlFamily::TopPanel,
             "Wheel Tilt Right",
             Some("Scroll Right Tilt"),
@@ -2072,7 +2167,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
-            ControlId::HypershiftButton,
+            ControlId::new("hypershift_button"),
             ControlFamily::System,
             "Hypershift Button",
             Some("Razer Hypershift"),
@@ -2081,7 +2176,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Exact encoder-model semantics remain unresolved."),
         ),
         physical_control(
-            ControlId::TopSpecial01,
+            ControlId::new("top_special_01"),
             ControlFamily::TopPanel,
             "Top Special 1",
             Some("Unknown special control 1"),
@@ -2090,7 +2185,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Phantom control — not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
-            ControlId::TopSpecial02,
+            ControlId::new("top_special_02"),
             ControlFamily::TopPanel,
             "Top Special 2",
             Some("Unknown special control 2"),
@@ -2099,7 +2194,7 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
             Some("Phantom control — not present on Naga V2 HyperSpeed. Kept for config compat."),
         ),
         physical_control(
-            ControlId::TopSpecial03,
+            ControlId::new("top_special_03"),
             ControlFamily::TopPanel,
             "Top Special 3",
             Some("Unknown special control 3"),
@@ -2112,44 +2207,44 @@ fn seed_physical_controls() -> Vec<PhysicalControl> {
 
 fn seed_encoder_mappings() -> Vec<EncoderMapping> {
     vec![
-        encoder_mapping(ControlId::Thumb01, Layer::Standard, "F13"),
-        encoder_mapping(ControlId::Thumb02, Layer::Standard, "F14"),
-        encoder_mapping(ControlId::Thumb03, Layer::Standard, "F15"),
-        encoder_mapping(ControlId::Thumb04, Layer::Standard, "F16"),
-        encoder_mapping(ControlId::Thumb05, Layer::Standard, "F17"),
-        encoder_mapping(ControlId::Thumb06, Layer::Standard, "F18"),
-        encoder_mapping(ControlId::Thumb07, Layer::Standard, "F19"),
-        encoder_mapping(ControlId::Thumb08, Layer::Standard, "F20"),
-        encoder_mapping(ControlId::Thumb09, Layer::Standard, "F21"),
-        encoder_mapping(ControlId::Thumb10, Layer::Standard, "F22"),
-        encoder_mapping(ControlId::Thumb11, Layer::Standard, "F23"),
-        encoder_mapping(ControlId::Thumb12, Layer::Standard, "F24"),
-        encoder_mapping(ControlId::Thumb01, Layer::Hypershift, "Ctrl+Alt+Shift+F13"),
-        encoder_mapping(ControlId::Thumb02, Layer::Hypershift, "Ctrl+Alt+Shift+F14"),
-        encoder_mapping(ControlId::Thumb03, Layer::Hypershift, "Ctrl+Alt+Shift+F15"),
-        encoder_mapping(ControlId::Thumb04, Layer::Hypershift, "Ctrl+Alt+Shift+F16"),
-        encoder_mapping(ControlId::Thumb05, Layer::Hypershift, "Ctrl+Alt+Shift+F17"),
-        encoder_mapping(ControlId::Thumb06, Layer::Hypershift, "Ctrl+Alt+Shift+F18"),
-        encoder_mapping(ControlId::Thumb07, Layer::Hypershift, "Ctrl+Alt+Shift+F19"),
-        encoder_mapping(ControlId::Thumb08, Layer::Hypershift, "Ctrl+Alt+Shift+F20"),
-        encoder_mapping(ControlId::Thumb09, Layer::Hypershift, "Ctrl+Alt+Shift+F21"),
-        encoder_mapping(ControlId::Thumb10, Layer::Hypershift, "Ctrl+Alt+Shift+F22"),
-        encoder_mapping(ControlId::Thumb11, Layer::Hypershift, "Ctrl+Alt+Shift+F23"),
-        encoder_mapping(ControlId::Thumb12, Layer::Hypershift, "Ctrl+Alt+Shift+F24"),
+        encoder_mapping(ControlId::new("thumb_01"), Layer::Standard, "F13"),
+        encoder_mapping(ControlId::new("thumb_02"), Layer::Standard, "F14"),
+        encoder_mapping(ControlId::new("thumb_03"), Layer::Standard, "F15"),
+        encoder_mapping(ControlId::new("thumb_04"), Layer::Standard, "F16"),
+        encoder_mapping(ControlId::new("thumb_05"), Layer::Standard, "F17"),
+        encoder_mapping(ControlId::new("thumb_06"), Layer::Standard, "F18"),
+        encoder_mapping(ControlId::new("thumb_07"), Layer::Standard, "F19"),
+        encoder_mapping(ControlId::new("thumb_08"), Layer::Standard, "F20"),
+        encoder_mapping(ControlId::new("thumb_09"), Layer::Standard, "F21"),
+        encoder_mapping(ControlId::new("thumb_10"), Layer::Standard, "F22"),
+        encoder_mapping(ControlId::new("thumb_11"), Layer::Standard, "F23"),
+        encoder_mapping(ControlId::new("thumb_12"), Layer::Standard, "F24"),
+        encoder_mapping(ControlId::new("thumb_01"), Layer::Hypershift, "Ctrl+Alt+Shift+F13"),
+        encoder_mapping(ControlId::new("thumb_02"), Layer::Hypershift, "Ctrl+Alt+Shift+F14"),
+        encoder_mapping(ControlId::new("thumb_03"), Layer::Hypershift, "Ctrl+Alt+Shift+F15"),
+        encoder_mapping(ControlId::new("thumb_04"), Layer::Hypershift, "Ctrl+Alt+Shift+F16"),
+        encoder_mapping(ControlId::new("thumb_05"), Layer::Hypershift, "Ctrl+Alt+Shift+F17"),
+        encoder_mapping(ControlId::new("thumb_06"), Layer::Hypershift, "Ctrl+Alt+Shift+F18"),
+        encoder_mapping(ControlId::new("thumb_07"), Layer::Hypershift, "Ctrl+Alt+Shift+F19"),
+        encoder_mapping(ControlId::new("thumb_08"), Layer::Hypershift, "Ctrl+Alt+Shift+F20"),
+        encoder_mapping(ControlId::new("thumb_09"), Layer::Hypershift, "Ctrl+Alt+Shift+F21"),
+        encoder_mapping(ControlId::new("thumb_10"), Layer::Hypershift, "Ctrl+Alt+Shift+F22"),
+        encoder_mapping(ControlId::new("thumb_11"), Layer::Hypershift, "Ctrl+Alt+Shift+F23"),
+        encoder_mapping(ControlId::new("thumb_12"), Layer::Hypershift, "Ctrl+Alt+Shift+F24"),
         // Top panel – standard layer (Alt+F-key avoids Win+F-key system conflicts)
-        encoder_mapping(ControlId::TopAux01, Layer::Standard, "Alt+F23"),
-        encoder_mapping(ControlId::TopAux02, Layer::Standard, "Alt+F24"),
-        encoder_mapping(ControlId::Mouse4, Layer::Standard, "Alt+F13"),
-        encoder_mapping(ControlId::Mouse5, Layer::Standard, "Alt+F14"),
-        encoder_mapping(ControlId::WheelClick, Layer::Standard, "Alt+F15"),
+        encoder_mapping(ControlId::new("top_aux_01"), Layer::Standard, "Alt+F23"),
+        encoder_mapping(ControlId::new("top_aux_02"), Layer::Standard, "Alt+F24"),
+        encoder_mapping(ControlId::new("mouse_4"), Layer::Standard, "Alt+F13"),
+        encoder_mapping(ControlId::new("mouse_5"), Layer::Standard, "Alt+F14"),
+        encoder_mapping(ControlId::new("wheel_click"), Layer::Standard, "Alt+F15"),
         // Top panel – hypershift layer
-        encoder_mapping(ControlId::TopAux01, Layer::Hypershift, "Ctrl+Alt+F23"),
-        encoder_mapping(ControlId::TopAux02, Layer::Hypershift, "Ctrl+Alt+F24"),
-        encoder_mapping(ControlId::Mouse4, Layer::Hypershift, "Ctrl+Alt+F13"),
-        encoder_mapping(ControlId::Mouse5, Layer::Hypershift, "Ctrl+Alt+F14"),
-        encoder_mapping(ControlId::WheelClick, Layer::Hypershift, "Ctrl+Alt+F15"),
-        encoder_mapping(ControlId::WheelUp, Layer::Hypershift, "Ctrl+Alt+F16"),
-        encoder_mapping(ControlId::WheelDown, Layer::Hypershift, "Ctrl+Alt+F17"),
+        encoder_mapping(ControlId::new("top_aux_01"), Layer::Hypershift, "Ctrl+Alt+F23"),
+        encoder_mapping(ControlId::new("top_aux_02"), Layer::Hypershift, "Ctrl+Alt+F24"),
+        encoder_mapping(ControlId::new("mouse_4"), Layer::Hypershift, "Ctrl+Alt+F13"),
+        encoder_mapping(ControlId::new("mouse_5"), Layer::Hypershift, "Ctrl+Alt+F14"),
+        encoder_mapping(ControlId::new("wheel_click"), Layer::Hypershift, "Ctrl+Alt+F15"),
+        encoder_mapping(ControlId::new("wheel_up"), Layer::Hypershift, "Ctrl+Alt+F16"),
+        encoder_mapping(ControlId::new("wheel_down"), Layer::Hypershift, "Ctrl+Alt+F17"),
     ]
 }
 
@@ -2235,7 +2330,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "default",
             Layer::Standard,
-            ControlId::Thumb01,
+            ControlId::new("thumb_01"),
             "Ctrl + C",
             "C",
             true,
@@ -2247,7 +2342,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "default",
             Layer::Standard,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Ctrl + V",
             "V",
             true,
@@ -2259,7 +2354,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "default",
             Layer::Standard,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Ctrl + F",
             "F",
             true,
@@ -2271,7 +2366,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "default",
             Layer::Standard,
-            ControlId::Thumb04,
+            ControlId::new("thumb_04"),
             "Ctrl + Z",
             "Z",
             true,
@@ -2283,7 +2378,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "default",
             Layer::Standard,
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             "Ctrl + S",
             "S",
             true,
@@ -2295,7 +2390,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "default",
             Layer::Standard,
-            ControlId::Thumb06,
+            ControlId::new("thumb_06"),
             "Ctrl + W",
             "W",
             true,
@@ -2307,7 +2402,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb01,
+            ControlId::new("thumb_01"),
             "Delete",
             "Delete",
             false,
@@ -2319,7 +2414,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Backspace",
             "Backspace",
             false,
@@ -2331,7 +2426,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Shift + F3",
             "F3",
             false,
@@ -2343,7 +2438,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb04,
+            ControlId::new("thumb_04"),
             "Ctrl + F",
             "F",
             true,
@@ -2355,7 +2450,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             "Ctrl + S",
             "S",
             true,
@@ -2367,7 +2462,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb06,
+            ControlId::new("thumb_06"),
             "Ctrl + Z",
             "Z",
             true,
@@ -2379,7 +2474,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             "Alt + F4",
             "F4",
             false,
@@ -2391,7 +2486,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             "Enter",
             "Enter",
             false,
@@ -2403,7 +2498,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb09,
+            ControlId::new("thumb_09"),
             "Ctrl + C",
             "C",
             true,
@@ -2415,7 +2510,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb10,
+            ControlId::new("thumb_10"),
             "Ctrl + W",
             "W",
             true,
@@ -2427,7 +2522,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             "Space",
             "Space",
             false,
@@ -2439,7 +2534,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Standard,
-            ControlId::Thumb12,
+            ControlId::new("thumb_12"),
             "Ctrl + V",
             "V",
             true,
@@ -2451,7 +2546,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb01,
+            ControlId::new("thumb_01"),
             "Minus",
             "-",
             false,
@@ -2463,7 +2558,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Ctrl + Shift + =",
             "=",
             true,
@@ -2475,7 +2570,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Alt + Ctrl + Shift + R",
             "R",
             true,
@@ -2487,7 +2582,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb04,
+            ControlId::new("thumb_04"),
             "Ctrl + H",
             "H",
             true,
@@ -2499,7 +2594,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb06,
+            ControlId::new("thumb_06"),
             "Ctrl + Y",
             "Y",
             true,
@@ -2511,7 +2606,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             "Alt + Ctrl + Shift + I",
             "I",
             true,
@@ -2523,7 +2618,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             "Shift + Enter",
             "Enter",
             false,
@@ -2535,7 +2630,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb10,
+            ControlId::new("thumb_10"),
             "Ctrl + Shift + T",
             "T",
             true,
@@ -2547,7 +2642,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             "Ctrl + Shift + 8",
             "8",
             true,
@@ -2559,7 +2654,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb12,
+            ControlId::new("thumb_12"),
             "Win + V",
             "V",
             false,
@@ -2571,7 +2666,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb01,
+            ControlId::new("thumb_01"),
             "Delete",
             "Delete",
             false,
@@ -2583,7 +2678,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Backspace",
             "Backspace",
             false,
@@ -2595,7 +2690,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb04,
+            ControlId::new("thumb_04"),
             "Ctrl + F",
             "F",
             true,
@@ -2607,7 +2702,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             "Ctrl + S",
             "S",
             true,
@@ -2619,7 +2714,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb06,
+            ControlId::new("thumb_06"),
             "Ctrl + Z",
             "Z",
             true,
@@ -2631,7 +2726,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             "Alt + F4",
             "F4",
             false,
@@ -2643,7 +2738,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             "Enter",
             "Enter",
             false,
@@ -2655,7 +2750,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb09,
+            ControlId::new("thumb_09"),
             "Ctrl + Insert",
             "Insert",
             true,
@@ -2667,7 +2762,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb10,
+            ControlId::new("thumb_10"),
             "Ctrl + W",
             "W",
             true,
@@ -2679,7 +2774,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             "Space",
             "Space",
             false,
@@ -2691,7 +2786,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb12,
+            ControlId::new("thumb_12"),
             "Shift + Insert",
             "Insert",
             false,
@@ -2703,7 +2798,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             "Shift + Enter",
             "Enter",
             false,
@@ -2715,7 +2810,7 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb10,
+            ControlId::new("thumb_10"),
             "Shift + Tab",
             "Tab",
             false,
@@ -2726,7 +2821,7 @@ fn seed_actions() -> Vec<Action> {
         ),
     ] {
         actions.push(shortcut_action(
-            action_id(profile, layer, control),
+            action_id(profile, layer, &control),
             display_name,
             key,
             ctrl,
@@ -2741,76 +2836,76 @@ fn seed_actions() -> Vec<Action> {
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Validation",
             "snippet-code-validation",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb01,
+            ControlId::new("thumb_01"),
             "Ask Me",
             "snippet-ask-me",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Agents for Analysis",
             "snippet-agents-for-analysis",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Best Practices",
             "snippet-best-practices",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb04,
+            ControlId::new("thumb_04"),
             "/resume",
             "snippet-resume",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             "/max",
             "snippet-max",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb06,
+            ControlId::new("thumb_06"),
             "Agent Team",
             "snippet-agent-team",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             "dangerously-skip-permissions-check",
             "snippet-danger-skip-permissions",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb09,
+            ControlId::new("thumb_09"),
             "Fix by GOS",
             "snippet-fix-by-gos",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             "dangerously-bypass-approvals-and-restrictions",
             "snippet-danger-bypass-restrictions",
         ),
     ] {
         actions.push(text_snippet_library_action(
-            action_id(profile, layer, control),
+            action_id(profile, layer, &control),
             display_name,
             snippet_id,
         ));
@@ -2820,27 +2915,27 @@ fn seed_actions() -> Vec<Action> {
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             "Right Ctrl + Right Shift + -",
             "Unresolved exact semantics. Preserve as placeholder until device validation confirms whether this is a shortcut or text payload.",
         ),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb09,
+            ControlId::new("thumb_09"),
             "Copy without paragraphs",
             "Unresolved exact logic. Preserve as placeholder until the text or sequence behavior is confirmed.",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb12,
+            ControlId::new("thumb_12"),
             "Paste Win",
             "Unresolved exact intent. Preserve as placeholder until the real action is confirmed.",
         ),
     ] {
         actions.push(disabled_placeholder_action(
-            action_id(profile, layer, control),
+            action_id(profile, layer, &control),
             display_name,
             notes,
         ));
@@ -2853,138 +2948,138 @@ fn seed_bindings() -> Vec<Binding> {
     let mut bindings = Vec::new();
 
     for (profile, layer, control, label) in [
-        ("default", Layer::Standard, ControlId::Thumb01, "Copy"),
-        ("default", Layer::Standard, ControlId::Thumb02, "Paste"),
-        ("default", Layer::Standard, ControlId::Thumb03, "Find"),
-        ("default", Layer::Standard, ControlId::Thumb04, "Undo"),
-        ("default", Layer::Standard, ControlId::Thumb05, "Save"),
-        ("default", Layer::Standard, ControlId::Thumb06, "Close tab"),
-        ("main", Layer::Standard, ControlId::Thumb01, "Delete"),
-        ("main", Layer::Standard, ControlId::Thumb02, "Backspace"),
-        ("main", Layer::Standard, ControlId::Thumb03, "Shift + F3"),
-        ("main", Layer::Standard, ControlId::Thumb04, "Ctrl + F"),
-        ("main", Layer::Standard, ControlId::Thumb05, "Ctrl + S"),
-        ("main", Layer::Standard, ControlId::Thumb06, "Ctrl + Z"),
-        ("main", Layer::Standard, ControlId::Thumb07, "Alt + F4"),
-        ("main", Layer::Standard, ControlId::Thumb08, "Enter"),
-        ("main", Layer::Standard, ControlId::Thumb09, "Ctrl + C"),
-        ("main", Layer::Standard, ControlId::Thumb10, "Ctrl + W"),
-        ("main", Layer::Standard, ControlId::Thumb11, "Space"),
-        ("main", Layer::Standard, ControlId::Thumb12, "Ctrl + V"),
-        ("main", Layer::Hypershift, ControlId::Thumb01, "Minus"),
+        ("default", Layer::Standard, ControlId::new("thumb_01"), "Copy"),
+        ("default", Layer::Standard, ControlId::new("thumb_02"), "Paste"),
+        ("default", Layer::Standard, ControlId::new("thumb_03"), "Find"),
+        ("default", Layer::Standard, ControlId::new("thumb_04"), "Undo"),
+        ("default", Layer::Standard, ControlId::new("thumb_05"), "Save"),
+        ("default", Layer::Standard, ControlId::new("thumb_06"), "Close tab"),
+        ("main", Layer::Standard, ControlId::new("thumb_01"), "Delete"),
+        ("main", Layer::Standard, ControlId::new("thumb_02"), "Backspace"),
+        ("main", Layer::Standard, ControlId::new("thumb_03"), "Shift + F3"),
+        ("main", Layer::Standard, ControlId::new("thumb_04"), "Ctrl + F"),
+        ("main", Layer::Standard, ControlId::new("thumb_05"), "Ctrl + S"),
+        ("main", Layer::Standard, ControlId::new("thumb_06"), "Ctrl + Z"),
+        ("main", Layer::Standard, ControlId::new("thumb_07"), "Alt + F4"),
+        ("main", Layer::Standard, ControlId::new("thumb_08"), "Enter"),
+        ("main", Layer::Standard, ControlId::new("thumb_09"), "Ctrl + C"),
+        ("main", Layer::Standard, ControlId::new("thumb_10"), "Ctrl + W"),
+        ("main", Layer::Standard, ControlId::new("thumb_11"), "Space"),
+        ("main", Layer::Standard, ControlId::new("thumb_12"), "Ctrl + V"),
+        ("main", Layer::Hypershift, ControlId::new("thumb_01"), "Minus"),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Ctrl + Shift + =",
         ),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Alt + Ctrl + Shift + R",
         ),
-        ("main", Layer::Hypershift, ControlId::Thumb04, "Ctrl + H"),
+        ("main", Layer::Hypershift, ControlId::new("thumb_04"), "Ctrl + H"),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb05,
+            ControlId::new("thumb_05"),
             "Right Ctrl + Right Shift + -",
         ),
-        ("main", Layer::Hypershift, ControlId::Thumb06, "Ctrl + Y"),
+        ("main", Layer::Hypershift, ControlId::new("thumb_06"), "Ctrl + Y"),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             "Alt + Ctrl + Shift + I",
         ),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             "Shift + Enter",
         ),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb09,
+            ControlId::new("thumb_09"),
             "Copy without paragraphs",
         ),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb10,
+            ControlId::new("thumb_10"),
             "Ctrl + Shift + T",
         ),
         (
             "main",
             Layer::Hypershift,
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             "Ctrl + Shift + 8",
         ),
-        ("main", Layer::Hypershift, ControlId::Thumb12, "Win + V"),
-        ("code", Layer::Standard, ControlId::Thumb01, "Delete"),
-        ("code", Layer::Standard, ControlId::Thumb02, "Backspace"),
-        ("code", Layer::Standard, ControlId::Thumb03, "Validation"),
-        ("code", Layer::Standard, ControlId::Thumb04, "Ctrl + F"),
-        ("code", Layer::Standard, ControlId::Thumb05, "Ctrl + S"),
-        ("code", Layer::Standard, ControlId::Thumb06, "Ctrl + Z"),
-        ("code", Layer::Standard, ControlId::Thumb07, "Alt + F4"),
-        ("code", Layer::Standard, ControlId::Thumb08, "Enter"),
-        ("code", Layer::Standard, ControlId::Thumb09, "Ctrl + Insert"),
-        ("code", Layer::Standard, ControlId::Thumb10, "Ctrl + W"),
-        ("code", Layer::Standard, ControlId::Thumb11, "Space"),
+        ("main", Layer::Hypershift, ControlId::new("thumb_12"), "Win + V"),
+        ("code", Layer::Standard, ControlId::new("thumb_01"), "Delete"),
+        ("code", Layer::Standard, ControlId::new("thumb_02"), "Backspace"),
+        ("code", Layer::Standard, ControlId::new("thumb_03"), "Validation"),
+        ("code", Layer::Standard, ControlId::new("thumb_04"), "Ctrl + F"),
+        ("code", Layer::Standard, ControlId::new("thumb_05"), "Ctrl + S"),
+        ("code", Layer::Standard, ControlId::new("thumb_06"), "Ctrl + Z"),
+        ("code", Layer::Standard, ControlId::new("thumb_07"), "Alt + F4"),
+        ("code", Layer::Standard, ControlId::new("thumb_08"), "Enter"),
+        ("code", Layer::Standard, ControlId::new("thumb_09"), "Ctrl + Insert"),
+        ("code", Layer::Standard, ControlId::new("thumb_10"), "Ctrl + W"),
+        ("code", Layer::Standard, ControlId::new("thumb_11"), "Space"),
         (
             "code",
             Layer::Standard,
-            ControlId::Thumb12,
+            ControlId::new("thumb_12"),
             "Shift + Insert",
         ),
-        ("code", Layer::Hypershift, ControlId::Thumb01, "Ask Me"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_01"), "Ask Me"),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb02,
+            ControlId::new("thumb_02"),
             "Agents for Analysis",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb03,
+            ControlId::new("thumb_03"),
             "Best Practices",
         ),
-        ("code", Layer::Hypershift, ControlId::Thumb04, "/resume"),
-        ("code", Layer::Hypershift, ControlId::Thumb05, "/max"),
-        ("code", Layer::Hypershift, ControlId::Thumb06, "Agent Team"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_04"), "/resume"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_05"), "/max"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_06"), "Agent Team"),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb07,
+            ControlId::new("thumb_07"),
             "dangerously-skip-permissions-check",
         ),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb08,
+            ControlId::new("thumb_08"),
             "Shift + Enter",
         ),
-        ("code", Layer::Hypershift, ControlId::Thumb09, "Fix by GOS"),
-        ("code", Layer::Hypershift, ControlId::Thumb10, "Shift + Tab"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_09"), "Fix by GOS"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_10"), "Shift + Tab"),
         (
             "code",
             Layer::Hypershift,
-            ControlId::Thumb11,
+            ControlId::new("thumb_11"),
             "dangerously-bypass-approvals-and-restrictions",
         ),
-        ("code", Layer::Hypershift, ControlId::Thumb12, "Paste Win"),
+        ("code", Layer::Hypershift, ControlId::new("thumb_12"), "Paste Win"),
     ] {
         bindings.push(binding(
-            binding_id(profile, layer, control),
+            binding_id(profile, layer, &control),
             profile,
             layer,
-            control,
+            control.clone(),
             label,
-            action_id(profile, layer, control),
+            action_id(profile, layer, &control),
         ));
     }
 
@@ -3012,6 +3107,7 @@ fn physical_control(
 ) -> PhysicalControl {
     PhysicalControl {
         id,
+        device_id: default_device_id(),
         family,
         default_name: default_name.into(),
         synapse_name: synapse_name.map(str::to_owned),
@@ -3130,7 +3226,7 @@ fn binding(
     }
 }
 
-fn action_id(profile_id: &str, layer: Layer, control_id: ControlId) -> String {
+fn action_id(profile_id: &str, layer: Layer, control_id: &ControlId) -> String {
     format!(
         "action-{profile_id}-{}-{}",
         layer.as_str(),
@@ -3138,7 +3234,7 @@ fn action_id(profile_id: &str, layer: Layer, control_id: ControlId) -> String {
     )
 }
 
-fn binding_id(profile_id: &str, layer: Layer, control_id: ControlId) -> String {
+fn binding_id(profile_id: &str, layer: Layer, control_id: &ControlId) -> String {
     format!(
         "binding-{profile_id}-{}-{}",
         layer.as_str(),
@@ -3200,12 +3296,12 @@ mod tests {
             "default config should not emit warnings"
         );
         assert_eq!(config.profiles.len(), 7);
-        assert_eq!(config.physical_controls.len(), ControlId::ALL.len());
+        assert_eq!(config.physical_controls.len(), NAGA_CONTROL_IDS.len());
     }
 
     #[test]
     fn repair_clipboard_action_is_schema_valid() {
-        // Guard against the actionType-enum gap in config.v2.schema.json: a config
+        // Guard against the actionType-enum gap in config.v3.schema.json: a config
         // holding a repairClipboard action must pass JSON-schema validation (the
         // omission previously broke saving/exporting any profile using it).
         let mut config = default_seed_config();
@@ -3225,6 +3321,134 @@ mod tests {
             errors.is_empty(),
             "repairClipboard action must be schema-valid: {errors:?}"
         );
+    }
+
+    // ─── v2 → v3 migration: devices ──────────────────────────────────────────
+
+    /// A v2 config file (version 2, no `devices`, no `deviceId`) loads, gains
+    /// the built-in Naga device, and every control is tagged with it.
+    #[test]
+    fn v2_config_migrates_to_v3_with_builtin_naga_device() {
+        let dir = tempdir().expect("tempdir");
+        let mut value = serde_json::to_value(default_seed_config()).expect("serialize");
+        value["version"] = serde_json::json!(2);
+        value.as_object_mut().unwrap().remove("devices");
+        for control in value["physicalControls"].as_array_mut().unwrap() {
+            control.as_object_mut().unwrap().remove("deviceId");
+        }
+        std::fs::write(
+            dir.path().join(CONFIG_FILE_NAME),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .expect("write v2 config");
+
+        let response = load_or_initialize_config(dir.path()).expect("v2 config must load");
+        assert!(!response.created_default, "must migrate, not reseed");
+        let config = response.config;
+        assert_eq!(config.version, SCHEMA_VERSION);
+        assert_eq!(config.devices.len(), 1);
+        assert_eq!(config.devices[0].id, RAZER_NAGA_DEVICE_ID);
+        assert!(config.devices[0].builtin);
+        assert!(
+            config
+                .physical_controls
+                .iter()
+                .all(|control| control.device_id == RAZER_NAGA_DEVICE_ID),
+            "every legacy control must be tagged with the built-in Naga device"
+        );
+    }
+
+    /// A config with only a custom (non-Naga) device and its own controls is
+    /// valid: the old "all 27 Naga controls required" invariant is scoped to
+    /// configs that declare the built-in Naga device.
+    #[test]
+    fn generic_only_config_validates_without_naga_controls() {
+        let mut config = default_seed_config();
+        config.devices = vec![Device {
+            id: "my-macropad".into(),
+            name: "My Macropad".into(),
+            builtin: false,
+            image: None,
+            hotspots: vec![DeviceHotspot {
+                control_id: ControlId::new("pad_01"),
+                x: 25.0,
+                y: 75.5,
+            }],
+        }];
+        config.physical_controls = vec![PhysicalControl {
+            id: ControlId::new("pad_01"),
+            device_id: "my-macropad".into(),
+            family: ControlFamily::ThumbGrid,
+            default_name: "Pad 1".into(),
+            synapse_name: None,
+            remappable: true,
+            capability_status: CapabilityStatus::Verified,
+            notes: None,
+        }];
+        config.bindings = Vec::new();
+        config.encoder_mappings = Vec::new();
+        validate_config(&config).expect("generic-only config must validate");
+
+        // And it is schema-valid on disk (open controlId + devices).
+        let value = serde_json::to_value(&config).expect("serialize");
+        let errors = collect_schema_errors(&value);
+        assert!(errors.is_empty(), "generic-only config schema errors: {errors:?}");
+    }
+
+    /// With `ControlId` open, referential integrity replaces the closed enum:
+    /// a binding / encoder mapping / hotspot / control pointing at an unknown
+    /// control or device must fail validation.
+    #[test]
+    fn validation_rejects_dangling_control_and_device_references() {
+        fn expect_error_containing(config: &AppConfig, needle: &str, case: &str) {
+            match validate_config(config) {
+                Err(ConfigStoreError::InvalidConfig { errors }) => assert!(
+                    errors.iter().any(|error| error.contains(needle)),
+                    "{case}: expected an error containing `{needle}`, got {errors:?}"
+                ),
+                other => panic!("{case}: expected InvalidConfig, got {other:?}"),
+            }
+        }
+
+        // Binding to a control that no device declares.
+        let mut config = default_seed_config();
+        config.bindings[0].control_id = ControlId::new("ghost_button");
+        expect_error_containing(&config, "unknown control", "dangling binding control");
+
+        // Encoder mapping to an unknown control.
+        let mut config = default_seed_config();
+        config.encoder_mappings[0].control_id = ControlId::new("ghost_button");
+        expect_error_containing(&config, "unknown control", "dangling mapping control");
+
+        // Control tagged with an undeclared device.
+        let mut config = default_seed_config();
+        config.physical_controls[0].device_id = "no-such-device".into();
+        expect_error_containing(&config, "missing device", "dangling control device");
+
+        // Hotspot for a control that does not exist.
+        let mut config = default_seed_config();
+        config.devices[0].hotspots.push(DeviceHotspot {
+            control_id: ControlId::new("ghost_button"),
+            x: 1.0,
+            y: 1.0,
+        });
+        expect_error_containing(&config, "unknown control", "dangling hotspot control");
+    }
+
+    /// Device image must be a bare file name (it is resolved inside app-data).
+    #[test]
+    fn validation_rejects_path_traversal_device_image() {
+        for bad in ["../../evil.png", "sub/dir.png", "..\\evil.png", "  "] {
+            let mut config = default_seed_config();
+            config.devices[0].image = Some(bad.to_string());
+            assert!(
+                validate_config(&config).is_err(),
+                "image `{bad}` must be rejected"
+            );
+        }
+        let mut config = default_seed_config();
+        config.devices[0].image = Some("naga.png".to_string());
+        validate_config(&config).expect("bare file name is fine");
     }
 
     #[test]
@@ -3657,7 +3881,7 @@ mod edge_proptests {
             id: id.into(),
             profile_id: "p1".into(),
             layer: Layer::Standard,
-            control_id: ControlId::Thumb01,
+            control_id: ControlId::new("thumb_01"),
             label: "lbl".into(),
             action_id: action_id.into(),
             color_tag: None,
@@ -3823,7 +4047,7 @@ mod edge_proptests {
                 id: "b1".into(),
                 profile_id: "p1".into(),
                 layer,
-                control_id: ControlId::Thumb01,
+                control_id: ControlId::new("thumb_01"),
                 label: "lbl".into(),
                 action_id: "a1".into(),
                 color_tag: None,
@@ -4463,7 +4687,8 @@ mod edge_proptests {
         fn validation_rejects_wrong_version(v in prop_oneof![
             Just(0i32),
             Just(1i32),
-            Just(3i32),
+            Just(2i32),
+            Just(4i32),
             Just(i32::MAX),
             Just(i32::MIN),
         ]) {
@@ -4860,24 +5085,25 @@ mod edge_proptests {
 
     // ─── Serialization: ControlId as_str == JSON repr ────────────────────────
 
-    /// ControlId::as_str() must exactly match the JSON serde rename for every variant.
-    /// This property guards against drift between `as_str` and `#[serde(rename)]`.
+    /// ControlId serializes transparently: the JSON repr is exactly `as_str()`
+    /// in quotes, and it deserializes back to the same value.
     #[test]
     fn control_id_as_str_matches_serde_rename() {
-        for id in ControlId::ALL {
+        for raw in NAGA_CONTROL_IDS {
+            let id = ControlId::new(raw);
             let json = serde_json::to_string(&id).expect("serialize ControlId");
             // JSON wraps strings in quotes.
             let expected_json = format!("\"{}\"", id.as_str());
             assert_eq!(
-                json,
-                expected_json,
-                "ControlId::{id:?} as_str() `{}` does not match serde JSON `{json}`",
-                id.as_str()
+                json, expected_json,
+                "ControlId `{raw}` does not serialize transparently"
             );
+            let back: ControlId = serde_json::from_str(&json).expect("deserialize ControlId");
+            assert_eq!(back, id, "ControlId `{raw}` does not roundtrip");
         }
     }
 
-    /// ActionType (Rust) and `$defs.actionType.enum` in config.v2.schema.json must
+    /// ActionType (Rust) and `$defs.actionType.enum` in config.v3.schema.json must
     /// list the SAME set. The schema is the contract a saved config is validated
     /// against; a variant in one but not the other is a save-breaker (this is how
     /// `repairClipboard` once broke saving). The per-variant tests above only cover
@@ -4895,7 +5121,7 @@ mod edge_proptests {
             ActionType::ALL.iter().map(|a| a.as_str()).collect();
         assert_eq!(
             rust, schema_enum,
-            "ActionType (Rust) and config.v2.schema.json $defs.actionType.enum drifted apart"
+            "ActionType (Rust) and config.v3.schema.json $defs.actionType.enum drifted apart"
         );
     }
 
@@ -4931,7 +5157,7 @@ mod edge_proptests {
             .collect();
         assert_eq!(
             rust, schema_enum,
-            "MouseActionKind (Rust) and config.v2.schema.json $defs.mouseActionKind.enum drifted apart"
+            "MouseActionKind (Rust) and config.v3.schema.json $defs.mouseActionKind.enum drifted apart"
         );
     }
 
@@ -4964,7 +5190,7 @@ mod edge_proptests {
             .collect();
         assert_eq!(
             rust, schema_enum,
-            "MediaKeyKind (Rust) and config.v2.schema.json $defs.mediaKeyKind.enum drifted apart"
+            "MediaKeyKind (Rust) and config.v3.schema.json $defs.mediaKeyKind.enum drifted apart"
         );
     }
 
@@ -4988,7 +5214,7 @@ mod edge_proptests {
     /// Missing any single required control triggers a validation error.
     #[test]
     fn validation_rejects_each_missing_required_control() {
-        for removed in ControlId::ALL {
+        for removed in NAGA_CONTROL_IDS.map(ControlId::new) {
             let mut cfg = minimal_valid_config();
             cfg.physical_controls.retain(|c| c.id != removed);
             let result = validate_config(&cfg);

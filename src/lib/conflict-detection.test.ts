@@ -57,6 +57,7 @@ function config(actions: Action[], bindings: Binding[]): AppConfig {
       debugLogging: true,
     } as AppConfig["settings"],
     profiles: [],
+    devices: [],
     physicalControls: [],
     encoderMappings: [],
     appMappings: [],

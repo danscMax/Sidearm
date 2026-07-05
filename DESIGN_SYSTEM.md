@@ -13,7 +13,7 @@ all wired into `.github/workflows/ci.yml` (`npm test` + `cargo test`).
 
 | Need | Canon home | Adoption guard |
 |------|-----------|----------------|
-| **ActionType** (3 sources of truth) | Rust `src-tauri/src/config.rs:538` `ActionType::ALL` ⇄ FE `src/lib/constants/ui-copy.ts:56` `ACTION_TYPE_LABELS` → `:73` `ALL_ACTION_TYPES` ⇄ schema `schemas/config.v2.schema.json` `$defs.actionType.enum` | `config.rs` test `action_type_set_matches_schema_enum` (`:4283`, set-equality Rust↔schema) + `:553` compile-exhaustive `match` (no `_` arm) + FE `Record<ActionType, …>` (won't compile without label+icon). A missed schema entry is a **save-breaker** — this is the highest-radius canon. |
+| **ActionType** (3 sources of truth) | Rust `src-tauri/src/config.rs:538` `ActionType::ALL` ⇄ FE `src/lib/constants/ui-copy.ts:56` `ACTION_TYPE_LABELS` → `:73` `ALL_ACTION_TYPES` ⇄ schema `schemas/config.v3.schema.json` `$defs.actionType.enum` | `config.rs` test `action_type_set_matches_schema_enum` (`:4283`, set-equality Rust↔schema) + `:553` compile-exhaustive `match` (no `_` arm) + FE `Record<ActionType, …>` (won't compile without label+icon). A missed schema entry is a **save-breaker** — this is the highest-radius canon. |
 | FE action-type lists | `ui-copy.ts` `editableActionTypes`/`ACTION_CATEGORIES`/`ACTION_TYPE_ICONS` | All derived from `ALL_ACTION_TYPES` — structurally cannot drift from the type set. |
 | **MouseActionKind / MediaKeyKind** (3 SoT, same shape as ActionType) | Rust `config.rs` `MouseActionKind`/`MediaKeyKind` enums ⇄ schema `$defs.mouseActionKind`/`mediaKeyKind` ⇄ FE `ui-copy.ts` `MOUSE_ACTION_LABELS`/`MEDIA_KEY_LABELS` → derived `*_OPTIONS` | `config.rs` tests `mouse_action_kind_set_matches_schema_enum` + `media_key_kind_set_matches_schema_enum` (set-equality Rust↔schema, strings via serde) + per-enum compile-exhaustive `match` (no `_`) + FE `Record<…Kind>` (won't compile without a label). The payload `$ref`s the enum, so a bad value is a clear `schema_violation`, not a deserialize parse-error. |
 | `<select>` dropdown | `src/components/shared.tsx` `SelectField` | `src/lib/canon-guards.test.ts:41` — raw `<select>` fails CI outside `SelectField` + 4 documented exceptions. |
@@ -31,7 +31,7 @@ all wired into `.github/workflows/ci.yml` (`npm test` + `cargo test`).
 
 Touch **all four** or a guard fails (which is the point):
 1. `config.rs` `ActionType` enum + `ActionType::ALL` (`:538`) + the exhaustive `match` (`:553`).
-2. `schemas/config.v2.schema.json` `$defs.actionType.enum`.
+2. `schemas/config.v3.schema.json` `$defs.actionType.enum`.
 3. FE `ui-copy.ts` `ACTION_TYPE_LABELS` + `ACTION_TYPE_ICONS` (compile-guarded `Record`s).
 4. Run `cargo test` (set-equality) + `npm test` (FE compile/derive). See `reference_add_action_type_checklist` in memory.
 

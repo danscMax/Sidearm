@@ -1386,6 +1386,7 @@ fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
         version: incoming.version,
         settings: incoming.settings,
         profiles: merge_by(base.profiles, incoming.profiles, |p| p.id.clone()),
+        devices: incoming.devices,
         physical_controls: incoming.physical_controls,
         encoder_mappings: incoming.encoder_mappings,
         app_mappings: merge_by(base.app_mappings, incoming.app_mappings, |m| m.id.clone()),

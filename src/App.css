@@ -4601,6 +4601,23 @@ code {
   align-items: center;
 }
 
+.profiles__bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+}
+
+.profiles__bulk-count {
+  margin-right: auto;
+  color: var(--c-text);
+  font-size: var(--fs-body-sm);
+}
+
 /* Monogram span (text fallback) */
 span.profiles__app-card-monogram {
   flex-shrink: 0;

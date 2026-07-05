@@ -61,6 +61,7 @@ import {
   mergeSnippetLibrary,
   isValidSnippetLibraryExport,
   isValidProfileExport,
+  removeBindingsForControls,
 } from "./config-editing";
 import type { ProfileExportData } from "./config-editing";
 
@@ -1429,5 +1430,40 @@ describe("import validators reject malformed-but-shaped files (R4)", () => {
     expect(
       isValidProfileExport({ profile: { id: "p", name: "P" }, bindings: [], actions: [] }),
     ).toBe(true);
+  });
+});
+
+describe("removeBindingsForControls (F5 bulk clear)", () => {
+  it("removes bindings for the selected controls in the given profile+layer", () => {
+    const cfg = minCfg({
+      actions: [makeAction("a1"), makeAction("a2"), makeAction("a3")],
+      bindings: [
+        makeBinding("b1", "p1", "thumb_01", "a1"),
+        makeBinding("b2", "p1", "thumb_02", "a2"),
+        makeBinding("b3", "p1", "thumb_03", "a3"),
+      ],
+    });
+    const { config, removed } = removeBindingsForControls(
+      cfg,
+      "p1",
+      "standard",
+      new Set<ControlId>(["thumb_01", "thumb_02"]),
+    );
+    expect(removed).toBe(2);
+    expect(config.bindings.map((b) => b.id)).toEqual(["b3"]);
+  });
+
+  it("ignores unbound controls and other layers", () => {
+    const cfg = minCfg({
+      actions: [makeAction("a1")],
+      bindings: [makeBinding("b1", "p1", "thumb_01", "a1", "hypershift")],
+    });
+    const { removed } = removeBindingsForControls(
+      cfg,
+      "p1",
+      "standard",
+      new Set<ControlId>(["thumb_01", "thumb_09"]),
+    );
+    expect(removed).toBe(0);
   });
 });

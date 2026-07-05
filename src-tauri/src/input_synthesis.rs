@@ -1165,6 +1165,82 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
     Ok(())
 }
 
+/// Expand snippet tokens at send time: `{date}` → today's date (YYYY-MM-DD),
+/// `{clipboard}` → the current clipboard text. `{{` / `}}` are literal braces;
+/// an unknown `{token}` is left untouched. Backward-compatible: text without
+/// braces is returned unchanged.
+pub fn expand_snippet_tokens(text: &str) -> String {
+    if !text.contains('{') && !text.contains('}') {
+        return text.to_string();
+    }
+    let date = crate::backup::today_date_string();
+    let clipboard = get_clipboard_text_for_token();
+    expand_tokens(text, &date, clipboard.as_deref())
+}
+
+/// Pure token expander — dependencies injected so it is deterministic to test.
+fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let mut out = String::with_capacity(text.len());
+    let mut idx = 0;
+    while idx < n {
+        let c = chars[idx];
+        if c == '{' {
+            if idx + 1 < n && chars[idx + 1] == '{' {
+                out.push('{');
+                idx += 2;
+                continue;
+            }
+            if let Some(rel) = chars[idx + 1..].iter().position(|&ch| ch == '}') {
+                let close = idx + 1 + rel;
+                let token: String = chars[idx + 1..close].iter().collect();
+                match token.as_str() {
+                    "date" => out.push_str(date),
+                    "clipboard" => out.push_str(clipboard.unwrap_or("")),
+                    // Unknown token — leave it verbatim so nothing is silently eaten.
+                    _ => {
+                        out.push('{');
+                        out.push_str(&token);
+                        out.push('}');
+                    }
+                }
+                idx = close + 1;
+                continue;
+            }
+            out.push('{');
+            idx += 1;
+        } else if c == '}' {
+            if idx + 1 < n && chars[idx + 1] == '}' {
+                out.push('}');
+                idx += 2;
+                continue;
+            }
+            out.push('}');
+            idx += 1;
+        } else {
+            out.push(c);
+            idx += 1;
+        }
+    }
+    out
+}
+
+#[cfg(target_os = "windows")]
+fn get_clipboard_text_for_token() -> Option<String> {
+    clipboard_get_text()
+}
+
+#[cfg(target_os = "linux")]
+fn get_clipboard_text_for_token() -> Option<String> {
+    arboard::Clipboard::new().ok()?.get_text().ok()
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+fn get_clipboard_text_for_token() -> Option<String> {
+    None
+}
+
 pub fn send_text(text: &str) -> Result<(), String> {
     send_text_with_delay(text, 0)
 }
@@ -2539,6 +2615,24 @@ fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expand_tokens_replaces_date_and_clipboard() {
+        let out = expand_tokens("Today: {date}, clip: {clipboard}", "2026-07-05", Some("hello"));
+        assert_eq!(out, "Today: 2026-07-05, clip: hello");
+    }
+
+    #[test]
+    fn expand_tokens_escapes_double_braces_and_keeps_unknown() {
+        let out = expand_tokens("{{literal}} {unknown} {date}", "2026-07-05", None);
+        assert_eq!(out, "{literal} {unknown} 2026-07-05");
+    }
+
+    #[test]
+    fn expand_tokens_empty_clipboard_is_blank_and_plain_text_unchanged() {
+        assert_eq!(expand_tokens("[{clipboard}]", "d", None), "[]");
+        assert_eq!(expand_snippet_tokens("no braces here"), "no braces here");
+    }
 
     #[test]
     #[cfg(target_os = "windows")]

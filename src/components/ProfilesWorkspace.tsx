@@ -16,6 +16,7 @@ import {
   findDuplicateAppMapping,
   importProfile,
   removeBinding,
+  removeBindingsForControls,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
   upsertAppMapping,
@@ -586,6 +587,56 @@ export function ProfilesWorkspace({
             })}
           </ul>
         </Notice>
+      ) : null}
+
+      {/* ── Bulk actions for a multi-control selection ── */}
+      {multiSelectedControlIds.size > 1 ? (
+        <div className="profiles__bulk-bar" role="toolbar" aria-label={t("bulk.label")}>
+          <span className="profiles__bulk-count">
+            {t("bulk.selected", { count: multiSelectedControlIds.size })}
+          </span>
+          <button
+            type="button"
+            className="action-button action-button--small action-button--danger"
+            onClick={() => {
+              if (!effectiveProfileId) return;
+              const profileId = effectiveProfileId;
+              const controlIds = multiSelectedControlIds;
+              const removed = removeBindingsForControls(
+                activeConfig,
+                profileId,
+                selectedLayer,
+                controlIds,
+              ).removed;
+              if (removed === 0) {
+                showToast(t("bulk.nothingToClear"), "info");
+                return;
+              }
+              setConfirmModal({
+                title: t("bulk.clearTitle"),
+                message: t("bulk.clearMessage", { count: removed }),
+                confirmLabel: t("bulk.clearConfirm"),
+                danger: true,
+                onConfirm: () => {
+                  updateDraft(
+                    (c) => removeBindingsForControls(c, profileId, selectedLayer, controlIds).config,
+                  );
+                  setMultiSelectedControlIds(new Set());
+                  showToast(t("bulk.cleared", { count: removed }), "success");
+                },
+              });
+            }}
+          >
+            {t("bulk.clear")}
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--small"
+            onClick={() => setMultiSelectedControlIds(new Set())}
+          >
+            {t("bulk.deselect")}
+          </button>
+        </div>
       ) : null}
 
       {/* ── Mouse visualization ── */}

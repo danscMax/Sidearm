@@ -69,6 +69,7 @@ export function TextSnippetEditor({
           placeholder={t("picker.textPlaceholder")}
         />
       </label>
+      <p className="snippet-token-hint panel__muted">{t("picker.tokenHint")}</p>
       {usesClipboardFastPath ? (
         <Notice variant="warning">
           {t("picker.longTextClipboardWarning")}

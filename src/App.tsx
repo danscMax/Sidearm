@@ -614,6 +614,14 @@ function App() {
       case "shortcuts":
         setShortcutHelpOpen(true);
         break;
+      case "toggle-runtime":
+        if (runtimeSummary.status === "running") void handleStopRuntime();
+        else void handleStartRuntime();
+        break;
+      case "open-snippet-library":
+        switchWorkspaceMode("settings");
+        setSettingsDeepLink({ tab: "snippets", nonce: Date.now() });
+        break;
     }
   }
 

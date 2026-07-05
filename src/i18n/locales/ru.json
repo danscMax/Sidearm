@@ -599,6 +599,17 @@
     "kept_few": "Оставлен {{label}}, отключено {{count}} других",
     "kept_many": "Оставлен {{label}}, отключено {{count}} других"
   },
+  "bulk": {
+    "label": "Массовые действия",
+    "selected": "Выбрано: {{count}}",
+    "clear": "Очистить привязки",
+    "deselect": "Снять выделение",
+    "clearTitle": "Очистить выбранные привязки",
+    "clearMessage": "Удалить привязки у выбранных кнопок ({{count}})?",
+    "clearConfirm": "Очистить",
+    "cleared": "Очищено привязок: {{count}}",
+    "nothingToClear": "У выбранных кнопок нет привязок"
+  },
   "shortcuts": {
     "title": "Горячие клавиши",
     "general": "Основные",
@@ -635,6 +646,8 @@
     "layerStandard": "Слой: Стандартный",
     "layerHypershift": "Слой: Hypershift",
     "shortcuts": "Помощь: горячие клавиши",
+    "toggleRuntime": "Старт / стоп перехвата",
+    "snippetLibrary": "Открыть библиотеку сниппетов",
     "placeholder": "Введите команду...",
     "empty": "Ничего не найдено",
     "sectionCommands": "Команды",
@@ -809,6 +822,7 @@
     "mouseModifiersHint": "Модификаторы зажимаются на время действия. Например, Ctrl + Скролл вверх = зум.",
     "textLabel": "Текст",
     "textPlaceholder": "Введите текст для ввода...",
+    "tokenHint": "Токены: {date} — сегодняшняя дата, {clipboard} — текущий буфер обмена.",
     "longTextClipboardWarning": "Текст длиннее 100 символов будет временно вставлен через буфер обмена, чтобы сохранить переносы строк.",
     "launchTargetMode": "Тип запуска",
     "launchMode": {

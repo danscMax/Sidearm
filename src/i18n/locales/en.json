@@ -593,6 +593,17 @@
     "kept_one": "Kept {{label}}, disabled {{count}} other",
     "kept_other": "Kept {{label}}, disabled {{count}} others"
   },
+  "bulk": {
+    "label": "Bulk actions",
+    "selected": "Selected: {{count}}",
+    "clear": "Clear bindings",
+    "deselect": "Deselect",
+    "clearTitle": "Clear selected bindings",
+    "clearMessage": "Remove the bindings on the {{count}} selected controls?",
+    "clearConfirm": "Clear",
+    "cleared": "Cleared {{count}} bindings",
+    "nothingToClear": "The selected controls have no bindings"
+  },
   "shortcuts": {
     "title": "Keyboard shortcuts",
     "general": "General",
@@ -629,6 +640,8 @@
     "layerStandard": "Layer: Standard",
     "layerHypershift": "Layer: Hypershift",
     "shortcuts": "Help: Keyboard shortcuts",
+    "toggleRuntime": "Start / stop interception",
+    "snippetLibrary": "Open the snippet library",
     "placeholder": "Type a command...",
     "empty": "Nothing found",
     "sectionCommands": "Commands",
@@ -803,6 +816,7 @@
     "mouseModifiersHint": "Modifiers are held during the action. For example, Ctrl + Scroll up = zoom.",
     "textLabel": "Text",
     "textPlaceholder": "Enter text to type...",
+    "tokenHint": "Tokens: {date} inserts today's date, {clipboard} inserts the current clipboard.",
     "longTextClipboardWarning": "Text longer than 100 characters is pasted through the clipboard temporarily so line breaks stay intact.",
     "launchTargetMode": "Launch target type",
     "launchMode": {

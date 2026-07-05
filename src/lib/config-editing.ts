@@ -72,6 +72,25 @@ export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
   };
 }
 
+/** Remove the bindings for a set of controls within one profile + layer, reusing
+ *  `removeBinding` (so orphaned actions and inline snippets are handled the same
+ *  way). Returns the new config and how many bindings were actually removed. */
+export function removeBindingsForControls(
+  config: AppConfig,
+  profileId: string,
+  layer: Binding["layer"],
+  controlIds: Set<ControlId>,
+): { config: AppConfig; removed: number } {
+  const targets = config.bindings.filter(
+    (b) => b.profileId === profileId && b.layer === layer && controlIds.has(b.controlId),
+  );
+  let next = config;
+  for (const binding of targets) {
+    next = removeBinding(next, binding.id);
+  }
+  return { config: next, removed: targets.length };
+}
+
 export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfig {
   const bindingIndex = config.bindings.findIndex(
     (binding) => binding.id === nextBinding.id,

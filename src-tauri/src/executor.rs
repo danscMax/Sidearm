@@ -940,7 +940,7 @@ fn run_live_text_snippet_action(
         )
     })?;
 
-    let warnings = live_text.warnings;
+    let mut warnings = live_text.warnings;
     // Always use SendInput (sendText) regardless of paste_mode setting.
     // clipboardPaste causes COM/OLE crashes in debug builds and is
     // unreliable. SendInput + KEYEVENTF_UNICODE works universally.
@@ -966,7 +966,6 @@ fn run_live_text_snippet_action(
 
     // {cursor}: walk the caret back to the marker. Best-effort — the text is
     // already delivered, so a failure here degrades to a warning, not an error.
-    let mut warnings = warnings;
     if let Some(back) = cursor_back
         && back > 0
         && let Err(message) = input_synthesis::send_left_arrows(back)

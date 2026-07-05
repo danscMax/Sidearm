@@ -1255,6 +1255,9 @@ pub fn send_left_arrows(count: usize) -> Result<(), String> {
             "{{cursor}} would need {count} arrow presses (limit {MAX_CURSOR_BACK_PRESSES})."
         ));
     }
+    // Same guard send_text uses: a held modifier (the Razer encoding's
+    // Ctrl/Shift, or a physical one) would turn Left into select/word-jump.
+    clear_modifiers(&ALL_MODIFIERS)?;
     let mut plan = Vec::with_capacity(count * 2);
     for _ in 0..count {
         for key_up in [false, true] {

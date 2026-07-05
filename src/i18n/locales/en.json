@@ -262,7 +262,7 @@
     "body": "Once the configuration is loaded, profiles, the mouse map, and editors will appear here."
   },
   "binding": {
-    "notAssigned": "Not assigned",
+    "notAssigned": "Native action",
     "disabledSuffix": "disabled",
     "assigned": "Assigned",
     "exportItem": "Export binding…",
@@ -658,7 +658,7 @@
     "duplicateRuleMessage": "A rule for '{{exe}}' already exists in this profile. Create another one?"
   },
   "visualization": {
-    "unassigned": "Not assigned",
+    "unassigned": "Native action",
     "offPill": "OFF",
     "switchPhoto": "Switch to photo",
     "switchSchematic": "Switch to schematic",

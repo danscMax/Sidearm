@@ -83,6 +83,11 @@ pub struct SaveConfigResponse {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
+    /// True when a rolling-backup rotation or the daily snapshot failed to write
+    /// (best-effort; the config itself still saved). Lets the UI warn once that
+    /// the backup safety net isn't being written.
+    #[serde(default)]
+    pub backup_failed: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -994,7 +999,7 @@ pub fn save_config(
         return Err(ConfigStoreError::ConcurrentModification);
     }
 
-    let backup_path = write_config_to_path(config_dir, &config)?;
+    let (backup_path, backup_failed) = write_config_to_path(config_dir, &config)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
     let mut config = config;
@@ -1005,6 +1010,7 @@ pub fn save_config(
         warnings,
         path: path_string(&config_path),
         backup_path: backup_path.map(|path| path_string(&path)),
+        backup_failed,
     })
 }
 
@@ -1058,8 +1064,11 @@ pub(crate) fn persist_atomically(
 fn write_config_to_path(
     config_dir: &Path,
     config: &AppConfig,
-) -> Result<Option<PathBuf>, ConfigStoreError> {
+) -> Result<(Option<PathBuf>, bool), ConfigStoreError> {
     let config_path = config_dir.join(CONFIG_FILE_NAME);
+    // Tracks whether any best-effort backup (rolling rotation / daily snapshot)
+    // failed to write, so the caller can warn that the safety net is broken.
+    let mut backup_failed = false;
 
     // Rotate .bak.N → .bak.N+1 and copy current config.json → .bak.1 before
     // overwriting. Returns the path to the just-created .bak.1 (or None if
@@ -1070,6 +1079,7 @@ fn write_config_to_path(
         Ok(path) => path,
         Err(error) => {
             log::warn!("[config] Failed to rotate rolling backup: {error}");
+            backup_failed = true;
             None
         }
     };
@@ -1089,9 +1099,10 @@ fn write_config_to_path(
     // Daily snapshot — best-effort, never fails the save.
     if let Err(err) = crate::backup::write_daily_snapshot_and_prune(config_dir) {
         log::warn!("[config] Failed to write daily snapshot: {err}");
+        backup_failed = true;
     }
 
-    Ok(backup_path)
+    Ok((backup_path, backup_failed))
 }
 
 fn config_schema_validator() -> Result<&'static Validator, ConfigStoreError> {

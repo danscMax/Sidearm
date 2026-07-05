@@ -399,8 +399,18 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         log::debug!("[input] Clipboard changed externally, skipping restore");
         return Ok(());
     }
-    if let Some(ref original) = saved_text {
-        restore(original);
+    match saved_text {
+        Some(ref original) => restore(original),
+        // The original clipboard held non-text (image, files, HTML) or was empty,
+        // so we can't restore it — but never leave our staged snippet behind.
+        None => {
+            log::warn!(
+                "[input] Long snippet staged through the clipboard; original non-text content could not be preserved — clearing the staged text"
+            );
+            let _ = with_clipboard_open(|| {
+                unsafe { EmptyClipboard() };
+            });
+        }
     }
 
     Ok(())
@@ -437,6 +447,14 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
             Err(_) => {
                 let _ = clipboard.set_text(&original);
             }
+        }
+    } else if let Ok(current) = clipboard.get_text() {
+        // Original clipboard held non-text or was empty; don't leave our snippet.
+        if current == text {
+            log::warn!(
+                "[input] Long snippet staged through the clipboard; original non-text content could not be preserved — clearing the staged text"
+            );
+            let _ = clipboard.set_text("");
         }
     }
 

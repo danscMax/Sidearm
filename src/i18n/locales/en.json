@@ -471,7 +471,8 @@
     "truncated": "Showing {{shown}} of {{total}}. Narrow your search.",
     "refresh": "Refresh",
     "pid": "PID {{pid}}",
-    "pathUnavailable": "Path unavailable — matching can use the process name only"
+    "pathUnavailable": "Path unavailable — matching can use the process name only",
+    "loadError": "Couldn't list running processes. Check permissions and try again."
   },
   "presets": {
     "title": "Presets",
@@ -934,6 +935,7 @@
     "undone": "Change undone",
     "redone": "Change redone",
     "saveFailedRollback": "Change reverted: {{reason}}",
+    "backupFailed": "Couldn't write a config backup — check the config folder's disk space and permissions. Your settings still saved.",
     "undoAction": "Redo",
     "openConfig": "Open folder"
   },

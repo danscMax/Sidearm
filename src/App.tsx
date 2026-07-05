@@ -104,7 +104,9 @@ function App() {
     [showToast, t],
   );
 
-  const persistence = useAppPersistence(undefined, handleAutoSaveFailed);
+  const persistence = useAppPersistence(undefined, handleAutoSaveFailed, () =>
+  showToast(t("toast.backupFailed"), "warning"),
+);
   const {
     viewState,
     workingConfig,

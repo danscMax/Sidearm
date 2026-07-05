@@ -6,7 +6,7 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 ## Ownership
 
-- `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v2.schema.json`).
+- `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v3.schema.json`).
 - `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe.
 - `conflict-detection.ts` — shortcut conflicts + `bindingMatchesQuery` (label/shortcut/action-content search).
 - `backend.ts` — typed wrappers over Tauri `invoke` (the only place `invoke` is called).

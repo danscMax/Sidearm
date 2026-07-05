@@ -181,6 +181,7 @@ export function SettingsShell({
             refreshConfig={refreshConfig}
             setError={setError}
             onRequestSynapseImport={onRequestSynapseImport}
+            showSynapseImport={activeConfig.devices.some((device) => device.builtin)}
           />
         ) : null}
 

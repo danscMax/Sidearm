@@ -647,8 +647,10 @@ mod tests {
                 profile("code", "Code", 200),
                 profile("review", "Review", 210),
             ],
+            devices: vec![crate::config::builtin_naga_device()],
             physical_controls: vec![PhysicalControl {
-                id: ControlId::Thumb01,
+                id: ControlId::new("thumb_01"),
+                device_id: "razer-naga".into(),
                 family: ControlFamily::ThumbGrid,
                 default_name: "Thumb 1".into(),
                 synapse_name: None,
@@ -657,7 +659,7 @@ mod tests {
                 notes: None,
             }],
             encoder_mappings: vec![EncoderMapping {
-                control_id: ControlId::Thumb01,
+                control_id: ControlId::new("thumb_01"),
                 layer: Layer::Standard,
                 encoded_key: "F13".into(),
                 source: MappingSource::Synapse,
@@ -668,7 +670,7 @@ mod tests {
                 id: "binding-default-standard-thumb-01".into(),
                 profile_id: "default".into(),
                 layer: Layer::Standard,
-                control_id: ControlId::Thumb01,
+                control_id: ControlId::new("thumb_01"),
                 label: "Example".into(),
                 action_id: "action-default-standard-thumb-01".into(),
                 color_tag: None,
@@ -921,8 +923,10 @@ mod edge_proptests {
                 minimal_profile("other", "Other", true),
                 minimal_profile("disabled-profile", "Disabled", false),
             ],
+            devices: vec![crate::config::builtin_naga_device()],
             physical_controls: vec![PhysicalControl {
-                id: ControlId::Thumb01,
+                id: ControlId::new("thumb_01"),
+                device_id: "razer-naga".into(),
                 family: ControlFamily::ThumbGrid,
                 default_name: "Thumb 1".into(),
                 synapse_name: None,
@@ -931,7 +935,7 @@ mod edge_proptests {
                 notes: None,
             }],
             encoder_mappings: vec![crate::config::EncoderMapping {
-                control_id: ControlId::Thumb01,
+                control_id: ControlId::new("thumb_01"),
                 layer: Layer::Standard,
                 encoded_key: "F13".into(),
                 source: MappingSource::Synapse,
@@ -942,7 +946,7 @@ mod edge_proptests {
                 id: "b1".into(),
                 profile_id: "default".into(),
                 layer: Layer::Standard,
-                control_id: ControlId::Thumb01,
+                control_id: ControlId::new("thumb_01"),
                 label: "Test".into(),
                 action_id: "a1".into(),
                 color_tag: None,
@@ -1204,7 +1208,7 @@ mod edge_proptests {
         let mut config = minimal_config(vec![]);
         // Add a second mapping with a different control but the same encoded_key
         config.encoder_mappings.push(crate::config::EncoderMapping {
-            control_id: ControlId::Thumb02,
+            control_id: ControlId::new("thumb_02"),
             layer: Layer::Standard,
             encoded_key: "F13".into(),
             source: MappingSource::Synapse,

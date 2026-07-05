@@ -1,5 +1,8 @@
 # Config Schema V2
 
+> **Superseded by v3** (universal-device support): see `docs/CONFIG-SCHEMA-V3.md`
+> for the delta. The bundled runtime schema is now `schemas/config.v3.schema.json`.
+
 - Status: Working draft aligned with accepted ADRs
 - Date: 2026-03-07
 - Canonical file name: `config.json`

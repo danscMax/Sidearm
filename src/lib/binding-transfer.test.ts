@@ -23,6 +23,7 @@ function minimalConfig(over: Partial<AppConfig> = {}): AppConfig {
       osdAnimation: "slideIn",
     },
     profiles: [],
+    devices: [],
     physicalControls: [],
     encoderMappings: [],
     appMappings: [],

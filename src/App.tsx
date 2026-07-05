@@ -121,10 +121,20 @@ function App() {
     refreshConfig, updateDraft, handleUndo, handleRedo,
   } = persistence;
 
+  // Razer conveniences (Synapse import, factory-defaults toast) only make
+  // sense while the config declares the built-in Naga device. Ref, not state:
+  // the native listeners below subscribe once and must read the latest value.
+  const hasBuiltinDeviceRef = useRef(true);
+  useEffect(() => {
+    hasBuiltinDeviceRef.current =
+      activeConfig?.devices.some((device) => device.builtin) ?? true;
+  }, [activeConfig]);
+
   // Tauri v2 file-drop event; looks like a hint the user wants to import a Synapse file.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     void listenDragDrop(async (paths) => {
+      if (!hasBuiltinDeviceRef.current) return;
       const path = paths[0];
       if (typeof path !== "string") return;
       const lower = path.toLowerCase();
@@ -200,6 +210,7 @@ function App() {
   useEffect(() => {
     let unlisten: (() => void) | undefined;
     void listenMouseDefaultsSuspected(() => {
+      if (!hasBuiltinDeviceRef.current) return;
       showToast(t("mouseDefaults.suspected"), "warning");
     }).then((fn) => {
       unlisten = fn;
@@ -300,6 +311,7 @@ function App() {
   const [selectedLayer, setSelectedLayer] = useState<Layer>("standard");
   const [selectedControlId, setSelectedControlId] = useState<ControlId | null>(null);
   const [multiSelectedControlIds, setMultiSelectedControlIds] = useState<Set<ControlId>>(new Set());
+  const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
 
   const verificationKeyEventRef = useRef<((event: EncodedKeyEvent) => void) | null>(null);
   const verificationResolutionRef = useRef<((preview: import("./lib/runtime").ResolvedInputPreview) => void) | null>(null);
@@ -818,13 +830,28 @@ function App() {
     });
   }
 
+  const devices = activeConfig?.devices ?? [];
+  const effectiveDeviceId =
+    activeDeviceId && devices.some((device) => device.id === activeDeviceId)
+      ? activeDeviceId
+      : devices[0]?.id ?? null;
+
+  function handleSelectDevice(id: string) {
+    setActiveDeviceId(id);
+    setSelectedControlId(null);
+    setMultiSelectedControlIds(new Set());
+  }
+
   const familySections = useMemo(
     () =>
       controlFamilyOrder.map((family) => ({
         family,
         entries:
           activeConfig?.physicalControls
-            .filter((control) => control.family === family)
+            .filter(
+              (control) =>
+                control.family === family && control.deviceId === effectiveDeviceId,
+            )
             .map((control) => {
               const binding = bindingByControlId.get(control.id) ?? null;
               return {
@@ -836,7 +863,7 @@ function App() {
               };
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId],
   );
 
   const isProfilesMode = workspaceMode === "profiles";
@@ -903,6 +930,9 @@ function App() {
                 handleCaptureActiveWindow={handleCaptureActiveWindow}
                 setProfileSyncSuppressed={setProfileSyncSuppressed}
                 familySections={familySections}
+                devices={devices}
+                activeDeviceId={effectiveDeviceId}
+                onSelectDevice={handleSelectDevice}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}
                 onSelectLayer={(layer) => setSelectedLayer(layer)}

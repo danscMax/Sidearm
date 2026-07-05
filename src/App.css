@@ -1861,6 +1861,136 @@ input[type="radio"] {
   padding: 4px 0 2px;
 }
 
+/* ── Device switcher + generic-device view ─────────────────────────── */
+
+.device-bar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.device-bar__track .pill-track__pill {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gdv__header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.gdv__name {
+  margin: 0;
+  font-size: var(--fs-body);
+  color: var(--c-text-bright);
+  font-weight: 600;
+}
+
+.gdv__name-input {
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-xs);
+  color: var(--c-text-bright);
+  font-size: var(--fs-body);
+  padding: 4px 8px;
+  min-width: 180px;
+}
+
+.gdv__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 16px;
+  border: 1px dashed var(--c-border);
+  border-radius: var(--radius-md);
+  margin: 8px 0;
+  max-width: 420px;
+}
+
+.gdv__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 8px;
+  width: 100%;
+  max-width: 680px;
+  margin: 8px 0;
+}
+
+.gdv__cell {
+  position: relative;
+  display: flex;
+}
+
+.gdv__cell .btn-legend__cell {
+  flex: 1;
+  width: 100%;
+}
+
+.gdv__cell-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--c-border);
+  background: var(--c-card-bg);
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.gdv__cell:hover .gdv__cell-remove,
+.gdv__cell:focus-within .gdv__cell-remove {
+  opacity: 1;
+}
+
+.gdv__cell-remove:hover {
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+}
+
+.gdv__photo {
+  max-width: 420px;
+  width: 100%;
+}
+
+/* Naga views size the container via per-view aspect-ratio; a user photo's
+   ratio is unknown, so let the image itself set the container height. */
+.gdv__photo .mouse-visual__img {
+  position: static;
+  display: block;
+  height: auto;
+}
+
+.gdv__photo--placing {
+  cursor: crosshair;
+}
+
+/* While placing, clicks must land on the photo, not on existing hotspots. */
+.gdv__photo--placing .mouse-visual__hotspot {
+  pointer-events: none;
+}
+
+.gdv__placing-hint {
+  max-width: 420px;
+  text-align: center;
+  margin: 0 0 6px;
+}
+
 @keyframes tab-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

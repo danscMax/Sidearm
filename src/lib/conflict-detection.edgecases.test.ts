@@ -92,6 +92,7 @@ function makeConfig(actions: Action[], bindings: Binding[]): AppConfig {
       osdAnimation: "slideIn",
     },
     profiles: [],
+    devices: [],
     physicalControls: [],
     encoderMappings: [],
     appMappings: [],

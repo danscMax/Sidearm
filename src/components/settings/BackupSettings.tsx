@@ -19,6 +19,9 @@ export interface BackupSettingsProps {
   refreshConfig: () => Promise<boolean>;
   setError: (error: CommandError | null) => void;
   onRequestSynapseImport: (parsed: ParsedSynapseProfiles) => void;
+  /** Synapse import is a Razer/Naga convenience — hidden when the config has
+   *  no built-in Naga device. */
+  showSynapseImport: boolean;
 }
 
 /** Backups tab: full-config export/import, config folder, Synapse import,
@@ -28,6 +31,7 @@ export function BackupSettings({
   refreshConfig,
   setError,
   onRequestSynapseImport,
+  showSynapseImport,
 }: BackupSettingsProps) {
   const { t } = useTranslation();
   const [synapseLoading, setSynapseLoading] = useState(false);
@@ -138,6 +142,7 @@ export function BackupSettings({
           >
             {t("settings.openConfigFolder")}
           </button>
+          {showSynapseImport ? (
           <button
             type="button"
             className="action-button action-button--secondary"
@@ -168,6 +173,7 @@ export function BackupSettings({
           >
             {synapseLoading ? t("synapseImport.parsing") : t("synapseImport.button")}
           </button>
+          ) : null}
         </div>
       </section>
 

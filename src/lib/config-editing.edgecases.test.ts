@@ -86,6 +86,7 @@ function minCfg(overrides: Partial<AppConfig> = {}): AppConfig {
       osdAnimation: "slideIn",
     },
     profiles: [],
+    devices: [],
     physicalControls: [],
     encoderMappings: [],
     appMappings: [],
@@ -980,6 +981,7 @@ describe("invariant: ensurePlaceholderBinding is idempotent", () => {
   it("calling ensurePlaceholderBinding twice never adds a second binding for the same slot", () => {
     const control = {
       id: "thumb_05" as ControlId,
+      deviceId: "razer-naga",
       family: "thumbGrid" as const,
       defaultName: "Thumb 5",
       remappable: true,

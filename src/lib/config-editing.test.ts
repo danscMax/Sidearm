@@ -76,6 +76,7 @@ function createMinimalConfig(): AppConfig {
       osdAnimation: "slideIn",
     },
     profiles: [],
+    devices: [],
     physicalControls: [],
     encoderMappings: [],
     appMappings: [],
@@ -121,6 +122,7 @@ function makeAction(overrides: Partial<Action> = {}): Action {
 function makePhysicalControl(overrides: Partial<PhysicalControl> = {}): PhysicalControl {
   return {
     id: "thumb_01" as ControlId,
+    deviceId: "razer-naga",
     family: "thumbGrid",
     defaultName: "Thumb 1",
     remappable: true,

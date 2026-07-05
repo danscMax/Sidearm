@@ -18,7 +18,7 @@ The editors inside the "Assign action" modal — one per `ActionType` (shortcut,
 ## Work Guidance
 
 Adding a new `ActionType` is a mirrored change — do all of:
-- Rust `ActionPayload` variant (untagged: give it a required discriminating field) + `config.v2.schema.json` (`anyOf`) + `ALL_ACTION_TYPES` exhaustiveness guard.
+- Rust `ActionPayload` variant (untagged: give it a required discriminating field) + `config.v3.schema.json` (`anyOf`) + `ALL_ACTION_TYPES` exhaustiveness guard.
 - TS `config.ts` union, `config-editing.ts` coercion switch, a new editor here, and all Settings literals.
 - Backend executor handling in `src-tauri/src/executor.rs`.
 

@@ -868,6 +868,153 @@ fn record_config_stamp(app: &AppHandle) {
     }
 }
 
+// ── Device images (universal-device support) ────────────────────────────────
+// User-device photos live as bare files in `<config_dir>/devices/`; the config
+// stores only the file name (validated bare in `validate_config`). Serving
+// goes through a data: URL instead of the asset protocol — the portable build
+// keeps its data dir next to the exe, which no asset-scope variable covers.
+
+const DEVICE_IMAGE_DIR: &str = "devices";
+const DEVICE_IMAGE_MAX_BYTES: u64 = 10 * 1024 * 1024;
+
+fn device_image_mime(extension: &str) -> Option<&'static str> {
+    match extension.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
+        "bmp" => Some("image/bmp"),
+        _ => None,
+    }
+}
+
+/// Reject anything that is not a bare file name (defense in depth on top of
+/// the same check in `validate_config`).
+fn validated_device_image_path(app: &AppHandle, file_name: &str) -> Result<PathBuf, CommandError> {
+    if file_name.trim().is_empty()
+        || file_name.contains(['/', '\\'])
+        || file_name.contains("..")
+    {
+        return Err(CommandError::new(
+            "device_image_invalid_name",
+            format!("`{file_name}` is not a bare file name."),
+            None,
+        ));
+    }
+    Ok(resolve_config_dir(app)?
+        .join(DEVICE_IMAGE_DIR)
+        .join(file_name))
+}
+
+/// Copy a user-picked photo into the app-data devices dir; returns the bare
+/// file name the config should reference.
+#[tauri::command]
+async fn import_device_image(app: AppHandle, source_path: String) -> Result<String, CommandError> {
+    let source = PathBuf::from(&source_path);
+    let extension = source
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if device_image_mime(&extension).is_none() {
+        return Err(CommandError::new(
+            "device_image_unsupported",
+            format!("`{extension}` is not a supported image type (png/jpg/webp/gif/bmp)."),
+            None,
+        ));
+    }
+
+    let devices_dir = resolve_config_dir(&app)?.join(DEVICE_IMAGE_DIR);
+    tauri::async_runtime::spawn_blocking(move || {
+        let metadata = fs::metadata(&source).map_err(|error| {
+            CommandError::internal(format!("Failed to read `{}`: {error}", source.display()))
+        })?;
+        if metadata.len() > DEVICE_IMAGE_MAX_BYTES {
+            return Err(CommandError::new(
+                "device_image_too_large",
+                format!(
+                    "Image is {} MB; the limit is {} MB.",
+                    metadata.len() / (1024 * 1024),
+                    DEVICE_IMAGE_MAX_BYTES / (1024 * 1024)
+                ),
+                None,
+            ));
+        }
+        fs::create_dir_all(&devices_dir).map_err(|error| {
+            CommandError::internal(format!(
+                "Failed to create `{}`: {error}",
+                devices_dir.display()
+            ))
+        })?;
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_nanos())
+            .unwrap_or(0);
+        let file_name = format!("device-{nanos}.{extension}");
+        fs::copy(&source, devices_dir.join(&file_name)).map_err(|error| {
+            CommandError::internal(format!("Failed to copy device image: {error}"))
+        })?;
+        Ok(file_name)
+    })
+    .await
+    .map_err(|error| CommandError::internal(format!("import_device_image task failed: {error}")))?
+}
+
+/// Read a stored device photo as a `data:` URL (CSP `img-src data:` allows it
+/// everywhere, including the portable build).
+#[tauri::command]
+async fn read_device_image(app: AppHandle, file_name: String) -> Result<String, CommandError> {
+    let path = validated_device_image_path(&app, &file_name)?;
+    let mime = path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .and_then(device_image_mime)
+        .ok_or_else(|| {
+            CommandError::new(
+                "device_image_unsupported",
+                format!("`{file_name}` is not a supported image type."),
+                None,
+            )
+        })?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let metadata = fs::metadata(&path).map_err(|error| {
+            CommandError::internal(format!("Failed to read `{}`: {error}", path.display()))
+        })?;
+        if metadata.len() > DEVICE_IMAGE_MAX_BYTES {
+            return Err(CommandError::new(
+                "device_image_too_large",
+                "Stored image exceeds the size limit.".to_string(),
+                None,
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|error| {
+            CommandError::internal(format!("Failed to read `{}`: {error}", path.display()))
+        })?;
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+        Ok(format!("data:{mime};base64,{encoded}"))
+    })
+    .await
+    .map_err(|error| CommandError::internal(format!("read_device_image task failed: {error}")))?
+}
+
+/// Best-effort cleanup when a photo is replaced or its device deleted.
+#[tauri::command]
+async fn delete_device_image(app: AppHandle, file_name: String) -> Result<(), CommandError> {
+    let path = validated_device_image_path(&app, &file_name)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(error) = fs::remove_file(&path) {
+            // Missing file is fine (already cleaned up / never written).
+            if error.kind() != std::io::ErrorKind::NotFound {
+                log::warn!("[device-image] Failed to delete {}: {error}", path.display());
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|error| CommandError::internal(format!("delete_device_image task failed: {error}")))?
+}
+
 #[tauri::command]
 async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
@@ -1343,9 +1490,12 @@ async fn import_full_config_apply(
 }
 
 /// Merge two configs by ID (incoming wins on ID conflicts). Non-array fields
-/// (version, settings, physicalControls, encoderMappings) are taken from
-/// `incoming`. Suitable for merging same-user configs where IDs are unique
-/// random tokens (see `makeRandomId` in the frontend).
+/// (version, settings) are taken from `incoming`. Suitable for merging
+/// same-user configs where IDs are unique random tokens (see `makeRandomId`
+/// in the frontend). Since v3, devices/physicalControls/encoderMappings merge
+/// by id too — taking them wholesale from `incoming` (the pre-v3 behavior,
+/// safe when the control set was a fixed enum) would orphan the base config's
+/// user-device bindings and fail validation.
 fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
     use std::collections::HashMap;
 
@@ -1386,8 +1536,13 @@ fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
         version: incoming.version,
         settings: incoming.settings,
         profiles: merge_by(base.profiles, incoming.profiles, |p| p.id.clone()),
-        physical_controls: incoming.physical_controls,
-        encoder_mappings: incoming.encoder_mappings,
+        devices: merge_by(base.devices, incoming.devices, |d| d.id.clone()),
+        physical_controls: merge_by(base.physical_controls, incoming.physical_controls, |c| {
+            c.id.clone()
+        }),
+        encoder_mappings: merge_by(base.encoder_mappings, incoming.encoder_mappings, |m| {
+            (m.control_id.clone(), m.layer)
+        }),
         app_mappings: merge_by(base.app_mappings, incoming.app_mappings, |m| m.id.clone()),
         bindings: merge_by(base.bindings, incoming.bindings, |b| b.id.clone()),
         actions: merge_by(base.actions, incoming.actions, |a| a.id.clone()),
@@ -3257,6 +3412,9 @@ pub fn run() {
             export_profile,
             import_profile,
             export_snippets,
+            import_device_image,
+            read_device_image,
+            delete_device_image,
             start_macro_recording,
             record_keystroke,
             stop_macro_recording
@@ -3278,6 +3436,59 @@ mod tests {
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")
+    }
+
+    /// Merge-import must not orphan the base config's user devices: since v3
+    /// devices/physicalControls/encoderMappings merge by id instead of being
+    /// taken wholesale from the incoming file (which may predate the device).
+    #[test]
+    fn merge_configs_preserves_base_user_device() {
+        let incoming = config::default_seed_config();
+        let mut base = config::default_seed_config();
+        base.devices.push(config::Device {
+            id: "my-macropad".into(),
+            name: "My Macropad".into(),
+            builtin: false,
+            image: None,
+            hotspots: Vec::new(),
+        });
+        base.physical_controls.push(config::PhysicalControl {
+            id: config::ControlId::new("my-macropad-b1"),
+            device_id: "my-macropad".into(),
+            family: config::ControlFamily::ThumbGrid,
+            default_name: "Pad 1".into(),
+            synapse_name: None,
+            remappable: true,
+            capability_status: config::CapabilityStatus::Verified,
+            notes: None,
+        });
+        base.encoder_mappings.push(config::EncoderMapping {
+            control_id: config::ControlId::new("my-macropad-b1"),
+            layer: config::Layer::Standard,
+            encoded_key: "Ctrl+Shift+F19".into(),
+            source: config::MappingSource::Detected,
+            verified: true,
+        });
+
+        let merged = merge_configs_by_id(base, incoming);
+        assert!(
+            merged.devices.iter().any(|d| d.id == "my-macropad"),
+            "user device must survive a merge with a device-less import"
+        );
+        assert!(
+            merged
+                .physical_controls
+                .iter()
+                .any(|c| c.id.as_str() == "my-macropad-b1"),
+            "user device's control must survive the merge"
+        );
+        assert!(
+            merged
+                .encoder_mappings
+                .iter()
+                .any(|m| m.control_id.as_str() == "my-macropad-b1"),
+            "user device's mapping must survive the merge"
+        );
     }
 
     #[test]

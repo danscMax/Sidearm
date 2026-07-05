@@ -1150,6 +1150,42 @@ export function removeControl(config: AppConfig, controlId: ControlId): AppConfi
   return stripControls(config, new Set([controlId]));
 }
 
+/** Set or clear a device's photo (bare file name in app-data/devices). */
+export function setDeviceImage(
+  config: AppConfig,
+  deviceId: string,
+  image: string | undefined,
+): AppConfig {
+  return {
+    ...config,
+    devices: config.devices.map((device) =>
+      device.id === deviceId ? { ...device, image } : device,
+    ),
+  };
+}
+
+/** Place (or move) a control's hotspot on the device photo. Coordinates are
+ * percent of the image size, clamped and rounded to 0.1 so the config stays
+ * schema-valid (0..=100) and diff-friendly. */
+export function placeDeviceHotspot(
+  config: AppConfig,
+  deviceId: string,
+  controlId: ControlId,
+  x: number,
+  y: number,
+): AppConfig {
+  const clamp = (value: number) => Math.round(Math.min(100, Math.max(0, value)) * 10) / 10;
+  const hotspot = { controlId, x: clamp(x), y: clamp(y) };
+  return {
+    ...config,
+    devices: config.devices.map((device) => {
+      if (device.id !== deviceId) return device;
+      const rest = (device.hotspots ?? []).filter((entry) => entry.controlId !== controlId);
+      return { ...device, hotspots: [...rest, hotspot] };
+    }),
+  };
+}
+
 /** The mapping already claiming this signal, if any — a duplicate encodedKey
  * is rejected by backend validation, so the UI checks before creating one. */
 export function findMappingByEncodedKey(

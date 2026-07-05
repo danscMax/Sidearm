@@ -1010,7 +1010,13 @@
     "deleteControl": "Delete button",
     "deleteControlTitle": "Delete button?",
     "deleteControlMessage": "Delete \"{{name}}\" with its binding and signal?",
-    "emptyHint": "This device has no buttons yet. Add one and press it — Sidearm will learn the key it sends."
+    "emptyHint": "This device has no buttons yet. Add one and press it — Sidearm will learn the key it sends.",
+    "addPhoto": "Add photo",
+    "replacePhoto": "Replace photo",
+    "pickPhotoTitle": "Pick a device photo",
+    "photoImportError": "Couldn't import the photo.",
+    "placeHotspots": "Place buttons",
+    "placingHint": "Click a button in the list, then click its spot on the photo. Placement auto-advances to the next unplaced button."
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",

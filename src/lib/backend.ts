@@ -79,6 +79,20 @@ export async function listBackups(): Promise<BackupEntry[]> {
   return invoke<BackupEntry[]>("list_backups");
 }
 
+/** Copy a user-picked photo into app-data/devices; returns the bare file name. */
+export async function importDeviceImage(sourcePath: string): Promise<string> {
+  return invoke<string>("import_device_image", { sourcePath });
+}
+
+/** Read a stored device photo as a data: URL (CSP-safe in every build). */
+export async function readDeviceImage(fileName: string): Promise<string> {
+  return invoke<string>("read_device_image", { fileName });
+}
+
+export async function deleteDeviceImage(fileName: string): Promise<void> {
+  return invoke<void>("delete_device_image", { fileName });
+}
+
 export async function restoreConfigFromBackup(
   backupPath: string,
 ): Promise<LoadConfigResponse> {

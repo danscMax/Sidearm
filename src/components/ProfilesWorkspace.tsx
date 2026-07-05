@@ -4,6 +4,8 @@ import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
+import { open } from "@tauri-apps/plugin-dialog";
+import { deleteDeviceImage, importDeviceImage } from "../lib/backend";
 import {
   addLearnedControl,
   applyBindingImport,
@@ -17,11 +19,13 @@ import {
   duplicateBinding,
   findDuplicateAppMapping,
   importProfile,
+  placeDeviceHotspot,
   removeBinding,
   removeBindingsForControls,
   removeControl,
   removeDevice,
   renameDevice,
+  setDeviceImage,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
   upsertAppMapping,
@@ -184,6 +188,7 @@ export function ProfilesWorkspace({
   function handleDeleteDevice() {
     if (!activeDevice || activeDevice.builtin || devices.length <= 1) return;
     const deviceId = activeDevice.id;
+    const image = activeDevice.image;
     setConfirmModal({
       title: t("device.deleteTitle"),
       message: t("device.deleteMessage", { name: activeDevice.name }),
@@ -194,8 +199,32 @@ export function ProfilesWorkspace({
         updateDraft((config) => removeDevice(config, deviceId));
         setSelectedControlId(null);
         if (fallback) onSelectDevice(fallback.id);
+        // Best-effort file cleanup; the config no longer references it.
+        if (image) void deleteDeviceImage(image).catch(() => {});
       },
     });
+  }
+
+  async function handlePickImage() {
+    if (!activeDevice) return;
+    const path = await open({
+      title: t("device.pickPhotoTitle"),
+      filters: [
+        { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "gif", "bmp"] },
+        { name: "All files", extensions: ["*"] },
+      ],
+      multiple: false,
+    });
+    if (typeof path !== "string") return;
+    const deviceId = activeDevice.id;
+    const previous = activeDevice.image;
+    try {
+      const fileName = await importDeviceImage(path);
+      updateDraft((config) => setDeviceImage(config, deviceId, fileName));
+      if (previous) void deleteDeviceImage(previous).catch(() => {});
+    } catch {
+      showToast(t("device.photoImportError"), "warning");
+    }
   }
 
   // Export one binding to a portable .sidearm-binding.json file.
@@ -748,6 +777,10 @@ export function ProfilesWorkspace({
             onRemoveControl={handleRemoveControl}
             onRenameDevice={(name) => updateDraft((config) => renameDevice(config, activeDevice.id, name))}
             onDeleteDevice={handleDeleteDevice}
+            onPickImage={() => void handlePickImage()}
+            onPlaceHotspot={(controlId, x, y) =>
+              updateDraft((config) => placeDeviceHotspot(config, activeDevice.id, controlId, x, y))
+            }
           />
         ) : (
           <MouseVisualization

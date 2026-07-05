@@ -1963,6 +1963,26 @@ input[type="radio"] {
   border-color: var(--c-danger);
 }
 
+.gdv__photo {
+  max-width: 420px;
+  width: 100%;
+}
+
+.gdv__photo--placing {
+  cursor: crosshair;
+}
+
+/* While placing, clicks must land on the photo, not on existing hotspots. */
+.gdv__photo--placing .mouse-visual__hotspot {
+  pointer-events: none;
+}
+
+.gdv__placing-hint {
+  max-width: 420px;
+  text-align: center;
+  margin: 0 0 6px;
+}
+
 @keyframes tab-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }

@@ -1490,9 +1490,12 @@ async fn import_full_config_apply(
 }
 
 /// Merge two configs by ID (incoming wins on ID conflicts). Non-array fields
-/// (version, settings, physicalControls, encoderMappings) are taken from
-/// `incoming`. Suitable for merging same-user configs where IDs are unique
-/// random tokens (see `makeRandomId` in the frontend).
+/// (version, settings) are taken from `incoming`. Suitable for merging
+/// same-user configs where IDs are unique random tokens (see `makeRandomId`
+/// in the frontend). Since v3, devices/physicalControls/encoderMappings merge
+/// by id too — taking them wholesale from `incoming` (the pre-v3 behavior,
+/// safe when the control set was a fixed enum) would orphan the base config's
+/// user-device bindings and fail validation.
 fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
     use std::collections::HashMap;
 
@@ -1533,9 +1536,13 @@ fn merge_configs_by_id(base: AppConfig, incoming: AppConfig) -> AppConfig {
         version: incoming.version,
         settings: incoming.settings,
         profiles: merge_by(base.profiles, incoming.profiles, |p| p.id.clone()),
-        devices: incoming.devices,
-        physical_controls: incoming.physical_controls,
-        encoder_mappings: incoming.encoder_mappings,
+        devices: merge_by(base.devices, incoming.devices, |d| d.id.clone()),
+        physical_controls: merge_by(base.physical_controls, incoming.physical_controls, |c| {
+            c.id.clone()
+        }),
+        encoder_mappings: merge_by(base.encoder_mappings, incoming.encoder_mappings, |m| {
+            (m.control_id.clone(), m.layer)
+        }),
         app_mappings: merge_by(base.app_mappings, incoming.app_mappings, |m| m.id.clone()),
         bindings: merge_by(base.bindings, incoming.bindings, |b| b.id.clone()),
         actions: merge_by(base.actions, incoming.actions, |a| a.id.clone()),
@@ -3429,6 +3436,59 @@ mod tests {
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")
+    }
+
+    /// Merge-import must not orphan the base config's user devices: since v3
+    /// devices/physicalControls/encoderMappings merge by id instead of being
+    /// taken wholesale from the incoming file (which may predate the device).
+    #[test]
+    fn merge_configs_preserves_base_user_device() {
+        let incoming = config::default_seed_config();
+        let mut base = config::default_seed_config();
+        base.devices.push(config::Device {
+            id: "my-macropad".into(),
+            name: "My Macropad".into(),
+            builtin: false,
+            image: None,
+            hotspots: Vec::new(),
+        });
+        base.physical_controls.push(config::PhysicalControl {
+            id: config::ControlId::new("my-macropad-b1"),
+            device_id: "my-macropad".into(),
+            family: config::ControlFamily::ThumbGrid,
+            default_name: "Pad 1".into(),
+            synapse_name: None,
+            remappable: true,
+            capability_status: config::CapabilityStatus::Verified,
+            notes: None,
+        });
+        base.encoder_mappings.push(config::EncoderMapping {
+            control_id: config::ControlId::new("my-macropad-b1"),
+            layer: config::Layer::Standard,
+            encoded_key: "Ctrl+Shift+F19".into(),
+            source: config::MappingSource::Detected,
+            verified: true,
+        });
+
+        let merged = merge_configs_by_id(base, incoming);
+        assert!(
+            merged.devices.iter().any(|d| d.id == "my-macropad"),
+            "user device must survive a merge with a device-less import"
+        );
+        assert!(
+            merged
+                .physical_controls
+                .iter()
+                .any(|c| c.id.as_str() == "my-macropad-b1"),
+            "user device's control must survive the merge"
+        );
+        assert!(
+            merged
+                .encoder_mappings
+                .iter()
+                .any(|m| m.control_id.as_str() == "my-macropad-b1"),
+            "user device's mapping must survive the merge"
+        );
     }
 
     #[test]

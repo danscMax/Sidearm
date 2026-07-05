@@ -111,10 +111,13 @@ export function GenericDeviceView({
     onPlaceHotspot(selected.control.id, x, y);
     // Auto-advance to the next control that has no hotspot yet, so placing a
     // whole device is click-click-click rather than select-click each time.
-    const next = entries.find(
-      (entry) => entry.control.id !== selected.control.id && !placedIds.has(entry.control.id),
-    );
-    if (next) onSelectControl(next.control.id);
+    // Re-placing an already-placed control (fine-tuning) keeps the selection.
+    if (!placedIds.has(selected.control.id)) {
+      const next = entries.find(
+        (entry) => entry.control.id !== selected.control.id && !placedIds.has(entry.control.id),
+      );
+      if (next) onSelectControl(next.control.id);
+    }
   }
 
   function renderHotspots() {

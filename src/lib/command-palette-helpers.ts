@@ -11,10 +11,21 @@ export type PaletteResults = {
 
 const SECTION_LIMIT = 25;
 
+/** True when every char of `needle` appears in `haystack` in order (gaps allowed). */
+function isSubsequence(needle: string, haystack: string): boolean {
+  let i = 0;
+  for (let j = 0; j < haystack.length && i < needle.length; j++) {
+    if (haystack[j] === needle[i]) i += 1;
+  }
+  return i === needle.length;
+}
+
 /**
  * Filter the command palette's data sources for a query.
  *
- * - Commands always shown (substring of label; everything when the query is empty).
+ * - Commands always shown; substring matches rank first (preserving their order),
+ *   then subsequence/fuzzy matches ("np" → "New profile") are appended. Everything
+ *   when the query is empty.
  * - Bindings/Snippets only contribute when there IS a query — cross-profile,
  *   both layers. Empty query keeps them empty (the empty state shows Recent).
  */
@@ -28,8 +39,16 @@ export function filterPaletteResults(
   },
 ): PaletteResults {
   const q = query.trim().toLowerCase();
-  const commands = data.commands.filter((c) => !q || c.label.toLowerCase().includes(q));
-  if (!q) return { commands, bindings: [], snippets: [] };
+  if (!q) return { commands: data.commands, bindings: [], snippets: [] };
+
+  const substringCmds: PaletteCommand[] = [];
+  const fuzzyCmds: PaletteCommand[] = [];
+  for (const c of data.commands) {
+    const label = c.label.toLowerCase();
+    if (label.includes(q)) substringCmds.push(c);
+    else if (isSubsequence(q, label)) fuzzyCmds.push(c);
+  }
+  const commands = [...substringCmds, ...fuzzyCmds];
 
   const bindings = data.bindings
     .filter((b) => bindingMatchesQuery(b, data.actionsById.get(b.actionId) ?? null, q))

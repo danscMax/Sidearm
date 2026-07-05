@@ -49,6 +49,30 @@ describe("filterPaletteResults", () => {
     expect(r.commands.map((c) => c.id)).toEqual(["redo", "reload"]);
   });
 
+  it("ranks substring matches before fuzzy/subsequence matches", () => {
+    const r = filterPaletteResults("rl", {
+      commands: [
+        { id: "reload", label: "Reload config" }, // "rl" is a subsequence, not substring
+        { id: "curl", label: "curl" }, // "rl" is a substring
+      ],
+      bindings: [],
+      actionsById: ACTIONS,
+      snippets: [],
+    });
+    // substring ("curl") first, then subsequence ("reload")
+    expect(r.commands.map((c) => c.id)).toEqual(["curl", "reload"]);
+  });
+
+  it("finds a command by subsequence when there is no substring match", () => {
+    const r = filterPaletteResults("np", {
+      commands: [{ id: "new-profile", label: "New profile" }, { id: "undo", label: "Undo" }],
+      bindings: [],
+      actionsById: ACTIONS,
+      snippets: [],
+    });
+    expect(r.commands.map((c) => c.id)).toEqual(["new-profile"]);
+  });
+
   it("matches bindings cross-profile by label", () => {
     const r = filterPaletteResults("paste", {
       commands: COMMANDS,

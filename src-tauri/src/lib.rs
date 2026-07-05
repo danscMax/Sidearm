@@ -519,15 +519,38 @@ pub(crate) fn plan_global_shortcut(current: Option<&str>, desired: &str) -> Shor
     }
 }
 
+/// Reliably surface the main window from a hidden / tray / minimized state. On
+/// Windows `set_focus` (SetForegroundWindow) is refused for a process that isn't
+/// already the foreground app (the foreground lock), so the window would appear
+/// behind everything and only flash its taskbar button. Briefly toggling
+/// always-on-top forces it to the top of the z-order, then we drop it back.
+fn bring_to_front(window: &tauri::WebviewWindow) {
+    let _ = window.unminimize();
+    let _ = window.show();
+    #[cfg(windows)]
+    {
+        let _ = window.set_always_on_top(true);
+        let _ = window.set_focus();
+        let _ = window.set_always_on_top(false);
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = window.set_focus();
+    }
+}
+
 /// Show/hide the main window. Shared by the tray left-click and the global
 /// shortcut so the toggle behaves identically from both entry points.
 fn toggle_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
-        if window.is_visible().unwrap_or(false) {
+        // A minimized window still reports visible on Windows, so treat
+        // "minimized" as "surface it", not "hide it".
+        let visible = window.is_visible().unwrap_or(false);
+        let minimized = window.is_minimized().unwrap_or(false);
+        if visible && !minimized {
             let _ = window.hide();
         } else {
-            let _ = window.show();
-            let _ = window.set_focus();
+            bring_to_front(&window);
         }
     }
 }
@@ -1937,8 +1960,7 @@ async fn capture_active_window(
 
     // Return focus to the studio window after capture
     if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.set_focus();
+        bring_to_front(&window);
     }
 
     Ok(result)
@@ -2796,9 +2818,7 @@ pub fn run() {
         // focusing. Upgrade path noted, not built — no evidence it's needed.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
+                bring_to_front(&window);
             }
             // Surface the blocked duplicate launch: log lands in Diagnostics, the
             // event drives a toast in the existing window.
@@ -3096,8 +3116,7 @@ pub fn run() {
                             };
                             // Surface the studio window so the dialog is visible.
                             if let Some(window) = app.get_webview_window("main") {
-                                let _ = window.show();
-                                let _ = window.set_focus();
+                                bring_to_front(&window);
                             }
                             let _ = app.emit(EVENT_QUICK_RULE_START, &result);
                             log::info!("[tray] quick-rule capture for `{}`", result.exe);

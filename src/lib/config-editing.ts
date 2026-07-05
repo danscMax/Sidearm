@@ -1045,6 +1045,157 @@ export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
   };
 }
 
+/* ────────────────────────────────────────────────────────────
+   Devices (universal-device support)
+   ──────────────────────────────────────────────────────────── */
+
+/** Slug for a device id: same rules as makeProfileId, device-flavoured fallback. */
+function makeDeviceId(name: string): string {
+  const normalized = name
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  const base = normalized || "device";
+  return /^[a-z]/.test(base) ? base : `d-${base}`;
+}
+
+export function createDevice(
+  config: AppConfig,
+  preferredName: string,
+): { config: AppConfig; deviceId: string } {
+  const name = preferredName.trim() || "Device";
+  const deviceId = nextUniqueId(
+    config.devices.map((device) => device.id),
+    makeDeviceId(name),
+  );
+  return {
+    config: { ...config, devices: [...config.devices, { id: deviceId, name }] },
+    deviceId,
+  };
+}
+
+export function renameDevice(config: AppConfig, deviceId: string, name: string): AppConfig {
+  const trimmed = name.trim();
+  if (!trimmed) return config;
+  return {
+    ...config,
+    devices: config.devices.map((device) =>
+      device.id === deviceId ? { ...device, name: trimmed } : device,
+    ),
+  };
+}
+
+/** Remove controls (and everything referencing them) from the config:
+ * bindings, encoder mappings, device hotspots; chord partners pointing at a
+ * removed control fall back to a plain press. Orphaned actions are pruned the
+ * same way deleteProfile does. */
+function stripControls(config: AppConfig, removedIds: Set<ControlId>): AppConfig {
+  const nextBindings = config.bindings
+    .filter((binding) => !removedIds.has(binding.controlId))
+    .map((binding) =>
+      binding.chordPartner && removedIds.has(binding.chordPartner)
+        ? {
+            ...binding,
+            chordPartner: undefined,
+            triggerMode: binding.triggerMode === "chord" ? undefined : binding.triggerMode,
+          }
+        : binding,
+    );
+  const { actions, snippetLibrary } = pruneActionsPreservingSnippets(
+    config.actions,
+    nextBindings,
+    config.snippetLibrary,
+  );
+  return {
+    ...config,
+    physicalControls: config.physicalControls.filter((control) => !removedIds.has(control.id)),
+    encoderMappings: config.encoderMappings.filter(
+      (mapping) => !removedIds.has(mapping.controlId),
+    ),
+    devices: config.devices.map((device) =>
+      device.hotspots?.some((hotspot) => removedIds.has(hotspot.controlId))
+        ? {
+            ...device,
+            hotspots: device.hotspots.filter((hotspot) => !removedIds.has(hotspot.controlId)),
+          }
+        : device,
+    ),
+    bindings: nextBindings,
+    actions,
+    snippetLibrary,
+  };
+}
+
+/** Delete a user device and cascade away its controls. No-op for the built-in
+ * device or the last remaining device (backend validation requires ≥1). */
+export function removeDevice(config: AppConfig, deviceId: string): AppConfig {
+  const device = config.devices.find((entry) => entry.id === deviceId);
+  if (!device || device.builtin || config.devices.length <= 1) return config;
+  const removedIds = new Set(
+    config.physicalControls
+      .filter((control) => control.deviceId === deviceId)
+      .map((control) => control.id),
+  );
+  const stripped = stripControls(config, removedIds);
+  return {
+    ...stripped,
+    devices: stripped.devices.filter((entry) => entry.id !== deviceId),
+  };
+}
+
+/** Delete a single learned control (cascades bindings/mappings/hotspots). */
+export function removeControl(config: AppConfig, controlId: ControlId): AppConfig {
+  if (!config.physicalControls.some((control) => control.id === controlId)) return config;
+  return stripControls(config, new Set([controlId]));
+}
+
+/** The mapping already claiming this signal, if any — a duplicate encodedKey
+ * is rejected by backend validation, so the UI checks before creating one. */
+export function findMappingByEncodedKey(
+  config: AppConfig,
+  encodedKey: string,
+): EncoderMapping | undefined {
+  const needle = encodedKey.trim().toLowerCase();
+  return config.encoderMappings.find(
+    (mapping) => mapping.encodedKey.trim().toLowerCase() === needle,
+  );
+}
+
+/** Learn mode: create a control on `deviceId` bound to a captured signal.
+ * The control id is schema-safe (`<deviceId>-b<n>`) and globally unique; the
+ * signal becomes a standard-layer encoder mapping (source: detected). */
+export function addLearnedControl(
+  config: AppConfig,
+  deviceId: string,
+  name: string,
+  encodedKey: string,
+): { config: AppConfig; controlId: ControlId } {
+  const controlId = nextUniqueId(
+    config.physicalControls.map((control) => control.id),
+    `${deviceId}-b${config.physicalControls.filter((c) => c.deviceId === deviceId).length + 1}`,
+  );
+  const control = {
+    id: controlId,
+    deviceId,
+    family: "thumbGrid" as const,
+    defaultName: name.trim() || controlId,
+    remappable: true,
+    capabilityStatus: "verified" as const,
+  };
+  const next = upsertEncoderMapping(
+    { ...config, physicalControls: [...config.physicalControls, control] },
+    {
+      controlId,
+      layer: "standard",
+      encodedKey: encodedKey.trim(),
+      source: "detected",
+      verified: true,
+    },
+  );
+  return { config: next, controlId };
+}
+
 export function duplicateBinding(
   config: AppConfig,
   bindingId: string,

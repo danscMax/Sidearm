@@ -1,12 +1,14 @@
 import { Fragment, startTransition, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
-import type { AppConfig, AppMapping, ControlId, Layer, Profile } from "../lib/config";
+import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import {
+  addLearnedControl,
   applyBindingImport,
   copyBindingBetweenProfiles,
+  createDevice,
   keepBindingDisableOthers,
   copyBindingFromLayer,
   createAppMapping,
@@ -17,6 +19,9 @@ import {
   importProfile,
   removeBinding,
   removeBindingsForControls,
+  removeControl,
+  removeDevice,
+  renameDevice,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
   upsertAppMapping,
@@ -34,6 +39,9 @@ import {
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
 import { ContextMenu } from "./ContextMenu";
+import { AddControlModal } from "./AddControlModal";
+import { DeviceBar } from "./DeviceBar";
+import { GenericDeviceView } from "./GenericDeviceView";
 import { MouseVisualization } from "./MouseVisualization";
 import { Notice, Toggle } from "./shared";
 import { ExeIcon } from "./ExeIcon";
@@ -57,6 +65,9 @@ export interface ProfilesWorkspaceProps {
   handleCaptureActiveWindow: () => Promise<void>;
   setProfileSyncSuppressed: (suppressed: boolean) => void;
   familySections: FamilySection[];
+  devices: Device[];
+  activeDeviceId: string | null;
+  onSelectDevice: (id: string) => void;
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
   onSelectLayer: (layer: Layer) => void;
@@ -93,6 +104,9 @@ export function ProfilesWorkspace({
   handleCaptureActiveWindow,
   setProfileSyncSuppressed,
   familySections,
+  devices,
+  activeDeviceId,
+  onSelectDevice,
   selectedLayer,
   multiSelectedControlIds,
   onSelectLayer,
@@ -127,6 +141,62 @@ export function ProfilesWorkspace({
     setActionPickerBindingId,
     setActionPickerOpen,
   });
+
+  // ── Devices ──
+  const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0] ?? null;
+  const [addControlOpen, setAddControlOpen] = useState(false);
+
+  function handleAddDevice() {
+    const { config: nextConfig, deviceId } = createDevice(activeConfig, t("device.defaultName"));
+    updateDraft(() => nextConfig);
+    onSelectDevice(deviceId);
+    showToast(t("device.created"), "success");
+  }
+
+  function handleCreateControl(name: string, encodedKey: string) {
+    if (!activeDevice) return;
+    const { config: nextConfig, controlId } = addLearnedControl(
+      activeConfig,
+      activeDevice.id,
+      name,
+      encodedKey,
+    );
+    updateDraft(() => nextConfig);
+    setSelectedControlId(controlId);
+    setAddControlOpen(false);
+    showToast(t("device.controlCreated"), "success");
+  }
+
+  function handleRemoveControl(controlId: ControlId) {
+    const control = activeConfig.physicalControls.find((entry) => entry.id === controlId);
+    setConfirmModal({
+      title: t("device.deleteControlTitle"),
+      message: t("device.deleteControlMessage", { name: control?.defaultName ?? controlId }),
+      confirmLabel: t("device.delete"),
+      danger: true,
+      onConfirm: () => {
+        updateDraft((config) => removeControl(config, controlId));
+        setSelectedControlId(null);
+      },
+    });
+  }
+
+  function handleDeleteDevice() {
+    if (!activeDevice || activeDevice.builtin || devices.length <= 1) return;
+    const deviceId = activeDevice.id;
+    setConfirmModal({
+      title: t("device.deleteTitle"),
+      message: t("device.deleteMessage", { name: activeDevice.name }),
+      confirmLabel: t("device.delete"),
+      danger: true,
+      onConfirm: () => {
+        const fallback = devices.find((device) => device.id !== deviceId);
+        updateDraft((config) => removeDevice(config, deviceId));
+        setSelectedControlId(null);
+        if (fallback) onSelectDevice(fallback.id);
+      },
+    });
+  }
 
   // Export one binding to a portable .sidearm-binding.json file.
   async function handleExportBinding(bindingId: string) {
@@ -641,32 +711,80 @@ export function ProfilesWorkspace({
 
       {/* ── Mouse visualization ── */}
       <div className="profiles__mouse-viz">
-        <MouseVisualization
-          entries={surfaceEntries}
-          selectedLayer={selectedLayer}
-          multiSelectedControlIds={multiSelectedControlIds}
-          matchedControlIds={matchedControlIds}
-          conflictBindingIds={conflictIds}
-          onSelectControl={(id) => {
-            startTransition(() => {
-              setSelectedControlId(id);
-              setMultiSelectedControlIds(new Set());
-            });
-          }}
-          onToggleMultiSelect={(id) => {
-            setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
-          }}
-          onOpenActionPicker={handleOpenActionPicker}
-          onContextMenu={(id, binding, _action, x, y) =>
-            setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
-          }
-          onSelectLayer={onSelectLayer}
-          executionCounts={executionCounts}
-          executionHistory={executionHistory}
-          throttledControlIds={throttledControlIds}
-          heatmapEnabled={heatmapEnabled}
-          onDropBinding={handleDropBinding}
+        <DeviceBar
+          devices={devices}
+          activeDeviceId={activeDevice?.id ?? null}
+          onSelect={onSelectDevice}
+          onAdd={handleAddDevice}
         />
+        {activeDevice && !activeDevice.builtin ? (
+          <GenericDeviceView
+            entries={surfaceEntries}
+            selectedLayer={selectedLayer}
+            multiSelectedControlIds={multiSelectedControlIds}
+            matchedControlIds={matchedControlIds}
+            conflictBindingIds={conflictIds}
+            onSelectControl={(id) => {
+              startTransition(() => {
+                setSelectedControlId(id);
+                setMultiSelectedControlIds(new Set());
+              });
+            }}
+            onToggleMultiSelect={(id) => {
+              setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
+            }}
+            onOpenActionPicker={handleOpenActionPicker}
+            onContextMenu={(id, binding, _action, x, y) =>
+              setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
+            }
+            onSelectLayer={onSelectLayer}
+            executionCounts={executionCounts}
+            executionHistory={executionHistory}
+            throttledControlIds={throttledControlIds}
+            heatmapEnabled={heatmapEnabled}
+            onDropBinding={handleDropBinding}
+            device={activeDevice}
+            onAddControl={() => setAddControlOpen(true)}
+            onRemoveControl={handleRemoveControl}
+            onRenameDevice={(name) => updateDraft((config) => renameDevice(config, activeDevice.id, name))}
+            onDeleteDevice={handleDeleteDevice}
+          />
+        ) : (
+          <MouseVisualization
+            entries={surfaceEntries}
+            selectedLayer={selectedLayer}
+            multiSelectedControlIds={multiSelectedControlIds}
+            matchedControlIds={matchedControlIds}
+            conflictBindingIds={conflictIds}
+            onSelectControl={(id) => {
+              startTransition(() => {
+                setSelectedControlId(id);
+                setMultiSelectedControlIds(new Set());
+              });
+            }}
+            onToggleMultiSelect={(id) => {
+              setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
+            }}
+            onOpenActionPicker={handleOpenActionPicker}
+            onContextMenu={(id, binding, _action, x, y) =>
+              setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
+            }
+            onSelectLayer={onSelectLayer}
+            executionCounts={executionCounts}
+            executionHistory={executionHistory}
+            throttledControlIds={throttledControlIds}
+            heatmapEnabled={heatmapEnabled}
+            onDropBinding={handleDropBinding}
+          />
+        )}
+        {addControlOpen && activeDevice ? (
+          <AddControlModal
+            config={activeConfig}
+            deviceName={activeDevice.name}
+            onClose={() => setAddControlOpen(false)}
+            onCreate={handleCreateControl}
+          />
+        ) : null}
         <div className="heatmap-toggle">
           <button
             type="button"

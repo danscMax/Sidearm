@@ -1968,6 +1968,14 @@ input[type="radio"] {
   width: 100%;
 }
 
+/* Naga views size the container via per-view aspect-ratio; a user photo's
+   ratio is unknown, so let the image itself set the container height. */
+.gdv__photo .mouse-visual__img {
+  position: static;
+  display: block;
+  height: auto;
+}
+
 .gdv__photo--placing {
   cursor: crosshair;
 }

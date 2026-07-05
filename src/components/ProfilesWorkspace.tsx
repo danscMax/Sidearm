@@ -176,7 +176,7 @@ export function ProfilesWorkspace({
     setConfirmModal({
       title: t("device.deleteControlTitle"),
       message: t("device.deleteControlMessage", { name: control?.defaultName ?? controlId }),
-      confirmLabel: t("device.delete"),
+      confirmLabel: t("device.deleteControl"),
       danger: true,
       onConfirm: () => {
         updateDraft((config) => removeControl(config, controlId));

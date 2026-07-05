@@ -267,7 +267,11 @@ export function GenericDeviceView({
                   interaction={interaction}
                   selected={selected}
                   badge={String(index + 1)}
-                  label={`${entry.control.defaultName} · ${actionLabel(entry, { triggerLabels })}`}
+                  label={
+                    entry.action && entry.action.type !== "disabled" && entry.binding?.enabled
+                      ? `${entry.control.defaultName} · ${actionLabel(entry, { triggerLabels })}`
+                      : `${entry.control.defaultName} · ${t("visualization.unassigned")}`
+                  }
                   tooltip={buildHotspotTooltip(
                     entry,
                     selectedLayer,

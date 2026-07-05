@@ -462,7 +462,7 @@ export function ActionPickerModal({
                   setThrottleDraft(clamped);
                 }}
               />
-              <span className="field__hint">{t("picker.throttleHelp")}</span>
+              <span className="panel__muted">{t("picker.throttleHelp")}</span>
             </label>
           </div>
         </div>

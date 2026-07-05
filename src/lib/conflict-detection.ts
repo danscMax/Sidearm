@@ -4,7 +4,10 @@ import type {
   Binding,
   ControlId,
   Layer,
+  LaunchActionPayload,
+  SequenceActionPayload,
   ShortcutActionPayload,
+  TextSnippetPayload,
 } from "./config";
 
 export interface ConflictGroup {
@@ -84,7 +87,9 @@ export function shortcutSignature(payload: ShortcutActionPayload): string {
 
 /**
  * Filter: does a binding/action pair match a freeform search query?
- * Matches against label, action.displayName, and the shortcut signature.
+ * Matches against label, action.displayName, the shortcut signature, and the
+ * action's content — a launch target, sequence step text, or inline snippet
+ * text — so a rule can be found by what it actually does, not just its name.
  */
 export function bindingMatchesQuery(
   binding: Binding | null | undefined,
@@ -101,6 +106,15 @@ export function bindingMatchesQuery(
     if (action.type === "shortcut") {
       const sig = shortcutSignature(action.payload as ShortcutActionPayload);
       if (sig) parts.push(sig);
+    } else if (action.type === "launch") {
+      parts.push((action.payload as LaunchActionPayload).target ?? "");
+    } else if (action.type === "sequence") {
+      for (const step of (action.payload as SequenceActionPayload).steps) {
+        if ("value" in step && step.value) parts.push(step.value);
+      }
+    } else if (action.type === "textSnippet") {
+      const payload = action.payload as TextSnippetPayload;
+      if (payload.source === "inline") parts.push(payload.text);
     }
   }
   return parts.some((p) => p.toLowerCase().includes(q));

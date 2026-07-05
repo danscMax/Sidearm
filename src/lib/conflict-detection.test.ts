@@ -182,6 +182,26 @@ describe("bindingMatchesQuery", () => {
     expect(bindingMatchesQuery(b, null, "paste")).toBe(false);
   });
 
+  it("matches by action content — launch target and sequence step text", () => {
+    const b = binding("b1", "p", "standard", "thumb_01", "a1");
+    const launch: Action = {
+      id: "a1",
+      type: "launch",
+      payload: { target: "C:/Tools/code.exe" },
+      displayName: "Open editor",
+    };
+    expect(bindingMatchesQuery(b, launch, "code.exe")).toBe(true);
+    expect(bindingMatchesQuery(b, launch, "notepad")).toBe(false);
+
+    const seq: Action = {
+      id: "a2",
+      type: "sequence",
+      payload: { steps: [{ type: "send", value: "git push" }] },
+      displayName: "Push",
+    };
+    expect(bindingMatchesQuery(b, seq, "git push")).toBe(true);
+  });
+
   it("matches against action.displayName", () => {
     const b = binding("b1", "p", "standard", "thumb_01", "a1");
     const a = shortcutAction("a1", "C", { ctrl: true });

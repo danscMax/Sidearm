@@ -61,6 +61,7 @@ export interface AppPersistence {
 export function useAppPersistence(
   onAutoSaved?: () => void,
   onAutoSaveFailed?: (reason: string) => void,
+  onBackupFailed?: () => void,
 ): AppPersistence {
   const [viewState, setViewState] = useState<ViewState>("idle");
   const [snapshot, setSnapshot] = useState<LoadConfigResponse | null>(null);
@@ -79,6 +80,10 @@ export function useAppPersistence(
   onAutoSavedRef.current = onAutoSaved;
   const onAutoSaveFailedRef = useRef(onAutoSaveFailed);
   onAutoSaveFailedRef.current = onAutoSaveFailed;
+  const onBackupFailedRef = useRef(onBackupFailed);
+  onBackupFailedRef.current = onBackupFailed;
+  // Warn only once per session that best-effort backups can't be written.
+  const backupWarnedRef = useRef(false);
   // Mirror of the last successfully-persisted config. Used to roll back the
   // in-memory working config when an auto-save fails (schema rejection,
   // backend error, etc.) so the UI cannot diverge from disk.
@@ -155,6 +160,10 @@ export function useAppPersistence(
         setViewState("ready");
       });
       onAutoSavedRef.current?.();
+      if (result.backupFailed && !backupWarnedRef.current) {
+        backupWarnedRef.current = true;
+        onBackupFailedRef.current?.();
+      }
     } catch (unknownError) {
       const normalized = normalizeCommandError(unknownError);
       // Another Sidearm instance wrote config.json after we loaded it (e.g. the

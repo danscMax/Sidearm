@@ -83,6 +83,11 @@ pub struct SaveConfigResponse {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backup_path: Option<String>,
+    /// True when a rolling-backup rotation or the daily snapshot failed to write
+    /// (best-effort; the config itself still saved). Lets the UI warn once that
+    /// the backup safety net isn't being written.
+    #[serde(default)]
+    pub backup_failed: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -920,23 +925,77 @@ pub fn load_or_initialize_config(
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
     if config_path.exists() {
-        let mut config = read_config_from_path(&config_path)?;
-        migrate_paste_mode(&mut config);
-        let warnings = validate_config(&config)?;
-        config.compile_title_regexes();
+        match load_and_validate(&config_path) {
+            Ok((config, warnings)) => {
+                // Mark the current config as last-known-good *after* it has loaded
+                // and validated cleanly. Failure is non-fatal — log and continue.
+                if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
+                    log::warn!("[config] Failed to update last-known-good marker: {err}");
+                }
 
-        // Mark the current config as last-known-good *after* it has loaded and
-        // validated cleanly. Failure is non-fatal — log and continue.
-        if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
-            log::warn!("[config] Failed to update last-known-good marker: {err}");
+                return Ok(LoadConfigResponse {
+                    config,
+                    warnings,
+                    path: path_string(&config_path),
+                    created_default: false,
+                });
+            }
+            Err(primary_err) => {
+                // Never quarantine/recover a config written by a NEWER Sidearm:
+                // recovering to an older backup would silently destroy data the
+                // newer version added. Fail the load with the file left intact so
+                // the user can update the app instead.
+                if raw_config_version(&config_path).is_some_and(|version| version > i64::from(SCHEMA_VERSION)) {
+                    log::error!(
+                        "[config] config.json declares a version newer than this app (schema {SCHEMA_VERSION}); refusing to recover or overwrite it"
+                    );
+                    return Err(primary_err);
+                }
+
+                log::error!(
+                    "[config] config.json failed to load ({primary_err}); attempting recovery from last-known-good / rolling backups"
+                );
+
+                if let Some((config, mut warnings, source)) =
+                    recover_config_from_backups(config_dir)
+                {
+                    // Preserve the unreadable bytes, then adopt + persist the recovered config.
+                    quarantine_corrupt_config(&config_path);
+                    if let Err(err) = write_config_to_path(config_dir, &config) {
+                        log::warn!("[config] Failed to persist recovered config: {err}");
+                    }
+                    if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
+                        log::warn!(
+                            "[config] Failed to update last-known-good marker after recovery: {err}"
+                        );
+                    }
+                    let source_name = source
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("a backup")
+                        .to_string();
+                    log::warn!("[config] Recovered config from {source_name}");
+                    warnings.push(ValidationWarning {
+                        code: "config_recovered_from_backup".to_string(),
+                        message: format!(
+                            "config.json could not be read and was restored from {source_name}. The unreadable file was kept alongside it."
+                        ),
+                        path: None,
+                        severity: ValidationSeverity::Warning,
+                    });
+                    return Ok(LoadConfigResponse {
+                        config,
+                        warnings,
+                        path: path_string(&config_path),
+                        created_default: false,
+                    });
+                }
+
+                // No usable backup: preserve the corrupt file, then seed defaults.
+                quarantine_corrupt_config(&config_path);
+                log::error!("[config] No valid backup found; seeding a default config");
+            }
         }
-
-        return Ok(LoadConfigResponse {
-            config,
-            warnings,
-            path: path_string(&config_path),
-            created_default: false,
-        });
     }
 
     let mut config = default_seed_config();
@@ -950,6 +1009,68 @@ pub fn load_or_initialize_config(
         path: path_string(&config_path),
         created_default: true,
     })
+}
+
+/// Load, migrate, validate and compile a config file — the canonical happy path,
+/// shared by the initial load and by backup recovery.
+fn load_and_validate(
+    config_path: &Path,
+) -> Result<(AppConfig, Vec<ValidationWarning>), ConfigStoreError> {
+    let mut config = read_config_from_path(config_path)?;
+    migrate_paste_mode(&mut config);
+    let warnings = validate_config(&config)?;
+    config.compile_title_regexes();
+    Ok((config, warnings))
+}
+
+/// Best-effort peek at the declared `version` of a possibly-broken config file.
+/// Returns `None` if the file is missing, not JSON, or has no numeric version.
+fn raw_config_version(config_path: &Path) -> Option<i64> {
+    let raw = fs::read_to_string(config_path).ok()?;
+    let value: Value = serde_json::from_str(&raw).ok()?;
+    value.get("version")?.as_i64()
+}
+
+/// Rename an unreadable `config.json` to `config.corrupt-<unix_secs>.json` so its
+/// bytes are never lost. Best-effort: a failure is logged, not fatal.
+fn quarantine_corrupt_config(config_path: &Path) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    let dst = config_path.with_file_name(format!("config.corrupt-{secs}.json"));
+    match fs::rename(config_path, &dst) {
+        Ok(()) => log::warn!(
+            "[config] Quarantined unreadable config.json -> {}",
+            dst.display()
+        ),
+        Err(err) => log::warn!("[config] Failed to quarantine corrupt config.json: {err}"),
+    }
+}
+
+/// Try to load a valid config from the recovery candidates in priority order:
+/// last-known-good first, then the rolling backups newest-first. Returns the
+/// recovered config, its warnings, and the source path.
+fn recover_config_from_backups(
+    config_dir: &Path,
+) -> Option<(AppConfig, Vec<ValidationWarning>, PathBuf)> {
+    let mut candidates = vec![config_dir.join(crate::backup::LAST_KNOWN_GOOD_FILE)];
+    for slot in 1..=crate::backup::MAX_ROLLING_BACKUPS {
+        candidates.push(config_dir.join(format!("{}{}", crate::backup::BACKUP_PREFIX, slot)));
+    }
+    for candidate in candidates {
+        if !candidate.is_file() {
+            continue;
+        }
+        match load_and_validate(&candidate) {
+            Ok((config, warnings)) => return Some((config, warnings, candidate)),
+            Err(err) => log::warn!(
+                "[config] Recovery candidate {} is also unusable: {err}",
+                candidate.display()
+            ),
+        }
+    }
+    None
 }
 
 /// A cheap content fingerprint of the on-disk `config.json`, used to detect
@@ -994,7 +1115,7 @@ pub fn save_config(
         return Err(ConfigStoreError::ConcurrentModification);
     }
 
-    let backup_path = write_config_to_path(config_dir, &config)?;
+    let (backup_path, backup_failed) = write_config_to_path(config_dir, &config)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
     let mut config = config;
@@ -1005,6 +1126,7 @@ pub fn save_config(
         warnings,
         path: path_string(&config_path),
         backup_path: backup_path.map(|path| path_string(&path)),
+        backup_failed,
     })
 }
 
@@ -1058,8 +1180,11 @@ pub(crate) fn persist_atomically(
 fn write_config_to_path(
     config_dir: &Path,
     config: &AppConfig,
-) -> Result<Option<PathBuf>, ConfigStoreError> {
+) -> Result<(Option<PathBuf>, bool), ConfigStoreError> {
     let config_path = config_dir.join(CONFIG_FILE_NAME);
+    // Tracks whether any best-effort backup (rolling rotation / daily snapshot)
+    // failed to write, so the caller can warn that the safety net is broken.
+    let mut backup_failed = false;
 
     // Rotate .bak.N → .bak.N+1 and copy current config.json → .bak.1 before
     // overwriting. Returns the path to the just-created .bak.1 (or None if
@@ -1070,6 +1195,7 @@ fn write_config_to_path(
         Ok(path) => path,
         Err(error) => {
             log::warn!("[config] Failed to rotate rolling backup: {error}");
+            backup_failed = true;
             None
         }
     };
@@ -1089,9 +1215,10 @@ fn write_config_to_path(
     // Daily snapshot — best-effort, never fails the save.
     if let Err(err) = crate::backup::write_daily_snapshot_and_prune(config_dir) {
         log::warn!("[config] Failed to write daily snapshot: {err}");
+        backup_failed = true;
     }
 
-    Ok(backup_path)
+    Ok((backup_path, backup_failed))
 }
 
 fn config_schema_validator() -> Result<&'static Validator, ConfigStoreError> {
@@ -3243,6 +3370,97 @@ mod tests {
         assert!(
             temp_dir.path().join("config.last-known-good.json").exists(),
             "last-known-good marker should exist after successful load"
+        );
+    }
+
+    fn has_quarantine_file(dir: &Path) -> bool {
+        fs::read_dir(dir)
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .any(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("config.corrupt-")
+            })
+    }
+
+    #[test]
+    fn recovers_config_from_backup_when_config_is_corrupt() {
+        let temp_dir = tempdir().expect("temp dir");
+        // Two loads: seed a valid config, then reload to write the lkg marker.
+        load_or_initialize_config(temp_dir.path()).expect("seed");
+        load_or_initialize_config(temp_dir.path()).expect("reload");
+        let config_path = temp_dir.path().join("config.json");
+        assert!(
+            temp_dir.path().join("config.last-known-good.json").exists(),
+            "precondition: last-known-good exists"
+        );
+
+        // Corrupt config.json.
+        fs::write(&config_path, b"{ not valid json").expect("corrupt");
+
+        let recovered = load_or_initialize_config(temp_dir.path()).expect("recovery");
+        assert!(
+            !recovered.created_default,
+            "should recover from backup, not seed defaults"
+        );
+        assert!(config_path.is_file(), "config.json restored after recovery");
+        assert!(
+            has_quarantine_file(temp_dir.path()),
+            "the unreadable config must be quarantined, not deleted"
+        );
+        assert!(
+            recovered
+                .warnings
+                .iter()
+                .any(|warning| warning.code == "config_recovered_from_backup"),
+            "recovery should surface a warning"
+        );
+    }
+
+    #[test]
+    fn refuses_to_recover_a_newer_schema_config() {
+        let temp_dir = tempdir().expect("temp dir");
+        load_or_initialize_config(temp_dir.path()).expect("seed");
+        load_or_initialize_config(temp_dir.path()).expect("reload");
+        let config_path = temp_dir.path().join("config.json");
+
+        // A config that declares a version NEWER than this app (valid JSON).
+        fs::write(&config_path, br#"{"version":99,"settings":{},"profiles":[]}"#)
+            .expect("write newer");
+
+        let result = load_or_initialize_config(temp_dir.path());
+        assert!(
+            result.is_err(),
+            "a newer-schema config must not be silently recovered/overwritten"
+        );
+        let content = fs::read_to_string(&config_path).expect("newer config still present");
+        assert!(
+            content.contains("\"version\":99"),
+            "newer config must be left intact"
+        );
+        assert!(
+            !has_quarantine_file(temp_dir.path()),
+            "newer config must not be quarantined"
+        );
+    }
+
+    #[test]
+    fn seeds_default_when_config_corrupt_and_no_backup() {
+        let temp_dir = tempdir().expect("temp dir");
+        let config_path = temp_dir.path().join("config.json");
+        fs::write(&config_path, b"totally broken").expect("corrupt");
+
+        let result = load_or_initialize_config(temp_dir.path()).expect("seeds default");
+        assert!(
+            result.created_default,
+            "no usable backup -> seed a default config"
+        );
+        assert!(config_path.is_file(), "a fresh config.json is seeded");
+        assert!(
+            has_quarantine_file(temp_dir.path()),
+            "the unreadable config must be preserved"
         );
     }
 

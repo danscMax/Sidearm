@@ -265,7 +265,7 @@ fn entry_meta(path: &Path) -> Option<(u64, u128)> {
     Some((bytes, ms))
 }
 
-fn today_date_string() -> String {
+pub(crate) fn today_date_string() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)

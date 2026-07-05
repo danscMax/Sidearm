@@ -64,7 +64,7 @@ describe("logLevelBadgeClass", () => {
 
 describe("surfacePrimaryLabel", () => {
   it("returns placeholder when no binding", () => {
-    expect(surfacePrimaryLabel(null, null)).toBe("Не назначено");
+    expect(surfacePrimaryLabel(null, null)).toBe("Штатное действие");
   });
 
   it("returns disabled label when binding is not enabled", () => {

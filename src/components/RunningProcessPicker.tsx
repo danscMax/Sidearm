@@ -25,6 +25,7 @@ export function RunningProcessPicker({
   const { t } = useTranslation();
   const [processes, setProcesses] = useState<RunningProcessInfo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<CommandError | null>(null);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -48,8 +49,15 @@ export function RunningProcessPicker({
       }
       deduped.sort((a, b) => a.exe.localeCompare(b.exe, undefined, { sensitivity: "base" }));
       setProcesses(deduped);
+      setLoadError(null);
     } catch (unknownError) {
-      if (mountedRef.current) setError?.(normalizeCommandError(unknownError));
+      // Distinguish a genuine failure from an empty list so the UI doesn't show
+      // a misleading "nothing running" when process enumeration actually failed.
+      if (mountedRef.current) {
+        const err = normalizeCommandError(unknownError);
+        setLoadError(err);
+        setError?.(err);
+      }
     } finally {
       if (mountedRef.current) setLoading(false);
     }
@@ -116,6 +124,17 @@ export function RunningProcessPicker({
         <div className="process-picker__body">
           {loading ? (
             <p className="panel__muted">{t("processPicker.loading")}</p>
+          ) : loadError ? (
+            <div className="process-picker__error">
+              <p className="panel__muted" role="alert">{t("processPicker.loadError")}</p>
+              <button
+                type="button"
+                className="action-button action-button--small"
+                onClick={() => { void loadProcesses(); }}
+              >
+                {t("processPicker.refresh")}
+              </button>
+            </div>
           ) : filtered.length === 0 ? (
             <p className="panel__muted">{t("processPicker.empty")}</p>
           ) : (

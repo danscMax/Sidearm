@@ -16,6 +16,7 @@ import {
   findDuplicateAppMapping,
   importProfile,
   removeBinding,
+  removeBindingsForControls,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
   upsertAppMapping,
@@ -34,7 +35,7 @@ import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
-import { Notice } from "./shared";
+import { Notice, Toggle } from "./shared";
 import { ExeIcon } from "./ExeIcon";
 import { AppMappingModal } from "./AppMappingModal";
 import { CaptureControls } from "./CaptureControls";
@@ -493,6 +494,7 @@ export function ProfilesWorkspace({
             type="search"
             className="profiles-workspace__search"
             placeholder={t("profile.searchPlaceholder")}
+            aria-label={t("profile.searchPlaceholder")}
             value={bindingSearch}
             onChange={(e) => setBindingSearch(e.target.value)}
           />
@@ -585,6 +587,56 @@ export function ProfilesWorkspace({
             })}
           </ul>
         </Notice>
+      ) : null}
+
+      {/* ── Bulk actions for a multi-control selection ── */}
+      {multiSelectedControlIds.size > 1 ? (
+        <div className="profiles__bulk-bar" role="toolbar" aria-label={t("bulk.label")}>
+          <span className="profiles__bulk-count">
+            {t("bulk.selected", { count: multiSelectedControlIds.size })}
+          </span>
+          <button
+            type="button"
+            className="action-button action-button--small action-button--danger"
+            onClick={() => {
+              if (!effectiveProfileId) return;
+              const profileId = effectiveProfileId;
+              const controlIds = multiSelectedControlIds;
+              const removed = removeBindingsForControls(
+                activeConfig,
+                profileId,
+                selectedLayer,
+                controlIds,
+              ).removed;
+              if (removed === 0) {
+                showToast(t("bulk.nothingToClear"), "info");
+                return;
+              }
+              setConfirmModal({
+                title: t("bulk.clearTitle"),
+                message: t("bulk.clearMessage", { count: removed }),
+                confirmLabel: t("bulk.clearConfirm"),
+                danger: true,
+                onConfirm: () => {
+                  updateDraft(
+                    (c) => removeBindingsForControls(c, profileId, selectedLayer, controlIds).config,
+                  );
+                  setMultiSelectedControlIds(new Set());
+                  showToast(t("bulk.cleared", { count: removed }), "success");
+                },
+              });
+            }}
+          >
+            {t("bulk.clear")}
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--small"
+            onClick={() => setMultiSelectedControlIds(new Set())}
+          >
+            {t("bulk.deselect")}
+          </button>
+        </div>
       ) : null}
 
       {/* ── Mouse visualization ── */}
@@ -803,18 +855,18 @@ export function ProfilesWorkspace({
                 <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
                 <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: activeConfig.bindings.filter((b) => b.profileId === mapping.profileId).length, priority: mapping.priority })}</span>
               </span>
-              <input
-                className="profiles__toggle"
-                type="checkbox"
-                checked={mapping.enabled}
-                title={mapping.enabled ? t("common.disabled") : t("common.enabled")}
+              <span
+                className="profiles__toggle-wrap"
                 onClick={(e) => e.stopPropagation()}
-                onChange={(e) =>
-                  updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, enabled: e.target.checked }),
-                  )
-                }
-              />
+              >
+                <Toggle
+                  checked={mapping.enabled}
+                  ariaLabel={mapping.enabled ? t("common.disabled") : t("common.enabled")}
+                  onChange={(checked) =>
+                    updateDraft((c) => upsertAppMapping(c, { ...mapping, enabled: checked }))
+                  }
+                />
+              </span>
             </button>
             </Fragment>
           );

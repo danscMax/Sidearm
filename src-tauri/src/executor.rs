@@ -949,7 +949,8 @@ fn run_live_text_snippet_action(
         live_text.text.chars().count(),
         preview.encoded_key
     );
-    input_synthesis::send_text(&live_text.text).map_err(|message| {
+    let expanded = input_synthesis::expand_snippet_tokens(&live_text.text);
+    input_synthesis::send_text(&expanded).map_err(|message| {
         log::error!(
             "[executor] TextSnippet sendText failed for key {}: {message}",
             preview.encoded_key

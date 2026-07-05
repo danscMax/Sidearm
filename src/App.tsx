@@ -18,6 +18,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
 import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette, type RecentPaletteItem } from "./components/CommandPalette";
+import { ShortcutHelp } from "./components/ShortcutHelp";
 import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ErrorModal } from "./components/ErrorModal";
@@ -104,7 +105,9 @@ function App() {
     [showToast, t],
   );
 
-  const persistence = useAppPersistence(undefined, handleAutoSaveFailed);
+  const persistence = useAppPersistence(undefined, handleAutoSaveFailed, () =>
+  showToast(t("toast.backupFailed"), "warning"),
+);
   const {
     viewState,
     workingConfig,
@@ -349,6 +352,7 @@ function App() {
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalRequest | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
@@ -464,6 +468,7 @@ function App() {
     // the branch below routes it to close the topmost overlay.
     const anyModalOpen =
       commandPaletteOpen ||
+      shortcutHelpOpen ||
       actionPickerOpen ||
       !!confirmModal ||
       showMigrationDialog ||
@@ -495,8 +500,14 @@ function App() {
       // Ctrl+Shift+C: capture the active window
       e.preventDefault();
       executeCommand("capture-window");
+    } else if (e.key === "?" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+      // "?" opens the keyboard-shortcut cheat-sheet.
+      e.preventDefault();
+      setShortcutHelpOpen(true);
     } else if (e.key === "Escape") {
-      if (commandPaletteOpen) {
+      if (shortcutHelpOpen) {
+        setShortcutHelpOpen(false);
+      } else if (commandPaletteOpen) {
         setCommandPaletteOpen(false);
       } else if (actionPickerOpen) {
         setActionPickerOpen(false);
@@ -599,6 +610,17 @@ function App() {
         break;
       case "layer-hypershift":
         setSelectedLayer("hypershift");
+        break;
+      case "shortcuts":
+        setShortcutHelpOpen(true);
+        break;
+      case "toggle-runtime":
+        if (runtimeSummary.status === "running") void handleStopRuntime();
+        else void handleStartRuntime();
+        break;
+      case "open-snippet-library":
+        switchWorkspaceMode("settings");
+        setSettingsDeepLink({ tab: "snippets", nonce: Date.now() });
         break;
     }
   }
@@ -1029,6 +1051,10 @@ function App() {
         />
       ) : null}
       <Toast toast={toasts[0] ?? null} onDismiss={() => setToasts((current) => current.slice(1))} />
+
+      {shortcutHelpOpen ? (
+        <ShortcutHelp onClose={() => setShortcutHelpOpen(false)} />
+      ) : null}
 
       {commandPaletteOpen ? (
         <CommandPalette

@@ -25,6 +25,11 @@ export function ShortcutEditor({
 
     const key = resolveKeyName(event);
     if (["Control", "Shift", "Alt", "Meta"].includes(key)) return;
+    // Ignore Sidearm's own injected "menu mask" / hook-probe key (VK 0xE8 = 232).
+    // While our window is focused, SendInput delivers it to the WebView as a real
+    // keydown (the hook-health probe fires ~every 5s), so without this guard it
+    // gets captured as "VK_232" even though the user pressed nothing.
+    if (key === "VK_232") return;
 
     onChange({
       key: normalizeKeyName(key),

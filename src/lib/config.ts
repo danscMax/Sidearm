@@ -308,6 +308,9 @@ export interface SaveConfigResponse {
   warnings: ValidationWarning[];
   path: string;
   backupPath?: string;
+  /** True when a rolling-backup rotation or the daily snapshot failed to write
+   *  (the config itself still saved). Drives a one-time "backups not written" warning. */
+  backupFailed?: boolean;
 }
 
 export interface CommandError {

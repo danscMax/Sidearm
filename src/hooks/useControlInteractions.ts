@@ -12,6 +12,7 @@ import { buildBindingDragData, HEAT_TINT, parseBindingDragData } from "../lib/mo
 interface ControlInteractionProps {
   onClick: (e: React.MouseEvent<Element>) => void;
   onDoubleClick: (e: React.MouseEvent<Element>) => void;
+  onKeyDown: (e: React.KeyboardEvent<Element>) => void;
   /** Omitted when the control opts out of a context menu (e.g. the side grid). */
   onContextMenu?: (e: React.MouseEvent<Element>) => void;
   onMouseEnter: () => void;
@@ -86,6 +87,15 @@ export function useControlInteractions({
       onDoubleClick: (e) => {
         e.preventDefault();
         onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
+      },
+      onKeyDown: (e) => {
+        // Enter opens the action editor for a keyboard-focused control. The
+        // legend cells are real <button>s (focusable); the schematic <g>
+        // hotspots are not, so this is a harmless no-op there.
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
+        }
       },
       onMouseEnter: () => setHoveredId(id),
       onMouseLeave: () => setHoveredId(null),

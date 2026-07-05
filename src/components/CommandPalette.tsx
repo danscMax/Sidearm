@@ -68,6 +68,9 @@ export function CommandPalette({
       { id: "tab-settings", label: t("command.gotoSettings"), shortcut: "3" },
       { id: "layer-standard", label: t("command.layerStandard"), shortcut: "" },
       { id: "layer-hypershift", label: t("command.layerHypershift"), shortcut: "" },
+      { id: "shortcuts", label: t("command.shortcuts"), shortcut: "?" },
+      { id: "toggle-runtime", label: t("command.toggleRuntime"), shortcut: "" },
+      { id: "open-snippet-library", label: t("command.snippetLibrary"), shortcut: "" },
     ],
     [t],
   );

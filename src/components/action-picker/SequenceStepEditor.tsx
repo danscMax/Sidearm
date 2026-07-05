@@ -322,6 +322,27 @@ export function SequenceStepEditor({
                   }}
                 />
               </label>
+
+              {(step.type === "send" || step.type === "text") && (
+                <label className="field">
+                  <span className="field__label">{t("picker.stepRepeat")}</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={100}
+                    value={step.repeat ?? ""}
+                    onChange={(e) => {
+                      const v = e.target.value.trim();
+                      const raw = v ? Number(v) : undefined;
+                      const repeat =
+                        raw !== undefined && Number.isFinite(raw)
+                          ? Math.max(1, Math.min(100, Math.round(raw)))
+                          : undefined;
+                      updateStep(index, { ...step, repeat } as SequenceStep);
+                    }}
+                  />
+                </label>
+              )}
           </CompoundCard>
         ))}
       </div>

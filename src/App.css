@@ -1566,7 +1566,8 @@ input[type="radio"] {
   cursor: pointer;
 }
 
-.context-menu__item:hover {
+.context-menu__item:hover,
+.context-menu__item--active {
   background: rgba(255, 255, 255, 0.08);
   color: var(--c-text-bright);
 }

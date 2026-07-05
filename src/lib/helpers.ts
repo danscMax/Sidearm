@@ -91,5 +91,6 @@ export function parseOptionalNumber(value: string): number | undefined {
 
 /** Clamp a priority value into the valid 0–9999 range, rounding to an integer. */
 export function clampPriority(value: number): number {
+  if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.min(9999, Math.round(value)));
 }

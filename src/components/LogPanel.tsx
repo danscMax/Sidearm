@@ -118,6 +118,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             type="text"
             className="log-panel__search"
             placeholder={t("common.search")}
+            aria-label={t("common.search")}
             value={searchQuery}
             onChange={(e) => {
               setSearchQuery(e.target.value);

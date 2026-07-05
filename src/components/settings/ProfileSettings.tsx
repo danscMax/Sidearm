@@ -182,7 +182,7 @@ export function ProfileSettings({
                   value={activeProfile.priority}
                   onChange={(e) => {
                     const v = Number(e.target.value);
-                    const clamped = Number.isFinite(v) ? clampPriority(v) : 0;
+                    const clamped = clampPriority(v);
                     updateDraft((c) => upsertProfile(c, { ...activeProfile, priority: clamped }));
                   }}
                 />

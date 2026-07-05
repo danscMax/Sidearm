@@ -58,6 +58,9 @@ import {
   importProfile,
   ensurePlaceholderBinding,
   duplicateBinding,
+  mergeSnippetLibrary,
+  isValidSnippetLibraryExport,
+  isValidProfileExport,
 } from "./config-editing";
 import type { ProfileExportData } from "./config-editing";
 
@@ -1400,5 +1403,31 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
       }),
       { numRuns: 500 },
     );
+  });
+});
+
+describe("import validators reject malformed-but-shaped files (R4)", () => {
+  it("isValidSnippetLibraryExport rejects non-object snippet entries", () => {
+    expect(isValidSnippetLibraryExport({ snippets: [null] })).toBe(false);
+    expect(isValidSnippetLibraryExport({ snippets: [42] })).toBe(false);
+    expect(
+      isValidSnippetLibraryExport({
+        snippets: [{ id: "a", name: "n", text: "t", pasteMode: "type", tags: [] }],
+      }),
+    ).toBe(true);
+  });
+
+  it("mergeSnippetLibrary does not crash on a non-object entry", () => {
+    const cfg = minCfg();
+    expect(() =>
+      mergeSnippetLibrary(cfg, [null as unknown as SnippetLibraryItem]),
+    ).not.toThrow();
+  });
+
+  it("isValidProfileExport rejects a shaped-but-empty profile", () => {
+    expect(isValidProfileExport({ profile: {}, bindings: [], actions: [] })).toBe(false);
+    expect(
+      isValidProfileExport({ profile: { id: "p", name: "P" }, bindings: [], actions: [] }),
+    ).toBe(true);
   });
 });

@@ -35,6 +35,7 @@ import {
   appendToBoundedArray,
   sortAppMappings,
   parseOptionalNumber,
+  clampPriority,
 } from "./helpers";
 
 // ---------------------------------------------------------------------------
@@ -633,5 +634,20 @@ describe("parseCommaSeparatedUniqueValues (PBT)", () => {
       ),
       { numRuns: 500 },
     );
+  });
+});
+
+describe("clampPriority — finite guard + range (R3)", () => {
+  it("returns 0 for non-finite input instead of passing NaN through", () => {
+    expect(clampPriority(Number.NaN)).toBe(0);
+    expect(clampPriority(Number.POSITIVE_INFINITY)).toBe(0);
+    expect(clampPriority(Number.NEGATIVE_INFINITY)).toBe(0);
+  });
+  it("clamps into 0..9999 and rounds to an integer", () => {
+    expect(clampPriority(-5)).toBe(0);
+    expect(clampPriority(12345)).toBe(9999);
+    expect(clampPriority(3.7)).toBe(4);
+    expect(clampPriority(0)).toBe(0);
+    expect(clampPriority(9999)).toBe(9999);
   });
 });

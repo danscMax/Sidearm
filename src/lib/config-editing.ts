@@ -388,10 +388,18 @@ export interface SnippetLibraryExportData {
   snippets: SnippetLibraryItem[];
 }
 
-/** Structural guard for a parsed snippet-library export envelope. */
+/** Structural guard for a parsed snippet-library export envelope. Every entry
+ *  must be a well-formed object with string id/name/text — a shape-only check
+ *  (just `Array.isArray`) lets `{snippets:[null]}` through and crashes the merge. */
 export function isValidSnippetLibraryExport(raw: unknown): raw is SnippetLibraryExportData {
   if (typeof raw !== "object" || raw === null) return false;
-  return Array.isArray((raw as Record<string, unknown>).snippets);
+  const snippets = (raw as Record<string, unknown>).snippets;
+  if (!Array.isArray(snippets)) return false;
+  return snippets.every((entry) => {
+    if (typeof entry !== "object" || entry === null) return false;
+    const e = entry as Record<string, unknown>;
+    return typeof e.id === "string" && typeof e.name === "string" && typeof e.text === "string";
+  });
 }
 
 /** Remove EXACT duplicate snippets (same name + text + paste mode), keeping the
@@ -437,6 +445,9 @@ export function mergeSnippetLibrary(
   const existingIds = new Set(config.snippetLibrary.map((s) => s.id));
   const added: SnippetLibraryItem[] = [];
   for (const snippet of incoming) {
+    // Defense-in-depth: the validator already rejects malformed entries, but
+    // never dereference a non-object entry here (avoids `null.text` crashes).
+    if (typeof snippet !== "object" || snippet === null) continue;
     if (!snippet.text?.trim()) continue;
     const local = config.snippetLibrary.find((s) => s.id === snippet.id);
     if (local && local.text === snippet.text && local.pasteMode === snippet.pasteMode) continue;
@@ -1507,11 +1518,21 @@ export interface ProfileExportData {
 }
 
 /** Structural validation for a parsed profile-export envelope. Guards against
- *  importing the wrong JSON shape; does not deep-validate nested entries. */
+ *  importing the wrong JSON shape. `profile` must be an object with string
+ *  id/name — `importProfile` derives ids from `profile.name`, so a shaped-but-
+ *  malformed `{profile:{}}` would otherwise throw mid-merge. */
 export function isValidProfileExport(raw: unknown): raw is ProfileExportData {
   if (typeof raw !== "object" || raw === null) return false;
   const d = raw as Record<string, unknown>;
-  return Boolean(d.profile) && Array.isArray(d.bindings) && Array.isArray(d.actions);
+  const profile = d.profile as Record<string, unknown> | null;
+  return (
+    typeof profile === "object" &&
+    profile !== null &&
+    typeof profile.id === "string" &&
+    typeof profile.name === "string" &&
+    Array.isArray(d.bindings) &&
+    Array.isArray(d.actions)
+  );
 }
 
 /** Extract a single profile with its bindings, actions, and app mappings into an export envelope. */

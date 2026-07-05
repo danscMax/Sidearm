@@ -225,6 +225,7 @@ export function SnippetLibrarySettings({
                 className="action-picker__search"
                 type="search"
                 placeholder={t("snippetLibrary.searchPlaceholder")}
+                aria-label={t("snippetLibrary.searchPlaceholder")}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 autoComplete="off"

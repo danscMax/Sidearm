@@ -263,7 +263,7 @@ export function MouseVisualization({
               <img
                 className="mouse-visual__img"
                 src="/assets/naga-top.webp"
-                alt="Razer Naga V2 HyperSpeed — top view"
+                alt={t("visualization.photoAltTop")}
                 draggable={false}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
@@ -280,7 +280,7 @@ export function MouseVisualization({
               <img
                 className="mouse-visual__img"
                 src="/assets/naga-side.webp"
-                alt="Razer Naga V2 HyperSpeed — thumb grid"
+                alt={t("visualization.photoAltSide")}
                 draggable={false}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
@@ -298,7 +298,7 @@ export function MouseVisualization({
               <img
                 className="mouse-visual__img"
                 src="/assets/naga-combined.webp"
-                alt="Razer Naga V2 HyperSpeed — all buttons"
+                alt={t("visualization.photoAltCombined")}
                 draggable={false}
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />

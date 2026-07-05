@@ -493,6 +493,7 @@ export function ProfilesWorkspace({
             type="search"
             className="profiles-workspace__search"
             placeholder={t("profile.searchPlaceholder")}
+            aria-label={t("profile.searchPlaceholder")}
             value={bindingSearch}
             onChange={(e) => setBindingSearch(e.target.value)}
           />

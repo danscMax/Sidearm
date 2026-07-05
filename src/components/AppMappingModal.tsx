@@ -162,7 +162,7 @@ export function AppMappingModal({
                 className="profiles__priority-input"
                 onChange={(e) => {
                   const v = Number(e.target.value);
-                  const clamped = Number.isFinite(v) ? clampPriority(v) : 0;
+                  const clamped = clampPriority(v);
                   onChange({ ...value, priority: clamped });
                 }}
               />

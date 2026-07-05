@@ -274,6 +274,7 @@ button, input, textarea, select {
 .nav-item--active {
   background: rgba(125, 182, 73, 0.14);
   color: var(--c-text-bright);
+  box-shadow: inset 3px 0 0 var(--c-accent);
 }
 
 .sidebar__sep {
@@ -1103,6 +1104,13 @@ select::checkmark {
 .field textarea,
 .input--multiline { resize: vertical; }
 
+/* All checkboxes/radios use the app accent (not the OS default blue),
+   including any outside a .field wrapper (e.g. the Synapse import list). */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--c-accent);
+}
+
 .field input[type="checkbox"] {
   width: 18px;
   height: 18px;
@@ -1187,6 +1195,16 @@ select::checkmark {
 
 .action-button:hover:not(:disabled) {
   border-color: var(--c-border-hover);
+  transform: translateY(-1px);
+  filter: brightness(1.08);
+}
+
+/* Quiet (default) buttons get a real fill change on hover. Vivid filled
+   variants (accent/warning/active) keep their own colour — excluded via
+   :where() so this stays at base specificity and ghost/danger hovers still
+   win by source order. */
+.action-button:hover:not(:disabled):where(:not(.action-button--accent):not(.action-button--warning):not(.action-button--active)) {
+  background: rgba(255, 255, 255, 0.12);
 }
 
 /* Toggle "on" state — accent-tinted so pressed/unpressed is unmistakable. */
@@ -1244,11 +1262,6 @@ select::checkmark {
 .action-button--ghost:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.06);
   border-color: var(--c-border);
-}
-
-.action-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  filter: brightness(1.08);
 }
 
 /* ── Verification session scope dropdown ── */

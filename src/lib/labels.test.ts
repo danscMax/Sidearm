@@ -67,7 +67,7 @@ describe("surfacePrimaryLabel", () => {
     expect(surfacePrimaryLabel(null, null)).toBe("Штатное действие");
   });
 
-  it("returns disabled label when binding is not enabled", () => {
+  it("returns the native-action label when a binding is disabled (Synapse passthrough)", () => {
     const binding: Binding = {
       id: "b1",
       profileId: "p1",
@@ -77,7 +77,7 @@ describe("surfacePrimaryLabel", () => {
       actionId: "a1",
       enabled: false,
     };
-    expect(surfacePrimaryLabel(binding, null)).toBe("My Bind · отключено");
+    expect(surfacePrimaryLabel(binding, null)).toBe("Штатное действие");
   });
 
   it("returns binding label when present and enabled", () => {

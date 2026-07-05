@@ -236,12 +236,10 @@ export function resolveControlBadge(label: string): string {
 }
 
 export function surfacePrimaryLabel(binding: Binding | null, action: Action | null): string {
-  if (!binding) {
+  // No binding, or a binding that's toggled off — either way the control falls
+  // through to its native / Razer Synapse action, so it reads as "Native action".
+  if (!binding || !binding.enabled) {
     return i18n.t("binding.notAssigned");
-  }
-
-  if (!binding.enabled) {
-    return `${binding.label} · ${i18n.t("binding.disabledSuffix")}`;
   }
 
   return binding.label.trim() ? binding.label : (action?.displayName || i18n.t("binding.assigned"));

@@ -34,7 +34,7 @@ import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
 import { ContextMenu } from "./ContextMenu";
 import { MouseVisualization } from "./MouseVisualization";
-import { Notice } from "./shared";
+import { Notice, Toggle } from "./shared";
 import { ExeIcon } from "./ExeIcon";
 import { AppMappingModal } from "./AppMappingModal";
 import { CaptureControls } from "./CaptureControls";
@@ -804,18 +804,18 @@ export function ProfilesWorkspace({
                 <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
                 <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: activeConfig.bindings.filter((b) => b.profileId === mapping.profileId).length, priority: mapping.priority })}</span>
               </span>
-              <input
-                className="profiles__toggle"
-                type="checkbox"
-                checked={mapping.enabled}
-                title={mapping.enabled ? t("common.disabled") : t("common.enabled")}
+              <span
+                className="profiles__toggle-wrap"
                 onClick={(e) => e.stopPropagation()}
-                onChange={(e) =>
-                  updateDraft((c) =>
-                    upsertAppMapping(c, { ...mapping, enabled: e.target.checked }),
-                  )
-                }
-              />
+              >
+                <Toggle
+                  checked={mapping.enabled}
+                  ariaLabel={mapping.enabled ? t("common.disabled") : t("common.enabled")}
+                  onChange={(checked) =>
+                    updateDraft((c) => upsertAppMapping(c, { ...mapping, enabled: checked }))
+                  }
+                />
+              </span>
             </button>
             </Fragment>
           );

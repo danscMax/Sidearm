@@ -3074,6 +3074,46 @@ code {
   background: rgba(0, 0, 0, 0.25);
 }
 
+/* Keyboard-shortcut cheat-sheet (ShortcutHelp) */
+.shortcut-help__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.shortcut-help__section-title {
+  margin: 0 0 6px;
+  font-size: var(--fs-caption);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--c-text-muted);
+}
+
+.shortcut-help__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shortcut-help__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.shortcut-help__keys {
+  min-width: 130px;
+  flex-shrink: 0;
+}
+
+.shortcut-help__desc {
+  color: var(--c-text);
+  font-size: var(--fs-body-sm);
+}
+
 /* Cross-profile sections: non-selectable header + per-row label/meta. */
 .command-palette__section {
   list-style: none;
@@ -4173,43 +4213,6 @@ code {
   overflow: hidden;
 }
 
-/* --- A. Toggle switch (shared) --- */
-
-.profiles__toggle {
-  position: relative;
-  flex-shrink: 0;
-  width: 36px;
-  height: 20px;
-  appearance: none;
-  -webkit-appearance: none;
-  border: none;
-  border-radius: var(--radius-md);
-  background: rgba(255, 255, 255, 0.12);
-  cursor: pointer;
-  transition: background 150ms ease;
-}
-
-.profiles__toggle:checked {
-  background: var(--c-accent);
-}
-
-.profiles__toggle::after {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
-  transition: transform 150ms ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.profiles__toggle:checked::after {
-  transform: translateX(16px);
-}
-
 /* --- B. Profile banner --- */
 
 /* --- Profile toolbar (full-width bar under visualization) --- */
@@ -4591,8 +4594,11 @@ code {
   transform: translateY(-1px);
 }
 
-.profiles__app-card > .profiles__toggle {
+.profiles__app-card > .profiles__toggle-wrap {
   margin-left: auto;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
 }
 
 /* Monogram span (text fallback) */

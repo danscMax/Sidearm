@@ -2517,6 +2517,13 @@ fn spawn_capture_helper(
         use std::io::BufRead;
 
         let reader = std::io::BufReader::new(stdout_pipe);
+        // Dropped-event diagnostics: the try_send below silently drops when the
+        // bounded channel is full (consumer stalled). That surfaces to the user
+        // as "a button press sometimes doesn't fire" with nothing in the log.
+        // Count drops and warn at most once every 5s (this reader is a single
+        // thread, so plain locals suffice — no shared state needed).
+        let mut dropped_events: u64 = 0;
+        let mut last_drop_warn = std::time::Instant::now();
         for line in reader.lines().map_while(Result::ok) {
             let trimmed = line.trim();
             if trimmed.is_empty() {
@@ -2560,13 +2567,27 @@ fn spawn_capture_helper(
             // try_send instead of send: when the bounded channel is full
             // (consumer stalled), drop the event rather than block this hot
             // path.  See CAPTURE_EVENT_CAPACITY for rationale.
-            let _ = event_tx.try_send(EncodedKeyEvent {
+            if let Err(mpsc::TrySendError::Full(_)) = event_tx.try_send(EncodedKeyEvent {
                 encoded_key,
                 backend: BACKEND_LL_HOOK.into(),
                 received_at: runtime::timestamp_millis(),
                 is_repeat,
                 is_key_up,
-            });
+            }) {
+                // Consumer stalled — this key press was dropped. Rate-limit the
+                // warning so a sustained stall can't re-create the v0.1.15 log
+                // feedback loop.
+                dropped_events += 1;
+                if last_drop_warn.elapsed() >= std::time::Duration::from_secs(5) {
+                    log::warn!(
+                        "[capture] Consumer stalled: dropped {dropped_events} keyboard \
+                         event(s) from the full bounded channel (cap {CAPTURE_EVENT_CAPACITY}). \
+                         Some button presses will not have fired."
+                    );
+                    dropped_events = 0;
+                    last_drop_warn = std::time::Instant::now();
+                }
+            }
         }
         // B-F4 Mode A: the read loop only exits when the helper's stdout hits
         // EOF — i.e. the helper process has exited/crashed. Flag it so the

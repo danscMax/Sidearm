@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] — 2026-07-05
+
+### Added
+- Text snippets can expand dynamic tokens at send time: `{date}` and `{clipboard}` (use `{{`/`}}` for literal braces); the snippet editor shows a token hint.
+- Command palette gained commands to start/stop interception, open the snippet library, browse profile presets, and export the active profile.
+- Command palette fuzzy matching — "np" finds "New profile" — and rules are searchable by what they do (launch-target paths, sequence step text, inline snippet text), not just their label.
+- Keyboard shortcut cheat-sheet: press `?` (or run it from the palette) to see every shortcut.
+- The macro step editor exposes the `repeat` field for Send/Text steps (the backend already executed it, but it could only be set by editing the config by hand).
+- A multi-control selection is no longer a dead end — an inline bar offers "Clear bindings" (with confirm + single undo) and "Deselect".
+- The context menu and a control's action editor are fully keyboard-operable (menu roles, arrow navigation, Enter to open the picker).
+- A corrupt `config.json` is auto-recovered from the last-known-good file or a rolling backup instead of dropping the app into an error state; a config newer than the app is preserved rather than overwritten.
+
+### Changed
+- Rule on/off toggles use the shared Toggle component; the active navigation item shows an accent bar; quiet buttons respond to hover; the accent colour now applies to every checkbox and radio (no more OS-blue Synapse-import checkboxes).
+- A control with no binding reads as "Native action" instead of "OFF" / "Not assigned".
+- Profiles, Diagnostics and Snippet-library search fields are labelled for screen readers; mouse-photo alt text is localized.
+
+### Fixed
+- The window reliably comes to the foreground when opened from the tray icon or the global shortcut (Windows).
+- "Record key" capture no longer picks up the app's own injected hook-probe key (a phantom `VK_232`).
+- Long throttle help text no longer overflows its badge in the action picker; the snippet cheat-sheet panel has a proper modal background.
+- Pasting a long snippet no longer silently discards non-text clipboard contents (image/files/HTML) without warning; a failed backup write now surfaces a toast instead of failing silently.
+- "Pick a running process" surfaces an IPC failure instead of falsely reporting that nothing is running.
+- Profile/snippet-library import validators no longer crash on a well-formed-but-corrupt file; rule priority guards against `NaN`.
+- Dropped keyboard-capture events (a stalled consumer filling the bounded channel) are now logged (rate-limited) so "a button sometimes doesn't fire" is diagnosable.
+
 ## [0.7.4] — 2026-07-04
 
 ### Added

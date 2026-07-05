@@ -22,6 +22,7 @@ All React components: mouse visualization, modals (action picker, app-mapping, c
 ## Work Guidance
 
 - An unassigned control is labelled "Native action" (it passes through to the device/Synapse default), distinct from the "OFF" pill for an explicitly-disabled binding.
+- Multi-device (v3): `DeviceBar` switches `AppConfig.devices`; the built-in Naga renders `MouseVisualization`, user devices render `GenericDeviceView` (legend grid + optional photo with click-to-place hotspots). `AddControlModal` learns a button via DOM key capture — do NOT switch it to the runtime `encoded_key_received` event: the low-level hook only hears already-mapped signals. Device photos are served as `data:` URLs via `read_device_image` (asset protocol deliberately off — its scope vars can't cover the portable `./data`).
 
 ## Verification
 

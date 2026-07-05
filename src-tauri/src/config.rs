@@ -945,7 +945,7 @@ pub fn load_or_initialize_config(
                 // recovering to an older backup would silently destroy data the
                 // newer version added. Fail the load with the file left intact so
                 // the user can update the app instead.
-                if raw_config_version(&config_path).is_some_and(|version| version > SCHEMA_VERSION) {
+                if raw_config_version(&config_path).is_some_and(|version| version > i64::from(SCHEMA_VERSION)) {
                     log::error!(
                         "[config] config.json declares a version newer than this app (schema {SCHEMA_VERSION}); refusing to recover or overwrite it"
                     );
@@ -1025,10 +1025,10 @@ fn load_and_validate(
 
 /// Best-effort peek at the declared `version` of a possibly-broken config file.
 /// Returns `None` if the file is missing, not JSON, or has no numeric version.
-fn raw_config_version(config_path: &Path) -> Option<i32> {
+fn raw_config_version(config_path: &Path) -> Option<i64> {
     let raw = fs::read_to_string(config_path).ok()?;
     let value: Value = serde_json::from_str(&raw).ok()?;
-    value.get("version")?.as_i64().map(|version| version as i32)
+    value.get("version")?.as_i64()
 }
 
 /// Rename an unreadable `config.json` to `config.corrupt-<unix_secs>.json` so its

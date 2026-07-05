@@ -818,7 +818,7 @@
     "mouseModifiersHint": "Modifiers are held during the action. For example, Ctrl + Scroll up = zoom.",
     "textLabel": "Text",
     "textPlaceholder": "Enter text to type...",
-    "tokenHint": "Tokens: {date} inserts today's date, {clipboard} inserts the current clipboard.",
+    "tokenHint": "Tokens: {date} inserts today's date, {clipboard} inserts the current clipboard, {cursor} puts the caret there after typing.",
     "longTextClipboardWarning": "Text longer than 100 characters is pasted through the clipboard temporarily so line breaks stay intact.",
     "launchTargetMode": "Launch target type",
     "launchMode": {
@@ -1064,6 +1064,7 @@
     "empty": "No backups yet — they will appear after the first save.",
     "restoreTitle": "Restore from backup?",
     "restoreMessage": "The current config will be moved to a rolling backup, and {{label}} will become the active config.",
+    "restoreContents": "It contains: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{snippets}} snippets.",
     "restoreConfirm": "Restore",
     "restoreButton": "Restore",
     "groupAuto": "Auto backups",

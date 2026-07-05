@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { BackupEntry, CommandError } from "../lib/config";
-import { listBackups, restoreConfigFromBackup } from "../lib/backend";
+import {
+  importFullConfigPreview,
+  listBackups,
+  restoreConfigFromBackup,
+} from "../lib/backend";
 import { normalizeCommandError } from "../lib/backend";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
@@ -47,10 +51,27 @@ export function BackupList({
     return { autoEntries: auto, snapshotEntries: snapshots };
   }, [entries]);
 
-  function handleRestore(entry: BackupEntry) {
+  async function handleRestore(entry: BackupEntry) {
+    // Show what the backup contains before overwriting the live config
+    // (mirrors the full-config ImportPreview). Best-effort: if the peek
+    // fails, the plain confirm still works — restore validates for real.
+    let contents = "";
+    try {
+      const preview = await importFullConfigPreview(entry.path);
+      contents = t("backup.restoreContents", {
+        profiles: preview.profileCount,
+        bindings: preview.bindingCount,
+        actions: preview.actionCount,
+        snippets: preview.snippetCount,
+      });
+    } catch {
+      // ignore — preview is informational only
+    }
     setConfirmModal({
       title: t("backup.restoreTitle"),
-      message: t("backup.restoreMessage", { label: describeEntry(entry, t) }),
+      message:
+        t("backup.restoreMessage", { label: describeEntry(entry, t) }) +
+        (contents ? ` ${contents}` : ""),
       confirmLabel: t("backup.restoreConfirm"),
       onConfirm: async () => {
         try {
@@ -92,7 +113,7 @@ export function BackupList({
         <button
           type="button"
           className="backup-item__restore"
-          onClick={() => handleRestore(entry)}
+          onClick={() => void handleRestore(entry)}
         >
           {t("backup.restoreButton")}
         </button>

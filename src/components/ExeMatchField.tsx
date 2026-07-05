@@ -81,13 +81,18 @@ export function ExeMatchField({
           type="button"
           className="action-button action-button--small"
           onClick={async () => {
-            const pick = await pickExecutablePath({
-              title: browseTitle,
-              filterName: browseFilter,
-              extensions: ["exe", "lnk"],
-            });
-            if (pick) {
-              onChange(pick.name, pick.path);
+            try {
+              const pick = await pickExecutablePath({
+                title: browseTitle,
+                filterName: browseFilter,
+                extensions: ["exe", "lnk"],
+              });
+              if (pick) {
+                onChange(pick.name, pick.path);
+              }
+            } catch {
+              // Dialog plugin failure: treat like a cancelled pick instead of
+              // an unhandled rejection (audit honorable mention).
             }
           }}
         >

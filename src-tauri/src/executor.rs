@@ -949,7 +949,7 @@ fn run_live_text_snippet_action(
         live_text.text.chars().count(),
         preview.encoded_key
     );
-    let expanded = input_synthesis::expand_snippet_tokens(&live_text.text);
+    let (expanded, cursor_back) = input_synthesis::expand_snippet_tokens(&live_text.text);
     input_synthesis::send_text(&expanded).map_err(|message| {
         log::error!(
             "[executor] TextSnippet sendText failed for key {}: {message}",
@@ -963,6 +963,20 @@ fn run_live_text_snippet_action(
             Some(action.id.clone()),
         )
     })?;
+
+    // {cursor}: walk the caret back to the marker. Best-effort — the text is
+    // already delivered, so a failure here degrades to a warning, not an error.
+    let mut warnings = warnings;
+    if let Some(back) = cursor_back
+        && back > 0
+        && let Err(message) = input_synthesis::send_left_arrows(back)
+    {
+        log::warn!(
+            "[executor] TextSnippet {{cursor}} repositioning failed for key {}: {message}",
+            preview.encoded_key
+        );
+        warnings.push(format!("Не удалось вернуть курсор к {{cursor}}: {message}"));
+    }
 
     Ok(ActionExecutionEvent {
         encoded_key: preview.encoded_key.clone(),

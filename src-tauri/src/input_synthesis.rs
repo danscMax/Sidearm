@@ -1166,12 +1166,14 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
 }
 
 /// Expand snippet tokens at send time: `{date}` → today's date (YYYY-MM-DD),
-/// `{clipboard}` → the current clipboard text. `{{` / `}}` are literal braces;
-/// an unknown `{token}` is left untouched. Backward-compatible: text without
+/// `{clipboard}` → the current clipboard text, `{cursor}` → nothing, but the
+/// caret is moved back to the marker after the send (see the second tuple
+/// element: Left-arrow presses to inject). `{{` / `}}` are literal braces; an
+/// unknown `{token}` is left untouched. Backward-compatible: text without
 /// braces is returned unchanged.
-pub fn expand_snippet_tokens(text: &str) -> String {
+pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
     if !text.contains('{') && !text.contains('}') {
-        return text.to_string();
+        return (text.to_string(), None);
     }
     let date = crate::backup::today_date_string();
     let clipboard = get_clipboard_text_for_token();
@@ -1179,10 +1181,16 @@ pub fn expand_snippet_tokens(text: &str) -> String {
 }
 
 /// Pure token expander — dependencies injected so it is deterministic to test.
-fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> String {
+/// Returns the expanded text and, when a `{cursor}` marker was present, how
+/// many characters FOLLOW it (= Left-arrow presses to return the caret there).
+/// The first marker wins; any further `{cursor}` markers are stripped. Marker
+/// positions count only template tokens — a literal `{cursor}` arriving via
+/// `{clipboard}` content is pasted as text, never treated as a marker.
+fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Option<usize>) {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
     let mut out = String::with_capacity(text.len());
+    let mut cursor_at: Option<usize> = None; // in chars of `out`
     let mut idx = 0;
     while idx < n {
         let c = chars[idx];
@@ -1198,6 +1206,11 @@ fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> String {
                 match token.as_str() {
                     "date" => out.push_str(date),
                     "clipboard" => out.push_str(clipboard.unwrap_or("")),
+                    "cursor" => {
+                        if cursor_at.is_none() {
+                            cursor_at = Some(out.chars().count());
+                        }
+                    }
                     // Unknown token — leave it verbatim so nothing is silently eaten.
                     _ => {
                         out.push('{');
@@ -1223,7 +1236,37 @@ fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> String {
             idx += 1;
         }
     }
-    out
+    let cursor_back = cursor_at.map(|pos| out.chars().count() - pos);
+    (out, cursor_back)
+}
+
+/// Cap for `{cursor}` Left-arrow injection — matches the practical size of a
+/// snippet; anything bigger indicates a corrupt marker position.
+const MAX_CURSOR_BACK_PRESSES: usize = 10_000;
+
+/// Tap Left-arrow `count` times to move the caret back to a `{cursor}` marker
+/// after the snippet text has been sent.
+pub fn send_left_arrows(count: usize) -> Result<(), String> {
+    if count == 0 {
+        return Ok(());
+    }
+    if count > MAX_CURSOR_BACK_PRESSES {
+        return Err(format!(
+            "{{cursor}} would need {count} arrow presses (limit {MAX_CURSOR_BACK_PRESSES})."
+        ));
+    }
+    let mut plan = Vec::with_capacity(count * 2);
+    for _ in 0..count {
+        for key_up in [false, true] {
+            // Arrow keys are extended keys (KEYEVENTF_EXTENDEDKEY).
+            plan.push(KeyboardInputSpec::VirtualKey {
+                code: VK_LEFT,
+                extended: true,
+                key_up,
+            });
+        }
+    }
+    send_keyboard_inputs(&plan)
 }
 
 #[cfg(target_os = "windows")]
@@ -2619,19 +2662,59 @@ mod tests {
     #[test]
     fn expand_tokens_replaces_date_and_clipboard() {
         let out = expand_tokens("Today: {date}, clip: {clipboard}", "2026-07-05", Some("hello"));
-        assert_eq!(out, "Today: 2026-07-05, clip: hello");
+        assert_eq!(out, ("Today: 2026-07-05, clip: hello".to_string(), None));
     }
 
     #[test]
     fn expand_tokens_escapes_double_braces_and_keeps_unknown() {
         let out = expand_tokens("{{literal}} {unknown} {date}", "2026-07-05", None);
-        assert_eq!(out, "{literal} {unknown} 2026-07-05");
+        assert_eq!(out, ("{literal} {unknown} 2026-07-05".to_string(), None));
     }
 
     #[test]
     fn expand_tokens_empty_clipboard_is_blank_and_plain_text_unchanged() {
-        assert_eq!(expand_tokens("[{clipboard}]", "d", None), "[]");
-        assert_eq!(expand_snippet_tokens("no braces here"), "no braces here");
+        assert_eq!(expand_tokens("[{clipboard}]", "d", None), ("[]".to_string(), None));
+        assert_eq!(
+            expand_snippet_tokens("no braces here"),
+            ("no braces here".to_string(), None)
+        );
+    }
+
+    #[test]
+    fn expand_tokens_cursor_reports_chars_after_marker() {
+        assert_eq!(
+            expand_tokens("ab{cursor}cd", "d", None),
+            ("abcd".to_string(), Some(2))
+        );
+        // Marker at the end: nothing to walk back over.
+        assert_eq!(
+            expand_tokens("ab{cursor}", "d", None),
+            ("ab".to_string(), Some(0))
+        );
+        // Marker before an expanded token counts the EXPANDED length.
+        assert_eq!(
+            expand_tokens("{cursor}{date}", "2026-07-05", None),
+            ("2026-07-05".to_string(), Some(10))
+        );
+    }
+
+    #[test]
+    fn expand_tokens_cursor_first_marker_wins_and_literals_stay_literal() {
+        // Extra markers are stripped but only the first sets the caret.
+        assert_eq!(
+            expand_tokens("a{cursor}b{cursor}c", "d", None),
+            ("abc".to_string(), Some(2))
+        );
+        // {{cursor}} is a literal, not a marker.
+        assert_eq!(
+            expand_tokens("{{cursor}}", "d", None),
+            ("{cursor}".to_string(), None)
+        );
+        // A {cursor} arriving via clipboard CONTENT is pasted as text.
+        assert_eq!(
+            expand_tokens("[{clipboard}]", "d", Some("{cursor}")),
+            ("[{cursor}]".to_string(), None)
+        );
     }
 
     #[test]

@@ -146,6 +146,16 @@ export function ProfilesWorkspace({
     setActionPickerOpen,
   });
 
+  // Binding count per profile for the rule cards — a per-card
+  // `bindings.filter()` was O(cards × bindings) on every render (audit A1).
+  const bindingCountByProfile = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const binding of activeConfig.bindings) {
+      counts.set(binding.profileId, (counts.get(binding.profileId) ?? 0) + 1);
+    }
+    return counts;
+  }, [activeConfig.bindings]);
+
   // ── Devices ──
   const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0] ?? null;
   const [addControlOpen, setAddControlOpen] = useState(false);
@@ -1004,7 +1014,7 @@ export function ProfilesWorkspace({
               <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
               <span className="profiles__app-card-body">
                 <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
-                <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: activeConfig.bindings.filter((b) => b.profileId === mapping.profileId).length, priority: mapping.priority })}</span>
+                <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: bindingCountByProfile.get(mapping.profileId) ?? 0, priority: mapping.priority })}</span>
               </span>
               <span
                 className="profiles__toggle-wrap"

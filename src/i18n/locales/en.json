@@ -642,6 +642,8 @@
     "shortcuts": "Help: Keyboard shortcuts",
     "toggleRuntime": "Start / stop interception",
     "snippetLibrary": "Open the snippet library",
+    "presets": "Browse profile presets…",
+    "exportProfile": "Export active profile…",
     "placeholder": "Type a command...",
     "empty": "Nothing found",
     "sectionCommands": "Commands",

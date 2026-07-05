@@ -71,6 +71,8 @@ export function CommandPalette({
       { id: "shortcuts", label: t("command.shortcuts"), shortcut: "?" },
       { id: "toggle-runtime", label: t("command.toggleRuntime"), shortcut: "" },
       { id: "open-snippet-library", label: t("command.snippetLibrary"), shortcut: "" },
+      { id: "open-presets", label: t("command.presets"), shortcut: "" },
+      { id: "export-profile", label: t("command.exportProfile"), shortcut: "" },
     ],
     [t],
   );

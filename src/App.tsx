@@ -23,6 +23,7 @@ import { ConfirmModal } from "./components/ConfirmModal";
 import { DebugWorkspace } from "./components/DebugWorkspace";
 import { ErrorModal } from "./components/ErrorModal";
 import { PortableMigrationDialog } from "./components/PortableMigrationDialog";
+import { PresetsModal } from "./components/PresetsModal";
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
@@ -48,6 +49,7 @@ import {
   restoreConfigFromBackup,
 } from "./lib/backend";
 import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels";
+import { exportProfileToFile } from "./lib/profile-transfer";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -91,6 +93,7 @@ function App() {
   const toastSeqRef = useRef(0);
   const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
   const [settingsDeepLink, setSettingsDeepLink] = useState<SettingsDeepLink | null>(null);
+  const [presetsOpen, setPresetsOpen] = useState(false);
 
   const showToast = useCallback((message: string, kind?: ToastState["kind"], action?: ToastState["action"]) => {
     toastSeqRef.current += 1;
@@ -622,6 +625,19 @@ function App() {
         switchWorkspaceMode("settings");
         setSettingsDeepLink({ tab: "snippets", nonce: Date.now() });
         break;
+      case "open-presets":
+        setPresetsOpen(true);
+        break;
+      case "export-profile":
+        if (activeConfig && activeProfile) {
+          void exportProfileToFile(
+            activeConfig,
+            activeProfile.id,
+            activeProfile.name,
+            t("settings.exportDialogTitle"),
+          ).catch(() => showToast(t("settings.exportProfileError"), "warning"));
+        }
+        break;
     }
   }
 
@@ -1054,6 +1070,14 @@ function App() {
 
       {shortcutHelpOpen ? (
         <ShortcutHelp onClose={() => setShortcutHelpOpen(false)} />
+      ) : null}
+
+      {presetsOpen ? (
+        <PresetsModal
+          onCancel={() => setPresetsOpen(false)}
+          updateDraft={updateDraft}
+          setError={setError}
+        />
       ) : null}
 
       {commandPaletteOpen ? (

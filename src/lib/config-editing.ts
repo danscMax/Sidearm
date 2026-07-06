@@ -1186,6 +1186,31 @@ export function placeDeviceHotspot(
   };
 }
 
+/** Edit a learned control in place: rename and/or rewrite its standard-layer
+ * signal — mis-captures no longer require delete + recreate (UI-review U1/U3). */
+export function updateLearnedControl(
+  config: AppConfig,
+  controlId: ControlId,
+  name: string,
+  encodedKey: string,
+): AppConfig {
+  const renamed = {
+    ...config,
+    physicalControls: config.physicalControls.map((control) =>
+      control.id === controlId
+        ? { ...control, defaultName: name.trim() || control.defaultName }
+        : control,
+    ),
+  };
+  return upsertEncoderMapping(renamed, {
+    controlId,
+    layer: "standard",
+    encodedKey: encodedKey.trim(),
+    source: "detected",
+    verified: true,
+  });
+}
+
 /** The mapping already claiming this signal, if any — a duplicate encodedKey
  * is rejected by backend validation, so the UI checks before creating one. */
 export function findMappingByEncodedKey(

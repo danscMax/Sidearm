@@ -90,15 +90,24 @@ export function Notice({
   children,
   className,
   title,
+  id,
 }: {
   variant: "info" | "warning" | "ok" | "error";
   children?: React.ReactNode;
   className?: string;
   /** Optional native tooltip on the banner. */
   title?: string;
+  /** For aria-describedby links from controls the notice explains. */
+  id?: string;
 }) {
   return (
-    <div className={`notice notice--${variant}${className ? ` ${className}` : ""}`} title={title}>
+    <div
+      id={id}
+      className={`notice notice--${variant}${className ? ` ${className}` : ""}`}
+      title={title}
+      // Dynamic warnings/errors must reach screen readers (WCAG 4.1.3).
+      role={variant === "warning" || variant === "error" ? "alert" : undefined}
+    >
       {children}
     </div>
   );

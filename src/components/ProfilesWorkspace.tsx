@@ -28,6 +28,7 @@ import {
   setDeviceImage,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
+  updateLearnedControl,
   upsertAppMapping,
   upsertBinding,
 } from "../lib/config-editing";
@@ -43,7 +44,7 @@ import {
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
 import { ContextMenu } from "./ContextMenu";
-import { AddControlModal } from "./AddControlModal";
+import { AddControlModal, type EditControlTarget } from "./AddControlModal";
 import { DeviceBar } from "./DeviceBar";
 import { GenericDeviceView } from "./GenericDeviceView";
 import { MouseVisualization } from "./MouseVisualization";
@@ -158,17 +159,35 @@ export function ProfilesWorkspace({
 
   // ── Devices ──
   const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0] ?? null;
-  const [addControlOpen, setAddControlOpen] = useState(false);
+  const [learnModal, setLearnModal] = useState<
+    | { mode: "create" }
+    | { mode: "edit"; target: EditControlTarget }
+    | null
+  >(null);
+  // One-shot signal: a just-created device opens its inline rename (U10).
+  const [renameFreshDevice, setRenameFreshDevice] = useState(false);
+
+  const deviceControlCount = activeDevice
+    ? activeConfig.physicalControls.filter((control) => control.deviceId === activeDevice.id).length
+    : 0;
+  const autoControlName = t("device.autoName", { n: deviceControlCount + 1 });
 
   function handleAddDevice() {
     const { config: nextConfig, deviceId } = createDevice(activeConfig, t("device.defaultName"));
     updateDraft(() => nextConfig);
     onSelectDevice(deviceId);
+    setRenameFreshDevice(true);
     showToast(t("device.created"), "success");
   }
 
-  function handleCreateControl(name: string, encodedKey: string) {
-    if (!activeDevice) return;
+  function handleSubmitControl(name: string, encodedKey: string, andNext: boolean) {
+    if (!activeDevice || !learnModal) return;
+    if (learnModal.mode === "edit") {
+      const controlId = learnModal.target.controlId;
+      updateDraft((config) => updateLearnedControl(config, controlId, name, encodedKey));
+      setLearnModal(null);
+      return;
+    }
     const { config: nextConfig, controlId } = addLearnedControl(
       activeConfig,
       activeDevice.id,
@@ -177,8 +196,21 @@ export function ProfilesWorkspace({
     );
     updateDraft(() => nextConfig);
     setSelectedControlId(controlId);
-    setAddControlOpen(false);
+    // Batch teaching: "add & next" keeps the modal open and re-arms capture.
+    if (!andNext) setLearnModal(null);
     showToast(t("device.controlCreated"), "success");
+  }
+
+  function handleEditControl(controlId: ControlId) {
+    const control = activeConfig.physicalControls.find((entry) => entry.id === controlId);
+    if (!control) return;
+    const mapping = activeConfig.encoderMappings.find(
+      (entry) => entry.controlId === controlId && entry.layer === "standard",
+    );
+    setLearnModal({
+      mode: "edit",
+      target: { controlId, name: control.defaultName, signal: mapping?.encodedKey ?? "" },
+    });
   }
 
   function handleRemoveControl(controlId: ControlId) {
@@ -783,7 +815,8 @@ export function ProfilesWorkspace({
             heatmapEnabled={heatmapEnabled}
             onDropBinding={handleDropBinding}
             device={activeDevice}
-            onAddControl={() => setAddControlOpen(true)}
+            onAddControl={() => setLearnModal({ mode: "create" })}
+            onEditControl={handleEditControl}
             onRemoveControl={handleRemoveControl}
             onRenameDevice={(name) => updateDraft((config) => renameDevice(config, activeDevice.id, name))}
             onDeleteDevice={handleDeleteDevice}
@@ -791,6 +824,8 @@ export function ProfilesWorkspace({
             onPlaceHotspot={(controlId, x, y) =>
               updateDraft((config) => placeDeviceHotspot(config, activeDevice.id, controlId, x, y))
             }
+            startRenaming={renameFreshDevice}
+            onStartRenamingHandled={() => setRenameFreshDevice(false)}
           />
         ) : (
           <MouseVisualization
@@ -820,12 +855,14 @@ export function ProfilesWorkspace({
             onDropBinding={handleDropBinding}
           />
         )}
-        {addControlOpen && activeDevice ? (
+        {learnModal && activeDevice ? (
           <AddControlModal
             config={activeConfig}
             deviceName={activeDevice.name}
-            onClose={() => setAddControlOpen(false)}
-            onCreate={handleCreateControl}
+            autoName={autoControlName}
+            editTarget={learnModal.mode === "edit" ? learnModal.target : undefined}
+            onClose={() => setLearnModal(null)}
+            onSubmit={handleSubmitControl}
           />
         ) : null}
         <div className="heatmap-toggle">

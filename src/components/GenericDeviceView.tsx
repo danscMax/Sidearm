@@ -11,11 +11,15 @@ import { LayerPills } from "./mouse-visual/LayerPills";
 interface GenericDeviceViewProps extends MouseVisualizationProps {
   device: Device;
   onAddControl: () => void;
+  onEditControl: (id: ControlId) => void;
   onRemoveControl: (id: ControlId) => void;
   onRenameDevice: (name: string) => void;
   onDeleteDevice: () => void;
   onPickImage: () => void;
   onPlaceHotspot: (controlId: ControlId, x: number, y: number) => void;
+  /** One-shot: open the inline rename with focus (just-created device, U10). */
+  startRenaming?: boolean;
+  onStartRenamingHandled?: () => void;
 }
 
 /** Visualization for a user-added device: an optional photo with click-to-place
@@ -39,15 +43,27 @@ export function GenericDeviceView({
   onDropBinding,
   device,
   onAddControl,
+  onEditControl,
   onRemoveControl,
   onRenameDevice,
   onDeleteDevice,
   onPickImage,
   onPlaceHotspot,
+  startRenaming,
+  onStartRenamingHandled,
 }: GenericDeviceViewProps) {
   const { t } = useTranslation();
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(device.name);
+
+  // A just-created device drops straight into naming it (UI-review U10).
+  useEffect(() => {
+    if (startRenaming) {
+      setNameDraft(device.name);
+      setEditingName(true);
+      onStartRenamingHandled?.();
+    }
+  }, [startRenaming, device.name, onStartRenamingHandled]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [placing, setPlacing] = useState(false);
   const interaction = useControlInteractions({
@@ -187,7 +203,9 @@ export function GenericDeviceView({
             autoFocus
           />
         ) : (
-          <h3 className="gdv__name">{device.name}</h3>
+          <h3 className="gdv__name" title={device.name}>
+            {device.name}
+          </h3>
         )}
         <button
           type="button"
@@ -209,6 +227,7 @@ export function GenericDeviceView({
         <button
           type="button"
           className="action-button action-button--small"
+          title={t("device.photoHint")}
           onClick={onPickImage}
         >
           {device.image ? t("device.replacePhoto") : t("device.addPhoto")}
@@ -220,12 +239,12 @@ export function GenericDeviceView({
             aria-pressed={placing}
             onClick={() => setPlacing((prev) => !prev)}
           >
-            {t("device.placeHotspots")}
+            {placing ? t("device.placeDone") : t("device.placeHotspots")}
           </button>
         ) : null}
         <button
           type="button"
-          className="action-button action-button--small action-button--danger"
+          className="action-button action-button--small action-button--danger gdv__delete"
           onClick={onDeleteDevice}
         >
           {t("device.delete")}
@@ -256,6 +275,12 @@ export function GenericDeviceView({
           </button>
         </div>
       ) : (
+        <>
+        {entries.some(
+          (entry) => !entry.action || entry.action.type === "disabled" || !entry.binding?.enabled,
+        ) ? (
+          <p className="panel__muted gdv__grid-hint">{t("device.gridHint")}</p>
+        ) : null}
         <div className="gdv__grid">
           {entries.map((entry, index) => {
             const controlId = entry.control.id;
@@ -289,6 +314,15 @@ export function GenericDeviceView({
                 />
                 <button
                   type="button"
+                  className="gdv__cell-remove gdv__cell-edit"
+                  title={t("device.editControlTitle")}
+                  aria-label={t("device.editControlTitle")}
+                  onClick={() => onEditControl(controlId)}
+                >
+                  ✎
+                </button>
+                <button
+                  type="button"
                   className="gdv__cell-remove"
                   title={t("device.deleteControl")}
                   aria-label={t("device.deleteControl", { name: entry.control.defaultName })}
@@ -300,9 +334,10 @@ export function GenericDeviceView({
             );
           })}
         </div>
+        </>
       )}
 
-      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} />
+      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} neutralLabels />
     </div>
   );
 }

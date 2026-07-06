@@ -1,37 +1,61 @@
 import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { AppConfig } from "../lib/config";
+import type { AppConfig, ControlId } from "../lib/config";
 import { normalizeKeyName, resolveKeyName } from "../lib/action-picker-helpers";
 import { findMappingByEncodedKey } from "../lib/config-editing";
 import { displayNameForControl } from "../lib/labels";
 import { ModalFooter, ModalHeader, ModalShell, Notice } from "./shared";
 import { CaptureRow } from "./action-picker/shared/CaptureRow";
 
-/** Learn mode: name a new control and capture the key signal its hardware
- * button sends. Capture happens in the DOM (like the shortcut recorder) — the
+export interface EditControlTarget {
+  controlId: ControlId;
+  name: string;
+  signal: string;
+}
+
+/** Learn mode: name a control and capture the key signal its hardware button
+ * sends. Capture happens in the DOM (like the shortcut recorder) — the
  * low-level hook only intercepts already-mapped signals, so a brand-new
- * button's keystroke reaches this window as a plain keydown. */
+ * button's keystroke reaches this window as a plain keydown.
+ * Doubles as the EDIT dialog for an existing control (rename + re-capture,
+ * UI-review U1/U3) and supports "add & next" batch teaching (U2). */
 export function AddControlModal({
   config,
   deviceName,
+  autoName,
+  editTarget,
   onClose,
-  onCreate,
+  onSubmit,
 }: {
   config: AppConfig;
   deviceName: string;
+  /** Suggested name for the next control ("Button N") — placeholder + fallback. */
+  autoName: string;
+  /** When set, the modal edits this control instead of creating one. */
+  editTarget?: EditControlTarget;
   onClose: () => void;
-  onCreate: (name: string, encodedKey: string) => void;
+  /** andNext is only ever true in create mode. */
+  onSubmit: (name: string, encodedKey: string, andNext: boolean) => void;
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useState("");
-  const [signal, setSignal] = useState("");
+  const isEdit = !!editTarget;
+  const [name, setName] = useState(editTarget?.name ?? "");
+  const [signal, setSignal] = useState(editTarget?.signal ?? "");
   const [capturing, setCapturing] = useState(false);
 
-  const duplicate = signal ? findMappingByEncodedKey(config, signal) : undefined;
+  const duplicateMapping = signal ? findMappingByEncodedKey(config, signal) : undefined;
+  // Re-capturing a control's own signal is not a conflict (edit mode).
+  const duplicate =
+    duplicateMapping && duplicateMapping.controlId !== editTarget?.controlId
+      ? duplicateMapping
+      : undefined;
   const duplicateControl = duplicate
     ? config.physicalControls.find((control) => control.id === duplicate.controlId)
     : undefined;
-  const canCreate = signal.trim().length > 0 && !duplicate;
+  const duplicateDevice = duplicateControl
+    ? config.devices.find((device) => device.id === duplicateControl.deviceId)
+    : undefined;
+  const canSubmit = signal.trim().length > 0 && !duplicate;
 
   function handleKeyCapture(event: ReactKeyboardEvent) {
     if (!capturing) return;
@@ -58,6 +82,16 @@ export function AddControlModal({
     setCapturing(false);
   }
 
+  function submit(andNext: boolean) {
+    onSubmit(name.trim() || autoName, signal, andNext);
+    if (andNext) {
+      // Batch teaching: stay open, arm the next capture immediately (U2).
+      setName("");
+      setSignal("");
+      setCapturing(true);
+    }
+  }
+
   return (
     <ModalShell
       onClose={onClose}
@@ -68,7 +102,7 @@ export function AddControlModal({
     >
       <ModalHeader
         id="add-control-title"
-        title={t("device.addControlTitle")}
+        title={isEdit ? t("device.editControlTitle") : t("device.addControlTitle")}
         subtitle={deviceName}
         onClose={onClose}
         closeLabel={t("common.close")}
@@ -79,7 +113,7 @@ export function AddControlModal({
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={t("device.controlNamePlaceholder")}
+          placeholder={autoName}
           maxLength={40}
         />
       </label>
@@ -95,10 +129,11 @@ export function AddControlModal({
       </label>
       <p className="panel__muted">{t("device.captureHint")}</p>
       {duplicate ? (
-        <Notice variant="warning">
+        <Notice variant="warning" id="add-control-dup-warning">
           {t("device.signalDuplicate", {
             signal: duplicate.encodedKey,
             control: duplicateControl ? displayNameForControl(duplicateControl) : duplicate.controlId,
+            device: duplicateDevice?.name ?? "?",
           })}
         </Notice>
       ) : null}
@@ -106,13 +141,25 @@ export function AddControlModal({
         <button type="button" className="action-button" onClick={onClose}>
           {t("common.cancel")}
         </button>
+        {!isEdit ? (
+          <button
+            type="button"
+            className="action-button"
+            disabled={!canSubmit}
+            aria-describedby={duplicate ? "add-control-dup-warning" : undefined}
+            onClick={() => submit(true)}
+          >
+            {t("device.createAndNext")}
+          </button>
+        ) : null}
         <button
           type="button"
           className="action-button action-button--accent"
-          disabled={!canCreate}
-          onClick={() => onCreate(name, signal)}
+          disabled={!canSubmit}
+          aria-describedby={duplicate ? "add-control-dup-warning" : undefined}
+          onClick={() => submit(false)}
         >
-          {t("device.create")}
+          {isEdit ? t("common.save") : t("device.create")}
         </button>
       </ModalFooter>
     </ModalShell>

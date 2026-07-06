@@ -25,6 +25,8 @@ export function DeviceBar({
           active={activeDeviceId}
           onSelect={onSelect}
           className="device-bar__track"
+          // Pills clamp long names; the full name lives in the tooltip (U12).
+          pillProps={(item) => ({ title: typeof item.label === "string" ? item.label : undefined })}
         />
       ) : null}
       <button

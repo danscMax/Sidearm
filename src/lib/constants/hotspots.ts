@@ -2,7 +2,7 @@ import type { ControlId } from "../config";
 import type { HotspotPosition } from "./types";
 
 /** Hotspot positions for the TOP-DOWN photo (naga-top.webp).
- *  Measured via hotspot-test.html click calibration. */
+ *  Measured via dev/hotspot-test.html click calibration (dev-only, not shipped). */
 export const topViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
   mouse_left:        { left: 25.5, top: 10, label: "control.name.mouseLeft" },
   wheel_up:          { left: 45.5, top: 13.5, label: "▲", size: "sm" },

@@ -105,4 +105,4 @@ debug = "line-tables-only"
 [profile.release]
 lto = true
 codegen-units = 1
-strip = "debuginfo"
+strip = "symbols"

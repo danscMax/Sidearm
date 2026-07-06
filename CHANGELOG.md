@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-07-06
+
+### Added
+- Universal device support — Sidearm is no longer Razer-Naga-only. Add any programmable mouse or device, name its buttons, and teach each one with learn-mode ("press the button and Sidearm captures the signal it sends"). Existing Naga configurations migrate automatically.
+- A device switcher to keep several devices side by side, and a generic device view that lists a device's controls with their per-layer bindings.
+- Upload a photo of your device and click to place hotspots over its buttons for a visual button map.
+- Edit a learned control in place — rename it and re-capture its signal — and teach several buttons in a row without reopening the dialog ("Add & next"); a suggested name is pre-filled.
+- Text snippets can drop the caret mid-text after expanding with the `{cursor}` token.
+- A new application icon and matching in-app brand mark.
+
+### Changed
+- Multi-device UI polish from an expert UI review: the signal-capture button stays quiet and reads "Stop" while armed, per-layer labels are neutral ("Layer 1/2/3"), a long device name truncates cleanly, unassigned hotspots use a solid outline, and the empty state spells out the F13–F24 precondition.
+- A duplicate-signal warning now names the device that already owns that signal and is announced to screen readers.
+
+### Fixed
+- Merge-importing a configuration keeps your existing devices instead of replacing them, and re-placing a hotspot keeps its binding.
+- Several layout and interaction issues on the multi-device surfaces caught in a browser UI walk.
+- Held modifiers are cleared before the `{cursor}` caret walk-back so it can't leave a modifier stuck down.
+
 ## [0.7.5] — 2026-07-05
 
 ### Added

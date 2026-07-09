@@ -10,7 +10,7 @@
 #   .\build_portable.ps1                - Full build
 #   .\build_portable.ps1 -SkipBuild     - Skip cargo build, just assemble
 #   .\build_portable.ps1 -Verify        - Verify existing build only
-#   .\build_portable.ps1 -Clean         - Clean Sidearm-Portable output dir
+#   .\build_portable.ps1 -Clean         - Clean ..\portable output dir
 #   .\build_portable.ps1 -CleanCargo    - Run `cargo clean -p sidearm` before
 #                                         building. target/release accumulates
 #                                         dep artefacts across releases (4+ GB
@@ -18,7 +18,7 @@
 #                                         that bloat starts to matter. Adds
 #                                         ~1–2 min to the build.
 #
-# Output: ..\Sidearm-Portable\ folder ready for distribution
+# Output: ..\portable\ folder ready for distribution (E:\Scripts\Sidearm\portable)
 # ============================================================================
 
 param(
@@ -46,7 +46,7 @@ $script:totalStartTime = Get-Date
 # ---- Paths ----
 $PROJECT_ROOT = $PSScriptRoot
 $TAURI_DIR    = Join-Path $PROJECT_ROOT 'src-tauri'
-$PORTABLE_DIR = Join-Path $PROJECT_ROOT '..\Sidearm-Portable'
+$PORTABLE_DIR = Join-Path $PROJECT_ROOT '..\portable'
 
 # Detect custom target-dir from .cargo/config.toml
 $TAURI_TARGET_DIR = Join-Path $TAURI_DIR 'target'

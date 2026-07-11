@@ -315,7 +315,7 @@ button, input, textarea, select {
   color: var(--c-text-muted);
   font-size: var(--fs-body-sm);
   cursor: pointer;
-  transition: all 120ms;
+  transition: background-color 120ms, border-color 120ms, color 120ms, outline 120ms, outline-offset 120ms;
   line-height: 1;
 }
 
@@ -3593,7 +3593,7 @@ code {
   color: var(--c-text-muted);
   cursor: pointer;
   font-family: inherit;
-  transition: all 0.15s;
+  transition: background-color 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s, outline 0.15s, outline-offset 0.15s;
 }
 
 .expert-ops__btn:hover:not(:disabled) {
@@ -4509,7 +4509,7 @@ code {
   color: var(--c-text-muted);
   font-size: var(--fs-body);
   cursor: pointer;
-  transition: all 120ms;
+  transition: background-color 120ms, border-color 120ms, color 120ms, outline 120ms, outline-offset 120ms;
   letter-spacing: 1px;
 }
 
@@ -5236,7 +5236,7 @@ input[type="search"]::-webkit-search-decoration {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid transparent;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background-color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 
 .settings-profile-card:hover {
@@ -5337,7 +5337,7 @@ input[type="search"]::-webkit-search-decoration {
   color: var(--c-text-muted);
   opacity: 0.5;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, opacity 0.12s, outline 0.12s, outline-offset 0.12s;
 }
 
 .settings-icon-btn:hover {

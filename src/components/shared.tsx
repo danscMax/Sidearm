@@ -61,7 +61,7 @@ export function SelectField<T extends string>({
   disabled,
   className,
 }: {
-  label: string;
+  label: React.ReactNode;
   value: T;
   options: ReadonlyArray<{ value: T; label: string }>;
   onChange: (value: T) => void;
@@ -79,6 +79,28 @@ export function SelectField<T extends string>({
         ))}
       </select>
     </label>
+  );
+}
+
+/** A small "?" badge that reveals an explanation bubble on hover/focus. Sits
+ *  beside a field label to explain a concept (throttle, trigger mode, …).
+ *  Keyboard-reachable (tabIndex 0) and CSP-safe — the bubble is pure CSS, no
+ *  inline styles or native `title` delay. */
+export function HelpTip({ text, className }: { text: string; className?: string }) {
+  return (
+    <span
+      className={`help-tip${className ? ` ${className}` : ""}`}
+      tabIndex={0}
+      role="note"
+      aria-label={text}
+    >
+      <span className="help-tip__badge" aria-hidden="true">
+        ?
+      </span>
+      <span className="help-tip__bubble" role="tooltip">
+        {text}
+      </span>
+    </span>
   );
 }
 

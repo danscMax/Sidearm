@@ -987,10 +987,10 @@ select::checkmark {
 .notice .action-button { margin-top: 10px; }
 
 .notice--subtle  { background: var(--c-card-bg); border-color: var(--c-card-border); }
-/* Blocking states get a solid left accent so they never read as neutral info
-   (UI-review V5). */
-.notice--warning { background: color-mix(in srgb, var(--c-warning) 12%, transparent); border-color: color-mix(in srgb, var(--c-warning) 26%, transparent); border-left: 3px solid var(--c-warning); }
-.notice--error   { background: rgba(167, 56, 56, 0.14); border-color: rgba(196, 73, 73, 0.28); border-left: 3px solid var(--c-danger); }
+/* Blocking states read as distinct via a tinted fill + coloured border on all
+   sides (no left-only accent bar). */
+.notice--warning { background: color-mix(in srgb, var(--c-warning) 13%, transparent); border-color: color-mix(in srgb, var(--c-warning) 38%, transparent); }
+.notice--error   { background: rgba(167, 56, 56, 0.14); border-color: rgba(196, 73, 73, 0.42); }
 .notice--ok      { background: rgba(83, 145, 74, 0.14); border-color: color-mix(in srgb, var(--c-ok) 28%, transparent); }
 .notice--info    { background: rgba(67, 120, 176, 0.14); border-color: color-mix(in srgb, var(--c-info) 28%, transparent); }
 
@@ -1174,8 +1174,8 @@ input[type="radio"] {
 }
 
 /* ── Action Button ── */
-/* Buttons are QUIET by default — accent is reserved for the one primary action
-   per screen (--accent / --primary) and for pressed toggle state (--active).
+/* Buttons are QUIET by default — accent (--accent) is reserved for the one
+   primary action per screen and for pressed toggle state (--active).
    The old inverted polarity (bright base, quiet opt-in) made every Browse /
    Export / toggle read as a CTA. */
 .action-button {
@@ -1207,6 +1207,11 @@ input[type="radio"] {
    win by source order. */
 .action-button:hover:not(:disabled):where(:not(.action-button--accent):not(.action-button--warning):not(.action-button--active)) {
   background: rgba(255, 255, 255, 0.12);
+}
+
+/* Filled accent CTA gets a slightly stronger brighten on hover than the base. */
+.action-button--accent:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
 /* Toggle "on" state — accent-tinted so pressed/unpressed is unmistakable. */
@@ -2933,8 +2938,8 @@ code {
   background: var(--c-bg);
   border: 1px solid var(--c-border);
   border-radius: var(--radius-modal);
-  width: min(580px, 90vw);
-  max-height: 80vh;
+  width: min(880px, 94vw);
+  max-height: 84vh;
   display: flex;
   flex-direction: column;
   box-shadow: var(--shadow-modal);
@@ -3161,17 +3166,6 @@ code {
 .binding-summary__actions {
   display: flex;
   gap: 8px;
-}
-
-.action-button--primary {
-  background: var(--c-accent);
-  border-color: transparent;
-  color: var(--c-text-on-accent);
-  font-weight: 700;
-}
-
-.action-button--primary:hover:not(:disabled) {
-  filter: brightness(1.1);
 }
 
 /* ── Confirm Modal ── */
@@ -4176,12 +4170,184 @@ code {
 /* "Linked to library snippet «…»" hint shown when a button references a snippet */
 .snippet-linked-hint {
   margin: 0;
-  padding: 8px 10px;
-  border-left: 3px solid var(--c-accent);
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 32%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--c-accent) 8%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
   font-size: var(--fs-caption);
   color: var(--c-text);
+}
+
+/* ── Help tip: "?" badge + hover/focus explanation bubble ───────────────────
+   Reused beside field labels (throttle, trigger mode, conditions, …). Pure
+   CSS reveal — no native `title` delay, no inline styles (CSP). ── */
+.help-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  margin-left: 6px;
+  border-radius: 50%;
+  background: var(--c-card-border);
+  color: var(--c-text);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+  user-select: none;
+  transition: background 120ms ease, color 120ms ease;
+}
+.help-tip:hover,
+.help-tip:focus-visible {
+  background: var(--c-accent);
+  color: var(--c-text-on-accent);
+  outline: none;
+}
+.help-tip__badge {
+  pointer-events: none;
+}
+.help-tip__bubble {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  z-index: 10;
+  width: max-content;
+  max-width: 260px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  box-shadow: var(--shadow-popover);
+  color: var(--c-text);
+  font-size: var(--fs-caption);
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.help-tip:hover .help-tip__bubble,
+.help-tip:focus-visible .help-tip__bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ── Token toolbar: quick-insert chips for {date}/{clipboard}/{cursor} ── */
+.token-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.token-toolbar__label {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+.token-chip {
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--c-accent) 40%, transparent);
+  border-radius: 999px;
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.token-chip:hover {
+  background: color-mix(in srgb, var(--c-accent) 26%, transparent);
+  border-color: var(--c-accent);
+  transform: translateY(-1px);
+}
+.token-chip:active {
+  transform: translateY(0);
+}
+
+/* ── Highlighting textarea: a transparent <textarea> over a backdrop that
+   renders the same text with the tokens <mark>ed. Both layers MUST share
+   identical text metrics (font/size/line-height/padding/wrapping) or the
+   highlight drifts off the glyphs. ── */
+.token-textarea {
+  position: relative;
+  border: 1px solid var(--c-input-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-input-bg);
+  box-shadow: var(--shadow-inset);
+  overflow: hidden;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.token-textarea:hover {
+  border-color: var(--c-border-hover);
+}
+.token-textarea:focus-within {
+  border-color: var(--c-accent);
+  box-shadow: var(--shadow-inset), 0 0 0 3px var(--c-accent-dim);
+}
+.token-textarea__backdrop,
+.token-textarea .token-textarea__input {
+  margin: 0;
+  padding: 10px 12px;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-body-sm);
+  line-height: 1.5;
+  letter-spacing: normal;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  tab-size: 4;
+}
+.token-textarea__backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: transparent;
+  pointer-events: none;
+  user-select: none;
+}
+.token-textarea__mark {
+  /* Only the background/outline shows; the glyphs come from the input above. */
+  background: color-mix(in srgb, var(--c-accent) 22%, transparent);
+  color: transparent;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-accent) 45%, transparent);
+}
+.token-textarea .token-textarea__input {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 148px;
+  max-height: 340px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--c-text-bright);
+  caret-color: var(--c-accent);
+  resize: none;
+  /* Auto-grow to the content (Chromium/WebView2 123+); the min/max-height keep
+     it a comfortable box and clamp runaway growth. Falls back gracefully to a
+     fixed min-height box on older runtimes. */
+  field-sizing: content;
+  overflow: auto;
+}
+.token-textarea .token-textarea__input:focus {
+  outline: none;
+  box-shadow: none;
+  border-color: transparent;
+}
+.token-textarea .token-textarea__input::placeholder {
+  color: var(--c-text-muted);
 }
 
 /* Snippet library tab: master-detail. Roster (own scroll) left, sticky editor

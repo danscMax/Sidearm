@@ -36,7 +36,7 @@ export function PortableMigrationDialog({
         <ModalFooter className="migration-modal__footer">
           <button
             type="button"
-            className="action-button action-button--primary"
+            className="action-button action-button--accent"
             onClick={() => {
               void onChoose(true);
             }}

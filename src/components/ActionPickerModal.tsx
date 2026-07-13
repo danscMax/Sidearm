@@ -12,7 +12,7 @@ import {
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { CloseButton, ModalFooter, ModalShell, Notice } from "./shared";
+import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice } from "./shared";
 import {
   autoName,
   buildAction,
@@ -424,7 +424,10 @@ export function ActionPickerModal({
             ) : null}
 
             <label className="field mt-12">
-              <span className="field__label">{t("picker.nameLabel")}</span>
+              <span className="field__label">
+                {t("picker.nameLabel")}
+                <HelpTip text={t("picker.nameHelp")} />
+              </span>
               <input
                 type="text"
                 value={nameDraft}
@@ -447,7 +450,10 @@ export function ActionPickerModal({
             />
 
             <label className="field mt-12">
-              <span className="field__label">{t("picker.throttleLabel")}</span>
+              <span className="field__label">
+                {t("picker.throttleLabel")}
+                <HelpTip text={t("picker.throttleHelp")} />
+              </span>
               <input
                 type="number"
                 min={0}
@@ -462,7 +468,6 @@ export function ActionPickerModal({
                   setThrottleDraft(clamped);
                 }}
               />
-              <span className="panel__muted">{t("picker.throttleHelp")}</span>
             </label>
           </div>
         </div>
@@ -490,7 +495,7 @@ export function ActionPickerModal({
           </button>
           <button
             type="button"
-            className="action-button action-button--primary"
+            className="action-button action-button--accent"
             onClick={handleSave}
             disabled={isSaveDisabled(effectiveCategory, drafts)}
           >

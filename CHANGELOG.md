@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-07-14
+
+### Fixed
+- The Save button in the action editor no longer washes out on hover — the accent call-to-action keeps its green fill and brightens, instead of fading to a translucent white. (Root cause: the `--primary` button variant was missing from the hover exclusion list, so a translucent-white overlay overrode its accent fill.)
+
+### Changed
+- Reworked the "Assign action" editor: a noticeably wider dialog; clickable token chips (`{date}`, `{clipboard}`, `{cursor}`) that insert at the caret, with live in-field highlighting of tokens; "?" help tooltips on throttle, trigger mode, execution conditions, name and signal; an auto-growing text field without the old resize grip; and removal of the left accent bars on notices.
+- Consolidated the duplicate `--primary` button style into `--accent` (they were byte-identical), so the hover-fade class of bug cannot recur.
+
 ## [0.8.0] — 2026-07-06
 
 ### Added

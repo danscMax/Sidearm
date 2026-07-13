@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { ActionCondition } from "../../lib/config";
 import { CONDITION_TYPE_KEYS } from "../../lib/action-picker-helpers";
-import { SelectField } from "../shared";
+import { HelpTip, SelectField } from "../shared";
 import { CompoundCard } from "./shared/CompoundCard";
 
 export function ConditionsEditor({
@@ -15,7 +15,10 @@ export function ConditionsEditor({
   return (
     <div className="editor-grid mt-12">
       <div className="field__header">
-        <span className="field__label">{t("picker.conditionsLabel")}</span>
+        <span className="field__label">
+          {t("picker.conditionsLabel")}
+          <HelpTip text={t("picker.conditionsHelp")} />
+        </span>
         <button
           type="button"
           className="action-button action-button--secondary action-button--small"

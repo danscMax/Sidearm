@@ -234,7 +234,7 @@ export function SynapseImportModal({
           </button>
           <button
             type="button"
-            className="action-button action-button--primary"
+            className="action-button action-button--accent"
             onClick={handleSubmit}
             disabled={submitting || selectedCount === 0}
           >

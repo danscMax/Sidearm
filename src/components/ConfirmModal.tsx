@@ -107,7 +107,7 @@ export function ConfirmModal({
         <button
           ref={confirmButtonRef}
           type="button"
-          className={`action-button ${danger ? "action-button--danger" : "action-button--primary"}`}
+          className={`action-button ${danger ? "action-button--danger" : "action-button--accent"}`}
           onClick={() => {
             void handleConfirm("primary");
           }}

@@ -102,7 +102,7 @@ export function ErrorModal({ error, onDismiss, onAction }: ErrorModalProps) {
               disabled={busyAction !== null}
               className={
                 action.primary
-                  ? "action-button action-button--primary"
+                  ? "action-button action-button--accent"
                   : action.danger
                   ? "action-button action-button--danger"
                   : "action-button action-button--ghost"

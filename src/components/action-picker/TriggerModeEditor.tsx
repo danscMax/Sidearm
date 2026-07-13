@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { Binding, ControlId, Layer, PhysicalControl, TriggerMode } from "../../lib/config";
 import { displayNameForControl } from "../../lib/labels";
-import { Notice, SelectField } from "../shared";
+import { HelpTip, Notice, SelectField } from "../shared";
 
 export function TriggerModeEditor({
   triggerMode,
@@ -27,7 +27,12 @@ export function TriggerModeEditor({
     <>
       <SelectField
         className="mt-12"
-        label={t("picker.triggerMode")}
+        label={
+          <>
+            {t("picker.triggerMode")}
+            <HelpTip text={t("picker.triggerModeHelp")} />
+          </>
+        }
         value={triggerMode}
         onChange={onChange}
         options={[

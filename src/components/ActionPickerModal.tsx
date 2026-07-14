@@ -17,9 +17,11 @@ import {
   autoName,
   buildAction,
   createInitialDrafts,
+  describeAction,
   isSaveDisabled,
   type PickerDrafts,
 } from "../lib/action-picker-helpers";
+import type { TriggerMode } from "../lib/config";
 import { SequenceStepEditor } from "./action-picker/SequenceStepEditor";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { MouseActionEditor } from "./action-picker/MouseActionEditor";
@@ -37,6 +39,14 @@ import { TriggerModeEditor } from "./action-picker/TriggerModeEditor";
 
 const LAST_PICKER_CATEGORY_KEY = "sidearm:lastPickerCategory";
 const LEGACY_LAST_PICKER_CATEGORY_KEY = "naga-studio:lastPickerCategory";
+
+const TRIGGER_LABEL_KEYS: Record<TriggerMode, string> = {
+  press: "picker.triggerPress",
+  doublePress: "picker.triggerDoublePress",
+  triplePress: "picker.triggerTriplePress",
+  hold: "picker.triggerHold",
+  chord: "picker.triggerChord",
+};
 
 export function ActionPickerModal({
   config,
@@ -172,6 +182,12 @@ export function ActionPickerModal({
   const [conditionsDraft, setConditionsDraft] = useState(initial.conditions);
   const [menuItemsDraft, setMenuItemsDraft] = useState(initial.menuItems);
 
+  // Advanced settings (trigger mode, throttle, conditions) collapse by default,
+  // but open automatically when the edited action already has any of them set.
+  const [advancedOpen, setAdvancedOpen] = useState(
+    () => initial.triggerMode !== "press" || initial.throttleMs > 0 || initial.conditions.length > 0,
+  );
+
   const menuActionOptions = useMemo(
     () =>
       existingAction
@@ -288,6 +304,17 @@ export function ActionPickerModal({
     }
   }
 
+  const saveDisabled = isSaveDisabled(effectiveCategory, drafts);
+  const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
+  const advancedTags = [
+    triggerModeDraft !== "press" ? t(TRIGGER_LABEL_KEYS[triggerModeDraft]) : null,
+    throttleDraft > 0 ? t("picker.advancedThrottleTag", { ms: throttleDraft }) : null,
+    activeConditionsCount > 0 ? t("picker.advancedConditionsTag", { count: activeConditionsCount }) : null,
+  ].filter(Boolean);
+  const advancedSummary = advancedTags.length > 0 ? advancedTags.join(" · ") : t("picker.advancedDefaults");
+  const previewText = describeAction(effectiveCategory, drafts, t, config.profiles);
+  const activeCat = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory);
+
   return (
     <ModalShell
       onClose={onCancel}
@@ -295,6 +322,13 @@ export function ActionPickerModal({
       dialogRef={modalRef}
       ariaLabelledby="action-picker-title"
       escapeEnabled={!isCapturing && !isCapturingSignal}
+      onKeyDown={(e) => {
+        // Ctrl/Cmd+Enter commits from anywhere in the modal (not while capturing).
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !saveDisabled && !isCapturing && !isCapturingSignal) {
+          e.preventDefault();
+          handleSave();
+        }
+      }}
     >
         <div className="action-picker__header">
           <div>
@@ -315,6 +349,14 @@ export function ActionPickerModal({
               aria-label={t("picker.searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                // Enter jumps to the first match — keyboard-first category pick.
+                if (e.key === "Enter" && filteredCategories[0]) {
+                  e.preventDefault();
+                  setSearchQuery("");
+                  setActiveCategoryWithMemory(filteredCategories[0].id);
+                }
+              }}
               autoComplete="off"
             />
             {filteredCategories.map((cat) => (
@@ -323,21 +365,30 @@ export function ActionPickerModal({
                 type="button"
                 className={`action-picker__cat-btn${effectiveCategory === cat.id ? " action-picker__cat-btn--active" : ""}`}
                 onClick={() => { setSearchQuery(""); setActiveCategoryWithMemory(cat.id); }}
+                aria-current={effectiveCategory === cat.id ? "true" : undefined}
                 title={t(cat.label)}
               >
                 <span className="action-picker__cat-icon">{cat.icon}</span>
                 <span className="action-picker__cat-label">{t(cat.label)}</span>
               </button>
             ))}
+            {filteredCategories.length === 0 ? (
+              <p className="action-picker__no-results">{t("picker.noResults")}</p>
+            ) : null}
           </nav>
 
           <div className="action-picker__editor">
-            <h3 className="action-picker__cat-title">
-              {(() => {
-                const key = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.label;
-                return key ? t(key) : "";
-              })()}
-            </h3>
+            <div className="action-picker__cat-head">
+              <span className="action-picker__cat-head-icon" aria-hidden="true">
+                {activeCat?.icon}
+              </span>
+              <div className="action-picker__cat-head-text">
+                <h3 className="action-picker__cat-title">
+                  {activeCat ? t(activeCat.label) : ""}
+                </h3>
+                <p className="action-picker__cat-desc">{t(`picker.categoryDesc.${effectiveCategory}`)}</p>
+              </div>
+            </div>
 
             {effectiveCategory === "shortcut" ? (
               <ShortcutEditor
@@ -399,17 +450,13 @@ export function ActionPickerModal({
 
             {effectiveCategory === "disabled" ? (
               <div className="editor-grid">
-                <p className="panel__muted">
-                  {t("picker.disabledHint")}
-                </p>
+                <Notice variant="info">{t("picker.disabledHint")}</Notice>
               </div>
             ) : null}
 
             {effectiveCategory === "repairClipboard" ? (
               <div className="editor-grid">
-                <p className="panel__muted">
-                  {t("picker.repairClipboardHint")}
-                </p>
+                <Notice variant="info">{t("picker.repairClipboardHint")}</Notice>
               </div>
             ) : null}
 
@@ -436,49 +483,66 @@ export function ActionPickerModal({
               />
             </label>
 
-            <ConditionsEditor conditions={conditionsDraft} onChange={setConditionsDraft} />
-
-            <TriggerModeEditor
-              triggerMode={triggerModeDraft}
-              onChange={setTriggerModeDraft}
-              chordPartner={chordPartnerDraft}
-              setChordPartner={setChordPartnerDraft}
-              controlId={controlId}
-              selectedLayer={selectedLayer}
-              physicalControls={config.physicalControls}
-              bindings={config.bindings}
-            />
-
-            <label className="field mt-12">
-              <span className="field__label">
-                {t("picker.throttleLabel")}
-                <HelpTip text={t("picker.throttleHelp")} />
-              </span>
-              <input
-                type="number"
-                min={0}
-                max={5000}
-                step={50}
-                value={throttleDraft}
-                onChange={(e) => {
-                  const parsed = Number(e.target.value);
-                  const clamped = Number.isFinite(parsed)
-                    ? Math.min(5000, Math.max(0, Math.round(parsed)))
-                    : 0;
-                  setThrottleDraft(clamped);
-                }}
-              />
-            </label>
+            <details
+              className="advanced-section picker-advanced mt-12"
+              open={advancedOpen}
+              onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
+            >
+              <summary className="advanced-section__toggle picker-advanced__summary">
+                <span className="picker-advanced__title">{t("picker.advancedTitle")}</span>
+                {!advancedOpen ? <span className="picker-advanced__tags">{advancedSummary}</span> : null}
+              </summary>
+              <div className="picker-advanced__body">
+                <div className={`picker-two-col${triggerModeDraft === "chord" ? " picker-two-col--single" : ""}`}>
+                  <TriggerModeEditor
+                    triggerMode={triggerModeDraft}
+                    onChange={setTriggerModeDraft}
+                    chordPartner={chordPartnerDraft}
+                    setChordPartner={setChordPartnerDraft}
+                    controlId={controlId}
+                    selectedLayer={selectedLayer}
+                    physicalControls={config.physicalControls}
+                    bindings={config.bindings}
+                  />
+                  <label className="field">
+                    <span className="field__label">
+                      {t("picker.throttleLabel")}
+                      <HelpTip text={t("picker.throttleHelp")} />
+                    </span>
+                    <div className="input-suffix">
+                      <input
+                        type="number"
+                        min={0}
+                        max={5000}
+                        step={50}
+                        value={throttleDraft}
+                        onChange={(e) => {
+                          const parsed = Number(e.target.value);
+                          const clamped = Number.isFinite(parsed)
+                            ? Math.min(5000, Math.max(0, Math.round(parsed)))
+                            : 0;
+                          setThrottleDraft(clamped);
+                        }}
+                      />
+                      <span className="input-suffix__unit">{t("picker.throttleUnit")}</span>
+                    </div>
+                  </label>
+                </div>
+                <ConditionsEditor conditions={conditionsDraft} onChange={setConditionsDraft} />
+              </div>
+            </details>
           </div>
         </div>
 
+        <p className="action-picker__preview">
+          <span className="action-picker__preview-label">{t("picker.previewLabel")}</span>
+          <span className="action-picker__preview-text">{previewText}</span>
+        </p>
+
         {testResult ? (
-          <p
-            className={`action-picker__test-result${testResult.ok ? "" : " action-picker__test-result--error"}`}
-            role="status"
-          >
-            {testResult.text}
-          </p>
+          <div className="action-picker__test-result">
+            <Notice variant={testResult.ok ? "ok" : "error"}>{testResult.text}</Notice>
+          </div>
         ) : null}
 
         <ModalFooter className="action-picker__footer">
@@ -489,7 +553,7 @@ export function ActionPickerModal({
             type="button"
             className="action-button action-button--ghost"
             onClick={handleTest}
-            disabled={isSaveDisabled(effectiveCategory, drafts) || testRunning}
+            disabled={saveDisabled || testRunning}
           >
             {t("picker.test")}
           </button>
@@ -497,7 +561,7 @@ export function ActionPickerModal({
             type="button"
             className="action-button action-button--accent"
             onClick={handleSave}
-            disabled={isSaveDisabled(effectiveCategory, drafts)}
+            disabled={saveDisabled}
           >
             {t("common.save")}
           </button>

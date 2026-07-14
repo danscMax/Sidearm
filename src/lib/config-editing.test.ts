@@ -251,14 +251,29 @@ describe("upsertBinding", () => {
   });
 
   it("preserves other bindings when inserting", () => {
-    const existing = makeBinding({ id: "existing" });
+    // A binding on a DIFFERENT control (distinct slot) must survive an insert.
+    const existing = makeBinding({ id: "existing", controlId: "thumb_02" as ControlId });
     const config = { ...createMinimalConfig(), bindings: [existing] };
-    const newBinding = makeBinding({ id: "new" });
+    const newBinding = makeBinding({ id: "new", controlId: "thumb_01" as ControlId });
 
     const result = upsertBinding(config, newBinding);
     expect(result.bindings).toHaveLength(2);
     expect(result.bindings[0]).toEqual(existing);
     expect(result.bindings[1]).toEqual(newBinding);
+  });
+
+  it("replaces a binding occupying the same slot even under a different id", () => {
+    // Regression: dragging an action onto an already-bound control created a
+    // second binding for the same (profile, control, layer) tuple → save failed
+    // with "Duplicate binding tuple detected". The slot must hold exactly one.
+    const existing = makeBinding({ id: "old-scheme-id", controlId: "thumb_07" as ControlId });
+    const config = { ...createMinimalConfig(), bindings: [existing] };
+    const dropped = makeBinding({ id: "binding-fresh", controlId: "thumb_07" as ControlId, label: "Dropped" });
+
+    const result = upsertBinding(config, dropped);
+    expect(result.bindings).toHaveLength(1);
+    expect(result.bindings[0]!.id).toBe("binding-fresh");
+    expect(result.bindings[0]!.label).toBe("Dropped");
   });
 });
 

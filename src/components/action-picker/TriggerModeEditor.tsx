@@ -26,7 +26,6 @@ export function TriggerModeEditor({
   return (
     <>
       <SelectField
-        className="mt-12"
         label={
           <>
             {t("picker.triggerMode")}

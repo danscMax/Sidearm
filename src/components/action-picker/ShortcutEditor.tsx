@@ -2,6 +2,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import type { ShortcutActionPayload } from "../../lib/config";
 import { normalizeKeyName, resolveKeyName } from "../../lib/action-picker-helpers";
+import { HelpTip } from "../shared";
 import { CaptureRow } from "./shared/CaptureRow";
 import { ModifierRow } from "./shared/ModifierRow";
 
@@ -44,7 +45,10 @@ export function ShortcutEditor({
   return (
     <div className="editor-grid" onKeyDown={handleKeyCapture}>
       <label className="field">
-        <span className="field__label">{t("picker.keyLabel")}</span>
+        <span className="field__label">
+          {t("picker.keyLabel")}
+          <HelpTip text={t("picker.keyHelp")} />
+        </span>
         <CaptureRow
           value={draft.key}
           placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
@@ -57,7 +61,7 @@ export function ShortcutEditor({
         value={draft}
         onChange={(mods) => onChange({ ...draft, ...mods })}
       />
-      <p className="panel__muted">
+      <p className="field__description">
         {t("picker.modifiersHint")}
       </p>
     </div>

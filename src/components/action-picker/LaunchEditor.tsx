@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChipEditor } from "../ChipEditor";
+import { HelpTip } from "../shared";
 import { DirectoryPathField } from "../DirectoryPathField";
 import { ExecutablePathField } from "../ExecutablePathField";
 
@@ -40,6 +41,12 @@ export function LaunchEditor({
 
   return (
     <div className="editor-grid">
+      <div className="field__header">
+        <span className="field__label">
+          {t("picker.launchTargetMode")}
+          <HelpTip text={t("picker.launchModeHelp")} />
+        </span>
+      </div>
       <div className="settings-actions" role="group" aria-label={t("picker.launchTargetMode")}>
         {(["program", "folder", "url"] as const).map((mode) => (
           <button

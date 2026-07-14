@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { CommandError } from "../lib/config";
 import { translateCommandError } from "../lib/errors";
@@ -87,19 +87,63 @@ export function SelectField<T extends string>({
  *  Keyboard-reachable (tabIndex 0) and CSP-safe — the bubble is pure CSS, no
  *  inline styles or native `title` delay. */
 export function HelpTip({ text, className }: { text: string; className?: string }) {
+  const badgeRef = useRef<HTMLSpanElement>(null);
+  const bubbleRef = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+
+  // The badge lives inside a scrolling, overflow-clipped editor. A `position:
+  // fixed` bubble escapes that clip (its containing block is the modal
+  // backdrop, whose backdrop-filter makes it the fixed containing block), so we
+  // position it against the viewport by hand and flip above when there's no
+  // room below. Coords go through CSSOM (`.style`) — CSP forbids the inline
+  // `style` attribute but not scripted CSSOM writes.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const badge = badgeRef.current;
+    const bubble = bubbleRef.current;
+    if (!badge || !bubble) return;
+
+    const place = () => {
+      const b = badge.getBoundingClientRect();
+      const bb = bubble.getBoundingClientRect();
+      const pad = 8;
+      let top = b.bottom + pad;
+      if (top + bb.height > window.innerHeight - pad && b.top - pad - bb.height > pad) {
+        top = b.top - pad - bb.height;
+      }
+      const left = Math.max(pad, Math.min(b.left, window.innerWidth - pad - bb.width));
+      bubble.style.top = `${Math.round(top)}px`;
+      bubble.style.left = `${Math.round(left)}px`;
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
+
   return (
     <span
+      ref={badgeRef}
       className={`help-tip${className ? ` ${className}` : ""}`}
       tabIndex={0}
       role="note"
       aria-label={text}
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
     >
       <span className="help-tip__badge" aria-hidden="true">
         ?
       </span>
-      <span className="help-tip__bubble" role="tooltip">
-        {text}
-      </span>
+      {open ? (
+        <span ref={bubbleRef} className="help-tip__bubble" role="tooltip">
+          {text}
+        </span>
+      ) : null}
     </span>
   );
 }

@@ -3022,14 +3022,15 @@ code {
 }
 
 .action-picker__cat-btn--active {
-  background: var(--c-accent);
-  color: var(--c-text-on-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
   font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--c-accent);
 }
 
 .action-picker__cat-btn--active:hover {
-  background: var(--c-accent);
-  color: var(--c-text-on-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
 }
 
 .action-picker__cat-icon {
@@ -3048,7 +3049,7 @@ code {
 }
 
 .action-picker__cat-btn--active .action-picker__cat-icon {
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--c-accent);
   color: var(--c-text-on-accent);
 }
 
@@ -3062,13 +3063,155 @@ code {
   overflow-y: auto;
 }
 
-.action-picker__cat-title {
-  margin: 0 0 12px;
+/* Category heading: icon badge + name + one-line description. */
+.action-picker__cat-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--c-border);
+}
+.action-picker__cat-head-icon {
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
   font-size: var(--fs-caption);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.action-picker__cat-head-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.action-picker__cat-title {
+  margin: 0;
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--c-text-bright);
+}
+.action-picker__cat-desc {
+  margin: 0;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  line-height: 1.35;
+}
+
+.action-picker__no-results {
+  margin: 8px 4px;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  text-align: center;
+}
+
+/* Two-column row for compact fields (trigger mode | throttle). Collapses to a
+   single column on narrow widths, or when the trigger's chord UI needs room. */
+.picker-two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  align-items: start;
+}
+.picker-two-col--single {
+  grid-template-columns: 1fr;
+}
+@media (max-width: 620px) {
+  .picker-two-col {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Number field with a trailing unit (e.g. throttle "ms"). */
+.input-suffix {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.input-suffix > input {
+  padding-right: 40px;
+}
+.input-suffix__unit {
+  position: absolute;
+  right: 12px;
+  pointer-events: none;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+}
+
+/* Collapsible "Advanced" section inside the action editor. */
+.picker-advanced {
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-md);
+}
+.picker-advanced__summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  color: var(--c-text);
+  font-weight: 600;
+}
+.picker-advanced__summary::-webkit-details-marker {
+  display: none;
+}
+.picker-advanced__summary::before {
+  content: "\25B8";
+  color: var(--c-text-muted);
+  font-size: 11px;
+  transition: transform 120ms ease;
+}
+.picker-advanced[open] > .picker-advanced__summary::before {
+  transform: rotate(90deg);
+}
+.picker-advanced__title {
+  font-size: var(--fs-caption);
+}
+.picker-advanced__tags {
+  margin-left: auto;
+  font-size: var(--fs-caption);
+  font-weight: 400;
+  color: var(--c-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-advanced__body {
+  display: grid;
+  gap: 14px;
+  padding: 4px 14px 14px;
+}
+
+/* Live "what will happen" preview above the footer. */
+.action-picker__preview {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 20px;
+  border-top: 1px solid var(--c-border);
+  font-size: var(--fs-caption);
+}
+.action-picker__preview-label {
+  flex-shrink: 0;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: var(--c-accent);
+  font-size: var(--fs-micro);
+  color: var(--c-text-muted);
+}
+.action-picker__preview-text {
+  color: var(--c-text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .action-picker__footer {
@@ -4210,11 +4353,13 @@ code {
   pointer-events: none;
 }
 .help-tip__bubble {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  transform: translateX(-50%) translateY(4px);
-  z-index: 10;
+  /* Fixed → escapes the editor's overflow clip; coords are set by JS against
+     the viewport (see HelpTip), so it never clips at an edge. Starts offscreen
+     until the layout effect places it. */
+  position: fixed;
+  top: -9999px;
+  left: 0;
+  z-index: 1100;
   width: max-content;
   max-width: 260px;
   padding: 8px 10px;
@@ -4228,16 +4373,12 @@ code {
   line-height: 1.45;
   text-align: left;
   white-space: normal;
-  opacity: 0;
-  visibility: hidden;
   pointer-events: none;
-  transition: opacity 120ms ease, transform 120ms ease;
+  animation: help-tip-in 120ms ease;
 }
-.help-tip:hover .help-tip__bubble,
-.help-tip:focus-visible .help-tip__bubble {
-  opacity: 1;
-  visibility: visible;
-  transform: translateX(-50%) translateY(0);
+@keyframes help-tip-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 /* ── Token toolbar: quick-insert chips for {date}/{clipboard}/{cursor} ── */
@@ -4380,17 +4521,7 @@ code {
 
 /* Inline result of the action-picker "Test" (dry-run) button */
 .action-picker__test-result {
-  margin: 8px 0 0;
-  padding: 8px 12px;
-  border-radius: var(--radius-xs);
-  background: var(--c-card-bg);
-  border: 1px solid var(--c-border);
-  font-size: var(--fs-caption);
-  color: var(--c-text);
-}
-.action-picker__test-result--error {
-  border-color: color-mix(in srgb, var(--c-danger) 40%, transparent);
-  color: var(--c-danger);
+  padding: 0 20px 4px;
 }
 
 /* ── Expert section density overrides ── */

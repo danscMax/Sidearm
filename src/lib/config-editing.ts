@@ -92,8 +92,19 @@ export function removeBindingsForControls(
 }
 
 export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfig {
+  // A binding's real identity is its (profileId, controlId, layer) slot — the
+  // same uniqueness key the backend validator enforces. Match on that slot OR
+  // the id, so dropping / quick-ruling an action onto an already-bound slot
+  // REPLACES the occupant instead of appending a second binding for the same
+  // tuple (which is schema-valid but fails validate_config on save with
+  // "Duplicate binding tuple detected"). The occupant may carry a different id
+  // (created via a different path), so an id-only match missed it.
   const bindingIndex = config.bindings.findIndex(
-    (binding) => binding.id === nextBinding.id,
+    (binding) =>
+      binding.id === nextBinding.id ||
+      (binding.profileId === nextBinding.profileId &&
+        binding.controlId === nextBinding.controlId &&
+        binding.layer === nextBinding.layer),
   );
 
   if (bindingIndex === -1) {

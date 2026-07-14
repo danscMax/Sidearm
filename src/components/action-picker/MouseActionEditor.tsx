@@ -20,7 +20,7 @@ export function MouseActionEditor({
         onChange={(action) => onChange({ ...draft, action })}
       />
       <ModifierRow value={draft} onChange={(mods) => onChange({ ...draft, ...mods })} />
-      <p className="panel__muted">
+      <p className="field__description">
         {t("picker.mouseModifiersHint")}
       </p>
     </div>

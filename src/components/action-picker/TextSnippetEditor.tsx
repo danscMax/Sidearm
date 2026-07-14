@@ -158,6 +158,7 @@ export function TextSnippetEditor({
             className="token-chip"
             onClick={() => insertToken(token)}
             title={t(descKey)}
+            aria-label={t("picker.tokenInsertAria", { token })}
           >
             {token}
           </button>

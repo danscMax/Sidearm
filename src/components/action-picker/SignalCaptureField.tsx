@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { HelpTip } from "../shared";
 import { CaptureRow } from "./shared/CaptureRow";
 
 export function SignalCaptureField({
@@ -21,9 +22,7 @@ export function SignalCaptureField({
         <span className="field__label">
           {t("picker.signalLabel")}
           {expectedSignal ? (
-            <span className="field__hint" title={`${t("picker.signalRecommended")} ${expectedSignal}`}>
-              ?
-            </span>
+            <HelpTip text={`${t("picker.signalRecommended")} ${expectedSignal}`} />
           ) : null}
         </span>
         <CaptureRow

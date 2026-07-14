@@ -179,6 +179,55 @@ export function autoName(
   }
 }
 
+/** One-line "what will happen" preview of the drafted action, for the live
+ *  summary above the modal footer. Pure, like autoName. */
+export function describeAction(
+  effectiveCategory: string,
+  drafts: PickerDrafts,
+  t: TFunction,
+  profiles: Profile[],
+): string {
+  const category = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory) ?? ACTION_CATEGORIES[0];
+  switch (category.actionType) {
+    case "shortcut": {
+      const combo = [...modifierLabels(drafts.shortcut), drafts.shortcut.key || null].filter(Boolean).join(" + ");
+      return combo ? t("picker.previewShortcut", { combo }) : t("picker.previewEmpty");
+    }
+    case "mouseAction": {
+      const mods = modifierLabels(drafts.mouse);
+      const label = mouseActionLabel(drafts.mouse.action) ?? "";
+      const combo = mods.length > 0 ? `${mods.join(" + ")} + ${label}` : label;
+      return t("picker.previewMouse", { combo });
+    }
+    case "textSnippet": {
+      const text = drafts.text.text.trim().replace(/\s+/g, " ");
+      if (!text) return t("picker.previewEmpty");
+      const clipped = text.length > 48 ? `${text.slice(0, 48)}…` : text;
+      return t("picker.previewText", { text: clipped });
+    }
+    case "sequence":
+      return t("picker.previewSequence", { count: drafts.sequence.length });
+    case "launch": {
+      const target = drafts.launch.target.trim();
+      return target ? t("picker.previewLaunch", { target }) : t("picker.previewEmpty");
+    }
+    case "mediaKey":
+      return t("picker.previewMedia", { key: mediaKeyLabel(drafts.media) ?? "" });
+    case "profileSwitch": {
+      const p = profiles.find((pr) => pr.id === drafts.profile);
+      return p ? t("picker.previewProfile", { name: p.name }) : t("picker.previewEmpty");
+    }
+    case "menu":
+      return t("picker.previewMenu", { count: drafts.menuItems.length });
+    case "disabled":
+      return t("picker.previewDisabled");
+    case "repairClipboard":
+      return t("picker.previewRepair");
+    default:
+      return assertNever(category.actionType);
+  }
+}
+
 /* ─────────────────────────────────────────────────────────
    Action assembly
    ───────────────────────────────────────────────────────── */

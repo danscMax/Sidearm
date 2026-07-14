@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-07-14
+
+### Fixed
+- Dragging an action onto an already-bound control no longer fails to save with "Duplicate binding tuple detected" — the drop now replaces the binding already occupying that control/layer slot instead of adding a second one.
+- Help tooltips ("?") in the action editor no longer clip at the top or bottom edge of the scrolling panel; they now escape the panel and flip above when there is no room below.
+
+### Changed
+- Reworked the "Assign action" editor for less clutter and better use of width:
+  - Rarely-changed settings (trigger mode, throttle, execution conditions) now live in a collapsible **Advanced** section that opens automatically when any of them is set and shows a summary of the current values when collapsed.
+  - Trigger mode and throttle sit side by side; the throttle field shows its "ms" unit.
+  - A live **Result** line at the bottom previews what the action will do ("Types …", "Presses Ctrl+C", …).
+  - The category list has a lighter active state, and each category now shows an icon and a one-line description.
+  - More "?" help tooltips (key, launch mode, signal), Ctrl+Enter to save, Enter in search jumps to the first match, and the dry-run test result reuses the standard banner style.
+
 ## [0.8.1] — 2026-07-14
 
 ### Fixed

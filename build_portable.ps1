@@ -205,6 +205,18 @@ if ($Clean) {
 }
 
 # ============================================================================
+# Shell gate -- every mode that assembles the package needs pwsh
+# ============================================================================
+# Windows PowerShell 5.1 cannot load Microsoft.PowerShell.Security on this setup
+# (PS7 entries in PSModulePath make its TypeData collide), so Get-AuthenticodeSignature
+# is missing and the WebView2 signature gate below silently degrades to "not bundled".
+# Refuse the wrong shell instead of shipping a portable without the bootstrapper.
+if ($PSVersionTable.PSVersion.Major -lt 6) {
+    Write-Fail "Run with pwsh (PowerShell 7+), not powershell.exe -- see AGENTS.md"
+    exit 1
+}
+
+# ============================================================================
 # Handle -Verify (jump to verification)
 # ============================================================================
 if ($Verify) {

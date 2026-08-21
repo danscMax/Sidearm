@@ -93,6 +93,28 @@ describe("canon adoption guards", () => {
     expect(offenders).toEqual([]);
   });
 
+  it("'toggle-switch' className only in the Toggle component", () => {
+    const offenders = TSX.filter(
+      ([p, c]) => /toggle-switch/.test(c) && p !== "components/shared.tsx",
+    ).map(([p]) => p);
+    expect(offenders).toEqual([]);
+  });
+
+  it("'modal-backdrop' / 'modal-header' / 'modal-footer' classNames only via ModalShell/ModalHeader/ModalFooter", () => {
+    const offenders = TSX.filter(
+      ([p, c]) =>
+        /"modal-backdrop|"modal-header|"modal-footer/.test(c) && p !== "components/shared.tsx",
+    ).map(([p]) => p);
+    expect(offenders).toEqual([]);
+  });
+
+  it("the × close-icon markup only lives in CloseButton (reuse it, don't re-draw it)", () => {
+    const offenders = TSX.filter(
+      ([p, c]) => c.includes("M1 1l12 12M13 1L1 13") && p !== "components/shared.tsx",
+    ).map(([p]) => p);
+    expect(offenders).toEqual([]);
+  });
+
   it("no hardcoded hex fallback in CSS var() (use the token, not a stale literal)", () => {
     // `var(--token, #abc)` lets a literal silently diverge from the real token
     // and masks an undefined token. Cascade fallbacks `var(--a, var(--b))` and

@@ -445,6 +445,25 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         .filter(|id| !id.is_empty());
     let is_elevated = window_capture::is_current_process_elevated();
 
+    // Windows shows an empty tooltip box on hover unless the tray icon carries
+    // one, so keep it in sync with the same state the menu shows.
+    let active_name = active
+        .as_deref()
+        .and_then(|id| config.profiles.iter().find(|p| p.id == id))
+        .map(|p| p.name.as_str())
+        .unwrap_or("—");
+    let state_label = if is_running {
+        "слушает мышь"
+    } else {
+        "приостановлен"
+    };
+    if let Err(error) = tray.set_tooltip(Some(format!(
+        "Sidearm — {state_label}
+Профиль: {active_name}"
+    ))) {
+        log::warn!("[tray] set_tooltip failed: {error}");
+    }
+
     match build_tray_menu(
         app,
         &config.profiles,
@@ -1785,6 +1804,10 @@ async fn start_runtime(
         CommandError::internal(format!("Failed to emit runtime_started event: {error}"))
     })?;
 
+    // Tray label and tooltip carry the running state, so they go stale unless
+    // every start/stop path refreshes them - not just the tray's own menu item.
+    rebuild_tray_menu_from_config(&app, &load_response.config);
+
     Ok(summary)
 }
 
@@ -1811,6 +1834,8 @@ async fn stop_runtime(
     app.emit(EVENT_RUNTIME_STOPPED, &summary).map_err(|error| {
         CommandError::internal(format!("Failed to emit runtime_stopped event: {error}"))
     })?;
+
+    rebuild_tray_menu(&app);
 
     Ok(summary)
 }
@@ -3134,6 +3159,7 @@ pub fn run() {
                 None => log::warn!("[system] No default window icon available for tray"),
             }
             tray_builder
+                .tooltip("Sidearm")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(move |app, event| match event.id.as_ref() {

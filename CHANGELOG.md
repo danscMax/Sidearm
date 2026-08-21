@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-08-21
+
+### Fixed
+- The tray icon no longer shows an empty black tooltip box on hover — it now
+  reports the runtime state and the active profile
+  ("Sidearm — слушает мышь / приостановлен", "Профиль: …").
+- The tray no longer shows a stale runtime state: starting or stopping capture
+  from the app window (including the automatic start at launch) left both the
+  tooltip and the "Приостановить / Слушать мышь" menu item showing whatever
+  was true at startup, because only the tray's own menu actions refreshed it.
+
 ## [0.8.2] — 2026-07-14
 
 ### Fixed

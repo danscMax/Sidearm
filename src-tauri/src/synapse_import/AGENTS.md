@@ -15,6 +15,7 @@ Parse exported Razer Synapse profiles (`.synapse3` / `.synapse4`, incl. zipped) 
 - Untrusted input: enforce a zip budget (`enforce_zip_budget`), never panic on malformed data — collect warnings and continue.
 - Canonicalize keys on the way in: F-key tokens to `F{n}`, bare-modifier VKs folded to modifier flags, dedupe case-insensitive path collisions.
 - Report skipped/unreadable entries as warnings rather than failing the whole import.
+- XML element text is collected through `macro_xml::TextBuf` (handles both `Event::Text` and `Event::GeneralRef`, trims once per element); never assign a raw `Event::Text` chunk — quick-xml ≥0.38 splits `A &amp; B` into three events.
 
 ## Work Guidance
 

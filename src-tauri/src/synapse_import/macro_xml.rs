@@ -19,6 +19,61 @@ const MAX_XML_MACRO_BYTES: u64 = MAX_ENTRY_UNCOMPRESSED;
 /// reusing the v3 ZIP entry-count limit.
 const MAX_XML_MACRO_FILES: usize = MAX_ZIP_ENTRIES;
 
+/// Collects one element's text across quick-xml events. Since quick-xml 0.38
+/// entity and char references (`&amp;`, `&#x41F;`) arrive as separate
+/// `Event::GeneralRef` events between `Event::Text` chunks, so `A &amp; B`
+/// must be stitched back together before it is assigned. Trimming happens
+/// once on the joined text: reader-level trimming would eat the spaces around
+/// each reference.
+#[derive(Default)]
+pub(super) struct TextBuf(String);
+
+impl TextBuf {
+    pub(super) fn push_text(
+        &mut self,
+        t: &quick_xml::events::BytesText<'_>,
+    ) -> Result<(), quick_xml::Error> {
+        self.0.push_str(&t.decode()?);
+        Ok(())
+    }
+
+    /// Resolves a char ref or one of the five predefined entities; anything
+    /// else is an error, as it was for `BytesText::unescape` before 0.38.
+    pub(super) fn push_ref(
+        &mut self,
+        r: &quick_xml::events::BytesRef<'_>,
+    ) -> Result<(), quick_xml::Error> {
+        if let Some(ch) = r.resolve_char_ref()? {
+            self.0.push(ch);
+            return Ok(());
+        }
+        let name = r.decode()?;
+        match quick_xml::escape::resolve_predefined_entity(&name) {
+            Some(value) => {
+                self.0.push_str(value);
+                Ok(())
+            }
+            None => Err(quick_xml::escape::EscapeError::UnrecognizedEntity(
+                0..name.len(),
+                name.into_owned(),
+            )
+            .into()),
+        }
+    }
+
+    /// Takes the collected text trimmed of XML whitespace; `None` when nothing
+    /// but whitespace was collected (the old `trim_text(true)` dropped such
+    /// text entirely).
+    pub(super) fn take(&mut self) -> Option<String> {
+        let text = self
+            .0
+            .trim_matches(|c| matches!(c, ' ' | '\t' | '\r' | '\n'))
+            .to_owned();
+        self.0.clear();
+        (!text.is_empty()).then_some(text)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum MacroXmlError {
     #[error("IO error: {0}")]
@@ -40,7 +95,6 @@ pub fn parse_macro_xml_str(
     use quick_xml::events::Event;
 
     let mut reader = Reader::from_str(raw);
-    reader.trim_text(true);
 
     let mut name = fallback_name.clone();
     let mut guid = String::new();
@@ -53,10 +107,20 @@ pub fn parse_macro_xml_str(
     let mut current_event = RawEvent::default();
     let mut in_macro_event = false;
     let mut text_target: Option<String> = None;
+    let mut text = TextBuf::default();
     let mut buf = Vec::new();
 
     loop {
-        match reader.read_event_into(&mut buf) {
+        let event = reader.read_event_into(&mut buf);
+        // Text collected so far belongs to the current element; assign it
+        // before the element stack changes.
+        if matches!(event, Ok(Event::Start(_) | Event::End(_)))
+            && let Some(value) = text.take()
+            && let Some(tag) = &text_target
+        {
+            assign_text(tag, &value, &stack, &mut name, &mut guid, &mut current_event);
+        }
+        match event {
             Ok(Event::Start(e)) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 stack.push(tag.clone());
@@ -78,11 +142,13 @@ pub fn parse_macro_xml_str(
             Ok(Event::Empty(_)) => {
                 // Self-closing tags like <flag/> and <DelaySetting/> — ignore.
             }
+            // Undecodable text or an unknown entity is tolerated (dropped),
+            // as before the quick-xml 0.38 event split.
             Ok(Event::Text(t)) => {
-                let text = t.unescape().unwrap_or_default().into_owned();
-                if let Some(tag) = &text_target {
-                    assign_text(tag, &text, &stack, &mut name, &mut guid, &mut current_event);
-                }
+                let _ = text.push_text(&t);
+            }
+            Ok(Event::GeneralRef(r)) => {
+                let _ = text.push_ref(&r);
             }
             Ok(Event::Eof) => break,
             Err(err) => return Err(MacroXmlError::Xml(err)),

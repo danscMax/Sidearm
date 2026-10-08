@@ -29,4 +29,5 @@ Security issues in any of these areas are in scope.
 
 | Version | Supported |
 |---------|-----------|
-| 0.1.x   | Yes       |
+| Latest release (0.8.x) | Yes |
+| Older versions | No |

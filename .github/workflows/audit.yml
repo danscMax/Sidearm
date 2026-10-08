@@ -19,6 +19,13 @@ jobs:
       # only on the Linux webview target (Windows is the primary platform); proc-macro-error,
       # unic-*, and fxhash are build-time/transitive; rand is unused by app code
       # (RUSTSEC-2026-0097 requires rand::rng() + a custom logger). Re-review yearly.
+      # 2026-10-08: the direct quick-xml dep is on 0.41 (fixed). RUSTSEC-2026-0194/0195
+      # remain only on transitive quick-xml 0.30 (xcb build-dep, Linux-only), 0.38 (plist,
+      # macOS-only Info.plist parsing in tauri; not in the Windows/Linux tree) and 0.39
+      # (wayland-scanner proc-macro, build-time, Linux). RUSTSEC-2026-0235: rkyv 0.7 is a
+      # lockfile-only optional dep of rust_decimal (via byte-unit), not compiled in
+      # (`cargo tree --target all -i rkyv` is empty); the app never reads rkyv archives.
+      # Re-review yearly.
       - run: >
           cargo audit --file src-tauri/Cargo.lock
           --ignore RUSTSEC-2024-0370
@@ -40,6 +47,9 @@ jobs:
           --ignore RUSTSEC-2025-0098
           --ignore RUSTSEC-2025-0100
           --ignore RUSTSEC-2026-0097
+          --ignore RUSTSEC-2026-0194
+          --ignore RUSTSEC-2026-0195
+          --ignore RUSTSEC-2026-0235
   npm-audit:
     runs-on: ubuntu-latest
     steps:

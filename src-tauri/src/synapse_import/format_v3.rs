@@ -21,7 +21,7 @@ use std::path::Path;
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
-use super::macro_xml;
+use super::macro_xml::{self, TextBuf};
 use super::makecode;
 use super::mapping::{
     input_id_to_control_id, mouse_action_from_assignment, parse_modifier_string, vk_to_key,
@@ -312,14 +312,23 @@ fn parse_v3_mapping_list(
     warnings: &mut Vec<ImportWarning>,
 ) -> Result<(), quick_xml::Error> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
 
     let mut stack: Vec<String> = Vec::new();
     let mut current_event: Option<MappingBuilder> = None;
+    let mut text = TextBuf::default();
     let mut buf = Vec::new();
 
     loop {
-        match reader.read_event_into(&mut buf)? {
+        let event = reader.read_event_into(&mut buf)?;
+        // Text collected so far belongs to the current element; assign it
+        // before the element stack changes.
+        if matches!(event, Event::Start(_) | Event::End(_))
+            && let Some(value) = text.take()
+            && let Some(b) = current_event.as_mut()
+        {
+            assign_mapping_text(b, &stack, &value);
+        }
+        match event {
             Event::Start(e) => {
                 let tag = String::from_utf8_lossy(e.name().as_ref()).into_owned();
                 stack.push(tag.clone());
@@ -347,12 +356,8 @@ fn parse_v3_mapping_list(
             Event::Empty(_) => {
                 // Self-closing tags like <Request /> — ignored.
             }
-            Event::Text(t) => {
-                let text = t.unescape()?.into_owned();
-                if let Some(b) = current_event.as_mut() {
-                    assign_mapping_text(b, &stack, &text);
-                }
-            }
+            Event::Text(t) => text.push_text(&t)?,
+            Event::GeneralRef(r) => text.push_ref(&r)?,
             Event::Eof => break,
             _ => {}
         }
@@ -597,27 +602,33 @@ fn build_mouse_action(
 
 fn parse_v3_profile_meta(xml: &str) -> Result<(String, String), quick_xml::Error> {
     let mut reader = Reader::from_str(xml);
-    reader.trim_text(true);
     let mut stack: Vec<String> = Vec::new();
     let mut name = String::new();
     let mut guid = String::new();
+    let mut text = TextBuf::default();
     let mut buf = Vec::new();
     loop {
-        match reader.read_event_into(&mut buf)? {
+        let event = reader.read_event_into(&mut buf)?;
+        // Text collected so far belongs to the current element; assign it
+        // before the element stack changes.
+        if matches!(event, Event::Start(_) | Event::End(_))
+            && let Some(value) = text.take()
+        {
+            match stack.last().map(String::as_str) {
+                Some("Name") => name = value,
+                Some("ProfileId") => guid = value,
+                _ => {}
+            }
+        }
+        match event {
             Event::Start(e) => {
                 stack.push(String::from_utf8_lossy(e.name().as_ref()).into_owned());
             }
             Event::End(_) => {
                 stack.pop();
             }
-            Event::Text(t) => {
-                let text = t.unescape()?.into_owned();
-                match stack.last().map(String::as_str) {
-                    Some("Name") => name = text,
-                    Some("ProfileId") => guid = text,
-                    _ => {}
-                }
-            }
+            Event::Text(t) => text.push_text(&t)?,
+            Event::GeneralRef(r) => text.push_ref(&r)?,
             Event::Eof => break,
             _ => {}
         }

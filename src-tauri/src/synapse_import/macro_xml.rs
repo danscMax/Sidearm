@@ -380,6 +380,24 @@ mod tests {
         }
     }
 
+    // Guard for the quick-xml upgrade: entity and char refs must decode into
+    // the full name, not get split or truncated.
+    #[test]
+    fn macro_name_decodes_entities() {
+        let xml = r#"<Macro><Name>A &amp; B &#x41F;</Name><MacroEvents>
+            <MacroEvent><Type>1</Type><KeyEvent><Makecode>30</Makecode><State>0</State></KeyEvent><flag/></MacroEvent>
+        </MacroEvents><Guid>g-1</Guid></Macro>"#;
+        let parsed = parse_macro_xml_str(xml, "fallback".into(), &mut Vec::new()).unwrap();
+        assert_eq!(parsed.name, "A & B П");
+    }
+
+    #[test]
+    fn macro_name_trims_surrounding_whitespace() {
+        let xml = "<Macro><Name>\n   Spaced   \n</Name><MacroEvents></MacroEvents><Guid>g-1</Guid></Macro>";
+        let parsed = parse_macro_xml_str(xml, "fallback".into(), &mut Vec::new()).unwrap();
+        assert_eq!(parsed.name, "Spaced");
+    }
+
     #[test]
     fn preserves_inter_event_delays() {
         // A `<Delay>` (ms) MacroEvent must surface as a Sleep step — these were

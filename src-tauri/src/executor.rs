@@ -1406,6 +1406,54 @@ mod tests {
         assert_eq!(event.outcome, ExecutionOutcome::Switched);
     }
 
+    // Guard for the launch path: the target really starts and args containing
+    // spaces arrive as single argv entries.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn launch_passes_args_with_spaces_verbatim() {
+        // CI Windows runners are elevated; the elevated launch path is covered
+        // by its own unit tests.
+        if crate::window_capture::is_current_process_elevated() {
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let spaced = tmp.path().join("dir with space");
+        std::fs::create_dir(&spaced).expect("create spaced dir");
+        let src = tmp.path().join("src.txt");
+        std::fs::write(&src, "ok").expect("write src");
+        let dst = spaced.join("dst file.txt");
+
+        let system_root = std::env::var("SystemRoot").expect("SystemRoot");
+        let payload = crate::config::LaunchActionPayload {
+            target: format!(r"{system_root}\System32\cmd.exe"),
+            args: vec![
+                "/c".into(),
+                "copy".into(),
+                "/y".into(),
+                src.display().to_string(),
+                dst.display().to_string(),
+            ],
+            working_dir: None,
+        };
+        let config = default_seed_config();
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
+
+        let pid = spawn_launch_target(&payload, &preview, None).expect("launch should spawn");
+        assert!(pid > 0);
+
+        let mut content = None;
+        for _ in 0..50 {
+            if let Ok(text) = std::fs::read_to_string(&dst)
+                && !text.is_empty()
+            {
+                content = Some(text);
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        assert_eq!(content.as_deref(), Some("ok"), "dst was not created with the source text");
+    }
+
     #[test]
     fn validate_launch_request_requires_absolute_path() {
         let payload = crate::config::LaunchActionPayload {

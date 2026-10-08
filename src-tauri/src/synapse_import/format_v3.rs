@@ -816,6 +816,16 @@ mod tests {
         assert_eq!(name, "MAIN-Default");
     }
 
+    // Guard for the quick-xml upgrade: entity and char refs must decode into
+    // the full name, not get split or truncated.
+    #[test]
+    fn profile_meta_decodes_entities_and_char_refs() {
+        let xml = "<Profile><ProfileId>g-1</ProfileId><Name>Work &amp; Play &lt;1&gt; &#x41F;&#1088;</Name></Profile>";
+        let (guid, name) = parse_v3_profile_meta(xml).unwrap();
+        assert_eq!(guid, "g-1");
+        assert_eq!(name, "Work & Play <1> Пр");
+    }
+
     #[test]
     fn vk_table_covers_common_keys() {
         assert_eq!(vk_to_key(0x08), Some("Backspace"));

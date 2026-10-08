@@ -381,4 +381,26 @@ mod tests {
         let cmd = &xml[cmd_start..cmd_end];
         assert!(!cmd.contains(" & "));
     }
+
+    #[test]
+    fn task_xml_has_no_raw_markup_for_hostile_path() {
+        // Single call site so a signature change only touches this helper.
+        fn build(path: &str) -> String {
+            task_definition_xml(path)
+        }
+        let xml = build(r"C:\a&b'c<d>e\Sidearm.exe");
+        const ENTITIES: [&str; 5] = ["&amp;", "&lt;", "&gt;", "&quot;", "&apos;"];
+        for (i, _) in xml.match_indices('&') {
+            assert!(
+                ENTITIES.iter().any(|e| xml[i..].starts_with(e)),
+                "raw '&' at byte {i}: {}",
+                &xml[i..(i + 10).min(xml.len())]
+            );
+        }
+        assert_eq!(xml.matches("<Task ").count(), 1);
+        assert_eq!(xml.matches("</Task>").count(), 1);
+        assert!(xml.contains("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>"));
+        assert!(xml.contains("<RunLevel>HighestAvailable</RunLevel>"));
+        assert!(xml.contains("<LogonTrigger>"));
+    }
 }

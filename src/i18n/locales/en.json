@@ -578,6 +578,8 @@
     "autostartPathUnknown": "(unknown)",
     "autostartCurrentPath": "Current path:",
     "autostartReregisterButton": "Re-register for current path",
+    "autostartReconfirmMsg": "Sidearm was updated (or the task was created by an older version). Confirm once to keep starting as administrator — Windows will ask for permission.",
+    "autostartReconfirmButton": "Confirm",
     "osdPreviewProfileLabel": "Profile:",
     "osdPreviewSampleProfile": "Main",
     "osdDurationSeconds": "{{seconds}} s",
@@ -1030,6 +1032,10 @@
   },
   "mouseDefaults": {
     "suspected": "Mouse buttons are typing factory digits (1–12) instead of the configured keys — the Razer profile is not applied. Make sure Synapse is running, or save the profile to the mouse's onboard memory."
+  },
+  "elevation": {
+    "foregroundBlocked": "“{{exe}}” is running as administrator — Windows blocks Sidearm's input there.",
+    "relaunchAction": "Restart as administrator"
   },
   "device": {
     "addDevice": "＋ Device",

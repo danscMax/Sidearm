@@ -380,6 +380,14 @@ export async function listenMouseDefaultsSuspected(
   return listenEvent("mouse_defaults_suspected", onSuspected);
 }
 
+/** Fires once per app when the foreground window runs elevated and Windows
+ *  (UIPI) blocks Sidearm's input there. Not sent while Sidearm is elevated. */
+export async function listenElevatedForeground(
+  onBlocked: (payload: { exe: string }) => void,
+): Promise<UnlistenFn> {
+  return listenEvent("elevated_foreground_blocked", onBlocked);
+}
+
 /** Fires when a binding's re-trigger was skipped inside its throttle window. */
 export async function listenThrottleBlocked(
   onPayload: (payload: ThrottleBlockedEvent) => void,

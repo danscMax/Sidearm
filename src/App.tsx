@@ -40,12 +40,14 @@ import {
   normalizeCommandError,
   openConfigFolder,
   listenDragDrop,
+  listenElevatedForeground,
   listenMouseDefaultsSuspected,
   listenSingleInstanceBlocked,
   listenTrayProfileChanged,
   listenQuickRuleStart,
   listenQuickRuleFailed,
   parseSynapseSource,
+  relaunchAsAdmin,
   restoreConfigFromBackup,
 } from "./lib/backend";
 import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels";
@@ -212,6 +214,25 @@ function App() {
     void listenMouseDefaultsSuspected(() => {
       if (!hasBuiltinDeviceRef.current) return;
       showToast(t("mouseDefaults.suspected"), "warning");
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => unlisten?.();
+  }, [showToast, t]);
+
+  // The foreground app runs elevated, so Windows (UIPI) drops our input there.
+  // Offer the existing "restart as administrator" path.
+  // ponytail: toast only, same ceiling as mouse_defaults_suspected (hidden in
+  // tray → toast unseen); upgrade to tauri-plugin-notification if it's missed.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listenElevatedForeground(({ exe }) => {
+      showToast(t("elevation.foregroundBlocked", { exe }), "warning", {
+        label: t("elevation.relaunchAction"),
+        onClick: () => {
+          void relaunchAsAdmin().catch((e: unknown) => showToast(normalizeCommandError(e).message, "warning"));
+        },
+      });
     }).then((fn) => {
       unlisten = fn;
     });

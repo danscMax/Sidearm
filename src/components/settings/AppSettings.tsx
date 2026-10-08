@@ -127,6 +127,20 @@ export function AppSettings({
             </button>
           </Notice>
         )}
+
+        {adminAutostart?.enabled && !adminAutostart.pathMismatch && adminAutostart.needsReconfirm && (
+          <Notice variant="warning" className="mt-12">
+            <p>{t("settings.autostartReconfirmMsg")}</p>
+            <button
+              type="button"
+              className="action-button action-button--secondary action-button--small mt-8"
+              onClick={() => void handleRunAsAdminToggle(true)}
+              disabled={autostartBusy}
+            >
+              {t("settings.autostartReconfirmButton")}
+            </button>
+          </Notice>
+        )}
       </section>
 
       {/* Global shortcut */}

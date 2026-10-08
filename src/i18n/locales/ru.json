@@ -582,6 +582,8 @@
     "autostartPathUnknown": "(неизвестно)",
     "autostartCurrentPath": "Текущий путь:",
     "autostartReregisterButton": "Перерегистрировать на текущий путь",
+    "autostartReconfirmMsg": "Sidearm обновился (или задача создана старой версией). Чтобы автозапуск от администратора снова работал, подтвердите его — Windows спросит разрешение один раз.",
+    "autostartReconfirmButton": "Подтвердить",
     "osdPreviewProfileLabel": "Профиль:",
     "osdPreviewSampleProfile": "Main",
     "osdDurationSeconds": "{{seconds}} сек",
@@ -1044,6 +1046,10 @@
   },
   "mouseDefaults": {
     "suspected": "Кнопки мыши печатают заводские цифры (1–12) вместо настроенных клавиш — профиль Razer не применён. Проверь, что Synapse запущен, или запиши профиль в бортовую память мыши."
+  },
+  "elevation": {
+    "foregroundBlocked": "Окно «{{exe}}» запущено от имени администратора — Windows не пропускает туда нажатия Sidearm.",
+    "relaunchAction": "Перезапустить от администратора"
   },
   "device": {
     "addDevice": "＋ Устройство",

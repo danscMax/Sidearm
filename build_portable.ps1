@@ -2,6 +2,7 @@
 # Sidearm -- Portable Build Script
 # ============================================================================
 # Builds a portable release:
+#   0. Dependency audit (cargo audit + npm audit); stops on any vulnerability
 #   1. Builds Tauri frontend (npm build) + Rust backend (cargo tauri build)
 #   2. Assembles portable folder with EXE + WebView2 bootstrapper
 #   3. Verifies build integrity
@@ -94,6 +95,29 @@ function Invoke-PreFlight {
         Show-Notification -Title 'Sidearm Build FAILED' -Body 'Pre-flight: npm or cargo missing.' -IsError
         exit 1
     }
+    Write-Host ""
+}
+
+# Release gate: refuse to build/package while shipped dependencies have known
+# vulnerabilities. Accepted advisories live in .cargo/audit.toml (same list CI uses).
+function Invoke-DependencyAudit {
+    Write-Host "  Dependency audit..." -ForegroundColor Cyan
+    Set-Location $PROJECT_ROOT
+    if (-not (Get-Command cargo-audit -ErrorAction SilentlyContinue)) {
+        Write-Fail "cargo-audit not found -- install it: cargo install cargo-audit --locked"
+        Show-Notification -Title 'Sidearm Build FAILED' -Body 'cargo-audit is not installed.' -IsError
+        exit 1
+    }
+    & cargo audit --file src-tauri/Cargo.lock
+    $cargoExit = $LASTEXITCODE
+    & npm audit --omit=dev --audit-level=high
+    $npmExit = $LASTEXITCODE
+    if ($cargoExit -ne 0 -or $npmExit -ne 0) {
+        Write-Fail "Dependency audit failed (cargo audit exit $cargoExit, npm audit exit $npmExit)"
+        Show-Notification -Title 'Sidearm Build FAILED' -Body 'Dependency audit found vulnerabilities.' -IsError
+        exit 1
+    }
+    Write-Ok "No known vulnerabilities in dependencies"
     Write-Host ""
 }
 
@@ -227,6 +251,9 @@ if ($Verify) {
 # Step 1: Build Tauri application
 # ============================================================================
 $totalSteps = 3
+
+# Every mode that produces a package (incl. -SkipBuild) passes the audit first.
+Invoke-DependencyAudit
 
 if (-not $SkipBuild) {
     Invoke-PreFlight

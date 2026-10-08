@@ -103,7 +103,7 @@ Run before declaring a code change done:
 
 - Frontend: `npm run check` (= `tsc --noEmit` + `knip` dead-code + `cargo clippy`) and `npm run test` (vitest).
 - Rust: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` and `cargo test --manifest-path src-tauri/Cargo.toml`.
-- Integration smoke: `pwsh -File build_portable.ps1` (release build + WebView2 packaging; build via pwsh, not cmd).
+- Integration smoke: `pwsh -File build_portable.ps1` (release build + WebView2 packaging; build via pwsh, not cmd; also runs cargo audit + npm audit and fails on vulnerabilities — accepted advisories live in `.cargo/audit.toml`).
 - The desktop UI cannot be rendered headlessly here — visual and screen-reader changes need a manual pass in the running app.
 
 ## User Preferences

@@ -273,11 +273,21 @@ pub(crate) fn open_in_explorer(path: &Path) -> Result<(), String> {
 
 /// Open a URL, folder, or document with the system default handler
 /// (`ShellExecuteW` with the "open" verb). Used by the launch action for
-/// non-executable targets (URLs and directories).
+/// non-executable targets (URLs and directories). When Sidearm is elevated the
+/// target is handed to Explorer under the shell's (non-admin) token instead.
 pub(crate) fn open_target(target: &str) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::UI::Shell::ShellExecuteW;
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    if crate::platform::window::is_current_process_elevated() {
+        let explorer = format!(
+            "{}\\explorer.exe",
+            std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".into())
+        );
+        return spawn_with_shell_token(Path::new(&explorer), &[target.to_string()], None)
+            .map(|_| ());
+    }
 
     let verb_w: Vec<u16> = "open\0".encode_utf16().collect();
     let target_w: Vec<u16> = std::ffi::OsStr::new(target)
@@ -305,9 +315,158 @@ pub(crate) fn open_target(target: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Quote one argument so `CommandLineToArgvW` / the MSVC CRT parse it back
+/// verbatim (the rules `std::process::Command` uses): backslashes are literal
+/// except before a quote, where N of them become 2N+1 plus `\"`, and a run
+/// before the closing quote is doubled.
+fn quote_windows_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.contains([' ', '\t', '\n', '"']) {
+        return arg.to_string();
+    }
+    let mut out = String::with_capacity(arg.len() + 2);
+    out.push('"');
+    let mut backslashes = 0usize;
+    for c in arg.chars() {
+        if c == '\\' {
+            backslashes += 1;
+            continue;
+        }
+        let n = if c == '"' { backslashes * 2 + 1 } else { backslashes };
+        out.extend(std::iter::repeat_n('\\', n));
+        out.push(c);
+        backslashes = 0;
+    }
+    out.extend(std::iter::repeat_n('\\', backslashes * 2));
+    out.push('"');
+    out
+}
+
+/// Start `target` with the token of the interactive shell (explorer), i.e.
+/// with the user's normal, non-elevated rights, and return its PID. Used when
+/// Sidearm itself runs elevated so launch actions don't inherit admin rights.
+/// Fails closed: if the shell token can't be obtained, nothing is started.
+pub(crate) fn spawn_with_shell_token(
+    target: &Path,
+    args: &[String],
+    working_dir: Option<&Path>,
+) -> Result<u32, String> {
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Security::{
+        DuplicateTokenEx, SecurityImpersonation, TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_SESSIONID,
+        TOKEN_ASSIGN_PRIMARY, TOKEN_DUPLICATE, TOKEN_QUERY, TokenPrimary,
+    };
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessWithTokenW, OpenProcessToken, PROCESS_INFORMATION, STARTUPINFOW,
+    };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId};
+
+    fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
+        s.encode_wide().chain(std::iter::once(0)).collect()
+    }
+    // std's OwnedHandle closes the handle on drop (RAII for every exit path).
+    fn owned(handle: HANDLE) -> OwnedHandle {
+        unsafe { OwnedHandle::from_raw_handle(handle) }
+    }
+    fn os_error(what: &str) -> String {
+        format!("{what}: {}", std::io::Error::last_os_error())
+    }
+
+    let shell = unsafe { GetShellWindow() };
+    if shell.is_null() {
+        return Err("Windows shell (explorer) is not running".into());
+    }
+    let mut shell_pid = 0u32;
+    unsafe { GetWindowThreadProcessId(shell, &mut shell_pid) };
+    if shell_pid == 0 {
+        return Err(os_error("GetWindowThreadProcessId(shell)"));
+    }
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, shell_pid) };
+    if process.is_null() {
+        return Err(os_error("OpenProcess(shell)"));
+    }
+    let process = owned(process);
+
+    let mut token: HANDLE = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(process.as_raw_handle(), TOKEN_DUPLICATE, &mut token) } == 0 {
+        return Err(os_error("OpenProcessToken(shell)"));
+    }
+    let token = owned(token);
+
+    let mut primary: HANDLE = std::ptr::null_mut();
+    let duplicated = unsafe {
+        DuplicateTokenEx(
+            token.as_raw_handle(),
+            TOKEN_QUERY
+                | TOKEN_DUPLICATE
+                | TOKEN_ASSIGN_PRIMARY
+                | TOKEN_ADJUST_DEFAULT
+                | TOKEN_ADJUST_SESSIONID,
+            std::ptr::null(),
+            SecurityImpersonation,
+            TokenPrimary,
+            &mut primary,
+        )
+    };
+    if duplicated == 0 {
+        return Err(os_error("DuplicateTokenEx(shell)"));
+    }
+    let primary = owned(primary);
+
+    let target_str = target.to_string_lossy();
+    let mut command_line = std::iter::once(quote_windows_arg(&target_str))
+        .chain(args.iter().map(|arg| quote_windows_arg(arg)))
+        .collect::<Vec<_>>()
+        .join(" ")
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<u16>>();
+    let application = wide(target.as_os_str());
+    let current_dir = working_dir.map(|dir| wide(dir.as_os_str()));
+
+    let mut startup: STARTUPINFOW = unsafe { std::mem::zeroed() };
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut info: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
+    let created = unsafe {
+        CreateProcessWithTokenW(
+            primary.as_raw_handle(),
+            0,
+            application.as_ptr(),
+            command_line.as_mut_ptr(),
+            0,
+            std::ptr::null(),
+            current_dir
+                .as_ref()
+                .map_or(std::ptr::null(), |dir| dir.as_ptr()),
+            &startup,
+            &mut info,
+        )
+    };
+    if created == 0 {
+        return Err(os_error("CreateProcessWithTokenW"));
+    }
+    drop(owned(info.hThread));
+    drop(owned(info.hProcess));
+    Ok(info.dwProcessId)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quote_windows_arg_cases() {
+        assert_eq!(quote_windows_arg("abc"), "abc");
+        assert_eq!(quote_windows_arg("a b"), r#""a b""#);
+        assert_eq!(quote_windows_arg(""), r#""""#);
+        assert_eq!(quote_windows_arg(r#"a"b"#), r#""a\"b""#);
+        assert_eq!(
+            quote_windows_arg(r"C:\dir with space\"),
+            r#""C:\dir with space\\""#
+        );
+        assert_eq!(quote_windows_arg(r"a\\b"), r"a\\b");
+    }
 
     #[test]
     fn expand_env_placeholders_edges() {

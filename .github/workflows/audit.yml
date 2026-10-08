@@ -13,43 +13,10 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-audit
-      # Audit F043: ignore transitive warning-level advisories (unmaintained/unsound,
-      # 0 actual vulnerabilities), reachability-validated as not exploitable here on
-      # 2026-06-17. GTK3-rs bindings (atk/gdk/gtk/gtk-sys/glib/gdkx11/gdkwayland) compile
-      # only on the Linux webview target (Windows is the primary platform); proc-macro-error,
-      # unic-*, and fxhash are build-time/transitive; rand is unused by app code
-      # (RUSTSEC-2026-0097 requires rand::rng() + a custom logger). Re-review yearly.
-      # 2026-10-08: the direct quick-xml dep is on 0.41 (fixed). RUSTSEC-2026-0194/0195
-      # remain only on transitive quick-xml 0.30 (xcb build-dep, Linux-only), 0.38 (plist,
-      # macOS-only Info.plist parsing in tauri; not in the Windows/Linux tree) and 0.39
-      # (wayland-scanner proc-macro, build-time, Linux). RUSTSEC-2026-0235: rkyv 0.7 is a
-      # lockfile-only optional dep of rust_decimal (via byte-unit), not compiled in
-      # (`cargo tree --target all -i rkyv` is empty); the app never reads rkyv archives.
-      # Re-review yearly.
-      - run: >
-          cargo audit --file src-tauri/Cargo.lock
-          --ignore RUSTSEC-2024-0370
-          --ignore RUSTSEC-2024-0411
-          --ignore RUSTSEC-2024-0412
-          --ignore RUSTSEC-2024-0413
-          --ignore RUSTSEC-2024-0414
-          --ignore RUSTSEC-2024-0415
-          --ignore RUSTSEC-2024-0416
-          --ignore RUSTSEC-2024-0417
-          --ignore RUSTSEC-2024-0418
-          --ignore RUSTSEC-2024-0419
-          --ignore RUSTSEC-2024-0420
-          --ignore RUSTSEC-2024-0429
-          --ignore RUSTSEC-2025-0057
-          --ignore RUSTSEC-2025-0075
-          --ignore RUSTSEC-2025-0080
-          --ignore RUSTSEC-2025-0081
-          --ignore RUSTSEC-2025-0098
-          --ignore RUSTSEC-2025-0100
-          --ignore RUSTSEC-2026-0097
-          --ignore RUSTSEC-2026-0194
-          --ignore RUSTSEC-2026-0195
-          --ignore RUSTSEC-2026-0235
+      # Accepted advisories (with their reachability rationale) live in
+      # .cargo/audit.toml, which cargo-audit reads from the repo root; the release
+      # script build_portable.ps1 runs the same check against the same list.
+      - run: cargo audit --file src-tauri/Cargo.lock
   npm-audit:
     runs-on: ubuntu-latest
     steps:

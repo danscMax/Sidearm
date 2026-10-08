@@ -1026,6 +1026,35 @@ fn spawn_launch_target(
         )
     })?;
 
+    // An elevated Sidearm must not hand its admin token to user-configured
+    // targets: start them with the shell's (non-admin) token, fail closed.
+    #[cfg(target_os = "windows")]
+    {
+        if crate::window_capture::is_current_process_elevated() {
+            return crate::platform::shell::spawn_with_shell_token(
+                &launch_request.target,
+                &payload.args,
+                launch_request.working_dir.as_deref(),
+            )
+            .map_err(|error| {
+                log::error!(
+                    "[executor] De-elevated launch failed for `{}`: {error}",
+                    payload.target
+                );
+                execution_error(
+                    "execution_failed",
+                    "выполнение",
+                    &format!(
+                        "Не удалось запустить `{}` без прав администратора: {error}",
+                        payload.target
+                    ),
+                    Some(preview.encoded_key.clone()),
+                    action_id,
+                )
+            });
+        }
+    }
+
     let mut command = Command::new(&launch_request.target);
     command.args(&payload.args);
     if let Some(working_dir) = &launch_request.working_dir {

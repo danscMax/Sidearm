@@ -15,6 +15,7 @@ Platform-specific implementations behind a shared interface: display/DPI, input 
 - Keep `#[cfg(target_os = ...)]` branches behind the shared `mod.rs` interface; callers stay platform-agnostic.
 - Process-info fields (path/exe/elevated) are cached per `(hwnd, pid)`; window title is NOT cached (it changes for the same HWND, e.g. browser tabs).
 - Registry/shell lookups sanitize inputs and never cross a privilege boundary.
+- When Sidearm runs elevated, launch/open targets run with the shell (explorer) token via `shell::spawn_with_shell_token`; fail closed, never inherit the admin token.
 
 ## Work Guidance
 

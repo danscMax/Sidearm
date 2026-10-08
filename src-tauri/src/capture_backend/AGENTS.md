@@ -16,6 +16,7 @@ The low-level keyboard hook and the Razer-encoding detector: turns raw key event
 - The mask/probe key is VK 0xE8 (`VK_PROBE_KEY` / `VK_MASK_KEY`); the hook passes it through and it is not a modifier.
 - The event channel is bounded and drops on full by design (a stalled consumer must not block the producer). Prefer draining releases promptly so holds don't stick.
 - Razer encoding window (~10ms) vs modifier replay buffer (~20ms) are tuned constants — change only with real hardware measurements.
+- An elevated foreground window (UIPI blocks our input) emits `elevated_foreground_blocked` `{exe}` once per app (`should_notify_elevated`), and only while Sidearm itself is not elevated.
 
 ## Work Guidance
 

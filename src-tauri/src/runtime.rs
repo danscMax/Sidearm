@@ -31,6 +31,7 @@ pub const EVENT_TRAY_PROFILE_CHANGED: &str = "tray_profile_changed";
 pub const EVENT_QUICK_RULE_START: &str = "quick_rule_start";
 pub const EVENT_QUICK_RULE_FAILED: &str = "quick_rule_failed";
 pub const EVENT_MOUSE_DEFAULTS_SUSPECTED: &str = "mouse_defaults_suspected";
+pub const EVENT_ELEVATED_FOREGROUND: &str = "elevated_foreground_blocked";
 
 const DEBUG_LOG_LIMIT: usize = 1000;
 const CAPTURE_BACKEND: &str = crate::capture_backend::CAPTURE_BACKEND_NAME;

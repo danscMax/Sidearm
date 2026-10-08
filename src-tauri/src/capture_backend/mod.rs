@@ -15,6 +15,7 @@ use crate::{
     },
     window_capture,
 };
+use crate::RecoverPoison;
 
 /// Payload for `throttle_blocked`: a binding's re-trigger landed inside its
 /// throttle window and was skipped. The FE greys the hotspot + shows a countdown.
@@ -24,6 +25,20 @@ struct ThrottleBlockedEvent {
     control_id: Option<String>,
     binding_id: Option<String>,
     remaining_ms: u64,
+}
+
+/// Exe of the last elevated foreground app the UI was told about, so the
+/// "input is blocked" notice fires once per app instead of on every key.
+static LAST_ELEVATED_NOTICE: Mutex<Option<String>> = Mutex::new(None);
+
+/// True (and remembers `exe`) when `exe` differs, case-insensitively, from the
+/// last notified one.
+fn should_notify_elevated(last: &mut Option<String>, exe: &str) -> bool {
+    if last.as_deref().is_some_and(|prev| prev.eq_ignore_ascii_case(exe)) {
+        return false;
+    }
+    *last = Some(exe.to_owned());
+    true
 }
 
 #[cfg(target_os = "windows")]
@@ -369,6 +384,19 @@ fn process_encoded_key_event(
             ),
             true,
         ));
+        // Tell the UI once per elevated app (it offers "restart as administrator");
+        // nothing to offer when Sidearm already runs elevated.
+        if !window_capture::is_current_process_elevated()
+            && should_notify_elevated(
+                &mut LAST_ELEVATED_NOTICE.lock().recover_poison(),
+                &capture_result.exe,
+            )
+        {
+            let _ = app.emit(
+                runtime::EVENT_ELEVATED_FOREGROUND,
+                serde_json::json!({ "exe": capture_result.exe }),
+            );
+        }
     }
 
     if capture_result.ignored {
@@ -844,5 +872,19 @@ mod select_held_key_tests {
             select_held_key(held.into_iter(), "Alt+F19"),
             HeldMatch::None
         );
+    }
+}
+
+#[cfg(test)]
+mod elevated_notice_tests {
+    use super::should_notify_elevated;
+
+    #[test]
+    fn should_notify_elevated_once_per_exe() {
+        let mut last = None;
+        assert!(should_notify_elevated(&mut last, "Admin.exe"));
+        assert!(!should_notify_elevated(&mut last, "Admin.exe"));
+        assert!(!should_notify_elevated(&mut last, "ADMIN.EXE"));
+        assert!(should_notify_elevated(&mut last, "Other.exe"));
     }
 }

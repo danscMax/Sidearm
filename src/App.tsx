@@ -740,6 +740,25 @@ function App() {
   const activeProfile =
     profiles.find((profile) => profile.id === effectiveProfileId) ?? null;
 
+  // Profile the RUNTIME applies right now — NOT `activeProfile`, which is only
+  // the one the sidebar is editing. Runtime resolution is `app mapping >
+  // fallback` (settings.lastSelectedProfileId is editor view-state and is never
+  // consulted). When our own window or the shell is focused the capture is
+  // ignored and the runtime re-resolves with an empty exe — i.e. the fallback
+  // profile. Same for "no capture yet": the watcher only emits on a foreground
+  // change, so right after launch (our own window focused) there is nothing to
+  // report but the fallback is what a keypress would hit. A switch-profile
+  // action can pin an override the frontend doesn't see; that case reports the
+  // fallback until the next real window capture.
+  const runtimeProfileId =
+    runtimeSummary.status !== "running"
+      ? null
+      : lastCapture && !lastCapture.ignored
+        ? (lastCapture.resolvedProfileId ?? null)
+        : (activeConfig?.settings.fallbackProfileId ?? null);
+  const runtimeProfileName =
+    profiles.find((profile) => profile.id === runtimeProfileId)?.name ?? null;
+
   const actionById = useMemo(
     () =>
       new Map<string, Action>(
@@ -882,7 +901,7 @@ function App() {
         onSwitchMode={switchWorkspaceMode}
         profiles={profiles}
         effectiveProfileId={effectiveProfileId}
-        runtimeResolvedProfileName={lastCapture?.resolvedProfileName ?? null}
+        runtimeResolvedProfileName={runtimeProfileName}
         onSelectProfile={(id) => {
           setSelectedProfileId(id);
           updateDraft((c) => ({
@@ -901,6 +920,8 @@ function App() {
       <div className="content">
         <Toolbar
           heading={activeModeHeading}
+          runtimeProfileName={runtimeProfileName}
+          editedProfileName={activeProfile?.name ?? null}
           undoCount={undoStack.length}
           redoCount={redoStack.length}
           viewState={viewState}

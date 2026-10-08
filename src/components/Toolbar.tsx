@@ -4,6 +4,8 @@ import type { ViewState } from "../lib/constants";
 
 export function Toolbar({
   heading,
+  runtimeProfileName,
+  editedProfileName,
   undoCount,
   redoCount,
   viewState,
@@ -12,6 +14,10 @@ export function Toolbar({
   onOpenCommandPalette,
 }: {
   heading: string;
+  /** Profile the runtime applies right now; null when the runtime is stopped. */
+  runtimeProfileName: string | null;
+  /** Profile currently open in the editor — flagged when it is not the live one. */
+  editedProfileName: string | null;
   undoCount: number;
   redoCount: number;
   viewState: ViewState;
@@ -38,6 +44,28 @@ export function Toolbar({
         <span className="toolbar__shortcut">{t("toolbar.shortcut")}</span>
       </button>
       <div className="toolbar__actions">
+        {runtimeProfileName && (
+          <span
+            className={`toolbar__profile${
+              editedProfileName && editedProfileName !== runtimeProfileName
+                ? " toolbar__profile--warn"
+                : ""
+            }`}
+            title={
+              editedProfileName && editedProfileName !== runtimeProfileName
+                ? t("toolbar.activeProfileMismatch", {
+                    active: runtimeProfileName,
+                    edited: editedProfileName,
+                  })
+                : t("toolbar.activeProfileHint")
+            }
+          >
+            <span className="toolbar__profile-dot" aria-hidden="true" />
+            {t("toolbar.activeProfile")}
+            <strong>{runtimeProfileName}</strong>
+          </span>
+        )}
+
         {viewState === "saving" && (
           <span className="toolbar__status">{t("toolbar.saving")}</span>
         )}

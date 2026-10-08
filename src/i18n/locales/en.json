@@ -96,7 +96,10 @@
     "redo": "Redo (Ctrl+Y)",
     "saving": "Saving…",
     "overflow": "More",
-    "reload": "Reload from disk"
+    "reload": "Reload from disk",
+    "activeProfile": "Live:",
+    "activeProfileHint": "Profile Sidearm applies right now. Picked from the focused window: app rule → fallback profile. The sidebar selection does not affect it.",
+    "activeProfileMismatch": "You are editing “{{edited}}”, but “{{active}}” is live. Bindings in “{{edited}}” only fire in the apps mapped to it."
   },
   "runtime": {
     "panelTitle": "Background interception",

@@ -758,6 +758,49 @@ select::checkmark {
   gap: 4px;
 }
 
+/* Live-profile badge: which profile the RUNTIME applies, as opposed to the one
+   open in the editor. Warn variant fires when those two differ — editing a
+   profile that is not live is the classic "my binding does nothing" trap. */
+.toolbar__profile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+  padding: 3px 10px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-pill);
+  background: var(--c-card-bg);
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  cursor: default;
+}
+
+.toolbar__profile strong {
+  color: var(--c-text-bright);
+  font-weight: 700;
+}
+
+.toolbar__profile-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--c-ok);
+}
+
+.toolbar__profile--warn {
+  border-color: var(--c-warning);
+  color: var(--c-warning-light);
+}
+
+.toolbar__profile--warn strong {
+  color: var(--c-warning-light);
+}
+
+.toolbar__profile--warn .toolbar__profile-dot {
+  background: var(--c-warning-light);
+}
+
 .toolbar__group {
   display: flex;
   gap: 2px;

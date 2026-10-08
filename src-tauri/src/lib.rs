@@ -1932,9 +1932,11 @@ async fn get_admin_autostart_status() -> Result<admin_autostart::AdminAutostartS
 }
 
 /// Enable or disable the elevated autostart-at-logon scheduled task.
-/// Enabling triggers a UAC prompt (schtasks needs admin to create a task
-/// with RunLevel=Highest).  After enabling, the frontend should disable the
-/// regular tauri-plugin-autostart entry to avoid two launchers competing.
+/// Enabling triggers a UAC prompt (Task Scheduler needs admin to create a
+/// RunLevel=Highest task) and re-pins the exe/DLL hashes, so it also serves
+/// as the one-time re-confirmation after an update.  After enabling, the
+/// frontend should disable the regular tauri-plugin-autostart entry to avoid
+/// two launchers competing.
 #[tauri::command]
 async fn set_admin_autostart(
     enabled: bool,

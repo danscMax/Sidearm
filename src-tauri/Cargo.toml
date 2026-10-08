@@ -38,6 +38,7 @@ thiserror = "2"
 png = "0.17"
 base64 = "0.22"
 regex = "1"
+sha2 = "0.10"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = { version = "0.41" }
 

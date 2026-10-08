@@ -18,6 +18,7 @@ The Rust backend: low-level keyboard capture, Razer-encoding detection, action e
 - Internal fns return `Result<T, String>`; convert to `CommandError` at the IPC boundary.
 - Config is schema-first: the bundled `config.v3.schema.json` validates raw JSON before deserialize. A persisted field rename needs `anyOf`(both names) in the schema + `#[serde(alias)]`. Keep the Rust structs, `src/lib/config.ts`, and the schema in sync.
 - Config writes are atomic (temp + rename); backups (rolling rotation, daily snapshot, last-known-good) are best-effort and never fail the save. A corrupt `config.json` recovers from last-known-good/rolling backups; a config declaring a newer schema version is never overwritten.
+- `src/admin_autostart.rs`: the elevated logon task never starts Sidearm.exe directly — it runs System32 PowerShell with a verifier script (in the task XML) that checks SHA-256 of the exe + every sibling `*.dll` pinned at enable time and holds them open until Sidearm is up. Re-running `enable()` re-pins (the "confirm after update" path, `needsReconfirm`). Keep `%` and `"` out of the script.
 - Self-injected input carries `INTERNAL_SENDINPUT_EXTRA_INFO`; VK 0xE8 is the mask/probe key (`vk.rs` `VK_MASK_KEY`), deliberately not a modifier.
 
 ## Work Guidance

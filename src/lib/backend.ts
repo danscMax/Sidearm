@@ -215,6 +215,8 @@ export interface AdminAutostartStatus {
   currentExe: string;
   pathMismatch: boolean;
   supported: boolean;
+  /** Task exists but its hash pin no longer matches (update) or predates pinning. */
+  needsReconfirm: boolean;
 }
 
 export async function getAdminAutostartStatus(): Promise<AdminAutostartStatus> {

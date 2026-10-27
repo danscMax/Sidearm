@@ -318,6 +318,17 @@
             500,
             1000
           ]
+        },
+        "mouseDpiStages": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 100,
+            "maximum": 30000
+          }
         }
       }
     },
@@ -1114,7 +1125,9 @@
         "scrollLeft",
         "scrollRight",
         "mouseBack",
-        "mouseForward"
+        "mouseForward",
+        "dpiUp",
+        "dpiDown"
       ]
     },
     "mediaKeyKind": {

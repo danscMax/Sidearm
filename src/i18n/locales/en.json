@@ -223,7 +223,9 @@
     "scrollLeft": "Scroll left",
     "scrollRight": "Scroll right",
     "mouseBack": "Back",
-    "mouseForward": "Forward"
+    "mouseForward": "Forward",
+    "dpiUp": "DPI Up",
+    "dpiDown": "DPI Down"
   },
   "mediaKey": {
     "playPause": "Play / Pause",
@@ -1325,6 +1327,24 @@
     "dpi": "Sensitivity",
     "dpiUnit": "DPI",
     "dpiCaption": "From {{min}} to {{max}}. Applies to both axes.",
-    "apply": "Apply"
+    "apply": "Apply",
+    "stageTitle": "DPI stages",
+    "stageInfo": "Create up to five DPI speeds for this profile. Assign DPI Up / DPI Down under Mouse action to cycle through them. Sidearm must be running.",
+    "stageAddPreset": "Create default stages",
+    "stageAdd": "Add stage",
+    "stageRemove": "Remove selected stage",
+    "stageSave": "Update stage",
+    "stageEdit": "Edit selected stage",
+    "stageSelected": "Starting stage: {{dpi}} DPI",
+    "stageHardware": "Mouse currently reports {{dpi}} DPI",
+    "stageUnavailable": "Current mouse DPI not available",
+    "stageChoose": "Set starting DPI to {{dpi}}",
+    "stageDisabled": "No stages configured. A DPI Up/Down assignment needs stages in the active profile.",
+    "stageInvalid": "Select a unique DPI value in the supported range.",
+    "stageLimit": "Up to five stages per profile.",
+    "stageHelp": "For the active profile, the highlight follows the mouse's current DPI when available. Otherwise it shows the saved starting stage. Click a stage to save a starting speed; DPI buttons step without changing it.",
+    "stageClear": "Remove all stages",
+    "stageDoubleClick": "Double-click a stage to edit its DPI directly. Press Enter to save or Esc to cancel.",
+    "stageInlineEdit": "Edit {{dpi}} DPI stage"
   }
 }

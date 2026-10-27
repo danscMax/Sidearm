@@ -99,6 +99,8 @@ export interface Profile {
   mouseDpi?: number;
   /** Poll rate (125/500/1000 Hz) applied with this profile; absent = unchanged. */
   mousePollRateHz?: number;
+  /** Optional stages (1–5) for DPI Up/Down; mouseDpi remains the starting stage. */
+  mouseDpiStages?: number[];
 }
 
 /** A physical input device; its controls live in `physicalControls` tagged
@@ -235,7 +237,9 @@ export type MouseActionKind =
   | "scrollLeft"
   | "scrollRight"
   | "mouseBack"
-  | "mouseForward";
+  | "mouseForward"
+  | "dpiUp"
+  | "dpiDown";
 
 interface MouseActionPayload {
   action: MouseActionKind;

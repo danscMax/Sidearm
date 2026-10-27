@@ -497,11 +497,11 @@ fn process_encoded_key_event(
         return EventOutcome::Handled;
     }
 
-    // Sidearm's own window is where buttons are configured and checked: a press
-    // there only highlights the control (the event above) and never fires.
-    // Otherwise our injected keys reach the window's own shortcuts — a thumb
-    // sending Backspace cleared the selected control's binding.
-    if capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON) {
+    // DPI stepping writes mouse hardware; other actions stay blocked while Sidearm
+    // is focused so injected shortcuts cannot operate its own editor.
+    let resolved_action = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
+    if capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON)
+        && !can_execute_in_own_window(resolved_action.map(|action| &action.payload)) {
         log::info!("[capture] Not dispatched {}: Sidearm's own window", preview.encoded_key);
         log_entries.push((
             "перехват",
@@ -529,11 +529,6 @@ fn process_encoded_key_event(
     // immediately release modifiers, which is useless.
     // Resolve the action once and reuse it below (is_modifier_only + hold branch)
     // instead of scanning config.actions twice per keystroke.
-    let resolved_action = config
-        .actions
-        .iter()
-        .find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
-
     let is_modifier_only_shortcut = preview.action_type.as_deref() == Some("shortcut")
         && resolved_action
             .and_then(|a| match &a.payload {
@@ -714,6 +709,16 @@ fn process_encoded_key_event(
     }
 
     EventOutcome::Handled
+}
+
+fn can_execute_in_own_window(payload: Option<&config::ActionPayload>) -> bool {
+    matches!(
+        payload,
+        Some(config::ActionPayload::MouseAction(config::MouseActionPayload {
+            action: config::MouseActionKind::DpiUp | config::MouseActionKind::DpiDown,
+            ..
+        }))
+    )
 }
 
 fn run_fire_and_forget(
@@ -947,5 +952,42 @@ mod elevated_notice_tests {
         assert!(!should_notify_elevated(&mut last, "Admin.exe"));
         assert!(!should_notify_elevated(&mut last, "ADMIN.EXE"));
         assert!(should_notify_elevated(&mut last, "Other.exe"));
+    }
+}
+
+#[cfg(test)]
+mod own_window_tests {
+    use super::{can_execute_in_own_window, config};
+
+    #[test]
+    fn permits_only_direct_dpi_steps() {
+        for kind in [
+            config::MouseActionKind::DpiUp,
+            config::MouseActionKind::DpiDown,
+            config::MouseActionKind::LeftClick,
+            config::MouseActionKind::ScrollUp,
+        ] {
+            let payload = config::ActionPayload::MouseAction(config::MouseActionPayload {
+                action: kind,
+                ctrl: false,
+                shift: false,
+                alt: false,
+                win: false,
+            });
+            assert_eq!(
+                can_execute_in_own_window(Some(&payload)),
+                matches!(kind, config::MouseActionKind::DpiUp | config::MouseActionKind::DpiDown)
+            );
+        }
+        let shortcut = config::ActionPayload::Shortcut(config::ShortcutActionPayload {
+            key: "Backspace".into(),
+            ctrl: false,
+            shift: false,
+            alt: false,
+            win: false,
+            raw: None,
+        });
+        assert!(!can_execute_in_own_window(Some(&shortcut)));
+        assert!(!can_execute_in_own_window(None));
     }
 }

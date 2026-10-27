@@ -105,7 +105,7 @@ fn append_profile(
         description: None,
         enabled: true,
         priority: next_priority,
-        mouse_dpi: None, mouse_poll_rate_hz: None,
+        mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
     };
 
     // Pre-create sequence actions from referenced macros so bindings can link.

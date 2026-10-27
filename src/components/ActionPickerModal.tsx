@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
-import { ACTION_CATEGORIES } from "../lib/constants";
+import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
 import { liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import {
@@ -143,6 +143,7 @@ export function ActionPickerModal({
         cat.actionType,
         t(cat.label),
         t(`action.type.${cat.actionType}`),
+        ...(cat.actionType === "mouseAction" ? MOUSE_ACTION_OPTIONS.flatMap((item) => [item.value, t(item.label)]) : []),
       ].some((value) => value.toLowerCase().includes(q)),
     );
   }, [searchQuery, t]);
@@ -177,7 +178,7 @@ export function ActionPickerModal({
   const [mediaDraft, setMediaDraft] = useState(initial.media);
   const [profileDraft, setProfileDraft] = useState(initial.profile);
   const [sequenceDraft, setSequenceDraft] = useState(initial.sequence);
-  const [nameDraft, setNameDraft] = useState(initial.name);
+  const [nameDraft, setNameDraft] = useState(isPlaceholderAction(existingAction) ? "" : initial.name);
   const [triggerModeDraft, setTriggerModeDraft] = useState(initial.triggerMode);
   const [chordPartnerDraft, setChordPartnerDraft] = useState(initial.chordPartner);
   const [throttleDraft, setThrottleDraft] = useState(initial.throttleMs);
@@ -403,7 +404,7 @@ export function ActionPickerModal({
             ) : null}
 
             {effectiveCategory === "mouseAction" ? (
-              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} />
+              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} searchQuery={searchQuery} />
             ) : null}
 
             {effectiveCategory === "textSnippet" ? (

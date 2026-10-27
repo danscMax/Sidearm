@@ -15,6 +15,8 @@ import {
 } from "../lib/backend";
 import type { MouseSettings as MouseSettingsState, MouseStatusKind, NativeModelInfo } from "../lib/onboard-mapping";
 import { PillTrack } from "./PillTrack";
+import { DpiStagesEditor } from "./DpiStagesEditor";
+import { listenActionExecutionEvent } from "../lib/backend";
 import { Notice, SelectField, SettingRow, Toggle } from "./shared";
 
 export interface MouseWorkspaceProps {
@@ -87,16 +89,27 @@ export function MouseWorkspace({
     return () => unlisten?.();
   }, []);
 
+  useEffect(() => {
+    let alive = true;
+    let dispose: (() => void) | undefined;
+    void listenActionExecutionEvent("action_executed", (event) => {
+      if (event.actionType === "mouseAction" && event.summary.startsWith("DPI switched to ")) {
+        void getMouseSettings().then((settings) => { if (alive) setDevice(settings); }, () => {});
+      }
+    }).then((fn) => { if (alive) dispose = fn; else fn(); });
+    return () => { alive = false; dispose?.(); };
+  }, []);
+
   const profileDpi = activeProfile?.mouseDpi;
   const profilePoll = activeProfile?.mousePollRateHz;
-  const overrides = profileDpi !== undefined || profilePoll !== undefined;
+  const overrides = profileDpi !== undefined || profilePoll !== undefined || (activeProfile?.mouseDpiStages?.length ?? 0) > 0;
   const appliesNow = activeProfile !== null && activeProfile.id === runtimeProfileId;
 
   useEffect(() => {
     setDpiDraft(profileDpi !== undefined ? String(profileDpi) : "");
   }, [profileDpi, activeProfile?.id]);
 
-  function saveProfile(patch: Pick<Profile, "mouseDpi" | "mousePollRateHz">) {
+  function saveProfile(patch: Partial<Pick<Profile, "mouseDpi" | "mousePollRateHz" | "mouseDpiStages">>) {
     if (!activeProfile) return;
     updateDraft((config) => upsertProfile(config, { ...activeProfile, ...patch }));
   }
@@ -206,7 +219,7 @@ export function MouseWorkspace({
                   saveProfile(
                     checked
                       ? { mouseDpi: device?.dpi, mousePollRateHz: device?.pollRateHz }
-                      : { mouseDpi: undefined, mousePollRateHz: undefined },
+                      : { mouseDpi: undefined, mousePollRateHz: undefined, mouseDpiStages: undefined },
                   )
                 }
                 ariaLabel={t("mouse.profileOverride")}
@@ -246,6 +259,7 @@ export function MouseWorkspace({
                     value={dpiDraft}
                     aria-label={t("mouse.dpi")}
                     onChange={(e) => setDpiDraft(e.target.value)}
+                    disabled={busy || (activeProfile.mouseDpiStages?.length ?? 0) > 0}
                   />
                   <span className="input-suffix__unit">{t("mouse.dpiUnit")}</span>
                 </div>
@@ -256,11 +270,21 @@ export function MouseWorkspace({
                     saveProfile({ mouseDpi: dpiValue, mousePollRateHz: profilePoll });
                     applyNow(() => setMouseDpi(dpiValue));
                   }}
-                  disabled={busy || !dpiValid || dpiValue === profileDpi}
+                  disabled={busy || !dpiValid || dpiValue === profileDpi || (activeProfile.mouseDpiStages?.length ?? 0) > 0}
                 >
                   {t("mouse.apply")}
                 </button>
               </SettingRow>
+              {model ? <DpiStagesEditor
+                key={activeProfile.id}
+                stages={activeProfile.mouseDpiStages ?? []}
+                startingDpi={profileDpi}
+                currentDpi={appliesNow ? device?.dpi : undefined}
+                dpiMin={model.dpiMin} dpiMax={model.dpiMax} busy={busy}
+                onSave={(stages, dpi) => {
+                  saveProfile({ mouseDpiStages: stages, mouseDpi: dpi });
+                  if (dpi !== undefined && dpi !== profileDpi) applyNow(() => setMouseDpi(dpi));
+                }} /> : null}
             </>
           ) : null}
         </section>

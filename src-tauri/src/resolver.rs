@@ -761,7 +761,7 @@ mod tests {
             description: None,
             enabled: true,
             priority,
-            mouse_dpi: None, mouse_poll_rate_hz: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
         }
     }
 
@@ -1114,7 +1114,7 @@ mod edge_proptests {
             description: None,
             enabled,
             priority: 0,
-            mouse_dpi: None, mouse_poll_rate_hz: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
         }
     }
 

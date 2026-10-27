@@ -115,6 +115,8 @@ const MOUSE_ACTION_LABELS: Record<MouseActionKind, string> = {
   scrollRight: "mouseAction.scrollRight",
   mouseBack: "mouseAction.mouseBack",
   mouseForward: "mouseAction.mouseForward",
+  dpiUp: "mouseAction.dpiUp",
+  dpiDown: "mouseAction.dpiDown",
 };
 
 /** Derived from `MOUSE_ACTION_LABELS` (order = literal order). `label` is an i18n

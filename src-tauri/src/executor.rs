@@ -15,7 +15,7 @@ const MAX_STEP_REPEAT: u32 = 100;
 use crate::{
     config::{
         Action, ActionCondition, ActionPayload, ActionType, AppConfig, MediaKeyKind, MenuItem,
-        MouseActionPayload, PasteMode, SequenceStep, TextSnippetPayload,
+        MouseActionKind, MouseActionPayload, PasteMode, SequenceStep, TextSnippetPayload,
     },
     input_synthesis,
     resolver::{ResolutionStatus, ResolvedInputPreview},
@@ -218,7 +218,7 @@ pub fn run_preview_action(
             run_live_sequence_action(action, preview, payload, Some(action_id))
         }
         (ActionType::MouseAction, ActionPayload::MouseAction(payload)) => {
-            run_live_mouse_action(action, preview, payload, Some(action_id))
+            run_live_mouse_action(config, action, preview, payload, Some(action_id))
         }
         (ActionType::MediaKey, ActionPayload::MediaKey(payload)) => {
             run_live_media_key_action(action, preview, &payload.key, Some(action_id))
@@ -758,11 +758,45 @@ fn run_live_shortcut_action(
 }
 
 fn run_live_mouse_action(
+    config: &AppConfig,
     action: &Action,
     preview: &ResolvedInputPreview,
     payload: &MouseActionPayload,
     action_id: Option<String>,
 ) -> Result<ActionExecutionEvent, ExecutorError> {
+    if matches!(payload.action, MouseActionKind::DpiUp | MouseActionKind::DpiDown) {
+        let profile = preview.resolved_profile_id.as_deref()
+            .and_then(|id| config.profiles.iter().find(|p| p.id == id))
+            .ok_or_else(|| execution_error("execution_failed", "выполнение",
+                "No resolved mouse profile for DPI step", Some(preview.encoded_key.clone()), action_id.clone()))?;
+        #[cfg(target_os = "windows")]
+        let result = crate::onboard_guard::step_profile_dpi(profile, payload.action == MouseActionKind::DpiUp);
+        #[cfg(not(target_os = "windows"))]
+        let result: Result<u16, String> = {
+            let _ = profile;
+            Err("DPI stepping requires Windows".into())
+        };
+        let dpi = result.map_err(|message| execution_error("execution_failed", "выполнение",
+            &message, Some(preview.encoded_key.clone()), action_id.clone()))?;
+        return Ok(ActionExecutionEvent {
+            encoded_key: preview.encoded_key.clone(),
+            action_id: action.id.clone(),
+            action_type: action.action_type.as_str().into(),
+            action_pretty: action.display_name.clone(),
+            resolved_profile_id: preview.resolved_profile_id.clone(),
+            resolved_profile_name: preview.resolved_profile_name.clone(),
+            matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+            control_id: preview.control_id.clone(),
+            layer: preview.layer.clone(),
+            binding_id: preview.binding_id.clone(),
+            mode: ExecutionMode::Live,
+            outcome: ExecutionOutcome::Injected,
+            process_id: None,
+            summary: format!("DPI switched to {dpi}"),
+            warnings: Vec::new(),
+            executed_at: timestamp_millis(),
+        });
+    }
     let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
     let dispatch =
         input_synthesis::send_mouse_action(payload, &encoding_mods).map_err(|message| {

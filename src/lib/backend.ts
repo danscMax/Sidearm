@@ -103,6 +103,28 @@ export async function restoreOnboardControl(): Promise<void> {
   return invoke<void>("restore_onboard_control");
 }
 
+export interface SynapseStatus {
+  running: boolean;
+  startupRestoreAvailable: boolean;
+}
+
+export interface SynapseRecoveryResult {
+  startupDisabled: boolean;
+  startupError: CommandError | null;
+}
+
+export async function getSynapseStatus(): Promise<SynapseStatus> {
+  return invoke<SynapseStatus>("get_synapse_status");
+}
+
+export async function recoverFromSynapse(disableStartup: boolean, closeSynapse: boolean): Promise<SynapseRecoveryResult> {
+  return invoke<SynapseRecoveryResult>("recover_from_synapse", { disableStartup, closeSynapse });
+}
+
+export async function restoreSynapseStartup(): Promise<void> {
+  return invoke<void>("restore_synapse_startup");
+}
+
 /** Name, DPI range and poll rates of the natively driven mouse model. */
 export async function getNativeModel(): Promise<NativeModelInfo> {
   return invoke<NativeModelInfo>("get_native_model");

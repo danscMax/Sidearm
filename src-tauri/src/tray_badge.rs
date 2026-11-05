@@ -90,10 +90,10 @@ fn downscale(src: &[u8], width: u32, height: u32) -> Vec<u8> {
                 }
             }
             let o = ((oy * SIZE + ox) * 4) as usize;
-            if a > 0 {
-                out[o] = (r / a) as u8;
-                out[o + 1] = (g / a) as u8;
-                out[o + 2] = (b / a) as u8;
+            if let (Some(r), Some(g), Some(b)) = (r.checked_div(a), g.checked_div(a), b.checked_div(a)) {
+                out[o] = r as u8;
+                out[o + 1] = g as u8;
+                out[o + 2] = b as u8;
                 out[o + 3] = (a / n.max(1)) as u8;
             }
         }

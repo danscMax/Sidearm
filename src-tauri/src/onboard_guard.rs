@@ -232,7 +232,7 @@ fn run(
         "[onboard-guard] watching (every {}s while the runtime runs, at once on request)",
         POLL_INTERVAL.as_secs()
     );
-    let mut last_notified: Option<(TakeoverKind, Instant)> = None;
+    let mut last_notified = Vec::new();
     let mut razer_was_running = false;
     let mut last_clean: Option<usize> = None;
     // The first check runs right away instead of after a whole period, and scans
@@ -341,7 +341,7 @@ fn check_once(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
     config_dir: &Path,
-    last_notified: &mut Option<(TakeoverKind, Instant)>,
+    last_notified: &mut Vec<(TakeoverKind, bool, Instant)>,
     full: bool,
 ) -> Verdict {
     let device = match VendorDevice::open_connected() {
@@ -561,26 +561,41 @@ fn record_clean(runtime_store: &Arc<Mutex<RuntimeStore>>, buttons: usize) {
 
 /// Writes the takeover into the runtime log and tells the UI, at most once per
 /// [`NOTIFY_COOLDOWN`] per kind.
+fn notification_allowed(
+    history: &mut Vec<(TakeoverKind, bool, Instant)>,
+    kind: TakeoverKind,
+    restored: bool,
+    now: Instant,
+) -> bool {
+    if let Some(entry) = history.iter_mut().find(|(previous, _, _)| *previous == kind) {
+        if entry.1 == restored && now.duration_since(entry.2) < NOTIFY_COOLDOWN {
+            return false;
+        }
+        *entry = (kind, restored, now);
+    } else {
+        history.push((kind, restored, now));
+    }
+    true
+}
+
 fn notify(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
-    last_notified: &mut Option<(TakeoverKind, Instant)>,
+    last_notified: &mut Vec<(TakeoverKind, bool, Instant)>,
     event: TakeoverEvent,
 ) {
     let now = Instant::now();
-    let throttled = matches!(
-        last_notified,
-        Some((kind, at)) if *kind == event.kind && now.duration_since(*at) < NOTIFY_COOLDOWN
-    );
+    let throttled = !notification_allowed(last_notified, event.kind, event.restored, now);
     let message = takeover_message(&event);
     if throttled {
         // The toast is throttled, the evidence is not: a silent log hid repeated
         // takeovers for a whole session.
         log::info!("[onboard-guard] {message}");
+        // The consolidated card represents state, not notification frequency.
+        // A throttled recovery transition must still replace a visible failure.
+        let _ = app.emit(EVENT_ONBOARD_TAKEOVER, &event);
         return;
     }
-    *last_notified = Some((event.kind, now));
-
     log::warn!("[onboard-guard] {message}");
     if let Ok(mut store) = runtime_store.lock() {
         store.record_warn("capture", message);
@@ -621,6 +636,23 @@ fn takeover_message(event: &TakeoverEvent) -> crate::ui_text::UiText {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn recovery_transitions_are_not_hidden_by_notification_cooldown() {
+        let now = Instant::now();
+        let mut history = Vec::new();
+        assert!(notification_allowed(&mut history, TakeoverKind::Mode, false, now));
+        assert!(!notification_allowed(&mut history, TakeoverKind::Mode, false, now + Duration::from_secs(1)));
+        assert!(notification_allowed(&mut history, TakeoverKind::Mode, true, now + Duration::from_secs(2)));
+    }
+
+    #[test]
+    fn alternating_takeover_kinds_keep_independent_cooldowns() {
+        let now = Instant::now();
+        let mut history = Vec::new();
+        assert!(notification_allowed(&mut history, TakeoverKind::Mode, false, now));
+        assert!(notification_allowed(&mut history, TakeoverKind::Mappings, false, now));
+        assert!(!notification_allowed(&mut history, TakeoverKind::Mode, false, now + Duration::from_secs(1)));
+    }
 
     /// Below 10 %, at most once a day — a restart within the day does not repeat it.
     #[test]

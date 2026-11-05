@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
 
 type ToastKind = "info" | "success" | "warning";
 type ToastAction = { label: string; onClick: () => void };
@@ -13,6 +13,7 @@ export interface ToastState {
 export interface ToastProps {
   toast: ToastState | null;
   onDismiss: () => void;
+  children?: ReactNode;
 }
 
 function toastDuration(kind: ToastKind | undefined, hasAction: boolean): number {
@@ -21,26 +22,26 @@ function toastDuration(kind: ToastKind | undefined, hasAction: boolean): number 
   return 3500;
 }
 
-export function Toast({ toast, onDismiss }: ToastProps) {
+export function Toast({ toast, onDismiss, children }: ToastProps) {
   const durationMs = toast ? toastDuration(toast.kind, !!toast.action) : 3500;
 
   useEffect(() => {
     if (!toast) return;
-    if (toast.action) return;
+    if (toast.action || children) return;
     const timer = setTimeout(onDismiss, durationMs);
     return () => clearTimeout(timer);
-  }, [toast, onDismiss, durationMs]);
+  }, [toast, onDismiss, durationMs, children]);
 
   if (!toast) return null;
 
   return (
     <div
-      className={`toast toast--${toast.kind ?? "info"}${toast.action ? " toast--with-action" : ""}`}
+      className={`toast toast--${toast.kind ?? "info"}${toast.action || children ? " toast--with-action" : ""}${children ? " toast--recovery" : ""}`}
       role="status"
       aria-live="polite"
     >
-      <span className="toast__message">{toast.message}</span>
-      {toast.action && (
+      {children ?? <span className="toast__message">{toast.message}</span>}
+      {!children && toast.action && (
         <button
           type="button"
           className="toast__action"

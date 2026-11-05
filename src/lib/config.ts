@@ -50,13 +50,10 @@ export type OsdAnimation = "slideIn" | "fadeIn" | "none";
 /** Control acting as the software Hypershift modifier while held. Only buttons
  * the mouse still reports as native mouse buttons can be used — a button its
  * onboard memory rewrote into a keystroke never reaches the mouse hook. */
-export type HypershiftTrigger =
-  | "none"
-  | "mouse_right"
-  | "mouse_left"
-  | "wheel_click"
-  | "mouse_4"
-  | "mouse_5";
+export const NATIVE_HYPERSHIFT_TRIGGERS = [
+  "mouse_right", "mouse_left", "wheel_click", "mouse_4", "mouse_5",
+] as const;
+export type HypershiftTrigger = "none" | typeof NATIVE_HYPERSHIFT_TRIGGERS[number];
 
 export interface Settings {
   fallbackProfileId: string;

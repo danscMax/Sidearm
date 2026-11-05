@@ -2,7 +2,7 @@
 # Sidearm -- Portable Build Script
 # ============================================================================
 # Builds a portable release:
-#   0. Dependency audit (cargo audit + npm audit); stops on any vulnerability
+#   0. Dependency audit (cargo audit + full npm audit; npm blocks high/critical)
 #   1. Builds Tauri frontend (npm build) + Rust backend (cargo tauri build)
 #   2. Assembles portable folder with EXE + WebView2 bootstrapper
 #   3. Verifies build integrity
@@ -98,8 +98,8 @@ function Invoke-PreFlight {
     Write-Host ""
 }
 
-# Release gate: refuse to build/package while shipped dependencies have known
-# vulnerabilities. Accepted advisories live in .cargo/audit.toml (same list CI uses).
+# Release gate: audit shipped dependencies and build/test tools. npm blocks
+# high/critical findings; accepted Rust advisories live in .cargo/audit.toml.
 function Invoke-DependencyAudit {
     Write-Host "  Dependency audit..." -ForegroundColor Cyan
     Set-Location $PROJECT_ROOT
@@ -110,14 +110,14 @@ function Invoke-DependencyAudit {
     }
     & cargo audit --file src-tauri/Cargo.lock
     $cargoExit = $LASTEXITCODE
-    & npm audit --omit=dev --audit-level=high
+    & npm audit --audit-level=high
     $npmExit = $LASTEXITCODE
     if ($cargoExit -ne 0 -or $npmExit -ne 0) {
         Write-Fail "Dependency audit failed (cargo audit exit $cargoExit, npm audit exit $npmExit)"
         Show-Notification -Title 'Sidearm Build FAILED' -Body 'Dependency audit found vulnerabilities.' -IsError
         exit 1
     }
-    Write-Ok "No known vulnerabilities in dependencies"
+    Write-Ok "Dependency audits passed (npm: no high/critical findings)"
     Write-Host ""
 }
 

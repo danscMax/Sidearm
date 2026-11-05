@@ -8,7 +8,7 @@ export const topViewHotspots: Partial<Record<ControlId, HotspotPosition>> = {
   wheel_up:          { left: 45.5, top: 13.5, label: "▲", size: "sm" },
   wheel_click:       { left: 45.5, top: 22, label: "●", size: "sm" },
   wheel_down:        { left: 45.5, top: 31, label: "▼", size: "sm" },
-  hypershift_button: { left: 68, top: 10.5, label: "HS", size: "sm" },
+  mouse_right:       { left: 68, top: 10.5, label: "control.name.mouseRight", size: "sm" },
   top_aux_01:        { left: 10, top: 10.5, label: "D+", size: "sm" },
   top_aux_02:        { left: 10, top: 21, label: "D−", size: "sm" },
   mouse_4:           { left: 31, top: 22.5, label: "←", size: "sm" },
@@ -56,7 +56,7 @@ export const combinedViewHotspots: Partial<Record<ControlId, HotspotPosition>> =
   wheel_up:          { left: 52, top: 15, label: "▲", size: "sm" },
   wheel_click:       { left: 56, top: 23.5, label: "●", size: "sm" },
   wheel_down:        { left: 56.5, top: 32.5, label: "▼", size: "sm" },
-  hypershift_button: { left: 60.5, top: 14, label: "HS", size: "sm" },
+  mouse_right:       { left: 60.5, top: 14, label: "control.name.mouseRight", size: "sm" },
   mouse_4:           { left: 50, top: 23.5, label: "←", size: "sm" },
   mouse_5:           { left: 61, top: 23.5, label: "→", size: "sm" },
 };

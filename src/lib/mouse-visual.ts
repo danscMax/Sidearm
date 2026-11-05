@@ -9,7 +9,7 @@ import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
 import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
-import { displayNameForControl } from "./labels";
+import { controlAssignmentLabel, displayNameForControl } from "./labels";
 
 export type ViewTab = "top" | "side" | "combined";
 
@@ -78,6 +78,7 @@ export function actionLabel(
   entry: ControlSurfaceEntry,
   opts: { triggerLabels?: TriggerBadgeLabels } = {},
 ): string {
+  if (entry.isHypershiftTrigger) return controlAssignmentLabel(entry);
   if (entry.action && entry.action.type !== "disabled" && entry.binding?.enabled) {
     const base = entry.action.displayName;
     if (!opts.triggerLabels) return base;
@@ -104,6 +105,7 @@ export const HEAT_TINT = "rgba(159, 202, 105, 0.07)";
 /** Two-line tooltip text: control name + assignment (or the unassigned label). */
 export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {
   const name = displayNameForControl(entry.control);
+  if (entry.isHypershiftTrigger) return `${name}\n${controlAssignmentLabel(entry)}`;
   if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
     return `${name}\n${unassignedLabel}`;
   }
@@ -155,7 +157,7 @@ export const TOP_LEFT_BUTTONS: ControlId[] = [
 ];
 
 export const TOP_RIGHT_BUTTONS: ControlId[] = [
-  "hypershift_button", "wheel_up", "wheel_click", "mouse_5", "wheel_down",
+  "mouse_right", "wheel_up", "wheel_click", "mouse_5", "wheel_down",
 ];
 
 export const COMBINED_LEFT_BUTTONS: ControlId[] = [
@@ -164,6 +166,6 @@ export const COMBINED_LEFT_BUTTONS: ControlId[] = [
 ];
 
 export const COMBINED_RIGHT_BUTTONS: ControlId[] = [
-  "hypershift_button", "wheel_up", "wheel_click", "wheel_down", "mouse_5",
+  "mouse_right", "wheel_up", "wheel_click", "wheel_down", "mouse_5",
   "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
 ];

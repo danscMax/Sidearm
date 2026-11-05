@@ -107,10 +107,10 @@ export function MouseVisualization({
       const pos = hotspots[entry.control.id];
       if (!pos) return null;
 
-      const isAssigned = entry.binding && entry.binding.enabled && entry.action && entry.action.type !== "disabled";
+      const isAssigned = entry.isHypershiftTrigger || (entry.binding && entry.binding.enabled && entry.action && entry.action.type !== "disabled");
       const actionType = entry.action?.type;
       const assignedClass = isAssigned
-        ? ` mouse-visual__hotspot--assigned mouse-visual__hotspot--type-${actionType}`
+        ? ` mouse-visual__hotspot--assigned${actionType && !entry.isHypershiftTrigger ? ` mouse-visual__hotspot--type-${actionType}` : ""}`
         : " mouse-visual__hotspot--unassigned";
       const isSelected = entry.isSelected || multiSelectedControlIds.has(entry.control.id);
       const isHovered = hoveredId === entry.control.id;
@@ -125,6 +125,7 @@ export function MouseVisualization({
       // an overflowing in-circle badge.
       const totalCount = executionCounts?.get(entry.control.id) ?? 0;
       const isThrottled = throttledControlIds?.has(entry.control.id) ?? false;
+      const tooltip = buildHotspotTooltip(entry, selectedLayer, executionHistory?.get(entry.control.id), totalCount);
 
       return (
         <button
@@ -146,16 +147,13 @@ export function MouseVisualization({
             }
             applyHeatBg(el, entry.control.id);
           }}
-          title={buildHotspotTooltip(
-            entry,
-            selectedLayer,
-            executionHistory?.get(entry.control.id),
-            totalCount,
-          )}
+          title={tooltip}
+          aria-label={tooltip}
           draggable={!!entry.binding && !!entry.action}
           {...getInteractionProps(entry.control.id)}
         >
           {resolveControlBadge(pos.label)}
+          {entry.isHypershiftTrigger && <span className="mouse-visual__assignment" aria-hidden="true">{t("visualization.hypershiftBadge")}</span>}
         </button>
       );
     });

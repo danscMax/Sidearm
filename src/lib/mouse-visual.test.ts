@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { Action, Binding, PhysicalControl } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
+import { buildHotspotTooltip } from "./labels";
 import {
   actionLabel,
+  TOP_RIGHT_BUTTONS,
+  COMBINED_RIGHT_BUTTONS,
   buildBindingDragData,
   heatIntensity,
   legendCellClass,
@@ -12,6 +15,21 @@ import {
 } from "./mouse-visual";
 
 const LABELS = { hold: "Hold", chord: "Chord" };
+
+describe("physical right button and configured HyperShift", () => {
+  it("uses the real right button rather than the legacy synthetic HS control", () => {
+    expect(TOP_RIGHT_BUTTONS).toContain("mouse_right");
+    expect(COMBINED_RIGHT_BUTTONS).toContain("mouse_right");
+    expect(TOP_RIGHT_BUTTONS).not.toContain("hypershift_button");
+  });
+  it("shows the configured modifier role instead of a stale stored assignment", () => {
+    const entry = { ...assignedEntry(), isHypershiftTrigger: true };
+    expect(actionLabel(entry)).toBe("HyperShift · удержание");
+    expect(tooltipText(entry, "Native")).toContain("HyperShift · удержание");
+    expect(buildHotspotTooltip({ ...entry, binding: { ...entry.binding!, triggerMode: "press" } }, "standard", undefined, 0)).toContain("Удержание");
+    expect(actionLabel({ ...entry, isHypershiftTrigger: false })).toBe("Ctrl+C");
+  });
+});
 
 const control = { id: "thumb_01", defaultName: "Thumb 1" } as unknown as PhysicalControl;
 

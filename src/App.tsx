@@ -27,6 +27,7 @@ import { PresetsModal } from "./components/PresetsModal";
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
+import { SynapseNotice } from "./components/SynapseNotice";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
 import { MouseWorkspace } from "./components/MouseWorkspace";
 import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
@@ -46,10 +47,8 @@ import {
   listenMouseDefaultsSuspected,
   listenMouseBattery,
   listenMouseStatus,
-  listenOnboardTakeover,
   getMouseStatus,
   getNativeModel,
-  openStartupAppsSettings,
   reloadRuntime,
   setKeySignals,
   setNativeTexts,
@@ -60,10 +59,9 @@ import {
   parseSynapseSource,
   relaunchAsAdmin,
   restoreConfigFromBackup,
-  restoreOnboardControl,
   setAdminAutostart,
 } from "./lib/backend";
-import { displayNameForControl, displayNameForControlId, labelForLayer, relativeTime } from "./lib/labels";
+import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels";
 import { MOUSE_STATUS_NOTICES, type MouseStatusKind } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
@@ -252,40 +250,6 @@ function App() {
     void listenMouseDefaultsSuspected(() => {
       if (!hasBuiltinDeviceRef.current) return;
       showToast(t("mouseDefaults.suspected"), "warning");
-    }).then((fn) => {
-      unlisten = fn;
-    });
-    return () => unlisten?.();
-  }, [showToast, t]);
-
-  // The backend guard caught Razer's engine holding the mouse (driver mode, or
-  // slots rewritten with Razer's own profile) and already took it back. Tell the
-  // user why their buttons moved, and offer a forced re-apply.
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    void listenOnboardTakeover(({ kind, restored, controls }) => {
-      // Nothing to take back yet — the guard now checks every few seconds.
-      if (kind === "razerStarted") {
-        showToast(t("onboard.razerStarted"), "warning", {
-          label: t("onboard.razerStartedAction"),
-          onClick: () => {
-            void openStartupAppsSettings().catch((e: unknown) => showToast(normalizeCommandError(e).message, "warning"));
-          },
-        });
-        return;
-      }
-      const messageKey = kind === "mode"
-        ? (restored ? "onboard.takeoverMode" : "onboard.takeoverModeFailed")
-        : (restored ? "onboard.takeoverMappings" : "onboard.takeoverMappingsFailed");
-      const names = controls.map((id) => displayNameForControlId(id)).join(", ");
-      showToast(t(messageKey, { controls: names }), "warning", {
-        label: t("onboard.restoreAction"),
-        onClick: () => {
-          void restoreOnboardControl()
-            .then(() => showToast(t("onboard.restoreDone"), "success"))
-            .catch((e: unknown) => showToast(normalizeCommandError(e).message, "warning"));
-        },
-      });
     }).then((fn) => {
       unlisten = fn;
     });
@@ -887,11 +851,10 @@ function App() {
     selectedProfileId ?? activeConfig?.settings.fallbackProfileId ?? null;
 
   // Keyboard-driven action picker (Enter on a selected control). Reuses the
-  // same hook the visualization uses, so placeholder-binding creation stays DRY.
+  // same read-only opening hook the visualization uses.
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
-    selectedLayer,
-    updateDraft,
+    config: activeConfig,
     setActionPickerBindingId,
     setActionPickerOpen,
   });
@@ -1073,6 +1036,8 @@ function App() {
                   ? null
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
+                isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
+                  && control.id === (activeConfig.settings.hypershiftTrigger ?? "mouse_right"),
               };
             }) ?? [],
       })),
@@ -1252,7 +1217,8 @@ function App() {
         <ActionPickerModal
           config={activeConfig}
           bindingId={actionPickerBindingId}
-          controlLabel={selectedControl ? displayNameForControl(selectedControl, "raw") : undefined}
+          profileId={effectiveProfileId ?? undefined}
+          controlLabel={selectedControl ? displayNameForControl(selectedControl) : undefined}
           layerLabel={labelForLayer(selectedLayer)}
           controlId={selectedControlId ?? undefined}
           selectedLayer={selectedLayer}
@@ -1323,7 +1289,13 @@ function App() {
           setError={setError}
         />
       ) : null}
-      <Toast toast={toasts[0] ?? null} onDismiss={() => setToasts((current) => current.slice(1))} />
+      <div className="toast-stack">
+        <SynapseNotice
+          enabled={runtimeSummary.status === "running" && !!activeConfig?.devices.some((device) => device.builtin)}
+          hypershiftTrigger={activeConfig?.settings.hypershiftTrigger ?? "mouse_right"}
+        />
+        <Toast toast={toasts[0] ?? null} onDismiss={() => setToasts((current) => current.slice(1))} />
+      </div>
 
       {shortcutHelpOpen ? (
         <ShortcutHelp onClose={() => setShortcutHelpOpen(false)} />

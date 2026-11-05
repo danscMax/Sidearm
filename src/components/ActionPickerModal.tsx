@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
+import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
+import { displayNameForControlId } from "../lib/labels";
 import { ACTION_CATEGORIES } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
 import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
 import {
   expectedEncodedKeyForControl,
+  ensurePlaceholderBinding,
   isPlaceholderAction,
+  nextUniqueId,
+  removeBinding,
   promoteInlineSnippetActionToLibrary,
   upsertAction,
   upsertBinding,
@@ -53,6 +58,7 @@ const TRIGGER_LABEL_KEYS: Record<TriggerMode, string> = {
 export function ActionPickerModal({
   config,
   bindingId,
+  profileId,
   controlLabel,
   layerLabel,
   controlId,
@@ -62,6 +68,7 @@ export function ActionPickerModal({
 }: {
   config: AppConfig;
   bindingId: string | null;
+  profileId?: string;
   controlLabel?: string;
   layerLabel?: string;
   controlId?: ControlId;
@@ -97,12 +104,22 @@ export function ActionPickerModal({
 
 
   const binding = bindingId ? config.bindings.find((b) => b.id === bindingId) ?? null : null;
-  const existingAction = binding
+  const savedAction = binding
     ? config.actions.find((a) => a.id === binding.actionId) ?? null
     : null;
+  const existingAction = isPlaceholderAction(savedAction) ? null : savedAction;
 
   // Encoder signal state (user devices only — see isBuiltinControl)
   const builtinControl = controlId ? isBuiltinControl(config, controlId) : false;
+  const currentTrigger = config.settings.hypershiftTrigger ?? "mouse_right";
+  const isCurrentTrigger = builtinControl && controlId === currentTrigger;
+  const canBeTrigger = builtinControl && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
+  // A global modifier role is not an executable, profile-specific ActionType.
+  const categories = [
+    { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
+    ...(canBeTrigger ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
+    ...ACTION_CATEGORIES,
+  ];
   // The mouse reports one key button at a time only with consumer signals; in
   // F13..F24 mode two arrive together. Asked once per opened key button.
   const keyButton = builtinControl && controlId !== undefined && isKeyButton(controlId);
@@ -129,13 +146,11 @@ export function ActionPickerModal({
   const [isCapturingSignal, setIsCapturingSignal] = useState(false);
 
   const [activeCategory, setActiveCategory] = useState(() => {
+    if (isCurrentTrigger) return "hypershift";
     if (existingAction) {
       return ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut";
     }
-    const lastCategory =
-      localStorage.getItem(LAST_PICKER_CATEGORY_KEY) ??
-      localStorage.getItem(LEGACY_LAST_PICKER_CATEGORY_KEY);
-    return lastCategory && ACTION_CATEGORIES.some((c) => c.id === lastCategory) ? lastCategory : "shortcut";
+    return "native";
   });
 
   function setActiveCategoryWithMemory(cat: string) {
@@ -146,18 +161,10 @@ export function ActionPickerModal({
   }
   const [searchQuery, setSearchQuery] = useState("");
 
-  const filteredCategories = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return ACTION_CATEGORIES;
-    return ACTION_CATEGORIES.filter((cat) =>
-      [
-        cat.id,
-        cat.actionType,
-        t(cat.label),
-        t(`action.type.${cat.actionType}`),
-      ].some((value) => value.toLowerCase().includes(q)),
-    );
-  }, [searchQuery, t]);
+  const query = searchQuery.trim().toLowerCase();
+  const filteredCategories = categories.filter((cat) =>
+    !query || [cat.id, cat.actionType, t(cat.label)].some((value) => value.toLowerCase().includes(query)),
+  );
 
   const effectiveCategory = filteredCategories.some((c) => c.id === activeCategory)
     ? activeCategory
@@ -242,8 +249,35 @@ export function ActionPickerModal({
   };
 
   function handleSave() {
+    if (effectiveCategory === "hypershift") {
+      if (!canBeTrigger || !controlId) return;
+      onSave({ ...config, settings: { ...config.settings, hypershiftTrigger: controlId as HypershiftTrigger } });
+      return;
+    }
+    let nextConfig = isCurrentTrigger
+      ? { ...config, settings: { ...config.settings, hypershiftTrigger: "none" as const } }
+      : config;
+    if (effectiveCategory === "native") {
+      onSave(binding ? removeBinding(nextConfig, binding.id) : nextConfig);
+      return;
+    }
+    let targetBinding = binding;
+    if (!targetBinding) {
+      const control = config.physicalControls.find((c) => c.id === controlId);
+      if (!control || !profileId || !selectedLayer) return;
+      const result = ensurePlaceholderBinding(nextConfig, profileId, selectedLayer, control);
+      nextConfig = result.config;
+      targetBinding = nextConfig.bindings.find((b) => b.id === result.bindingId) ?? null;
+    }
+    if (!targetBinding) return;
     const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
-    let nextConfig = upsertAction(config, nextAction);
+    // Reuse the new slot's action id so Save cannot leave an orphan placeholder.
+    if (!existingAction) {
+      nextAction.id = !binding && config.actions.some((a) => a.id === targetBinding.actionId)
+        ? nextUniqueId(config.actions.map((a) => a.id), targetBinding.actionId)
+        : targetBinding.actionId;
+    }
+    nextConfig = upsertAction(nextConfig, nextAction);
 
     // Opt-in: store this inline snippet in the reusable library AND link the
     // button to it (source: libraryRef), so later library edits reach the
@@ -260,15 +294,15 @@ export function ActionPickerModal({
       nextConfig = promoteInlineSnippetActionToLibrary(nextConfig, nextAction.id, snippetName);
     }
 
-    if (binding) {
+    if (targetBinding) {
       nextConfig = upsertBinding(nextConfig, {
-        ...binding,
+        ...targetBinding,
         actionId: nextAction.id,
         label: nextAction.displayName,
         // Preserve enabled state only when editing a REAL saved action; a
         // first-time assignment sits on a disabled placeholder action+binding
         // (enabled:false), so treat placeholder as "new" and enable it.
-        enabled: existingAction && !isPlaceholderAction(existingAction) ? binding.enabled : true,
+        enabled: existingAction ? targetBinding.enabled : true,
         triggerMode: triggerModeDraft === "press" ? undefined : triggerModeDraft,
         chordPartner: triggerModeDraft === "chord" && chordPartnerDraft
           ? chordPartnerDraft as ControlId
@@ -319,7 +353,8 @@ export function ActionPickerModal({
     }
   }
 
-  const saveDisabled = isSaveDisabled(effectiveCategory, drafts);
+  const roleCategory = effectiveCategory === "native" || effectiveCategory === "hypershift";
+  const saveDisabled = roleCategory ? false : isSaveDisabled(effectiveCategory, drafts);
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [
     triggerModeDraft !== "press" ? t(TRIGGER_LABEL_KEYS[triggerModeDraft]) : null,
@@ -327,8 +362,10 @@ export function ActionPickerModal({
     activeConditionsCount > 0 ? t("picker.advancedConditionsTag", { count: activeConditionsCount }) : null,
   ].filter(Boolean);
   const advancedSummary = advancedTags.length > 0 ? advancedTags.join(" · ") : t("picker.advancedDefaults");
-  const previewText = describeAction(effectiveCategory, drafts, t, config.profiles);
-  const activeCat = ACTION_CATEGORIES.find((c) => c.id === effectiveCategory);
+  const previewText = roleCategory
+    ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview" : "picker.nativePreview")
+    : describeAction(effectiveCategory, drafts, t, config.profiles);
+  const activeCat = categories.find((c) => c.id === effectiveCategory);
 
   return (
     <ModalShell
@@ -404,6 +441,24 @@ export function ActionPickerModal({
                 <p className="action-picker__cat-desc">{t(`picker.categoryDesc.${effectiveCategory}`)}</p>
               </div>
             </div>
+
+            {effectiveCategory === "hypershift" ? (
+              <div className="editor-grid">
+                <Notice variant="info">{t("picker.hypershiftScope")}</Notice>
+                {currentTrigger !== "none" && !isCurrentTrigger ? (
+                  <Notice variant="warning">{t("picker.hypershiftReplace", { button: displayNameForControlId(currentTrigger) })}</Notice>
+                ) : null}
+              </div>
+            ) : null}
+            {effectiveCategory === "native" ? (
+              <Notice variant="info">{t("picker.nativeHint")}</Notice>
+            ) : null}
+            {isCurrentTrigger && effectiveCategory !== "hypershift" ? (
+              <Notice variant="warning">{t("picker.hypershiftRemove")}</Notice>
+            ) : null}
+            {builtinControl && !canBeTrigger ? (
+              <Notice variant="info">{t("picker.hypershiftUnsupported")}</Notice>
+            ) : null}
 
             {effectiveCategory === "shortcut" ? (
               <ShortcutEditor
@@ -485,7 +540,7 @@ export function ActionPickerModal({
               />
             ) : null}
 
-            <label className="field mt-12">
+            {!roleCategory ? <label className="field mt-12">
               <span className="field__label">
                 {t("picker.nameLabel")}
                 <HelpTip text={t("picker.nameHelp")} />
@@ -496,9 +551,9 @@ export function ActionPickerModal({
                 onChange={(e) => setNameDraft(e.target.value)}
                 placeholder={autoName(ACTION_CATEGORIES.find((c) => c.id === effectiveCategory)?.actionType ?? "disabled", drafts, t, config.profiles)}
               />
-            </label>
+            </label> : null}
 
-            <details
+            {!roleCategory ? <details
               className="advanced-section picker-advanced mt-12"
               open={advancedOpen}
               onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
@@ -546,7 +601,7 @@ export function ActionPickerModal({
                 </div>
                 <ConditionsEditor conditions={conditionsDraft} onChange={setConditionsDraft} />
               </div>
-            </details>
+            </details> : null}
           </div>
         </div>
 
@@ -565,14 +620,14 @@ export function ActionPickerModal({
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>
             {t("common.cancel")}
           </button>
-          <button
+          {!roleCategory ? <button
             type="button"
             className="action-button action-button--ghost"
             onClick={handleTest}
             disabled={saveDisabled || testRunning}
           >
             {t("picker.test")}
-          </button>
+          </button> : null}
           <button
             type="button"
             className="action-button action-button--accent"

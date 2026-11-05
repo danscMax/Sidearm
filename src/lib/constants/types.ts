@@ -20,6 +20,8 @@ export type ControlSurfaceEntry = {
   action: Action | null;
   mapping: EncoderMapping | null;
   isSelected: boolean;
+  /** Derived from current settings, never persisted as a binding or control. */
+  isHypershiftTrigger?: boolean;
 };
 
 export type HotspotPosition = { left: number; top: number; label: string; size?: "sm" | "lg" };

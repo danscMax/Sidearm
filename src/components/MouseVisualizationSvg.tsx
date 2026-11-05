@@ -107,14 +107,6 @@ const TOP_BUTTONS: SvgButtonDef[] = [
     lx: 202,
     ly: 180,
   },
-  {
-    id: "hypershift_button",
-    label: "HS",
-    // Hypershift: right side of top, right of wheel area
-    path: "M 220 50 L 220 82 L 250 82 L 250 50 Z",
-    lx: 235,
-    ly: 66,
-  },
 ];
 
 /**
@@ -186,6 +178,9 @@ function buttonColors(
       fill: "rgba(var(--layer-rgb, 159,202,105), 0.35)",
     };
   }
+  if (entry?.isHypershiftTrigger) {
+    return { stroke: "var(--c-accent)", fill: "var(--c-surface)" };
+  }
   if (entry?.binding?.enabled && entry.action && entry.action.type !== "disabled") {
     const typeColor = ACTION_TYPE_COLORS[entry.action.type];
     if (typeColor) {
@@ -225,7 +220,6 @@ const HOTSPOT_LABELS: Partial<Record<ControlId, string>> = {
   wheel_up: "\u25B2",
   wheel_click: "\u25CF",
   wheel_down: "\u25BC",
-  hypershift_button: "HS",
   thumb_01: "1", thumb_02: "2", thumb_03: "3",
   thumb_04: "4", thumb_05: "5", thumb_06: "6",
   thumb_07: "7", thumb_08: "8", thumb_09: "9",
@@ -412,6 +406,7 @@ export function MouseVisualizationSvg({
         >
           {label}
         </text>
+        {entry?.isHypershiftTrigger && <text x={labelX} y={labelY - fs - 4} textAnchor="middle" className="mouse-svg__assignment">{t("visualization.hypershiftBadge")}</text>}
         {/* Heatmap count */}
         {heatCountText(id) ? (
           <text

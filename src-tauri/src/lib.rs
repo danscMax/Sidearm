@@ -22,6 +22,8 @@ mod mouse_status;
 #[cfg(target_os = "windows")]
 mod onboard_guard;
 #[cfg(target_os = "windows")]
+mod synapse_control;
+#[cfg(target_os = "windows")]
 mod tray_badge;
 mod paths;
 mod platform;
@@ -2781,23 +2783,114 @@ async fn restore_onboard_control(app: AppHandle) -> Result<(), CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let config = config::read_and_migrate_config_file(&config_dir.join("config.json"))
             .map_err(CommandError::from)?;
-        let device = mouse_memory::VendorDevice::open_connected()
-            .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))?;
-        device
-            .ensure_normal_mode()
-            .map_err(|msg| CommandError::new("onboard_mode_stuck", msg, None))?;
-        device
-            .apply_bindings(&mouse_memory::onboard_bindings(&config))
-            .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
-        // Razer may also have stored Hypershift (or a key) over a plain mouse
-        // button, which swallows the software Hypershift trigger.
-        let native: Vec<&str> = mouse_memory::native_buttons().iter().map(|(id, _, _)| *id).collect();
-        device
-            .restore_native_buttons(&native)
-            .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
+        restore_and_verify_onboard(&config)
     })
     .await
     .map_err(|e| CommandError::internal(format!("restore_onboard_control task failed: {e}")))?
+}
+
+#[cfg(target_os = "windows")]
+fn restore_and_verify_onboard(config: &AppConfig) -> Result<(), CommandError> {
+    let device = mouse_memory::VendorDevice::open_connected()
+        .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))?;
+    device.ensure_normal_mode()
+        .map_err(|msg| CommandError::new("onboard_mode_stuck", msg, None))?;
+    let bindings = mouse_memory::onboard_bindings(config);
+    device.apply_bindings(&bindings)
+        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
+    let native: Vec<_> = mouse_memory::native_buttons().iter().map(|(id, _, _)| *id).collect();
+    device.restore_native_buttons(&native)
+        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
+    if device.mode().map_err(CommandError::internal)? != mouse_memory::MODE_NORMAL
+        || !device.drifted_bindings(&bindings).map_err(CommandError::internal)?.is_empty()
+        || !device.drifted_native_buttons().map_err(CommandError::internal)?.is_empty() {
+        return Err(CommandError::internal("Mouse settings could not be confirmed. Wake the mouse and retry."));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn get_synapse_status(app: AppHandle) -> Result<synapse_control::Status, CommandError> {
+    let dir = resolve_config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || synapse_control::status(&dir))
+        .await.map_err(|e| CommandError::internal(e.to_string()))?.map_err(CommandError::internal)
+}
+
+#[cfg(target_os = "windows")]
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SynapseRecoveryResult {
+    startup_disabled: bool,
+    startup_error: Option<CommandError>,
+}
+
+#[cfg(target_os = "windows")]
+fn synapse_command_error(reason: impl Into<String>) -> CommandError {
+    let reason = reason.into();
+    log::warn!("[synapse-recovery] {reason}");
+    let mut error = CommandError::from_ui("synapse_recovery_failed", crate::ui_text!(
+        "synapse.recoveryFailed",
+        "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log."
+    ));
+    error.details = Some(vec![reason]);
+    error
+}
+
+/// Explicit ownership transfer. Successful writes are read back; a physical
+/// HyperShift test remains a separate user step, never inferred from HID memory.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn recover_from_synapse(app: AppHandle, disable_startup: bool, close_synapse: bool) -> Result<SynapseRecoveryResult, CommandError> {
+    let dir = resolve_config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _operation = synapse_control::RECOVERY_LOCK.try_lock()
+            .map_err(|_| synapse_command_error("A Synapse recovery operation is already running"))?;
+        if !app.state::<Arc<Mutex<RuntimeStore>>>().lock().recover_poison().is_running() {
+            return Err(CommandError::from_ui("runtime_stopped", crate::ui_text!("synapse.runtimeStopped", "Start Sidearm capture and retry.")));
+        }
+        let config = config::read_and_migrate_config_file(&dir.join("config.json")).map_err(CommandError::from)?;
+        {
+            let device = mouse_memory::VendorDevice::open_connected().map_err(synapse_command_error)?;
+            if !device.model().verified {
+                return Err(CommandError::from_ui("unverified_mouse", crate::ui_text!("synapse.unverifiedMouse", "This mouse model is not verified for Sidearm's native setup. Synapse was left running.")));
+            }
+        }
+        if close_synapse {
+            synapse_control::close_engines().map_err(synapse_command_error)?;
+        } else if synapse_control::engine_running().map_err(synapse_command_error)? {
+            return Err(CommandError::from_ui("synapse_restarted", crate::ui_text!("synapse.restarted", "Synapse started again. Use the close-Synapse action to continue.")));
+        }
+        restore_and_verify_onboard(&config).map_err(|e| synapse_command_error(e.message))?;
+        if !restart_capture(&app, || true).map_err(synapse_command_error)? {
+            return Err(CommandError::from_ui("runtime_stopped", crate::ui_text!("synapse.runtimeStopped", "Start Sidearm capture and retry.")));
+        }
+        if synapse_control::engine_running().map_err(synapse_command_error)? {
+            return Err(CommandError::from_ui("synapse_restarted", crate::ui_text!("synapse.restarted", "Synapse started again. Use the close-Synapse action to continue.")));
+        }
+        // Change future startup only after the current-session repair succeeds.
+        let startup_result = if disable_startup && close_synapse { synapse_control::disable_startup(&dir) } else { Ok(()) };
+        onboard_guard::request_check();
+        log::info!("[synapse-recovery] vendor engine closed; onboard settings verified; capture restarted; awaiting physical test");
+        Ok(SynapseRecoveryResult { startup_disabled: disable_startup && close_synapse && startup_result.is_ok(), startup_error: startup_result.err().map(|reason| {
+            log::warn!("[synapse-recovery] startup: {reason}");
+            CommandError::from_ui("synapse_startup_failed", crate::ui_text!("synapse.startupFailed", "The startup entry could not be changed. Use Windows Startup apps, or restore the saved entry before retrying."))
+        }) })
+    }).await.map_err(|e| CommandError::internal(e.to_string()))?
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn restore_synapse_startup(app: AppHandle) -> Result<(), CommandError> {
+    let dir = resolve_config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let _operation = synapse_control::RECOVERY_LOCK.try_lock()
+            .map_err(|_| synapse_command_error("A Synapse recovery operation is already running"))?;
+        synapse_control::restore_startup(&dir).map_err(|reason| {
+            log::warn!("[synapse-recovery] startup restore: {reason}");
+            CommandError::from_ui("synapse_startup_restore_failed", crate::ui_text!("synapse.startupRestoreFailed", "The saved startup entry could not be restored. It was kept for a retry; no newer entry was overwritten."))
+        })
+    }).await.map_err(|e| CommandError::internal(e.to_string()))?
 }
 
 /// On exit: store the profile in effect in the mouse itself, so its simple
@@ -3788,6 +3881,9 @@ pub fn run() {
             apply_onboard_mapping,
             verify_onboard_mapping,
             restore_onboard_control,
+            get_synapse_status,
+            recover_from_synapse,
+            restore_synapse_startup,
             get_native_model,
             get_device_report,
             open_device_report_issue,

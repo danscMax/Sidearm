@@ -95,6 +95,7 @@ Windows-first desktop app that remaps a programmable mouse (Razer Naga) and keyb
 - No AI/assistant attribution anywhere (commits, PRs, code, docs).
 - Config is the source of truth: schema-first (`schemas/config.v3.schema.json` at the repo root, runtime-validated), atomic writes, rolling + daily backups, corrupt-recovery. The TS `AppConfig` (`src/lib/config.ts`) and Rust structs must stay in sync with the schema.
 - Adding an `ActionType` touches many mirrored sites — see `src/components/action-picker/AGENTS.md`.
+- `CONTEXT.md` defines button identity, profile assignment, and the global HyperShift role; keep the role distinct from an executable action.
 - Fix root causes, not symptoms. Reuse existing shared primitives/helpers before adding new ones.
 
 ## Verification
@@ -103,7 +104,7 @@ Run before declaring a code change done:
 
 - Frontend: `npm run check` (= `tsc --noEmit` + `knip` dead-code + `cargo clippy`) and `npm run test` (vitest).
 - Rust: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` and `cargo test --manifest-path src-tauri/Cargo.toml`.
-- Integration smoke: `pwsh -File build_portable.ps1` (release build + WebView2 packaging; build via pwsh, not cmd; also runs cargo audit + npm audit and fails on vulnerabilities — accepted advisories live in `.cargo/audit.toml`).
+- Integration smoke: `pwsh -File build_portable.ps1` (release build + WebView2 packaging; build via pwsh, not cmd; also runs cargo audit and full `npm audit --audit-level=high`, including build/test tooling; accepted Rust advisories live in `.cargo/audit.toml`). High/critical npm findings block the gate, lower severities remain visible.
 - The desktop UI cannot be rendered headlessly here — visual and screen-reader changes need a manual pass in the running app.
 
 ## User Preferences
@@ -111,6 +112,7 @@ Run before declaring a code change done:
 - Present non-trivial choices as numbered options with trade-offs; let the user pick.
 - Diagnose to root cause before proposing fixes; explain what could break.
 - Commit when authorized; do not push/merge/release without explicit approval.
+- Run verification locally or on MiniPC. Do not start cloud CI jobs or add cloud verification gates; preserve cloud usage limits.
 
 ## Child DOX Index
 

@@ -11,6 +11,7 @@ import type {
   PhysicalControl,
   SequenceStep,
   TriggerMode,
+  HypershiftTrigger,
 } from "./config";
 import type {
   ActionExecutionEvent,
@@ -227,6 +228,22 @@ export function displayNameForControlId(controlId: string): string {
   return key ? i18n.t(key) : controlId;
 }
 
+/** The native hook reserves the configured trigger, independently of bindings. */
+export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
+  return entry.isHypershiftTrigger
+    ? i18n.t("visualization.hypershiftAssignment")
+    : surfacePrimaryLabel(entry.binding, entry.action);
+}
+
+/** Exercise only gestures supported by this user's current capture settings. */
+export function recoveryTestInstruction(trigger: HypershiftTrigger = "mouse_right"): string {
+  if (trigger === "none") return i18n.t("synapse.testNative");
+  const button = displayNameForControlId(trigger);
+  return trigger === "mouse_left"
+    ? i18n.t("synapse.testLayer", { button })
+    : i18n.t("synapse.testHypershift", { button, left: displayNameForControlId("mouse_left") });
+}
+
 /** Resolve a hotspot/region badge that may be an i18n key (`control.name.*`)
  *  or a literal glyph. The static hotspot tables store keys for the two mouse
  *  buttons (language-specific) and glyphs (▲ ● ← 1…12, language-neutral) for the
@@ -286,10 +303,10 @@ export function buildHotspotTooltip(
     signal
       ? `${displayNameForControl(entry.control)} (${signal})`
       : displayNameForControl(entry.control),
-    surfacePrimaryLabel(entry.binding, entry.action),
+    controlAssignmentLabel(entry),
   ];
 
-  const triggerMode = entry.binding?.triggerMode;
+  const triggerMode = entry.isHypershiftTrigger ? "hold" : entry.binding?.triggerMode;
   const triggerLabel = triggerMode ? labelForTriggerMode(triggerMode) : null;
   lines.push(
     triggerLabel

@@ -701,6 +701,8 @@
     "photoAltSide": "Razer Naga V2 HyperSpeed — thumb grid",
     "photoAltCombined": "Razer Naga V2 HyperSpeed — all buttons",
     "badgeHold": "Hold",
+    "hypershiftBadge": "HS",
+    "hypershiftAssignment": "HyperShift · hold",
     "badgeChord": "Chord",
     "tabAll": "All buttons",
     "tabTop": "Top panel",
@@ -835,6 +837,15 @@
     "debugLogging": "Debug logging"
   },
   "picker": {
+    "native": "Native action",
+    "hypershift": "HyperShift · hold",
+    "nativeHint": "Use the device's original action for this button in the selected profile and layer.",
+    "nativePreview": "Original device action",
+    "hypershiftScope": "For all profiles. Hold this button to activate the HyperShift layer. Its ordinary assignment is suspended while it acts as the modifier; existing assignments are preserved.",
+    "hypershiftReplace": "HyperShift will move from {{button}} to this button in all profiles.",
+    "hypershiftRemove": "Saving a different function here will turn off this HyperShift modifier in all profiles.",
+    "hypershiftPreview": "Hold to activate HyperShift · all profiles",
+    "hypershiftUnsupported": "HyperShift currently requires a button whose held state Sidearm can read. Scroll ticks cannot act as a held modifier.",
     "title": "Assign action",
     "test": "Test",
     "testCountdown": "Testing in {{n}}… switch to your target window",
@@ -915,6 +926,8 @@
     "previewDisabled": "Nothing — the button is disabled",
     "previewRepair": "Re-encodes the clipboard",
     "categoryDesc": {
+      "native": "Keep the device's original behaviour.",
+      "hypershift": "A held modifier that activates the second layer of assignments.",
       "shortcut": "Sends a keyboard shortcut to the active window.",
       "mouseAction": "A mouse click, scroll or button — optionally with modifiers.",
       "textSnippet": "Types ready-made text or a snippet from the library.",
@@ -1069,6 +1082,31 @@
     "restoreDone": "Sidearm controls the mouse again.",
     "razerStarted": "Razer Synapse is running — it rewrites the mouse buttons. Sidearm keeps restoring them, but it is better to close Synapse and turn off its autostart.",
     "razerStartedAction": "Startup apps"
+  },
+  "synapse": {
+    "conflict": "The Razer application is running. Running it alongside Sidearm can swallow HyperShift and button presses.",
+    "closeImpact": "This closes the Razer application and its modules: their macros and lighting sync will stop. Services and drivers stay enabled.",
+    "driverDetail": "Razer also switched the mouse to driver mode.",
+    "mappingDetail": "Razer also changed the button assignments.",
+    "mappingChanged": "The mouse settings changed. Restore Sidearm's assignments and test HyperShift.",
+    "disableStartup": "Also disable Synapse startup",
+    "repair": "Close Synapse and set up Sidearm",
+    "repairing": "Setting up the mouse for Sidearm…",
+    "testNative": "Assignments written. Test ordinary clicks and assigned buttons in the intended application. Do they perform the expected actions?",
+    "testHypershift": "Assignments written. Test ordinary buttons. To test HyperShift, hold {{button}} and press {{left}}: does the context menu open?",
+    "testLayer": "Assignments written. Test ordinary buttons. If you use the extra layer, hold {{button}} and press a button assigned on that layer. Does its action run?",
+    "testPassed": "Yes, it works",
+    "testNotPassed": "It does not work",
+    "testFailed": "The physical test failed. Control has not been restored yet. Retry or open Diagnostics.",
+    "confirmed": "Check completed.",
+    "needsAttention": "Check the mouse setup status.",
+    "failed": "Recovery did not finish: {{reason}}",
+    "statusUnknown": "Could not check Synapse status: {{reason}}",
+    "restarted": "Synapse started again. Close it and retry setup.",
+    "startupDisabled": "Synapse startup is disabled. The previous entry can be restored.",
+    "startupFailed": "The current session is set up, but startup could not be changed: {{reason}}",
+    "undoStartup": "Restore previous startup",
+    "dismiss": "Close"
   },
   "elevation": {
     "foregroundBlocked": "“{{exe}}” is running as administrator — Windows blocks Sidearm's input there.",
@@ -1424,6 +1462,14 @@
       "shortcutSent": "Sent shortcut `{{shortcut}}`.",
       "snippetPreview": "Will paste {{target}} via {{mode}}.",
       "snippetTags": "Snippet has tags: {{tags}}."
+    },
+    "synapse": {
+      "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",
+      "runtimeStopped": "Start Sidearm capture and retry.",
+      "unverifiedMouse": "This mouse model is not verified for Sidearm's native setup. Synapse was left running.",
+      "restarted": "Synapse started again. Use the close-Synapse action to continue.",
+      "startupFailed": "The startup entry could not be changed. Use Windows Startup apps, or restore the saved entry before retrying.",
+      "startupRestoreFailed": "The saved startup entry could not be restored. It was kept for a retry; no newer entry was overwritten."
     },
     "guard": {
       "batteryLow": "Mouse battery: {{percent}}%",

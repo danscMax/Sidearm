@@ -12,6 +12,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 - `useModalDismiss.ts` / `useDismissable.ts` — Escape + focus-trap + outside-click for modals/popovers.
 - `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle.
 - `useLogPanel.ts`, `useMouseVisualPanel.ts`, `useActionPicker.ts`, `useVerification.ts`.
+- `useActionPicker` only opens a valid control's editor and selects its existing binding, if any. It must never create a placeholder or invoke persistence; the modal owns local drafts until Save.
 
 ## Local Contracts
 

@@ -1,0 +1,120 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { ActionPickerModal } from "./ActionPickerModal";
+import { makeConfig } from "../lib/test-fixtures";
+import type { AppConfig } from "../lib/config";
+import { ensurePlaceholderBinding, makeActionId, makeBindingId } from "../lib/config-editing";
+
+vi.mock("../lib/backend", () => ({
+  getNativeModel: vi.fn().mockResolvedValue({ consumerSignals: false }),
+  liveTestAction: vi.fn(), listenEncodedKeyEvent: vi.fn(), normalizeCommandError: vi.fn(),
+}));
+afterEach(cleanup);
+
+function show(controlId = "mouse_4", config = makeConfig(), bindingId: string | null = null) {
+  const onSave = vi.fn<(config: AppConfig) => void>();
+  const onCancel = vi.fn();
+  render(<ActionPickerModal config={config} bindingId={bindingId} profileId="p1"
+    controlId={controlId} selectedLayer="standard" onSave={onSave} onCancel={onCancel} />);
+  return { onSave, onCancel };
+}
+function save() { fireEvent.click(screen.getByRole("button", { name: "Сохранить" })); }
+
+describe("button role editor", () => {
+  it("shows the configured global role instead of an unassigned action, without mutating config", () => {
+    const config = makeConfig();
+    config.settings.hypershiftTrigger = "mouse_4";
+    const original = structuredClone(config);
+    const { onSave, onCancel } = show("mouse_4", config);
+    expect(screen.getByRole("button", { name: /HyperShift · удержание/ }).getAttribute("aria-current")).toBe("true");
+    expect(screen.queryByText(/Unassigned/)).toBeNull();
+    expect(screen.getByText(/Для всех профилей/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Тест" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(config).toEqual(original);
+  });
+
+  it("moves the modifier in all profiles without adding bindings or dropping existing actions", () => {
+    const config = makeConfig();
+    const { onSave } = show("mouse_4", config);
+    fireEvent.click(screen.getByRole("button", { name: /HyperShift · удержание/ }));
+    expect(screen.getByText(/перенесён с кнопки «ПКМ»/)).toBeTruthy();
+    expect(onSave).not.toHaveBeenCalled();
+    save();
+    expect(onSave.mock.calls[0]![0]).toEqual({ ...config, settings: { ...config.settings, hypershiftTrigger: "mouse_4" } });
+  });
+
+  it("restores the native role and explicitly turns off the global modifier", () => {
+    const config = makeConfig();
+    config.settings.hypershiftTrigger = "mouse_4";
+    const { onSave } = show("mouse_4", config);
+    fireEvent.click(screen.getByRole("button", { name: /Исходное действие/ }));
+    expect(screen.getByText(/выключит этот модификатор/)).toBeTruthy();
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.settings.hypershiftTrigger).toBe("none");
+    expect(result.bindings).toEqual([]);
+    expect(result.actions).toEqual([]);
+  });
+
+  it("creates one enabled real action on Save, preserving another action with a colliding derived id", () => {
+    const config = makeConfig();
+    const id = makeActionId("p1", "standard", "mouse_4");
+    config.actions = [{ id, type: "textSnippet", displayName: "Keep", payload: { source: "inline", text: "Existing text", tags: [], pasteMode: "sendText" } }];
+    config.bindings = [{ id: makeBindingId("p1", "standard", "mouse_4"), profileId: "p2", controlId: "thumb_01", layer: "standard", actionId: id, enabled: true, label: "Keep" }];
+    const { onSave } = show("mouse_4", config);
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.actions).toHaveLength(2);
+    expect(result.actions.find((a) => a.id === id)).toEqual(config.actions[0]);
+    const binding = result.bindings.find((b) => b.profileId === "p1")!;
+    expect(binding.id).not.toBe(config.bindings[0]!.id);
+    expect(binding.enabled).toBe(true);
+    expect(result.actions.find((a) => a.id === binding.actionId)?.type).toBe("disabled");
+    expect(result.actions.some((a) => a.notes?.includes("placeholder"))).toBe(false);
+  });
+
+  it("ignores an old placeholder's disabled label and does not save on Escape", () => {
+    const config = makeConfig();
+    const seeded = ensurePlaceholderBinding(config, "p1", "standard", config.physicalControls[0]!);
+    const { onSave, onCancel } = show("mouse_4", seeded.config, seeded.bindingId);
+    expect(screen.getByRole("button", { name: /Исходное действие/ }).getAttribute("aria-current")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps the existing assignment when the same button becomes the global modifier", () => {
+    const config = makeConfig();
+    config.actions = [{ id: "existing", type: "mouseAction", displayName: "Back", payload: { action: "mouseBack" } }];
+    config.bindings = [{ id: "binding", profileId: "p1", controlId: "mouse_4", layer: "standard", actionId: "existing", enabled: true, label: "Back" }];
+    const { onSave } = show("mouse_4", config, "binding");
+    fireEvent.click(screen.getByRole("button", { name: /HyperShift · удержание/ }));
+    save();
+    expect(onSave.mock.calls[0]![0].bindings).toEqual(config.bindings);
+    expect(onSave.mock.calls[0]![0].actions).toEqual(config.actions);
+  });
+
+  it("a real action replacing the modifier turns off HyperShift and creates no orphan placeholder", () => {
+    const config = makeConfig();
+    config.settings.hypershiftTrigger = "mouse_4";
+    const { onSave } = show("mouse_4", config);
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.settings.hypershiftTrigger).toBe("none");
+    expect(result.actions).toHaveLength(1);
+    expect(result.bindings).toHaveLength(1);
+    expect(result.bindings[0]!.actionId).toBe(result.actions[0]!.id);
+    expect(result.bindings[0]!.enabled).toBe(true);
+  });
+
+  it("does not offer unsupported encoded buttons as modifier triggers", () => {
+    show("thumb_01");
+    expect(screen.queryByRole("button", { name: /HyperShift · удержание/ })).toBeNull();
+    expect(screen.getByText(/удержание которой Sidearm умеет считывать/)).toBeTruthy();
+  });
+});

@@ -141,8 +141,7 @@ export function ProfilesWorkspace({
 
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
-    selectedLayer,
-    updateDraft,
+    config: activeConfig,
     setActionPickerBindingId,
     setActionPickerOpen,
   });

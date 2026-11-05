@@ -2,6 +2,8 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../../i18n";
+import { NATIVE_HYPERSHIFT_TRIGGERS } from "../../lib/config";
+import { displayNameForControlId } from "../../lib/labels";
 import type {
   AppConfig,
   CommandError,
@@ -190,11 +192,7 @@ export function AppSettings({
             ariaLabel={t("settings.hypershiftTriggerLabel")}
             value={osd.hypershiftTrigger ?? "mouse_right"}
             options={[
-              { value: "mouse_right", label: t("settings.hypershiftMouseRight") },
-              { value: "mouse_left", label: t("settings.hypershiftMouseLeft") },
-              { value: "wheel_click", label: t("settings.hypershiftWheelClick") },
-              { value: "mouse_4", label: t("settings.hypershiftMouse4") },
-              { value: "mouse_5", label: t("settings.hypershiftMouse5") },
+              ...NATIVE_HYPERSHIFT_TRIGGERS.map((value) => ({ value, label: displayNameForControlId(value) })),
               { value: "none", label: t("settings.hypershiftOff") },
             ]}
             onChange={(trigger) => updateSettings({ hypershiftTrigger: trigger })}

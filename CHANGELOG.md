@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.7] — 2026-11-05
+
+### Added
+- One persistent Synapse conflict card combines running-engine, driver-mode and
+  changed-assignment warnings. Its recovery button closes the conflicting Razer
+  application, restores and verifies mouse assignments, and restarts capture.
+- Synapse startup can optionally be disabled during recovery. The checkbox is
+  off by default, and the original startup entry can be restored on the same PC.
+- HyperShift can be assigned directly in the button editor. The editor explains
+  that this held modifier applies to all profiles and preserves existing actions.
+
+### Fixed
+- The button editor recognises the configured HyperShift role instead of showing
+  an unassigned or disabled action. Opening or cancelling the editor no longer
+  saves a placeholder binding.
+- The mouse image keeps physical button names and shows an HS marker only on the
+  configured modifier. Recovery instructions use that button, with separate
+  instructions when HyperShift is off or assigned to the left button.
+- Failure-to-recovery transitions reach the conflict card even within the
+  notification cooldown; separate warnings no longer replace one another.
+- New recovery and editor messages have English and Russian translations,
+  including the physical button name in the editor header and missing plurals.
+
+### Security
+- Updated vulnerable development dependencies, including Vite, Vitest and their
+  affected dependency chains. Production dependency versions are unchanged.
+- Portable builds now audit all npm dependencies, including build and test tools;
+  high and critical findings block the build.
+
+### Notes
+- A successful technical recovery still asks the user to test the physical mouse.
+  Synapse is closed only after an explicit action; shared Razer modules may stop.
+- HyperShift still supports the five native mouse-button triggers. Support for
+  encoded side and top buttons is deferred.
+
 ## [0.11.6] — 2026-10-28
 
 ### Changed

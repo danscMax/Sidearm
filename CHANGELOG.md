@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.8] — 2026-11-06
+
+### Added
+- Per-profile DPI stages and DPI Up/Down mouse actions, adapted from
+  [PR #3](https://github.com/danscMax/Sidearm/pull/3) by NightCodeOfficial. Up to
+  five speeds can be configured; stepping stops at the ends and keeps the saved
+  starting DPI unchanged. DPI actions require Sidearm to be running.
+- DPI presets and an explicit Manual option share the existing Sensitivity row
+  with one numeric input. English and Russian labels are included.
+- Mouse readings are collected independently: available DPI, polling rate and
+  battery values remain visible when another query fails. Missing readings have
+  field-specific warnings; sleep or an access failure is not a disconnection.
+- Quick local mouse diagnostics show available device information and read
+  failures without scanning all button records. Copying is explicit; the report
+  excludes serial numbers, user paths and profile contents.
+
+### Fixed
+- Confirmed DPI/polling writes remain successful when a different read fails.
+- Refreshes reject stale results and coalesce device events without adding a
+  polling timer. Enabling profile overrides uses only available readings.
+- Ordinary fields use the shared input styling. Shortcut capture, chip entry,
+  device naming, rule/profile selectors and text editors have explicit labels.
+- Deferred edits retain the chosen button status and typed profile name or
+  description, including clearing a description.
+- Local canon checks catch unstyled fields and deferred reads of form events.
+- Diagnostics fill the available window width instead of growing with long log
+  messages; log actions wrap when space is limited.
+
+### Compatibility and validation
+- Configurations migrate from v2/v3 to v4 while preserving assignments. Back up
+  `data/config.json` before updating; rollback to v0.11.7 requires its compatible
+  pre-update config. No personal settings are included in the download.
+- 1,229 frontend tests pass. The unchanged Rust sources passed strict Clippy and
+  726 Rust tests; 12 hardware tests remain ignored. Packaging and dependency
+  audits passed locally/on MiniPC; no cloud CI was used.
+- The running Windows app was visually checked in English and Russian: DPI
+  presets/manual entry, readings/report, settings/profile fields, device naming,
+  action text, status/log controls, application rules, process search and command
+  palette. DPI stepping was tested on a Naga V2 HyperSpeed during the candidate
+  checks. Real user assignments are preserved; test data is excluded.
+
 ## [0.11.8-rc.5] — 2026-11-06
 
 ### Added

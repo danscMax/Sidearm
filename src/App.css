@@ -901,6 +901,9 @@ select::checkmark {
 .workspace--expert {
   display: flex;
   flex-direction: column;
+  /* Override the grid's start alignment: long log lines must not size the
+     diagnostics column beyond the available viewport width. */
+  align-items: stretch;
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -5871,6 +5874,7 @@ input[type="search"]::-webkit-search-decoration {
 
 .log-panel__actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 4px;
   align-items: center;
   margin-left: auto;

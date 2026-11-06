@@ -131,8 +131,8 @@ export async function getNativeModel(): Promise<NativeModelInfo> {
 }
 
 /** Read-only text dump of the connected mouse for a "help verify" issue (~20 s). */
-export async function getDeviceReport(): Promise<string> {
-  return invoke<string>("get_device_report");
+export async function getDeviceReport(detail?: "summary" | "full"): Promise<string> {
+  return invoke<string>("get_device_report", { detail: detail ?? null });
 }
 
 /** Opens a new GitHub issue for a device report in the browser. */
@@ -404,8 +404,8 @@ export async function runPreviewAction(
  * signal. Actually executes it; the caller runs a countdown first so the user
  * can switch to the target window.
  */
-export async function liveTestAction(action: Action): Promise<ActionExecutionEvent> {
-  return invoke<ActionExecutionEvent>("live_test_action", { action });
+export async function liveTestAction(action: Action, profileId?: string): Promise<ActionExecutionEvent> {
+  return invoke<ActionExecutionEvent>("live_test_action", { action, profileId: profileId ?? null });
 }
 
 export async function getExeIcon(exeName: string, processPath?: string): Promise<string | null> {

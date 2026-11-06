@@ -1,11 +1,12 @@
 import { describe, it, expect } from "vitest";
+import * as ts from "typescript";
 
 // Adoption ratchets. This stack has no source-level linter (ESLint/stylelint are
 // deliberately absent), so bypassing a shared primitive compiles green. These
-// cheap source greps are the guard the canon audit recommended: a new raw
-// `<select>` / `notice` banner / inline style / un-wrapped IPC listen fails CI
-// instead of quietly drifting. Whitelists are the justified exceptions the audit
-// documented (a primitive that genuinely does not fit that one site).
+// Local source checks catch a raw form field, duplicate primitive, inline style
+// or unwrapped IPC listener before it quietly drifts. JSX checks use the existing
+// compiler to understand inherited wrappers and deferred config callbacks.
+// Exceptions identify an intentionally specialized composite control.
 
 // Vite-native raw import of every source file as a string — no Node fs needed.
 const sources = import.meta.glob("../**/*.{ts,tsx}", {
@@ -38,9 +39,110 @@ const CSS = Object.entries(cssSources).map(
   ([path, content]) => [toSrcRel(path), content] as const,
 );
 
+const inputClasses = new Set([
+  "input", "settings-text-input", "debug-testing__input", "profiles__priority-input",
+  "action-picker__search", "profiles-workspace__search",
+]);
+// These editors deliberately draw a larger composite control around their input.
+const specialInputs: Record<string, ReadonlySet<string>> = {
+  "components/ChipEditor.tsx": new Set(["chip-editor__input", "chip-editor__chip-edit"]),
+  "components/CommandPalette.tsx": new Set(["command-palette__input"]),
+  "components/action-picker/TextSnippetEditor.tsx": new Set(["token-textarea__input"]),
+};
+type Opening = ts.JsxOpeningElement | ts.JsxSelfClosingElement;
+
+function attribute(node: Opening, name: string) {
+  return node.attributes.properties.find((prop): prop is ts.JsxAttribute =>
+    ts.isJsxAttribute(prop) && prop.name.getText() === name)?.initializer;
+}
+
+function classTokens(node: Opening): string[] {
+  const value = attribute(node, "className");
+  if (!value) return [];
+  if (ts.isStringLiteral(value)) return value.text.split(/\s+/);
+  if (ts.isJsxExpression(value) && value.expression) {
+    const expression = value.expression;
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text.split(/\s+/);
+    if (ts.isTemplateExpression(expression)) return [expression.head.text, ...expression.templateSpans.map((span) => span.literal.text)].join(" ").split(/\s+/);
+  }
+  return [];
+}
+
+function unstyledControls(path: string, content: string): string[] {
+  const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const offenders: string[] = [];
+  function visit(node: ts.Node) {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && ["input", "textarea", "select"].includes(node.tagName.getText(source))) {
+      const type = attribute(node, "type");
+      const separateControl = type && ts.isStringLiteral(type) && ["checkbox", "radio", "hidden"].includes(type.text);
+      const classes = classTokens(node);
+      let styled = classes.some((name) => inputClasses.has(name) || specialInputs[path]?.has(name));
+      for (let parent = node.parent; parent && !styled; parent = parent.parent) {
+        if (ts.isJsxElement(parent) && parent.openingElement !== node) {
+          styled = classTokens(parent.openingElement).some((name) => name === "field" || name === "capture-row");
+        }
+      }
+      if (!separateControl && !styled) offenders.push(`${path}:${source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1}`);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return offenders;
+}
+
+function deferredEventReads(path: string, content: string): string[] {
+  const source = ts.createSourceFile(path, content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const offenders: string[] = [];
+  function readsFormEvent(node: ts.Node): boolean {
+    if (ts.isPropertyAccessExpression(node) && ["value", "checked"].includes(node.name.text)
+      && ts.isPropertyAccessExpression(node.expression) && ["target", "currentTarget"].includes(node.expression.name.text)
+      && ts.isIdentifier(node.expression.expression) && ["event", "e"].includes(node.expression.expression.text)) return true;
+    return ts.forEachChild(node, readsFormEvent) ?? false;
+  }
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && /(?:^|\.)(?:updateDraft|setDraft|setConfig|setActiveConfig)$/.test(node.expression.getText(source))) {
+      for (const arg of node.arguments) {
+        if ((ts.isArrowFunction(arg) || ts.isFunctionExpression(arg)) && readsFormEvent(arg)) {
+          offenders.push(`${path}:${source.getLineAndCharacterOfPosition(arg.getStart(source)).line + 1}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  return offenders;
+}
+
 describe("canon adoption guards", () => {
   it("scans the source tree", () => {
     expect(ENTRIES.length).toBeGreaterThan(50);
+  });
+
+  it("ordinary form controls opt into the canonical input recipe", () => {
+    expect(TSX.flatMap(([path, content]) => unstyledControls(path, content))).toEqual([]);
+  });
+
+  it("detects a bare unit field but accepts canonical wrappers and classes", () => {
+    expect(unstyledControls("Example.tsx", '<div className="input-suffix"><input type="number" /></div>')).toHaveLength(1);
+    expect(unstyledControls("Example.tsx", '<div className="field__row"><input /></div>')).toHaveLength(1);
+    expect(unstyledControls("Example.tsx", '<label className="field"><div className="input-suffix"><input type="number" /></div></label>')).toEqual([]);
+    expect(unstyledControls("Example.tsx", '<input className="input" type="number" />')).toEqual([]);
+    expect(unstyledControls("Example.tsx", '<input type="checkbox" />')).toEqual([]);
+  });
+
+  it("special-editor exceptions apply to a control rather than a whole file", () => {
+    expect(unstyledControls("components/ChipEditor.tsx", '<><input className="chip-editor__input" /><input /></>')).toHaveLength(1);
+    expect(unstyledControls("Example.tsx", '<input className="chip-editor__input" />')).toHaveLength(1);
+  });
+
+  it("config updaters snapshot form values before deferring", () => {
+    expect(TSX.flatMap(([path, content]) => deferredEventReads(path, content))).toEqual([]);
+  });
+
+  it("detects deferred event reads while accepting an immediate value snapshot", () => {
+    expect(deferredEventReads("Example.tsx", 'const onChange = (event) => updateDraft((config) => ({ ...config, name: event.target.value }));')).toHaveLength(1);
+    expect(deferredEventReads("Example.tsx", 'const onChange = (e) => updateDraft((config) => ({ ...config, enabled: e.currentTarget.checked }));')).toHaveLength(1);
+    expect(deferredEventReads("Example.tsx", 'const onChange = (event) => { const name = event.currentTarget.value; updateDraft((config) => ({ ...config, name })); };')).toEqual([]);
   });
 
   it("no inline style={{ }} (CSP style-src forbids inline styles)", () => {

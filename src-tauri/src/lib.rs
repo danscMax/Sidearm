@@ -16,6 +16,8 @@ mod log_cleanup;
 #[cfg(target_os = "windows")]
 mod mouse_memory;
 #[cfg(target_os = "windows")]
+mod mouse_settings;
+#[cfg(target_os = "windows")]
 mod mouse_offline;
 #[cfg(target_os = "windows")]
 mod mouse_status;
@@ -2625,23 +2627,17 @@ async fn run_preview_action(
 async fn live_test_action(
     app: AppHandle,
     action: config::Action,
+    profile_id: Option<String>,
 ) -> Result<ActionExecutionEvent, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
-    let config =
-        tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
-            .await
-            .map_err(|error| {
-                CommandError::internal(format!("live_test_action task failed: {error}"))
-            })?
-            .map_err(CommandError::from)?
-            .config;
-
-    executor::live_test_action(&config, &action).map_err(|error| {
-        CommandError {
+    // HID queries can wait for the shared device lock; keep them off async workers.
+    tauri::async_runtime::spawn_blocking(move || {
+        let config = load_or_initialize_config(&config_dir).map_err(CommandError::from)?.config;
+        executor::live_test_action(&config, &action, profile_id.as_deref()).map_err(|error| CommandError {
             details: error.event.action_id.clone().map(|id| vec![id]),
             ..CommandError::from_ui(error.code, error.event.message.clone())
-        }
-    })
+        })
+    }).await.map_err(|error| CommandError::internal(format!("live_test_action task failed: {error}")))?
 }
 
 fn emit_runtime_error(
@@ -2921,14 +2917,24 @@ fn write_offline_mouse_profile(app: &AppHandle) {
 #[cfg(target_os = "windows")]
 async fn with_mouse_settings(
     work: impl FnOnce(&mouse_memory::VendorDevice) -> Result<(), String> + Send + 'static,
-) -> Result<mouse_memory::MouseSettings, CommandError> {
+) -> Result<mouse_settings::MouseSettings, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let device = mouse_memory::VendorDevice::open_connected()
-            .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))?;
-        work(&device).map_err(|msg| CommandError::new("mouse_setting_failed", msg, None))?;
-        device
-            .settings()
-            .map_err(|msg| CommandError::new("mouse_setting_failed", msg, None))
+            .map_err(|msg| {
+                let mut error = CommandError::from_ui("onboard_device_unavailable",
+                    crate::ui_text!("mouseRead.accessFailed", "Could not access the mouse."));
+                error.details = Some(vec![mouse_settings::public_read_error(&msg)]);
+                error
+            })?;
+        work(&device).map_err(|msg| {
+            let mut error = CommandError::from_ui("mouse_setting_failed",
+                crate::ui_text!("mouseRead.writeNotConfirmed", "Could not confirm the mouse setting."));
+            error.details = Some(vec![mouse_settings::public_read_error(&msg)]);
+            error
+        })?;
+        // Each setter has already verified its own write. Other failed readings
+        // are warnings in the snapshot, not a second failure of that write.
+        Ok(device.settings())
     })
     .await
     .map_err(|e| CommandError::internal(format!("mouse settings task failed: {e}")))?
@@ -2952,11 +2958,23 @@ async fn get_native_model() -> Result<device_catalog::NativeModelInfo, CommandEr
 /// (`VendorDevice::probe_report`). Scans every button id, so it takes ~20 s.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn get_device_report() -> Result<String, CommandError> {
-    tauri::async_runtime::spawn_blocking(|| {
-        mouse_memory::VendorDevice::open_connected()
-            .map(|device| device.probe_report())
-            .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))
+async fn get_device_report(detail: Option<mouse_settings::ReportDetail>) -> Result<String, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let detail = detail.unwrap_or_default();
+        match mouse_memory::VendorDevice::open_connected() {
+            Ok(device) => Ok(match detail {
+                mouse_settings::ReportDetail::Summary => device.probe_summary(),
+                mouse_settings::ReportDetail::Full => device.probe_report(),
+            }),
+            Err(message) if matches!(detail, mouse_settings::ReportDetail::Summary) =>
+                Ok(mouse_memory::unavailable_device_report(&message)),
+            Err(message) => {
+                let mut error = CommandError::from_ui("onboard_device_unavailable",
+                    crate::ui_text!("mouseRead.accessFailed", "Could not access the mouse."));
+                error.details = Some(vec![mouse_settings::public_read_error(&message)]);
+                Err(error)
+            }
+        }
     })
     .await
     .map_err(|e| CommandError::internal(format!("device report task failed: {e}")))?
@@ -3035,21 +3053,24 @@ fn open_startup_apps_settings() -> Result<(), CommandError> {
 /// Battery, DPI and poll rate as the mouse reports them now.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn get_mouse_settings() -> Result<mouse_memory::MouseSettings, CommandError> {
-    with_mouse_settings(|_| Ok(())).await
+async fn get_mouse_settings() -> Result<mouse_settings::MouseSettings, CommandError> {
+    tauri::async_runtime::spawn_blocking(|| match mouse_memory::VendorDevice::open_connected() {
+        Ok(device) => device.settings(),
+        Err(error) => mouse_settings::MouseSettings::inaccessible(&error, error == mouse_memory::NOT_CONNECTED),
+    }).await.map_err(|error| CommandError::internal(format!("mouse settings task failed: {error}")))
 }
 
 /// Stores a DPI in the mouse (both axes) and returns the settings read back.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn set_mouse_dpi(dpi: u16) -> Result<mouse_memory::MouseSettings, CommandError> {
+async fn set_mouse_dpi(dpi: u16) -> Result<mouse_settings::MouseSettings, CommandError> {
     with_mouse_settings(move |device| device.set_dpi(dpi, true)).await
 }
 
 /// Sets the mouse poll rate (125/500/1000 Hz) and returns the settings read back.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn set_mouse_poll_rate(hz: u16) -> Result<mouse_memory::MouseSettings, CommandError> {
+async fn set_mouse_poll_rate(hz: u16) -> Result<mouse_settings::MouseSettings, CommandError> {
     with_mouse_settings(move |device| device.set_poll_rate_hz(hz)).await
 }
 

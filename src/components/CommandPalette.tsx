@@ -179,6 +179,7 @@ export function CommandPalette({
     >
       <input
         className="command-palette__input"
+        aria-label={t("command.placeholder")}
         type="text"
         role="combobox"
         aria-expanded={rows.length > 0}

@@ -98,7 +98,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
             </button>
           ))}
           <select
-            className="log-panel__category-select"
+            className="input log-panel__category-select"
             aria-label={t("log.categoryFilter")}
             value={categoryFilter}
             onChange={(e) => {
@@ -116,7 +116,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
         <div className="log-panel__actions">
           <input
             type="text"
-            className="log-panel__search"
+            className="input log-panel__search"
             placeholder={t("common.search")}
             aria-label={t("common.search")}
             value={searchQuery}

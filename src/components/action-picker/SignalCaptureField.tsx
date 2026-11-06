@@ -26,6 +26,7 @@ export function SignalCaptureField({
           ) : null}
         </span>
         <CaptureRow
+          ariaLabel={t("picker.signalLabel")}
           value={signalDraft ?? ""}
           placeholder={isCapturing ? t("picker.signalCapturing") : t("picker.signalEmpty")}
           capturing={isCapturing}

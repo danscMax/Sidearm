@@ -120,6 +120,7 @@ export function AddControlModal({
       <label className="field">
         <span className="field__label">{t("device.signal")}</span>
         <CaptureRow
+          ariaLabel={t("device.signal")}
           value={signal}
           placeholder={capturing ? t("device.signalCapturing") : t("device.signalEmpty")}
           capturing={capturing}

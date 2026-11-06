@@ -13,6 +13,7 @@ i18next setup and the two locale bundles. Every user-facing string lives here.
 
 - Every key must exist in BOTH `en.json` and `ru.json`. Add to both in the same change.
 - `backend.<area>.<name>` holds the texts the Rust backend sends with a key (`ui_text!`); `ui-text.test.ts` pins that every Rust key exists in both locales with the same placeholders.
+- `backend.mouseRead` holds field/access/write-confirmation errors; `mouse.readStatus` and diagnostic controls cover complete, partial, unavailable and disconnected snapshots in both languages.
 - No hardcoded user-facing text in components — add a key and use `t(...)` / `aria-label={t(...)}`.
 - Interpolation uses `{{var}}`. A literal single-brace token like `{date}` is fine; never leave an unpaired `{{` in a string (it starts an interpolation).
 - Prefer count-in-parens phrasing (`"Selected: {{count}}"`) over noun agreement, or add proper CLDR plural forms (RU needs `_one/_few/_many/_other`).

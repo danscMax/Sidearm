@@ -193,6 +193,59 @@ pub static USER_SWITCHED_SIGNALS: std::sync::atomic::AtomicBool = std::sync::ato
 /// Profile switches so far; the newest one owns the mouse's DPI / poll rate.
 static PROFILE_SWITCHES: AtomicU64 = AtomicU64::new(0);
 
+/// Select the next higher/lower configured stage. The end stops rather than wrapping.
+/// A DPI value not exactly on a stage (e.g. after Synapse takes control) moves
+/// to the nearest stage in the requested direction.
+fn next_dpi_stage(stages: &[u16], current: u16, up: bool) -> Result<u16, String> {
+    if stages.is_empty() {
+        return Err("Configure DPI stages for the active profile first".into());
+    }
+    let mut sorted = stages.to_vec();
+    sorted.sort_unstable();
+    sorted.dedup();
+    if up {
+        Ok(sorted.iter().copied().find(|value| *value > current).unwrap_or(current))
+    } else {
+        Ok(sorted.iter().copied().rev().find(|value| *value < current).unwrap_or(current))
+    }
+}
+
+/// Apply a DPI Up/Down binding using the resolved profile's list, rather than
+/// mutating another profile or the saved startup DPI. Device verification fails
+/// explicitly when the wireless mouse is asleep or disconnected.
+#[cfg(target_os = "windows")]
+pub fn step_profile_dpi(profile: &crate::config::Profile, up: bool) -> Result<u16, String> {
+    let stages = profile.mouse_dpi_stages.as_deref().ok_or_else(||
+        "Configure DPI stages for the active profile first".to_string())?;
+    let device = VendorDevice::open_connected()?;
+    let current = device.dpi()?;
+    let desired = next_dpi_stage(stages, current, up)?;
+    if desired != current {
+        device.set_dpi(desired, false)?;
+    }
+    Ok(desired)
+}
+
+#[cfg(test)]
+mod dpi_stage_tests {
+    use super::next_dpi_stage;
+
+    #[test]
+    fn steps_clamp_and_recover_from_unknown_values() {
+        let s = [1600, 400, 3200, 800];
+        assert_eq!(next_dpi_stage(&s, 800, true).unwrap(), 1600);
+        assert_eq!(next_dpi_stage(&s, 800, false).unwrap(), 400);
+        assert_eq!(next_dpi_stage(&s, 1600, true).unwrap(), 3200);
+        assert_eq!(next_dpi_stage(&s, 400, false).unwrap(), 400);
+        assert_eq!(next_dpi_stage(&s, 3200, true).unwrap(), 3200);
+        assert_eq!(next_dpi_stage(&s, 900, true).unwrap(), 1600);
+        assert_eq!(next_dpi_stage(&s, 900, false).unwrap(), 800);
+        assert_eq!(next_dpi_stage(&s, 6400, true).unwrap(), 6400);
+        assert_eq!(next_dpi_stage(&s, 100, false).unwrap(), 100);
+        assert!(next_dpi_stage(&[], 800, true).is_err());
+    }
+}
+
 /// Asks the guard for a check now instead of at its next tick.
 pub fn request_check() {
     if let Some(sender) = CHECK_NOW.get() {

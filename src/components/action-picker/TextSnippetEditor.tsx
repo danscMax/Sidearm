@@ -137,6 +137,7 @@ export function TextSnippetEditor({
           <textarea
             ref={taRef}
             className="token-textarea__input"
+            aria-label={t("picker.textLabel")}
             value={draft.text}
             onChange={(e) => setText(e.target.value)}
             onScroll={syncScroll}

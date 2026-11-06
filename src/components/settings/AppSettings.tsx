@@ -147,6 +147,7 @@ export function AppSettings({
         <SettingRow title={t("settings.globalShortcutHeader")} hint={t("settings.globalShortcutHelp")}>
           <div onKeyDown={handleShortcutCapture}>
             <CaptureRow
+              ariaLabel={t("settings.globalShortcutHeader")}
               value={osd.globalShortcut ?? ""}
               placeholder={
                 capturingShortcut

@@ -2535,6 +2535,8 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
             make_mouse(MOUSEEVENTF_XDOWN, 0x0002),
             make_mouse(MOUSEEVENTF_XUP, 0x0002),
         ],
+        MouseActionKind::DpiUp | MouseActionKind::DpiDown =>
+            return Err("DPI actions must execute through the profile DPI handler".into()),
     };
 
     let sent = unsafe {
@@ -2666,6 +2668,8 @@ fn send_mouse_event(action: crate::config::MouseActionKind) -> Result<(), String
             emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_EXTRA.0, 1)])?;
             emit(&[InputEvent::new(EventType::KEY.0, KeyCode::BTN_EXTRA.0, 0)])?;
         }
+        MouseActionKind::DpiUp | MouseActionKind::DpiDown =>
+            return Err("DPI actions are only supported by the profile DPI handler".into()),
     }
 
     Ok(())

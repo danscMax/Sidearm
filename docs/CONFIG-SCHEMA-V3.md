@@ -1,6 +1,9 @@
 # Config Schema V3
 
-- Status: Current
+> Historical v3 format. The current runtime uses
+> [config schema v4](CONFIG-SCHEMA-V4.md), which adds profile DPI stages.
+
+- Status: Historical (superseded by v4)
 - Date: 2026-07-05
 - Canonical file name: `config.json`
 - Canonical schema file: `schemas/config.v3.schema.json`

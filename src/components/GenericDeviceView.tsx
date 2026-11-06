@@ -188,7 +188,8 @@ export function GenericDeviceView({
         {editingName ? (
           <input
             type="text"
-            className="gdv__name-input"
+            className="input gdv__name-input"
+            aria-label={t("settings.deviceNameHeader")}
             value={nameDraft}
             onChange={(e) => setNameDraft(e.target.value)}
             onBlur={commitName}

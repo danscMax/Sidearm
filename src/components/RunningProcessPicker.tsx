@@ -114,7 +114,7 @@ export function RunningProcessPicker({
         <input
           ref={inputRef}
           type="search"
-          className="process-picker__search"
+          className="input process-picker__search"
           placeholder={t("processPicker.searchPlaceholder")}
           aria-label={t("processPicker.searchPlaceholder")}
           value={query}

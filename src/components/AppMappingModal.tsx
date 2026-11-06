@@ -173,6 +173,7 @@ export function AppMappingModal({
           <div className="field">
             <span className="field__label">{t("debug.profile")}</span>
             <select
+              aria-label={t("debug.profile")}
               value={value.profileId}
               onChange={(e) => {
                 const newProfileId = e.target.value;

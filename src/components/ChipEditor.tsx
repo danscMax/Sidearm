@@ -5,7 +5,7 @@ export interface ChipEditorProps {
   values: string[];
   onChange: (values: string[]) => void;
   placeholder?: string;
-  ariaLabel?: string;
+  ariaLabel: string;
   disabled?: boolean;
 }
 
@@ -140,6 +140,7 @@ export function ChipEditor({
       <input
         ref={inputRef}
         className="chip-editor__input"
+        aria-label={ariaLabel}
         type="text"
         value={draft}
         placeholder={values.length === 0 ? placeholder : ""}

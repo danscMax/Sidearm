@@ -8,6 +8,7 @@ export function CaptureRow({
   capturing,
   onToggle,
   recordLabel,
+  ariaLabel,
 }: {
   value: string;
   placeholder: string;
@@ -16,12 +17,14 @@ export function CaptureRow({
   /** Idle button label; distinguishes co-located capture rows (key vs signal).
    *  Defaults to the generic "Record". */
   recordLabel?: string;
+  ariaLabel: string;
 }) {
   const { t } = useTranslation();
   return (
     <div className="capture-row">
       <input
         type="text"
+        aria-label={ariaLabel}
         readOnly
         value={value}
         placeholder={placeholder}

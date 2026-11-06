@@ -1991,13 +1991,11 @@ input[type="radio"] {
 }
 
 .gdv__name-input {
-  background: var(--c-card-bg);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-xs);
-  color: var(--c-text-bright);
   font-size: var(--fs-body);
   padding: 4px 8px;
+  width: 20ch;
   min-width: 180px;
+  max-width: 100%;
 }
 
 .gdv__empty {
@@ -2840,13 +2838,8 @@ code {
 .process-picker { width: min(560px, 92vw); max-height: 80vh; display: flex; flex-direction: column; }
 .process-picker h3 { margin: 0 0 8px; }
 .process-picker__search {
-  width: 100%;
   padding: 6px 10px;
-  font-size: 0.82rem;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--c-text-bright);
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-sm);
+  font-size: var(--fs-caption);
   margin-bottom: 10px;
 }
 .process-picker__body {
@@ -4140,18 +4133,10 @@ code {
 }
 
 .props-meta__select select {
+  width: auto;
   padding: 6px 10px;
-  font-size: 12px;
-  border-radius: var(--radius-sm);
-  background: rgba(0, 0, 0, 0.25);
-  border: 1px solid var(--c-border);
-  color: var(--c-text);
+  font-size: var(--fs-caption);
   cursor: pointer;
-}
-
-.props-meta__select select:focus {
-  outline: none;
-  border-color: var(--c-accent);
 }
 
 /* ── Properties panel: action preview ── */
@@ -5879,12 +5864,9 @@ input[type="search"]::-webkit-search-decoration {
 }
 
 .log-panel__category-select {
+  width: auto;
+  max-width: 100%;
   padding: 4px 8px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-card-bg);
-  color: var(--c-text);
-  font-size: var(--fs-body-sm);
 }
 
 .log-panel__actions {
@@ -5896,17 +5878,7 @@ input[type="search"]::-webkit-search-decoration {
 
 .log-panel__search {
   padding: 4px 10px;
-  border: 1px solid var(--c-border);
-  border-radius: var(--radius-xs);
-  background: var(--c-card-bg);
-  color: var(--c-text);
-  font-size: var(--fs-body-sm);
   width: 150px;
-}
-
-.log-panel__search:focus {
-  outline: none;
-  border-color: var(--c-accent);
 }
 
 .log-panel__list {
@@ -6424,3 +6396,8 @@ input[type="search"]::-webkit-search-decoration {
 }
 .chord-preview__key--partner { border-style: dashed; color: var(--c-text-muted); }
 .chord-preview__plus { color: var(--c-text-muted); font-size: 0.9rem; }
+
+/* DPI uses the existing sensitivity row and shared segmented selector. */
+.mouse-dpi-control { display: flex; flex-direction: column; gap: var(--space-sm); width: 480px; max-width: 100%; }
+.mouse-dpi-control .pill-track__pill { padding-inline: var(--space-sm); }
+.mouse-dpi-control__entry { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-sm); }

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId } from "../lib/labels";
-import { ACTION_CATEGORIES } from "../lib/constants";
+import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
 import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
@@ -163,7 +163,9 @@ export function ActionPickerModal({
 
   const query = searchQuery.trim().toLowerCase();
   const filteredCategories = categories.filter((cat) =>
-    !query || [cat.id, cat.actionType, t(cat.label)].some((value) => value.toLowerCase().includes(query)),
+    !query || [cat.id, cat.actionType, t(cat.label),
+      ...(cat.actionType === "mouseAction" ? MOUSE_ACTION_OPTIONS.flatMap((item) => [item.value, t(item.label)]) : []),
+    ].some((text) => text.toLowerCase().includes(query)),
   );
 
   const effectiveCategory = filteredCategories.some((c) => c.id === activeCategory)
@@ -196,7 +198,7 @@ export function ActionPickerModal({
   const [mediaDraft, setMediaDraft] = useState(initial.media);
   const [profileDraft, setProfileDraft] = useState(initial.profile);
   const [sequenceDraft, setSequenceDraft] = useState(initial.sequence);
-  const [nameDraft, setNameDraft] = useState(initial.name);
+  const [nameDraft, setNameDraft] = useState(isPlaceholderAction(existingAction) ? "" : initial.name);
   const [triggerModeDraft, setTriggerModeDraft] = useState(initial.triggerMode);
   const [chordPartnerDraft, setChordPartnerDraft] = useState(initial.chordPartner);
   const [throttleDraft, setThrottleDraft] = useState(initial.throttleMs);
@@ -340,7 +342,7 @@ export function ActionPickerModal({
           await new Promise((resolve) => setTimeout(resolve, 1000));
         }
       }
-      const result = await liveTestAction(draftAction);
+      const result = await liveTestAction(draftAction, profileId ?? binding?.profileId);
       const detail =
         result.warnings.length > 0
           ? `${uiText(result.summary)} — ${result.warnings.map(uiText).join("; ")}`
@@ -470,7 +472,7 @@ export function ActionPickerModal({
             ) : null}
 
             {effectiveCategory === "mouseAction" ? (
-              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} />
+              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} searchQuery={searchQuery} />
             ) : null}
 
             {effectiveCategory === "textSnippet" ? (

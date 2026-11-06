@@ -328,16 +328,6 @@ pub struct OnboardReport {
     pub failed: Vec<String>,
 }
 
-/// Live device settings. The mouse stores them itself, so they are not part of
-/// the config.
-#[derive(Debug, Clone, Copy, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct MouseSettings {
-    pub battery_percent: u8,
-    pub dpi: u16,
-    pub poll_rate_hz: u16,
-}
-
 /// One button record as the device holds it, read back with the per-button query
 /// (no write in front of it, unlike the slot query the record path uses).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -478,6 +468,12 @@ pub struct VendorDevice {
 
 /// Serializes every [`VendorDevice`] in this process.
 static DEVICE_LOCK: Mutex<()> = Mutex::new(());
+
+/// A failed open is still useful diagnostic evidence, without exporting the HID path.
+pub fn unavailable_device_report(error: &str) -> String {
+    format!("Sidearm {} device report\nWindows: {}\nDevice: unavailable\nReason: {}",
+        env!("CARGO_PKG_VERSION"), windows_version(), crate::mouse_settings::public_read_error(error))
+}
 
 impl VendorDevice {
     /// Opens the vendor collection of the first catalog model found in the
@@ -688,57 +684,63 @@ impl VendorDevice {
         })
     }
 
-    /// The settings the Mouse tab shows, read live from the device.
-    pub fn settings(&self) -> Result<MouseSettings, String> {
-        Ok(MouseSettings {
-            battery_percent: self.battery_percent()?,
-            dpi: self.dpi()?,
-            poll_rate_hz: self.poll_rate_hz()?,
-        })
+    /// Evaluate every independent query; only a failed field becomes unavailable.
+    pub fn settings(&self) -> crate::mouse_settings::MouseSettings {
+        let dpi = self.dpi().and_then(|value| {
+            if (self.model.dpi_min..=self.model.dpi_max).contains(&value) { Ok(value) }
+            else { Err(format!("DPI {value} is outside the model range")) }
+        });
+        crate::mouse_settings::MouseSettings::from_reads(self.battery_percent(), dpi, self.poll_rate_hz())
     }
 
-    /// Plain-text dump for a "help verify this model" issue: identity, mode,
-    /// settings, and the raw record of every button id the device answers for.
-    /// Only reads; a failed read becomes a line, not an error.
-    pub fn probe_report(&self) -> String {
+    /// Shared header for summary and full reports; no serial or HID paths.
+    fn report_header(&self) -> Vec<String> {
         let model = self.model;
-        let show = |read: Result<String, String>| read.unwrap_or_else(|error| format!("error: {error}"));
+        let show = |read: Result<String, String>| read.unwrap_or_else(|error| format!("error: {}", crate::mouse_settings::public_read_error(&error)));
+        let settings = self.settings();
         let mut lines = vec![
             format!("Sidearm {} device report", env!("CARGO_PKG_VERSION")),
             format!("Windows: {}", windows_version()),
             format!("Model: {} ({})", model.name, if model.verified { "verified" } else { "not verified" }),
             format!("VID:PID {:04X}:{:04X}, interface MI_{:02X}", model.vid, self.pid, model.interface),
-            // No serial number: the report is posted in a public issue.
-            format!("Firmware: {}", show(
-                self.command(CLASS_CONTROL, CMD_GET_FIRMWARE, &[0x00, 0x00]).map(|reply| format!("v{}.{}", reply[8], reply[9])),
-            )),
+            format!("Firmware: {}", show(self.command(CLASS_CONTROL, CMD_GET_FIRMWARE, &[0x00, 0x00]).map(|reply| format!("v{}.{}", reply[8], reply[9])))),
             format!("Mode: {}", show(self.mode().map(|mode| format!("{mode:#04x}")))),
-            format!("DPI: {}", show(self.dpi().map(|dpi| dpi.to_string()))),
-            format!("Poll rate code: {}", show(
-                self.command(CLASS_CONTROL, CMD_GET_POLL_RATE, &[0x00]).map(|reply| format!("{:#04x}", reply[8])),
-            )),
-            format!("Battery: {}", show(self.battery_percent().map(|percent| format!("{percent}%")))),
-            String::new(),
-            "Button records (class 0x02 / command 0x8c): id layer: record bytes".to_string(),
+            format!("Readings: {:?}", settings.status),
+            format!("DPI: {}", settings.dpi.map_or_else(|| "unavailable".into(), |n| n.to_string())),
+            format!("Poll rate Hz: {}", settings.poll_rate_hz.map_or_else(|| "unavailable".into(), |n| n.to_string())),
+            format!("Battery: {}", settings.battery_percent.map_or_else(|| "unavailable".into(), |n| format!("{n}%"))),
         ];
-        let mut silent = 0;
-        for button_id in 0..=u8::MAX {
-            // shortcut: layer 1 is read only for ids that answer on layer 0 (halves the
-            // ~50 ms-per-id scan); read it for every id if a model turns up a layer-1-only button.
-            match self.raw_button_record(button_id, 0) {
-                Ok(record) => {
-                    lines.push(record_line(button_id, 0, &record));
-                    lines.push(match self.raw_button_record(button_id, 1) {
-                        Ok(record) => record_line(button_id, 1, &record),
-                        Err(error) => format!("{button_id:#04x} L1: error: {error}"),
-                    });
-                }
-                Err(_) => silent += 1,
-            }
+        for warning in settings.warnings {
+            lines.push(format!("{:?}: {} {}", warning.field, warning.message.text, warning.details));
         }
-        lines.push(format!("{silent} ids did not answer"));
-        lines.join("
-")
+        lines
+    }
+
+    /// Read-only summary, without the long button-record scan.
+    pub fn probe_summary(&self) -> String {
+        crate::mouse_settings::format_report(self.report_header(), crate::mouse_settings::ReportDetail::Summary, Vec::new)
+    }
+
+    /// Preserve the existing full model-verification report.
+    pub fn probe_report(&self) -> String {
+        crate::mouse_settings::format_report(self.report_header(), crate::mouse_settings::ReportDetail::Full, || {
+            let mut lines = vec![String::new(), "Button records (class 0x02 / command 0x8c): id layer: record bytes".into()];
+            let mut silent = 0;
+            for button_id in 0..=u8::MAX {
+                match self.raw_button_record(button_id, 0) {
+                    Ok(record) => {
+                        lines.push(record_line(button_id, 0, &record));
+                        lines.push(match self.raw_button_record(button_id, 1) {
+                            Ok(record) => record_line(button_id, 1, &record),
+                            Err(error) => format!("{button_id:#04x} L1: error: {error}"),
+                        });
+                    }
+                    Err(_) => silent += 1,
+                }
+            }
+            lines.push(format!("{silent} ids did not answer"));
+            lines
+        })
     }
 
     /// The 10 record bytes `GET_BUTTON` answers for `button_id` on `layer`.

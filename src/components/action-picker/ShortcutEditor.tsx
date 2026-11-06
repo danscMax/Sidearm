@@ -50,6 +50,7 @@ export function ShortcutEditor({
           <HelpTip text={t("picker.keyHelp")} />
         </span>
         <CaptureRow
+          ariaLabel={t("picker.keyLabel")}
           value={draft.key}
           placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
           capturing={isCapturing}

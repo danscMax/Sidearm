@@ -124,13 +124,16 @@ export function ControlPropertiesPanel({
           </div>
           <label className="props-meta__select">
             <select
+              className="input"
+              aria-label={t("properties.status")}
               value={selectedControl.capabilityStatus}
               onChange={(event) => {
+                const status = event.currentTarget.value as CapabilityStatus;
                 updateDraft((config) =>
                   updateControlCapabilityStatus(
                     config,
                     selectedControl.id,
-                    event.target.value as CapabilityStatus,
+                    status,
                   ),
                 );
               }}

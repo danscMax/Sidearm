@@ -149,12 +149,13 @@ export function ProfileSettings({
                 className="settings-text-input"
                 aria-label={t("settings.nameLabel")}
                 value={activeProfile.name}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const name = e.currentTarget.value;
                   updateDraft(
-                    (c) => upsertProfile(c, { ...activeProfile, name: e.target.value }),
+                    (c) => upsertProfile(c, { ...activeProfile, name }),
                     { coalesceKey: `profile-name:${activeProfile.id}` },
-                  )
-                }
+                  );
+                }}
                 onBlur={(e) => {
                   if (!e.target.value.trim()) {
                     updateDraft((c) =>
@@ -205,11 +206,12 @@ export function ProfileSettings({
                 rows={2}
                 value={activeProfile.description ?? ""}
                 placeholder={t("settings.descriptionPlaceholder")}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const description = e.currentTarget.value || undefined;
                   updateDraft((c) =>
-                    upsertProfile(c, { ...activeProfile, description: e.target.value || undefined }),
-                  )
-                }
+                    upsertProfile(c, { ...activeProfile, description }),
+                  );
+                }}
               />
             </label>
 

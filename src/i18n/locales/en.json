@@ -223,7 +223,9 @@
     "scrollLeft": "Scroll left",
     "scrollRight": "Scroll right",
     "mouseBack": "Back",
-    "mouseForward": "Forward"
+    "mouseForward": "Forward",
+    "dpiUp": "DPI Up",
+    "dpiDown": "DPI Down"
   },
   "mediaKey": {
     "playPause": "Play / Pause",
@@ -1374,7 +1376,29 @@
     "dpi": "Sensitivity",
     "dpiUnit": "DPI",
     "dpiCaption": "From {{min}} to {{max}}. Applies to both axes.",
-    "apply": "Apply"
+    "apply": "Apply",
+    "stageInfo": "Choose DPI presets or enter a custom value under Mouse → Sensitivity. DPI Up/Down uses those stages while Sidearm is running.",
+    "liveHeader": "Mouse readings",
+    "liveHelp": "Read from the device. Saved profile settings are shown separately below.",
+    "liveDpi": "Current sensitivity",
+    "liveDpiValue": "{{dpi}} DPI",
+    "noReading": "—",
+    "reading": "Reading…",
+    "readAt": "Read at {{time}}",
+    "readDetails": "Reading details",
+    "summaryButton": "Mouse diagnostics",
+    "copySummary": "Copy report",
+    "summaryCopied": "Report copied.",
+    "summaryCopyFailed": "Could not copy. Select and copy the report above.",
+    "writeConfirmedPartial": "The setting was confirmed by the mouse. Some other readings are unavailable.",
+    "readStatus": {
+      "complete": "All readings are available.",
+      "partial": "Some readings are unavailable; successful readings are shown.",
+      "unavailable": "Readings are unavailable. The mouse may be asleep, out of range, or inaccessible.",
+      "disconnected": "No supported mouse is connected."
+    },
+    "manualDpiHint": "Enter a custom DPI. With five stages, it replaces the selected stage.",
+    "dpiManual": "Manual"
   },
   "backend": {
     "admin": {
@@ -1461,7 +1485,11 @@
       "shortcutPreview": "Will send shortcut `{{shortcut}}`.",
       "shortcutSent": "Sent shortcut `{{shortcut}}`.",
       "snippetPreview": "Will paste {{target}} via {{mode}}.",
-      "snippetTags": "Snippet has tags: {{tags}}."
+      "snippetTags": "Snippet has tags: {{tags}}.",
+      "dpiSwitched": "DPI: {{dpi}}.",
+      "dpiProfileMissing": "Select a profile before testing DPI controls.",
+      "dpiStagesMissing": "Configure DPI stages in the Mouse tab for this profile first.",
+      "dpiFailed": "Could not change DPI: {{detail}}"
     },
     "synapse": {
       "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",
@@ -1509,6 +1537,14 @@
     "window": {
       "captured": "Captured `{{exe}}`, profile `{{profile_id}}`.",
       "ignored": "The window is ignored."
+    },
+    "mouseRead": {
+      "batteryFailed": "Battery charge could not be read.",
+      "dpiFailed": "Current DPI could not be read.",
+      "pollFailed": "Polling rate could not be read.",
+      "accessFailed": "Could not access the mouse.",
+      "disconnected": "No supported mouse is connected.",
+      "writeNotConfirmed": "Could not confirm the mouse setting."
     }
   }
 }

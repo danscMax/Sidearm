@@ -64,6 +64,7 @@ export function ExeMatchField({
       <div className="field__row">
         <input
           ref={inputRef}
+          aria-label={label}
           type="text"
           autoFocus={autoFocus}
           value={exe}

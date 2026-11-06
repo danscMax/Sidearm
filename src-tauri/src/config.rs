@@ -13,11 +13,11 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const SCHEMA_VERSION: i32 = 3;
+const SCHEMA_VERSION: i32 = 4;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../schemas/config.v3.schema.json"
+    "/../schemas/config.v4.schema.json"
 ));
 
 #[derive(Debug, Error)]
@@ -297,6 +297,9 @@ pub struct Profile {
     /// Poll rate (125/500/1000 Hz) applied with the profile; absent = unchanged.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mouse_poll_rate_hz: Option<u16>,
+    /// Optional profile-specific DPI stages; mouse_dpi is the starting stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse_dpi_stages: Option<Vec<u16>>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -586,7 +589,7 @@ impl ActionType {
 
     /// Every variant, in declaration order. Test-only: the set-equality guard
     /// `action_type_set_matches_schema_enum` iterates this and asserts it equals
-    /// `$defs.actionType.enum` in `schemas/config.v3.schema.json`. The always-on
+    /// `$defs.actionType.enum` in `schemas/config.v4.schema.json`. The always-on
     /// `match` below forces a new variant to be added here and to the schema
     /// (a missed schema entry is a save-breaker).
     #[cfg(test)]
@@ -606,7 +609,7 @@ impl ActionType {
 
 // Compile-time exhaustiveness: adding an ActionType variant breaks this match
 // (no `_` arm), forcing you to also update `ActionType::ALL` above and
-// `$defs.actionType.enum` in schemas/config.v3.schema.json — the JSON contract a
+// `$defs.actionType.enum` in schemas/config.v4.schema.json — the JSON contract a
 // saved config is validated against, where a missed entry is a save-breaker.
 const _: fn(ActionType) = |a| match a {
     ActionType::Shortcut
@@ -788,6 +791,8 @@ pub enum MouseActionKind {
     ScrollRight,
     MouseBack,
     MouseForward,
+    DpiUp,
+    DpiDown,
 }
 
 impl MouseActionKind {
@@ -796,7 +801,7 @@ impl MouseActionKind {
     /// The always-on `match` below forces a new variant to be added here and to the
     /// schema. Mirrors `ActionType::ALL`.
     #[cfg(test)]
-    const ALL: [MouseActionKind; 10] = [
+    const ALL: [MouseActionKind; 12] = [
         MouseActionKind::LeftClick,
         MouseActionKind::RightClick,
         MouseActionKind::MiddleClick,
@@ -807,12 +812,14 @@ impl MouseActionKind {
         MouseActionKind::ScrollRight,
         MouseActionKind::MouseBack,
         MouseActionKind::MouseForward,
+        MouseActionKind::DpiUp,
+        MouseActionKind::DpiDown,
     ];
 }
 
 // Compile-time exhaustiveness: adding a MouseActionKind variant breaks this match
 // (no `_` arm), forcing you to also update `MouseActionKind::ALL` above and
-// `$defs.mouseActionKind.enum` in schemas/config.v3.schema.json.
+// `$defs.mouseActionKind.enum` in schemas/config.v4.schema.json.
 const _: fn(MouseActionKind) = |k| match k {
     MouseActionKind::LeftClick
     | MouseActionKind::RightClick
@@ -823,7 +830,9 @@ const _: fn(MouseActionKind) = |k| match k {
     | MouseActionKind::ScrollLeft
     | MouseActionKind::ScrollRight
     | MouseActionKind::MouseBack
-    | MouseActionKind::MouseForward => {}
+    | MouseActionKind::MouseForward
+    | MouseActionKind::DpiUp
+    | MouseActionKind::DpiDown => {}
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -871,7 +880,7 @@ impl MediaKeyKind {
 
 // Compile-time exhaustiveness: adding a MediaKeyKind variant breaks this match
 // (no `_` arm), forcing you to also update `MediaKeyKind::ALL` above and
-// `$defs.mediaKeyKind.enum` in schemas/config.v3.schema.json.
+// `$defs.mediaKeyKind.enum` in schemas/config.v4.schema.json.
 const _: fn(MediaKeyKind) = |k| match k {
     MediaKeyKind::PlayPause
     | MediaKeyKind::NextTrack
@@ -940,14 +949,14 @@ pub fn builtin_naga_device() -> Device {
     }
 }
 
-/// Migrate a v2 config to v3: declare the built-in Naga device and adopt the
-/// v3 version stamp. Controls without a `deviceId` were already tagged
+/// Migrate supported v2/v3 configs to v4 without changing profile assignments.
+/// V2 gains the built-in Naga device. Controls without a `deviceId` were tagged
 /// `razer-naga` by the serde default.
 fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if config.version == 2 {
+    if matches!(config.version, 2 | 3) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -1378,6 +1387,13 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
             path: Some("settings.fallbackProfileId".into()),
             severity: ValidationSeverity::Warning,
         });
+    }
+
+    for profile in &config.profiles {
+        if let (Some(stages), Some(start)) = (&profile.mouse_dpi_stages, profile.mouse_dpi)
+            && !stages.contains(&start) {
+            errors.push(format!("profile `{}` mouseDpi must be one of its mouseDpiStages.", profile.id));
+        }
     }
 
     let device_ids = collect_unique_strings(
@@ -3151,7 +3167,7 @@ fn profile(id: &str, name: &str, priority: i32, description: Option<&str>) -> Pr
         description: description.map(str::to_owned),
         enabled: true,
         priority,
-        mouse_dpi: None, mouse_poll_rate_hz: None,
+        mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
     }
 }
 
@@ -3307,6 +3323,38 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn dpi_stages_roundtrip_and_validate_boundaries() {
+        let dir = tempdir().expect("tempdir");
+        let mut config = default_seed_config();
+        config.profiles[0].mouse_dpi_stages = Some(vec![400, 800, 1600]);
+        config.profiles[0].mouse_dpi = Some(800);
+        save_config(dir.path(), config.clone(), None).expect("save stages");
+        let loaded = load_or_initialize_config(dir.path()).expect("reload stages");
+        assert_eq!(loaded.config.profiles[0].mouse_dpi_stages, Some(vec![400, 800, 1600]));
+        assert_eq!(loaded.config.profiles[0].mouse_dpi, Some(800));
+        assert_eq!(loaded.config.version, 4);
+        for invalid in [vec![], vec![400, 400], vec![99], vec![30001], vec![100, 200, 300, 400, 500, 600]] {
+            config.profiles[0].mouse_dpi_stages = Some(invalid);
+            assert!(save_config(dir.path(), config.clone(), None).is_err());
+        }
+        config.profiles[0].mouse_dpi_stages = Some(vec![400, 1600]);
+        assert!(validate_config(&config).is_err(), "startup DPI must be in the list");
+    }
+
+    #[test]
+    fn v3_migration_preserves_all_assignments_and_adds_no_dpi_stages() {
+        let dir = tempdir().expect("tempdir");
+        let original = default_seed_config();
+        let mut old = serde_json::to_value(&original).expect("serialize");
+        old["version"] = serde_json::json!(3);
+        fs::write(dir.path().join(CONFIG_FILE_NAME), serde_json::to_vec(&old).unwrap()).unwrap();
+        let loaded = load_or_initialize_config(dir.path()).expect("load v3");
+        assert!(!loaded.created_default);
+        assert_eq!(serde_json::to_value(&loaded.config).unwrap(), serde_json::to_value(&original).unwrap());
+        assert!(loaded.config.profiles.iter().all(|profile| profile.mouse_dpi_stages.is_none()));
+    }
+
+    #[test]
     fn repair_clipboard_payload_roundtrips_and_avoids_disabled_collision() {
         // The required `strategy` discriminator keeps the untagged ActionPayload
         // enum unambiguous: RepairClipboard serializes as {"strategy":"latin1"}.
@@ -3387,7 +3435,7 @@ mod tests {
     /// A v2 config file (version 2, no `devices`, no `deviceId`) loads, gains
     /// the built-in Naga device, and every control is tagged with it.
     #[test]
-    fn v2_config_migrates_to_v3_with_builtin_naga_device() {
+    fn v2_config_migrates_to_current_schema_with_builtin_naga_device() {
         let dir = tempdir().expect("tempdir");
         let mut value = serde_json::to_value(default_seed_config()).expect("serialize");
         value["version"] = serde_json::json!(2);
@@ -3909,7 +3957,7 @@ mod edge_proptests {
             description: None,
             enabled: true,
             priority: 0,
-            mouse_dpi: None, mouse_poll_rate_hz: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
         }];
         cfg.settings.fallback_profile_id = "p1".into();
         cfg.app_mappings = vec![];
@@ -4067,7 +4115,7 @@ mod edge_proptests {
             description: Some("desc".into()),
             enabled: false,
             priority: i32::MAX,
-            mouse_dpi: None, mouse_poll_rate_hz: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Profile = serde_json::from_str(&json).unwrap();
@@ -4181,7 +4229,7 @@ mod edge_proptests {
                 description: None,
                 enabled: true,
                 priority,
-                mouse_dpi: None, mouse_poll_rate_hz: None,
+                mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
             };
             let json = serde_json::to_string(&p).unwrap();
             let back: Profile = serde_json::from_str(&json).unwrap();
@@ -4312,7 +4360,7 @@ mod edge_proptests {
                     description: None,
                     enabled: true,
                     priority: i as i32,
-                    mouse_dpi: None, mouse_poll_rate_hz: None,
+                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None,
                 })
                 .collect();
             cfg.settings.fallback_profile_id = "p0".into();
@@ -4781,7 +4829,8 @@ mod edge_proptests {
             Just(0i32),
             Just(1i32),
             Just(2i32),
-            Just(4i32),
+            Just(3i32),
+            Just(SCHEMA_VERSION + 1),
             Just(i32::MAX),
             Just(i32::MIN),
         ]) {

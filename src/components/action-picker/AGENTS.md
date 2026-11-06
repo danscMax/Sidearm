@@ -12,13 +12,14 @@ The editors inside the "Assign action" modal — one per `ActionType` (shortcut,
 ## Local Contracts
 
 - The KEY capture is a DOM `onKeyDown` (`resolveKeyName`), so it also receives Sidearm's own injected VK 0xE8 (mask/hook-probe key) when the window is focused — capture ignores `"VK_232"` for this reason; keep that guard.
-- Capture rows own their capture state via the parent; `CaptureRow` is presentational.
+- `dpiUp`/`dpiDown` are mouse actions with no keyboard modifiers. They use the resolved profile's stages; the picker test passes the edited profile ID explicitly.
+- Capture rows own their capture state via the parent; `CaptureRow` is presentational and requires a localized `ariaLabel`, forwarded to its readonly input. A changing capture placeholder must not change the field's accessible name.
 - A snippet's text is sent verbatim except `{date}`/`{clipboard}` tokens (`{{`/`}}` escape) expanded backend-side at send time.
 
 ## Work Guidance
 
 Adding a new `ActionType` is a mirrored change — do all of:
-- Rust `ActionPayload` variant (untagged: give it a required discriminating field) + `config.v3.schema.json` (`anyOf`) + `ALL_ACTION_TYPES` exhaustiveness guard.
+- Rust `ActionPayload` variant (untagged: give it a required discriminating field) + `config.v4.schema.json` (`anyOf`) + `ALL_ACTION_TYPES` exhaustiveness guard.
 - TS `config.ts` union, `config-editing.ts` coercion switch, a new editor here, and all Settings literals.
 - Backend executor handling in `src-tauri/src/executor.rs`.
 

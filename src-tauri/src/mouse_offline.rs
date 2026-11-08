@@ -36,15 +36,7 @@ pub struct OfflineRecord {
 
 /// The records that make the mouse behave like `profile_id` on its own.
 pub fn offline_records(config: &AppConfig, profile_id: &str) -> Vec<OfflineRecord> {
-    // `None` = no binding on that layer; `Some(None)` = a binding the firmware
-    // cannot play (text, macro, launch…).
-    let action_of = |control: &str, layer: Layer| -> Option<Option<OnboardAction>> {
-        let binding = config.bindings.iter().find(|b| {
-            b.enabled && b.profile_id == profile_id && b.layer == layer && b.control_id.as_str() == control
-        })?;
-        let action = config.actions.iter().find(|a| a.id == binding.action_id)?;
-        Some(onboard_action(&action.payload))
-    };
+    let action_of = |control, layer| binding_action(config, profile_id, control, layer);
     // (control, button id, what the button does when nothing else applies):
     // Sidearm's own inert signal of a key control, so no leftover vendor macro
     // plays on a layer nothing else fills.
@@ -95,6 +87,20 @@ pub fn offline_records(config: &AppConfig, profile_id: &str) -> Vec<OfflineRecor
     records
 }
 
+/// `None` means no binding; `Some(None)` means the firmware cannot play it.
+pub(crate) fn binding_action(
+    config: &AppConfig,
+    profile_id: &str,
+    control: &str,
+    layer: Layer,
+) -> Option<Option<OnboardAction>> {
+    let binding = config.bindings.iter().find(|b| {
+        b.enabled && b.profile_id == profile_id && b.layer == layer && b.control_id.as_str() == control
+    })?;
+    let action = config.actions.iter().find(|a| a.id == binding.action_id)?;
+    Some(onboard_action(&action.payload))
+}
+
 /// The firmware form of an action, when it has one.
 fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
     match payload {
@@ -135,6 +141,11 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
 /// left when the mouse took a record; a mouse that took none (asleep) leaves
 /// [`OFFLINE_FAILED_FILE`] instead.
 pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &Path) {
+    if crate::mouse_memory::naga_v3::configured(config)
+        && let Err(error) = crate::mouse_memory::naga_v3::write_offline(config, profile_id, config_dir)
+    {
+        log::warn!("[mouse-offline] Naga V3 Pro profile `{profile_id}` was not stored: {error}");
+    }
     let records = offline_records(config, profile_id);
     let failed_marker = config_dir.join(OFFLINE_FAILED_FILE);
     let device = match VendorDevice::open_v2() {

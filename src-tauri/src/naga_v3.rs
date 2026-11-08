@@ -26,6 +26,7 @@ pub const DEVICE_ID: &str = "razer-naga-v3";
 const COPY_EXISTING: &str = "naga-v3-copy-existing";
 const BACKUP: &str = "naga-v3-live.json";
 const V2_BACKUP: &str = "naga-v2-live.json";
+const LIVE_BANK: u8 = 0;
 static V2_LIVE: AtomicBool = AtomicBool::new(false);
 static V2_READY: AtomicBool = AtomicBool::new(false);
 static V3_READY: AtomicBool = AtomicBool::new(false);
@@ -307,6 +308,51 @@ fn controls() -> impl Iterator<Item = (&'static str, u8)> {
     NAGA_V3_PRO.key_buttons.iter().chain(&EXTRAS).copied()
 }
 
+fn offline_targets(config: &AppConfig, profile_id: &str) -> Vec<(u8, u8, OnboardAction)> {
+    let mut targets = Vec::new();
+    let mut uses_hypershift = false;
+    for (control, button) in controls().filter(|(control, _)| *control != "top_special_03") {
+        let control = control_id(control);
+        let action = |layer| crate::mouse_offline::binding_action(config, profile_id, control.as_str(), layer);
+        let standard = action(Layer::Standard).flatten();
+        let hypershift = action(Layer::Hypershift);
+        uses_hypershift |= matches!(hypershift, Some(Some(_)));
+        if let Some(action) = standard {
+            targets.push((button, 0, action));
+        }
+        if let Some(action) = hypershift.unwrap_or(standard) {
+            targets.push((button, 1, action));
+        }
+    }
+    if uses_hypershift {
+        targets.extend([0, 1].map(|layer| (RING, layer, OnboardAction::Hypershift)));
+    }
+    targets
+}
+
+pub(crate) fn write_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> Result<(), String> {
+    let device = VendorDevice::open(&NAGA_V3_PRO, NAGA_V3_PRO.pids[0])?;
+    let reply = device.command(0x05, 0x84, &[0])?;
+    let bank = reply[8];
+    if !(1..=5).contains(&bank) {
+        return Err(format!("Unknown active onboard bank {bank}"));
+    }
+    let backup = config_dir.join(format!("naga-v3-onboard-{bank}.json"));
+    let targets = offline_targets(config, profile_id);
+    let already_stored = load_snapshot(&device, &backup)?.is_some_and(|snapshot| {
+        snapshot.records.len() == targets.len()
+            && snapshot.records.iter().zip(&targets).all(|(record, &(button, layer, action))| {
+                (record.button, record.layer, record.target) == (button, layer, bank_block(bank, action))
+            })
+            && verify_bank(&device, bank, &snapshot.records).is_ok()
+    });
+    if !already_stored {
+        apply_bank(&device, bank, &backup, &targets)?;
+    }
+    log::info!("[mouse-offline] Naga V3 Pro profile `{profile_id}` verified in bank {bank}: {} records", targets.len());
+    Ok(())
+}
+
 fn usage(index: usize, layer: u8) -> u16 {
     USAGES[2 * index + usize::from(layer)]
 }
@@ -486,13 +532,25 @@ fn block(action: OnboardAction) -> [u8; 7] {
 }
 
 fn read(device: &VendorDevice, button: u8, layer: u8) -> Result<[u8; 7], String> {
+    read_bank(device, LIVE_BANK, button, layer)
+}
+
+fn bank_block(bank: u8, action: OnboardAction) -> [u8; 7] {
+    if bank != LIVE_BANK && let OnboardAction::Key { modifier: 0, usage } = action {
+        return [0x02, 0x01, 0, usage, 0, 0, 0];
+    }
+    block(action)
+}
+
+fn read_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8) -> Result<[u8; 7], String> {
     let mut args = [0; 10];
+    args[0] = bank;
     args[1] = button;
     args[2] = layer;
     let reply = device.command(super::CLASS_BUTTON, super::CMD_GET_BUTTON, &args)?;
     if reply[8..10] != args[..2] {
         return Err(format!(
-            "Live readback returned the wrong address for {button:#04x}/{layer}"
+            "Readback returned the wrong address for bank {bank}, button {button:#04x}/{layer}"
         ));
     }
     Ok(reply[11..18].try_into().expect("fixed-size function block"))
@@ -507,28 +565,37 @@ fn confirmed_drift(
 }
 
 fn write(device: &VendorDevice, button: u8, layer: u8, block: [u8; 7]) -> Result<(), String> {
+    write_bank(device, LIVE_BANK, button, layer, block)
+}
+
+fn write_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8, block: [u8; 7]) -> Result<(), String> {
     let mut args = [0; 10];
+    args[0] = bank;
     args[1] = button;
     args[2] = layer;
     args[3..].copy_from_slice(&block);
     device.command(super::CLASS_BUTTON, super::CMD_SET_BUTTON, &args)?;
-    if read(device, button, layer)? != block {
+    if read_bank(device, bank, button, layer)? != block {
         return Err(format!(
-            "Live write did not read back for {button:#04x}/{layer}"
+            "Write did not read back for bank {bank}, button {button:#04x}/{layer}"
         ));
     }
     Ok(())
 }
 
 fn restore(device: &VendorDevice, backup: &Path) -> Result<(), String> {
+    restore_bank(device, LIVE_BANK, backup)
+}
+
+fn load_snapshot(device: &VendorDevice, backup: &Path) -> Result<Option<Snapshot>, String> {
     let bytes = match std::fs::read(backup) {
         Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.to_string()),
     };
     let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
     if snapshot.path != device.path {
-        return Err("Live backup belongs to another receiver".into());
+        return Err("Backup belongs to another receiver".into());
     }
     for record in &snapshot.records {
         let model = device.model();
@@ -545,15 +612,20 @@ fn restore(device: &VendorDevice, backup: &Path) -> Result<(), String> {
                     .any(|&(_, button, _)| button == record.button)
         };
         if !known || record.layer > 1 {
-            return Err("Invalid live recovery address".into());
+            return Err("Invalid recovery address".into());
         }
     }
+    Ok(Some(snapshot))
+}
+
+fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), String> {
+    let Some(snapshot) = load_snapshot(device, backup)? else { return Ok(()) };
     let mut failure = None;
     for record in snapshot.records.iter().rev() {
         if record.before != record.target {
-            let result = read(device, record.button, record.layer).and_then(|current| {
+            let result = read_bank(device, bank, record.button, record.layer).and_then(|current| {
                 if current == record.target {
-                    write(device, record.button, record.layer, record.before)
+                    write_bank(device, bank, record.button, record.layer, record.before)
                 } else {
                     Ok(())
                 }
@@ -568,8 +640,7 @@ fn restore(device: &VendorDevice, backup: &Path) -> Result<(), String> {
     }
     std::fs::remove_file(backup).map_err(|error| error.to_string())?;
     log::info!(
-        "[naga-live] {} restored previous live assignments",
-        device.model().name
+        "[naga-live] {} restored previous assignments in bank {bank}", device.model().name
     );
     Ok(())
 }
@@ -582,10 +653,14 @@ fn save_snapshot(backup: &Path, snapshot: &Snapshot) -> Result<(), String> {
 }
 
 fn verify(device: &VendorDevice, records: &[Record]) -> Result<(), String> {
+    verify_bank(device, LIVE_BANK, records)
+}
+
+fn verify_bank(device: &VendorDevice, bank: u8, records: &[Record]) -> Result<(), String> {
     for record in records {
-        if read(device, record.button, record.layer)? != record.target {
+        if read_bank(device, bank, record.button, record.layer)? != record.target {
             return Err(format!(
-                "Live layer assignments changed after programming {:#04x}/{}",
+                "Bank {bank} assignments changed after programming {:#04x}/{}",
                 record.button, record.layer
             ));
         }
@@ -646,40 +721,49 @@ fn apply(
     backup: &Path,
     targets: &[(u8, u8, OnboardAction)],
 ) -> Result<Snapshot, String> {
+    let snapshot = apply_bank(device, LIVE_BANK, backup, targets)?;
+    log::info!("[naga-live] {} verified {} live assignments", device.model().name, snapshot.records.len());
+    Ok(snapshot)
+}
+
+fn apply_bank(
+    device: &VendorDevice,
+    bank: u8,
+    backup: &Path,
+    targets: &[(u8, u8, OnboardAction)],
+) -> Result<Snapshot, String> {
     if device.mode()? != MODE_NORMAL {
         return Err("Mouse is not in firmware mode".into());
     }
-    restore(device, backup)?;
+    restore_bank(device, bank, backup)?;
     let mut records = Vec::with_capacity(targets.len());
     for &(button, layer, action) in targets {
         records.push(Record {
             button,
             layer,
-            before: read(device, button, layer)?,
-            target: block(action),
+            before: read_bank(device, bank, button, layer)?,
+            target: bank_block(bank, action),
         });
     }
     let snapshot = Snapshot {
         path: device.path.clone(),
         records,
     };
+    if snapshot.records.is_empty() {
+        return Ok(snapshot);
+    }
     save_snapshot(backup, &snapshot)?;
     let result: Result<(), String> = snapshot.records.iter().try_for_each(|record| {
         if record.before != record.target {
-            write(device, record.button, record.layer, record.target)?;
+            write_bank(device, bank, record.button, record.layer, record.target)?;
         }
         Ok(())
     });
-    let result = result.and_then(|()| verify(device, &snapshot.records));
+    let result = result.and_then(|()| verify_bank(device, bank, &snapshot.records));
     if result.is_err() {
-        restore(device, backup)?;
+        restore_bank(device, bank, backup)?;
     }
     result?;
-    log::info!(
-        "[naga-live] {} verified {} live assignments",
-        device.model().name,
-        snapshot.records.len()
-    );
     Ok(snapshot)
 }
 
@@ -834,6 +918,21 @@ impl Drop for Session {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn v3_offline_profile_exports_paste_backspace_and_its_own_hypershift() {
+        let mut config = crate::config::default_seed_config();
+        prepare(&mut config, true, true);
+        let targets = offline_targets(&config, "main");
+        let backspace = OnboardAction::Key { modifier: 0, usage: 0x2a };
+        let paste = OnboardAction::Key { modifier: 1, usage: 0x19 };
+        assert!(targets.contains(&(0x41, 0, backspace)));
+        assert!(targets.contains(&(0x4b, 0, paste)));
+        assert!(targets.contains(&(RING, 0, OnboardAction::Hypershift)));
+        assert!(!targets.iter().any(|&(button, _, _)| button == 0x0e));
+        assert_eq!(bank_block(1, backspace), [2, 1, 0, 0x2a, 0, 0, 0]);
+        assert_eq!(bank_block(1, paste), [2, 2, 1, 0x19, 0, 0, 0]);
+    }
 
     #[test]
     fn live_drift_requires_two_mismatches_and_ignores_unreadable_records() {

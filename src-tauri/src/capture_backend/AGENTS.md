@@ -36,6 +36,7 @@ The low-level input hooks and the Razer-encoding detector: turns raw key events 
 
 - With V3 configured, V2 and V3 use separate Consumer collections and firmware-reported layers. The helper tags each receiver. The parent admits its HID events after that receiver's live map verifies. The legacy global mouse modifier remains available for standalone V2. Manual F13–F24 fallback uses the keyboard hook for V3 while concurrent V2 stays on its own HID stream.
 - On config save, keep each receiver's live session if its target records are unchanged. Explicit restarts still restore and reapply the maps. An intercepted V3 vertical wheel tick without an active assignment is replayed as scrolling. In Sidearm's own window intercepted vertical wheel ticks also scroll.
+- V3 onboarding temporarily includes additional standard-layer controls in the verified live HID map. Signal lookup and firmware targets share one check-mode snapshot. Leaving the test restores the normal map, including unassigned controls, without storing the test records in the mouse's onboard profile.
 
 ## Work Guidance
 

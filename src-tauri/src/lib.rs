@@ -1673,13 +1673,13 @@ async fn open_config_folder(app: AppHandle) -> Result<(), CommandError> {
 async fn accept_portable_migration(
     app: AppHandle,
     copy_from_roaming: bool,
-) -> Result<LoadConfigResponse, CommandError> {
+) -> Result<(), CommandError> {
     let paths_state = resolve_app_paths(&app);
     let config_dir = paths_state.config_dir.clone();
     let roaming_config = paths::AppPaths::roaming_config_file();
 
-    let response = tauri::async_runtime::spawn_blocking(
-        move || -> Result<LoadConfigResponse, CommandError> {
+    tauri::async_runtime::spawn_blocking(
+        move || -> Result<(), CommandError> {
             if copy_from_roaming && roaming_config.is_file() {
                 fs::create_dir_all(&config_dir).map_err(|e| {
                     CommandError::internal(format!("Failed to create portable config dir: {e}"))
@@ -1697,19 +1697,11 @@ async fn accept_portable_migration(
             if let Err(err) = paths_state.mark_migration_declined() {
                 log::warn!("[portable] Failed to write migration marker: {err}");
             }
-            load_or_initialize_config(&config_dir).map_err(CommandError::from)
+            Ok(())
         },
     )
     .await
-    .map_err(|e| CommandError::internal(format!("migration task failed: {e}")))??;
-
-    app.state::<MinimizeToTray>()
-        .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
-    // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
-    // the next save_config does not falsely report a concurrent change.
-    record_config_stamp(&app);
-
-    Ok(response)
+    .map_err(|e| CommandError::internal(format!("migration task failed: {e}")))?
 }
 
 // ============================================================================
@@ -1774,11 +1766,17 @@ async fn import_synapse_into_config(
 /// Best-effort check for the onboarding pre-flight: is Razer Synapse installed
 /// or running? Windows-only signal; returns false on other platforms.
 #[tauri::command]
-async fn check_synapse_installed() -> Result<bool, CommandError> {
+async fn check_synapse_installed(running_only: Option<bool>) -> Result<bool, CommandError> {
     // The process-snapshot walk (CreateToolhelp32Snapshot/Process32*) plus the
     // registry lookups are blocking syscalls; run them off the shared async
     // executor thread, matching list_running_processes / get_exe_icon.
-    tauri::async_runtime::spawn_blocking(|| {
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(target_os = "windows")]
+        if running_only == Some(true) {
+            return synapse_control::engine_running().map_err(synapse_command_error);
+        }
+        #[cfg(not(target_os = "windows"))]
+        let _ = running_only;
         let running =
             crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
         #[cfg(target_os = "windows")]
@@ -1787,10 +1785,10 @@ async fn check_synapse_installed() -> Result<bool, CommandError> {
             || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
         #[cfg(not(target_os = "windows"))]
         let installed = false;
-        running || installed
+        Ok(running || installed)
     })
     .await
-    .map_err(|e| CommandError::internal(format!("check_synapse_installed task failed: {e}")))
+    .map_err(|e| CommandError::internal(format!("check_synapse_installed task failed: {e}")))?
 }
 
 /// Toggle "live capture" mode. While enabled, captured Naga keys are surfaced
@@ -1798,9 +1796,50 @@ async fn check_synapse_installed() -> Result<bool, CommandError> {
 /// The onboarding hardware test enables it so pressing buttons lights up the
 /// tester without firing their real actions; it is always cleared on exit.
 #[tauri::command]
-async fn set_input_capture_mode(enabled: bool) -> Result<(), CommandError> {
+async fn set_input_capture_mode(app: AppHandle, enabled: bool, test_naga_v3: Option<bool>) -> Result<(), CommandError> {
+    #[cfg(target_os = "windows")]
+    if test_naga_v3 == Some(true) {
+        return tauri::async_runtime::spawn_blocking(move || {
+            let store = app.state::<Arc<Mutex<RuntimeStore>>>();
+            let controller = app.state::<Arc<Mutex<RuntimeController>>>();
+            let mut controller = controller.lock().recover_poison();
+            let previous = mouse_memory::naga_v3::CHECK_EXTRA_CONTROLS.swap(enabled, Ordering::AcqRel);
+            if enabled {
+                capture_backend::SUPPRESS_EXECUTION.store(true, Ordering::Relaxed);
+            }
+            if previous != enabled && store.lock().recover_poison().is_running() {
+                let reload = (|| {
+                    let config = load_or_initialize_config(&resolve_config_dir(&app)?)
+                        .map_err(CommandError::from)?.config;
+                    controller.reload_saved_config(app.clone(), store.inner().clone(), config, app.package_info().name.clone())
+                        .map_err(|message| CommandError::new("runtime_reload_failed", message, None))
+                })();
+                if let Err(error) = reload {
+                    mouse_memory::naga_v3::CHECK_EXTRA_CONTROLS.store(false, Ordering::Release);
+                    capture_backend::SUPPRESS_EXECUTION.store(false, Ordering::Relaxed);
+                    let _ = controller.stop();
+                    let summary = store.lock().recover_poison().stop();
+                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
+                    return Err(error);
+                }
+            }
+            capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
+            Ok(())
+        }).await.map_err(|error| CommandError::internal(format!("V3 setup task failed: {error}")))?;
+    }
+    let _ = (app, test_naga_v3);
     capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
     Ok(())
+}
+
+#[tauri::command]
+fn naga_v3_capture_ready() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        mouse_memory::naga_v3::hid_ready(false) && mouse_memory::consumer_signals_enabled()
+    }
+    #[cfg(not(target_os = "windows"))]
+    false
 }
 
 #[tauri::command]
@@ -3887,6 +3926,7 @@ pub fn run() {
             import_synapse_into_config,
             check_synapse_installed,
             set_input_capture_mode,
+            naga_v3_capture_ready,
             start_runtime,
             stop_runtime,
             reload_runtime,

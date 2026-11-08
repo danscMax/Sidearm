@@ -113,6 +113,8 @@ function App() {
   }, [i18n]);
 
   const [showMigrationDialog, setShowMigrationDialog] = useState(false);
+  const [migrationChecked, setMigrationChecked] = useState(false);
+  const autoStartedRuntime = useRef(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastSeqRef = useRef(0);
@@ -213,6 +215,9 @@ function App() {
       })
       .catch((error) => {
         console.error("getAppPaths failed:", error);
+      })
+      .finally(() => {
+        if (!cancelled) setMigrationChecked(true);
       });
     return () => {
       cancelled = true;
@@ -498,16 +503,10 @@ function App() {
     async (copyFromRoaming: boolean) => {
       try {
         await acceptPortableMigration(copyFromRoaming);
-        await refreshConfig();
-        // The capture runtime was started with the default-seed config that
-        // load_config auto-created during startup, racing with our prompt.
-        // After the migration overwrites config.json with the roaming copy
-        // we must re-register hotkeys with the freshly-loaded config or the
-        // first post-migration session silently has stale registrations.
-        try {
+        if (!copyFromRoaming) return;
+        const loaded = await refreshConfig();
+        if (loaded && runtimeSummary.status === "running") {
           await handleReloadRuntime();
-        } catch {
-          // Runtime may not be running yet — ignore.
         }
       } catch (unknownError) {
         setError(normalizeCommandError(unknownError));
@@ -515,7 +514,7 @@ function App() {
         setShowMigrationDialog(false);
       }
     },
-    [refreshConfig, setError, handleReloadRuntime],
+    [refreshConfig, setError, handleReloadRuntime, runtimeSummary.status],
   );
 
 
@@ -533,21 +532,22 @@ function App() {
 
 
   useEffect(() => {
-    async function initApp() {
-      // Show the window now that React has mounted (avoids white flash).
-      // The window starts hidden (visible:false in tauri.conf.json).
-      void getCurrentWindow().show();
-
-      const configLoaded = await refreshConfig();
-      if (!configLoaded) return;
-      try {
-        await handleStartRuntime();
-      } catch (unknownError) {
-        console.warn("Runtime auto-start failed:", unknownError);
-      }
-    }
-    void initApp();
+    // The window starts hidden to avoid a white flash before React mounts.
+    void getCurrentWindow().show();
+    void refreshConfig();
   }, []);
+
+  const startInitialRuntime = useEffectEvent(() => {
+    if (runtimeSummary.status !== "running") void handleStartRuntime();
+  });
+  useEffect(() => {
+    if (!migrationChecked || showMigrationDialog || viewState !== "ready" || !activeConfig || autoStartedRuntime.current) return;
+    // The first V3 check starts capture after Synapse preflight and applies the
+    // test map directly. Starting here would apply a map and then undo it.
+    if (!activeConfig.settings.onboardingCompleted && usesNagaV3Ring(activeConfig)) return;
+    autoStartedRuntime.current = true;
+    startInitialRuntime();
+  }, [activeConfig, migrationChecked, showMigrationDialog, viewState]);
 
   useEffect(() => {
     const handleError = (event: ErrorEvent) => {
@@ -1269,7 +1269,7 @@ function App() {
       {showMigrationDialog ? (
         <PortableMigrationDialog onChoose={handleMigrationChoice} />
       ) : null}
-      {showOnboarding && activeConfig && !showMigrationDialog ? (
+      {showOnboarding && activeConfig && migrationChecked && !showMigrationDialog ? (
         <OnboardingWizard
           config={activeConfig}
           applyConfig={(next) => updateDraft(() => next, { immediate: true })}

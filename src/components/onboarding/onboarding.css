@@ -147,6 +147,13 @@
   flex-direction: column;
   gap: 8px;
 }
+.onb-checks--extras {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+@media (max-width: 640px) {
+  .onb-checks--extras { grid-template-columns: minmax(0, 1fr); }
+}
 .onb-check {
   display: flex;
   align-items: center;

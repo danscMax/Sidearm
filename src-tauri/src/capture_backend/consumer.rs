@@ -360,7 +360,7 @@ mod tests {
     #[test]
     fn naga_v3_reports_translate_all_thumb_presses_and_releases_on_both_layers() {
         let config = crate::mouse_memory::naga_v3::tests::config_with_v3();
-        let signals = crate::mouse_memory::naga_v3::signals(&config, true);
+        let signals = crate::mouse_memory::naga_v3::signals(&config, true, false);
         let mut reader = Translator::new(signals.clone(), Duration::from_millis(500), Duration::from_millis(100));
         let now = Instant::now();
         for (index, signal) in signals[..24].iter().enumerate() {

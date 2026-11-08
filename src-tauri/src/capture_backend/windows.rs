@@ -1044,9 +1044,10 @@ impl CaptureBackendHandle {
         } else {
             (mouse_memory::consumer_signals(&config), Vec::new())
         };
-        let v3_signals = naga_v3::signals(&config, naga_v3_hid);
+        let checking_extras = naga_v3::CHECK_EXTRA_CONTROLS.load(Ordering::Acquire);
+        let v3_signals = naga_v3::signals(&config, naga_v3_hid, checking_extras);
         let v3_targets = if has_v3 {
-            naga_v3::targets(&config, naga_v3_hid).unwrap_or_else(|error| {
+            naga_v3::targets(&config, naga_v3_hid, checking_extras).unwrap_or_else(|error| {
                 log::warn!("[naga-v3] {error}");
                 Vec::new()
             })

@@ -18,6 +18,8 @@ All React components: mouse visualization, modals (action picker, app-mapping, c
 
 ## Local Contracts
 
+- The portable migration prompt shows feedback while a choice is applied. Starting fresh keeps the loaded config and does not reload it.
+
 - Modals use `ModalShell` (Escape, focus-trap, focus restore). Popovers/menus use `useDismissable` + `useListKeyboard` for keyboard operability.
 - Icon-only buttons carry an `aria-label`; search/text inputs carry an `aria-label` (placeholder is not an accessible name).
 - Reusable CaptureRow and ChipEditor require an explicit localized `ariaLabel` on their actual inputs, including chip entry after the placeholder disappears. A labelled wrapper/group alone does not name a nested field. Existing visible captions may supply the same localized text through aria-label.
@@ -33,7 +35,7 @@ All React components: mouse visualization, modals (action picker, app-mapping, c
 - An unassigned control is labelled "Native action" (it passes through to the device/Synapse default), distinct from the "OFF" pill for an explicitly-disabled binding.
 - `ActionPickerModal` shows the global HyperShift role before profile actions, with an explicit all-profiles scope and replacement/removal warning. The role edits `settings.hypershiftTrigger`, never adds an `ActionType`; existing actions survive a role transfer. Native action removes the selected slot's binding. A new action/binding is created only on Save, with collision-safe IDs; opening/cancelling must not change the config. The five native trigger choices share `NATIVE_HYPERSHIFT_TRIGGERS` with general settings; encoded key buttons and scroll ticks remain unsupported as triggers.
 - V2 photo/schematic layouts derive the HS badge from `settings.hypershiftTrigger`. V3 uses the shared photos with model-specific hotspots, a fixed ring-finger trigger, the 12-button side grid and an underside view. DeviceBar selects an independent config device for editing and updates the sidebar. Switching tabs never restarts capture or writes the mouse.
-- Multi-device (v3): `DeviceBar` switches `AppConfig.devices`; the built-in Naga renders `MouseVisualization`, user devices render `GenericDeviceView` (legend grid + optional photo with click-to-place hotspots). For a detected V3, Add Device offers the existing onboarding wizard or manual setup for another device. V3 verification only counts its own tagged HID signals and keeps action execution suspended. `AddControlModal` learns generic buttons via DOM key capture. Device photos are served as `data:` URLs via `read_device_image`.
+- Multi-device (v3): `DeviceBar` switches `AppConfig.devices`; the built-in Naga renders `MouseVisualization`, user devices render `GenericDeviceView` (legend grid + optional photo with click-to-place hotspots). For a detected V3, Add Device offers the existing onboarding wizard or manual setup for another device. V3 onboarding checks whether Synapse is running before capture starts. Verification waits for the live HID map, counts regular and held presses separately, prompts on a missed hold and offers an optional check of the top controls and wheel. Only tagged V3 signals count. Action execution stays suspended through both verification steps. `AddControlModal` learns generic buttons via DOM key capture. Device photos are served as `data:` URLs via `read_device_image`.
 
 ## Verification
 

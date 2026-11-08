@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ModalFooter, ModalHeader, ModalShell } from "./shared";
@@ -12,6 +12,16 @@ export function PortableMigrationDialog({
 }: PortableMigrationDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const [pending, setPending] = useState<"copy" | "fresh" | null>(null);
+
+  async function choose(copyFromRoaming: boolean) {
+    setPending(copyFromRoaming ? "copy" : "fresh");
+    try {
+      await onChoose(copyFromRoaming);
+    } finally {
+      setPending(null);
+    }
+  }
 
   useEffect(() => {
     dialogRef.current?.focus();
@@ -31,24 +41,23 @@ export function PortableMigrationDialog({
         <div className="migration-modal__body">
           <p>{t("migration.body")}</p>
           <p className="panel__muted">{t("migration.hint")}</p>
+          {pending && <p role="status">{t(pending === "copy" ? "migration.copying" : "migration.startingFresh")}</p>}
         </div>
 
         <ModalFooter className="migration-modal__footer">
           <button
             type="button"
             className="action-button action-button--accent"
-            onClick={() => {
-              void onChoose(true);
-            }}
+            disabled={pending !== null}
+            onClick={() => void choose(true)}
           >
             {t("migration.copyFromRoaming")}
           </button>
           <button
             type="button"
             className="action-button action-button--ghost"
-            onClick={() => {
-              void onChoose(false);
-            }}
+            disabled={pending !== null}
+            onClick={() => void choose(false)}
           >
             {t("migration.startFresh")}
           </button>

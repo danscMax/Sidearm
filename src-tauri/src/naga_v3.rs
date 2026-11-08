@@ -30,6 +30,7 @@ const LIVE_BANK: u8 = 0;
 static V2_LIVE: AtomicBool = AtomicBool::new(false);
 static V2_READY: AtomicBool = AtomicBool::new(false);
 static V3_READY: AtomicBool = AtomicBool::new(false);
+pub(crate) static CHECK_EXTRA_CONTROLS: AtomicBool = AtomicBool::new(false);
 
 pub fn v2_live() -> bool {
     V2_LIVE.load(Ordering::Acquire)
@@ -332,10 +333,23 @@ fn offline_targets(config: &AppConfig, profile_id: &str) -> Vec<(u8, u8, Onboard
 
 pub(crate) fn write_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> Result<(), String> {
     let device = VendorDevice::open(&NAGA_V3_PRO, NAGA_V3_PRO.pids[0])?;
-    let reply = device.command(0x05, 0x84, &[0])?;
-    let bank = reply[8];
-    if !(1..=5).contains(&bank) {
-        return Err(format!("Unknown active onboard bank {bank}"));
+    let count = device.command(0x05, 0x80, &[0])?[8];
+    match count {
+        1 => {}
+        2..=5 => {
+            // The selected hardware bank has no association with the offline Sidearm profile.
+            log::info!("[mouse-offline] Naga V3 Pro has {count} onboard profiles; preserving them");
+            return Ok(());
+        }
+        _ => return Err(format!("Unexpected onboard profile count {count}")),
+    }
+    let inventory = device.command(0x05, 0x81, &[0; 6])?;
+    let active = device.command(0x05, 0x84, &[])?[8];
+    let bank = inventory[9];
+    if inventory[8] != 5 || !(1..=5).contains(&bank) || active != bank
+        || inventory[10..14].iter().any(|&slot| slot != 0)
+    {
+        return Err("Could not confirm the only assigned onboard bank".into());
     }
     let backup = config_dir.join(format!("naga-v3-onboard-{bank}.json"));
     let targets = offline_targets(config, profile_id);
@@ -357,9 +371,10 @@ fn usage(index: usize, layer: u8) -> u16 {
     USAGES[2 * index + usize::from(layer)]
 }
 
-fn remapped(config: &AppConfig, index: usize, control: &str, layer: Layer) -> bool {
+fn remapped(config: &AppConfig, index: usize, control: &str, layer: Layer, checking_extras: bool) -> bool {
     let control_id = control_id(control);
     index < NAGA_V3_PRO.key_buttons.len()
+        || (checking_extras && layer == Layer::Standard)
         || config.bindings.iter().any(|binding| {
             binding.enabled
                 && binding.control_id == control_id
@@ -371,7 +386,7 @@ fn remapped(config: &AppConfig, index: usize, control: &str, layer: Layer) -> bo
         })
 }
 
-pub fn signals(config: &AppConfig, consumer: bool) -> Vec<ConsumerSignal> {
+pub fn signals(config: &AppConfig, consumer: bool, checking_extras: bool) -> Vec<ConsumerSignal> {
     if !consumer {
         return Vec::new();
     }
@@ -388,7 +403,7 @@ pub fn signals(config: &AppConfig, consumer: bool) -> Vec<ConsumerSignal> {
                     } else {
                         Layer::Hypershift
                     };
-                    remapped(config, index, control, logical).then(|| ConsumerSignal {
+                    remapped(config, index, control, logical, checking_extras).then(|| ConsumerSignal {
                         usage: usage(index, layer),
                         encoded_key: mapping.encoded_key.clone(),
                         hypershift: layer == 1,
@@ -485,11 +500,11 @@ struct Snapshot {
     records: Vec<Record>,
 }
 
-pub(crate) fn targets(config: &AppConfig, consumer: bool) -> Result<Vec<(u8, u8, OnboardAction)>, String> {
+pub(crate) fn targets(config: &AppConfig, consumer: bool, checking_extras: bool) -> Result<Vec<(u8, u8, OnboardAction)>, String> {
     let mut targets = Vec::new();
     for (index, (control, button)) in controls().enumerate() {
         for (layer, logical) in [(0, Layer::Standard), (1, Layer::Hypershift)] {
-            if !remapped(config, index, control, logical) {
+            if !remapped(config, index, control, logical, checking_extras && consumer) {
                 continue;
             }
             let mapping_layer = if consumer { Layer::Standard } else { logical };
@@ -920,6 +935,25 @@ pub(crate) mod tests {
     use super::*;
 
     #[test]
+    fn v3_setup_maps_unassigned_extra_controls_only_in_live_standard_layer() {
+        let mut config = crate::config::default_seed_config();
+        prepare(&mut config, true, false);
+        let normal = targets(&config, true, false).unwrap();
+        let setup = targets(&config, true, true).unwrap();
+        let signals = signals(&config, true, true);
+        assert_eq!(setup.len() - normal.len(), EXTRAS.len());
+        for (control, button) in EXTRAS {
+            assert!(!normal.iter().any(|target| target.0 == button));
+            let index = controls().position(|entry| entry.0 == control).unwrap();
+            let signal = usage(index, 0);
+            assert!(setup.contains(&(button, 0, OnboardAction::Consumer(signal))));
+            assert!(!setup.iter().any(|target| target.0 == button && target.1 == 1));
+            assert!(signals.iter().any(|entry| entry.usage == signal && !entry.hypershift));
+        }
+        assert!(offline_targets(&config, "main").is_empty());
+    }
+
+    #[test]
     fn v3_offline_profile_exports_paste_backspace_and_its_own_hypershift() {
         let mut config = crate::config::default_seed_config();
         prepare(&mut config, true, true);
@@ -1048,7 +1082,7 @@ pub(crate) mod tests {
         let mut config = crate::config::default_seed_config();
         prepare(&mut config, true, false);
         let (v2, targets) = v2_overlay(&config);
-        let v3 = signals(&config, true);
+        let v3 = signals(&config, true, false);
         assert!(targets.contains(&(0x02, 0, OnboardAction::Hypershift)));
         assert!(targets.contains(&(0x01, 1, OnboardAction::Mouse(2))));
         assert!(
@@ -1072,22 +1106,22 @@ pub(crate) mod tests {
     fn editing_an_action_keeps_both_maps_but_moving_v2_hypershift_changes_only_v2() {
         let mut config = config_with_v3();
         let v2 = v2_overlay(&config).1;
-        let v3 = targets(&config, true).unwrap();
+        let v3 = targets(&config, true, false).unwrap();
         config.actions[0].display_name = "Renamed shortcut".into();
         assert_eq!(v2_overlay(&config).1, v2);
-        assert_eq!(targets(&config, true).unwrap(), v3);
+        assert_eq!(targets(&config, true, false).unwrap(), v3);
         config.settings.hypershift_trigger = "mouse_4".into();
         assert_ne!(v2_overlay(&config).1, v2);
-        assert_eq!(targets(&config, true).unwrap(), v3);
+        assert_eq!(targets(&config, true, false).unwrap(), v3);
     }
 
     #[test]
     fn all_thumb_layers_have_distinct_hid_usages_and_keyboard_fallback() {
         let config = config_with_v3();
-        let encoded = signals(&config, true);
-        let hid = targets(&config, true).unwrap();
-        let keys = targets(&config, false).unwrap();
-        assert!(signals(&config, false).is_empty());
+        let encoded = signals(&config, true, false);
+        let hid = targets(&config, true, false).unwrap();
+        let keys = targets(&config, false, false).unwrap();
+        assert!(signals(&config, false, false).is_empty());
         let mut seen = std::collections::HashSet::new();
         for index in 0..12 {
             for layer in 0..2 {

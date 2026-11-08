@@ -230,8 +230,8 @@ export async function openConfigFolder(): Promise<void> {
 
 export async function acceptPortableMigration(
   copyFromRoaming: boolean,
-): Promise<LoadConfigResponse> {
-  return invoke<LoadConfigResponse>("accept_portable_migration", {
+): Promise<void> {
+  return invoke<void>("accept_portable_migration", {
     copyFromRoaming,
   });
 }
@@ -243,15 +243,22 @@ export async function parseSynapseSource(
 }
 
 /** Best-effort onboarding pre-flight: is Razer Synapse installed/running? */
-export async function checkSynapseInstalled(): Promise<boolean> {
-  return invoke<boolean>("check_synapse_installed");
+export async function checkSynapseInstalled(runningOnly = false): Promise<boolean> {
+  return invoke<boolean>("check_synapse_installed", { runningOnly });
 }
 
 /** Toggle "live capture" mode: while enabled, captured Naga keys are reported
  * to the UI (encoded_key_received) but NOT resolved/executed. Used by the
  * onboarding hardware test so buttons light up without firing real actions. */
-export async function setInputCaptureMode(enabled: boolean): Promise<void> {
-  return invoke<void>("set_input_capture_mode", { enabled });
+let captureModeCommand = Promise.resolve();
+export function setInputCaptureMode(enabled: boolean, testNagaV3 = false): Promise<void> {
+  const next = captureModeCommand.then(() => invoke<void>("set_input_capture_mode", { enabled, testNagaV3 }));
+  captureModeCommand = next.catch(() => {});
+  return next;
+}
+
+export async function getNagaV3CaptureReady(): Promise<boolean> {
+  return invoke<boolean>("naga_v3_capture_ready");
 }
 
 export async function listRunningProcesses(): Promise<RunningProcessInfo[]> {

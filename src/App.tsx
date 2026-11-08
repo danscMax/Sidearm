@@ -65,7 +65,7 @@ import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels
 import { MOUSE_STATUS_NOTICES, type MouseStatusKind } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
-import { isBuiltinControl } from "./lib/onboard-mapping";
+import { isBuiltinControl, NAGA_V3_DEVICE_ID, usesNagaV3Ring } from "./lib/onboard-mapping";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -466,6 +466,9 @@ function App() {
   const [selectedControlId, setSelectedControlId] = useState<ControlId | null>(null);
   const [multiSelectedControlIds, setMultiSelectedControlIds] = useState<Set<ControlId>>(new Set());
   const [activeDeviceId, setActiveDeviceId] = useState<string | null>(null);
+  const devices = activeConfig?.devices ?? [];
+  const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0];
+  const effectiveDeviceId = activeDevice?.id ?? null;
 
   const verificationKeyEventRef = useRef<((event: EncodedKeyEvent) => void) | null>(null);
   const verificationResolutionRef = useRef<((preview: import("./lib/runtime").ResolvedInputPreview) => void) | null>(null);
@@ -588,13 +591,14 @@ function App() {
 
     if (
       selectedControlId === null ||
-      !activeConfig.physicalControls.some((control) => control.id === selectedControlId)
+      !activeConfig.physicalControls.some((control) =>
+        control.id === selectedControlId && control.deviceId === effectiveDeviceId)
     ) {
       startTransition(() => {
-        setSelectedControlId(resolveInitialControlId(activeConfig));
+        setSelectedControlId(resolveInitialControlId(activeConfig, effectiveDeviceId));
       });
     }
-  }, [activeConfig, selectedControlId]);
+  }, [activeConfig, selectedControlId, effectiveDeviceId]);
 
   // Auto-follow the runtime's resolved profile on window-focus change — but ONLY
   // on the Assignments view, where the intent is to show the active profile's
@@ -693,15 +697,18 @@ function App() {
       }
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.altKey && !e.metaKey) {
       // Arrow keys: navigate between hotspots
-      if (ALL_HOTSPOT_IDS.length > 0 && selectedControlId) {
-        e.preventDefault();
-        const currentIndex = ALL_HOTSPOT_IDS.indexOf(selectedControlId);
+      const hotspotIds = effectiveDeviceId === NAGA_V3_DEVICE_ID
+        ? ALL_HOTSPOT_IDS.map((id) => "v3_" + id)
+        : ALL_HOTSPOT_IDS;
+      const availableIds = hotspotIds.filter((id) => activeConfig?.physicalControls.some((control) =>
+        control.id === id && control.deviceId === effectiveDeviceId));
+      if (availableIds.length > 0 && selectedControlId) {
+        const currentIndex = availableIds.indexOf(selectedControlId);
         const delta = e.key === "ArrowRight" ? 1 : -1;
-        const nextIndex = (currentIndex + delta + ALL_HOTSPOT_IDS.length) % ALL_HOTSPOT_IDS.length;
-        startTransition(() => {
-          setSelectedControlId(ALL_HOTSPOT_IDS[nextIndex] as ControlId);
-          setMultiSelectedControlIds(new Set());
-        });
+        const nextIndex = (currentIndex + delta + availableIds.length) % availableIds.length;
+        e.preventDefault();
+        setSelectedControlId(availableIds[nextIndex]);
+        setMultiSelectedControlIds(new Set());
       }
     } else if (e.key === "Enter" && selectedControlId && !e.ctrlKey && !e.altKey && !e.metaKey) {
       // Enter: open the action picker for the selected control
@@ -1002,12 +1009,6 @@ function App() {
     });
   }
 
-  const devices = activeConfig?.devices ?? [];
-  const effectiveDeviceId =
-    activeDeviceId && devices.some((device) => device.id === activeDeviceId)
-      ? activeDeviceId
-      : devices[0]?.id ?? null;
-
   function handleSelectDevice(id: string) {
     setActiveDeviceId(id);
     setSelectedControlId(null);
@@ -1037,7 +1038,9 @@ function App() {
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
                 isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
-                  && control.id === (activeConfig.settings.hypershiftTrigger ?? "mouse_right"),
+                  && control.id === (control.deviceId === NAGA_V3_DEVICE_ID
+                    ? "v3_hypershift_button"
+                    : activeConfig.settings.hypershiftTrigger ?? "mouse_right"),
               };
             }) ?? [],
       })),
@@ -1074,6 +1077,7 @@ function App() {
         setSelectedProfileId={setSelectedProfileId}
         setConfirmModal={setConfirmModal}
         activeConfig={activeConfig}
+        selectedDeviceName={activeDevice?.name}
       />
 
       <div className="content">
@@ -1113,6 +1117,10 @@ function App() {
                 devices={devices}
                 activeDeviceId={effectiveDeviceId}
                 onSelectDevice={handleSelectDevice}
+                onSetupNagaV3={() => {
+                  handleSelectDevice(NAGA_V3_DEVICE_ID);
+                  setShowOnboarding(true);
+                }}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}
                 onSelectLayer={(layer) => setSelectedLayer(layer)}
@@ -1265,7 +1273,10 @@ function App() {
         <OnboardingWizard
           config={activeConfig}
           applyConfig={(next) => updateDraft(() => next, { immediate: true })}
-          onClose={() => setShowOnboarding(false)}
+          onClose={() => {
+            if (usesNagaV3Ring(activeConfig)) handleSelectDevice(NAGA_V3_DEVICE_ID);
+            setShowOnboarding(false);
+          }}
         />
       ) : null}
       {synapseParsed && activeConfig ? (

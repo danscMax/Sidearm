@@ -17,6 +17,7 @@ import {
   startRuntime,
 } from "../../lib/backend";
 import type { AppConfig } from "../../lib/config";
+import { usesNagaV3Ring } from "../../lib/onboard-mapping";
 import type { ActionExecutionEvent, EncodedKeyEvent } from "../../lib/runtime";
 import { NagaIllustration } from "./NagaIllustration";
 import { ModalShell } from "../shared";
@@ -24,6 +25,7 @@ import "./onboarding.css";
 
 type StepKey = "welcome" | "mouse" | "live" | "admin" | "tryit";
 const STEPS: StepKey[] = ["welcome", "mouse", "live", "admin", "tryit"];
+const NAGA_V3_STEPS: StepKey[] = ["welcome", "live", "tryit"];
 
 type Lang = "ru" | "en";
 type CheckState = "ok" | "bad" | "pending";
@@ -52,9 +54,11 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   // source of truth). Pull the whole nested block as one object so the JSX below
   // keeps its `T.section.key` shape; re-resolves on language switch.
   const T = t("onboarding", { returnObjects: true }) as unknown as Copy;
+  const nagaV3 = usesNagaV3Ring(config);
+  const steps = nagaV3 ? NAGA_V3_STEPS : STEPS;
 
   const [stepIdx, setStepIdx] = useState(0);
-  const step = STEPS[stepIdx];
+  const step = steps[stepIdx];
 
   // Pre-flight. "ok" = Razer Synapse is neither installed nor running: Sidearm
   // writes the mouse itself, and a running Synapse rewrites the buttons.
@@ -63,6 +67,10 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
 
   // Live test
   const [detected, setDetected] = useState<Set<number>>(new Set());
+  const [detectedShifted, setDetectedShifted] = useState<Set<number>>(new Set());
+  const [lastShifted, setLastShifted] = useState(false);
+  const [fullCheck, setFullCheck] = useState(false);
+  const liveVerification = useRef(false);
   const [activeBtn, setActiveBtn] = useState<number | null>(null);
   const [lastButton, setLastButton] = useState<number | null>(null);
   const activeTimer = useRef<number | null>(null);
@@ -90,23 +98,34 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     void startRuntime()
       .then(() => !cancelled && setRuntimeSetupError(null))
       .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
-    void checkSynapseInstalled()
-      .then((present) => !cancelled && setSynapseOk(present ? "bad" : "ok"))
-      .catch(() => !cancelled && setSynapseOk("bad"));
-    void isRunningAsAdmin()
-      .then((ok) => !cancelled && setElevated(ok ? "ok" : "bad"))
-      .catch(() => !cancelled && setElevated("bad"));
-    void getAdminAutostartStatus()
-      .then((s) => !cancelled && setAdmin(s))
-      .catch((err) => !cancelled && setAdminError(normalizeCommandError(err).message));
+    if (!nagaV3) {
+      void checkSynapseInstalled()
+        .then((present) => !cancelled && setSynapseOk(present ? "bad" : "ok"))
+        .catch(() => !cancelled && setSynapseOk("bad"));
+      void isRunningAsAdmin()
+        .then((ok) => !cancelled && setElevated(ok ? "ok" : "bad"))
+        .catch(() => !cancelled && setElevated("bad"));
+      void getAdminAutostartStatus()
+        .then((s) => !cancelled && setAdmin(s))
+        .catch((err) => !cancelled && setAdminError(normalizeCommandError(err).message));
+    }
 
     void listenEncodedKeyEvent("encoded_key_received", (e: EncodedKeyEvent) => {
       if (e.isKeyUp) return;
-      const btn = fkeyToButton(e.encodedKey);
+      if (nagaV3 && (!liveVerification.current || e.backend !== "windows-hid-naga-v3")) return;
+      const control = nagaV3
+        ? config.encoderMappings.find((item) => item.layer === "standard" && item.encodedKey === e.encodedKey)
+        : undefined;
+      const btn = nagaV3
+        ? Number(/^v3_thumb_(0[1-9]|1[0-2])$/.exec(control?.controlId ?? "")?.[1]) || null
+        : fkeyToButton(e.encodedKey);
       if (btn === null) return;
+      const shifted = nagaV3 && e.isHypershift === true;
+      setLastShifted(shifted);
       setActiveBtn(btn);
       setLastButton(btn);
-      setDetected((prev) => {
+      const mark = shifted ? setDetectedShifted : setDetected;
+      mark((prev) => {
         if (prev.has(btn)) return prev;
         const next = new Set(prev);
         next.add(btn);
@@ -143,9 +162,13 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   // Always cleared when leaving the step or unmounting.
   useEffect(() => {
     const inLive = step === "live";
+    liveVerification.current = inLive;
     void setInputCaptureMode(inLive);
     return () => {
-      if (inLive) void setInputCaptureMode(false);
+      if (inLive) {
+        liveVerification.current = false;
+        void setInputCaptureMode(false);
+      }
     };
   }, [step]);
 
@@ -171,12 +194,12 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     // Keep the setState updater pure: decide from the current index in the
     // closure and run the side effect (complete()) outside it, so StrictMode's
     // double-invoked updater can't fire complete() twice.
-    if (stepIdx >= STEPS.length - 1) {
+    if (stepIdx >= steps.length - 1) {
       complete();
     } else {
       setStepIdx((i) => i + 1);
     }
-  }, [stepIdx, complete]);
+  }, [stepIdx, steps.length, complete]);
   const goBack = useCallback(() => setStepIdx((i) => Math.max(0, i - 1)), []);
 
   const writeMouse = useCallback(async () => {
@@ -219,6 +242,9 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   }, []);
 
   const detectedCount = detected.size;
+  const v3Confirmed = fullCheck
+    ? detected.size === 12 && detectedShifted.size === 12
+    : detected.has(1) && detectedShifted.has(1);
 
   const readiness = useMemo<CheckState>(() => {
     if (synapseOk === "pending" || elevated === "pending") return "pending";
@@ -257,12 +283,12 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
           </button>
         </div>
 
-        <div className="onb-progress" role="progressbar" aria-valuemin={1} aria-valuemax={STEPS.length} aria-valuenow={stepIdx + 1}>
-          {STEPS.map((s, i) => (
+        <div className="onb-progress" role="progressbar" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={stepIdx + 1}>
+          {steps.map((s, i) => (
             <button
               key={s}
               type="button"
-              aria-label={`${i + 1}/${STEPS.length}`}
+              aria-label={`${i + 1}/${steps.length}`}
               aria-current={i === stepIdx ? "step" : undefined}
               disabled={i > stepIdx}
               className={`onb-dot ${i === stepIdx ? "is-current" : i < stepIdx ? "is-done" : ""}`}
@@ -273,7 +299,13 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
 
         <div className="onb-body">
           <div className="onb-step" key={step}>
-            {step === "welcome" && (
+            {step === "welcome" && nagaV3 && (
+              <>
+                <h2 className="onb-step__title">Razer Naga V3 Pro</h2>
+                <p className="onb-step__lead">{t("onboarding.v3.welcome")}</p>
+              </>
+            )}
+            {step === "welcome" && !nagaV3 && (
               <>
                 <h2 className="onb-step__title">{T.welcome.title}</h2>
                 <p className="onb-step__lead">{T.welcome.lead}</p>
@@ -336,7 +368,24 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
               </>
             )}
 
-            {step === "live" && (
+            {step === "live" && nagaV3 && (
+              <>
+                <h2 className="onb-step__title">{t("onboarding.v3.check")}</h2>
+                <p className="onb-step__lead">{t(fullCheck ? "onboarding.v3.full" : "onboarding.v3.quick")}</p>
+                <NagaIllustration detected={lastShifted ? detectedShifted : detected} active={activeBtn} label={T.ariaNaga} />
+                <div className="onb-live-readout" role="status">
+                  {t("onboarding.v3.progress", {
+                    count: fullCheck ? detected.size + detectedShifted.size : Number(detected.has(1)) + Number(detectedShifted.has(1)),
+                    total: fullCheck ? 24 : 2,
+                  })}
+                </div>
+                {!fullCheck && <button type="button" className="onb-btn ghost" onClick={() => setFullCheck(true)}>
+                  {t("onboarding.v3.checkAll")}
+                </button>}
+                {runtimeSetupError && <div className="onb-result" role="alert">{runtimeSetupError}</div>}
+              </>
+            )}
+            {step === "live" && !nagaV3 && (
               <>
                 <h2 className="onb-step__title">{T.live.title}</h2>
                 <p className="onb-step__lead">{T.live.lead}</p>
@@ -413,7 +462,13 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
               </>
             )}
 
-            {step === "tryit" && (
+            {step === "tryit" && nagaV3 && (
+              <>
+                <h2 className="onb-step__title">{t("onboarding.v3.ready")}</h2>
+                <p className="onb-step__lead">{t("onboarding.v3.assign")}</p>
+              </>
+            )}
+            {step === "tryit" && !nagaV3 && (
               <>
                 <h2 className="onb-step__title">{T.tryit.title}</h2>
                 <p className="onb-step__lead">{T.tryit.lead}</p>
@@ -441,8 +496,8 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
             {T.back}
           </button>
           <div className="onb-spacer" />
-          <button type="button" className="onb-btn primary" onClick={goNext}>
-            {stepIdx === STEPS.length - 1 ? T.finish : T.next}
+          <button type="button" className="onb-btn primary" onClick={goNext} disabled={nagaV3 && step === "live" && !v3Confirmed}>
+            {stepIdx === steps.length - 1 ? T.finish : T.next}
           </button>
         </div>
     </ModalShell>

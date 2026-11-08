@@ -4,7 +4,7 @@ import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
-import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
+import { isBuiltinControl, isKeyButton, nagaLayoutControlId, NAGA_V3_DEVICE_ID } from "../lib/onboard-mapping";
 import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
 import {
@@ -111,9 +111,10 @@ export function ActionPickerModal({
 
   // Encoder signal state (user devices only — see isBuiltinControl)
   const builtinControl = controlId ? isBuiltinControl(config, controlId) : false;
-  const currentTrigger = config.settings.hypershiftTrigger ?? "mouse_right";
+  const nagaV3 = config.physicalControls.some((control) => control.id === controlId && control.deviceId === NAGA_V3_DEVICE_ID);
+  const currentTrigger = nagaV3 ? "none" : config.settings.hypershiftTrigger ?? "mouse_right";
   const isCurrentTrigger = builtinControl && controlId === currentTrigger;
-  const canBeTrigger = builtinControl && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
+  const canBeTrigger = builtinControl && !nagaV3 && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
   // A global modifier role is not an executable, profile-specific ActionType.
   const categories = [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
@@ -122,7 +123,7 @@ export function ActionPickerModal({
   ];
   // The mouse reports one key button at a time only with consumer signals; in
   // F13..F24 mode two arrive together. Asked once per opened key button.
-  const keyButton = builtinControl && controlId !== undefined && isKeyButton(controlId);
+  const keyButton = builtinControl && controlId !== undefined && isKeyButton(nagaLayoutControlId(controlId));
   const [consumerSignals, setConsumerSignals] = useState(false);
   useEffect(() => {
     if (!keyButton) return;
@@ -458,10 +459,6 @@ export function ActionPickerModal({
             {isCurrentTrigger && effectiveCategory !== "hypershift" ? (
               <Notice variant="warning">{t("picker.hypershiftRemove")}</Notice>
             ) : null}
-            {builtinControl && !canBeTrigger ? (
-              <Notice variant="info">{t("picker.hypershiftUnsupported")}</Notice>
-            ) : null}
-
             {effectiveCategory === "shortcut" ? (
               <ShortcutEditor
                 draft={shortcutDraft}

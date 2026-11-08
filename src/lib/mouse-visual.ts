@@ -11,7 +11,7 @@ import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
 import { controlAssignmentLabel, displayNameForControl } from "./labels";
 
-export type ViewTab = "top" | "side" | "combined";
+export type ViewTab = "top" | "side" | "combined" | "bottom";
 
 /**
  * Shared prop contract for both mouse-layout visualizers (photo + schematic).

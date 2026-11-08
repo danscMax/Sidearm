@@ -8,7 +8,7 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 - `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v4.schema.json`).
 - `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe.
-- `conflict-detection.ts` — shortcut conflicts + `bindingMatchesQuery` (label/shortcut/action-content search).
+- `conflict-detection.ts` — shortcut conflicts within a device, profile, and layer, plus `bindingMatchesQuery` (label/shortcut/action-content search).
 - `dpi-stages.ts` — pure, model-limited DPI choices and manual-value application for the single sensitivity control. Displaying defaults does not persist them; explicit application preserves the five-stage limit and custom saved values.
 - `onboard-mapping.ts` also defines the mouse snapshot IPC: three nullable readings, status and per-field UiText warnings/details. A missing read is not zero and does not erase saved profile settings. `getDeviceReport(detail)` keeps absent/full compatible with the existing verification scan.
 - `backend.ts` — typed wrappers over Tauri `invoke` (the only place `invoke` is called).

@@ -258,6 +258,8 @@ pub(super) struct CaptureBackendHandle {
     hook_thread: JoinHandle<()>,
     worker_thread: JoinHandle<()>,
     helper: Option<HelperHandle>,
+    naga_v3: Option<crate::mouse_memory::naga_v3::Session>,
+    naga_v2: Option<crate::mouse_memory::naga_v3::Session>,
     foreground_watcher_thread_id: Option<u32>,
     foreground_watcher_thread: Option<JoinHandle<()>>,
 }
@@ -1008,7 +1010,59 @@ impl CaptureBackendHandle {
         config: AppConfig,
         app_name: String,
     ) -> Result<Self, String> {
-        let registrations = build_hotkey_registrations(&config)?;
+        Self::start_with_sessions(app, runtime_store, config, app_name, [None, None])
+    }
+
+    pub(super) fn restart_after_save(
+        mut self,
+        app: AppHandle,
+        runtime_store: Arc<Mutex<RuntimeStore>>,
+        config: AppConfig,
+        app_name: String,
+    ) -> Result<Self, String> {
+        let sessions = [self.naga_v2.take(), self.naga_v3.take()];
+        self.stop()?;
+        Self::start_with_sessions(app, runtime_store, config, app_name, sessions)
+    }
+
+    fn start_with_sessions(
+        app: AppHandle,
+        runtime_store: Arc<Mutex<RuntimeStore>>,
+        mut config: AppConfig,
+        app_name: String,
+        sessions: [Option<crate::mouse_memory::naga_v3::Session>; 2],
+    ) -> Result<Self, String> {
+        use crate::mouse_memory::{self, naga_v3};
+        let config_dir = crate::resolve_app_paths(&app).config_dir.clone();
+        naga_v3::configure(&mut config, &config_dir);
+        let has_v3 = naga_v3::configured(&config);
+        let parallel_v2 = naga_v3::parallel_v2(&config);
+        let naga_v3_hid = has_v3 && mouse_memory::consumer_signals_enabled();
+        let registrations = build_hotkey_registrations(&config, parallel_v2, naga_v3_hid)?;
+        let (v2_signals, v2_targets) = if parallel_v2 {
+            naga_v3::v2_overlay(&config)
+        } else {
+            (mouse_memory::consumer_signals(&config), Vec::new())
+        };
+        let v3_signals = naga_v3::signals(&config, naga_v3_hid);
+        let v3_targets = if has_v3 {
+            naga_v3::targets(&config, naga_v3_hid).unwrap_or_else(|error| {
+                log::warn!("[naga-v3] {error}");
+                Vec::new()
+            })
+        } else {
+            Vec::new()
+        };
+        let [previous_v2, previous_v3] = sessions;
+        let previous_v2 = previous_v2.filter(|session| session.matches(&v2_targets));
+        let previous_v3 = previous_v3.filter(|session| session.matches(&v3_targets));
+        if previous_v2.is_some() || previous_v3.is_some() {
+            log::info!(
+                "[capture] Keeping live button maps on config reload (V2: {}, V3: {})",
+                previous_v2.is_some(),
+                previous_v3.is_some(),
+            );
+        }
         // Map each held encoding back to its source physical VK so the stale-hold
         // sweep can probe whether the button is still physically down (RF-dropout
         // tolerance) before force-releasing. Moved into the worker thread below.
@@ -1184,11 +1238,17 @@ impl CaptureBackendHandle {
             runtime_store.clone(),
             &registrations,
             helper_event_tx,
-            &config.settings,
-            crate::mouse_memory::consumer_signals(&config),
+            &config,
+            (v2_signals, v3_signals),
             reader_helper_died,
         );
-        if !registrations.is_empty()
+        let naga_v2 = helper.as_ref().filter(|_| parallel_v2).and_then(|_| {
+            previous_v2.or_else(|| naga_v3::Session::start_v2(config_dir.clone(), &config, v2_targets))
+        });
+        let naga_v3 = helper.as_ref().filter(|_| has_v3).and_then(|_| {
+            previous_v3.or_else(|| naga_v3::Session::start_v3(config_dir, v3_targets))
+        });
+        if (naga_v3_hid || !registrations.is_empty())
             && helper.is_none()
             && let Ok(mut store) = runtime_store.lock()
         {
@@ -1223,6 +1283,8 @@ impl CaptureBackendHandle {
             hook_thread,
             worker_thread,
             helper,
+            naga_v3,
+            naga_v2,
             foreground_watcher_thread_id,
             foreground_watcher_thread: Some(foreground_watcher_thread),
         })
@@ -1231,6 +1293,8 @@ impl CaptureBackendHandle {
     pub(super) fn stop(self) -> Result<(), String> {
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 
+        drop(self.naga_v2);
+        drop(self.naga_v3);
         let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
         if posted == 0 {
             return Err(format!(
@@ -1307,9 +1371,20 @@ impl CaptureBackendHandle {
     }
 }
 
-fn build_hotkey_registrations(config: &AppConfig) -> Result<Vec<RegisteredHotkey>, String> {
+fn build_hotkey_registrations(config: &AppConfig, parallel_v2: bool, naga_v3_hid: bool) -> Result<Vec<RegisteredHotkey>, String> {
     let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
     for (index, mapping) in config.encoder_mappings.iter().enumerate() {
+        use crate::{config::RAZER_NAGA_DEVICE_ID, mouse_memory::naga_v3};
+        let device = config.physical_controls.iter()
+            .find(|control| control.id == mapping.control_id)
+            .map(|control| control.device_id.as_str());
+        if (device == Some(naga_v3::DEVICE_ID) && naga_v3_hid)
+            || (device == Some(RAZER_NAGA_DEVICE_ID) && (parallel_v2
+                || mapping.source == crate::config::MappingSource::Reserved
+                    && naga_v3::is_extra(mapping.control_id.as_str())))
+        {
+            continue;
+        }
         let hotkey = hotkeys::parse_hotkey(&mapping.encoded_key).map_err(|message| {
             format!(
                 "Failed to register encodedKey `{}` for `{}::{}`: {}",
@@ -2947,6 +3022,10 @@ pub fn capture_helper_main() {
         /// mouse sends `F13`..`F24`, which the keyboard hook catches.
         #[serde(default)]
         consumer_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+        #[serde(default)]
+        naga_v3_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+        #[serde(default)]
+        firmware_hypershift: bool,
     }
 
     let init: HelperInit = match serde_json::from_str::<HelperInit>(line.trim()) {
@@ -2960,6 +3039,8 @@ pub fn capture_helper_main() {
                     replayed_modifier_force_release_ms: None,
                     hypershift_trigger: None,
                     consumer_signals: Vec::new(),
+                    naga_v3_signals: Vec::new(),
+                    firmware_hypershift: false,
                 },
                 Err(e) => {
                     log::error!("[capture-helper] Failed to parse init payload: {e}");
@@ -2975,12 +3056,14 @@ pub fn capture_helper_main() {
         replayed_modifier_force_release_ms,
         hypershift_trigger,
         consumer_signals,
+        naga_v3_signals,
+        firmware_hypershift,
     } = init;
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
     HELPER_HYPER_TRIGGER.store(
-        hypershift_trigger
+        hypershift_trigger.filter(|_| !firmware_hypershift)
             .as_deref()
             .map(hypershift_trigger_code)
             .unwrap_or(HYPER_TRIGGER_OFF),
@@ -3003,8 +3086,8 @@ pub fn capture_helper_main() {
         log::info!("[capture-helper] REPLAYED awaiting-up threshold set to {clamped} ms.");
     }
 
-    if registrations.is_empty() {
-        log::warn!("[capture-helper] No registrations, exiting.");
+    if registrations.is_empty() && consumer_signals.is_empty() && naga_v3_signals.is_empty() {
+        log::warn!("[capture-helper] No input mappings, exiting.");
         return;
     }
 
@@ -3019,13 +3102,18 @@ pub fn capture_helper_main() {
         Ordering::Relaxed,
     );
     HELPER_REGISTRATIONS.with(|cell| *cell.borrow_mut() = registrations);
-    if !consumer_signals.is_empty()
-        && let Some(consumer) = crate::mouse_memory::config_model().consumer.as_ref()
-    {
+    if !consumer_signals.is_empty() {
         log::info!("[capture-helper] {} key buttons read as consumer signals.", consumer_signals.len());
-        super::consumer::spawn_reader(consumer_signals, consumer.report_id, || {
-            HELPER_HYPER_ACTIVE.load(Ordering::Relaxed)
-        });
+        super::consumer::spawn_reader(
+            consumer_signals, crate::mouse_memory::config_model(),
+            || HELPER_HYPER_ACTIVE.load(Ordering::Relaxed), naga_v3_signals.is_empty(),
+            if firmware_hypershift { super::consumer::NAGA_V2_PREFIX } else { "" },
+        );
+    }
+    if !naga_v3_signals.is_empty() {
+        super::consumer::spawn_reader(
+            naga_v3_signals, &crate::device_catalog::NAGA_V3_PRO, || false, true, super::consumer::NAGA_V3_PREFIX,
+        );
     }
     HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
     HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
@@ -3560,8 +3648,8 @@ fn spawn_capture_helper(
     runtime_store: Arc<Mutex<RuntimeStore>>,
     registrations: &[RegisteredHotkey],
     event_tx: mpsc::SyncSender<EncodedKeyEvent>,
-    settings: &crate::config::Settings,
-    consumer_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+    config: &AppConfig,
+    mouse_signals: (Vec<crate::mouse_memory::ConsumerSignal>, Vec<crate::mouse_memory::ConsumerSignal>),
     helper_died: Arc<AtomicBool>,
 ) -> Option<HelperHandle> {
     use std::io::Write;
@@ -3588,7 +3676,9 @@ fn spawn_capture_helper(
         })
         .collect();
 
-    if helper_regs.is_empty() {
+    let (consumer_signals, naga_v3_signals) = mouse_signals;
+    let firmware_hypershift = crate::mouse_memory::naga_v3::configured(config);
+    if helper_regs.is_empty() && consumer_signals.is_empty() && naga_v3_signals.is_empty() {
         return None;
     }
 
@@ -3668,13 +3758,18 @@ fn spawn_capture_helper(
         hypershift_trigger: &'a str,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         consumer_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        naga_v3_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+        firmware_hypershift: bool,
     }
     let init = HelperInit {
         registrations: &helper_regs,
-        modifier_stale_gc_ms: settings.modifier_stale_gc_ms,
-        replayed_modifier_force_release_ms: settings.replayed_modifier_force_release_ms,
-        hypershift_trigger: settings.hypershift_trigger.trim(),
+        modifier_stale_gc_ms: config.settings.modifier_stale_gc_ms,
+        replayed_modifier_force_release_ms: config.settings.replayed_modifier_force_release_ms,
+        hypershift_trigger: config.settings.hypershift_trigger.trim(),
         consumer_signals,
+        naga_v3_signals,
+        firmware_hypershift,
     };
     let json = match serde_json::to_string(&init) {
         Ok(j) => j,
@@ -3768,9 +3863,18 @@ fn spawn_capture_helper(
             }
             // `HS:` is stamped by the helper when the press arrived while the
             // Hypershift trigger was held; it wraps the other prefixes.
-            let (is_hypershift, rest) = match trimmed.strip_prefix(HS_PREFIX) {
+            let (input, backend) = if let Some(input) = trimmed.strip_prefix(super::consumer::NAGA_V2_PREFIX) {
+                if !crate::mouse_memory::naga_v3::hid_ready(true) { continue; }
+                (input, "windows-hid-naga-v2")
+            } else if let Some(input) = trimmed.strip_prefix(super::consumer::NAGA_V3_PREFIX) {
+                if !crate::mouse_memory::naga_v3::hid_ready(false) { continue; }
+                (input, "windows-hid-naga-v3")
+            } else {
+                (trimmed, BACKEND_LL_HOOK)
+            };
+            let (is_hypershift, rest) = match input.strip_prefix(HS_PREFIX) {
                 Some(rest) => (true, rest),
-                None => (false, trimmed),
+                None => (false, input),
             };
             let (is_key_up, is_repeat, encoded_key) =
                 if let Some(rest) = rest.strip_prefix("UP:") {
@@ -3783,7 +3887,7 @@ fn spawn_capture_helper(
             // An unstamped press with a foreign encoding means the firmware's own
             // Hypershift fired (it swallowed our trigger). Our wheel ticks carry
             // `HS:`, so they never trip this.
-            if !is_hypershift && !is_key_up {
+            if backend == BACKEND_LL_HOOK && !is_hypershift && !is_key_up {
                 crate::onboard_guard::note_signal(&encoded_key);
             }
             // try_send instead of send: when the bounded channel is full
@@ -3791,7 +3895,7 @@ fn spawn_capture_helper(
             // path.  See CAPTURE_EVENT_CAPACITY for rationale.
             if let Err(mpsc::TrySendError::Full(_)) = event_tx.try_send(EncodedKeyEvent {
                 encoded_key,
-                backend: BACKEND_LL_HOOK.into(),
+                backend: backend.into(),
                 received_at: runtime::timestamp_millis(),
                 is_repeat,
                 is_key_up,

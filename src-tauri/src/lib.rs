@@ -1106,7 +1106,19 @@ async fn delete_device_image(app: AppHandle, file_name: String) -> Result<(), Co
 async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
     let response =
-        tauri::async_runtime::spawn_blocking(move || load_or_initialize_config(&config_dir))
+        tauri::async_runtime::spawn_blocking(move || {
+            #[cfg(target_os = "windows")]
+            let stamp = config::config_file_stamp(&config_dir);
+            let mut response = load_or_initialize_config(&config_dir)?;
+            #[cfg(target_os = "windows")]
+            if mouse_memory::naga_v3::configure(&mut response.config, &config_dir) {
+                let migrated = config::save_config(&config_dir, response.config, stamp)?;
+                response.config = migrated.config;
+                response.warnings = migrated.warnings;
+                mouse_memory::naga_v3::clear_copy_request(&config_dir);
+            }
+            Ok::<_, config::ConfigStoreError>(response)
+        })
             .await
             .map_err(|error| CommandError::internal(format!("load_config task failed: {error}")))?
             .map_err(CommandError::from)?;
@@ -1127,7 +1139,7 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
 /// CONCURRENCY NOTE: The `runtime_controller` lock serializes concurrent
 /// `save_config` calls through the restart path. The `runtime_store` lock is
 /// re-acquired immediately after restart to update the version. No async yield
-/// points exist between `controller.restart()` and `store.reload()`.
+/// points exist between `controller.reload_saved_config()` and `store.reload()`.
 #[tauri::command]
 async fn save_config(
     app: AppHandle,
@@ -1170,7 +1182,7 @@ async fn save_config(
             if !still_running {
                 None
             } else {
-                Some(controller.restart(
+                Some(controller.reload_saved_config(
                     app.clone(),
                     runtime_store.inner().clone(),
                     result.config.clone(),
@@ -3031,8 +3043,14 @@ fn switch_key_signals(app: &AppHandle, consumer: bool) -> Result<(), CommandErro
     let rewritten = load_or_initialize_config(&config_dir)
         .map_err(|error| error.to_string())
         .and_then(|loaded| {
-            mouse_memory::VendorDevice::open_connected()?
-                .apply_bindings(&mouse_memory::onboard_bindings(&loaded.config))
+            if mouse_memory::naga_v3::v2_live() {
+                return Ok(()); // The V2 receiver keeps its own HID stream in parallel mode.
+            }
+            let device = mouse_memory::VendorDevice::open_connected()?;
+            if std::ptr::eq(device.model(), &device_catalog::NAGA_V3_PRO) {
+                return Ok(()); // The runtime restart replaces the live overlay.
+            }
+            device.apply_bindings(&mouse_memory::onboard_bindings(&loaded.config))
         });
     if let Err(message) = rewritten {
         log::info!("[onboard] signal switch left to the guard: {message}");

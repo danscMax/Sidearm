@@ -7,6 +7,7 @@ import {
   findShortcutConflicts,
   shortcutSignature,
 } from "./conflict-detection";
+import { makeConfig } from "./test-fixtures";
 
 function shortcutAction(
   id: string,
@@ -89,6 +90,28 @@ describe("shortcutSignature", () => {
 });
 
 describe("findShortcutConflicts", () => {
+  it("groups duplicate shortcuts only among buttons of the same device", () => {
+    const cfg = makeConfig({
+      actions: [shortcutAction("copy", "C", { ctrl: true })],
+      bindings: [
+        binding("v2-1", "p1", "standard", "thumb_01", "copy"),
+        binding("v2-4", "p1", "standard", "mouse_4", "copy"),
+        binding("v3-1", "p1", "standard", "v3_thumb_01", "copy"),
+      ],
+    });
+    cfg.devices.push({ id: "razer-naga-v3", name: "Razer Naga V3 Pro", builtin: true });
+    cfg.physicalControls.push({
+      ...cfg.physicalControls[1],
+      id: "v3_thumb_01",
+      deviceId: "razer-naga-v3",
+    });
+
+    expect(findShortcutConflicts(cfg)).toHaveLength(1);
+    expect([...conflictingBindingIds(cfg)]).toEqual(["v2-1", "v2-4"]);
+    cfg.bindings = cfg.bindings.filter((entry) => entry.id !== "v2-4");
+    expect(findShortcutConflicts(cfg)).toHaveLength(0);
+  });
+
   it("detects two bindings with the same shortcut", () => {
     const actions = [
       shortcutAction("a1", "C", { ctrl: true }),

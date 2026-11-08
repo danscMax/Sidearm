@@ -43,6 +43,7 @@ export interface EncodedKeyEvent {
   receivedAt: number;
   isRepeat: boolean;
   isKeyUp: boolean;
+  isHypershift?: boolean;
 }
 
 export interface WindowCaptureResult {

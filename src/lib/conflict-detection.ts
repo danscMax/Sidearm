@@ -12,13 +12,14 @@ import type {
 
 export interface ConflictGroup {
   signature: string;
+  deviceId: string | null;
   profileId: string;
   layer: Layer;
   bindings: Array<{ bindingId: string; controlId: ControlId; label: string }>;
 }
 
 /**
- * Pure: find bindings that fire the same shortcut on the same profile+layer.
+ * Pure: find bindings that fire the same shortcut on the same device, profile, and layer.
  * Returns one entry per *group* of conflicting bindings (size ≥ 2). Bindings
  * that are disabled, or whose action is missing/disabled, are ignored.
  *
@@ -28,8 +29,8 @@ export interface ConflictGroup {
 export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
   const actionsById = new Map<string, Action>();
   for (const a of config.actions) actionsById.set(a.id, a);
+  const devicesByControlId = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
 
-  // Key: `${profileId}::${layer}::${signature}` → bindings
   const grouped = new Map<string, ConflictGroup>();
 
   for (const binding of config.bindings) {
@@ -39,7 +40,8 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
     const signature = shortcutSignature(action.payload as ShortcutActionPayload);
     if (!signature) continue;
 
-    const key = `${binding.profileId}::${binding.layer}::${signature}`;
+    const deviceId = devicesByControlId.get(binding.controlId) ?? null;
+    const key = JSON.stringify([deviceId, binding.profileId, binding.layer, signature]);
     const existing = grouped.get(key);
     const entry = {
       bindingId: binding.id,
@@ -51,6 +53,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
     } else {
       grouped.set(key, {
         signature,
+        deviceId,
         profileId: binding.profileId,
         layer: binding.layer,
         bindings: [entry],

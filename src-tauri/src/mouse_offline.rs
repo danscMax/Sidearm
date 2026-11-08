@@ -137,7 +137,7 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
 pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &Path) {
     let records = offline_records(config, profile_id);
     let failed_marker = config_dir.join(OFFLINE_FAILED_FILE);
-    let device = match VendorDevice::open_connected() {
+    let device = match VendorDevice::open_v2() {
         Ok(device) => device,
         Err(message) => {
             // No mouse at all (or one that does not open) is not a sleeping
@@ -186,7 +186,7 @@ pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
     if !marker.exists() {
         return false;
     }
-    let result = VendorDevice::open_connected().and_then(|device| {
+    let result = VendorDevice::open_v2().and_then(|device| {
         if !device.model().verified {
             // Not the mouse the profile was written into; keep the marker for it.
             return Err(format!("{} is not verified", device.model().name));

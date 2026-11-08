@@ -9,18 +9,20 @@ import { PillTrack } from "../PillTrack";
 interface ViewTabPillsProps {
   activeTab: ViewTab;
   onSelect: (tab: ViewTab) => void;
+  showBottom?: boolean;
 }
 
-export function ViewTabPills({ activeTab, onSelect }: ViewTabPillsProps) {
+export function ViewTabPills({ activeTab, onSelect, showBottom }: ViewTabPillsProps) {
   const { t } = useTranslation();
   return (
     <PillTrack
       active={activeTab}
       onSelect={onSelect}
       items={[
-        { key: "combined", label: t("visualization.tabAll") },
-        { key: "top", label: t("visualization.tabTop") },
-        { key: "side", label: t("visualization.tabSide") },
+        { key: "combined", label: t(showBottom ? "visualization.v3All" : "visualization.tabAll") },
+        { key: "top", label: t(showBottom ? "visualization.v3Top" : "visualization.tabTop") },
+        { key: "side", label: t(showBottom ? "visualization.v3Side" : "visualization.tabSide") },
+        ...(showBottom ? [{ key: "bottom" as const, label: t("visualization.v3Bottom") }] : []),
       ]}
     />
   );

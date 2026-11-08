@@ -332,7 +332,8 @@ fn run(
 
         // The mouse may still hold the offline profile written at the last exit:
         // put Sidearm's signals back quietly before the check would call it drift.
-        if config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists()
+        if !crate::mouse_memory::naga_v3::v2_live()
+            && config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists()
             && let Some(config) = read_config(config_dir)
             && !crate::mouse_offline::restore_after_offline(&config, config_dir)
         {
@@ -403,7 +404,7 @@ fn check_once(
         // Its collection is not openable right now.
         Err(_) => return Verdict::Unreadable,
     };
-    if !device.model().verified {
+    if !device.model().verified || crate::mouse_memory::naga_v3::v2_live() {
         if full
             && let Some(config) = read_config(config_dir)
             && let Ok(percent) = device.battery_percent()

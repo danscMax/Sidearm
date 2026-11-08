@@ -1,4 +1,9 @@
 import type { AppConfig, ControlId } from "./config";
+export const NAGA_V3_DEVICE_ID = "razer-naga-v3";
+
+export function nagaLayoutControlId(controlId: ControlId): ControlId {
+  return controlId.startsWith("v3_") ? controlId.slice(3) : controlId;
+}
 
 /**
  * One thumb binding the mouse can hold in its own memory. The backend owns the
@@ -57,6 +62,10 @@ export function isBuiltinControl(config: AppConfig, controlId: ControlId | strin
   const control = config.physicalControls.find((entry) => entry.id === controlId);
   if (!control) return false;
   return config.devices.some((device) => device.id === control.deviceId && device.builtin === true);
+}
+
+export function usesNagaV3Ring(config: AppConfig): boolean {
+  return config.devices.some((device) => device.id === NAGA_V3_DEVICE_ID);
 }
 
 /** Live mouse settings; the mouse stores them, so they are not in the config. */

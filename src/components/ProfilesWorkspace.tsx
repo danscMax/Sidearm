@@ -43,6 +43,7 @@ import {
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
+import { usesNagaV3Ring } from "../lib/onboard-mapping";
 import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
 import { DeviceBar } from "./DeviceBar";
@@ -73,6 +74,7 @@ export interface ProfilesWorkspaceProps {
   devices: Device[];
   activeDeviceId: string | null;
   onSelectDevice: (id: string) => void;
+  onSetupNagaV3?: () => void;
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
   onSelectLayer: (layer: Layer) => void;
@@ -112,6 +114,7 @@ export function ProfilesWorkspace({
   devices,
   activeDeviceId,
   onSelectDevice,
+  onSetupNagaV3,
   selectedLayer,
   multiSelectedControlIds,
   onSelectLayer,
@@ -172,6 +175,21 @@ export function ProfilesWorkspace({
   const autoControlName = t("device.autoName", { n: deviceControlCount + 1 });
 
   function handleAddDevice() {
+    if (onSetupNagaV3 && usesNagaV3Ring(activeConfig)) {
+      setConfirmModal({
+        title: t("onboarding.v3.deviceTitle"),
+        message: t("onboarding.v3.deviceMessage"),
+        confirmLabel: t("onboarding.v3.deviceSetup"),
+        onConfirm: onSetupNagaV3,
+        secondaryConfirmLabel: t("onboarding.v3.otherDevice"),
+        onSecondaryConfirm: createGenericDevice,
+      });
+      return;
+    }
+    createGenericDevice();
+  }
+
+  function createGenericDevice() {
     const { config: nextConfig, deviceId } = createDevice(activeConfig, t("device.defaultName"));
     updateDraft(() => nextConfig);
     onSelectDevice(deviceId);
@@ -363,14 +381,14 @@ export function ProfilesWorkspace({
     [activeConfig],
   );
 
-  // Conflict groups scoped to what's currently on screen (this profile + layer),
+  // Conflict groups scoped to the device, profile and layer on screen,
   // so the banner names exactly the buttons the user can see.
   const layerConflicts = useMemo(
     () =>
       findShortcutConflicts(activeConfig).filter(
-        (g) => g.profileId === effectiveProfileId && g.layer === selectedLayer,
+        (g) => g.deviceId === activeDevice?.id && g.profileId === effectiveProfileId && g.layer === selectedLayer,
       ),
-    [activeConfig, effectiveProfileId, selectedLayer],
+    [activeConfig, activeDevice?.id, effectiveProfileId, selectedLayer],
   );
 
   // Conflict merge: keep one binding enabled, disable the rest of its group.

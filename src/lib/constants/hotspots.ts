@@ -60,3 +60,25 @@ export const combinedViewHotspots: Partial<Record<ControlId, HotspotPosition>> =
   mouse_4:           { left: 50, top: 23.5, label: "←", size: "sm" },
   mouse_5:           { left: 61, top: 23.5, label: "→", size: "sm" },
 };
+
+export const nagaV3TopHotspots: typeof topViewHotspots = {
+  ...topViewHotspots,
+  mouse_4: undefined,
+  mouse_5: undefined,
+  wheel_left: { left: 37, top: 22, label: "◀", size: "sm" },
+  wheel_right: { left: 55, top: 22, label: "▶", size: "sm" },
+  hypershift_button: { left: 75, top: 28, label: "HS", size: "sm" },
+  top_special_01: { left: 47, top: 40, label: "I", size: "sm" },
+  top_special_02: { left: 47, top: 49, label: "II", size: "sm" },
+};
+
+export const nagaV3CombinedHotspots: typeof combinedViewHotspots = {
+  ...combinedViewHotspots,
+  mouse_4: undefined,
+  mouse_5: undefined,
+  wheel_left: { left: 50, top: 23.5, label: "◀", size: "sm" },
+  wheel_right: { left: 61, top: 23.5, label: "▶", size: "sm" },
+  hypershift_button: { left: 70.5, top: 31, label: "HS", size: "sm" },
+  top_special_01: { left: 58, top: 40, label: "I", size: "sm" },
+  top_special_02: { left: 59, top: 48, label: "II", size: "sm" },
+};

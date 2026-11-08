@@ -1,3 +1,4 @@
+import { nagaLayoutControlId } from "./onboard-mapping";
 import i18n from "../i18n";
 import type {
   ActionType,
@@ -219,12 +220,15 @@ export function displayNameForControl(
   if (mode === "raw") {
     return control.defaultName;
   }
-  const key = CONTROL_ID_TO_I18N_KEY[control.id];
+  if (control.defaultName.startsWith("control.name.v3")) {
+    return i18n.t(control.defaultName);
+  }
+  const key = CONTROL_ID_TO_I18N_KEY[nagaLayoutControlId(control.id)];
   return key ? i18n.t(key) : control.defaultName;
 }
 
 export function displayNameForControlId(controlId: string): string {
-  const key = CONTROL_ID_TO_I18N_KEY[controlId as ControlId];
+  const key = CONTROL_ID_TO_I18N_KEY[nagaLayoutControlId(controlId)];
   return key ? i18n.t(key) : controlId;
 }
 

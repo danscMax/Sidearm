@@ -637,6 +637,63 @@ select::checkmark {
 .mouse-svg__glow--on { filter: drop-shadow(0 0 6px rgba(var(--layer-rgb, 159, 202, 105), 0.4)); }
 .mouse-svg__glow--selected { filter: drop-shadow(0 0 10px rgba(var(--layer-rgb, 159, 202, 105), 0.5)); }
 .mouse-svg__root { width: 100%; height: 100%; display: block; }
+
+.naga-v3 {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.naga-v3 .mouse-top-layout {
+  grid-template-columns: minmax(0, 200px) minmax(0, 1fr) minmax(0, 200px);
+}
+
+.naga-v3 .mouse-top-layout .mouse-visual {
+  max-height: none;
+}
+
+.naga-v3 .mouse-top-layout .mouse-visual--top {
+  max-width: min(400px, 38vh);
+}
+
+.naga-v3__bottom {
+  max-width: 240px;
+  aspect-ratio: 300 / 420;
+}
+
+.naga-v3__underside > text {
+  fill: var(--c-text-muted);
+  font-size: 10px;
+  text-anchor: middle;
+}
+
+.naga-v3__shell {
+  fill: var(--c-surface);
+  stroke: var(--c-border-active);
+  stroke-width: 1.5;
+}
+
+.naga-v3__panel {
+  fill: var(--c-bg);
+  stroke: var(--c-border-hover);
+}
+
+.naga-v3__detail {
+  fill: var(--c-surface-alt);
+  stroke: var(--c-border-hover);
+}
+
+.naga-v3__indicator { fill: var(--c-accent); }
+
+.naga-v3 .btn-legend__label {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@container (max-width: 540px) {
+  .naga-v3 .mouse-top-layout { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .naga-v3 .mouse-top-layout .mouse-visual { grid-column: 1 / -1; order: -1; }
+  .naga-v3 .btn-legend__row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .svg-no-select { user-select: none; }
 /* P2-3:END */
 
@@ -1855,8 +1912,10 @@ input[type="radio"] {
   color: var(--c-text-bright);
   font-size: var(--fs-caption);
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
   z-index: 10;
+  width: max-content;
   max-width: 220px;
   line-height: 1.4;
   animation: tab-fade-in 120ms ease-out;
@@ -6372,7 +6431,7 @@ input[type="search"]::-webkit-search-decoration {
   border-color: rgba(234, 179, 8, 0.6);
   position: relative;
 }
-.btn-legend__cell--conflict::after {
+.btn-legend__cell--conflict::before {
   content: "⚠";
   position: absolute;
   top: 3px;

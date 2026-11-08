@@ -2029,7 +2029,7 @@ fn seed_profiles() -> Vec<Profile> {
     ]
 }
 
-fn seed_physical_controls() -> Vec<PhysicalControl> {
+pub(crate) fn seed_physical_controls() -> Vec<PhysicalControl> {
     vec![
         physical_control(
             ControlId::new("thumb_01"),

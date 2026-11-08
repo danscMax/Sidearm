@@ -8,10 +8,11 @@ export function resolveInitialProfileId(config: AppConfig): string | null {
   );
 }
 
-export function resolveInitialControlId(config: AppConfig): ControlId | null {
+export function resolveInitialControlId(config: AppConfig, deviceId?: string | null): ControlId | null {
+  const controls = deviceId ? config.physicalControls.filter((control) => control.deviceId === deviceId) : config.physicalControls;
   return (
-    config.physicalControls.find((control) => control.family === "thumbGrid")?.id ??
-    config.physicalControls[0]?.id ??
+    controls.find((control) => control.family === "thumbGrid")?.id ??
+    controls[0]?.id ??
     null
   );
 }

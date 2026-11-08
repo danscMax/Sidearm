@@ -52,6 +52,7 @@ export function Sidebar({
   setSelectedProfileId,
   setConfirmModal,
   activeConfig,
+  selectedDeviceName,
 }: {
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
@@ -65,6 +66,7 @@ export function Sidebar({
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   activeConfig?: AppConfig | null;
+  selectedDeviceName?: string;
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
@@ -84,7 +86,7 @@ export function Sidebar({
           <span>
             {t("app.name")} <span className="sidebar__version">v{__APP_VERSION__}</span>
           </span>
-          <strong>{activeConfig?.settings?.deviceName ?? t("app.deviceFallback")}</strong>
+          <strong>{selectedDeviceName ?? activeConfig?.settings?.deviceName ?? t("app.deviceFallback")}</strong>
         </div>
       </div>
       {workspaceModeCopy

@@ -114,7 +114,8 @@ describe("button role editor", () => {
 
   it("does not offer unsupported encoded buttons as modifier triggers", () => {
     show("thumb_01");
+    fireEvent.click(screen.getByRole("button", { name: /Клавиатура/ }));
     expect(screen.queryByRole("button", { name: /HyperShift · удержание/ })).toBeNull();
-    expect(screen.getByText(/удержание которой Sidearm умеет считывать/)).toBeTruthy();
+    expect(screen.queryByText(/удержание которой Sidearm умеет считывать/)).toBeNull();
   });
 });

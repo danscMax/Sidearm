@@ -147,6 +147,21 @@ impl RuntimeController {
         self.start(app, runtime_store, config, app_name)
     }
 
+    pub fn reload_saved_config(
+        &mut self,
+        app: AppHandle,
+        runtime_store: Arc<Mutex<RuntimeStore>>,
+        config: AppConfig,
+        app_name: String,
+    ) -> Result<(), String> {
+        #[cfg(target_os = "windows")]
+        if let Some(backend) = self.backend.take() {
+            self.backend = Some(backend.restart_after_save(app, runtime_store, config, app_name)?);
+            return Ok(());
+        }
+        self.restart(app, runtime_store, config, app_name)
+    }
+
     pub fn stop(&mut self) -> Result<(), String> {
         #[cfg(target_os = "windows")]
         if let Some(backend) = self.backend.take() {
@@ -463,6 +478,20 @@ fn process_encoded_key_event(
         event.is_hypershift,
     );
 
+    let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
+    if let Some(action) = native_v3_scroll(&preview, own_window) {
+        if !event.is_repeat
+            && let Err(error) = crate::input_synthesis::send_mouse_action(
+                &config::MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false },
+                &hotkeys::HotkeyModifiers::default(),
+            )
+        {
+            log::warn!("[capture] Native V3 scroll failed: {error}");
+        }
+        flush_log_entries(runtime_store, log_entries);
+        return EventOutcome::Handled;
+    }
+
     match preview.status {
         resolver::ResolutionStatus::Resolved => {
             log_entries.push((
@@ -518,8 +547,7 @@ fn process_encoded_key_event(
     // DPI stepping writes mouse hardware; other actions stay blocked while Sidearm
     // is focused so injected shortcuts cannot operate its own editor.
     let resolved_action = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
-    if capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON)
-        && !can_execute_in_own_window(resolved_action.map(|action| &action.payload)) {
+    if own_window && !can_execute_in_own_window(resolved_action.map(|action| &action.payload)) {
         log::info!("[capture] Not dispatched {}: Sidearm's own window", preview.encoded_key);
         log_entries.push((
             "capture",
@@ -735,6 +763,22 @@ fn process_encoded_key_event(
     }
 
     EventOutcome::Handled
+}
+
+fn native_v3_scroll(
+    preview: &resolver::ResolvedInputPreview,
+    own_window: bool,
+) -> Option<config::MouseActionKind> {
+    if !own_window && preview.binding_id.is_some()
+        && preview.status != resolver::ResolutionStatus::ConditionUnmet
+    {
+        return None;
+    }
+    match preview.control_id.as_deref() {
+        Some("v3_wheel_up") => Some(config::MouseActionKind::ScrollUp),
+        Some("v3_wheel_down") => Some(config::MouseActionKind::ScrollDown),
+        _ => None,
+    }
 }
 
 fn can_execute_in_own_window(payload: Option<&config::ActionPayload>) -> bool {
@@ -992,6 +1036,30 @@ mod elevated_notice_tests {
 #[cfg(test)]
 mod own_window_tests {
     use super::{can_execute_in_own_window, config};
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn v3_wheel_falls_back_to_scroll_without_an_active_assignment() {
+        use super::{native_v3_scroll, resolver};
+        let mut config = crate::mouse_memory::naga_v3::tests::config_with_v3();
+        let key = config.encoder_mappings.iter().find(|mapping|
+            mapping.control_id.as_str() == "v3_wheel_down" && mapping.layer == config::Layer::Standard
+        ).unwrap().encoded_key.clone();
+        let resolve = |config: &config::AppConfig| resolver::resolve_input_preview(
+            config, &key, "notepad.exe", "Test", None,
+        );
+        assert_eq!(native_v3_scroll(&resolve(&config), false), Some(config::MouseActionKind::ScrollDown));
+        let mut binding = config.bindings.iter().find(|binding|
+            binding.profile_id == config.settings.fallback_profile_id && binding.enabled
+        ).unwrap().clone();
+        binding.id = "v3-scroll-test".into();
+        binding.layer = config::Layer::Standard;
+        binding.control_id = config::ControlId::new("v3_wheel_down");
+        config.bindings.push(binding);
+        let assigned = resolve(&config);
+        assert_eq!(native_v3_scroll(&assigned, false), None);
+        assert_eq!(native_v3_scroll(&assigned, true), Some(config::MouseActionKind::ScrollDown));
+    }
 
     #[test]
     fn permits_only_direct_dpi_steps() {

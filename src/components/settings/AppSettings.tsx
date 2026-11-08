@@ -2,8 +2,9 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../../i18n";
-import { NATIVE_HYPERSHIFT_TRIGGERS } from "../../lib/config";
+import { NATIVE_HYPERSHIFT_TRIGGERS, RAZER_NAGA_DEVICE_ID } from "../../lib/config";
 import { displayNameForControlId } from "../../lib/labels";
+import { usesNagaV3Ring } from "../../lib/onboard-mapping";
 import type {
   AppConfig,
   CommandError,
@@ -35,6 +36,7 @@ export function AppSettings({
 }: AppSettingsProps) {
   const { t, i18n } = useTranslation();
   const osd = activeConfig.settings;
+  const nagaV3 = usesNagaV3Ring(activeConfig) && !activeConfig.devices.some((device) => device.id === RAZER_NAGA_DEVICE_ID);
   const {
     adminAutostart,
     autostartBusy,
@@ -188,8 +190,8 @@ export function AppSettings({
       </section>
 
       <section className="settings-section">
-        <SettingRow title={t("settings.hypershiftHeader")} hint={t("settings.hypershiftHelp")}>
-          <SelectField<HypershiftTrigger>
+        <SettingRow title={t("settings.hypershiftHeader")} hint={t(nagaV3 ? "settings.hypershiftV3Help" : "settings.hypershiftHelp")}>
+          {nagaV3 ? <span>{t("control.name.v3Ring")}</span> : <SelectField<HypershiftTrigger>
             ariaLabel={t("settings.hypershiftTriggerLabel")}
             value={osd.hypershiftTrigger ?? "mouse_right"}
             options={[
@@ -197,7 +199,7 @@ export function AppSettings({
               { value: "none", label: t("settings.hypershiftOff") },
             ]}
             onChange={(trigger) => updateSettings({ hypershiftTrigger: trigger })}
-          />
+          />}
         </SettingRow>
 
         {/* Clipboard repair (OSC 52 mojibake workaround) */}

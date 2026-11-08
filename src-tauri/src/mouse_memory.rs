@@ -36,6 +36,9 @@
 use std::io::Error;
 
 use crate::device_catalog::NativeModel;
+
+#[path = "naga_v3.rs"]
+pub mod naga_v3;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -261,6 +264,8 @@ pub fn signal_action(binding: &OnboardBinding) -> Option<(u8, OnboardAction)> {
 pub struct ConsumerSignal {
     pub usage: u16,
     pub encoded_key: String,
+    #[serde(default)]
+    pub hypershift: bool,
 }
 
 /// The consumer signals the helper must translate; empty in key mode or for a
@@ -275,7 +280,7 @@ pub fn consumer_signals(config: &crate::config::AppConfig) -> Vec<ConsumerSignal
         .filter_map(|binding| {
             let usage = model.consumer_usage_for(&binding.control_id)?;
             let encoded_key = crate::hotkeys::parse_hotkey(&binding.encoded_key).ok()?.canonical;
-            Some(ConsumerSignal { usage, encoded_key })
+            Some(ConsumerSignal { usage, encoded_key, hypershift: false })
         })
         .collect()
 }
@@ -464,6 +469,7 @@ pub struct VendorDevice {
     _exclusive: MutexGuard<'static, ()>,
     model: &'static NativeModel,
     pid: u16,
+    path: String,
 }
 
 /// Serializes every [`VendorDevice`] in this process.
@@ -494,13 +500,18 @@ impl VendorDevice {
         Err(last_error)
     }
 
+    pub fn open_v2() -> Result<Self, String> {
+        let model = config_model();
+        Self::open(model, model.pids[0])
+    }
+
     /// Opens the vendor collection of `model` under `pid`, discovering its
     /// interface path in the registry. `Err` carries an OS-error description.
     fn open(model: &'static NativeModel, pid: u16) -> Result<Self, String> {
         // A panic mid-exchange leaves no state behind the lock worth refusing for.
         let exclusive = DEVICE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         let paths = find_paths(&interface_needle(model.vid, pid, model.interface))?;
-        let handle = open_first(&paths, |path| {
+        let (handle, path) = open_first(&paths, |path| {
             let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
             // No requested rights: the vendor collection is held by Razer's driver
             // and refuses GENERIC_READ|GENERIC_WRITE to non-owners.
@@ -516,7 +527,7 @@ impl VendorDevice {
                 )
             };
             if handle != INVALID_HANDLE_VALUE {
-                return Ok(handle);
+                return Ok((handle, path.to_owned()));
             }
             let error = Error::last_os_error();
             // A leaf of a device no longer plugged in: absent, not failing.
@@ -527,7 +538,7 @@ impl VendorDevice {
                 Err(format!("{error}: CreateFileW({path})"))
             }
         })?;
-        Ok(Self { handle, _exclusive: exclusive, model, pid })
+        Ok(Self { handle, _exclusive: exclusive, model, pid, path })
     }
 
     /// The model this device was opened as.
@@ -1089,8 +1100,7 @@ fn record_matches(written: &[u8; PAYLOAD_LEN], read: &[u8; PAYLOAD_LEN]) -> bool
 /// for the capture helper's reader: every matching leaf of every PID, since the
 /// registry keeps leaves of devices no longer present (another USB port, a
 /// re-paired dongle) and only the live one opens.
-pub fn consumer_collection_paths() -> Result<Vec<String>, String> {
-    let model = config_model();
+pub fn consumer_collection_paths(model: &NativeModel) -> Result<Vec<String>, String> {
     let consumer = model.consumer.as_ref().ok_or_else(|| format!("{} has no consumer signals", model.name))?;
     let paths: Vec<String> = model
         .pids
@@ -1404,7 +1414,7 @@ mod tests {
             assert_eq!(device.holds_other_signal(&bindings, &b.control_id), Ok(false), "{}", b.control_id);
         }
         put_back(&device, &saved);
-        let paths = consumer_collection_paths().expect("consumer collection in the registry");
+        let paths = consumer_collection_paths(device.model()).expect("consumer collection in the registry");
         let opened = paths.iter().find(|path| std::fs::File::open(path).is_ok());
         println!("consumer collection: {opened:?} of {paths:?}");
         assert!(opened.is_some(), "no consumer collection opens: {paths:?}");
@@ -1776,6 +1786,7 @@ mod tests {
             _exclusive: DEVICE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
             model: &UNVERIFIED,
             pid: 0,
+            path: String::new(),
         };
         let refused = |result: Result<(), String>| {
             assert_eq!(result, Err("Test mouse is not verified yet: button records are not written".into()));

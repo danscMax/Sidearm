@@ -21,6 +21,7 @@ use windows_sys::Win32::{
             GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_TERMINATE,
             QueryFullProcessImageNameW, TerminateProcess, WaitForSingleObject,
         },
+        WindowsProgramming::{GetComputerNameW, GetUserNameW, MAX_COMPUTERNAME_LENGTH},
     },
 };
 
@@ -188,11 +189,19 @@ struct StartupEntry {
 }
 
 fn backup_path(config_dir: &Path) -> Result<PathBuf, String> {
-    let machine = std::env::var("COMPUTERNAME").map_err(|_| "Cannot identify this computer")?;
-    let user = std::env::var("USERNAME").map_err(|_| "Cannot identify this user")?;
-    if machine.is_empty() || user.is_empty() {
-        return Err("Cannot identify this computer/user".into());
+    let mut machine = [0; MAX_COMPUTERNAME_LENGTH as usize + 1];
+    let mut machine_len = machine.len() as u32;
+    if unsafe { GetComputerNameW(machine.as_mut_ptr(), &mut machine_len) } == 0 || machine_len == 0 {
+        return Err("Cannot identify this computer".into());
     }
+    let machine = String::from_utf16_lossy(&machine[..machine_len as usize]);
+    // UNLEN (256) plus the terminating NUL, which GetUserNameW includes in the result length.
+    let mut user = [0; 257];
+    let mut user_len = user.len() as u32;
+    if unsafe { GetUserNameW(user.as_mut_ptr(), &mut user_len) } == 0 || user_len <= 1 {
+        return Err("Cannot identify this user".into());
+    }
+    let user = String::from_utf16_lossy(&user[..(user_len - 1) as usize]);
     // Portable data may be synced between PCs. Never offer another PC/user's
     // startup backup as this one's undo, and do not expose names in filenames.
     let binding = format!(
@@ -389,6 +398,16 @@ pub fn restore_startup(config_dir: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn status_reads_processes_and_local_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!status(dir.path()).unwrap().startup_restore_available);
+
+        fs::write(backup_path(dir.path()).unwrap(), b"{}").unwrap();
+        assert!(status(dir.path()).unwrap().startup_restore_available);
+    }
+
     #[test]
     fn startup_parser_rejects_binary_odd_length_and_embedded_nul() {
         assert!(

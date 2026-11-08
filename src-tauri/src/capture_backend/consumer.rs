@@ -8,6 +8,7 @@
 use std::time::{Duration, Instant};
 
 use crate::mouse_memory::ConsumerSignal;
+use crate::device_catalog::NativeModel;
 
 const HS_PREFIX: &str = "HS:";
 /// A hold with no report for this long is released: the device reports changes
@@ -61,22 +62,21 @@ impl Translator {
         !self.held.is_empty() && now.saturating_duration_since(self.last_report) >= after
     }
 
-    fn encoded_key(&self, usage: u16) -> Option<&str> {
-        self.signals.iter().find(|s| s.usage == usage).map(|s| s.encoded_key.as_str())
+    fn signal(&self, usage: u16) -> Option<&ConsumerSignal> {
+        self.signals.iter().find(|signal| signal.usage == usage)
     }
 
     /// Lines for a new report: `UP:` for every usage no longer held, a press
     /// for every newly held one. A report repeating the held set yields none.
     pub(super) fn report(&mut self, usages: &[u16], now: Instant, hyper: bool) -> Vec<String> {
-        let prefix = if hyper { HS_PREFIX } else { "" };
         self.last_report = now;
         let mut lines = Vec::new();
         let released: Vec<u16> =
             self.held.iter().map(|(u, _)| *u).filter(|u| !usages.contains(u)).collect();
         for usage in released {
             self.held.retain(|(u, _)| *u != usage);
-            if let Some(key) = self.encoded_key(usage) {
-                lines.push(format!("{prefix}UP:{key}"));
+            if let Some(signal) = self.signal(usage) {
+                lines.push(signal_line(signal, "UP:", hyper));
             }
         }
         for &usage in usages {
@@ -84,8 +84,8 @@ impl Translator {
                 continue;
             }
             // An unknown usage is not ours (or not bound): never held, never sent.
-            if let Some(key) = self.encoded_key(usage) {
-                lines.push(format!("{prefix}{key}"));
+            if let Some(signal) = self.signal(usage) {
+                lines.push(signal_line(signal, "", hyper));
                 self.held.push((usage, now + self.delay));
             }
         }
@@ -94,7 +94,6 @@ impl Translator {
 
     /// `REPEAT:` lines for every held usage whose repeat is due.
     pub(super) fn repeats(&mut self, now: Instant, hyper: bool) -> Vec<String> {
-        let prefix = if hyper { HS_PREFIX } else { "" };
         let mut due = Vec::new();
         for (usage, next) in &mut self.held {
             if *next <= now {
@@ -103,7 +102,7 @@ impl Translator {
             }
         }
         due.into_iter()
-            .filter_map(|usage| self.encoded_key(usage).map(|key| format!("{prefix}REPEAT:{key}")))
+            .filter_map(|usage| self.signal(usage).map(|signal| signal_line(signal, "REPEAT:", hyper)))
             .collect()
     }
 
@@ -117,6 +116,11 @@ impl Translator {
     pub(super) fn release_all(&mut self, hyper: bool) -> Vec<String> {
         self.report(&[], Instant::now(), hyper)
     }
+}
+
+fn signal_line(signal: &ConsumerSignal, kind: &str, hyper: bool) -> String {
+    let layer = if hyper || signal.hypershift { HS_PREFIX } else { "" };
+    format!("{layer}{kind}{}", signal.encoded_key)
 }
 
 /// Windows' own keyboard repeat timing (Control Panel → Keyboard), so a held
@@ -146,7 +150,18 @@ fn repeat_timing(delay: u32, speed: u32) -> (Duration, Duration) {
 /// report, and reopens after the dongle sleeps or is unplugged; `hyper` tells
 /// whether the Hypershift trigger is held, read when a report arrives (the
 /// stamp is a capture-time decision, as for the keyboard hook).
-pub(super) fn spawn_reader(signals: Vec<ConsumerSignal>, report_id: u8, hyper: fn() -> bool) {
+pub(super) const NAGA_V3_PREFIX: &str = "V3:";
+pub(super) const NAGA_V2_PREFIX: &str = "V2:";
+
+pub(super) fn spawn_reader(
+    signals: Vec<ConsumerSignal>,
+    model: &'static NativeModel,
+    hyper: fn() -> bool,
+    report_status: bool,
+    signal_prefix: &'static str,
+) {
+    let Some(consumer) = &model.consumer else { return };
+    let report_id = consumer.report_id;
     let (delay, period) = keyboard_repeat_timing();
     let spawned = std::thread::Builder::new().name("consumer-reader".into()).spawn(move || {
         let mut translator = Translator::new(signals, delay, period);
@@ -154,20 +169,20 @@ pub(super) fn spawn_reader(signals: Vec<ConsumerSignal>, report_id: u8, hyper: f
         // every two seconds and must not flood the log.
         let mut last_error = String::new();
         loop {
-            match read_until_lost(&mut translator, report_id, hyper) {
+            match read_until_lost(&mut translator, model, report_id, hyper, report_status, signal_prefix) {
                 Ok(()) => return, // the parent is gone
                 Err(message) => {
-                    if !emit(&translator.release_all(hyper())) {
+                    if !emit(&translator.release_all(hyper()), signal_prefix) {
                         return;
                     }
                     // Warn level: the parent logs it as a warning — while this
                     // lasts the key buttons do nothing; the status line puts it
                     // in the Mouse tab.
                     // The parent keeps the state, so repeating it is harmless.
-                    if !emit(&[STATUS_UNREADABLE.to_string()]) {
+                    if report_status && !emit(&[STATUS_UNREADABLE.to_string()], "") {
                         return;
                     }
-                    if message != last_error {
+                    if message != last_error && report_status {
                         log::warn!("[consumer] no button signals right now: {message}");
                         last_error = message;
                     }
@@ -182,17 +197,24 @@ pub(super) fn spawn_reader(signals: Vec<ConsumerSignal>, report_id: u8, hyper: f
 }
 
 /// Writes helper lines to stdout. `false` once the parent closed the pipe.
-fn emit(lines: &[String]) -> bool {
+fn emit(lines: &[String], prefix: &str) -> bool {
     use std::io::Write;
     if lines.is_empty() {
         return true;
     }
     let mut out = std::io::stdout().lock();
-    lines.iter().all(|line| writeln!(out, "{line}").is_ok()) && out.flush().is_ok()
+    lines.iter().all(|line| writeln!(out, "{prefix}{line}").is_ok()) && out.flush().is_ok()
 }
 
 /// Reads reports until the device fails (`Err`, reopen) or stdout closes (`Ok`).
-fn read_until_lost(translator: &mut Translator, report_id: u8, hyper: fn() -> bool) -> Result<(), String> {
+fn read_until_lost(
+    translator: &mut Translator,
+    model: &NativeModel,
+    report_id: u8,
+    hyper: fn() -> bool,
+    report_status: bool,
+    signal_prefix: &str,
+) -> Result<(), String> {
     use windows_sys::Win32::Foundation::{
         CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GetLastError, INVALID_HANDLE_VALUE,
         WAIT_OBJECT_0, WAIT_TIMEOUT,
@@ -203,7 +225,7 @@ fn read_until_lost(translator: &mut Translator, report_id: u8, hyper: fn() -> bo
     use windows_sys::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
     use windows_sys::Win32::System::Threading::{CreateEventW, INFINITE, WaitForSingleObject};
 
-    let paths = crate::mouse_memory::consumer_collection_paths()?;
+    let paths = crate::mouse_memory::consumer_collection_paths(model)?;
     let (handle, path) = crate::mouse_memory::open_first(&paths, |path| {
         let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
         let handle = unsafe {
@@ -229,7 +251,7 @@ fn read_until_lost(translator: &mut Translator, report_id: u8, hyper: fn() -> bo
         return Err(format!("CreateEventW: {}", std::io::Error::last_os_error()));
     }
     log::info!("[consumer] reading button signals from {path}");
-    if !emit(&[STATUS_READABLE.to_string()]) {
+    if report_status && !emit(&[STATUS_READABLE.to_string()], "") {
         unsafe {
             CloseHandle(event);
             CloseHandle(handle);
@@ -264,7 +286,7 @@ fn read_until_lost(translator: &mut Translator, report_id: u8, hyper: fn() -> bo
                         log::warn!("[consumer] hold released after {HOLD_GIVE_UP_AFTER:?} without a report");
                         lines.extend(translator.release_all(hyper()));
                     }
-                    if !emit(&lines) {
+                    if !emit(&lines, signal_prefix) {
                         break Some(Ok(()));
                     }
                 }
@@ -283,7 +305,7 @@ fn read_until_lost(translator: &mut Translator, report_id: u8, hyper: fn() -> bo
         let Some(usages) = held_usages(&buffer[..read as usize], report_id) else {
             continue;
         };
-        if !emit(&translator.report(&usages, Instant::now(), hyper())) {
+        if !emit(&translator.report(&usages, Instant::now(), hyper()), signal_prefix) {
             break Ok(());
         }
     };
@@ -300,8 +322,8 @@ mod tests {
 
     fn translator() -> Translator {
         let signals = vec![
-            ConsumerSignal { usage: 0x10, encoded_key: "F13".into() },
-            ConsumerSignal { usage: 0x11, encoded_key: "F14".into() },
+            ConsumerSignal { usage: 0x10, encoded_key: "F13".into(), hypershift: false },
+            ConsumerSignal { usage: 0x11, encoded_key: "F14".into(), hypershift: false },
         ];
         Translator::new(signals, Duration::from_millis(500), Duration::from_millis(100))
     }
@@ -333,6 +355,22 @@ mod tests {
     fn hypershift_stamps_the_press() {
         let mut t = translator();
         assert_eq!(t.report(&[0x11], Instant::now(), true), ["HS:F14"]);
+    }
+
+    #[test]
+    fn naga_v3_reports_translate_all_thumb_presses_and_releases_on_both_layers() {
+        let config = crate::mouse_memory::naga_v3::tests::config_with_v3();
+        let signals = crate::mouse_memory::naga_v3::signals(&config, true);
+        let mut reader = Translator::new(signals.clone(), Duration::from_millis(500), Duration::from_millis(100));
+        let now = Instant::now();
+        for (index, signal) in signals[..24].iter().enumerate() {
+            let [low, high] = signal.usage.to_le_bytes();
+            let press = held_usages(&[2, low, high, 0, 0], 2).unwrap();
+            let layer = if index % 2 == 0 { "" } else { "HS:" };
+            let key = &signal.encoded_key;
+            assert_eq!(reader.report(&press, now, false), [format!("{layer}{key}")]);
+            assert_eq!(reader.report(&[], now, false), [format!("{layer}UP:{key}")]);
+        }
     }
 
     #[test]

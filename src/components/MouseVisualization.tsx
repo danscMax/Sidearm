@@ -1,9 +1,12 @@
+import { nagaLayoutControlId } from "../lib/onboard-mapping";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ControlId } from "../lib/config";
 import { topViewHotspots, sideViewHotspots, combinedViewHotspots } from "../lib/constants";
+import { nagaV3TopHotspots, nagaV3CombinedHotspots } from "../lib/constants/hotspots";
 import { buildHotspotTooltip, resolveControlBadge } from "../lib/labels";
 import { MouseVisualizationSvg } from "./MouseVisualizationSvg";
+import { NagaV3Bottom } from "./NagaV3Bottom";
 import {
   actionLabel,
   COMBINED_LEFT_BUTTONS,
@@ -28,6 +31,7 @@ const SIDE_LEGEND_GRID: ControlId[][] = [
   ["thumb_02", "thumb_05", "thumb_08", "thumb_11"],
   ["thumb_01", "thumb_04", "thumb_07", "thumb_10"],
 ];
+const BOTTOM_HOTSPOTS = { top_special_03: { left: 48.33, top: 64.29, label: "↓" } };
 
 export function MouseVisualization({
   entries,
@@ -49,6 +53,10 @@ export function MouseVisualization({
   const { t } = useTranslation();
   const [activeTab, setActiveTab] = useState<ViewTab>("combined");
   const [visualMode, setVisualMode] = useState<VisualMode>("photo");
+  const nagaV3 = entries.some((entry) => entry.control.defaultName === "control.name.v3ScrollMode");
+  const view = !nagaV3 && activeTab === "bottom" ? "combined" : activeTab;
+  const topHotspots = nagaV3 ? nagaV3TopHotspots : topViewHotspots;
+  const combinedHotspots = nagaV3 ? nagaV3CombinedHotspots : combinedViewHotspots;
   const interaction = useControlInteractions({
     entries,
     onSelectControl,
@@ -65,7 +73,7 @@ export function MouseVisualization({
     chord: t("visualization.badgeChord"),
   };
 
-  if (visualMode === "schematic") {
+  if (visualMode === "schematic" && !nagaV3) {
     return (
       <div className="mouse-visual-tabs" data-layer={selectedLayer}>
         <div className="mouse-visual-tabs__nav">
@@ -104,7 +112,7 @@ export function MouseVisualization({
     hotspots: Partial<Record<ControlId, { left: number; top: number; label: string; size?: "sm" | "lg" }>>,
   ) {
     return entries.map((entry) => {
-      const pos = hotspots[entry.control.id];
+      const pos = hotspots[nagaLayoutControlId(entry.control.id)];
       if (!pos) return null;
 
       const isAssigned = entry.isHypershiftTrigger || (entry.binding && entry.binding.enabled && entry.action && entry.action.type !== "disabled");
@@ -153,7 +161,7 @@ export function MouseVisualization({
           {...getInteractionProps(entry.control.id)}
         >
           {resolveControlBadge(pos.label)}
-          {entry.isHypershiftTrigger && <span className="mouse-visual__assignment" aria-hidden="true">{t("visualization.hypershiftBadge")}</span>}
+          {entry.isHypershiftTrigger && pos.label !== "HS" && <span className="mouse-visual__assignment" aria-hidden="true">{t("visualization.hypershiftBadge")}</span>}
         </button>
       );
     });
@@ -167,12 +175,14 @@ export function MouseVisualization({
   ) {
     return (
       <LabelColumn
-        controlIds={controlIds}
+        controlIds={nagaV3 ? controlIds.map((id) => 'v3_' + id) : controlIds}
         side={side}
         interaction={interaction}
         multiSelectedControlIds={multiSelectedControlIds}
-        badgeFor={(id) => resolveControlBadge(hotspots[id]?.label ?? id)}
-        actionLabelFor={(entry) => actionLabel(entry, { triggerLabels })}
+        badgeFor={(id) => resolveControlBadge(hotspots[nagaLayoutControlId(id)]?.label ?? nagaLayoutControlId(id))}
+        actionLabelFor={(entry) => nagaV3 && entry.isHypershiftTrigger
+          ? t("control.name.v3Ring")
+          : actionLabel(entry, { triggerLabels })}
         unassignedLabel={t("visualization.unassigned")}
         executionCounts={executionCounts}
         heatmapEnabled={heatmapEnabled}
@@ -196,7 +206,8 @@ export function MouseVisualization({
               if (el) el.style.setProperty("--col-count", String(row.length));
             }}
           >
-            {row.map((controlId) => {
+            {row.map((layoutId) => {
+              const controlId = nagaV3 ? 'v3_' + layoutId : layoutId;
               const entry = entryMap.get(controlId);
               if (!entry) return null;
               const selected = entry.isSelected || multiSelectedControlIds.has(controlId);
@@ -209,7 +220,7 @@ export function MouseVisualization({
                   controlId={controlId}
                   interaction={interaction}
                   selected={selected}
-                  badge={resolveControlBadge(hotspots[controlId]?.label ?? controlId)}
+                  badge={resolveControlBadge(hotspots[layoutId]?.label ?? layoutId)}
                   label={actionLabel(entry, { triggerLabels })}
                   tooltip={buildHotspotTooltip(
                     entry,
@@ -232,11 +243,15 @@ export function MouseVisualization({
     );
   }
 
+  const topLeft = nagaV3 ? ["mouse_left", "top_aux_01", "top_aux_02", "wheel_left", "top_special_01"] : TOP_LEFT_BUTTONS;
+  const topRight = nagaV3 ? ["mouse_right", "wheel_up", "wheel_click", "wheel_down", "wheel_right", "hypershift_button", "top_special_02"] : TOP_RIGHT_BUTTONS;
+  const combinedLeft = nagaV3 ? [...topLeft, ...COMBINED_LEFT_BUTTONS.filter((id) => id.startsWith("thumb_"))] : COMBINED_LEFT_BUTTONS;
+  const combinedRight = nagaV3 ? [...topRight, ...COMBINED_RIGHT_BUTTONS.filter((id) => id.startsWith("thumb_"))] : COMBINED_RIGHT_BUTTONS;
   return (
-    <div className="mouse-visual-tabs" data-layer={selectedLayer}>
+    <div className={nagaV3 ? "mouse-visual-tabs naga-v3" : "mouse-visual-tabs"} data-layer={selectedLayer}>
       <div className="mouse-visual-tabs__nav">
-        <ViewTabPills activeTab={activeTab} onSelect={setActiveTab} />
-        <button
+        <ViewTabPills activeTab={view} onSelect={setActiveTab} showBottom={nagaV3} />
+        {!nagaV3 && <button
           type="button"
           className="view-mode-toggle view-mode-toggle--icon"
           onClick={() => setVisualMode("schematic")}
@@ -244,13 +259,13 @@ export function MouseVisualization({
           aria-label={t("visualization.switchSchematic")}
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="1" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="1" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="9" width="6" height="6" rx="1" stroke="currentColor" strokeWidth="1.5"/></svg>
-        </button>
+        </button>}
       </div>
 
       <div className="mouse-visual-tabs__content">
-        {activeTab === "top" && (
+        {view === "top" && (
           <div className="mouse-top-layout">
-            {renderLabelColumn(TOP_LEFT_BUTTONS, topViewHotspots, "left")}
+            {renderLabelColumn(topLeft, topHotspots, "left")}
             <div className="mouse-visual mouse-visual--top">
               <img
                 className="mouse-visual__img"
@@ -260,13 +275,13 @@ export function MouseVisualization({
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
               <div className="mouse-visual__overlay">
-                {renderHotspotButtons(topViewHotspots)}
+                {renderHotspotButtons(topHotspots)}
               </div>
             </div>
-            {renderLabelColumn(TOP_RIGHT_BUTTONS, topViewHotspots, "right")}
+            {renderLabelColumn(topRight, topHotspots, "right")}
           </div>
         )}
-        {activeTab === "side" && (
+        {view === "side" && (
           <div className="mouse-view-panel">
             <div className="mouse-visual mouse-visual--side">
               <img
@@ -280,12 +295,13 @@ export function MouseVisualization({
                 {renderHotspotButtons(sideViewHotspots)}
               </div>
             </div>
+            {nagaV3 && <span className="panel__muted">{t("visualization.v3Plate12")}</span>}
             {renderSideLegendGrid(sideViewHotspots)}
           </div>
         )}
-        {activeTab === "combined" && (
+        {view === "combined" && (
           <div className="mouse-top-layout">
-            {renderLabelColumn(COMBINED_LEFT_BUTTONS, combinedViewHotspots, "left")}
+            {renderLabelColumn(combinedLeft, combinedHotspots, "left")}
             <div className="mouse-visual mouse-visual--combined">
               <img
                 className="mouse-visual__img"
@@ -295,10 +311,19 @@ export function MouseVisualization({
                 onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
               />
               <div className="mouse-visual__overlay">
-                {renderHotspotButtons(combinedViewHotspots)}
+                {renderHotspotButtons(combinedHotspots)}
               </div>
             </div>
-            {renderLabelColumn(COMBINED_RIGHT_BUTTONS, combinedViewHotspots, "right")}
+            {renderLabelColumn(combinedRight, combinedHotspots, "right")}
+          </div>
+        )}
+        {view === "bottom" && (
+          <div className="mouse-view-panel">
+            <div className="mouse-visual naga-v3__bottom">
+              <NagaV3Bottom />
+              <div className="mouse-visual__overlay">{renderHotspotButtons(BOTTOM_HOTSPOTS)}</div>
+            </div>
+            {renderLabelColumn(["top_special_03"], BOTTOM_HOTSPOTS, "left")}
           </div>
         )}
       </div>

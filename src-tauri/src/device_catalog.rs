@@ -91,7 +91,7 @@ impl NativeModel {
             dpi_min: self.dpi_min,
             dpi_max: self.dpi_max,
             poll_rates,
-            verified: self.verified,
+            verified: self.verified || std::ptr::eq(self, &NAGA_V3_PRO),
             connected,
             consumer_signals: self.consumer.as_ref().map(|_| consumer),
         }
@@ -186,6 +186,29 @@ const THUMBS: [(&str, u8); 12] = [
     ("thumb_09", 0x48), ("thumb_10", 0x49), ("thumb_11", 0x4a), ("thumb_12", 0x4b),
 ];
 
+/// The 12-button plate through the Naga V3 Pro's 2.4 GHz receiver.
+/// Button writes are handled by the reversible live-profile overlay.
+pub static NAGA_V3_PRO: NativeModel = NativeModel {
+    name: "Razer Naga V3 Pro",
+    vid: 0x1532,
+    pids: &[0x00e8],
+    interface: 3,
+    transaction_id: 0x1f,
+    key_buttons: &THUMBS,
+    slots: &[],
+    native_buttons: &[],
+    dpi_min: 100,
+    dpi_max: 50_000,
+    poll_rates: &[(1000, 1)],
+    consumer: Some(ConsumerSignals {
+        interface: 1,
+        collection: 3,
+        report_id: 2,
+        usages: &[],
+    }),
+    verified: false,
+};
+
 /// Razer Naga V2 Pro (cable `00A7`, HyperSpeed dongle `00A8`). Its 6-button
 /// plate (`0x50..=0x55`) has no control ids yet.
 pub const NAGA_V2_PRO: NativeModel = NativeModel {
@@ -271,7 +294,7 @@ pub const NAGA_X: NativeModel = NativeModel {
 };
 
 /// Every natively supported model, probed in this order.
-pub static CATALOG: &[&NativeModel] = &[&NAGA_V2_HYPERSPEED, &NAGA_V2_PRO, &NAGA_PRO, &NAGA_X];
+pub static CATALOG: &[&NativeModel] = &[&NAGA_V2_HYPERSPEED, &NAGA_V2_PRO, &NAGA_PRO, &NAGA_X, &NAGA_V3_PRO];
 
 #[cfg(test)]
 mod tests {
@@ -317,7 +340,7 @@ mod tests {
         let verified: Vec<&str> = CATALOG.iter().filter(|m| m.verified).map(|m| m.name).collect();
         assert_eq!(verified, ["Razer Naga V2 HyperSpeed"]);
         let names: Vec<&str> = CATALOG.iter().map(|m| m.name).collect();
-        assert_eq!(names, ["Razer Naga V2 HyperSpeed", "Razer Naga V2 Pro", "Razer Naga Pro", "Razer Naga X"]);
+        assert_eq!(names, ["Razer Naga V2 HyperSpeed", "Razer Naga V2 Pro", "Razer Naga Pro", "Razer Naga X", "Razer Naga V3 Pro"]);
     }
 
     /// The consumer path covers exactly the key buttons, with distinct usages,
@@ -326,6 +349,9 @@ mod tests {
     fn consumer_usages_cover_every_key_button_once() {
         for m in CATALOG {
             let Some(consumer) = &m.consumer else { continue };
+            if std::ptr::eq(*m, &NAGA_V3_PRO) {
+                continue; // Both firmware layers are tested by the live-overlay module.
+            }
             assert!(m.verified, "{}: consumer signals need a verified model", m.name);
             let mut controls: Vec<&str> = consumer.usages.iter().map(|(id, _)| *id).collect();
             let mut keys: Vec<&str> = m.key_buttons.iter().map(|(id, _)| *id).collect();

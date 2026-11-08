@@ -425,7 +425,7 @@ pub fn v2_overlay(config: &AppConfig) -> (Vec<ConsumerSignal>, Vec<(u8, u8, Onbo
     (signals, targets)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 struct Record {
     button: u8,
     layer: u8,
@@ -433,7 +433,7 @@ struct Record {
     target: [u8; 7],
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct Snapshot {
     path: String,
     records: Vec<Record>,
@@ -574,11 +574,78 @@ fn restore(device: &VendorDevice, backup: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn save_snapshot(backup: &Path, snapshot: &Snapshot) -> Result<(), String> {
+    crate::config::persist_atomically(backup, |file| {
+        serde_json::to_writer(file, snapshot).map_err(std::io::Error::other)
+    })
+    .map_err(|error| error.to_string())
+}
+
+fn verify(device: &VendorDevice, records: &[Record]) -> Result<(), String> {
+    for record in records {
+        if read(device, record.button, record.layer)? != record.target {
+            return Err(format!(
+                "Live layer assignments changed after programming {:#04x}/{}",
+                record.button, record.layer
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn plan_repair(
+    records: &mut [Record],
+    mut read_record: impl FnMut(u8, u8) -> Result<[u8; 7], String>,
+) -> Result<Vec<usize>, String> {
+    let mut pending = Vec::new();
+    for (index, record) in records.iter_mut().enumerate() {
+        let current = read_record(record.button, record.layer)?;
+        if current != record.target {
+            record.before = current;
+            pending.push(index);
+        }
+    }
+    Ok(pending)
+}
+
+fn repair(device: &VendorDevice, backup: &Path, snapshot: &mut Snapshot) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    if snapshot.path != device.path {
+        return Err("Live backup belongs to another receiver".into());
+    }
+    if device.mode()? != MODE_NORMAL {
+        return Err("Mouse is not in firmware mode".into());
+    }
+
+    let mut updated = snapshot.clone();
+    let pending = plan_repair(&mut updated.records, |button, layer| read(device, button, layer))?;
+    // Save any newly observed original values before taking ownership of them.
+    if updated.records != snapshot.records {
+        save_snapshot(backup, &updated)?;
+        *snapshot = updated;
+    }
+    if !pending.is_empty() {
+        for &index in &pending {
+            let record = &snapshot.records[index];
+            write(device, record.button, record.layer, record.target)?;
+        }
+        verify(device, &snapshot.records)?;
+    }
+    log::info!(
+        "[naga-live] {} repaired {} of {} live assignments in {} ms",
+        device.model().name,
+        pending.len(),
+        snapshot.records.len(),
+        started.elapsed().as_millis()
+    );
+    Ok(())
+}
+
 fn apply(
     device: &VendorDevice,
     backup: &Path,
     targets: &[(u8, u8, OnboardAction)],
-) -> Result<(), String> {
+) -> Result<Snapshot, String> {
     if device.mode()? != MODE_NORMAL {
         return Err("Mouse is not in firmware mode".into());
     }
@@ -596,27 +663,14 @@ fn apply(
         path: device.path.clone(),
         records,
     };
-    crate::config::persist_atomically(backup, |file| {
-        serde_json::to_writer(file, &snapshot).map_err(std::io::Error::other)
-    })
-    .map_err(|error| error.to_string())?;
+    save_snapshot(backup, &snapshot)?;
     let result: Result<(), String> = snapshot.records.iter().try_for_each(|record| {
         if record.before != record.target {
             write(device, record.button, record.layer, record.target)?;
         }
         Ok(())
     });
-    let result = result.and_then(|()| {
-        snapshot.records.iter().try_for_each(|record| {
-            if read(device, record.button, record.layer)? != record.target {
-                return Err(format!(
-                    "Live layer assignments changed after programming {:#04x}/{}",
-                    record.button, record.layer
-                ));
-            }
-            Ok(())
-        })
-    });
+    let result = result.and_then(|()| verify(device, &snapshot.records));
     if result.is_err() {
         restore(device, backup)?;
     }
@@ -626,7 +680,7 @@ fn apply(
         device.model().name,
         snapshot.records.len()
     );
-    Ok(())
+    Ok(snapshot)
 }
 
 pub struct Session {
@@ -682,7 +736,10 @@ impl Session {
             .spawn(move || {
                 let mut last_error = None;
                 let open = || VendorDevice::open(model, model.pids[0]);
-                let attempt = || {
+                let attempt = |active: &mut Option<Snapshot>| {
+                    if let Some(snapshot) = active {
+                        return repair(&open()?, &backup, snapshot);
+                    }
                     if let Some(config) = &offline
                         && config_dir
                             .join(crate::mouse_offline::OFFLINE_MARKER_FILE)
@@ -693,13 +750,14 @@ impl Session {
                             return Err("Offline assignments are still pending".into());
                         }
                     }
-                    apply(&open()?, &backup, &worker_targets)
+                    *active = Some(apply(&open()?, &backup, &worker_targets)?);
+                    Ok(())
                 };
                 let ready = if v2 { &V2_READY } else { &V3_READY };
-                let mut applied = false;
+                let mut active = None;
                 'session: loop {
                     loop {
-                        match attempt() {
+                        match attempt(&mut active) {
                             Ok(()) => break,
                             Err(message)
                                 if message != super::NO_INTERFACE
@@ -718,7 +776,6 @@ impl Session {
                         }
                     }
                     last_error = None;
-                    applied = true;
                     ready.store(true, Ordering::Release);
 
                     for &(button, layer, action) in worker_targets.iter().cycle() {
@@ -731,7 +788,7 @@ impl Session {
                         if drift == Ok(true) {
                             // Keep forwarding releases for inputs held before recovery.
                             log::warn!(
-                                "[naga-live] {} live assignment {button:#04x}/{layer} changed; reapplying",
+                                "[naga-live] {} live assignment {button:#04x}/{layer} changed; repairing",
                                 model.name
                             );
                             break;
@@ -739,7 +796,7 @@ impl Session {
                     }
                 }
                 ready.store(false, Ordering::Release);
-                if applied && let Err(error) = open().and_then(|device| restore(&device, &backup)) {
+                if active.is_some() && let Err(error) = open().and_then(|device| restore(&device, &backup)) {
                     log::warn!(
                         "[naga-live] {} recovery pending until next start: {error}",
                         model.name
@@ -788,6 +845,32 @@ pub(crate) mod tests {
         assert_eq!(confirmed_drift(expected, || transition.next().unwrap()), Ok(false));
         let mut asleep = [Ok(factory), Err("Mouse asleep".into())].into_iter();
         assert!(confirmed_drift(expected, || asleep.next().unwrap()).is_err());
+    }
+
+    #[test]
+    fn live_repair_skips_correct_layers_and_preserves_their_original_values() {
+        let original = block(OnboardAction::Key { modifier: 0, usage: 0x1e });
+        let changed = block(OnboardAction::Key { modifier: 0, usage: 0x1f });
+        let standard = block(OnboardAction::Consumer(0x10));
+        let hypershift = block(OnboardAction::Consumer(0x11));
+        let mut records = [
+            Record { button: 0x40, layer: 0, before: original, target: standard },
+            Record { button: 0x40, layer: 1, before: original, target: hypershift },
+        ];
+
+        let pending = plan_repair(&mut records, |_, layer| {
+            Ok(if layer == 0 { standard } else { changed })
+        });
+        assert_eq!(pending, Ok(vec![1]));
+        assert_eq!(records[0].before, original);
+        assert_eq!(records[1].before, changed);
+        assert_eq!(records[1].target, hypershift);
+
+        let retried = plan_repair(&mut records, |_, layer| {
+            Ok(if layer == 0 { standard } else { hypershift })
+        });
+        assert_eq!(retried, Ok(vec![]));
+        assert_eq!(records[1].before, changed);
     }
 
     pub(crate) fn config_with_v3() -> AppConfig {

@@ -41,6 +41,7 @@ The Rust backend: low-level keyboard capture, Razer-encoding detection, action e
 
 - Naga V3 Pro over the `1532:00E8` receiver is a separate built-in device (`razer-naga-v3`). Its controls and transport aliases are independent of V2. New V3 configs start without bindings. An explicit portable `naga-v3-copy-existing` request copies compatible assignments and action definitions once, saves the validated config with a backup, then clears the request.
 - `src/naga_v3.rs` manages verified live `profile=0x00` overlays with separate receiver-bound recovery files. V3 uses the ring-finger firmware trigger. When V3 is configured, V2 uses its own configured firmware trigger and HID stream, and the V2 legacy guard skips remapping the overlay. Offline profile writes still target only V2. Stop or the next overlay startup restores records Sidearm still owns. Optional controls keep their native records where no enabled action requires a replacement.
+- While a V2 or V3 overlay is active, its worker checks one configured live record every two seconds, cycling through both layers on that receiver. Two mismatches trigger a full, verified reapply. The input stream stays open during recovery so already held inputs can release. An unreadable record is retried on later checks.
 
 ## Work Guidance
 

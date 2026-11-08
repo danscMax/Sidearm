@@ -498,6 +498,14 @@ fn read(device: &VendorDevice, button: u8, layer: u8) -> Result<[u8; 7], String>
     Ok(reply[11..18].try_into().expect("fixed-size function block"))
 }
 
+fn confirmed_drift(
+    expected: [u8; 7],
+    mut read_record: impl FnMut() -> Result<[u8; 7], String>,
+) -> Result<bool, String> {
+    // A firmware transition can return plausible but incorrect bytes once.
+    Ok(read_record()? != expected && read_record()? != expected)
+}
+
 fn write(device: &VendorDevice, button: u8, layer: u8, block: [u8; 7]) -> Result<(), String> {
     let mut args = [0; 10];
     args[1] = button;
@@ -687,30 +695,51 @@ impl Session {
                     }
                     apply(&open()?, &backup, &worker_targets)
                 };
-                loop {
-                    match attempt() {
-                        Ok(()) => break,
-                        Err(message)
-                            if message != super::NO_INTERFACE
-                                && last_error.as_ref() != Some(&message) =>
-                        {
+                let ready = if v2 { &V2_READY } else { &V3_READY };
+                let mut applied = false;
+                'session: loop {
+                    loop {
+                        match attempt() {
+                            Ok(()) => break,
+                            Err(message)
+                                if message != super::NO_INTERFACE
+                                    && last_error.as_ref() != Some(&message) =>
+                            {
+                                log::warn!(
+                                    "[naga-live] {} waiting to configure live assignments: {message}",
+                                    model.name
+                                );
+                                last_error = Some(message);
+                            }
+                            Err(_) => {}
+                        }
+                        if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
+                            break 'session;
+                        }
+                    }
+                    last_error = None;
+                    applied = true;
+                    ready.store(true, Ordering::Release);
+
+                    for &(button, layer, action) in worker_targets.iter().cycle() {
+                        if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
+                            break 'session;
+                        }
+                        let drift = open().and_then(|device| {
+                            confirmed_drift(block(action), || read(&device, button, layer))
+                        });
+                        if drift == Ok(true) {
+                            // Keep forwarding releases for inputs held before recovery.
                             log::warn!(
-                                "[naga-live] {} waiting to configure live assignments: {message}",
+                                "[naga-live] {} live assignment {button:#04x}/{layer} changed; reapplying",
                                 model.name
                             );
-                            last_error = Some(message);
+                            break;
                         }
-                        Err(_) => {}
-                    }
-                    if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
-                        return;
                     }
                 }
-                let ready = if v2 { &V2_READY } else { &V3_READY };
-                ready.store(true, Ordering::Release);
-                let _ = stopped.recv();
                 ready.store(false, Ordering::Release);
-                if let Err(error) = open().and_then(|device| restore(&device, &backup)) {
+                if applied && let Err(error) = open().and_then(|device| restore(&device, &backup)) {
                     log::warn!(
                         "[naga-live] {} recovery pending until next start: {error}",
                         model.name
@@ -748,6 +777,18 @@ impl Drop for Session {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn live_drift_requires_two_mismatches_and_ignores_unreadable_records() {
+        let expected = block(OnboardAction::Consumer(0x10));
+        let factory = block(OnboardAction::Key { modifier: 0, usage: 0x1e });
+        let mut reset = [Ok(factory), Ok(factory)].into_iter();
+        assert_eq!(confirmed_drift(expected, || reset.next().unwrap()), Ok(true));
+        let mut transition = [Ok(factory), Ok(expected)].into_iter();
+        assert_eq!(confirmed_drift(expected, || transition.next().unwrap()), Ok(false));
+        let mut asleep = [Ok(factory), Err("Mouse asleep".into())].into_iter();
+        assert!(confirmed_drift(expected, || asleep.next().unwrap()).is_err());
+    }
 
     pub(crate) fn config_with_v3() -> AppConfig {
         let mut config = crate::config::default_seed_config();

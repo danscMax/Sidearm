@@ -491,7 +491,10 @@ pub fn wait_idle(limit: Duration) -> bool {
 /// restoring (killed, crashed): run by its capture helper, which outlives it.
 /// Until then the mouse plays Sidearm's signals — every mapped button and the
 /// wheel stay silent until a bank switch reloads the map from flash.
-pub fn restore_orphaned(config_dir: &Path) {
+///
+/// Returns whether nothing is left to restore.
+pub fn restore_orphaned(config_dir: &Path) -> bool {
+    let mut done = true;
     for model in CATALOG.iter().filter(|model| model.live.is_some()) {
         let backup = live_backup(config_dir, model);
         if !backup.exists() {
@@ -505,9 +508,13 @@ pub fn restore_orphaned(config_dir: &Path) {
                 }
             }
             Ok(()) => {}
-            Err(error) => log::warn!("[naga-live] {} live map left by a stopped Sidearm not restored: {error}", model.name),
+            Err(error) => {
+                log::warn!("[naga-live] {} live map left by a stopped Sidearm not restored: {error}", model.name);
+                done = false;
+            }
         }
     }
+    done
 }
 
 /// A rollback file of `model`'s live map that no session restored (the mouse

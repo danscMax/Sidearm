@@ -113,7 +113,7 @@ Run before declaring a code change done:
 - Diagnose to root cause before proposing fixes; explain what could break.
 - Commit when authorized; do not push/merge/release without explicit approval.
 - Run verification locally or on MiniPC. Do not start cloud CI jobs or add cloud verification gates; preserve cloud usage limits.
-- Portable packaging intentionally stops all running Sidearm processes on the build machine: the app first, then it waits up to 30 s for the capture helpers to restore the mice's live maps and exit. Treat assembly as an interruption of those apps even when its output directory is isolated; do not narrow this behavior to one executable path.
+- Portable packaging intentionally stops all running Sidearm processes on the build machine: the app first, then it waits up to 30 s for the capture helpers to restore the mice's live maps and exit, then stops whatever is left (a restore process waiting for a sleeping mouse; the next start restores). Treat assembly as an interruption of those apps even when its output directory is isolated; do not narrow this behavior to one executable path.
 - Use computer control only for brief necessary UI actions. Release it before builds, transfers, analysis or waiting for the user.
 
 ## Child DOX Index

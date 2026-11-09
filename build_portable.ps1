@@ -206,6 +206,9 @@ function Stop-AppProcessIfRunning {
             }
             Get-Process -Id $helpers -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         }
+        # A helper whose mouse was asleep leaves a `--restore-live-maps` process
+        # waiting for it; it holds the exe, and the next start restores anyway.
+        Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
         Write-Ok "Stopped running process(es)"
     } catch {

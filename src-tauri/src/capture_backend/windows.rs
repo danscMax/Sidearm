@@ -3281,9 +3281,24 @@ pub fn capture_helper_main() {
                         windows_sys::Win32::System::Threading::WaitForSingleObject(handle as _, 3000)
                             == windows_sys::Win32::Foundation::WAIT_OBJECT_0
                     });
-                    if parent_gone && let Some(dir) = &config_dir {
-                        log::warn!("[capture-helper] Sidearm stopped without restoring the mice; restoring their live maps.");
-                        crate::mouse_memory::live_overlay::restore_orphaned(dir);
+                    // A mouse may sleep now: a separate process (no hooks) keeps
+                    // trying, so this helper can exit and release its hooks.
+                    if parent_gone
+                        && let Some(dir) = &config_dir
+                        && !crate::mouse_memory::live_overlay::restore_orphaned(dir)
+                        && let Ok(exe) = std::env::current_exe()
+                    {
+                        use std::os::windows::process::CommandExt;
+                        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+                        const DETACHED_PROCESS: u32 = 0x0000_0008;
+                        if let Err(error) = std::process::Command::new(exe)
+                            .arg(crate::RESTORE_LIVE_MAPS_ARG)
+                            .arg(dir)
+                            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+                            .spawn()
+                        {
+                            log::warn!("[capture-helper] live-map restore process not started: {error}");
+                        }
                     }
                     log::info!("[capture-helper] stdin closed, posting WM_QUIT.");
                     unsafe {

@@ -65,6 +65,33 @@ type CurrentGlobalShortcut = Arc<Mutex<Option<String>>>;
 
 use capture_backend::RuntimeController;
 pub use capture_backend::capture_helper_main;
+
+/// Argument of the one-shot process that restores the live maps a dead
+/// Sidearm left (`Sidearm.exe --restore-live-maps <config dir>`).
+#[cfg(target_os = "windows")]
+pub const RESTORE_LIVE_MAPS_ARG: &str = "--restore-live-maps";
+
+/// Restores the live maps a dead Sidearm left, retrying while a mouse sleeps
+/// (an asleep mouse answers nothing and plays the silent map once it wakes).
+/// Gives up after 30 minutes, or as soon as another Sidearm runs: its own
+/// start restores them, and two processes must not talk to one receiver.
+#[cfg(target_os = "windows")]
+pub fn restore_live_maps_main(config_dir: &std::path::Path) {
+    let me = std::process::id();
+    let exe = std::env::current_exe().ok();
+    let another_sidearm = || {
+        platform::shell::list_running_processes().iter().any(|process| {
+            process.pid != me && exe.as_ref().is_some_and(|exe| std::path::Path::new(&process.path) == exe)
+        })
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
+    while !mouse_memory::live_overlay::restore_orphaned(config_dir) && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        if another_sidearm() {
+            return;
+        }
+    }
+}
 #[cfg(target_os = "windows")]
 pub use admin_autostart::{HELPER_ARG as ADMIN_AUTOSTART_HELPER_ARG, helper_main as admin_autostart_helper_main};
 use command_error::CommandError;

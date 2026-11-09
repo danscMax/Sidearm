@@ -350,6 +350,11 @@ fn parse_banks(count: &[u8], inventory: &[u8], active: &[u8]) -> Result<Banks, S
     Ok(Banks { assigned, active })
 }
 
+/// The bank the mouse plays now (one command; [`read_banks`] checks it too).
+fn active_bank(device: &VendorDevice) -> Result<u8, String> {
+    Ok(device.command(CLASS_BANKS, CMD_ACTIVE_BANK, &[])?[8])
+}
+
 fn read_banks(device: &VendorDevice) -> Result<Banks, String> {
     parse_banks(
         &device.command(CLASS_BANKS, CMD_BANK_COUNT, &[0])?,
@@ -759,9 +764,23 @@ impl Session {
                     }
                     last_error = None;
                     READY[index].store(true, Ordering::Release);
+                    // The profile button reloads the whole live map from another
+                    // bank: watching the active bank catches it at once, where the
+                    // record-by-record check would take a full cycle.
+                    let has_banks = model.live.as_ref().is_some_and(|live| live.banks);
+                    let mut last_bank = None;
                     for &(button, layer, action) in worker_targets.iter().cycle() {
                         if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
                             break 'session;
+                        }
+                        if has_banks
+                            && let Ok(bank) = open().and_then(|device| active_bank(&device))
+                        {
+                            if last_bank.is_some_and(|last| last != bank) {
+                                log::warn!("[naga-live] {} switched to bank {bank}; repairing the live map", model.name);
+                                break;
+                            }
+                            last_bank = Some(bank);
                         }
                         let drift = open().and_then(|device| {
                             confirmed_drift(block(action), || read_bank(&device, LIVE_BANK, button, layer))

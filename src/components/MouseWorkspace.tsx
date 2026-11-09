@@ -73,7 +73,11 @@ export function MouseWorkspace({
   const [writeConfirmed, setWriteConfirmed] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState<boolean | null>(null);
-  const lifecycle = useRef({ alive: false, version: 0, pending: false, queued: false });
+  const lifecycle = useRef<{
+    alive: boolean; version: number; pending: boolean; queued: boolean;
+    /** A write that arrived while another request ran: it runs next, never dropped. */
+    queuedWrite: ((deviceId?: string) => Promise<MouseSettingsState>) | null;
+  }>({ alive: false, version: 0, pending: false, queued: false, queuedWrite: null });
   const reportPending = useRef(false);
   // Several connected mice: the one this page reads and writes.
   const [mice, setMice] = useState<NativeModelInfo[]>([]);
@@ -84,7 +88,14 @@ export function MouseWorkspace({
 
   async function run(request: (deviceId?: string) => Promise<MouseSettingsState>, writing = false) {
     const state = lifecycle.current;
-    if (!state.alive || state.pending) return;
+    if (!state.alive) return;
+    if (state.pending) {
+      if (writing) {
+        state.queuedWrite = request;
+        state.version += 1; // the running request's result is older than this write
+      }
+      return;
+    }
     state.pending = true;
     const version = ++state.version;
     setBusy(true);
@@ -109,7 +120,10 @@ export function MouseWorkspace({
       state.pending = false;
       if (state.alive) {
         setBusy(false);
-        if (state.queued) { state.queued = false; refresh(); }
+        const write = state.queuedWrite;
+        state.queuedWrite = null;
+        if (write) { state.queued = false; void run(write, true); }
+        else if (state.queued) { state.queued = false; refresh(); }
       }
     }
   }

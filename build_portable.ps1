@@ -193,21 +193,20 @@ function Stop-AppProcessIfRunning {
     Write-Warn "Detected running Sidearm (PID: $pids). Stopping..."
 
     try {
-        # Stop the app first and leave its capture helpers alive: a helper that
-        # outlives Sidearm restores the mice's live button maps (else the V3
-        # stays silent until its profile button is pressed), then exits.
-        $helpers = @(Get-CimInstance Win32_Process -Filter "Name = 'Sidearm.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.CommandLine -like '*--capture-helper*' } | ForEach-Object { [int]$_.ProcessId })
-        $running | Where-Object { $helpers -notcontains $_.Id } | Stop-Process -Force -ErrorAction Stop
-        if ($helpers.Count -gt 0) {
-            $deadline = (Get-Date).AddSeconds(30)
-            while ((Get-Date) -lt $deadline -and (Get-Process -Id $helpers -ErrorAction SilentlyContinue)) {
-                Start-Sleep -Milliseconds 250
-            }
-            Get-Process -Id $helpers -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        # Stop the app itself first: its capture helper then starts a
+        # `--restore-live-maps` process that puts the mice's own button maps
+        # back (else the V3 stays silent until its profile button is pressed).
+        # The app is the Sidearm whose parent is not a Sidearm (a command line
+        # is unreadable for an elevated instance).
+        $all = @(Get-CimInstance Win32_Process -Filter "Name = 'Sidearm.exe'" -ErrorAction SilentlyContinue)
+        $ids = @($all | ForEach-Object { [int]$_.ProcessId })
+        $apps = @($all | Where-Object { $ids -notcontains [int]$_.ParentProcessId } | ForEach-Object { [int]$_.ProcessId })
+        if ($apps.Count -gt 0) { Stop-Process -Id $apps -Force -ErrorAction Stop }
+        # Up to 30 s for the restore; a mouse asleep longer is restored by the next start.
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline -and (Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue)) {
+            Start-Sleep -Milliseconds 250
         }
-        # A helper whose mouse was asleep leaves a `--restore-live-maps` process
-        # waiting for it; it holds the exe, and the next start restores anyway.
         Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Start-Sleep -Seconds 1
         Write-Ok "Stopped running process(es)"

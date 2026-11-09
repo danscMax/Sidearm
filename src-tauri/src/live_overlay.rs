@@ -786,6 +786,10 @@ impl Session {
             .spawn(move || {
                 let open = || VendorDevice::open_model(model);
                 let attempt = |active: &mut Option<Snapshot>| {
+                    // The last session's maps are still being restored by another process.
+                    if crate::live_map_restore_running() {
+                        return Err("The previous session's live maps are still being restored".to_owned());
+                    }
                     if let Some(snapshot) = active {
                         return repair(&open()?, &backup, snapshot);
                     }

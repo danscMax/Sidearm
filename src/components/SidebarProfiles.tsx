@@ -36,13 +36,15 @@ export function SidebarProfiles({
   onToggleAllRules: () => void;
 }) {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  // The profile whose full app list is open (selecting another closes it).
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   return (
     <div className="sidebar-profiles">
       <ul className="sidebar-profiles__list">
         {profiles.map((profile) => {
           const selected = profile.id === effectiveProfileId;
           const apps = sortAppMappings(appMappings.filter((mapping) => mapping.profileId === profile.id));
+          const expanded = expandedId === profile.id;
           const shown = expanded ? apps : apps.slice(0, SHOWN_APPS);
           return (
             <li key={profile.id} className={`sidebar-profiles__item${selected ? " sidebar-profiles__item--selected" : ""}`}>
@@ -50,10 +52,7 @@ export function SidebarProfiles({
                 type="button"
                 className="sidebar-profiles__row"
                 aria-current={selected ? "true" : undefined}
-                onClick={() => {
-                  setExpanded(false);
-                  startTransition(() => onSelect(profile.id));
-                }}
+                onClick={() => startTransition(() => onSelect(profile.id))}
                 onDoubleClick={(e) => {
                   e.preventDefault();
                   onOpenSettings();
@@ -90,7 +89,7 @@ export function SidebarProfiles({
                       type="button"
                       className="sidebar-profiles__app sidebar-profiles__app--more"
                       aria-expanded={expanded}
-                      onClick={() => setExpanded((v) => !v)}
+                      onClick={() => setExpandedId(expanded ? null : profile.id)}
                     >
                       {expanded ? t("profile.stripLess") : t("profile.stripMore", { count: apps.length - SHOWN_APPS })}
                     </button>

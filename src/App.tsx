@@ -1109,8 +1109,9 @@ function App() {
           setAddRuleSignal(true);
         }}
         onToggleAllRules={() => {
+          // From another screen the button opens the rules rather than hiding them.
+          setAllRulesView((v) => workspaceMode !== "profiles" || !v);
           switchWorkspaceMode("profiles");
-          setAllRulesView((v) => !v);
         }}
       />
 

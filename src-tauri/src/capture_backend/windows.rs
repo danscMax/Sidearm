@@ -3123,10 +3123,8 @@ pub fn capture_helper_main() {
         readers: Vec<ReaderInit>,
         #[serde(default)]
         firmware_hypershift: bool,
-        /// Sidearm's process and config folder: when it dies without stopping
-        /// the helper, the helper restores the live maps it left.
-        #[serde(default)]
-        parent_pid: Option<u32>,
+        /// Sidearm's config folder: when Sidearm dies without stopping the
+        /// helper, the live maps it left are restored from there.
         #[serde(default)]
         config_dir: Option<std::path::PathBuf>,
     }
@@ -3143,7 +3141,6 @@ pub fn capture_helper_main() {
                     hypershift_trigger: None,
                     readers: Vec::new(),
                     firmware_hypershift: false,
-                    parent_pid: None,
                     config_dir: None,
                 },
                 Err(e) => {
@@ -3161,13 +3158,8 @@ pub fn capture_helper_main() {
         hypershift_trigger,
         readers,
         firmware_hypershift,
-        parent_pid,
         config_dir,
     } = init;
-    // Opened now, so the pid cannot be reused before it is checked.
-    let parent = parent_pid.map(|pid| unsafe {
-        windows_sys::Win32::System::Threading::OpenProcess(windows_sys::Win32::System::Threading::PROCESS_SYNCHRONIZE, 0, pid) as usize
-    }).filter(|&handle| handle != 0);
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
@@ -3272,33 +3264,12 @@ pub fn capture_helper_main() {
             buf.clear();
             match stdin.lock().read_line(&mut buf) {
                 Ok(0) | Err(_) => {
-                    // A stop sends HELPER_EXIT first; stdin closing without it is
-                    // Sidearm's death. Windows closes the pipe before the process
-                    // counts as ended, so wait for that briefly (measured: an
-                    // immediate check still saw it alive).
-                    // No handle to watch: without HELPER_EXIT, still assume the death.
-                    let parent_gone = !exit_requested && parent.is_none_or(|handle| unsafe {
-                        windows_sys::Win32::System::Threading::WaitForSingleObject(handle as _, 3000)
-                            == windows_sys::Win32::Foundation::WAIT_OBJECT_0
-                    });
-                    // A mouse may sleep now: a separate process (no hooks) keeps
-                    // trying, so this helper can exit and release its hooks.
-                    if parent_gone
-                        && let Some(dir) = &config_dir
-                        && !crate::mouse_memory::live_overlay::restore_orphaned(dir)
-                        && let Ok(exe) = std::env::current_exe()
-                    {
-                        use std::os::windows::process::CommandExt;
-                        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-                        const DETACHED_PROCESS: u32 = 0x0000_0008;
-                        if let Err(error) = std::process::Command::new(exe)
-                            .arg(crate::RESTORE_LIVE_MAPS_ARG)
-                            .arg(dir)
-                            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-                            .spawn()
-                        {
-                            log::warn!("[capture-helper] live-map restore process not started: {error}");
-                        }
+                    // A stop sends HELPER_EXIT first; stdin closing without it
+                    // is Sidearm's death. A hook-free process restores the maps
+                    // (and makes sure Sidearm is really gone), so this one exits
+                    // at once and releases its hooks.
+                    if !exit_requested && let Some(dir) = &config_dir {
+                        crate::spawn_live_map_restore(dir);
                     }
                     log::info!("[capture-helper] stdin closed, posting WM_QUIT.");
                     unsafe {
@@ -3893,7 +3864,6 @@ fn spawn_capture_helper(
         #[serde(skip_serializing_if = "Vec::is_empty")]
         readers: Vec<ReaderInit>,
         firmware_hypershift: bool,
-        parent_pid: u32,
         config_dir: &'a std::path::Path,
     }
     let init = HelperInit {
@@ -3903,7 +3873,6 @@ fn spawn_capture_helper(
         hypershift_trigger: config.settings.hypershift_trigger.trim(),
         readers,
         firmware_hypershift,
-        parent_pid: std::process::id(),
         config_dir: &config_dir,
     };
     let json = match serde_json::to_string(&init) {

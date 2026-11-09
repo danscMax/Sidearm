@@ -379,10 +379,12 @@ fn run(
         };
         while requests.try_recv().is_ok() {}
 
-        let running = runtime_store
-            .lock()
-            .map(|store| store.is_running())
-            .unwrap_or(false);
+        // A restore process still talking to the receiver counts as not running.
+        let running = !crate::live_map_restore_running()
+            && runtime_store
+                .lock()
+                .map(|store| store.is_running())
+                .unwrap_or(false);
         if !running {
             // A stopped Sidearm reads nothing: its warnings would be stale.
             crate::mouse_status::set_state(Some(app), crate::mouse_status::StatusKind::MouseUnreachable, false);

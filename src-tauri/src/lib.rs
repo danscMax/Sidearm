@@ -71,23 +71,80 @@ pub use capture_backend::capture_helper_main;
 #[cfg(target_os = "windows")]
 pub const RESTORE_LIVE_MAPS_ARG: &str = "--restore-live-maps";
 
+/// Held by every running Sidearm app for its whole life; Windows drops it
+/// with the process, so its absence means no Sidearm runs.
+#[cfg(target_os = "windows")]
+const APP_MUTEX: &str = "Local\\Sidearm-app";
+/// Held by the live-map restore process: a Sidearm starting meanwhile leaves
+/// the mice alone until it ends (two processes must not talk to one receiver).
+#[cfg(target_os = "windows")]
+const RESTORE_MUTEX: &str = "Local\\Sidearm-live-map-restore";
+
+#[cfg(target_os = "windows")]
+fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: a NUL-terminated name; the handle is kept until the process ends.
+    let handle = unsafe { windows_sys::Win32::System::Threading::CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
+    let existed = unsafe { windows_sys::Win32::Foundation::GetLastError() } == windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
+    (!handle.is_null() && !existed).then_some(handle)
+}
+
+#[cfg(target_os = "windows")]
+fn mutex_exists(name: &str) -> bool {
+    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    // SAFETY: a NUL-terminated name; the handle is closed at once.
+    unsafe {
+        let handle = windows_sys::Win32::System::Threading::OpenMutexW(windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE, 0, name.as_ptr());
+        !handle.is_null() && windows_sys::Win32::Foundation::CloseHandle(handle) != 0
+    }
+}
+
+/// Whether a restore process still owns the mice (live sessions wait for it).
+#[cfg(target_os = "windows")]
+pub(crate) fn live_map_restore_running() -> bool {
+    mutex_exists(RESTORE_MUTEX)
+}
+
+/// Started by the capture helper when Sidearm died: a separate process with
+/// no hooks, so the helper can exit at once.
+#[cfg(target_os = "windows")]
+pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    let started = std::env::current_exe().and_then(|exe| {
+        std::process::Command::new(exe)
+            .arg(RESTORE_LIVE_MAPS_ARG)
+            .arg(config_dir)
+            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            .spawn()
+    });
+    if let Err(error) = started {
+        log::warn!("[capture-helper] live-map restore process not started: {error}");
+    }
+}
+
 /// Restores the live maps a dead Sidearm left, retrying while a mouse sleeps
 /// (an asleep mouse answers nothing and plays the silent map once it wakes).
-/// Gives up after 30 minutes, or as soon as another Sidearm runs: its own
-/// start restores them, and two processes must not talk to one receiver.
+/// Quits when Sidearm turns out alive, after 30 minutes, or once a Sidearm
+/// starts — its own start restores them after this process ends.
 #[cfg(target_os = "windows")]
 pub fn restore_live_maps_main(config_dir: &std::path::Path) {
-    let me = std::process::id();
-    let exe = std::env::current_exe().ok();
-    let another_sidearm = || {
-        platform::shell::list_running_processes().iter().any(|process| {
-            process.pid != me && exe.as_ref().is_some_and(|exe| std::path::Path::new(&process.path) == exe)
-        })
-    };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30 * 60);
-    while !mouse_memory::live_overlay::restore_orphaned(config_dir) && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        if another_sidearm() {
+    use std::time::{Duration, Instant};
+    // One restorer at a time, holding the mutex until it exits.
+    let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
+    // The dying Sidearm's mutex goes when its process has fully ended.
+    let grace = Instant::now() + Duration::from_secs(10);
+    while mutex_exists(APP_MUTEX) {
+        if Instant::now() >= grace {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    let deadline = Instant::now() + Duration::from_secs(30 * 60);
+    while !mouse_memory::live_overlay::restore_orphaned(config_dir) {
+        std::thread::sleep(Duration::from_secs(2));
+        if mutex_exists(APP_MUTEX) || Instant::now() >= deadline {
             return;
         }
     }
@@ -3501,6 +3558,9 @@ fn epoch_seconds_string() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Marks this process as a running Sidearm for a live-map restore process.
+    #[cfg(target_os = "windows")]
+    let _app_mutex = create_mutex(APP_MUTEX);
     // Safety net: release all modifier keys if we panic while holding keys.
     // NOTE: This only works with panic="unwind" (the default). If Cargo.toml
     // sets panic="abort" for release, this hook won't run in release builds.

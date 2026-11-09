@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   switch to each (click one to edit it, "+ App" adds one, "All rules" shows every
   profile's rules), mouse cards show battery, DPI, poll rate and slot, and a built-in
   mouse has Buttons, Performance and Mouse memory tabs. The separate Mouse page is gone.
+
+### Added
 - Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
   wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
   live button map that Sidearm restores when it stops.

@@ -1463,12 +1463,13 @@
     "dpiManual": "Manual",
     "devicePicker": "Mouse",
     "devicePickerHelp": "Several mice are connected: choose the one this page reads and sets.",
-    "slotHeader": "Slot in the mouse",
-    "slotHelp": "When Sidearm closes, this profile is saved into the chosen slot of the {{model}}, so its simple assignments work without Sidearm. The button on the bottom of the mouse switches slots.",
-    "slotNone": "Not saved to the mouse",
+    "slotHeader": "Save to a slot of the mouse",
+    "slotHelp": "When Sidearm closes, this profile is written into the chosen slot of the {{model}}. Without Sidearm the slot plays its shortcuts and mouse buttons; text, macros and launching apps work only while Sidearm runs, and those buttons stay silent. Switch slots with the button on the bottom of the mouse.",
+    "slotNone": "Do not save",
     "slotOption": "Slot {{n}}",
-    "slotActive": "Slot {{n}} (playing now)",
-    "slotNeedsMouse": "Connect the mouse to see its slots."
+    "slotNeedsMouse": "Connect the mouse to see its slots.",
+    "slotHolder": "now: {{name}}",
+    "slotSelected": "selected on the mouse"
   },
   "backend": {
     "admin": {

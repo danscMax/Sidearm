@@ -291,17 +291,29 @@ fn offline_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) ->
     let Some(live) = &model.live else { return Vec::new() };
     let mut targets = Vec::new();
     let mut uses_hypershift = false;
-    // The profile button keeps switching banks without Sidearm.
-    for (control, button) in controls(model).into_iter().filter(|&(_, button)| Some(button) != live.profile_button) {
+    for (index, (control, button)) in controls(model).into_iter().enumerate() {
+        // The profile button keeps switching banks without Sidearm.
+        if Some(button) == live.profile_button {
+            continue;
+        }
         let id = control_id(model, control);
         let action = |layer| crate::mouse_offline::binding_action(config, profile_id, id.as_str(), layer);
-        let standard = action(Layer::Standard).flatten();
+        // A binding the firmware cannot play (text, macro, launch) gets a
+        // reserved signal that does nothing, never the bank's old record —
+        // a factory digit would type into whatever has focus. No binding at
+        // all keeps the bank's own record.
+        let play = |layer: u8, found: Option<Option<OnboardAction>>| {
+            found.map(|action| action.unwrap_or(OnboardAction::Consumer(USAGES[2 * index + usize::from(layer)])))
+        };
+        let standard = action(Layer::Standard);
         let hypershift = action(Layer::Hypershift);
         uses_hypershift |= matches!(hypershift, Some(Some(_)));
-        if let Some(action) = standard {
+        if let Some(action) = play(0, standard) {
             targets.push((button, 0, action));
         }
-        if let Some(action) = hypershift.unwrap_or(standard) {
+        // Like the resolver: the standard binding fills in only where the
+        // hypershift layer has none.
+        if let Some(action) = play(1, hypershift.or(standard)) {
             targets.push((button, 1, action));
         }
     }
@@ -1062,6 +1074,20 @@ pub(crate) mod tests {
         });
         assert!(!offline_targets(&config, &NAGA_V3_PRO, &profile).iter().any(|&(button, _, _)| button == 0x0e),
             "the profile button stays the mouse's own");
+        // A text binding has no firmware form: the bank gets a silent signal,
+        // not its old record (a factory digit).
+        let text = config.actions.iter().find(|action| action.action_type == ActionType::TextSnippet).unwrap().id.clone();
+        config.bindings.push(crate::config::Binding {
+            id: "v3-text".into(),
+            control_id: control_id(&NAGA_V3_PRO, "thumb_03"),
+            layer: Layer::Standard,
+            action_id: text,
+            ..config.bindings.last().unwrap().clone()
+        });
+        let targets = offline_targets(&config, &NAGA_V3_PRO, &profile);
+        assert!(targets.contains(&(0x42, 0, OnboardAction::Consumer(USAGES[4]))));
+        assert!(targets.contains(&(0x42, 1, OnboardAction::Consumer(USAGES[5]))));
+        assert!(!targets.iter().any(|&(button, _, _)| button == 0x43), "an unbound button keeps its record");
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 0, usage: 0x2a }), [2, 1, 0, 0x2a, 0, 0, 0]);
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 1, usage: 0x19 }), [2, 2, 1, 0x19, 0, 0, 0]);
     }

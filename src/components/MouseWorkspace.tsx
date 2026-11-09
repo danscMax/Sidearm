@@ -455,10 +455,19 @@ export function MouseWorkspace({
               disabled={banks === null && slot === undefined}
               options={[
                 { value: "", label: t("mouse.slotNone") },
-                ...[...new Set([...(banks?.assigned ?? []), ...(slot === undefined ? [] : [slot])])].sort((a, b) => a - b).map((bank) => ({
-                  value: String(bank),
-                  label: t(banks?.active === bank ? "mouse.slotActive" : "mouse.slotOption", { n: bank }),
-                })),
+                ...[...new Set([...(banks?.assigned ?? []), ...(slot === undefined ? [] : [slot])])].sort((a, b) => a - b).map((bank) => {
+                  // Who else is stored there, and which slot the mouse is on.
+                  const holder = profiles.find((profile) => profile.id !== activeProfile.id
+                    && profile.deviceSlots?.[model.deviceId] === bank);
+                  const notes = [
+                    ...(holder ? [t("mouse.slotHolder", { name: holder.name })] : []),
+                    ...(banks?.active === bank ? [t("mouse.slotSelected")] : []),
+                  ];
+                  return {
+                    value: String(bank),
+                    label: [t("mouse.slotOption", { n: bank }), ...notes].join(" · "),
+                  };
+                }),
               ]}
               onChange={(value) => updateDraft((config) =>
                 setProfileDeviceSlot(config, activeProfile.id, model.deviceId, value ? Number(value) : undefined))}

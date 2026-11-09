@@ -36,7 +36,7 @@ export function SidebarProfiles({
   onToggleAllRules: () => void;
 }) {
   const { t } = useTranslation();
-  // The profile whose full app list is open (selecting another closes it).
+  // The profile whose full app list is open; other profiles show the short one.
   const [expandedId, setExpandedId] = useState<string | null>(null);
   return (
     <div className="sidebar-profiles">

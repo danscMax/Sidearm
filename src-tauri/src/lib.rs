@@ -80,13 +80,39 @@ const APP_MUTEX: &str = "Local\\Sidearm-app";
 #[cfg(target_os = "windows")]
 const RESTORE_MUTEX: &str = "Local\\Sidearm-live-map-restore";
 
+/// Creates a named mutex every process of this user can open, an elevated
+/// Sidearm's included (a default DACL would hide it from a non-elevated one);
+/// `None` when it exists already or cannot be created.
 #[cfg(target_os = "windows")]
 fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError},
+        Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, SECURITY_ATTRIBUTES},
+        System::Threading::CreateMutexW,
+    };
     let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
-    // SAFETY: a NUL-terminated name; the handle is kept until the process ends.
-    let handle = unsafe { windows_sys::Win32::System::Threading::CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
-    let existed = unsafe { windows_sys::Win32::Foundation::GetLastError() } == windows_sys::Win32::Foundation::ERROR_ALREADY_EXISTS;
-    (!handle.is_null() && !existed).then_some(handle)
+    // Full access for authenticated users, low integrity label: readable at any elevation.
+    let sddl: Vec<u16> = "D:(A;;GA;;;AU)S:(ML;;NW;;;LW)".encode_utf16().chain(Some(0)).collect();
+    let mut descriptor = std::ptr::null_mut();
+    // SAFETY: NUL-terminated strings; the descriptor lives as long as the process
+    // (one per mutex, never freed), the handle too.
+    unsafe {
+        let attributes = (ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) != 0)
+            .then_some(SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: descriptor,
+                bInheritHandle: 0,
+            });
+        let handle = CreateMutexW(attributes.as_ref().map_or(std::ptr::null(), |a| a as *const _), 0, name.as_ptr());
+        if handle.is_null() {
+            return None;
+        }
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            CloseHandle(handle);
+            return None;
+        }
+        Some(handle)
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -131,22 +157,23 @@ pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
 #[cfg(target_os = "windows")]
 pub fn restore_live_maps_main(config_dir: &std::path::Path) {
     use std::time::{Duration, Instant};
-    // One restorer at a time, holding the mutex until it exits.
-    let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
-    // The dying Sidearm's mutex goes when its process has fully ended.
-    let grace = Instant::now() + Duration::from_secs(10);
+    // The dying Sidearm's mutex goes when its process has fully ended. Checked
+    // before taking the restore mutex: a live Sidearm is never paused by it.
+    let grace = Instant::now() + Duration::from_secs(5);
     while mutex_exists(APP_MUTEX) {
         if Instant::now() >= grace {
             return;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
+    // One restorer at a time, holding the mutex until it exits.
+    let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
-    while !mouse_memory::live_overlay::restore_orphaned(config_dir) {
-        std::thread::sleep(Duration::from_secs(2));
-        if mutex_exists(APP_MUTEX) || Instant::now() >= deadline {
+    while !mutex_exists(APP_MUTEX) && Instant::now() < deadline {
+        if mouse_memory::live_overlay::restore_orphaned(config_dir) {
             return;
         }
+        std::thread::sleep(Duration::from_secs(2));
     }
 }
 #[cfg(target_os = "windows")]
@@ -4171,6 +4198,18 @@ pub fn run() {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_named_mutex_is_single_and_goes_with_its_handle() {
+        let name = format!(r"Local\Sidearm-test-{}", std::process::id());
+        assert!(!mutex_exists(&name));
+        let handle = create_mutex(&name).expect("first create");
+        assert!(mutex_exists(&name));
+        assert!(create_mutex(&name).is_none(), "a second holder is refused");
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(handle) };
+        assert!(!mutex_exists(&name));
+    }
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")

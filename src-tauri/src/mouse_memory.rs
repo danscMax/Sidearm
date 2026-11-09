@@ -890,11 +890,17 @@ impl VendorDevice {
     /// Sets `dpi` for both axes — live only, or also kept across power cycles
     /// with `store` — and requires it to read back.
     pub fn set_dpi(&self, dpi: u16, store: bool) -> Result<(), String> {
+        self.set_dpi_in(if store { VARSTORE } else { NOSTORE }, dpi)
+    }
+
+    /// Sets `dpi` in one storage: `NOSTORE` (live), `VARSTORE`, or — on a
+    /// mouse with onboard banks — a bank number (the V3 keeps a DPI per bank,
+    /// read with the same selector). Confirmed by reading that storage back.
+    pub fn set_dpi_in(&self, storage: u8, dpi: u16) -> Result<(), String> {
         let (min, max) = (self.model.dpi_min, self.model.dpi_max);
         if !(min..=max).contains(&dpi) {
             return Err(format!("DPI {dpi} is outside {min}..={max}"));
         }
-        let storage = if store { VARSTORE } else { NOSTORE };
         let [hi, lo] = dpi.to_be_bytes();
         self.command(CLASS_DPI, CMD_SET_DPI, &[storage, hi, lo, hi, lo, 0x00, 0x00])?;
         match self.dpi_in(storage)? {

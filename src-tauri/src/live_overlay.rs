@@ -437,6 +437,18 @@ pub(crate) fn write_offline(
             apply_bank(&device, bank, &backup, &targets)?;
         }
         log::info!("[mouse-offline] {} profile `{profile_id}` verified in bank {bank}: {} records", model.name, targets.len());
+        // Each bank keeps its own DPI and the mouse switches to it with the
+        // bank: store the profile's own DPI for this mouse there.
+        if let Some(dpi) = config.profiles.iter().find(|profile| profile.id == profile_id)
+            .and_then(|profile| profile.mouse_for(model.device_id))
+            .and_then(|own| own.mouse_dpi)
+        {
+            let dpi = dpi.clamp(model.dpi_min, model.dpi_max);
+            match device.set_dpi_in(bank, dpi) {
+                Ok(()) => log::info!("[mouse-offline] {} bank {bank} DPI {dpi} stored", model.name),
+                Err(error) => log::warn!("[mouse-offline] {} bank {bank} DPI not stored: {error}", model.name),
+            }
+        }
     }
     // The records are stored either way; playing them at once is a convenience.
     if let Err(error) = select_bank(&device, exit_bank(&plan, &banks, offline_profile)) {

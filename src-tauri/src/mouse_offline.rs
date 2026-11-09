@@ -191,7 +191,10 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         .count();
     // Profile switches set the DPI live only: store the offline profile's own
     // DPI; a profile without one leaves the mouse's stored DPI alone.
-    if let Some(dpi) = config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| p.mouse_dpi)
+    if let Some(dpi) = config.profiles.iter().find(|p| p.id == profile_id)
+        .and_then(|p| p.mouse_for(device.model().device_id))
+        .and_then(|own| own.mouse_dpi)
+        .map(|dpi| dpi.clamp(device.model().dpi_min, device.model().dpi_max))
         && let Err(message) = device.set_dpi(dpi, true)
     {
         log::warn!("[mouse-offline] DPI not stored: {message}");

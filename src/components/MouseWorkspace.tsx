@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type Profile } from "../lib/config";
+import { OFFLINE_PROFILE_ACTIVE, RAZER_NAGA_DEVICE_ID, type AppConfig, type MouseOverrides, type Profile } from "../lib/config";
 import { uiText } from "../lib/ui-text";
-import { setProfileDeviceSlot, upsertProfile } from "../lib/config-editing";
+import { setProfileDeviceSlot, setProfileMouse } from "../lib/config-editing";
 import {
   getDeviceReport,
   getMouseSettings,
@@ -166,23 +166,23 @@ export function MouseWorkspace({
     return () => { current = false; };
   }, [model?.deviceId, model?.banks, model?.connected]);
 
-  const profileDpi = activeProfile?.mouseDpi;
-  const profilePoll = activeProfile?.mousePollRateHz;
-  const overrides = profileDpi !== undefined || profilePoll !== undefined || (activeProfile?.mouseDpiStages?.length ?? 0) > 0;
+  // The profile's own settings for the mouse shown.
+  const mouseId = target ?? model?.deviceId ?? RAZER_NAGA_DEVICE_ID;
+  const own = activeProfile?.deviceMouse?.[mouseId];
+  const profileDpi = own?.mouseDpi;
+  const profilePoll = own?.mousePollRateHz;
+  const overrides = profileDpi !== undefined || profilePoll !== undefined || (own?.mouseDpiStages?.length ?? 0) > 0;
   const appliesNow = activeProfile !== null && activeProfile.id === runtimeProfileId;
 
   useEffect(() => {
     setDpiDraft(profileDpi !== undefined ? String(profileDpi) : "");
-  }, [profileDpi, activeProfile?.id]);
+  }, [profileDpi, activeProfile?.id, mouseId]);
 
-  useEffect(() => { setManualDpi(false); }, [activeProfile?.id]);
+  useEffect(() => { setManualDpi(false); }, [activeProfile?.id, mouseId]);
 
-  function saveProfile(patch: Partial<Pick<Profile, "mouseDpi" | "mousePollRateHz" | "mouseDpiStages">>) {
+  function saveProfile(patch: Partial<MouseOverrides>) {
     if (!activeProfile) return;
-    updateDraft((config) => {
-      const current = config.profiles.find((profile) => profile.id === activeProfile.id);
-      return current ? upsertProfile(config, { ...current, ...patch }) : config;
-    });
+    updateDraft((config) => setProfileMouse(config, activeProfile.id, mouseId, patch));
   }
 
   /** Writes a value to the mouse when the edited profile is the one in effect. */
@@ -263,7 +263,7 @@ export function MouseWorkspace({
     dpiValue >= model.dpiMin &&
     dpiValue <= model.dpiMax;
 
-  const dpiChoices = model ? dpiStageChoices(activeProfile?.mouseDpiStages, profileDpi, model.dpiMin, model.dpiMax) : [];
+  const dpiChoices = model ? dpiStageChoices(own?.mouseDpiStages, profileDpi, model.dpiMin, model.dpiMax) : [];
   function applyDpi(value: number) {
     if (!model || hardwareBusy) return;
     const stages = dpiStagesForValue(dpiChoices, profileDpi, value, model.dpiMin, model.dpiMax);

@@ -866,13 +866,18 @@ fn run_live_mouse_action(
             .and_then(|id| config.profiles.iter().find(|p| p.id == id))
             .ok_or_else(|| execution_error("execution_failed", "execution",
                 crate::ui_text!("execution.dpiProfileMissing", "Select a profile before testing DPI controls."), Some(preview.encoded_key.clone()), action_id.clone()))?;
-        if profile.mouse_dpi_stages.as_ref().is_none_or(Vec::is_empty) {
-            return Err(execution_error("execution_failed", "execution",
-                crate::ui_text!("execution.dpiStagesMissing", "Configure DPI stages in the Mouse tab for this profile first."),
-                Some(preview.encoded_key.clone()), action_id));
+        let stages_missing = || execution_error("execution_failed", "execution",
+            crate::ui_text!("execution.dpiStagesMissing", "Configure DPI stages in the Mouse tab for this profile first."),
+            Some(preview.encoded_key.clone()), action_id.clone());
+        if !profile.device_mouse.iter().flatten().any(|(_, own)| own.mouse_dpi_stages.as_ref().is_some_and(|stages| !stages.is_empty())) {
+            return Err(stages_missing());
         }
         #[cfg(target_os = "windows")]
         let result = crate::onboard_guard::step_profile_dpi(profile, payload.action == MouseActionKind::DpiUp);
+        #[cfg(target_os = "windows")]
+        if result.as_ref().is_err_and(|message| message == crate::onboard_guard::NO_DPI_STAGES) {
+            return Err(stages_missing());
+        }
         #[cfg(not(target_os = "windows"))]
         let result: Result<u16, String> = {
             let _ = profile;

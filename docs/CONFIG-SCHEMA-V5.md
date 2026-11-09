@@ -14,10 +14,14 @@ linked profile is stored in its bank, then the offline profile's bank (otherwise
 the bank that was playing) is selected. A bank with no linked profile is left as
 it is. With a single bank and no link, the offline profile is stored there.
 
-## DPI range
+## DPI per mouse
 
-`Profile.mouseDpi` and `Profile.mouseDpiStages` accept 100 to 50000. Every write
-still respects the connected model's own range.
+`Profile.deviceMouse` maps a built-in device id to that mouse's own `mouseDpi`,
+`mousePollRateHz` and `mouseDpiStages` (DPI 100 to 50000; every write still
+respects the connected model's own range). A profile switch writes each connected
+mouse's own values; DPI Up/Down steps each mouse through its own stages. The
+flat `Profile.mouseDpi`/`mousePollRateHz`/`mouseDpiStages` of v4 are moved on
+load to every built-in mouse of the config, so nothing changes until edited.
 
 ## Upgrades and rollback
 

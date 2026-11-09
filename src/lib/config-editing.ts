@@ -13,6 +13,7 @@ import type {
   PhysicalControl,
   Profile,
   SnippetLibraryItem,
+  MouseOverrides,
 } from "./config";
 import { clampPriority, uniqueStrings } from "./helpers";
 import { defaultPayloadFor } from "./action-helpers";
@@ -1817,6 +1818,28 @@ export function extractProfileExport(
   };
 }
 
+/** Changes one mouse's settings in a profile. A field set to `undefined` is
+ *  removed, and a mouse left with no settings is dropped. */
+export function setProfileMouse(
+  config: AppConfig,
+  profileId: string,
+  deviceId: string,
+  patch: Partial<MouseOverrides>,
+): AppConfig {
+  return {
+    ...config,
+    profiles: config.profiles.map((profile) => {
+      if (profile.id !== profileId) return profile;
+      const { [deviceId]: current, ...others } = profile.deviceMouse ?? {};
+      const merged = Object.fromEntries(
+        Object.entries({ ...current, ...patch }).filter(([, value]) => value !== undefined),
+      ) as MouseOverrides;
+      const deviceMouse = Object.keys(merged).length > 0 ? { ...others, [deviceId]: merged } : others;
+      return { ...profile, deviceMouse: Object.keys(deviceMouse).length > 0 ? deviceMouse : undefined };
+    }),
+  };
+}
+
 /** Links a profile to an onboard bank of a device's mouse (`undefined`
  *  unlinks it). A bank holds one profile, so another profile's link to the
  *  same bank is removed. */
@@ -1838,6 +1861,11 @@ export function setProfileDeviceSlot(
       return slot !== undefined && profile.deviceSlots?.[deviceId] === slot ? withSlot(profile, undefined) : profile;
     }),
   };
+}
+
+function keepDevices<T>(perDevice: Record<string, T> | undefined, config: AppConfig): Record<string, T> | undefined {
+  const kept = Object.entries(perDevice ?? {}).filter(([id]) => config.devices.some((device) => device.id === id));
+  return kept.length > 0 ? Object.fromEntries(kept) : undefined;
 }
 
 /** Import a profile from exported data, assigning new IDs to avoid conflicts. */
@@ -1897,8 +1925,12 @@ export function importProfile(
 
   return {
     ...config,
-    // Banks belong to this computer's mice, not to the file.
-    profiles: [...config.profiles, { ...data.profile, id: newId, name: newName, deviceSlots: undefined }],
+    // Banks belong to this computer's mice, not to the file; mouse settings
+    // only for the mice this config has.
+    profiles: [...config.profiles, {
+      ...data.profile, id: newId, name: newName, deviceSlots: undefined,
+      deviceMouse: keepDevices(data.profile.deviceMouse, config),
+    }],
     appMappings: [...config.appMappings, ...newAppMappings],
     bindings: [...config.bindings, ...newBindings],
     actions: [...config.actions, ...newActions],

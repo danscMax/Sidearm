@@ -92,14 +92,20 @@ export interface Profile {
   description?: string;
   enabled: boolean;
   priority: number;
-  /** DPI applied to the built-in mouse with this profile; absent = unchanged. */
-  mouseDpi?: number;
-  /** Poll rate (125/500/1000 Hz) applied with this profile; absent = unchanged. */
-  mousePollRateHz?: number;
-  /** Optional stages (1–5) for DPI Up/Down; mouseDpi remains the starting stage. */
-  mouseDpiStages?: number[];
-  /** Onboard bank (1–5) each mouse plays this profile from, by device id. */
+  /** Onboard bank (1–5) each mouse stores this profile in, by device id. */
   deviceSlots?: Record<string, number>;
+  /** Each mouse's own DPI / poll rate / stages with this profile, by device id. */
+  deviceMouse?: Record<string, MouseOverrides>;
+}
+
+/** A mouse's own settings within a profile; absent fields leave the mouse as it is. */
+export interface MouseOverrides {
+  /** Starting DPI, written live on every switch to the profile. */
+  mouseDpi?: number;
+  /** Poll rate (125/500/1000 Hz). */
+  mousePollRateHz?: number;
+  /** Stages (1–5) for DPI Up/Down; mouseDpi is one of them. */
+  mouseDpiStages?: number[];
 }
 
 /** A physical input device; its controls live in `physicalControls` tagged

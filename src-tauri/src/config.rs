@@ -304,6 +304,32 @@ pub struct Profile {
     /// device id. Written only at exit; banks never switch while Sidearm runs.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_slots: Option<std::collections::BTreeMap<String, u8>>,
+    /// Each mouse's own DPI / poll rate / DPI stages with this profile, by
+    /// config device id. The flat `mouse_*` fields above are the pre-v5 form,
+    /// moved here on load (`migrate_mouse_settings`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_mouse: Option<std::collections::BTreeMap<String, MouseOverrides>>,
+}
+
+/// A mouse's own settings within a profile; absent fields leave the mouse as it is.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MouseOverrides {
+    /// Starting DPI, written live on every switch to the profile.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse_dpi: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse_poll_rate_hz: Option<u16>,
+    /// DPI Up/Down stages; `mouse_dpi` is one of them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mouse_dpi_stages: Option<Vec<u16>>,
+}
+
+impl Profile {
+    /// This profile's settings for one mouse.
+    pub fn mouse_for(&self, device_id: &str) -> Option<&MouseOverrides> {
+        self.device_mouse.as_ref()?.get(device_id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -965,6 +991,29 @@ fn migrate_devices(config: &mut AppConfig) {
     }
 }
 
+/// Pre-v5 profiles held one DPI / poll rate / stage list for "the" mouse: it
+/// becomes every built-in mouse's own, so nothing changes until edited.
+fn migrate_mouse_settings(config: &mut AppConfig) {
+    let mice: Vec<String> = config.devices.iter().filter(|device| device.builtin).map(|device| device.id.clone()).collect();
+    if mice.is_empty() {
+        return; // No mouse to give them to: the flat values stay.
+    }
+    for profile in &mut config.profiles {
+        let legacy = MouseOverrides {
+            mouse_dpi: profile.mouse_dpi.take(),
+            mouse_poll_rate_hz: profile.mouse_poll_rate_hz.take(),
+            mouse_dpi_stages: profile.mouse_dpi_stages.take(),
+        };
+        if legacy == MouseOverrides::default() {
+            continue;
+        }
+        let own = profile.device_mouse.get_or_insert_with(Default::default);
+        for mouse in &mice {
+            own.entry(mouse.clone()).or_insert_with(|| legacy.clone());
+        }
+    }
+}
+
 /// Migrate legacy clipboardPaste to sendText (avoids COM/OLE crashes).
 fn migrate_paste_mode(config: &mut AppConfig) {
     for action in &mut config.actions {
@@ -1083,6 +1132,7 @@ fn load_and_validate(
 ) -> Result<(AppConfig, Vec<ValidationWarning>), ConfigStoreError> {
     let mut config = read_config_from_path(config_path)?;
     migrate_devices(&mut config);
+    migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
     let warnings = validate_config(&config)?;
     config.compile_title_regexes();
@@ -1162,10 +1212,12 @@ pub fn config_file_stamp(config_dir: &Path) -> Option<u64> {
 /// overwrite (explicit restore/import/migration).
 pub fn save_config(
     config_dir: &Path,
-    config: AppConfig,
+    mut config: AppConfig,
     expected_stamp: Option<u64>,
 ) -> Result<SaveConfigResponse, ConfigStoreError> {
     fs::create_dir_all(config_dir).map_err(|error| io_error(Some(config_dir), error))?;
+    // An imported pre-v5 profile still carries the flat fields.
+    migrate_mouse_settings(&mut config);
     let schema_value = serde_json::to_value(&config)
         .map_err(|error| ConfigStoreError::Serialize(error.to_string()))?;
     validate_config_schema_value(&schema_value)?;
@@ -1219,6 +1271,7 @@ fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreErr
 pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, ConfigStoreError> {
     let mut config = read_config_from_path(config_path)?;
     migrate_devices(&mut config);
+    migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
     config.compile_title_regexes();
     Ok(config)
@@ -1394,9 +1447,11 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
     }
 
     for profile in &config.profiles {
-        if let (Some(stages), Some(start)) = (&profile.mouse_dpi_stages, profile.mouse_dpi)
-            && !stages.contains(&start) {
-            errors.push(format!("profile `{}` mouseDpi must be one of its mouseDpiStages.", profile.id));
+        for (mouse, own) in profile.device_mouse.iter().flatten() {
+            if let (Some(stages), Some(start)) = (&own.mouse_dpi_stages, own.mouse_dpi)
+                && !stages.contains(&start) {
+                errors.push(format!("profile `{}` mouseDpi of `{mouse}` must be one of its mouseDpiStages.", profile.id));
+            }
         }
     }
 
@@ -3171,7 +3226,7 @@ fn profile(id: &str, name: &str, priority: i32, description: Option<&str>) -> Pr
         description: description.map(str::to_owned),
         enabled: true,
         priority,
-        mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None,
+        mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
     }
 }
 
@@ -3331,7 +3386,6 @@ mod tests {
         let dir = tempdir().expect("tempdir");
         let mut config = default_seed_config();
         config.profiles[0].device_slots = Some([("razer-naga-v3".to_owned(), 2)].into());
-        config.profiles[0].mouse_dpi = Some(45_000);
         save_config(dir.path(), config.clone(), None).expect("save slots");
         let loaded = load_or_initialize_config(dir.path()).expect("reload slots");
         assert_eq!(loaded.config.profiles[0].device_slots, config.profiles[0].device_slots);
@@ -3348,19 +3402,52 @@ mod tests {
     fn dpi_stages_roundtrip_and_validate_boundaries() {
         let dir = tempdir().expect("tempdir");
         let mut config = default_seed_config();
-        config.profiles[0].mouse_dpi_stages = Some(vec![400, 800, 1600]);
-        config.profiles[0].mouse_dpi = Some(800);
+        let own = |dpi, stages: Vec<u16>| Some([("razer-naga".to_owned(), MouseOverrides {
+            mouse_dpi: dpi, mouse_poll_rate_hz: None, mouse_dpi_stages: Some(stages),
+        })].into());
+        config.profiles[0].device_mouse = own(Some(800), vec![400, 800, 1600]);
         save_config(dir.path(), config.clone(), None).expect("save stages");
         let loaded = load_or_initialize_config(dir.path()).expect("reload stages");
-        assert_eq!(loaded.config.profiles[0].mouse_dpi_stages, Some(vec![400, 800, 1600]));
-        assert_eq!(loaded.config.profiles[0].mouse_dpi, Some(800));
+        assert_eq!(loaded.config.profiles[0].device_mouse, config.profiles[0].device_mouse);
         assert_eq!(loaded.config.version, SCHEMA_VERSION);
         for invalid in [vec![], vec![400, 400], vec![99], vec![50001], vec![100, 200, 300, 400, 500, 600]] {
-            config.profiles[0].mouse_dpi_stages = Some(invalid);
+            config.profiles[0].device_mouse = own(None, invalid);
             assert!(save_config(dir.path(), config.clone(), None).is_err());
         }
-        config.profiles[0].mouse_dpi_stages = Some(vec![400, 1600]);
-        assert!(validate_config(&config).is_err(), "startup DPI must be in the list");
+        config.profiles[0].device_mouse = own(Some(800), vec![400, 1600]);
+        assert!(save_config(dir.path(), config.clone(), None).is_err(), "start DPI outside its stages");
+    }
+
+    #[test]
+    fn a_pre_v5_profile_dpi_becomes_every_built_in_mouses_own() {
+        let mut config = default_seed_config();
+        config.devices.push(Device { id: "razer-naga-v3".into(), name: "V3".into(), builtin: true, image: None, hotspots: Vec::new() });
+        config.devices.push(Device { id: "pad".into(), name: "Pad".into(), builtin: false, image: None, hotspots: Vec::new() });
+        config.profiles[0].mouse_dpi = Some(1600);
+        config.profiles[0].mouse_dpi_stages = Some(vec![800, 1600]);
+        migrate_mouse_settings(&mut config);
+        let profile = &config.profiles[0];
+        assert_eq!(profile.mouse_dpi, None, "the flat form is gone");
+        let mice: Vec<&String> = profile.device_mouse.as_ref().unwrap().keys().collect();
+        assert_eq!(mice, ["razer-naga", "razer-naga-v3"], "user devices have no DPI");
+        assert_eq!(profile.mouse_for("razer-naga-v3").unwrap().mouse_dpi, Some(1600));
+        assert!(config.profiles[1].device_mouse.is_none(), "a profile without settings stays without");
+        let once = config.clone();
+        migrate_mouse_settings(&mut config);
+        assert_eq!(config, once, "a second run changes nothing");
+    }
+
+    #[test]
+    fn saving_a_flat_profile_stores_and_checks_it_per_mouse() {
+        let dir = tempdir().expect("tempdir");
+        let mut config = default_seed_config();
+        config.profiles[0].mouse_dpi = Some(1600);
+        config.profiles[0].mouse_dpi_stages = Some(vec![800, 1600]);
+        let saved = save_config(dir.path(), config.clone(), None).expect("save flat");
+        assert_eq!(saved.config.profiles[0].mouse_dpi, None);
+        assert_eq!(saved.config.profiles[0].mouse_for(RAZER_NAGA_DEVICE_ID).unwrap().mouse_dpi, Some(1600));
+        config.profiles[0].mouse_dpi = Some(3200);
+        assert!(save_config(dir.path(), config, None).is_err(), "a start DPI outside its stages is refused");
     }
 
     #[test]
@@ -3979,7 +4066,7 @@ mod edge_proptests {
             description: None,
             enabled: true,
             priority: 0,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
         }];
         cfg.settings.fallback_profile_id = "p1".into();
         cfg.app_mappings = vec![];
@@ -4137,7 +4224,7 @@ mod edge_proptests {
             description: Some("desc".into()),
             enabled: false,
             priority: i32::MAX,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Profile = serde_json::from_str(&json).unwrap();
@@ -4251,7 +4338,7 @@ mod edge_proptests {
                 description: None,
                 enabled: true,
                 priority,
-                mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None,
+                mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
             };
             let json = serde_json::to_string(&p).unwrap();
             let back: Profile = serde_json::from_str(&json).unwrap();
@@ -4382,7 +4469,7 @@ mod edge_proptests {
                     description: None,
                     enabled: true,
                     priority: i as i32,
-                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None,
+                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
                 })
                 .collect();
             cfg.settings.fallback_profile_id = "p0".into();

@@ -136,24 +136,24 @@ pub fn spawn(app: AppHandle, runtime_store: Arc<Mutex<RuntimeStore>>, config_dir
         .ok();
 }
 
-/// Applies a profile's own DPI / poll rate to the mouse (fields left unset keep
-/// the mouse as it is). Runs on its own thread: it is called from the capture
+/// Applies a profile's own DPI / poll rate to each connected mouse, from that
+/// mouse's own settings (fields left unset keep the mouse as it is). Runs on its own thread: it is called from the capture
 /// path on a profile switch and must not delay the key that caused it. The
 /// device lock serializes it with the guard tick.
 pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
-    let (dpi, poll_rate_hz) = (profile.mouse_dpi, profile.mouse_poll_rate_hz);
-    if dpi.is_none() && poll_rate_hz.is_none() {
+    if profile.device_mouse.as_ref().is_none_or(|own| own.values().all(|own| own.mouse_dpi.is_none() && own.mouse_poll_rate_hz.is_none())) {
         return;
     }
     let name = profile.name.clone();
+    let profile = profile.clone();
     // Every switch spawns its own thread and the device lock does not keep their
     // order: a switch that waited behind a newer one must not undo it.
     let generation = PROFILE_SWITCHES.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::Builder::new()
         .name("profile-mouse".into())
         .spawn(move || {
-            // Every connected mouse follows the profile, each within its own
-            // range; one asleep mouse does not hold back the other.
+            // Every connected mouse takes its own settings; one asleep mouse
+            // does not hold back the other.
             let mice = match connected_mice() {
                 Ok(mice) => mice,
                 Err(message) => {
@@ -167,8 +167,9 @@ pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
                     return;
                 }
                 let model = device.model();
-                let dpi = dpi.map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
-                let poll_rate_hz = poll_rate_hz.filter(|hz| model.poll_code_for_hz(*hz).is_some());
+                let Some(own) = profile.mouse_for(model.device_id) else { continue };
+                let dpi = own.mouse_dpi.map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
+                let poll_rate_hz = own.mouse_poll_rate_hz.filter(|hz| model.poll_code_for_hz(*hz).is_some());
                 let result = (|| {
                     let mut written = false;
                     if let Some(hz) = poll_rate_hz
@@ -224,17 +225,20 @@ fn next_dpi_stage(stages: &[u16], current: u16, up: bool) -> Result<u16, String>
     }
 }
 
+/// `step_profile_dpi` error when no connected mouse has stages in the profile.
+pub const NO_DPI_STAGES: &str = "no connected mouse has DPI stages in this profile";
+
 /// Apply a DPI Up/Down binding using the resolved profile's list, rather than
 /// mutating another profile or the saved startup DPI. Device verification fails
 /// explicitly when the wireless mouse is asleep or disconnected.
 #[cfg(target_os = "windows")]
 pub fn step_profile_dpi(profile: &crate::config::Profile, up: bool) -> Result<u16, String> {
-    let stages = profile.mouse_dpi_stages.as_deref().ok_or_else(||
-        "Configure DPI stages for the active profile first".to_string())?;
-    // Each mouse steps through the stages it can play; an asleep one is skipped.
-    let mut last = Err(crate::mouse_memory::NOT_CONNECTED.to_string());
+    // Each mouse steps through its own stages within its range; one without
+    // stages, or asleep, is skipped.
+    let mut last = Err(NO_DPI_STAGES.to_string());
     for device in connected_mice()? {
         let model = device.model();
+        let Some(stages) = profile.mouse_for(model.device_id).and_then(|own| own.mouse_dpi_stages.as_deref()) else { continue };
         let playable: Vec<u16> = stages.iter().copied().filter(|dpi| (model.dpi_min..=model.dpi_max).contains(dpi)).collect();
         let step = (|| {
             let current = device.dpi()?;

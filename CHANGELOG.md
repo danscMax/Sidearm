@@ -15,8 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mouse's slots; on exit every linked profile is stored in its slot, so its simple
   assignments work without Sidearm. Slots are never switched while Sidearm runs.
 - Two mice at once (V2 HyperSpeed and V3 Pro): each keeps its own HyperShift layer.
-  The Mouse tab shows a mouse picker; profile DPI applies to every connected mouse
-  within its own range.
+  The Mouse tab shows a mouse picker; each mouse has its own DPI, DPI stages and
+  poll rate per profile (`Profile.deviceMouse`; existing values become the own settings of every
+  built-in mouse in the config, a mouse added later starts without any).
 - Copy assignments from one mouse to the other (Profiles → Copy from another mouse),
   with a preview of what is copied and what is left out. A profile file exported from
   another mouse is imported onto the mouse shown.
@@ -38,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Config warnings from loading are no longer dropped when a new mouse is added.
 
 ### Compatibility
-- The config moves to schema v5 (`Profile.deviceSlots`, DPI up to 50000). v2–v4 configs
+- The config moves to schema v5 (`Profile.deviceSlots`, `Profile.deviceMouse`, DPI up to 50000). v2–v4 configs
   migrate on load. Back up `data/config.json` before updating; older versions refuse
   a v5 config instead of recovering an older backup over it.
 

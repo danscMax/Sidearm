@@ -86,28 +86,33 @@ const RESTORE_MUTEX: &str = "Local\\Sidearm-live-map-restore";
 #[cfg(target_os = "windows")]
 fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError},
+        Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, LocalFree},
         Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, SECURITY_ATTRIBUTES},
         System::Threading::CreateMutexW,
     };
     let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
-    // Full access for authenticated users, low integrity label: readable at any elevation.
-    let sddl: Vec<u16> = "D:(A;;GA;;;AU)S:(ML;;NW;;;LW)".encode_utf16().chain(Some(0)).collect();
+    // Full access for authenticated users: openable at any elevation.
+    let sddl: Vec<u16> = "D:(A;;GA;;;AU)".encode_utf16().chain(Some(0)).collect();
     let mut descriptor = std::ptr::null_mut();
-    // SAFETY: NUL-terminated strings; the descriptor lives as long as the process
-    // (one per mutex, never freed), the handle too.
+    // SAFETY: NUL-terminated strings; CreateMutexW copies the descriptor, which
+    // is freed right after; the handle is kept until the process ends.
     unsafe {
-        let attributes = (ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) != 0)
-            .then_some(SECURITY_ATTRIBUTES {
-                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-                lpSecurityDescriptor: descriptor,
-                bInheritHandle: 0,
-            });
-        let handle = CreateMutexW(attributes.as_ref().map_or(std::ptr::null(), |a| a as *const _), 0, name.as_ptr());
+        if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) == 0 {
+            log::warn!("[system] mutex {} not created: security descriptor error {}", String::from_utf16_lossy(&name[..name.len() - 1]), GetLastError());
+            return None;
+        }
+        let attributes = SECURITY_ATTRIBUTES {
+            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+            lpSecurityDescriptor: descriptor,
+            bInheritHandle: 0,
+        };
+        let handle = CreateMutexW(&attributes, 0, name.as_ptr());
+        let existed = GetLastError() == ERROR_ALREADY_EXISTS;
+        LocalFree(descriptor);
         if handle.is_null() {
             return None;
         }
-        if GetLastError() == ERROR_ALREADY_EXISTS {
+        if existed {
             CloseHandle(handle);
             return None;
         }
@@ -115,13 +120,20 @@ fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
     }
 }
 
+/// Whether a named mutex exists: one that refuses access exists too (an older
+/// or foreign DACL), so the check never fails open.
 #[cfg(target_os = "windows")]
 fn mutex_exists(name: &str) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
     let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
     // SAFETY: a NUL-terminated name; the handle is closed at once.
     unsafe {
         let handle = windows_sys::Win32::System::Threading::OpenMutexW(windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE, 0, name.as_ptr());
-        !handle.is_null() && windows_sys::Win32::Foundation::CloseHandle(handle) != 0
+        if handle.is_null() {
+            return GetLastError() == ERROR_ACCESS_DENIED;
+        }
+        CloseHandle(handle);
+        true
     }
 }
 

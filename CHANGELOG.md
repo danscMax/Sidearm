@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
+  wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
+  live button map that Sidearm restores when it stops.
+- Naga V3 Pro onboard slots: in the Mouse tab a profile can be linked to one of the
+  mouse's slots; on exit every linked profile is stored in its slot, so its simple
+  assignments work without Sidearm. Slots are never switched while Sidearm runs.
+- Two mice at once (V2 HyperSpeed and V3 Pro): each keeps its own HyperShift layer.
+  The Mouse tab shows a mouse picker; profile DPI applies to every connected mouse
+  within its own range.
+- Copy assignments from one mouse to the other (Profiles → Copy from another mouse),
+  with a preview of what is copied and what is left out. A profile file exported from
+  another mouse is imported onto the mouse shown.
+- Setup finds the connected mice and asks which one to set up when there are two,
+  says so when there is none, checks Razer Synapse and can close it, waits at most
+  15 s for the mouse before offering Check again or skipping, checks HyperShift for
+  every model and resumes at the same step after Restart as administrator.
+
+### Fixed
+- Plugging a mouse in or out while Sidearm runs switches each mouse to the path it
+  needs; a V2 alone no longer stays in two-mouse mode after a V3 was seen once, so
+  V2 Pro, Naga Pro and Naga X buttons and the F13–F24 switch work again there.
+- Shutting down, restarting or signing out of Windows now restores the mouse and
+  stores the offline profile, like a normal exit. Two mice restore in parallel.
+- A live-map rollback file still matches after the receiver moves to another USB port.
+- One misread record during repair no longer becomes the "original" written back on exit.
+- A V3 that slept through the exit now leaves the "offline profile not stored" notice.
+- "Side buttons unreadable" is tracked per mouse: an unplugged V3 no longer raises it.
+- Config warnings from loading are no longer dropped when a new mouse is added.
+
+### Compatibility
+- The config moves to schema v5 (`Profile.deviceSlots`, DPI up to 50000). v2–v4 configs
+  migrate on load. Back up `data/config.json` before updating; older versions refuse
+  a v5 config instead of recovering an older backup over it.
+
 ## [0.11.8] — 2026-11-06
 
 ### Added

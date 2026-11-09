@@ -2,19 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type Profile } from "../lib/config";
 import { uiText } from "../lib/ui-text";
-import { upsertProfile } from "../lib/config-editing";
+import { setProfileDeviceSlot, upsertProfile } from "../lib/config-editing";
 import {
   getDeviceReport,
   getMouseSettings,
   getNativeModel,
+  getOnboardBanks,
   listenMouseBattery,
+  listenNativeMiceChanged,
+  listNativeMice,
   normalizeCommandError,
   openDeviceReportIssue,
   setKeySignals,
   setMouseDpi,
   setMousePollRate,
 } from "../lib/backend";
-import type { MouseSettings as MouseSettingsState, MouseStatusKind, NativeModelInfo } from "../lib/onboard-mapping";
+import type { MouseSettings as MouseSettingsState, MouseStatusKind, NativeModelInfo, OnboardBanks } from "../lib/onboard-mapping";
 import { PillTrack } from "./PillTrack";
 import { dpiStageChoices, dpiStagesForValue } from "../lib/dpi-stages";
 import { listenActionExecutionEvent } from "../lib/backend";
@@ -72,15 +75,22 @@ export function MouseWorkspace({
   const [summaryCopied, setSummaryCopied] = useState<boolean | null>(null);
   const lifecycle = useRef({ alive: false, version: 0, pending: false, queued: false });
   const reportPending = useRef(false);
+  // Several connected mice: the one this page reads and writes.
+  const [mice, setMice] = useState<NativeModelInfo[]>([]);
+  const [chosenMouse, setChosenMouse] = useState<string | null>(null);
+  const target = (mice.find((mouse) => mouse.deviceId === chosenMouse) ?? mice[0])?.deviceId;
+  const targetRef = useRef(target);
+  const [banks, setBanks] = useState<OnboardBanks | null>(null);
 
-  async function run(request: () => Promise<MouseSettingsState>, writing = false) {
+  async function run(request: (deviceId?: string) => Promise<MouseSettingsState>, writing = false) {
     const state = lifecycle.current;
     if (!state.alive || state.pending) return;
     state.pending = true;
     const version = ++state.version;
     setBusy(true);
     try {
-      const [readings, descriptor] = await Promise.allSettled([request(), getNativeModel()]);
+      const deviceId = targetRef.current;
+      const [readings, descriptor] = await Promise.allSettled([request(deviceId), getNativeModel(deviceId)]);
       if (!state.alive || state.version !== version) return;
       if (descriptor.status === "fulfilled") setModel(descriptor.value);
       if (readings.status === "fulfilled") {
@@ -119,10 +129,12 @@ export function MouseWorkspace({
   useEffect(() => {
     const state = lifecycle.current;
     state.alive = true;
-    refresh();
+    // The first read comes from the effect on the shown mouse below.
     let subscribed = true;
     const disposers: (() => void)[] = [];
+    void listNativeMice().then((list) => { if (subscribed) setMice(list); }, () => {});
     const subscriptions = [
+      listenNativeMiceChanged((list) => { if (subscribed) setMice(list); }),
       listenMouseBattery(() => { if (subscribed) refresh(); }),
       listenActionExecutionEvent("action_executed", (event) => {
         if (subscribed && event.actionType === "mouseAction" && typeof event.summary === "object" && event.summary.key === "execution.dpiSwitched") refresh();
@@ -134,6 +146,25 @@ export function MouseWorkspace({
     }
     return () => { subscribed = false; state.alive = false; state.version += 1; disposers.forEach((dispose) => dispose()); };
   }, []);
+
+  // A new mouse to show: read it (the ref serves callbacks bound at mount).
+  useEffect(() => {
+    targetRef.current = target;
+    setSummary(null);
+    setSummaryCopied(null);
+    setReport(null);
+    setReportCopied(false);
+    setSignalsSwitch(null);
+    refresh();
+  }, [target]);
+
+  useEffect(() => {
+    setBanks(null);
+    if (!model?.banks || !model.connected) return;
+    let current = true;
+    void getOnboardBanks(model.deviceId).then((next) => { if (current) setBanks(next); }, () => {});
+    return () => { current = false; };
+  }, [model?.deviceId, model?.banks, model?.connected]);
 
   const profileDpi = activeProfile?.mouseDpi;
   const profilePoll = activeProfile?.mousePollRateHz;
@@ -155,7 +186,7 @@ export function MouseWorkspace({
   }
 
   /** Writes a value to the mouse when the edited profile is the one in effect. */
-  function applyNow(request: () => Promise<MouseSettingsState>) {
+  function applyNow(request: (deviceId?: string) => Promise<MouseSettingsState>) {
     if (appliesNow) void run(request, true);
   }
 
@@ -165,7 +196,7 @@ export function MouseWorkspace({
     reportPending.current = true;
     setReporting(true);
     try {
-      const text = await getDeviceReport();
+      const text = await getDeviceReport(undefined, target);
       if (!lifecycle.current.alive) return;
       setReport(text);
       setError(null);
@@ -188,7 +219,7 @@ export function MouseWorkspace({
     setReporting(true);
     setSummaryCopied(null);
     try {
-      const text = await getDeviceReport("summary");
+      const text = await getDeviceReport("summary", target);
       if (lifecycle.current.alive) { setSummary(text); setError(null); }
     } catch (unknownError) {
       if (lifecycle.current.alive) setError(normalizeCommandError(unknownError).message);
@@ -209,7 +240,7 @@ export function MouseWorkspace({
     setSignalsSwitch(consumer);
     try {
       await setKeySignals(consumer);
-      const descriptor = await getNativeModel();
+      const descriptor = await getNativeModel(target);
       if (!lifecycle.current.alive) return;
       setModel(descriptor);
       setError(null);
@@ -239,11 +270,25 @@ export function MouseWorkspace({
     if (!stages) return;
     setDpiDraft(String(value));
     saveProfile({ mouseDpi: value, mouseDpiStages: stages });
-    if (device?.dpi !== value) applyNow(() => setMouseDpi(value));
+    if (device?.dpi !== value) applyNow((deviceId) => setMouseDpi(value, deviceId));
   }
+
+  const slot = model && activeProfile ? activeProfile.deviceSlots?.[model.deviceId] : undefined;
 
   return (
     <div className="settings-shell__content">
+      {mice.length > 1 ? (
+        <section className="settings-section">
+          <SettingRow title={t("mouse.devicePicker")} hint={t("mouse.devicePickerHelp")}>
+            <PillTrack
+              items={mice.map((mouse) => ({ key: mouse.deviceId, label: mouse.name }))}
+              active={target ?? ""}
+              pillProps={() => ({ disabled: hardwareBusy })}
+              onSelect={(id) => setChosenMouse(id)}
+            />
+          </SettingRow>
+        </section>
+      ) : null}
       {mouseStates.flatMap((kind) => {
         const key = STATE_MESSAGE[kind];
         return key ? [<Notice key={kind} variant="warning"><p>{t(key)}</p></Notice>] : [];
@@ -358,7 +403,7 @@ export function MouseWorkspace({
                   onSelect={(key) => {
                     const hz = Number(key);
                     saveProfile({ mouseDpi: profileDpi, mousePollRateHz: hz });
-                    applyNow(() => setMousePollRate(hz));
+                    applyNow((deviceId) => setMousePollRate(hz, deviceId));
                   }}
                 />
               </SettingRow>
@@ -398,6 +443,28 @@ export function MouseWorkspace({
               </SettingRow>
             </>
           ) : null}
+        </section>
+      ) : null}
+
+      {model?.banks && activeProfile ? (
+        <section className="settings-section">
+          <SettingRow title={t("mouse.slotHeader")} hint={t("mouse.slotHelp", { model: model.name })}>
+            <SelectField
+              ariaLabel={t("mouse.slotHeader")}
+              value={slot === undefined ? "" : String(slot)}
+              disabled={banks === null && slot === undefined}
+              options={[
+                { value: "", label: t("mouse.slotNone") },
+                ...[...new Set([...(banks?.assigned ?? []), ...(slot === undefined ? [] : [slot])])].sort((a, b) => a - b).map((bank) => ({
+                  value: String(bank),
+                  label: t(banks?.active === bank ? "mouse.slotActive" : "mouse.slotOption", { n: bank }),
+                })),
+              ]}
+              onChange={(value) => updateDraft((config) =>
+                setProfileDeviceSlot(config, activeProfile.id, model.deviceId, value ? Number(value) : undefined))}
+            />
+          </SettingRow>
+          {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : null}
         </section>
       ) : null}
 

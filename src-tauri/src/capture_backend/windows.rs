@@ -21,6 +21,30 @@ use crate::vk::{ModifierKind, classify_modifier_vk, is_modifier_vk};
 
 const BACKEND_LL_HOOK: &str = "windows-ll-hook";
 
+/// Backend tag of a press read from a mouse's own HID stream (`hid:<device>`).
+fn hid_backend(model: &crate::device_catalog::NativeModel) -> String {
+    format!("hid:{}", model.device_id)
+}
+
+/// One consumer reader the helper starts.
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReaderInit {
+    /// Catalog index of the mouse.
+    model: usize,
+    signals: Vec<crate::mouse_memory::ConsumerSignal>,
+    /// The layer is the software trigger's state, not the signal's own.
+    software_layer: bool,
+}
+
+/// What the helper reads from the mice besides the keyboard.
+struct MouseInputs {
+    readers: Vec<ReaderInit>,
+    /// Every connected mouse keeps its HyperShift layer in its firmware: the
+    /// software trigger is off.
+    firmware_hypershift: bool,
+}
+
 const MOD_ALT: u32 = 0x0001;
 const MOD_CONTROL: u32 = 0x0002;
 const MOD_SHIFT: u32 = 0x0004;
@@ -258,8 +282,8 @@ pub(super) struct CaptureBackendHandle {
     hook_thread: JoinHandle<()>,
     worker_thread: JoinHandle<()>,
     helper: Option<HelperHandle>,
-    naga_v3: Option<crate::mouse_memory::naga_v3::Session>,
-    naga_v2: Option<crate::mouse_memory::naga_v3::Session>,
+    /// One live button map per mouse that needs it (`live_overlay`).
+    live_sessions: Vec<crate::mouse_memory::live_overlay::Session>,
     foreground_watcher_thread_id: Option<u32>,
     foreground_watcher_thread: Option<JoinHandle<()>>,
 }
@@ -1010,7 +1034,7 @@ impl CaptureBackendHandle {
         config: AppConfig,
         app_name: String,
     ) -> Result<Self, String> {
-        Self::start_with_sessions(app, runtime_store, config, app_name, [None, None])
+        Self::start_with_sessions(app, runtime_store, config, app_name, Vec::new())
     }
 
     pub(super) fn restart_after_save(
@@ -1020,7 +1044,7 @@ impl CaptureBackendHandle {
         config: AppConfig,
         app_name: String,
     ) -> Result<Self, String> {
-        let sessions = [self.naga_v2.take(), self.naga_v3.take()];
+        let sessions = std::mem::take(&mut self.live_sessions);
         self.stop()?;
         Self::start_with_sessions(app, runtime_store, config, app_name, sessions)
     }
@@ -1030,39 +1054,83 @@ impl CaptureBackendHandle {
         runtime_store: Arc<Mutex<RuntimeStore>>,
         mut config: AppConfig,
         app_name: String,
-        sessions: [Option<crate::mouse_memory::naga_v3::Session>; 2],
+        previous: Vec<crate::mouse_memory::live_overlay::Session>,
     ) -> Result<Self, String> {
-        use crate::mouse_memory::{self, naga_v3};
+        use crate::device_catalog::Transport;
+        use crate::mouse_memory::{self, live_overlay};
         let config_dir = crate::resolve_app_paths(&app).config_dir.clone();
-        naga_v3::configure(&mut config, &config_dir);
-        let has_v3 = naga_v3::configured(&config);
-        let parallel_v2 = naga_v3::parallel_v2(&config);
-        let naga_v3_hid = has_v3 && mouse_memory::consumer_signals_enabled();
-        let registrations = build_hotkey_registrations(&config, parallel_v2, naga_v3_hid)?;
-        let (v2_signals, v2_targets) = if parallel_v2 {
-            naga_v3::v2_overlay(&config)
-        } else {
-            (mouse_memory::consumer_signals(&config), Vec::new())
-        };
-        let checking_extras = naga_v3::CHECK_EXTRA_CONTROLS.load(Ordering::Acquire);
-        let v3_signals = naga_v3::signals(&config, naga_v3_hid, checking_extras);
-        let v3_targets = if has_v3 {
-            naga_v3::targets(&config, naga_v3_hid, checking_extras).unwrap_or_else(|error| {
-                log::warn!("[naga-v3] {error}");
-                Vec::new()
-            })
-        } else {
+        let present = mouse_memory::present_models();
+        live_overlay::configure(&mut config, &present);
+        let consumer = mouse_memory::consumer_signals_enabled();
+        let checking_extras = live_overlay::CHECK_EXTRA_CONTROLS.load(Ordering::Acquire);
+        // The live maps this start drives: a live-only mouse needs its device
+        // in the config; an onboard mouse is always built in.
+        let mut plans = Vec::new();
+        for model in live_overlay::live_models(&present) {
+            if model.transport == Transport::LiveOverlay && !live_overlay::configured(&config, model) {
+                continue;
+            }
+            match live_overlay::overlay(&config, model, consumer, checking_extras) {
+                Ok(overlay) => plans.push((model, overlay)),
+                Err(error) => {
+                    log::warn!("[capture] {} live map not written: {error}", model.name);
+                    if let Ok(mut store) = runtime_store.lock() {
+                        store.record_warn(
+                            "capture",
+                            crate::ui_text!(
+                                "capture.liveMapFailed",
+                                "{model}: the side buttons could not be set up ({error}).",
+                                model = model.name,
+                                error = error
+                            ),
+                        );
+                    }
+                }
+            }
+        }
+        let live: Vec<_> = plans.iter().map(|(model, _)| *model).collect();
+        let registrations = build_hotkey_registrations(&config, &live, consumer)?;
+        // A mouse on the onboard path reads its consumer signals the old way,
+        // with the software trigger stamping the layer.
+        let onboard_present = present.is_empty()
+            || present.iter().any(|model| model.verified && model.transport == Transport::Onboard);
+        let onboard_signals = if !onboard_present || live.iter().any(|model| model.transport == Transport::Onboard) {
             Vec::new()
+        } else {
+            mouse_memory::consumer_signals(&config)
         };
-        let [previous_v2, previous_v3] = sessions;
-        let previous_v2 = previous_v2.filter(|session| session.matches(&v2_targets));
-        let previous_v3 = previous_v3.filter(|session| session.matches(&v3_targets));
-        if previous_v2.is_some() || previous_v3.is_some() {
-            log::info!(
-                "[capture] Keeping live button maps on config reload (V2: {}, V3: {})",
-                previous_v2.is_some(),
-                previous_v3.is_some(),
-            );
+        let mut readers: Vec<ReaderInit> = plans
+            .iter()
+            .filter(|(_, overlay)| !overlay.signals.is_empty())
+            .map(|(model, overlay)| ReaderInit {
+                model: live_overlay::catalog_index(model),
+                signals: overlay.signals.clone(),
+                software_layer: false,
+            })
+            .collect();
+        if !onboard_signals.is_empty() {
+            readers.push(ReaderInit {
+                model: live_overlay::catalog_index(mouse_memory::config_model()),
+                signals: onboard_signals,
+                software_layer: true,
+            });
+        }
+        let firmware_hypershift = !live_overlay::software_hypershift(&present, &live);
+        // Keep a live map whose records did not change; restore the others
+        // before their replacement writes over the same records.
+        let mut kept = Vec::new();
+        let mut stale = Vec::new();
+        for session in previous {
+            if plans.iter().any(|(model, overlay)| session.matches(model, &overlay.targets)) {
+                kept.push(session);
+            } else {
+                stale.push(session);
+            }
+        }
+        stale.iter_mut().for_each(|session| session.request_stop());
+        drop(stale);
+        if !kept.is_empty() {
+            log::info!("[capture] Keeping {} live button map(s) on config reload", kept.len());
         }
         // Map each held encoding back to its source physical VK so the stale-hold
         // sweep can probe whether the button is still physically down (RF-dropout
@@ -1240,16 +1308,22 @@ impl CaptureBackendHandle {
             &registrations,
             helper_event_tx,
             &config,
-            (v2_signals, v3_signals),
+            MouseInputs { readers, firmware_hypershift },
             reader_helper_died,
         );
-        let naga_v2 = helper.as_ref().filter(|_| parallel_v2).and_then(|_| {
-            previous_v2.or_else(|| naga_v3::Session::start_v2(config_dir.clone(), &config, v2_targets))
-        });
-        let naga_v3 = helper.as_ref().filter(|_| has_v3).and_then(|_| {
-            previous_v3.or_else(|| naga_v3::Session::start_v3(config_dir, v3_targets))
-        });
-        if (naga_v3_hid || !registrations.is_empty())
+        let mut live_sessions = Vec::new();
+        if helper.is_some() {
+            for (model, overlay) in plans {
+                if let Some(index) = kept.iter().position(|session| session.matches(model, &overlay.targets)) {
+                    live_sessions.push(kept.swap_remove(index));
+                } else if let Some(session) =
+                    live_overlay::Session::start(model, config_dir.clone(), &config, overlay.targets)
+                {
+                    live_sessions.push(session);
+                }
+            }
+        }
+        if (!live_sessions.is_empty() || !registrations.is_empty())
             && helper.is_none()
             && let Ok(mut store) = runtime_store.lock()
         {
@@ -1284,8 +1358,7 @@ impl CaptureBackendHandle {
             hook_thread,
             worker_thread,
             helper,
-            naga_v3,
-            naga_v2,
+            live_sessions,
             foreground_watcher_thread_id,
             foreground_watcher_thread: Some(foreground_watcher_thread),
         })
@@ -1294,8 +1367,10 @@ impl CaptureBackendHandle {
     pub(super) fn stop(self) -> Result<(), String> {
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 
-        drop(self.naga_v2);
-        drop(self.naga_v3);
+        // Every mouse restores at once; dropping waits for all of them.
+        let mut live_sessions = self.live_sessions;
+        live_sessions.iter_mut().for_each(|session| session.request_stop());
+        drop(live_sessions);
         let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
         if posted == 0 {
             return Err(format!(
@@ -1372,18 +1447,30 @@ impl CaptureBackendHandle {
     }
 }
 
-fn build_hotkey_registrations(config: &AppConfig, parallel_v2: bool, naga_v3_hid: bool) -> Result<Vec<RegisteredHotkey>, String> {
+/// Whether a device's encodings arrive another way than the keyboard: its
+/// mouse sends consumer signals through a live map, or it is a live-only
+/// mouse that is not connected (its aliases must not grab real shortcuts).
+fn skips_keyboard(device: &str, live: &[&'static crate::device_catalog::NativeModel], consumer: bool) -> bool {
+    use crate::device_catalog::{CATALOG, Transport};
+    let live_now = live.iter().any(|model| model.device_id == device);
+    (live_now && consumer)
+        || (!live_now
+            && CATALOG
+                .iter()
+                .any(|model| model.device_id == device && model.transport == Transport::LiveOverlay))
+}
+
+fn build_hotkey_registrations(
+    config: &AppConfig,
+    live: &[&'static crate::device_catalog::NativeModel],
+    consumer: bool,
+) -> Result<Vec<RegisteredHotkey>, String> {
     let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
     for (index, mapping) in config.encoder_mappings.iter().enumerate() {
-        use crate::{config::RAZER_NAGA_DEVICE_ID, mouse_memory::naga_v3};
         let device = config.physical_controls.iter()
             .find(|control| control.id == mapping.control_id)
             .map(|control| control.device_id.as_str());
-        if (device == Some(naga_v3::DEVICE_ID) && naga_v3_hid)
-            || (device == Some(RAZER_NAGA_DEVICE_ID) && (parallel_v2
-                || mapping.source == crate::config::MappingSource::Reserved
-                    && naga_v3::is_extra(mapping.control_id.as_str())))
-        {
+        if device.is_some_and(|device| skips_keyboard(device, live, consumer)) {
             continue;
         }
         let hotkey = hotkeys::parse_hotkey(&mapping.encoded_key).map_err(|message| {
@@ -3022,9 +3109,7 @@ pub fn capture_helper_main() {
         /// Key buttons read from the mouse's consumer collection. Empty = the
         /// mouse sends `F13`..`F24`, which the keyboard hook catches.
         #[serde(default)]
-        consumer_signals: Vec<crate::mouse_memory::ConsumerSignal>,
-        #[serde(default)]
-        naga_v3_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+        readers: Vec<ReaderInit>,
         #[serde(default)]
         firmware_hypershift: bool,
     }
@@ -3039,8 +3124,7 @@ pub fn capture_helper_main() {
                     modifier_stale_gc_ms: None,
                     replayed_modifier_force_release_ms: None,
                     hypershift_trigger: None,
-                    consumer_signals: Vec::new(),
-                    naga_v3_signals: Vec::new(),
+                    readers: Vec::new(),
                     firmware_hypershift: false,
                 },
                 Err(e) => {
@@ -3056,8 +3140,7 @@ pub fn capture_helper_main() {
         modifier_stale_gc_ms,
         replayed_modifier_force_release_ms,
         hypershift_trigger,
-        consumer_signals,
-        naga_v3_signals,
+        readers,
         firmware_hypershift,
     } = init;
 
@@ -3087,7 +3170,7 @@ pub fn capture_helper_main() {
         log::info!("[capture-helper] REPLAYED awaiting-up threshold set to {clamped} ms.");
     }
 
-    if registrations.is_empty() && consumer_signals.is_empty() && naga_v3_signals.is_empty() {
+    if registrations.is_empty() && readers.is_empty() {
         log::warn!("[capture-helper] No input mappings, exiting.");
         return;
     }
@@ -3103,18 +3186,13 @@ pub fn capture_helper_main() {
         Ordering::Relaxed,
     );
     HELPER_REGISTRATIONS.with(|cell| *cell.borrow_mut() = registrations);
-    if !consumer_signals.is_empty() {
-        log::info!("[capture-helper] {} key buttons read as consumer signals.", consumer_signals.len());
-        super::consumer::spawn_reader(
-            consumer_signals, crate::mouse_memory::config_model(),
-            || HELPER_HYPER_ACTIVE.load(Ordering::Relaxed), naga_v3_signals.is_empty(),
-            if firmware_hypershift { super::consumer::NAGA_V2_PREFIX } else { "" },
-        );
-    }
-    if !naga_v3_signals.is_empty() {
-        super::consumer::spawn_reader(
-            naga_v3_signals, &crate::device_catalog::NAGA_V3_PRO, || false, true, super::consumer::NAGA_V3_PREFIX,
-        );
+    for reader in readers {
+        let Some(model) = crate::device_catalog::CATALOG.get(reader.model) else { continue };
+        log::info!("[capture-helper] {}: {} button signals read from the mouse.", model.name, reader.signals.len());
+        // A firmware layer arrives in the signal itself; the onboard path's
+        // layer is the software trigger's state.
+        let hyper: fn() -> bool = if reader.software_layer { || HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) } else { || false };
+        super::consumer::spawn_reader(reader.signals, model, hyper, true);
     }
     HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
     HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
@@ -3650,9 +3728,10 @@ fn spawn_capture_helper(
     registrations: &[RegisteredHotkey],
     event_tx: mpsc::SyncSender<EncodedKeyEvent>,
     config: &AppConfig,
-    mouse_signals: (Vec<crate::mouse_memory::ConsumerSignal>, Vec<crate::mouse_memory::ConsumerSignal>),
+    mouse: MouseInputs,
     helper_died: Arc<AtomicBool>,
 ) -> Option<HelperHandle> {
+    let MouseInputs { readers, firmware_hypershift } = mouse;
     use std::io::Write;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -3677,9 +3756,7 @@ fn spawn_capture_helper(
         })
         .collect();
 
-    let (consumer_signals, naga_v3_signals) = mouse_signals;
-    let firmware_hypershift = crate::mouse_memory::naga_v3::configured(config);
-    if helper_regs.is_empty() && consumer_signals.is_empty() && naga_v3_signals.is_empty() {
+    if helper_regs.is_empty() && readers.is_empty() {
         return None;
     }
 
@@ -3758,9 +3835,7 @@ fn spawn_capture_helper(
         replayed_modifier_force_release_ms: Option<u64>,
         hypershift_trigger: &'a str,
         #[serde(skip_serializing_if = "Vec::is_empty")]
-        consumer_signals: Vec<crate::mouse_memory::ConsumerSignal>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        naga_v3_signals: Vec<crate::mouse_memory::ConsumerSignal>,
+        readers: Vec<ReaderInit>,
         firmware_hypershift: bool,
     }
     let init = HelperInit {
@@ -3768,8 +3843,7 @@ fn spawn_capture_helper(
         modifier_stale_gc_ms: config.settings.modifier_stale_gc_ms,
         replayed_modifier_force_release_ms: config.settings.replayed_modifier_force_release_ms,
         hypershift_trigger: config.settings.hypershift_trigger.trim(),
-        consumer_signals,
-        naga_v3_signals,
+        readers,
         firmware_hypershift,
     };
     let json = match serde_json::to_string(&init) {
@@ -3811,6 +3885,7 @@ fn spawn_capture_helper(
         // Count drops and warn at most once every 5s (this reader is a single
         // thread, so plain locals suffice — no shared state needed).
         let mut dropped_events: u64 = 0;
+        let mut unreadable = [false; crate::device_catalog::CATALOG_LEN];
         let mut last_drop_warn = std::time::Instant::now();
         for line in reader.lines().map_while(Result::ok) {
             let trimmed = line.trim();
@@ -3818,12 +3893,15 @@ fn spawn_capture_helper(
                 continue;
             }
             // Whether the consumer reader can read the side buttons (Mouse tab).
-            if trimmed.starts_with("STATUS:") {
-                let unreadable = trimmed == super::consumer::STATUS_UNREADABLE;
+            let reader_line = super::consumer::split_reader_line(trimmed);
+            if let Some((model, status)) = reader_line.filter(|(_, rest)| rest.starts_with("STATUS:")) {
+                // Unreadable while any mouse's reader cannot read its collection.
+                let index = crate::mouse_memory::live_overlay::catalog_index(model);
+                unreadable[index] = status == super::consumer::STATUS_UNREADABLE;
                 crate::mouse_status::set_state(
                     Some(&app),
                     crate::mouse_status::StatusKind::ButtonsUnreadable,
-                    unreadable,
+                    unreadable.iter().any(|&state| state),
                 );
                 continue;
             }
@@ -3864,14 +3942,14 @@ fn spawn_capture_helper(
             }
             // `HS:` is stamped by the helper when the press arrived while the
             // Hypershift trigger was held; it wraps the other prefixes.
-            let (input, backend) = if let Some(input) = trimmed.strip_prefix(super::consumer::NAGA_V2_PREFIX) {
-                if !crate::mouse_memory::naga_v3::hid_ready(true) { continue; }
-                (input, "windows-hid-naga-v2")
-            } else if let Some(input) = trimmed.strip_prefix(super::consumer::NAGA_V3_PREFIX) {
-                if !crate::mouse_memory::naga_v3::hid_ready(false) { continue; }
-                (input, "windows-hid-naga-v3")
-            } else {
-                (trimmed, BACKEND_LL_HOOK)
+            let (input, backend) = match reader_line {
+                Some((model, input)) => {
+                    if !crate::mouse_memory::live_overlay::events_allowed(model) {
+                        continue;
+                    }
+                    (input, hid_backend(model))
+                }
+                None => (trimmed, BACKEND_LL_HOOK.to_owned()),
             };
             let (is_hypershift, rest) = match input.strip_prefix(HS_PREFIX) {
                 Some(rest) => (true, rest),
@@ -3896,7 +3974,7 @@ fn spawn_capture_helper(
             // path.  See CAPTURE_EVENT_CAPACITY for rationale.
             if let Err(mpsc::TrySendError::Full(_)) = event_tx.try_send(EncodedKeyEvent {
                 encoded_key,
-                backend: backend.into(),
+                backend,
                 received_at: runtime::timestamp_millis(),
                 is_repeat,
                 is_key_up,

@@ -21,6 +21,7 @@ import type {
   MouseSettings,
   MouseStatusEvent,
   NativeModelInfo,
+  OnboardBanks,
   OnboardBinding,
   OnboardReport,
   OnboardTakeoverEvent,
@@ -125,14 +126,25 @@ export async function restoreSynapseStartup(): Promise<void> {
   return invoke<void>("restore_synapse_startup");
 }
 
-/** Name, DPI range and poll rates of the natively driven mouse model. */
-export async function getNativeModel(): Promise<NativeModelInfo> {
-  return invoke<NativeModelInfo>("get_native_model");
+/** Name, DPI range and poll rates of a device's mouse model (any connected
+ *  one when `deviceId` is absent). */
+export async function getNativeModel(deviceId?: string): Promise<NativeModelInfo> {
+  return invoke<NativeModelInfo>("get_native_model", { deviceId: deviceId ?? null });
 }
 
-/** Read-only text dump of the connected mouse for a "help verify" issue (~20 s). */
-export async function getDeviceReport(detail?: "summary" | "full"): Promise<string> {
-  return invoke<string>("get_device_report", { detail: detail ?? null });
+/** Every native mouse whose receiver is plugged in now. */
+export async function listNativeMice(): Promise<NativeModelInfo[]> {
+  return invoke<NativeModelInfo[]>("list_native_mice");
+}
+
+/** The onboard banks (stored profiles) of a device's mouse. */
+export async function getOnboardBanks(deviceId: string): Promise<OnboardBanks> {
+  return invoke<OnboardBanks>("get_onboard_banks", { deviceId });
+}
+
+/** Read-only text dump of a connected mouse for a "help verify" issue (~20 s). */
+export async function getDeviceReport(detail?: "summary" | "full", deviceId?: string): Promise<string> {
+  return invoke<string>("get_device_report", { detail: detail ?? null, deviceId: deviceId ?? null });
 }
 
 /** Opens a new GitHub issue for a device report in the browser. */
@@ -161,19 +173,19 @@ export async function openStartupAppsSettings(): Promise<void> {
   return invoke<void>("open_startup_apps_settings");
 }
 
-/** Battery, DPI and poll rate as the mouse reports them now. */
-export async function getMouseSettings(): Promise<MouseSettings> {
-  return invoke<MouseSettings>("get_mouse_settings");
+/** Battery, DPI and poll rate as a device's mouse reports them now. */
+export async function getMouseSettings(deviceId?: string): Promise<MouseSettings> {
+  return invoke<MouseSettings>("get_mouse_settings", { deviceId: deviceId ?? null });
 }
 
 /** Stores a DPI (both axes) in the mouse; resolves with the settings read back. */
-export async function setMouseDpi(dpi: number): Promise<MouseSettings> {
-  return invoke<MouseSettings>("set_mouse_dpi", { dpi });
+export async function setMouseDpi(dpi: number, deviceId?: string): Promise<MouseSettings> {
+  return invoke<MouseSettings>("set_mouse_dpi", { dpi, deviceId: deviceId ?? null });
 }
 
 /** Sets the poll rate (one of the model's `pollRates`); resolves with the settings read back. */
-export async function setMousePollRate(hz: number): Promise<MouseSettings> {
-  return invoke<MouseSettings>("set_mouse_poll_rate", { hz });
+export async function setMousePollRate(hz: number, deviceId?: string): Promise<MouseSettings> {
+  return invoke<MouseSettings>("set_mouse_poll_rate", { hz, deviceId: deviceId ?? null });
 }
 
 export async function getAppPaths(): Promise<AppPathsInfo> {
@@ -242,23 +254,25 @@ export async function parseSynapseSource(
   return invoke<ParsedSynapseProfiles>("parse_synapse_source", { path });
 }
 
-/** Best-effort onboarding pre-flight: is Razer Synapse installed/running? */
-export async function checkSynapseInstalled(runningOnly = false): Promise<boolean> {
-  return invoke<boolean>("check_synapse_installed", { runningOnly });
-}
-
 /** Toggle "live capture" mode: while enabled, captured Naga keys are reported
  * to the UI (encoded_key_received) but NOT resolved/executed. Used by the
- * onboarding hardware test so buttons light up without firing real actions. */
+ * onboarding hardware test so buttons light up without firing real actions.
+ * `checkExtraControls` also maps every optional live control for the check. */
 let captureModeCommand = Promise.resolve();
-export function setInputCaptureMode(enabled: boolean, testNagaV3 = false): Promise<void> {
-  const next = captureModeCommand.then(() => invoke<void>("set_input_capture_mode", { enabled, testNagaV3 }));
+export function setInputCaptureMode(enabled: boolean, checkExtraControls = false): Promise<void> {
+  const next = captureModeCommand.then(() => invoke<void>("set_input_capture_mode", { enabled, checkExtraControls }));
   captureModeCommand = next.catch(() => {});
   return next;
 }
 
-export async function getNagaV3CaptureReady(): Promise<boolean> {
-  return invoke<boolean>("naga_v3_capture_ready");
+/** Whether a device's buttons reach Sidearm now (its live map is verified). */
+export async function getLiveMapReady(deviceId: string): Promise<boolean> {
+  return invoke<boolean>("live_map_ready", { deviceId });
+}
+
+/** The connected native mice changed (plugged in or out). */
+export function listenNativeMiceChanged(onPayload: (mice: NativeModelInfo[]) => void) {
+  return listenEvent("native_mice_changed", onPayload);
 }
 
 export async function listRunningProcesses(): Promise<RunningProcessInfo[]> {

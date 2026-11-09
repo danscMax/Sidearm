@@ -98,6 +98,8 @@ export interface Profile {
   mousePollRateHz?: number;
   /** Optional stages (1–5) for DPI Up/Down; mouseDpi remains the starting stage. */
   mouseDpiStages?: number[];
+  /** Onboard bank (1–5) each mouse plays this profile from, by device id. */
+  deviceSlots?: Record<string, number>;
 }
 
 /** A physical input device; its controls live in `physicalControls` tagged

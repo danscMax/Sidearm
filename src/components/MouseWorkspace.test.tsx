@@ -8,7 +8,8 @@ import type { MouseSettings } from "../lib/onboard-mapping";
 import * as backend from "../lib/backend";
 
 vi.mock("../lib/backend", () => ({
-  getMouseSettings: vi.fn(), getNativeModel: vi.fn(), getDeviceReport: vi.fn(),
+  getMouseSettings: vi.fn(), getNativeModel: vi.fn(), getDeviceReport: vi.fn(), getOnboardBanks: vi.fn(),
+  listNativeMice: vi.fn(async () => []), listenNativeMiceChanged: vi.fn(async () => () => {}),
   listenMouseBattery: vi.fn(), listenActionExecutionEvent: vi.fn(),
   setMouseDpi: vi.fn(), setMousePollRate: vi.fn(), setKeySignals: vi.fn(), openDeviceReportIssue: vi.fn(),
   normalizeCommandError: (error: unknown) => ({ message: String(error) }),
@@ -24,7 +25,7 @@ beforeEach(async () => {
   vi.clearAllMocks();
   await i18n.changeLanguage("en");
   vi.mocked(backend.getMouseSettings).mockResolvedValue(readings);
-  vi.mocked(backend.getNativeModel).mockResolvedValue({ name: "Naga", connected: true, verified: true, consumerSignals: null, dpiMin: 100, dpiMax: 30000, pollRates: [125, 500, 1000] });
+  vi.mocked(backend.getNativeModel).mockResolvedValue({ name: "Naga", deviceId: "razer-naga", banks: false, connected: true, verified: true, consumerSignals: null, dpiMin: 100, dpiMax: 30000, pollRates: [125, 500, 1000] });
   vi.mocked(backend.listenMouseBattery).mockImplementation(async (callback) => { batteryEvent = () => callback({ percent: 63, low: false }); return vi.fn<() => void>(); });
   vi.mocked(backend.listenActionExecutionEvent).mockImplementation(async (_name, callback) => { executionEvent = callback as typeof executionEvent; return vi.fn<() => void>(); });
   vi.mocked(backend.getDeviceReport).mockResolvedValue("Sidearm diagnostic summary");
@@ -87,7 +88,7 @@ describe("independent mouse readings", () => {
     const changed = updates.mock.calls[0][0](config) as AppConfig;
     expect(changed.profiles[0].mouseDpi).toBe(1200);
     expect(changed.profiles[0].mouseDpiStages).toEqual([400, 800, 1200, 1600, 3200]);
-    expect(backend.setMouseDpi).toHaveBeenCalledWith(1200);
+    expect(backend.setMouseDpi).toHaveBeenCalledWith(1200, undefined);
   });
 
   it("edits an inactive profile without changing the mouse or another profile", async () => {
@@ -161,7 +162,7 @@ describe("independent mouse readings", () => {
     await screen.findByText("1100 DPI");
     fireEvent.click(screen.getByRole("button", { name: "Mouse diagnostics" }));
     await screen.findByRole("textbox", { name: "Mouse diagnostics" });
-    expect(backend.getDeviceReport).toHaveBeenCalledWith("summary");
+    expect(backend.getDeviceReport).toHaveBeenCalledWith("summary", undefined);
     expect(backend.openDeviceReportIssue).not.toHaveBeenCalled();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Copy report" }));

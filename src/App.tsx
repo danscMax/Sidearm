@@ -49,6 +49,7 @@ import {
   listenMouseStatus,
   getMouseStatus,
   getNativeModel,
+  listenNativeMiceChanged,
   reloadRuntime,
   setKeySignals,
   setNativeTexts,
@@ -62,10 +63,11 @@ import {
   setAdminAutostart,
 } from "./lib/backend";
 import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels";
-import { MOUSE_STATUS_NOTICES, type MouseStatusKind } from "./lib/onboard-mapping";
+import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
-import { isBuiltinControl, NAGA_V3_DEVICE_ID, usesNagaV3Ring } from "./lib/onboard-mapping";
+import { isBuiltinControl } from "./lib/onboard-mapping";
+import { deviceControlId, deviceLayout, hasDevice, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -158,7 +160,7 @@ function App() {
     undoStack,
     redoStack,
     activeConfig,
-    refreshConfig, updateDraft, handleUndo, handleRedo,
+    refreshConfig, refreshAfterSave, updateDraft, handleUndo, handleRedo,
   } = persistence;
 
   // Razer conveniences (Synapse import, factory-defaults toast) only make
@@ -401,6 +403,26 @@ function App() {
     return () => unlisten?.();
   }, [switchWorkspaceMode]);
 
+  // A mouse plugged in while Sidearm runs: loading the config adds its device
+  // (the backend seeds it), so reload once one is missing.
+  const reloadForNewMouse = useEffectEvent((mice: NativeModelInfo[]) => {
+    if (activeConfig && mice.some((mouse) => mouse.verified && !hasDevice(activeConfig, mouse.deviceId))) {
+      void refreshAfterSave();
+    }
+  });
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listenNativeMiceChanged((mice) => reloadForNewMouse(mice)).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   // Tray quick-rule found no usable target window (only Sidearm was in front) —
   // tell the user instead of failing silently.
   useEffect(() => {
@@ -542,9 +564,9 @@ function App() {
   });
   useEffect(() => {
     if (!migrationChecked || showMigrationDialog || viewState !== "ready" || !activeConfig || autoStartedRuntime.current) return;
-    // The first V3 check starts capture after Synapse preflight and applies the
-    // test map directly. Starting here would apply a map and then undo it.
-    if (!activeConfig.settings.onboardingCompleted && usesNagaV3Ring(activeConfig)) return;
+    // A first-run setup starts capture itself, after its Razer Synapse check.
+    // Re-running setup later must not leave the buttons dead at autostart.
+    if (activeConfig.settings.onboardingCompleted === undefined) return;
     autoStartedRuntime.current = true;
     startInitialRuntime();
   }, [activeConfig, migrationChecked, showMigrationDialog, viewState]);
@@ -697,9 +719,8 @@ function App() {
       }
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.altKey && !e.metaKey) {
       // Arrow keys: navigate between hotspots
-      const hotspotIds = effectiveDeviceId === NAGA_V3_DEVICE_ID
-        ? ALL_HOTSPOT_IDS.map((id) => "v3_" + id)
-        : ALL_HOTSPOT_IDS;
+      const layout = deviceLayout(effectiveDeviceId);
+      const hotspotIds = layout ? ALL_HOTSPOT_IDS.map((id) => deviceControlId(layout, id)) : ALL_HOTSPOT_IDS;
       const availableIds = hotspotIds.filter((id) => activeConfig?.physicalControls.some((control) =>
         control.id === id && control.deviceId === effectiveDeviceId));
       if (availableIds.length > 0 && selectedControlId) {
@@ -1038,9 +1059,7 @@ function App() {
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
                 isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
-                  && control.id === (control.deviceId === NAGA_V3_DEVICE_ID
-                    ? "v3_hypershift_button"
-                    : activeConfig.settings.hypershiftTrigger ?? "mouse_right"),
+                  && control.id === hypershiftControlId(activeConfig, control.deviceId),
               };
             }) ?? [],
       })),
@@ -1117,10 +1136,6 @@ function App() {
                 devices={devices}
                 activeDeviceId={effectiveDeviceId}
                 onSelectDevice={handleSelectDevice}
-                onSetupNagaV3={() => {
-                  handleSelectDevice(NAGA_V3_DEVICE_ID);
-                  setShowOnboarding(true);
-                }}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}
                 onSelectLayer={(layer) => setSelectedLayer(layer)}
@@ -1273,8 +1288,8 @@ function App() {
         <OnboardingWizard
           config={activeConfig}
           applyConfig={(next) => updateDraft(() => next, { immediate: true })}
-          onClose={() => {
-            if (usesNagaV3Ring(activeConfig)) handleSelectDevice(NAGA_V3_DEVICE_ID);
+          onClose={(deviceId) => {
+            if (deviceId && hasDevice(activeConfig, deviceId)) handleSelectDevice(deviceId);
             setShowOnboarding(false);
           }}
         />

@@ -2,7 +2,7 @@
 
 # Sidearm
 
-**An open-source Razer Synapse alternative for the Razer Naga V2 HyperSpeed.**
+**An open-source Razer Synapse alternative for the Razer Naga V2 HyperSpeed and Naga V3 Pro.**
 
 Configure every button, Hypershift, DPI, polling rate and battery of your Naga
 without installing Razer Synapse — plus per-app profiles, macros and text snippets
@@ -64,6 +64,11 @@ Synapse completely.
 ### Supported devices
 
 - **Razer Naga V2 HyperSpeed** — full native support (onboard memory, DPI, polling rate, battery).
+- **Razer Naga V3 Pro** (2.4 GHz receiver, 12-button side plate) — full native support:
+  side and top buttons, wheel, the HyperShift button under the ring finger, DPI, battery,
+  and its onboard profile slots — each Sidearm profile can be saved into a slot on exit.
+  Works together with a V2 HyperSpeed: each mouse keeps its own HyperShift layer, and
+  assignments can be copied from one mouse to the other.
 - **Razer Naga V2 Pro, Naga Pro, Naga X** — recognised: DPI, polling rate and battery
   work, the buttons work as a custom device. **Own one?** Press **Help verify** in the
   Mouse tab: Sidearm reads the mouse (without changing it) and opens a
@@ -134,7 +139,7 @@ Button press
 
 </div>
 
-**Sidearm — открытая альтернатива Razer Synapse для Razer Naga V2 HyperSpeed.**
+**Sidearm — открытая альтернатива Razer Synapse для Razer Naga V2 HyperSpeed и Naga V3 Pro.**
 Настраивает все кнопки, Hypershift, DPI, частоту опроса и заряд мыши без
 установленного Razer Synapse. Плюс профили под приложения, макросы и текстовые
 сниппеты, которых в Synapse нет.
@@ -169,6 +174,11 @@ Synapse, Razer Central и фоновых служб Razer. Synapse можно у
 ### Поддерживаемые устройства
 
 - **Razer Naga V2 HyperSpeed** — полная поддержка (память мыши, DPI, частота опроса, заряд).
+- **Razer Naga V3 Pro** (приёмник 2,4 ГГц, панель на 12 кнопок) — полная поддержка: боковые и
+  верхние кнопки, колесо, кнопка HyperShift под безымянным пальцем, DPI, заряд и слоты
+  профилей в памяти мыши — каждый профиль Sidearm можно сохранить в слот при выходе.
+  Работает вместе с V2 HyperSpeed: у каждой мыши свой слой HyperShift, назначения можно
+  скопировать с одной мыши на другую.
 - **Razer Naga V2 Pro, Naga Pro, Naga X** — распознаются: DPI, частота опроса и заряд
   работают, кнопки — как у своего устройства. **Есть такая мышь?** Нажмите
   **«Помочь проверить»** во вкладке «Мышь»: Sidearm прочитает мышь (ничего не меняя) и

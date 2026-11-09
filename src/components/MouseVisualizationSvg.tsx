@@ -5,15 +5,17 @@ import type { ControlSurfaceEntry } from "../lib/constants";
 import { buildHotspotTooltip, resolveControlBadge } from "../lib/labels";
 import {
   actionLabel,
-  COMBINED_LEFT_BUTTONS,
-  COMBINED_RIGHT_BUTTONS,
   HEAT_TINT,
   heatIntensity,
   type MouseVisualizationProps,
-  TOP_LEFT_BUTTONS,
-  TOP_RIGHT_BUTTONS,
   type ViewTab,
 } from "../lib/mouse-visual";
+import {
+  COMBINED_LEFT_BUTTONS,
+  COMBINED_RIGHT_BUTTONS,
+  TOP_LEFT_BUTTONS,
+  TOP_RIGHT_BUTTONS,
+} from "../lib/devices";
 import { useControlInteractions } from "../hooks/useControlInteractions";
 import { LabelColumn } from "./mouse-visual/LabelColumn";
 import { LayerPills } from "./mouse-visual/LayerPills";

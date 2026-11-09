@@ -2,6 +2,7 @@ import { Fragment, startTransition, useEffect, useMemo, useRef, useState, type R
 import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
+import { RAZER_NAGA_DEVICE_ID } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -43,7 +44,9 @@ import {
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
 import { displayNameForControl } from "../lib/labels";
-import { usesNagaV3Ring } from "../lib/onboard-mapping";
+import { defaultLayout, deviceLayout } from "../lib/devices";
+import { retargetImportedBindings } from "../lib/device-transfer";
+import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
 import { DeviceBar } from "./DeviceBar";
@@ -74,7 +77,6 @@ export interface ProfilesWorkspaceProps {
   devices: Device[];
   activeDeviceId: string | null;
   onSelectDevice: (id: string) => void;
-  onSetupNagaV3?: () => void;
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
   onSelectLayer: (layer: Layer) => void;
@@ -114,7 +116,6 @@ export function ProfilesWorkspace({
   devices,
   activeDeviceId,
   onSelectDevice,
-  onSetupNagaV3,
   selectedLayer,
   multiSelectedControlIds,
   onSelectLayer,
@@ -168,6 +169,8 @@ export function ProfilesWorkspace({
   >(null);
   // One-shot signal: a just-created device opens its inline rename (U10).
   const [renameFreshDevice, setRenameFreshDevice] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
+  const builtinMice = activeConfig.devices.filter((device) => device.builtin && deviceLayout(device.id)).length;
 
   const deviceControlCount = activeDevice
     ? activeConfig.physicalControls.filter((control) => control.deviceId === activeDevice.id).length
@@ -175,21 +178,6 @@ export function ProfilesWorkspace({
   const autoControlName = t("device.autoName", { n: deviceControlCount + 1 });
 
   function handleAddDevice() {
-    if (onSetupNagaV3 && usesNagaV3Ring(activeConfig)) {
-      setConfirmModal({
-        title: t("onboarding.v3.deviceTitle"),
-        message: t("onboarding.v3.deviceMessage"),
-        confirmLabel: t("onboarding.v3.deviceSetup"),
-        onConfirm: onSetupNagaV3,
-        secondaryConfirmLabel: t("onboarding.v3.otherDevice"),
-        onSecondaryConfirm: createGenericDevice,
-      });
-      return;
-    }
-    createGenericDevice();
-  }
-
-  function createGenericDevice() {
     const { config: nextConfig, deviceId } = createDevice(activeConfig, t("device.defaultName"));
     updateDraft(() => nextConfig);
     onSelectDevice(deviceId);
@@ -870,6 +858,7 @@ export function ProfilesWorkspace({
             throttledControlIds={throttledControlIds}
             heatmapEnabled={heatmapEnabled}
             onDropBinding={handleDropBinding}
+            layout={deviceLayout(activeDevice?.id) ?? defaultLayout()}
           />
         )}
         {learnModal && activeDevice ? (
@@ -929,7 +918,18 @@ export function ProfilesWorkspace({
                   showToast(t("settings.invalidProfileError"), "warning");
                   return;
                 }
-                updateDraft((c) => importProfile(c, result.data));
+                // A profile from another mouse lands on the one shown now.
+                const target = activeDevice?.builtin ? activeDevice.id : RAZER_NAGA_DEVICE_ID;
+                let dropped = 0;
+                updateDraft((c) => {
+                  const before = new Set(c.bindings.map((binding) => binding.id));
+                  const imported = importProfile(c, result.data);
+                  const added = new Set(imported.bindings.filter((binding) => !before.has(binding.id)).map((binding) => binding.id));
+                  const placed = retargetImportedBindings(imported, added, target);
+                  dropped = placed.dropped;
+                  return placed.config;
+                });
+                if (dropped > 0) showToast(t("transfer.importDropped", { count: dropped }), "warning");
               } catch {
                 showToast(t("settings.readProfileError"), "warning");
               }
@@ -937,7 +937,25 @@ export function ProfilesWorkspace({
           >
             {t("profile.importProfile")}
           </button>
+          {builtinMice > 1 ? (
+            <button type="button" className="action-button action-button--small" onClick={() => setShowTransfer(true)}>
+              {t("transfer.open")}
+            </button>
+          ) : null}
         </div>
+      ) : null}
+      {showTransfer ? (
+        <DeviceTransferModal
+          config={activeConfig}
+          activeDeviceId={activeDevice?.id ?? null}
+          activeProfileId={activeProfile?.id ?? null}
+          onClose={() => setShowTransfer(false)}
+          onApply={(next, copied) => {
+            updateDraft(() => next);
+            setShowTransfer(false);
+            showToast(t("transfer.done", { count: copied }), "success");
+          }}
+        />
       ) : null}
 
       {/* ── Section header ── */}

@@ -37,8 +37,8 @@ use std::io::Error;
 
 use crate::device_catalog::NativeModel;
 
-#[path = "naga_v3.rs"]
-pub mod naga_v3;
+#[path = "live_overlay.rs"]
+pub mod live_overlay;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
@@ -472,8 +472,88 @@ pub struct VendorDevice {
     path: String,
 }
 
-/// Serializes every [`VendorDevice`] in this process.
-static DEVICE_LOCK: Mutex<()> = Mutex::new(());
+/// Serializes every [`VendorDevice`] of one catalog model in this process.
+/// Two receivers never share replies, so two mice can be talked to at once.
+static DEVICE_LOCKS: [Mutex<()>; crate::device_catalog::CATALOG_LEN] =
+    [const { Mutex::new(()) }; crate::device_catalog::CATALOG_LEN];
+
+fn device_lock(model: &'static NativeModel) -> MutexGuard<'static, ()> {
+    let index = crate::device_catalog::CATALOG
+        .iter()
+        .position(|entry| std::ptr::eq(*entry, model))
+        .unwrap_or(0);
+    // A panic mid-exchange leaves no state behind the lock worth refusing for.
+    DEVICE_LOCKS[index].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Catalog models whose vendor interface is present right now (the receiver
+/// is plugged in; the mouse itself may sleep). When Windows cannot list (the
+/// list changes mid-read during a plug burst), the last answer stands: a
+/// failed read must not look like every mouse unplugged.
+pub fn present_models() -> Vec<&'static NativeModel> {
+    static LAST: Mutex<Vec<&'static NativeModel>> = Mutex::new(Vec::new());
+    let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    match present_hid_paths() {
+        Ok(paths) => *last = models_in(&paths),
+        Err(error) => log::warn!("[mouse] Could not list present HID devices, keeping the last list: {error}"),
+    }
+    last.clone()
+}
+
+/// Catalog models with a vendor interface among these upper-cased paths.
+fn models_in(paths: &[String]) -> Vec<&'static NativeModel> {
+    crate::device_catalog::CATALOG
+        .iter()
+        .copied()
+        .filter(|model| {
+            model.pids.iter().any(|pid| {
+                let needle = interface_needle(model.vid, *pid, model.interface);
+                paths.iter().any(|path| path.contains(&needle))
+            })
+        })
+        .collect()
+}
+
+/// Upper-cased paths of every HID interface Windows reports as present.
+fn present_hid_paths() -> Result<Vec<String>, String> {
+    use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
+        CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_ListW,
+        CR_BUFFER_SMALL, CR_SUCCESS,
+    };
+    let guid = windows_sys::core::GUID::from_u128(0x4d1e55b2_f16f_11cf_88cb_001111000030);
+    // The list can grow between the size query and the read: retry then.
+    for _ in 0..3 {
+        let mut len = 0u32;
+        let status = unsafe {
+            CM_Get_Device_Interface_List_SizeW(&mut len, &guid, std::ptr::null(), CM_GET_DEVICE_INTERFACE_LIST_PRESENT)
+        };
+        if status != CR_SUCCESS {
+            return Err(format!("CM_Get_Device_Interface_List_SizeW returned {status}"));
+        }
+        let mut buffer = vec![0u16; len as usize];
+        let status = unsafe {
+            CM_Get_Device_Interface_ListW(
+                &guid,
+                std::ptr::null(),
+                buffer.as_mut_ptr(),
+                len,
+                CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
+            )
+        };
+        if status == CR_BUFFER_SMALL {
+            continue;
+        }
+        if status != CR_SUCCESS {
+            return Err(format!("CM_Get_Device_Interface_ListW returned {status}"));
+        }
+        return Ok(buffer
+            .split(|&unit| unit == 0)
+            .filter(|path| !path.is_empty())
+            .map(|path| String::from_utf16_lossy(path).to_uppercase())
+            .collect());
+    }
+    Err("the HID device list kept changing".into())
+}
 
 /// A failed open is still useful diagnostic evidence, without exporting the HID path.
 pub fn unavailable_device_report(error: &str) -> String {
@@ -485,10 +565,31 @@ impl VendorDevice {
     /// Opens the vendor collection of the first catalog model found in the
     /// registry. `Err` carries the last model's failure.
     pub fn open_connected() -> Result<Self, String> {
+        Self::open_first_model(|_| true)
+    }
+
+    /// The connected V2-family mouse whose buttons hold onboard records.
+    pub fn open_onboard() -> Result<Self, String> {
+        Self::open_first_model(|model| model.transport == crate::device_catalog::Transport::Onboard)
+    }
+
+    /// The connected mouse of a config device (`razer-naga`, `razer-naga-v3`).
+    pub fn open_for_device(device_id: &str) -> Result<Self, String> {
+        Self::open_first_model(|model| model.device_id == device_id)
+    }
+
+    /// Opens `model` under whichever of its PIDs is connected.
+    pub fn open_model(model: &'static NativeModel) -> Result<Self, String> {
+        Self::open_first_model(|candidate| std::ptr::eq(candidate, model))
+    }
+
+    /// Opens the first catalog model accepted by `wanted`. `Err` carries the
+    /// last model's failure, or [`NOT_CONNECTED`].
+    fn open_first_model(wanted: impl Fn(&NativeModel) -> bool) -> Result<Self, String> {
         // A model that is simply not plugged in is not worth reporting; an
         // interface that exists but does not open is.
         let mut last_error = NOT_CONNECTED.to_string();
-        for model in crate::device_catalog::CATALOG {
+        for model in crate::device_catalog::CATALOG.iter().filter(|model| wanted(model)) {
             for pid in model.pids {
                 match Self::open(model, *pid) {
                     Ok(device) => return Ok(device),
@@ -500,16 +601,10 @@ impl VendorDevice {
         Err(last_error)
     }
 
-    pub fn open_v2() -> Result<Self, String> {
-        let model = config_model();
-        Self::open(model, model.pids[0])
-    }
-
     /// Opens the vendor collection of `model` under `pid`, discovering its
     /// interface path in the registry. `Err` carries an OS-error description.
     fn open(model: &'static NativeModel, pid: u16) -> Result<Self, String> {
-        // A panic mid-exchange leaves no state behind the lock worth refusing for.
-        let exclusive = DEVICE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let exclusive = device_lock(model);
         let paths = find_paths(&interface_needle(model.vid, pid, model.interface))?;
         let (handle, path) = open_first(&paths, |path| {
             let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -541,6 +636,12 @@ impl VendorDevice {
         Ok(Self { handle, _exclusive: exclusive, model, pid, path })
     }
 
+    /// A handle that reaches no device, for tests of pure checks.
+    #[cfg(test)]
+    pub(crate) fn test_handle(model: &'static NativeModel, pid: u16, path: &str) -> Self {
+        Self { handle: INVALID_HANDLE_VALUE, _exclusive: device_lock(model), model, pid, path: path.into() }
+    }
+
     /// The model this device was opened as.
     pub fn model(&self) -> &'static NativeModel {
         self.model
@@ -550,10 +651,13 @@ impl VendorDevice {
     /// model not proven on hardware may hold wrong button ids, and a wrong
     /// record can leave a button dead outside Sidearm.
     fn require_verified(&self) -> Result<(), String> {
-        if self.model.verified {
-            Ok(())
-        } else {
+        if !self.model.verified {
             Err(format!("{} is not verified yet: button records are not written", self.model.name))
+        } else if self.model.transport != crate::device_catalog::Transport::Onboard {
+            // Its buttons live in the reversible live map only (`live_overlay`).
+            Err(format!("{} keeps no onboard profile records", self.model.name))
+        } else {
+            Ok(())
         }
     }
 
@@ -1781,13 +1885,7 @@ mod tests {
             verified: false,
             ..crate::device_catalog::NAGA_V2_HYPERSPEED
         };
-        let device = VendorDevice {
-            handle: INVALID_HANDLE_VALUE,
-            _exclusive: DEVICE_LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
-            model: &UNVERIFIED,
-            pid: 0,
-            path: String::new(),
-        };
+        let device = VendorDevice::test_handle(&UNVERIFIED, 0, "");
         let refused = |result: Result<(), String>| {
             assert_eq!(result, Err("Test mouse is not verified yet: button records are not written".into()));
         };

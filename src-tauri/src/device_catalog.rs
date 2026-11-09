@@ -2,13 +2,48 @@
 //! descriptor per model. Everything that differs between models lives here;
 //! the wire format they share stays in `mouse_memory`.
 //!
-//! Only the Naga V2 HyperSpeed is verified on hardware; the others are read
-//! only. How a model is added and verified: `docs/ADDING-A-MODEL.md`.
+//! The Naga V2 HyperSpeed and the Naga V3 Pro are verified on hardware; the
+//! others are read only. How a model is added and verified:
+//! `docs/ADDING-A-MODEL.md`.
+
+/// How Sidearm puts its signals into a model's buttons.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Transport {
+    /// Persistent records in onboard profile 1, kept by the takeover guard.
+    Onboard,
+    /// Only the reversible live map (`profile 0`), restored on stop.
+    LiveOverlay,
+}
+
+/// A model's reversible live-map path (`live_overlay`).
+#[derive(Debug)]
+pub struct LiveSpec {
+    /// Controls remapped only when an enabled action needs them, as
+    /// `(control id, button id)`.
+    pub extras: &'static [(&'static str, u8)],
+    /// Button that holds the firmware Hypershift key on both layers; `None`
+    /// takes it from `Settings.hypershift_trigger`.
+    pub firmware_trigger: Option<u8>,
+    /// Whether the model has several onboard banks (`0x05` profile commands).
+    pub banks: bool,
+    /// The button that switches banks on the mouse; never stored in a bank.
+    pub profile_button: Option<u8>,
+    /// Display-name keys of controls that differ from the shared seed, as
+    /// `(control id, i18n key)`.
+    pub names: &'static [(&'static str, &'static str)],
+}
 
 /// One natively supported mouse model.
 #[derive(Debug)]
 pub struct NativeModel {
     pub name: &'static str,
+    /// Config device this model's controls belong to.
+    pub device_id: &'static str,
+    /// Prefix of this model's control ids in the config (`v3_thumb_01`).
+    pub control_prefix: &'static str,
+    pub transport: Transport,
+    /// `None`: the model has no live-map path.
+    pub live: Option<LiveSpec>,
     pub vid: u16,
     /// Every PID the vendor collection can appear under (cable, dongle). The
     /// Bluetooth PID is absent on purpose: that link carries no vendor collection.
@@ -88,11 +123,13 @@ impl NativeModel {
         poll_rates.sort_unstable();
         NativeModelInfo {
             name: self.name,
+            device_id: self.device_id,
             dpi_min: self.dpi_min,
             dpi_max: self.dpi_max,
             poll_rates,
-            verified: self.verified || std::ptr::eq(self, &NAGA_V3_PRO),
+            verified: self.verified,
             connected,
+            banks: self.live.as_ref().is_some_and(|live| live.banks),
             consumer_signals: self.consumer.as_ref().map(|_| consumer),
         }
     }
@@ -103,11 +140,14 @@ impl NativeModel {
 #[serde(rename_all = "camelCase")]
 pub struct NativeModelInfo {
     pub name: &'static str,
+    pub device_id: &'static str,
     pub dpi_min: u16,
     pub dpi_max: u16,
     pub poll_rates: Vec<u16>,
     pub verified: bool,
     pub connected: bool,
+    /// The mouse stores profiles in onboard banks (`live_overlay::Banks`).
+    pub banks: bool,
     /// `None`: the model has no consumer path; else whether it is in use.
     pub consumer_signals: Option<bool>,
 }
@@ -115,6 +155,12 @@ pub struct NativeModelInfo {
 /// Razer Naga V2 HyperSpeed, measured on hardware (2026-10-16/17).
 pub const NAGA_V2_HYPERSPEED: NativeModel = NativeModel {
     name: "Razer Naga V2 HyperSpeed",
+    device_id: crate::config::RAZER_NAGA_DEVICE_ID,
+    control_prefix: "",
+    transport: Transport::Onboard,
+    // Used only while a second native mouse is connected (firmware Hypershift
+    // keeps each mouse's layer to itself).
+    live: Some(LiveSpec { extras: &[], firmware_trigger: None, banks: false, profile_button: None, names: &[] }),
     vid: 0x1532,
     // The receiver; the mouse has no wired data link (Bluetooth is 0x00B5).
     pids: &[0x00B4],
@@ -186,10 +232,41 @@ const THUMBS: [(&str, u8); 12] = [
     ("thumb_09", 0x48), ("thumb_10", 0x49), ("thumb_11", 0x4a), ("thumb_12", 0x4b),
 ];
 
-/// The 12-button plate through the Naga V3 Pro's 2.4 GHz receiver.
-/// Button writes are handled by the reversible live-profile overlay.
+/// The 12-button plate through the Naga V3 Pro's 2.4 GHz receiver. Verified
+/// on hardware 2026-11-08; buttons are written only through the reversible
+/// live map (`Transport::LiveOverlay`), never the onboard-profile path.
 pub static NAGA_V3_PRO: NativeModel = NativeModel {
     name: "Razer Naga V3 Pro",
+    device_id: "razer-naga-v3",
+    control_prefix: "v3_",
+    transport: Transport::LiveOverlay,
+    // Measured 2026-11-08 (plans/naga-v3-pro-20261108/findings.md).
+    live: Some(LiveSpec {
+        extras: &[
+            ("top_aux_01", 0x0b),
+            ("top_aux_02", 0x0c),
+            ("wheel_left", 0x34),
+            ("wheel_right", 0x35),
+            ("wheel_click", 0x03),
+            ("top_special_01", 0x6a),
+            ("top_special_02", 0x80),
+            ("top_special_03", 0x0e),
+            ("wheel_up", 0x09),
+            ("wheel_down", 0x0a),
+        ],
+        // The button under the ring finger.
+        firmware_trigger: Some(0x39),
+        banks: true,
+        profile_button: Some(0x0e),
+        names: &[
+            ("top_special_01", "control.name.v3ScrollMode"),
+            ("top_special_02", "control.name.v3ScrollAux"),
+            ("top_special_03", "control.name.v3ProfileButton"),
+            ("wheel_left", "control.name.v3TiltLeft"),
+            ("wheel_right", "control.name.v3TiltRight"),
+            ("hypershift_button", "control.name.v3Ring"),
+        ],
+    }),
     vid: 0x1532,
     pids: &[0x00e8],
     interface: 3,
@@ -200,19 +277,24 @@ pub static NAGA_V3_PRO: NativeModel = NativeModel {
     dpi_min: 100,
     dpi_max: 50_000,
     poll_rates: &[(1000, 1)],
+    // Usages come from `live_overlay::USAGES`, one per control and layer.
     consumer: Some(ConsumerSignals {
         interface: 1,
         collection: 3,
         report_id: 2,
         usages: &[],
     }),
-    verified: false,
+    verified: true,
 };
 
 /// Razer Naga V2 Pro (cable `00A7`, HyperSpeed dongle `00A8`). Its 6-button
 /// plate (`0x50..=0x55`) has no control ids yet.
 pub const NAGA_V2_PRO: NativeModel = NativeModel {
     name: "Razer Naga V2 Pro",
+    device_id: crate::config::RAZER_NAGA_DEVICE_ID,
+    control_prefix: "",
+    transport: Transport::Onboard,
+    live: None,
     vid: 0x1532,
     pids: &[0x00A7, 0x00A8],
     interface: 0,
@@ -244,6 +326,10 @@ pub const NAGA_V2_PRO: NativeModel = NativeModel {
 /// plate answers on which ids is unknown.
 pub const NAGA_PRO: NativeModel = NativeModel {
     name: "Razer Naga Pro",
+    device_id: crate::config::RAZER_NAGA_DEVICE_ID,
+    control_prefix: "",
+    transport: Transport::Onboard,
+    live: None,
     vid: 0x1532,
     pids: &[0x008F, 0x0090],
     interface: 0,
@@ -273,6 +359,10 @@ pub const NAGA_PRO: NativeModel = NativeModel {
 /// Razer Naga X (wired only, `0096`): no mouse 4/5, no tilt, no top buttons.
 pub const NAGA_X: NativeModel = NativeModel {
     name: "Razer Naga X",
+    device_id: crate::config::RAZER_NAGA_DEVICE_ID,
+    control_prefix: "",
+    transport: Transport::Onboard,
+    live: None,
     vid: 0x1532,
     pids: &[0x0096],
     interface: 3,
@@ -294,7 +384,8 @@ pub const NAGA_X: NativeModel = NativeModel {
 };
 
 /// Every natively supported model, probed in this order.
-pub static CATALOG: &[&NativeModel] = &[&NAGA_V2_HYPERSPEED, &NAGA_V2_PRO, &NAGA_PRO, &NAGA_X, &NAGA_V3_PRO];
+pub static CATALOG: &[&NativeModel; CATALOG_LEN] = &[&NAGA_V2_HYPERSPEED, &NAGA_V2_PRO, &NAGA_PRO, &NAGA_X, &NAGA_V3_PRO];
+pub const CATALOG_LEN: usize = 5;
 
 #[cfg(test)]
 mod tests {
@@ -336,9 +427,9 @@ mod tests {
     /// Only hardware proves a model: flipping `verified` must be a deliberate,
     /// reviewed change of this list.
     #[test]
-    fn only_the_naga_v2_hyperspeed_is_verified() {
+    fn only_the_hardware_tested_models_are_verified() {
         let verified: Vec<&str> = CATALOG.iter().filter(|m| m.verified).map(|m| m.name).collect();
-        assert_eq!(verified, ["Razer Naga V2 HyperSpeed"]);
+        assert_eq!(verified, ["Razer Naga V2 HyperSpeed", "Razer Naga V3 Pro"]);
         let names: Vec<&str> = CATALOG.iter().map(|m| m.name).collect();
         assert_eq!(names, ["Razer Naga V2 HyperSpeed", "Razer Naga V2 Pro", "Razer Naga Pro", "Razer Naga X", "Razer Naga V3 Pro"]);
     }
@@ -349,8 +440,8 @@ mod tests {
     fn consumer_usages_cover_every_key_button_once() {
         for m in CATALOG {
             let Some(consumer) = &m.consumer else { continue };
-            if std::ptr::eq(*m, &NAGA_V3_PRO) {
-                continue; // Both firmware layers are tested by the live-overlay module.
+            if m.transport == Transport::LiveOverlay {
+                continue; // Its usages are per layer, tested by `live_overlay`.
             }
             assert!(m.verified, "{}: consumer signals need a verified model", m.name);
             let mut controls: Vec<&str> = consumer.usages.iter().map(|(id, _)| *id).collect();

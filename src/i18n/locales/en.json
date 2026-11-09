@@ -532,7 +532,7 @@
     "hypershiftHeader": "Hypershift",
     "hypershiftHelp": "Button held down to switch the 12 thumb buttons to their Hypershift actions. While it is held, the right click is produced by the left button. Only buttons the mouse still reports to Windows can be used — if the mouse's own memory was rewritten to send a keystroke for a button, Windows never sees that button.",
     "hypershiftTriggerLabel": "TRIGGER BUTTON",
-    "hypershiftV3Help": "Hold the ring finger button to use the second layer on the Naga V3 Pro.",
+    "hypershiftV3Help": "The Naga V3 Pro has its own HyperShift button under the ring finger.",
     "hypershiftMouseRight": "Right",
     "hypershiftMouseLeft": "Left",
     "hypershiftWheelClick": "Wheel",
@@ -738,7 +738,8 @@
     "triggerDoublePress": "Double press",
     "triggerTriplePress": "Triple press",
     "triggerHold": "Hold",
-    "triggerChord": "Chord"
+    "triggerChord": "Chord",
+    "firmwareHypershift": "HyperShift (in the mouse)"
   },
   "inspector": {
     "actionEyebrow": "Button action",
@@ -1291,77 +1292,93 @@
     }
   },
   "onboarding": {
-    "v3": {
-      "deviceTitle": "Add a device",
-      "deviceMessage": "Sidearm found a Razer Naga V3 Pro. Set it up with its 12-button side plate and 2.4 GHz receiver.",
-      "deviceSetup": "Set up Naga V3 Pro",
-      "otherDevice": "Add a different device",
-      "welcome": "Connect the 2.4 GHz receiver and attach the 12-button side plate. Setup checks the side buttons, top buttons, and wheel. Assignments stored in the mouse are kept.",
-      "synapse": {
-        "pending": "Checking whether Razer Synapse is running…",
-        "ok": "Razer Synapse is closed. You can check the buttons now.",
-        "bad": "Razer Synapse is running and can change the button assignments. Close it from the system tray, then select Check again.",
-        "unknown": "Could not check Razer Synapse. If it is running, close it from the system tray before checking the buttons.",
-        "retry": "Check again"
-      },
-      "check": "Check the side buttons",
-      "preparingTitle": "Getting your mouse ready",
-      "preparing": "Wait before pressing any buttons. If the mouse is asleep, move it to wake it. The button diagram and first instruction will appear when it is ready.",
-      "pressOne": "Press side button 1 on its own.",
-      "pressAll": "Press side buttons 1 through 12 without holding any other button.",
-      "holdOne": "Hold the separate button on the right edge of the mouse, under your ring finger. Keep holding it and press side button 1.",
-      "holdAll": "Hold the separate button on the right edge of the mouse, under your ring finger. Keep holding it and press side buttons 1 through 12.",
-      "confirmed": "Both ways of pressing the buttons are confirmed. You can continue.",
-      "checkAll": "Check the full panel · 24 presses",
-      "checkOne": "Return to the quick check",
-      "standardProgress": "On its own · {{count}} of {{total}}",
-      "heldProgress": "With the ring-finger button held · {{count}} of {{total}}",
-      "missedHold": "Side button {{button}} was pressed on its own. Hold the separate button under your ring finger on the right edge and press it again.",
-      "extrasTitle": "Check the top buttons and wheel",
-      "extrasLead": "Press each control on its own, with the ring-finger button released. You can press, tilt, and scroll the wheel. This step is optional.",
-      "extrasProgress": "Checked · {{count}} of {{total}}",
-      "extraSeen": "Confirmed",
-      "extraWaiting": "Waiting for input",
-      "skipExtras": "Skip this check",
-      "ready": "Mouse is ready",
-      "assign": "Setup checked the buttons. Open Assignments to choose your actions. Hold the ring-finger button to use the second layer (HyperShift). For example, DPI− may still run a command previously stored in the mouse."
-    },
     "brand": "Sidearm setup",
-    "ariaTitle": "Sidearm onboarding",
+    "ariaTitle": "Sidearm setup",
     "ariaLanguage": "Language",
-    "ariaNaga": "Razer Naga thumb grid",
+    "ariaNaga": "Side buttons of the mouse",
+    "ariaSteps": "Setup steps",
+    "stepLabel": "Step {{n}} of {{total}}: {{name}}",
+    "stepName": {
+      "welcome": "Welcome",
+      "mouse": "Mouse memory",
+      "live": "Button check",
+      "extras": "Top buttons and wheel",
+      "admin": "Administrator windows",
+      "tryit": "Try it"
+    },
+    "buttonN": "Button {{n}}",
     "skip": "Skip setup",
     "back": "Back",
     "next": "Next",
     "finish": "Done",
+    "retry": "Check again",
     "checkOk": "ready",
-    "checkBad": "not found",
     "checkPending": "checking…",
     "welcome": {
       "title": "Welcome to Sidearm",
-      "lead": "Sidearm turns Razer Naga buttons into handy per-app actions. Setup takes a couple of minutes: write the assignments into the mouse itself, test the hardware live, and load a ready-made profile.",
-      "checks": "Environment check",
-      "cSynapse": "Razer Synapse is out of the way",
-      "cElevated": "Sidearm running as administrator",
-      "cNaga": "Readiness",
-      "nagaHint": "verified in the Test step",
-      "relaunch": "Restart as admin",
-      "synapseHint": "found — close Synapse and turn off its autostart"
+      "lead": "Sidearm turns the buttons of your Razer Naga into actions for each app. Setup takes a couple of minutes: it finds your mouse, makes sure Razer Synapse is out of the way and tests the buttons.",
+      "checks": "Before we start",
+      "cElevated": "Sidearm runs as administrator",
+      "elevatedHint": "optional: only needed in administrator windows"
+    },
+    "device": {
+      "label": "Mouse",
+      "found": "connected",
+      "none": "not found",
+      "pick": "choose a mouse above",
+      "unverified": "connected, not tested with Sidearm yet: the button check is skipped",
+      "choose": "Two mice are connected. Which one do you want to set up now?",
+      "later": "You can set up the other one later: Settings → Run setup again.",
+      "noneNote": "No supported Razer Naga is connected. Plug in its receiver or cable: Sidearm notices it at once. You can also continue and connect the mouse later."
+    },
+    "synapse": {
+      "label": "Razer Synapse",
+      "pending": "checking…",
+      "ok": "not running",
+      "running": "running: it takes over the buttons",
+      "unknown": "could not check",
+      "closing": "closing…",
+      "explain": "While Razer Synapse runs, it rewrites the mouse buttons and Sidearm's assignments stop working. Sidearm can close it for you. Other Razer apps that share its modules close too.",
+      "startup": "Also stop it from starting with Windows (can be undone later)",
+      "close": "Close Razer Synapse"
     },
     "mouse": {
       "title": "Assignments in the mouse's memory",
-      "lead": "Sidearm writes the button assignments into the Naga's own memory — Razer Synapse is not needed for this.",
-      "s1": "Click “Write to mouse” — Sidearm writes the buttons and checks that the mouse accepted them.",
-      "s2": "If Razer Synapse is installed, close it and turn off its autostart: while it runs, it rewrites the buttons.",
+      "lead": "Sidearm writes its button signals into the mouse's own memory and checks that the mouse accepted them. Razer Synapse is not needed for this.",
       "write": "Write to mouse",
-      "written": "Done — the mouse accepted Sidearm's assignments."
+      "written": "Done: the mouse accepted Sidearm's assignments.",
+      "failed": "The mouse did not accept the assignments. Move it to wake it up and try again."
     },
-    "live": {
-      "title": "Live hardware test",
-      "lead": "Press the buttons on the Naga's side panel — they should light up here. This confirms the mouse responds.",
-      "waiting": "Waiting for presses… press any Naga button.",
-      "last": "Button pressed",
-      "allDone": "Nice — all 12 buttons respond!"
+    "check": {
+      "title": "Check the side buttons",
+      "preparingTitle": "Getting your mouse ready",
+      "preparing": "Wait before pressing any buttons. If the mouse is asleep, move it to wake it. The button diagram and the first instruction appear when it is ready.",
+      "timeoutTitle": "The mouse does not answer",
+      "timeout": "Move the mouse to wake it up and check that its receiver is plugged in. Then select Check again, or skip the check and continue.",
+      "pressOne": "Press side button 1 on its own.",
+      "pressAll": "Press side buttons 1 through 12 without holding any other button.",
+      "holdOne": "Hold {{trigger}} and, while holding it, press side button 1.",
+      "holdAll": "Hold {{trigger}} and, while holding it, press side buttons 1 through 12.",
+      "confirmed": "Both ways of pressing the buttons are confirmed. You can continue.",
+      "missedHold": "Side button {{button}} was pressed on its own. Hold {{trigger}} and press it again.",
+      "standardProgress": "On its own · {{count}} of {{total}}",
+      "heldProgress": "With {{trigger}} held · {{count}} of {{total}}",
+      "checkAll": "Check the full panel · {{count}} presses",
+      "checkOne": "Return to the quick check",
+      "skip": "Skip the check",
+      "extrasTitle": "Check the top buttons and wheel",
+      "extrasLead": "Press each control on its own, without holding {{trigger}}. You can press, tilt and scroll the wheel. This step is optional.",
+      "extrasProgress": "Checked · {{count}} of {{total}}",
+      "extraSeen": "Confirmed",
+      "extraWaiting": "Waiting for input",
+      "skipExtras": "Skip this check"
+    },
+    "tryit": {
+      "title": "Try it!",
+      "lead": "Switch to any app and press a mouse button that has an action. When the action runs, you see it here.",
+      "waiting": "Waiting for the first action…",
+      "fired": "Ran",
+      "assign": "Choose actions for the buttons"
     },
     "admin": {
       "title": "Working in administrator windows",
@@ -1372,12 +1389,6 @@
       "autostartConfigured": "Run-as-admin autostart is configured — privileges apply at your next sign-in.",
       "relaunch": "Restart as administrator now",
       "note": "Creates a Task Scheduler entry (launch at logon). You can change this later in Settings."
-    },
-    "tryit": {
-      "title": "Try it!",
-      "lead": "Switch to any app and press a Naga button. As soon as an action fires, you'll see it here.",
-      "waiting": "Waiting for the first action…",
-      "fired": "Fired"
     }
   },
   "mouse": {
@@ -1449,7 +1460,15 @@
       "disconnected": "No supported mouse is connected."
     },
     "manualDpiHint": "Enter a custom DPI. With five stages, it replaces the selected stage.",
-    "dpiManual": "Manual"
+    "dpiManual": "Manual",
+    "devicePicker": "Mouse",
+    "devicePickerHelp": "Several mice are connected: choose the one this page reads and sets.",
+    "slotHeader": "Slot in the mouse",
+    "slotHelp": "When Sidearm closes, this profile is saved into the chosen slot of the {{model}}, so its simple assignments work without Sidearm. The button on the bottom of the mouse switches slots.",
+    "slotNone": "Not saved to the mouse",
+    "slotOption": "Slot {{n}}",
+    "slotActive": "Slot {{n}} (playing now)",
+    "slotNeedsMouse": "Connect the mouse to see its slots."
   },
   "backend": {
     "admin": {
@@ -1480,7 +1499,8 @@
       "signalReceived": "Got signal `{{key}}` from the capture backend.",
       "signalResolved": "Signal `{{key}}` resolved to `{{control}}` / `{{layer}}`.",
       "signalUnresolved": "Signal `{{key}}` could not be resolved: {{reason}}",
-      "throttled": "[throttle] `{{key}}` skipped — {{ms}} ms left."
+      "throttled": "[throttle] `{{key}}` skipped — {{ms}} ms left.",
+      "liveMapFailed": "{{model}}: the side buttons could not be set up ({{error}})."
     },
     "execution": {
       "workingDirNotFound": "Working directory `{{working_dir}}` does not exist.",
@@ -1596,6 +1616,31 @@
       "accessFailed": "Could not access the mouse.",
       "disconnected": "No supported mouse is connected.",
       "writeNotConfirmed": "Could not confirm the mouse setting."
+    },
+    "system": {
+      "restoringMouse": "Sidearm is restoring the mouse buttons"
     }
+  },
+  "transfer": {
+    "open": "Copy from another mouse",
+    "title": "Copy assignments between mice",
+    "lead": "Each assignment moves to the button in the same place on the other mouse. Every copy gets its own action, so editing one mouse later does not change the other.",
+    "from": "From",
+    "to": "To",
+    "scope": "Profiles",
+    "scopeProfile": "{{name}}",
+    "scopeAll": "All profiles",
+    "conflict": "Already assigned buttons",
+    "conflictHelp": "Keep leaves the existing assignment; Replace overwrites it.",
+    "keep": "Keep",
+    "replace": "Replace",
+    "nothing": "Nothing to copy: the source mouse has no assignments in these profiles.",
+    "summary": "To copy: {{copied}} · left out: {{skipped}}",
+    "skippedDetails": "What is left out",
+    "reasonOccupied": "already assigned on the other mouse",
+    "reasonNoMatch": "the other mouse has no such button",
+    "apply": "Copy ({{count}})",
+    "done": "Assignments copied: {{count}}",
+    "importDropped": "Not imported, no matching button on this mouse: {{count}}"
   }
 }

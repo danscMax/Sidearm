@@ -1041,7 +1041,7 @@ mod own_window_tests {
     #[test]
     fn v3_wheel_falls_back_to_scroll_without_an_active_assignment() {
         use super::{native_v3_scroll, resolver};
-        let mut config = crate::mouse_memory::naga_v3::tests::config_with_v3();
+        let mut config = crate::mouse_memory::live_overlay::tests::config_with_v3();
         let key = config.encoder_mappings.iter().find(|mapping|
             mapping.control_id.as_str() == "v3_wheel_down" && mapping.layer == config::Layer::Standard
         ).unwrap().encoded_key.clone();

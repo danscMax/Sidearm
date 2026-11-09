@@ -26,6 +26,8 @@ mod onboard_guard;
 #[cfg(target_os = "windows")]
 mod synapse_control;
 #[cfg(target_os = "windows")]
+mod system_events;
+#[cfg(target_os = "windows")]
 mod tray_badge;
 mod paths;
 mod platform;
@@ -1111,11 +1113,10 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
             let stamp = config::config_file_stamp(&config_dir);
             let mut response = load_or_initialize_config(&config_dir)?;
             #[cfg(target_os = "windows")]
-            if mouse_memory::naga_v3::configure(&mut response.config, &config_dir) {
+            if mouse_memory::live_overlay::configure(&mut response.config, &mouse_memory::present_models()) {
                 let migrated = config::save_config(&config_dir, response.config, stamp)?;
                 response.config = migrated.config;
-                response.warnings = migrated.warnings;
-                mouse_memory::naga_v3::clear_copy_request(&config_dir);
+                response.warnings.extend(migrated.warnings);
             }
             Ok::<_, config::ConfigStoreError>(response)
         })
@@ -1763,47 +1764,19 @@ async fn import_synapse_into_config(
 // Onboarding — environment checks
 // ============================================================================
 
-/// Best-effort check for the onboarding pre-flight: is Razer Synapse installed
-/// or running? Windows-only signal; returns false on other platforms.
-#[tauri::command]
-async fn check_synapse_installed(running_only: Option<bool>) -> Result<bool, CommandError> {
-    // The process-snapshot walk (CreateToolhelp32Snapshot/Process32*) plus the
-    // registry lookups are blocking syscalls; run them off the shared async
-    // executor thread, matching list_running_processes / get_exe_icon.
-    tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(target_os = "windows")]
-        if running_only == Some(true) {
-            return synapse_control::engine_running().map_err(synapse_command_error);
-        }
-        #[cfg(not(target_os = "windows"))]
-        let _ = running_only;
-        let running =
-            crate::platform::shell::find_running_process_path("RazerAppEngine.exe").is_some();
-        #[cfg(target_os = "windows")]
-        let installed = crate::platform::shell::lookup_app_paths_registry("RazerAppEngine.exe")
-            .is_some()
-            || crate::platform::shell::lookup_app_paths_registry("Razer Synapse 3.exe").is_some();
-        #[cfg(not(target_os = "windows"))]
-        let installed = false;
-        Ok(running || installed)
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("check_synapse_installed task failed: {e}")))?
-}
-
 /// Toggle "live capture" mode. While enabled, captured Naga keys are surfaced
 /// to the UI via `encoded_key_received` but are NOT resolved/executed/injected.
 /// The onboarding hardware test enables it so pressing buttons lights up the
 /// tester without firing their real actions; it is always cleared on exit.
 #[tauri::command]
-async fn set_input_capture_mode(app: AppHandle, enabled: bool, test_naga_v3: Option<bool>) -> Result<(), CommandError> {
+async fn set_input_capture_mode(app: AppHandle, enabled: bool, check_extra_controls: Option<bool>) -> Result<(), CommandError> {
     #[cfg(target_os = "windows")]
-    if test_naga_v3 == Some(true) {
+    if check_extra_controls == Some(true) {
         return tauri::async_runtime::spawn_blocking(move || {
             let store = app.state::<Arc<Mutex<RuntimeStore>>>();
             let controller = app.state::<Arc<Mutex<RuntimeController>>>();
             let mut controller = controller.lock().recover_poison();
-            let previous = mouse_memory::naga_v3::CHECK_EXTRA_CONTROLS.swap(enabled, Ordering::AcqRel);
+            let previous = mouse_memory::live_overlay::CHECK_EXTRA_CONTROLS.swap(enabled, Ordering::AcqRel);
             if enabled {
                 capture_backend::SUPPRESS_EXECUTION.store(true, Ordering::Relaxed);
             }
@@ -1815,7 +1788,7 @@ async fn set_input_capture_mode(app: AppHandle, enabled: bool, test_naga_v3: Opt
                         .map_err(|message| CommandError::new("runtime_reload_failed", message, None))
                 })();
                 if let Err(error) = reload {
-                    mouse_memory::naga_v3::CHECK_EXTRA_CONTROLS.store(false, Ordering::Release);
+                    mouse_memory::live_overlay::CHECK_EXTRA_CONTROLS.store(false, Ordering::Release);
                     capture_backend::SUPPRESS_EXECUTION.store(false, Ordering::Relaxed);
                     let _ = controller.stop();
                     let summary = store.lock().recover_poison().stop();
@@ -1825,21 +1798,36 @@ async fn set_input_capture_mode(app: AppHandle, enabled: bool, test_naga_v3: Opt
             }
             capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
             Ok(())
-        }).await.map_err(|error| CommandError::internal(format!("V3 setup task failed: {error}")))?;
+        }).await.map_err(|error| CommandError::internal(format!("button check task failed: {error}")))?;
     }
-    let _ = (app, test_naga_v3);
+    let _ = (app, check_extra_controls);
     capture_backend::SUPPRESS_EXECUTION.store(enabled, Ordering::Relaxed);
     Ok(())
 }
 
+/// Whether a mouse's buttons reach Sidearm now: a live-map mouse once its map
+/// is written and verified (and it sends consumer signals); an onboard mouse
+/// whenever it is connected — the guard keeps its records.
 #[tauri::command]
-fn naga_v3_capture_ready() -> bool {
+async fn live_map_ready(device_id: String) -> bool {
     #[cfg(target_os = "windows")]
     {
-        mouse_memory::naga_v3::hid_ready(false) && mouse_memory::consumer_signals_enabled()
+        tauri::async_runtime::spawn_blocking(move || {
+            let present = mouse_memory::present_models();
+            let Some(model) = present.iter().find(|model| model.device_id == device_id) else { return false };
+            match mouse_memory::live_overlay::live_models(&present).iter().any(|live| std::ptr::eq(*live, *model)) {
+                true => mouse_memory::live_overlay::is_ready(model),
+                false => model.transport == device_catalog::Transport::Onboard,
+            }
+        })
+        .await
+        .unwrap_or(false)
     }
     #[cfg(not(target_os = "windows"))]
-    false
+    {
+        let _ = device_id;
+        false
+    }
 }
 
 #[tauri::command]
@@ -1931,6 +1919,20 @@ async fn stop_runtime(
 /// reload / stop-start already replaced what this restart was for.
 #[cfg(target_os = "windows")]
 pub(crate) fn restart_capture(app: &AppHandle, still_wanted: impl Fn() -> bool) -> Result<bool, String> {
+    restart_capture_with(app, still_wanted, false)
+}
+
+/// Like [`restart_capture`], but a mouse whose live map did not change keeps
+/// it: plugging one receiver in must not rewrite the other mouse.
+#[cfg(target_os = "windows")]
+pub(crate) fn reload_capture(app: &AppHandle) -> Result<bool, String> {
+    restart_capture_with(app, || true, true)
+}
+
+fn restart_capture_with(app: &AppHandle, still_wanted: impl Fn() -> bool, keep_maps: bool) -> Result<bool, String> {
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return Ok(false);
+    }
     let config_dir = resolve_config_dir(app).map_err(|error| error.message)?;
     let loaded = load_or_initialize_config(&config_dir).map_err(|error| error.to_string())?;
     let store = app.state::<Arc<Mutex<RuntimeStore>>>().inner().clone();
@@ -1939,7 +1941,12 @@ pub(crate) fn restart_capture(app: &AppHandle, still_wanted: impl Fn() -> bool) 
     if !store.lock().recover_poison().is_running() || !still_wanted() {
         return Ok(false);
     }
-    let result = controller.restart(app.clone(), store.clone(), loaded.config, app.package_info().name.clone());
+    let name = app.package_info().name.clone();
+    let result = if keep_maps {
+        controller.reload_saved_config(app.clone(), store.clone(), loaded.config, name)
+    } else {
+        controller.restart(app.clone(), store.clone(), loaded.config, name)
+    };
     if result.is_err() {
         // `restart` already dropped the old backend: say so, as `reload_runtime`
         // does, and in the tray — nobody may be watching the window.
@@ -2781,6 +2788,14 @@ async fn stop_macro_recording(
         .map_err(|msg| CommandError::new("recording_error", msg, None))
 }
 
+/// No onboard-path mouse plugged in is `onboard_not_connected` (the guard
+/// writes it when one appears); any other open failure is a real error.
+#[cfg(target_os = "windows")]
+fn onboard_open_error(message: String) -> CommandError {
+    let code = if message == mouse_memory::NOT_CONNECTED { "onboard_not_connected" } else { "onboard_device_unavailable" };
+    CommandError::new(code, message, None)
+}
+
 /// Writes the thumb-button mapping into the mouse's onboard memory, so the
 /// mouse emits those key codes itself and no vendor remapper has to run.
 /// `bindings` come from the config's `encoder_mappings`; each write is verified
@@ -2791,8 +2806,7 @@ async fn apply_onboard_mapping(
     bindings: Vec<mouse_memory::OnboardBinding>,
 ) -> Result<(), CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let device = mouse_memory::VendorDevice::open_connected()
-            .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))?;
+        let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
         device
             .apply_bindings(&bindings)
             .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
@@ -2810,8 +2824,7 @@ async fn verify_onboard_mapping(
     bindings: Vec<mouse_memory::OnboardBinding>,
 ) -> Result<mouse_memory::OnboardReport, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let device = mouse_memory::VendorDevice::open_connected()
-            .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))?;
+        let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
         device
             .verify(&bindings)
             .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
@@ -2838,8 +2851,7 @@ async fn restore_onboard_control(app: AppHandle) -> Result<(), CommandError> {
 
 #[cfg(target_os = "windows")]
 fn restore_and_verify_onboard(config: &AppConfig) -> Result<(), CommandError> {
-    let device = mouse_memory::VendorDevice::open_connected()
-        .map_err(|msg| CommandError::new("onboard_device_unavailable", msg, None))?;
+    let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
     device.ensure_normal_mode()
         .map_err(|msg| CommandError::new("onboard_mode_stuck", msg, None))?;
     let bindings = mouse_memory::onboard_bindings(config);
@@ -2897,18 +2909,23 @@ async fn recover_from_synapse(app: AppHandle, disable_startup: bool, close_synap
             return Err(CommandError::from_ui("runtime_stopped", crate::ui_text!("synapse.runtimeStopped", "Start Sidearm capture and retry.")));
         }
         let config = config::read_and_migrate_config_file(&dir.join("config.json")).map_err(CommandError::from)?;
-        {
-            let device = mouse_memory::VendorDevice::open_connected().map_err(synapse_command_error)?;
-            if !device.model().verified {
-                return Err(CommandError::from_ui("unverified_mouse", crate::ui_text!("synapse.unverifiedMouse", "This mouse model is not verified for Sidearm's native setup. Synapse was left running.")));
-            }
+        let present = mouse_memory::present_models();
+        if present.is_empty() {
+            return Err(synapse_command_error(mouse_memory::NOT_CONNECTED));
         }
+        if present.iter().all(|model| !model.verified) {
+            return Err(CommandError::from_ui("unverified_mouse", crate::ui_text!("synapse.unverifiedMouse", "This mouse model is not verified for Sidearm's native setup. Synapse was left running.")));
+        }
+        // A live-map mouse is set up again by the capture restart below.
+        let onboard = present.iter().any(|model| model.verified && model.transport == device_catalog::Transport::Onboard);
         if close_synapse {
             synapse_control::close_engines().map_err(synapse_command_error)?;
         } else if synapse_control::engine_running().map_err(synapse_command_error)? {
             return Err(CommandError::from_ui("synapse_restarted", crate::ui_text!("synapse.restarted", "Synapse started again. Use the close-Synapse action to continue.")));
         }
-        restore_and_verify_onboard(&config).map_err(|e| synapse_command_error(e.message))?;
+        if onboard {
+            restore_and_verify_onboard(&config).map_err(|e| synapse_command_error(e.message))?;
+        }
         if !restart_capture(&app, || true).map_err(synapse_command_error)? {
             return Err(CommandError::from_ui("runtime_stopped", crate::ui_text!("synapse.runtimeStopped", "Start Sidearm capture and retry.")));
         }
@@ -2940,6 +2957,26 @@ async fn restore_synapse_startup(app: AppHandle) -> Result<(), CommandError> {
     }).await.map_err(|e| CommandError::internal(e.to_string()))?
 }
 
+/// Set once exit work began: no capture restart may write the mice after it.
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Exit work for the mice, once per process — a clean exit and the end of the
+/// Windows session both run it. Stops the capture helper first (an orphaned
+/// helper keeps its mouse hook alive and swallows back/forward after exit),
+/// which also restores every live map, then stores the offline profile.
+pub(crate) fn shutdown_mouse(app: &AppHandle) {
+    if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()
+        && let Err(message) = controller.stop()
+    {
+        log::warn!("[system] runtime stop on exit failed: {message}");
+    }
+    #[cfg(target_os = "windows")]
+    write_offline_mouse_profile(app);
+}
+
 /// On exit: store the profile in effect in the mouse itself, so its simple
 /// bindings keep working while Sidearm is closed (see `mouse_offline`).
 #[cfg(target_os = "windows")]
@@ -2967,10 +3004,11 @@ fn write_offline_mouse_profile(app: &AppHandle) {
 /// Opens the mouse, runs `work` on it, and returns its fresh settings.
 #[cfg(target_os = "windows")]
 async fn with_mouse_settings(
+    device_id: Option<String>,
     work: impl FnOnce(&mouse_memory::VendorDevice) -> Result<(), String> + Send + 'static,
 ) -> Result<mouse_settings::MouseSettings, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
-        let device = mouse_memory::VendorDevice::open_connected()
+        let device = open_mouse(device_id.as_deref())
             .map_err(|msg| {
                 let mut error = CommandError::from_ui("onboard_device_unavailable",
                     crate::ui_text!("mouseRead.accessFailed", "Could not access the mouse."));
@@ -2991,28 +3029,73 @@ async fn with_mouse_settings(
     .map_err(|e| CommandError::internal(format!("mouse settings task failed: {e}")))?
 }
 
-/// Name, DPI range, poll rates and verification of the natively driven model:
-/// the one plugged in, else the config's. Catalog data plus a registry lookup
-/// and an open handle — no vendor command, so a sleeping mouse still answers.
+/// The mouse of a config device, or the first connected one.
+#[cfg(target_os = "windows")]
+fn open_mouse(device_id: Option<&str>) -> Result<mouse_memory::VendorDevice, String> {
+    match device_id {
+        Some(device_id) => mouse_memory::VendorDevice::open_for_device(device_id),
+        None => mouse_memory::VendorDevice::open_connected(),
+    }
+}
+
+/// Name, DPI range, poll rates and verification of a natively driven model:
+/// the one plugged in for `device_id` (else any), else the catalog's default
+/// for that device. Catalog data plus a registry lookup and an open handle —
+/// no vendor command, so a sleeping mouse still answers.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn get_native_model() -> Result<device_catalog::NativeModelInfo, CommandError> {
-    tauri::async_runtime::spawn_blocking(|| match mouse_memory::VendorDevice::open_connected() {
-        Ok(device) => device.model().info(true, mouse_memory::consumer_signals_enabled()),
-        Err(_) => mouse_memory::config_model().info(false, mouse_memory::consumer_signals_enabled()),
+async fn get_native_model(device_id: Option<String>) -> Result<device_catalog::NativeModelInfo, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let consumer = mouse_memory::consumer_signals_enabled();
+        match open_mouse(device_id.as_deref()) {
+            Ok(device) => device.model().info(true, consumer),
+            Err(_) => device_id
+                .as_deref()
+                .and_then(|id| device_catalog::CATALOG.iter().find(|model| model.device_id == id).copied())
+                .unwrap_or_else(mouse_memory::config_model)
+                .info(false, consumer),
+        }
     })
     .await
     .map_err(|e| CommandError::internal(format!("native model task failed: {e}")))
+}
+
+/// Every catalog mouse whose receiver is plugged in now, without talking to it.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+fn list_native_mice() -> Vec<device_catalog::NativeModelInfo> {
+    let consumer = mouse_memory::consumer_signals_enabled();
+    mouse_memory::present_models().into_iter().map(|model| model.info(true, consumer)).collect()
+}
+
+/// The onboard banks of a device's mouse (`live_overlay::Banks`).
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn get_onboard_banks(device_id: String) -> Result<mouse_memory::live_overlay::Banks, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = device_catalog::CATALOG
+            .iter()
+            .find(|model| model.device_id == device_id && model.live.as_ref().is_some_and(|live| live.banks))
+            .ok_or_else(|| CommandError::internal(format!("{device_id} has no onboard banks")))?;
+        mouse_memory::live_overlay::banks(model).map_err(|msg| {
+            let mut error = CommandError::from_ui("onboard_device_unavailable",
+                crate::ui_text!("mouseRead.accessFailed", "Could not access the mouse."));
+            error.details = Some(vec![mouse_settings::public_read_error(&msg)]);
+            error
+        })
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("onboard banks task failed: {e}")))?
 }
 
 /// Read-only dump of the connected mouse for a "help verify" issue
 /// (`VendorDevice::probe_report`). Scans every button id, so it takes ~20 s.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn get_device_report(detail: Option<mouse_settings::ReportDetail>) -> Result<String, CommandError> {
+async fn get_device_report(detail: Option<mouse_settings::ReportDetail>, device_id: Option<String>) -> Result<String, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let detail = detail.unwrap_or_default();
-        match mouse_memory::VendorDevice::open_connected() {
+        match open_mouse(device_id.as_deref()) {
             Ok(device) => Ok(match detail {
                 mouse_settings::ReportDetail::Summary => device.probe_summary(),
                 mouse_settings::ReportDetail::Full => device.probe_report(),
@@ -3082,12 +3165,14 @@ fn switch_key_signals(app: &AppHandle, consumer: bool) -> Result<(), CommandErro
     let rewritten = load_or_initialize_config(&config_dir)
         .map_err(|error| error.to_string())
         .and_then(|loaded| {
-            if mouse_memory::naga_v3::v2_live() {
-                return Ok(()); // The V2 receiver keeps its own HID stream in parallel mode.
-            }
-            let device = mouse_memory::VendorDevice::open_connected()?;
-            if std::ptr::eq(device.model(), &device_catalog::NAGA_V3_PRO) {
-                return Ok(()); // The runtime restart replaces the live overlay.
+            let device = match mouse_memory::VendorDevice::open_onboard() {
+                Ok(device) => device,
+                // Live maps follow from the capture restart below.
+                Err(message) if message == mouse_memory::NOT_CONNECTED => return Ok(()),
+                Err(message) => return Err(message),
+            };
+            if mouse_memory::live_overlay::is_active(device.model()) {
+                return Ok(()); // The capture restart below rewrites its live map.
             }
             device.apply_bindings(&mouse_memory::onboard_bindings(&loaded.config))
         });
@@ -3110,8 +3195,8 @@ fn open_startup_apps_settings() -> Result<(), CommandError> {
 /// Battery, DPI and poll rate as the mouse reports them now.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn get_mouse_settings() -> Result<mouse_settings::MouseSettings, CommandError> {
-    tauri::async_runtime::spawn_blocking(|| match mouse_memory::VendorDevice::open_connected() {
+async fn get_mouse_settings(device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || match open_mouse(device_id.as_deref()) {
         Ok(device) => device.settings(),
         Err(error) => mouse_settings::MouseSettings::inaccessible(&error, error == mouse_memory::NOT_CONNECTED),
     }).await.map_err(|error| CommandError::internal(format!("mouse settings task failed: {error}")))
@@ -3120,15 +3205,15 @@ async fn get_mouse_settings() -> Result<mouse_settings::MouseSettings, CommandEr
 /// Stores a DPI in the mouse (both axes) and returns the settings read back.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn set_mouse_dpi(dpi: u16) -> Result<mouse_settings::MouseSettings, CommandError> {
-    with_mouse_settings(move |device| device.set_dpi(dpi, true)).await
+async fn set_mouse_dpi(dpi: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
+    with_mouse_settings(device_id, move |device| device.set_dpi(dpi, true)).await
 }
 
 /// Sets the mouse poll rate (125/500/1000 Hz) and returns the settings read back.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn set_mouse_poll_rate(hz: u16) -> Result<mouse_settings::MouseSettings, CommandError> {
-    with_mouse_settings(move |device| device.set_poll_rate_hz(hz)).await
+async fn set_mouse_poll_rate(hz: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
+    with_mouse_settings(device_id, move |device| device.set_poll_rate_hz(hz)).await
 }
 
 #[cfg(target_os = "windows")]
@@ -3588,6 +3673,7 @@ pub fn run() {
                         runtime_store_for_guard.clone(),
                         config_dir,
                     );
+                    system_events::spawn(app.handle().clone());
                 }
                 Err(error) => {
                     log::warn!("[onboard-guard] not started: {}", error.message);
@@ -3924,9 +4010,8 @@ pub fn run() {
             accept_portable_migration,
             parse_synapse_source,
             import_synapse_into_config,
-            check_synapse_installed,
             set_input_capture_mode,
-            naga_v3_capture_ready,
+            live_map_ready,
             start_runtime,
             stop_runtime,
             reload_runtime,
@@ -3964,6 +4049,8 @@ pub fn run() {
             recover_from_synapse,
             restore_synapse_startup,
             get_native_model,
+            list_native_mice,
+            get_onboard_banks,
             get_device_report,
             open_device_report_issue,
             get_mouse_status,
@@ -3978,15 +4065,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 log::info!("[system] Clean shutdown.");
-                // Stop the capture helper first: an orphaned helper keeps its
-                // mouse hook alive and swallows back/forward after exit.
-                if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()
-                    && let Err(message) = controller.stop()
-                {
-                    log::warn!("[system] runtime stop on exit failed: {message}");
-                }
-                #[cfg(target_os = "windows")]
-                write_offline_mouse_profile(app);
+                shutdown_mouse(app);
                 remove_crash_sentinel(app);
             }
         });

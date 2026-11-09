@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+
 /**
  * Stylised Razer Naga thumb-grid (12 buttons, 3×4) used by the onboarding
  * live-test step. Buttons light up as their press arrives from the
@@ -10,15 +12,16 @@ interface NagaIllustrationProps {
   /** 1-based button currently being pressed (flash highlight), or null. */
   active: number | null;
   /** Localized accessible name for the illustration. */
-  label?: string;
+  label: string;
 }
 
 // The Naga side grid is laid out 3 columns × 4 rows: 1-2-3 / 4-5-6 / 7-8-9 / 10-11-12.
 const BUTTONS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 export function NagaIllustration({ detected, active, label }: NagaIllustrationProps) {
+  const { t } = useTranslation();
   return (
-    <div className="onb-naga" role="img" aria-label={label ?? "Razer Naga thumb grid"}>
+    <div className="onb-naga" role="img" aria-label={label}>
       <div className="onb-naga__body">
         <div className="onb-naga__grid">
           {BUTTONS.map((n) => {
@@ -32,7 +35,7 @@ export function NagaIllustration({ detected, active, label }: NagaIllustrationPr
               .filter(Boolean)
               .join(" ");
             return (
-              <div key={n} className={cls} aria-label={`Button ${n}`}>
+              <div key={n} className={cls} aria-label={t("onboarding.buttonN", { n })}>
                 <span className="onb-naga__num">{n}</span>
               </div>
             );

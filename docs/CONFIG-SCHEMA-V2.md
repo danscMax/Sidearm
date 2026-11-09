@@ -1,7 +1,7 @@
 # Config Schema V2
 
 > **Superseded by v3** (universal-device support): see `docs/CONFIG-SCHEMA-V3.md`
-> for the v3 delta. The current runtime schema is `schemas/config.v4.schema.json`;
+> for the v3 delta. The current runtime schema is `schemas/config.v5.schema.json`;
 > see [Config schema v4](CONFIG-SCHEMA-V4.md) for DPI stages and upgrade notes.
 
 - Status: Working draft aligned with accepted ADRs

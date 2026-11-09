@@ -9,21 +9,26 @@ import { PillTrack } from "../PillTrack";
 interface ViewTabPillsProps {
   activeTab: ViewTab;
   onSelect: (tab: ViewTab) => void;
-  showBottom?: boolean;
+  /** Tabs in display order; the default is the V2 photo set. */
+  views?: readonly ViewTab[];
+  /** i18n keys that replace the default tab labels. */
+  labels?: Partial<Record<ViewTab, string>>;
 }
 
-export function ViewTabPills({ activeTab, onSelect, showBottom }: ViewTabPillsProps) {
+const DEFAULT_LABELS: Record<ViewTab, string> = {
+  combined: "visualization.tabAll",
+  top: "visualization.tabTop",
+  side: "visualization.tabSide",
+  bottom: "visualization.v3Bottom",
+};
+
+export function ViewTabPills({ activeTab, onSelect, views = ["combined", "top", "side"], labels }: ViewTabPillsProps) {
   const { t } = useTranslation();
   return (
     <PillTrack
       active={activeTab}
       onSelect={onSelect}
-      items={[
-        { key: "combined", label: t(showBottom ? "visualization.v3All" : "visualization.tabAll") },
-        { key: "top", label: t(showBottom ? "visualization.v3Top" : "visualization.tabTop") },
-        { key: "side", label: t(showBottom ? "visualization.v3Side" : "visualization.tabSide") },
-        ...(showBottom ? [{ key: "bottom" as const, label: t("visualization.v3Bottom") }] : []),
-      ]}
+      items={views.map((key) => ({ key, label: t(labels?.[key] ?? DEFAULT_LABELS[key]) }))}
     />
   );
 }

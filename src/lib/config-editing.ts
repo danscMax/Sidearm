@@ -934,7 +934,8 @@ export function duplicateProfile(
     makeProfileId(newName),
   );
 
-  const newProfile: Profile = { ...source, id: newId, name: newName };
+  // A bank holds one profile: the copy is not linked to the source's banks.
+  const newProfile: Profile = { ...source, id: newId, name: newName, deviceSlots: undefined };
 
   // Clone all appMappings for this profile
   const sourceAppMappings = config.appMappings.filter(
@@ -1816,6 +1817,29 @@ export function extractProfileExport(
   };
 }
 
+/** Links a profile to an onboard bank of a device's mouse (`undefined`
+ *  unlinks it). A bank holds one profile, so another profile's link to the
+ *  same bank is removed. */
+export function setProfileDeviceSlot(
+  config: AppConfig,
+  profileId: string,
+  deviceId: string,
+  slot: number | undefined,
+): AppConfig {
+  const withSlot = (profile: Profile, value: number | undefined): Profile => {
+    const { [deviceId]: _previous, ...rest } = profile.deviceSlots ?? {};
+    const deviceSlots = value === undefined ? rest : { ...rest, [deviceId]: value };
+    return { ...profile, deviceSlots: Object.keys(deviceSlots).length > 0 ? deviceSlots : undefined };
+  };
+  return {
+    ...config,
+    profiles: config.profiles.map((profile) => {
+      if (profile.id === profileId) return withSlot(profile, slot);
+      return slot !== undefined && profile.deviceSlots?.[deviceId] === slot ? withSlot(profile, undefined) : profile;
+    }),
+  };
+}
+
 /** Import a profile from exported data, assigning new IDs to avoid conflicts. */
 export function importProfile(
   config: AppConfig,
@@ -1873,7 +1897,8 @@ export function importProfile(
 
   return {
     ...config,
-    profiles: [...config.profiles, { ...data.profile, id: newId, name: newName }],
+    // Banks belong to this computer's mice, not to the file.
+    profiles: [...config.profiles, { ...data.profile, id: newId, name: newName, deviceSlots: undefined }],
     appMappings: [...config.appMappings, ...newAppMappings],
     bindings: [...config.bindings, ...newBindings],
     actions: [...config.actions, ...newActions],

@@ -85,8 +85,11 @@
   display: flex;
   gap: 8px;
   justify-content: center;
+  margin: 0;
   padding: 14px 20px 4px;
+  list-style: none;
 }
+.onb-progress li { display: flex; }
 .onb-dot {
   width: 9px;
   height: 9px;
@@ -189,6 +192,7 @@
   border: 1px solid color-mix(in srgb, var(--c-accent) 40%, transparent);
   transition: background 0.15s ease, border-color 0.15s ease;
 }
+.onb-check__hint + .onb-check__action { margin-left: 0; }
 .onb-check__action:hover {
   background: color-mix(in srgb, var(--c-accent) 20%, transparent);
   border-color: var(--c-accent);
@@ -332,3 +336,41 @@
   .onb-step { animation: none; }
   .onb-dot, .onb-naga__btn { transition: none; }
 }
+
+/* Which mouse to set up (two connected). */
+.onb-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+}
+.onb-choice__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md, 12px);
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--c-border, rgba(255, 255, 255, 0.06));
+  color: var(--c-text);
+  cursor: pointer;
+}
+.onb-choice__option.is-active { border-color: var(--c-accent); }
+.onb-choice__option input { accent-color: var(--c-accent); }
+
+/* Razer Synapse is running: what it does and the fix. */
+.onb-synapse {
+  margin-top: 12px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md, 12px);
+  background: color-mix(in srgb, var(--c-warning) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c-warning) 40%, transparent);
+  color: var(--c-text);
+  font-size: 14px;
+}
+.onb-synapse p { margin: 0 0 10px; line-height: 1.5; }
+.onb-synapse__startup { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--c-text-dim); }
+.onb-synapse__startup input { accent-color: var(--c-accent); }
+.onb-synapse .onb-actions { margin-top: 12px; }

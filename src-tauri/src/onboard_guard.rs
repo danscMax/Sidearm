@@ -152,35 +152,49 @@ pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
     std::thread::Builder::new()
         .name("profile-mouse".into())
         .spawn(move || {
-            let result = VendorDevice::open_connected().and_then(|device| {
-                if PROFILE_SWITCHES.load(Ordering::SeqCst) != generation {
-                    return Ok(None);
-                }
-                let mut written = false;
-                if let Some(hz) = poll_rate_hz
-                    && device.poll_rate_hz()? != hz
-                {
-                    device.set_poll_rate_hz(hz)?;
-                    written = true;
-                }
-                // Live only: the mouse keeps its stored DPI for use without
-                // Sidearm, and a switch per alt-tab must not wear its storage.
-                if let Some(dpi) = dpi
-                    && device.dpi()? != dpi
-                {
-                    device.set_dpi(dpi, false)?;
-                    written = true;
-                }
-                Ok(Some(written))
-            });
-            match result {
-                Ok(None) => log::debug!("[onboard-guard] profile `{name}`: superseded by a newer switch"),
-                Ok(Some(false)) => log::debug!("[onboard-guard] profile `{name}`: mouse settings already in place"),
-                Ok(Some(true)) => log::info!(
-                    "[onboard-guard] profile `{name}`: mouse DPI {dpi:?}, poll {poll_rate_hz:?} Hz written"
-                ),
+            // Every connected mouse follows the profile, each within its own
+            // range; one asleep mouse does not hold back the other.
+            let mice = match connected_mice() {
+                Ok(mice) => mice,
                 Err(message) => {
-                    log::warn!("[onboard-guard] profile `{name}`: mouse settings not applied: {message}")
+                    log::warn!("[onboard-guard] profile `{name}`: mouse settings not applied: {message}");
+                    return;
+                }
+            };
+            for device in mice {
+                if PROFILE_SWITCHES.load(Ordering::SeqCst) != generation {
+                    log::debug!("[onboard-guard] profile `{name}`: superseded by a newer switch");
+                    return;
+                }
+                let model = device.model();
+                let dpi = dpi.map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
+                let poll_rate_hz = poll_rate_hz.filter(|hz| model.poll_code_for_hz(*hz).is_some());
+                let result = (|| {
+                    let mut written = false;
+                    if let Some(hz) = poll_rate_hz
+                        && device.poll_rate_hz()? != hz
+                    {
+                        device.set_poll_rate_hz(hz)?;
+                        written = true;
+                    }
+                    // Live only: the mouse keeps its stored DPI for use without
+                    // Sidearm, and a switch per alt-tab must not wear its storage.
+                    if let Some(dpi) = dpi
+                        && device.dpi()? != dpi
+                    {
+                        device.set_dpi(dpi, false)?;
+                        written = true;
+                    }
+                    Ok::<_, String>(written)
+                })();
+                match result {
+                    Ok(false) => log::debug!("[onboard-guard] profile `{name}`: {} settings already in place", model.name),
+                    Ok(true) => log::info!(
+                        "[onboard-guard] profile `{name}`: {} DPI {dpi:?}, poll {poll_rate_hz:?} Hz written", model.name
+                    ),
+                    Err(message) => {
+                        log::warn!("[onboard-guard] profile `{name}`: {} settings not applied: {message}", model.name)
+                    }
                 }
             }
         })
@@ -217,13 +231,40 @@ fn next_dpi_stage(stages: &[u16], current: u16, up: bool) -> Result<u16, String>
 pub fn step_profile_dpi(profile: &crate::config::Profile, up: bool) -> Result<u16, String> {
     let stages = profile.mouse_dpi_stages.as_deref().ok_or_else(||
         "Configure DPI stages for the active profile first".to_string())?;
-    let device = VendorDevice::open_connected()?;
-    let current = device.dpi()?;
-    let desired = next_dpi_stage(stages, current, up)?;
-    if desired != current {
-        device.set_dpi(desired, false)?;
+    // Each mouse steps through the stages it can play; an asleep one is skipped.
+    let mut last = Err(crate::mouse_memory::NOT_CONNECTED.to_string());
+    for device in connected_mice()? {
+        let model = device.model();
+        let playable: Vec<u16> = stages.iter().copied().filter(|dpi| (model.dpi_min..=model.dpi_max).contains(dpi)).collect();
+        let step = (|| {
+            let current = device.dpi()?;
+            let desired = next_dpi_stage(&playable, current, up)?;
+            if desired != current {
+                device.set_dpi(desired, false)?;
+            }
+            Ok::<_, String>(desired)
+        })();
+        if let Err(message) = &step {
+            log::warn!("[onboard-guard] {} DPI step not applied: {message}", model.name);
+        }
+        if last.is_err() {
+            last = step;
+        }
     }
-    Ok(desired)
+    last
+}
+
+/// Every connected native mouse, opened one after another (each holds only its
+/// own device lock). `Err` when none opens.
+#[cfg(target_os = "windows")]
+fn connected_mice() -> Result<Vec<VendorDevice>, String> {
+    let present = crate::mouse_memory::present_models();
+    let mice: Vec<_> = present.iter().filter_map(|model| VendorDevice::open_model(model).ok()).collect();
+    if mice.is_empty() {
+        // Same error as before for a missing or unopenable mouse.
+        return VendorDevice::open_connected().map(|device| vec![device]);
+    }
+    Ok(mice)
 }
 
 #[cfg(test)]
@@ -332,7 +373,7 @@ fn run(
 
         // The mouse may still hold the offline profile written at the last exit:
         // put Sidearm's signals back quietly before the check would call it drift.
-        if !crate::mouse_memory::naga_v3::v2_live()
+        if !crate::mouse_memory::live_overlay::is_active(crate::mouse_memory::config_model())
             && config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists()
             && let Some(config) = read_config(config_dir)
             && !crate::mouse_offline::restore_after_offline(&config, config_dir)
@@ -398,13 +439,26 @@ fn check_once(
     last_notified: &mut Vec<(TakeoverKind, bool, Instant)>,
     full: bool,
 ) -> Verdict {
-    let device = match VendorDevice::open_connected() {
+    let device = match VendorDevice::open_onboard() {
         Ok(device) => device,
-        Err(message) if message == crate::mouse_memory::NOT_CONNECTED => return Verdict::Absent,
+        // A live-only mouse has nothing to guard here but still reports its battery.
+        Err(message) if message == crate::mouse_memory::NOT_CONNECTED => {
+            if crate::mouse_memory::present_models().is_empty() {
+                return Verdict::Absent;
+            }
+            if full
+                && let Ok(device) = VendorDevice::open_connected()
+                && let Some(config) = read_config(config_dir)
+                && let Ok(percent) = device.battery_percent()
+            {
+                report_battery(app, &config, config_dir, percent);
+            }
+            return Verdict::ReadOnly;
+        }
         // Its collection is not openable right now.
         Err(_) => return Verdict::Unreadable,
     };
-    if !device.model().verified || crate::mouse_memory::naga_v3::v2_live() {
+    if !device.model().verified || crate::mouse_memory::live_overlay::is_active(device.model()) {
         if full
             && let Some(config) = read_config(config_dir)
             && let Ok(percent) = device.battery_percent()

@@ -1390,12 +1390,17 @@ impl CaptureBackendHandle {
         // Signal helper to exit by closing its stdin pipe, then wait for cleanup
         if let Some(helper) = self.helper {
             let HelperHandle {
-                stdin_pipe,
+                mut stdin_pipe,
                 mut child,
                 reader_thread,
                 stopping,
             } = helper;
             stopping.store(true, Ordering::SeqCst);
+            // A stop says so first: stdin closing without it means Sidearm died.
+            {
+                use std::io::Write;
+                let _ = writeln!(stdin_pipe, "{HELPER_EXIT}").and_then(|()| stdin_pipe.flush());
+            }
             drop(stdin_pipe);
 
             // Bounded wait: poll try_wait() up to 5 seconds, then force-kill
@@ -3065,6 +3070,9 @@ unsafe extern "system" fn helper_ll_keyboard_proc(code: i32, w_param: usize, l_p
     }
 }
 
+/// The line a stop writes to the helper before closing its stdin.
+const HELPER_EXIT: &str = "EXIT";
+
 /// Entry point for the `--capture-helper` child process.
 /// Reads modifier-combo registrations from stdin (one JSON line),
 /// installs WH_KEYBOARD_LL, and writes matched encoded keys to stdout.
@@ -3259,13 +3267,18 @@ pub fn capture_helper_main() {
     thread::spawn(move || {
         let stdin = std::io::stdin();
         let mut buf = String::new();
+        let mut exit_requested = false;
         loop {
             buf.clear();
             match stdin.lock().read_line(&mut buf) {
                 Ok(0) | Err(_) => {
-                    // A stop closes stdin with Sidearm alive; a kill closes it by its death.
-                    let parent_gone = parent.is_some_and(|handle| unsafe {
-                        windows_sys::Win32::System::Threading::WaitForSingleObject(handle as _, 0)
+                    // A stop sends HELPER_EXIT first; stdin closing without it is
+                    // Sidearm's death. Windows closes the pipe before the process
+                    // counts as ended, so wait for that briefly (measured: an
+                    // immediate check still saw it alive).
+                    // No handle to watch: without HELPER_EXIT, still assume the death.
+                    let parent_gone = !exit_requested && parent.is_none_or(|handle| unsafe {
+                        windows_sys::Win32::System::Threading::WaitForSingleObject(handle as _, 3000)
                             == windows_sys::Win32::Foundation::WAIT_OBJECT_0
                     });
                     if parent_gone && let Some(dir) = &config_dir {
@@ -3280,7 +3293,9 @@ pub fn capture_helper_main() {
                 }
                 Ok(_) => {
                     let cmd = buf.trim();
-                    if cmd == "REHOOK" {
+                    if cmd == HELPER_EXIT {
+                        exit_requested = true;
+                    } else if cmd == "REHOOK" {
                         log::info!("[capture-helper] REHOOK command received.");
                         unsafe {
                             PostThreadMessageW(hook_tid, WM_REHOOK, 0, 0);

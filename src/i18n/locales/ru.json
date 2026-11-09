@@ -456,8 +456,10 @@
     "duplicateName": "{{name}} (копия)",
     "importName": "{{name}} (импорт)",
     "importSuffix": "импорт",
-    "stripApps": "Включается в:",
-    "stripAddApp": "+ Приложение"
+    "stripApps": "Включается в приложениях ({{count}}):",
+    "stripAddApp": "+ Приложение",
+    "stripMore": "ещё {{count}}",
+    "stripLess": "Свернуть"
   },
   "newRule": {
     "title": "Новое правило",
@@ -1189,7 +1191,9 @@
     "notConnected": "не подключена",
     "tabButtons": "Кнопки",
     "tabPerformance": "Производительность",
-    "tabMemory": "Память мыши"
+    "tabMemory": "Память мыши",
+    "reading": "читаю…",
+    "noAnswer": "не отвечает — пошевелите"
   },
   "synapseImport": {
     "button": "Импорт из Razer Synapse…",

@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- After Sidearm was killed or crashed, the V3's buttons and wheel stayed silent until its
+  profile button was pressed: its capture helper now restores the mouse's own button map.
+  A normal exit waits for both mice to finish restoring before it closes.
+- A connected mouse that does not answer (asleep) says so on its card instead of showing
+  nothing; a profile with many apps shows four of them and "N more".
 - Plugging a mouse in or out while Sidearm runs switches each mouse to the path it
   needs; a V2 alone no longer stays in two-mouse mode after a V3 was seen once, so
   V2 Pro, Naga Pro and Naga X buttons and the F13–F24 switch work again there.

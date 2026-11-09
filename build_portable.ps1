@@ -193,7 +193,19 @@ function Stop-AppProcessIfRunning {
     Write-Warn "Detected running Sidearm (PID: $pids). Stopping..."
 
     try {
-        $running | Stop-Process -Force -ErrorAction Stop
+        # Stop the app first and leave its capture helpers alive: a helper that
+        # outlives Sidearm restores the mice's live button maps (else the V3
+        # stays silent until its profile button is pressed), then exits.
+        $helpers = @(Get-CimInstance Win32_Process -Filter "Name = 'Sidearm.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like '*--capture-helper*' } | ForEach-Object { [int]$_.ProcessId })
+        $running | Where-Object { $helpers -notcontains $_.Id } | Stop-Process -Force -ErrorAction Stop
+        if ($helpers.Count -gt 0) {
+            $deadline = (Get-Date).AddSeconds(30)
+            while ((Get-Date) -lt $deadline -and (Get-Process -Id $helpers -ErrorAction SilentlyContinue)) {
+                Start-Sleep -Milliseconds 250
+            }
+            Get-Process -Id $helpers -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        }
         Start-Sleep -Seconds 1
         Write-Ok "Stopped running process(es)"
     } catch {

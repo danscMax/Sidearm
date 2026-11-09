@@ -14,9 +14,10 @@ import type { MouseSettings, NativeModelInfo } from "../lib/onboard-mapping";
 /** Live state of each connected built-in mouse, read on mount, on mouse
  *  events and when `refreshToken` changes (a write from the Performance tab) —
  *  never on a timer, so the mice are not polled for a picture. */
-function useMiceState(refreshToken: number): { mice: NativeModelInfo[]; readings: Map<string, MouseSettings> } {
+function useMiceState(refreshToken: number): { mice: NativeModelInfo[]; readings: Map<string, MouseSettings | null> } {
   const [mice, setMice] = useState<NativeModelInfo[]>([]);
-  const [readings, setReadings] = useState<Map<string, MouseSettings>>(new Map());
+  // null: the mouse was asked and did not answer (asleep, out of range).
+  const [readings, setReadings] = useState<Map<string, MouseSettings | null>>(new Map());
   useEffect(() => {
     let alive = true;
     const read = (list: NativeModelInfo[]) => {
@@ -24,7 +25,7 @@ function useMiceState(refreshToken: number): { mice: NativeModelInfo[]; readings
       for (const mouse of list) {
         void getMouseSettings(mouse.deviceId).then(
           (value) => alive && setReadings((prev) => new Map(prev).set(mouse.deviceId, value)),
-          () => {},
+          () => alive && setReadings((prev) => new Map(prev).set(mouse.deviceId, null)),
         );
       }
     };
@@ -71,7 +72,9 @@ export function DeviceCards({
   onAdd: () => void;
 }) {
   const { t } = useTranslation();
-  const { mice, readings } = useMiceState(refreshToken);
+  // Selecting a card reads that mouse again (it may have woken up since).
+  const [selectToken, setSelectToken] = useState(0);
+  const { mice, readings } = useMiceState(refreshToken + selectToken);
   return (
     <div className="device-cards" role="group" aria-label={t("device.cardsLabel")}>
       {devices.map((device) => {
@@ -80,12 +83,17 @@ export function DeviceCards({
         const reading = readings.get(device.id);
         const slot = profile?.deviceSlots?.[device.id];
         const controls = config.physicalControls.filter((control) => control.deviceId === device.id).length;
+        const values = builtin && connected
+          ? [
+              reading?.batteryPercent != null ? t("device.chipBattery", { percent: reading.batteryPercent }) : null,
+              reading?.dpi != null ? t("device.chipDpi", { dpi: reading.dpi }) : null,
+              reading?.pollRateHz != null ? t("device.chipPoll", { hz: reading.pollRateHz }) : null,
+            ].filter((chip): chip is string => chip !== null)
+          : [];
         const chips = builtin
           ? connected
             ? [
-                reading?.batteryPercent != null ? t("device.chipBattery", { percent: reading.batteryPercent }) : null,
-                reading?.dpi != null ? t("device.chipDpi", { dpi: reading.dpi }) : null,
-                reading?.pollRateHz != null ? t("device.chipPoll", { hz: reading.pollRateHz }) : null,
+                ...(values.length > 0 ? values : [reading === undefined ? t("device.reading") : t("device.noAnswer")]),
                 slot !== undefined ? t("device.chipSlot", { n: slot }) : null,
               ].filter((chip): chip is string => chip !== null)
             : [t("device.notConnected")]
@@ -97,7 +105,10 @@ export function DeviceCards({
             type="button"
             aria-pressed={active}
             className={`device-card${active ? " device-card--active" : ""}${builtin && !connected ? " device-card--offline" : ""}`}
-            onClick={() => onSelect(device.id)}
+            onClick={() => {
+              onSelect(device.id);
+              if (builtin && connected) setSelectToken((n) => n + 1);
+            }}
             title={device.name}
           >
             <span className="device-card__name">{device.name}</span>

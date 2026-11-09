@@ -473,6 +473,43 @@ struct Snapshot {
     records: Vec<Record>,
 }
 
+/// Waits until every live session has restored its map and ended, at most
+/// `limit`: the process must not exit while a mouse still plays Sidearm's
+/// signals, which are silent without it.
+pub fn wait_idle(limit: Duration) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    while ACTIVE.iter().any(|active| active.load(Ordering::Acquire)) {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+    true
+}
+
+/// Puts back every live map a Sidearm process left when it died without
+/// restoring (killed, crashed): run by its capture helper, which outlives it.
+/// Until then the mouse plays Sidearm's signals — every mapped button and the
+/// wheel stay silent until a bank switch reloads the map from flash.
+pub fn restore_orphaned(config_dir: &Path) {
+    for model in CATALOG.iter().filter(|model| model.live.is_some()) {
+        let backup = live_backup(config_dir, model);
+        if !backup.exists() {
+            continue;
+        }
+        match VendorDevice::open_model(model).and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
+            // Same as a session's end: the onboard path's signals come back at the next start.
+            Ok(()) if model.transport == Transport::Onboard => {
+                if let Err(error) = std::fs::write(config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map") {
+                    log::warn!("[naga-live] {} signals marker not written: {error}", model.name);
+                }
+            }
+            Ok(()) => {}
+            Err(error) => log::warn!("[naga-live] {} live map left by a stopped Sidearm not restored: {error}", model.name),
+        }
+    }
+}
+
 /// A rollback file of `model`'s live map that no session restored (the mouse
 /// slept until the session ended, or Sidearm was killed): the mouse may still
 /// play that live map instead of its onboard signals.

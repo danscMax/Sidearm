@@ -2061,6 +2061,11 @@ input[type="radio"] {
   text-decoration: line-through;
 }
 
+.profile-strip__chip--more {
+  color: var(--c-text-muted);
+  background: transparent;
+}
+
 .profile-strip__chip--add {
   color: var(--c-accent);
   border-style: dashed;
@@ -2145,10 +2150,25 @@ input[type="radio"] {
   content: "· ";
 }
 
-/* The built-in mouse's tabs: buttons, performance, memory. */
-.device-tabs {
-  align-self: flex-start;
-  margin-bottom: var(--space-md);
+/* The selected device's panel header: its name and its tabs, set apart from
+   the cards above so the tabs read as belonging to that one device. */
+.device-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-md);
+  width: 100%;
+  margin: var(--space-lg) 0 var(--space-md);
+  padding-bottom: var(--space-sm);
+  border-bottom: 1px solid var(--c-border);
+}
+
+.device-panel__title {
+  margin: 0;
+  font-size: var(--fs-heading-sm);
+  font-weight: 600;
+  color: var(--c-text-bright);
 }
 
 .gdv__header {

@@ -98,6 +98,9 @@ export interface ProfilesWorkspaceProps {
   mouseStates: MouseStatusKind[];
 }
 
+/** App chips shown in the profile strip before "N more". */
+const STRIP_APPS = 4;
+
 /* ────────────────────────────────────────────────────────────
    Profiles Workspace
    ──────────────────────────────────────────────────────────── */
@@ -180,6 +183,8 @@ export function ProfilesWorkspace({
   const [showTransfer, setShowTransfer] = useState(false);
   // A built-in mouse has three tabs: its buttons, its performance, its memory.
   const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory">("buttons");
+  // A profile used by many apps shows a few of them until expanded.
+  const [appsExpanded, setAppsExpanded] = useState(false);
   // Bumped after a write from the Performance tab so the mouse cards re-read.
   const [cardsToken, setCardsToken] = useState(0);
   const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
@@ -636,10 +641,12 @@ export function ProfilesWorkspace({
         <div className="profile-strip">
           <span className="profile-strip__name">{activeProfile.name}</span>
           <span className="profile-strip__label">
-            {selectedAppMappings.length > 0 ? t("profile.stripApps") : t("profile.emptyHint")}
+            {selectedAppMappings.length > 0
+              ? t("profile.stripApps", { count: selectedAppMappings.length })
+              : t("profile.emptyHint")}
           </span>
           <span className="profile-strip__chips">
-            {selectedAppMappings.map((mapping) => (
+            {(appsExpanded ? selectedAppMappings : selectedAppMappings.slice(0, STRIP_APPS)).map((mapping) => (
               <button
                 key={mapping.id}
                 type="button"
@@ -655,6 +662,16 @@ export function ProfilesWorkspace({
                 {mapping.exe.replace(/\.exe$/i, "")}
               </button>
             ))}
+            {selectedAppMappings.length > STRIP_APPS ? (
+              <button
+                type="button"
+                className="profile-strip__chip profile-strip__chip--more"
+                aria-expanded={appsExpanded}
+                onClick={() => setAppsExpanded((v) => !v)}
+              >
+                {appsExpanded ? t("profile.stripLess") : t("profile.stripMore", { count: selectedAppMappings.length - STRIP_APPS })}
+              </button>
+            ) : null}
             <button type="button" className="profile-strip__chip profile-strip__chip--add" onClick={openCreateRule} title={t("profile.addRuleTooltip")}>
               {t("profile.stripAddApp")}
             </button>
@@ -834,6 +851,8 @@ export function ProfilesWorkspace({
         onAdd={handleAddDevice}
       />
       {activeDevice?.builtin && deviceLayout(activeDevice.id) ? (
+        <div className="device-panel__header">
+          <h3 className="device-panel__title">{activeDevice.name}</h3>
         <PillTrack
           className="device-tabs"
           items={[
@@ -844,6 +863,7 @@ export function ProfilesWorkspace({
           active={mouseTab}
           onSelect={setDeviceTab}
         />
+        </div>
       ) : null}
 
       {mouseTab !== "buttons" && activeDevice ? (

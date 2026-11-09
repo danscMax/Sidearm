@@ -43,6 +43,9 @@ struct MouseInputs {
     /// Every connected mouse keeps its HyperShift layer in its firmware: the
     /// software trigger is off.
     firmware_hypershift: bool,
+    /// Where the live maps' rollback files are: the helper restores them if
+    /// Sidearm dies without stopping it.
+    config_dir: std::path::PathBuf,
 }
 
 const MOD_ALT: u32 = 0x0001;
@@ -1308,7 +1311,7 @@ impl CaptureBackendHandle {
             &registrations,
             helper_event_tx,
             &config,
-            MouseInputs { readers, firmware_hypershift },
+            MouseInputs { readers, firmware_hypershift, config_dir: config_dir.clone() },
             reader_helper_died,
         );
         let mut live_sessions = Vec::new();
@@ -3112,6 +3115,12 @@ pub fn capture_helper_main() {
         readers: Vec<ReaderInit>,
         #[serde(default)]
         firmware_hypershift: bool,
+        /// Sidearm's process and config folder: when it dies without stopping
+        /// the helper, the helper restores the live maps it left.
+        #[serde(default)]
+        parent_pid: Option<u32>,
+        #[serde(default)]
+        config_dir: Option<std::path::PathBuf>,
     }
 
     let init: HelperInit = match serde_json::from_str::<HelperInit>(line.trim()) {
@@ -3126,6 +3135,8 @@ pub fn capture_helper_main() {
                     hypershift_trigger: None,
                     readers: Vec::new(),
                     firmware_hypershift: false,
+                    parent_pid: None,
+                    config_dir: None,
                 },
                 Err(e) => {
                     log::error!("[capture-helper] Failed to parse init payload: {e}");
@@ -3142,7 +3153,13 @@ pub fn capture_helper_main() {
         hypershift_trigger,
         readers,
         firmware_hypershift,
+        parent_pid,
+        config_dir,
     } = init;
+    // Opened now, so the pid cannot be reused before it is checked.
+    let parent = parent_pid.map(|pid| unsafe {
+        windows_sys::Win32::System::Threading::OpenProcess(windows_sys::Win32::System::Threading::PROCESS_SYNCHRONIZE, 0, pid) as usize
+    }).filter(|&handle| handle != 0);
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
@@ -3246,6 +3263,15 @@ pub fn capture_helper_main() {
             buf.clear();
             match stdin.lock().read_line(&mut buf) {
                 Ok(0) | Err(_) => {
+                    // A stop closes stdin with Sidearm alive; a kill closes it by its death.
+                    let parent_gone = parent.is_some_and(|handle| unsafe {
+                        windows_sys::Win32::System::Threading::WaitForSingleObject(handle as _, 0)
+                            == windows_sys::Win32::Foundation::WAIT_OBJECT_0
+                    });
+                    if parent_gone && let Some(dir) = &config_dir {
+                        log::warn!("[capture-helper] Sidearm stopped without restoring the mice; restoring their live maps.");
+                        crate::mouse_memory::live_overlay::restore_orphaned(dir);
+                    }
                     log::info!("[capture-helper] stdin closed, posting WM_QUIT.");
                     unsafe {
                         PostThreadMessageW(hook_tid, WM_QUIT, 0, 0);
@@ -3731,7 +3757,7 @@ fn spawn_capture_helper(
     mouse: MouseInputs,
     helper_died: Arc<AtomicBool>,
 ) -> Option<HelperHandle> {
-    let MouseInputs { readers, firmware_hypershift } = mouse;
+    let MouseInputs { readers, firmware_hypershift, config_dir } = mouse;
     use std::io::Write;
     use std::os::windows::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -3837,6 +3863,8 @@ fn spawn_capture_helper(
         #[serde(skip_serializing_if = "Vec::is_empty")]
         readers: Vec<ReaderInit>,
         firmware_hypershift: bool,
+        parent_pid: u32,
+        config_dir: &'a std::path::Path,
     }
     let init = HelperInit {
         registrations: &helper_regs,
@@ -3845,6 +3873,8 @@ fn spawn_capture_helper(
         hypershift_trigger: config.settings.hypershift_trigger.trim(),
         readers,
         firmware_hypershift,
+        parent_pid: std::process::id(),
+        config_dir: &config_dir,
     };
     let json = match serde_json::to_string(&init) {
         Ok(j) => j,

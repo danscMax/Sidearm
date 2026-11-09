@@ -452,8 +452,10 @@
     "duplicateName": "{{name}} (copy)",
     "importName": "{{name}} (imported)",
     "importSuffix": "imported",
-    "stripApps": "Turns on in:",
-    "stripAddApp": "+ App"
+    "stripApps": "Turns on in {{count}} apps:",
+    "stripAddApp": "+ App",
+    "stripMore": "+{{count}} more",
+    "stripLess": "Show fewer"
   },
   "newRule": {
     "title": "New rule",
@@ -1173,7 +1175,9 @@
     "notConnected": "not connected",
     "tabButtons": "Buttons",
     "tabPerformance": "Performance",
-    "tabMemory": "Mouse memory"
+    "tabMemory": "Mouse memory",
+    "reading": "reading…",
+    "noAnswer": "not answering — move it"
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",

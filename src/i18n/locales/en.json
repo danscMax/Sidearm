@@ -64,7 +64,10 @@
     "runtimeStopped": "Sidearm idle",
     "runtimeTooltip": "Intercepts clicks from the 12-button thumb grid and hotkeys. Disable to temporarily hand control back to Razer Synapse.",
     "stop": "STOP",
-    "start": "START"
+    "start": "START",
+    "appCount_one": "{{count}} app",
+    "appCount_other": "{{count}} apps",
+    "noApps": "turned on by hand"
   },
   "statusbar": {
     "events": "{{count}} events"
@@ -452,7 +455,6 @@
     "duplicateName": "{{name}} (copy)",
     "importName": "{{name}} (imported)",
     "importSuffix": "imported",
-    "stripApps": "Turns on in {{count}} apps:",
     "stripAddApp": "+ App",
     "stripMore": "+{{count}} more",
     "stripLess": "Show fewer"

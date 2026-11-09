@@ -548,6 +548,9 @@ function App() {
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
+  // A rule chosen in the sidebar opens in the assignments screen's editor.
+  const [editRuleSignal, setEditRuleSignal] = useState<string | null>(null);
+  const [allRulesView, setAllRulesView] = useState(false);
   // Tray "Create rule for active window" capture, consumed by ProfilesWorkspace.
   const [quickRuleCapture, setQuickRuleCapture] = useState<WindowCaptureResult | null>(null);
 
@@ -1096,6 +1099,19 @@ function App() {
         setConfirmModal={setConfirmModal}
         activeConfig={activeConfig}
         selectedDeviceName={activeDevice?.name}
+        allRules={allRulesView}
+        onEditRule={(mappingId) => {
+          switchWorkspaceMode("profiles");
+          setEditRuleSignal(mappingId);
+        }}
+        onAddRule={() => {
+          switchWorkspaceMode("profiles");
+          setAddRuleSignal(true);
+        }}
+        onToggleAllRules={() => {
+          switchWorkspaceMode("profiles");
+          setAllRulesView((v) => !v);
+        }}
       />
 
       <div className="content">
@@ -1121,6 +1137,9 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 addRuleSignal={addRuleSignal}
                 onAddRuleHandled={() => setAddRuleSignal(false)}
+                editRuleSignal={editRuleSignal}
+                onEditRuleHandled={() => setEditRuleSignal(null)}
+                allProfilesView={allRulesView}
                 quickRuleCapture={quickRuleCapture}
                 onQuickRuleHandled={() => setQuickRuleCapture(null)}
                 lastCapture={lastCapture}

@@ -5,8 +5,7 @@ import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
-import { ProfileDropdown } from "./ProfileDropdown";
-import { PillTrack } from "./PillTrack";
+import { SidebarProfiles } from "./SidebarProfiles";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
@@ -47,6 +46,10 @@ export function Sidebar({
   setConfirmModal,
   activeConfig,
   selectedDeviceName,
+  allRules,
+  onEditRule,
+  onAddRule,
+  onToggleAllRules,
 }: {
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
@@ -61,6 +64,11 @@ export function Sidebar({
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   activeConfig?: AppConfig | null;
   selectedDeviceName?: string;
+  /** The all-rules view of the assignments screen. */
+  allRules: boolean;
+  onEditRule: (mappingId: string) => void;
+  onAddRule: () => void;
+  onToggleAllRules: () => void;
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
@@ -123,43 +131,19 @@ export function Sidebar({
             </button>
           </div>
         </div>
-        {profiles.length <= 3 ? (
-          <PillTrack
-            className="pill-track--sidebar"
-            active={effectiveProfileId ?? ""}
-            onSelect={(id) => startTransition(() => onSelectProfile(id))}
-            items={profiles.map((p) => ({ key: p.id, label: p.name }))}
-            pillProps={(item) => ({
-              onDoubleClick: (e) => {
-                e.preventDefault();
-                onSwitchMode("settings");
-              },
-              onContextMenu: (e) => {
-                e.preventDefault();
-                setCtxMenu({ x: e.clientX, y: e.clientY, profileId: item.key });
-              },
-            })}
-            renderTrailing={(item) =>
-              runtimeStatus === "running" && runtimeResolvedProfileName === item.label ? (
-                <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
-              ) : null
-            }
-          />
-        ) : (
-          <ProfileDropdown
-            profiles={profiles}
-            effectiveProfileId={effectiveProfileId}
-            runtimeResolvedProfileName={runtimeResolvedProfileName}
-            runtimeStatus={runtimeStatus}
-            onSelectProfile={(id) => {
-              startTransition(() => onSelectProfile(id));
-            }}
-            onSwitchMode={onSwitchMode}
-            onContextMenu={(x, y, profileId) =>
-              setCtxMenu({ x, y, profileId })
-            }
-          />
-        )}
+        <SidebarProfiles
+          profiles={profiles}
+          appMappings={activeConfig?.appMappings ?? []}
+          effectiveProfileId={effectiveProfileId}
+          runtimeProfileName={runtimeStatus === "running" ? runtimeResolvedProfileName : null}
+          allRules={allRules}
+          onSelect={onSelectProfile}
+          onContextMenu={(x, y, profileId) => setCtxMenu({ x, y, profileId })}
+          onOpenSettings={() => onSwitchMode("settings")}
+          onEditRule={onEditRule}
+          onAddRule={onAddRule}
+          onToggleAllRules={onToggleAllRules}
+        />
         {runtimeStatus === "running" && profiles.some((p) => p.name === runtimeResolvedProfileName) ? (
           <p className="sidebar__profile-legend help-caption">
             <span className="pill-track__active-dot sidebar__profile-legend-dot" aria-hidden="true" />

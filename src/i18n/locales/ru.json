@@ -68,7 +68,12 @@
     "runtimeStopped": "Sidearm не активен",
     "runtimeTooltip": "Перехват кликов 12-кнопочной клавиатуры и горячих клавиш. Отключите, чтобы временно передать управление Razer Synapse.",
     "stop": "СТОП",
-    "start": "СТАРТ"
+    "start": "СТАРТ",
+    "appCount_one": "{{count}} приложение",
+    "appCount_other": "{{count}} приложений",
+    "noApps": "включается вручную",
+    "appCount_few": "{{count}} приложения",
+    "appCount_many": "{{count}} приложений"
   },
   "statusbar": {
     "events": "{{count}} событий"
@@ -456,7 +461,6 @@
     "duplicateName": "{{name}} (копия)",
     "importName": "{{name}} (импорт)",
     "importSuffix": "импорт",
-    "stripApps": "Включается в приложениях ({{count}}):",
     "stripAddApp": "+ Приложение",
     "stripMore": "ещё {{count}}",
     "stripLess": "Свернуть"

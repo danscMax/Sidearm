@@ -8,12 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- One screen per profile and mouse: the profile strip on top lists the apps that switch
-  to the profile (click one to edit it, "+ App" adds one), mouse cards show battery, DPI,
-  poll rate and slot, and a built-in mouse has Buttons, Performance and Mouse memory
-  tabs. The separate Mouse page is gone; "All rules" still shows every profile's rules.
-
-### Added
+- One screen per profile and mouse: the sidebar lists the profiles with the apps that
+  switch to each (click one to edit it, "+ App" adds one, "All rules" shows every
+  profile's rules), mouse cards show battery, DPI, poll rate and slot, and a built-in
+  mouse has Buttons, Performance and Mouse memory tabs. The separate Mouse page is gone.
 - Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
   wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
   live button map that Sidearm restores when it stops.
@@ -39,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   profile button was pressed: its capture helper now restores the mouse's own button map.
   A normal exit waits for both mice to finish restoring before it closes.
 - A connected mouse that does not answer (asleep) says so on its card instead of showing
-  nothing; a profile with many apps shows four of them and "N more".
+  nothing.
 - Plugging a mouse in or out while Sidearm runs switches each mouse to the path it
   needs; a V2 alone no longer stays in two-mouse mode after a V3 was seen once, so
   V2 Pro, Naga Pro and Naga X buttons and the F13–F24 switch work again there.

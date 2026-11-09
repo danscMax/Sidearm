@@ -19,7 +19,7 @@ export interface UseListKeyboardOptions {
  * events (only `.key` / `.preventDefault` are used), so it can be attached as an
  * `onKeyDown` prop or from a `window` listener. The caller owns the active-index
  * state and its reset policy; this only unifies the key logic that had drifted
- * between ProfileDropdown (wrap) and CommandPalette (clamp).
+ * between list menus (wrap) and CommandPalette (clamp).
  */
 export function useListKeyboard({
   itemCount,

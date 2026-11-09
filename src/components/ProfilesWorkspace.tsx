@@ -66,6 +66,11 @@ export interface ProfilesWorkspaceProps {
   effectiveProfileId: string | null;
   addRuleSignal: boolean;
   onAddRuleHandled: () => void;
+  /** A rule picked in the sidebar: open it in the editor. */
+  editRuleSignal: string | null;
+  onEditRuleHandled: () => void;
+  /** Every profile's rule cards (the sidebar's "All rules"). */
+  allProfilesView: boolean;
   quickRuleCapture: WindowCaptureResult | null;
   onQuickRuleHandled: () => void;
   lastCapture: WindowCaptureResult | null;
@@ -98,9 +103,6 @@ export interface ProfilesWorkspaceProps {
   mouseStates: MouseStatusKind[];
 }
 
-/** App chips shown in the profile strip before "N more". */
-const STRIP_APPS = 4;
-
 /* ────────────────────────────────────────────────────────────
    Profiles Workspace
    ──────────────────────────────────────────────────────────── */
@@ -111,6 +113,9 @@ export function ProfilesWorkspace({
   effectiveProfileId,
   addRuleSignal,
   onAddRuleHandled,
+  editRuleSignal,
+  onEditRuleHandled,
+  allProfilesView,
   quickRuleCapture,
   onQuickRuleHandled,
   lastCapture,
@@ -183,8 +188,6 @@ export function ProfilesWorkspace({
   const [showTransfer, setShowTransfer] = useState(false);
   // A built-in mouse has three tabs: its buttons, its performance, its memory.
   const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory">("buttons");
-  // A profile used by many apps shows a few of them until expanded.
-  const [appsExpanded, setAppsExpanded] = useState(false);
   // Bumped after a write from the Performance tab so the mouse cards re-read.
   const [cardsToken, setCardsToken] = useState(0);
   const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
@@ -365,9 +368,6 @@ export function ProfilesWorkspace({
   >(null);
   const [bindingSearch, setBindingSearch] = useState("");
   const [searchAllProfiles, setSearchAllProfiles] = useState(false);
-  // All-rules view: list every profile's app rules, grouped by profile, instead
-  // of only the active profile's. Clicking a foreign card switches to its profile.
-  const [allProfilesView, setAllProfilesView] = useState(false);
 
   // Open the new-rule dialog when the command palette requests it, then ack
   // so a later remount (mode switch) doesn't reopen it.
@@ -377,6 +377,13 @@ export function ProfilesWorkspace({
       onAddRuleHandled();
     }
   }, [addRuleSignal]);
+
+  useEffect(() => {
+    if (editRuleSignal) {
+      setEditingMappingId(editRuleSignal);
+      onEditRuleHandled();
+    }
+  }, [editRuleSignal]);
 
   // Drag-reorder state for the profile rules grid.
   const [draggingMappingId, setDraggingMappingId] = useState<string | null>(null);
@@ -636,57 +643,6 @@ export function ProfilesWorkspace({
     <div
       className={`profiles-workspace profiles-workspace--layer-${selectedLayer}`}
     >
-      {/* ── Profile strip: the edited profile and the apps that switch to it ── */}
-      {activeProfile ? (
-        <div className="profile-strip">
-          <span className="profile-strip__name">{activeProfile.name}</span>
-          <span className="profile-strip__label">
-            {selectedAppMappings.length > 0
-              ? t("profile.stripApps", { count: selectedAppMappings.length })
-              : t("profile.emptyHint")}
-          </span>
-          <span className="profile-strip__chips">
-            {(appsExpanded ? selectedAppMappings : selectedAppMappings.slice(0, STRIP_APPS)).map((mapping) => (
-              <button
-                key={mapping.id}
-                type="button"
-                className={`profile-strip__chip${mapping.enabled ? "" : " profile-strip__chip--disabled"}`}
-                onClick={() => setEditingMappingId(mapping.id)}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
-                }}
-                title={mapping.processPath ?? mapping.exe}
-              >
-                <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profile-strip__icon" />
-                {mapping.exe.replace(/\.exe$/i, "")}
-              </button>
-            ))}
-            {selectedAppMappings.length > STRIP_APPS ? (
-              <button
-                type="button"
-                className="profile-strip__chip profile-strip__chip--more"
-                aria-expanded={appsExpanded}
-                onClick={() => setAppsExpanded((v) => !v)}
-              >
-                {appsExpanded ? t("profile.stripLess") : t("profile.stripMore", { count: selectedAppMappings.length - STRIP_APPS })}
-              </button>
-            ) : null}
-            <button type="button" className="profile-strip__chip profile-strip__chip--add" onClick={openCreateRule} title={t("profile.addRuleTooltip")}>
-              {t("profile.stripAddApp")}
-            </button>
-          </span>
-          <button
-            type="button"
-            className={`action-button action-button--small${allProfilesView ? " action-button--active" : ""}`}
-            aria-pressed={allProfilesView}
-            onClick={() => setAllProfilesView((v) => !v)}
-          >
-            {t("profile.allProfilesToggle")}
-          </button>
-        </div>
-      ) : null}
-
       {/* ── All rules: every profile's cards, drag to reorder or move ── */}
       {allProfilesView && activeProfile ? (
       <>

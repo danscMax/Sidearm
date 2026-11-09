@@ -413,15 +413,33 @@ fn run(
             continue;
         }
         // The mouse may still hold the offline profile written at the last exit,
-        // or what it had stored under a live map that just ended: put Sidearm's
-        // signals back quietly before the check would call it drift.
-        if !crate::mouse_memory::live_overlay::is_active(crate::mouse_memory::config_model())
-            && config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists()
+        // what it had stored under a live map that just ended, or a live map no
+        // session restored: put Sidearm's signals back quietly before the check
+        // would call it drift.
+        let model = crate::mouse_memory::config_model();
+        let marker = config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists();
+        let stale_map = crate::mouse_memory::live_overlay::unrestored_map(config_dir, model);
+        if !crate::mouse_memory::live_overlay::is_active(model)
+            && (marker || stale_map.is_some())
             && let Some(config) = read_config(config_dir)
-            && !crate::mouse_offline::restore_after_offline(&config, config_dir)
         {
-            wait = FAST_POLL;
-            continue;
+            let restored = if marker {
+                crate::mouse_offline::restore_after_offline(&config, config_dir)
+            } else {
+                crate::mouse_offline::restore_signals(&config)
+                    .inspect_err(|error| log::warn!("[onboard-guard] signals not restored over a stale live map: {error}"))
+                    .is_ok()
+            };
+            if !restored {
+                wait = FAST_POLL;
+                continue;
+            }
+            // The mouse plays Sidearm's signals again: that rollback is moot.
+            if let Some(path) = stale_map
+                && let Err(error) = std::fs::remove_file(&path)
+            {
+                log::warn!("[onboard-guard] {} not removed: {error}", path.display());
+            }
         }
 
         // Only Razer's engine rewrites the records, so a full scan is worth its

@@ -444,6 +444,14 @@ struct Snapshot {
     records: Vec<Record>,
 }
 
+/// A rollback file of `model`'s live map that no session restored (the mouse
+/// slept until the session ended, or Sidearm was killed): the mouse may still
+/// play that live map instead of its onboard signals.
+pub fn unrestored_map(config_dir: &Path, model: &NativeModel) -> Option<PathBuf> {
+    let backup = live_backup(config_dir, model);
+    (!is_active(model) && backup.exists()).then_some(backup)
+}
+
 fn live_backup(config_dir: &Path, model: &NativeModel) -> PathBuf {
     // shortcut: rc builds of 2026-11-08 used these names; drop after 0.13.
     let legacy = match model.transport {
@@ -834,6 +842,16 @@ pub(crate) mod tests {
         // and an unverified one does not make a second mouse.
         assert_eq!(names(live_models(&[&NAGA_PRO, &NAGA_V3_PRO])), ["Razer Naga V3 Pro"]);
         assert_eq!(names(live_models(&[&NAGA_V2_HYPERSPEED, &NAGA_PRO])), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_rollback_file_nobody_restored_is_found_by_model() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(unrestored_map(dir.path(), &NAGA_V2_HYPERSPEED), None);
+        std::fs::write(dir.path().join("naga-v2-live.json"), "{}").unwrap();
+        let found = unrestored_map(dir.path(), &NAGA_V2_HYPERSPEED).expect("an rc-era file counts too");
+        assert!(found.ends_with("razer-naga-live.json"));
+        assert_eq!(unrestored_map(dir.path(), &NAGA_V3_PRO), None, "another model's file is not this one's");
     }
 
     #[test]

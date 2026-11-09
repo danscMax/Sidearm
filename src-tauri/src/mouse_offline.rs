@@ -211,6 +211,20 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
     false
 }
 
+/// Writes Sidearm's own signals into the onboard-path mouse: its key buttons
+/// and its plain mouse buttons (no firmware Hypershift). Used after the
+/// offline profile and when a mouse leaves the live map for the onboard path —
+/// its live map then plays whatever the mouse stored, not Sidearm's signals.
+pub fn restore_signals(config: &AppConfig) -> Result<(), String> {
+    let device = VendorDevice::open_onboard()?;
+    if !device.model().verified {
+        return Err(format!("{} is not verified", device.model().name));
+    }
+    device.apply_bindings(&onboard_bindings(config))?;
+    let natives: Vec<&str> = native_buttons().iter().map(|(id, _, _)| *id).collect();
+    device.restore_native_buttons(&natives)
+}
+
 /// Puts Sidearm's own signals back when the mouse still holds the offline
 /// profile. Returns `true` when it restored (the marker was there).
 pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
@@ -218,16 +232,9 @@ pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
     if !marker.exists() {
         return false;
     }
-    let result = VendorDevice::open_onboard().and_then(|device| {
-        if !device.model().verified {
-            // Not the mouse the profile was written into; keep the marker for it.
-            return Err(format!("{} is not verified", device.model().name));
-        }
-        device.apply_bindings(&onboard_bindings(config))?;
-        let natives: Vec<&str> = native_buttons().iter().map(|(id, _, _)| *id).collect();
-        device.restore_native_buttons(&natives)
-    });
-    match result {
+    // An unverified mouse is not the one the profile was written into; the
+    // marker stays for it.
+    match restore_signals(config) {
         Ok(()) => {
             let _ = std::fs::remove_file(&marker);
             log::info!("[mouse-offline] Sidearm signals restored after the offline profile");

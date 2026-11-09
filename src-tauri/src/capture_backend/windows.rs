@@ -1127,8 +1127,23 @@ impl CaptureBackendHandle {
                 stale.push(session);
             }
         }
+        // An onboard mouse that stays connected but leaves the live map goes
+        // back to the onboard path, which needs Sidearm's signals in the mouse:
+        // the restored live map plays what the mouse had stored (often the
+        // offline profile, with firmware Hypershift on the trigger).
+        let handed_over = stale.iter().any(|session| live_overlay::returns_to_onboard(session.model(), &present, &live));
         stale.iter_mut().for_each(|session| session.request_stop());
         drop(stale);
+        if handed_over {
+            match crate::mouse_offline::restore_signals(&config) {
+                Ok(()) => log::info!("[capture] Onboard mouse back on its own signals after leaving the live map"),
+                // The guard finds and fixes the records on its next full scan.
+                Err(error) => {
+                    log::warn!("[capture] Onboard signals not restored after the live map: {error}");
+                    crate::onboard_guard::request_check();
+                }
+            }
+        }
         if !kept.is_empty() {
             log::info!("[capture] Keeping {} live button map(s) on config reload", kept.len());
         }

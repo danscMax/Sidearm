@@ -88,6 +88,15 @@ pub fn live_models(present: &[&'static NativeModel]) -> Vec<&'static NativeModel
         .collect()
 }
 
+/// Whether a mouse whose live map just ended goes back to the onboard path
+/// (still connected, no live map now): it then needs Sidearm's own signals
+/// written into it again.
+pub fn returns_to_onboard(model: &NativeModel, present: &[&'static NativeModel], live: &[&'static NativeModel]) -> bool {
+    model.transport == Transport::Onboard
+        && present.iter().any(|item| std::ptr::eq(*item, model))
+        && !live.iter().any(|item| std::ptr::eq(*item, model))
+}
+
 /// Whether the mouse hook's software Hypershift is needed: some connected
 /// mouse uses the onboard path, or nothing is connected yet.
 pub fn software_hypershift(present: &[&'static NativeModel], live: &[&'static NativeModel]) -> bool {
@@ -677,6 +686,10 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn model(&self) -> &'static NativeModel {
+        self.model
+    }
+
     pub fn matches(&self, model: &NativeModel, targets: &[(u8, u8, OnboardAction)]) -> bool {
         std::ptr::eq(self.model, model) && self.targets.as_ref() == targets
     }
@@ -822,6 +835,16 @@ pub(crate) mod tests {
         // and an unverified one does not make a second mouse.
         assert_eq!(names(live_models(&[&NAGA_PRO, &NAGA_V3_PRO])), ["Razer Naga V3 Pro"]);
         assert_eq!(names(live_models(&[&NAGA_V2_HYPERSPEED, &NAGA_PRO])), Vec::<&str>::new());
+    }
+
+    #[test]
+    fn a_v2_left_alone_goes_back_to_its_onboard_signals() {
+        let alone = [&NAGA_V2_HYPERSPEED];
+        assert!(returns_to_onboard(&NAGA_V2_HYPERSPEED, &alone, &live_models(&alone)), "V3 unplugged");
+        let both = [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO];
+        assert!(!returns_to_onboard(&NAGA_V2_HYPERSPEED, &both, &live_models(&both)), "still live");
+        assert!(!returns_to_onboard(&NAGA_V2_HYPERSPEED, &[&NAGA_V3_PRO], &[&NAGA_V3_PRO]), "unplugged itself");
+        assert!(!returns_to_onboard(&NAGA_V3_PRO, &[&NAGA_V3_PRO], &[]), "a live-only mouse has no onboard path");
     }
 
     #[test]

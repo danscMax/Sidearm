@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { setProfileDeviceSlot, setProfileMouse } from "./config-editing";
+import { importProfile, setProfileDeviceSlot, setProfileMouse } from "./config-editing";
+import type { Profile } from "./config";
 import { makeConfig } from "./test-fixtures";
 
 describe("per-mouse profile settings", () => {
@@ -15,6 +16,19 @@ describe("per-mouse profile settings", () => {
     config = setProfileMouse(config, "p1", "razer-naga-v3", { mouseDpi: undefined, mouseDpiStages: undefined });
     expect(config.profiles[0].deviceMouse).toBeUndefined();
     expect(config.profiles[1].deviceMouse).toBeUndefined();
+  });
+
+  it("imports a pre-v5 profile's DPI onto this config's mice only", () => {
+    const config = makeConfig();
+    config.devices.push({ id: "razer-naga-v3", name: "V3", builtin: true });
+    const old = { id: "x", name: "Old", enabled: true, priority: 0, mouseDpi: 1600 } as Profile;
+    const imported = importProfile(config, { version: 2, exportedAt: "", profile: old, bindings: [], actions: [], appMappings: [] });
+    const profile = imported.profiles[imported.profiles.length - 1] as Profile & { mouseDpi?: number };
+    expect(profile.mouseDpi).toBeUndefined();
+    expect(profile.deviceMouse).toEqual({ "razer-naga": { mouseDpi: 1600 }, "razer-naga-v3": { mouseDpi: 1600 } });
+    const foreign = { ...old, mouseDpi: undefined, deviceMouse: { "other-pc-mouse": { mouseDpi: 800 } } } as Profile;
+    const again = importProfile(config, { version: 2, exportedAt: "", profile: foreign, bindings: [], actions: [], appMappings: [] });
+    expect(again.profiles[again.profiles.length - 1].deviceMouse).toBeUndefined();
   });
 
   it("gives a bank to one profile only", () => {

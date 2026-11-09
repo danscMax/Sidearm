@@ -1560,7 +1560,8 @@
       "dpiSwitched": "DPI: {{dpi}}.",
       "dpiProfileMissing": "Select a profile before testing DPI controls.",
       "dpiStagesMissing": "Configure DPI stages in the Mouse tab for this profile first.",
-      "dpiFailed": "Could not change DPI: {{detail}}"
+      "dpiFailed": "Could not change DPI: {{detail}}",
+      "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected."
     },
     "synapse": {
       "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",

@@ -167,9 +167,7 @@ pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
                     return;
                 }
                 let model = device.model();
-                let Some(own) = profile.mouse_for(model.device_id) else { continue };
-                let dpi = own.mouse_dpi.map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
-                let poll_rate_hz = own.mouse_poll_rate_hz.filter(|hz| model.poll_code_for_hz(*hz).is_some());
+                let Some((dpi, poll_rate_hz)) = switch_values(&profile, model) else { continue };
                 let result = (|| {
                     let mut written = false;
                     if let Some(hz) = poll_rate_hz
@@ -225,6 +223,22 @@ fn next_dpi_stage(stages: &[u16], current: u16, up: bool) -> Result<u16, String>
     }
 }
 
+/// The DPI and poll rate a profile switch writes into `model`: that mouse's
+/// own settings, within its range. `None`: the profile has none for it.
+fn switch_values(profile: &crate::config::Profile, model: &crate::device_catalog::NativeModel) -> Option<(Option<u16>, Option<u16>)> {
+    let own = profile.mouse_for(model.device_id)?;
+    Some((
+        own.mouse_dpi.map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max)),
+        own.mouse_poll_rate_hz.filter(|hz| model.poll_code_for_hz(*hz).is_some()),
+    ))
+}
+
+/// The DPI stages `model` steps through: its own, within its range.
+fn playable_stages(profile: &crate::config::Profile, model: &crate::device_catalog::NativeModel) -> Option<Vec<u16>> {
+    let stages = profile.mouse_for(model.device_id)?.mouse_dpi_stages.as_deref()?;
+    Some(stages.iter().copied().filter(|dpi| (model.dpi_min..=model.dpi_max).contains(dpi)).collect())
+}
+
 /// `step_profile_dpi` error when no connected mouse has stages in the profile.
 pub const NO_DPI_STAGES: &str = "no connected mouse has DPI stages in this profile";
 
@@ -238,8 +252,7 @@ pub fn step_profile_dpi(profile: &crate::config::Profile, up: bool) -> Result<u1
     let mut last = Err(NO_DPI_STAGES.to_string());
     for device in connected_mice()? {
         let model = device.model();
-        let Some(stages) = profile.mouse_for(model.device_id).and_then(|own| own.mouse_dpi_stages.as_deref()) else { continue };
-        let playable: Vec<u16> = stages.iter().copied().filter(|dpi| (model.dpi_min..=model.dpi_max).contains(dpi)).collect();
+        let Some(playable) = playable_stages(profile, model) else { continue };
         let step = (|| {
             let current = device.dpi()?;
             let desired = next_dpi_stage(&playable, current, up)?;
@@ -273,7 +286,26 @@ fn connected_mice() -> Result<Vec<VendorDevice>, String> {
 
 #[cfg(test)]
 mod dpi_stage_tests {
-    use super::next_dpi_stage;
+    use super::{next_dpi_stage, playable_stages, switch_values};
+    use crate::config::{MouseOverrides, Profile};
+    use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
+
+    #[test]
+    fn each_mouse_takes_its_own_settings_within_its_range() {
+        let mut profile: Profile = crate::config::default_seed_config().profiles[0].clone();
+        profile.device_mouse = Some([
+            ("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: Some(250), mouse_dpi_stages: None }),
+            ("razer-naga-v3".to_owned(), MouseOverrides { mouse_dpi: Some(45_000), mouse_poll_rate_hz: Some(1000), mouse_dpi_stages: Some(vec![800, 45_000]) }),
+        ].into());
+        assert_eq!(switch_values(&profile, &NAGA_V2_HYPERSPEED), Some((Some(1600), None)), "250 Hz is not a V2 rate");
+        assert_eq!(switch_values(&profile, &NAGA_V3_PRO), Some((Some(45_000), Some(1000))));
+        assert_eq!(playable_stages(&profile, &NAGA_V2_HYPERSPEED), None, "no stages of its own");
+        assert_eq!(playable_stages(&profile, &NAGA_V3_PRO), Some(vec![800, 45_000]));
+        profile.device_mouse.as_mut().unwrap().get_mut("razer-naga").unwrap().mouse_dpi_stages = Some(vec![800, 40_000]);
+        assert_eq!(playable_stages(&profile, &NAGA_V2_HYPERSPEED), Some(vec![800]), "beyond the V2's range");
+        profile.device_mouse = None;
+        assert_eq!(switch_values(&profile, &NAGA_V3_PRO), None);
+    }
 
     #[test]
     fn steps_clamp_and_recover_from_unknown_values() {

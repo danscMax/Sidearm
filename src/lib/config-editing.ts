@@ -1863,9 +1863,25 @@ export function setProfileDeviceSlot(
   };
 }
 
-function keepDevices<T>(perDevice: Record<string, T> | undefined, config: AppConfig): Record<string, T> | undefined {
-  const kept = Object.entries(perDevice ?? {}).filter(([id]) => config.devices.some((device) => device.id === id));
+/** An imported profile's per-mouse settings for the mice this config has; a
+ *  pre-v5 file's flat settings become every built-in mouse's own, as on load. */
+function importedMouseSettings(profile: Profile, config: AppConfig): Record<string, MouseOverrides> | undefined {
+  const legacy = profile as Profile & MouseOverrides;
+  const flat: MouseOverrides = Object.fromEntries(
+    Object.entries({ mouseDpi: legacy.mouseDpi, mousePollRateHz: legacy.mousePollRateHz, mouseDpiStages: legacy.mouseDpiStages })
+      .filter(([, value]) => value !== undefined),
+  );
+  const perMouse = { ...profile.deviceMouse };
+  if (Object.keys(flat).length > 0) {
+    for (const device of config.devices.filter((entry) => entry.builtin)) perMouse[device.id] ??= flat;
+  }
+  const kept = Object.entries(perMouse).filter(([id]) => config.devices.some((device) => device.id === id));
   return kept.length > 0 ? Object.fromEntries(kept) : undefined;
+}
+
+function withoutFlatMouse(profile: Profile): Profile {
+  const { mouseDpi: _dpi, mousePollRateHz: _poll, mouseDpiStages: _stages, ...rest } = profile as Profile & MouseOverrides;
+  return rest;
 }
 
 /** Import a profile from exported data, assigning new IDs to avoid conflicts. */
@@ -1928,8 +1944,8 @@ export function importProfile(
     // Banks belong to this computer's mice, not to the file; mouse settings
     // only for the mice this config has.
     profiles: [...config.profiles, {
-      ...data.profile, id: newId, name: newName, deviceSlots: undefined,
-      deviceMouse: keepDevices(data.profile.deviceMouse, config),
+      ...withoutFlatMouse(data.profile), id: newId, name: newName, deviceSlots: undefined,
+      deviceMouse: importedMouseSettings(data.profile, config),
     }],
     appMappings: [...config.appMappings, ...newAppMappings],
     bindings: [...config.bindings, ...newBindings],

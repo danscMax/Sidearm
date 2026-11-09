@@ -164,6 +164,9 @@ export function MouseWorkspace({
   // A new mouse to show: read it (the ref serves callbacks bound at mount).
   useEffect(() => {
     targetRef.current = target;
+    // The previous mouse's numbers must not stand under this mouse's name.
+    setDevice(null);
+    setReadAt(null);
     setSummary(null);
     setSummaryCopied(null);
     setReport(null);
@@ -295,7 +298,7 @@ export function MouseWorkspace({
             <PillTrack
               items={mice.map((mouse) => ({ key: mouse.deviceId, label: mouse.name }))}
               active={target ?? ""}
-              pillProps={() => ({ disabled: hardwareBusy })}
+              // Never blocked by a read in flight: the switch supersedes it.
               onSelect={(id) => setChosenMouse(id)}
             />
           </SettingRow>

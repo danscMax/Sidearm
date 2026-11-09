@@ -407,8 +407,14 @@ fn run(
         }
         razer_was_running = razer_running;
 
-        // The mouse may still hold the offline profile written at the last exit:
-        // put Sidearm's signals back quietly before the check would call it drift.
+        // The exit is writing the offline profile: never put signals over it.
+        if crate::is_shutting_down() {
+            wait = POLL_INTERVAL;
+            continue;
+        }
+        // The mouse may still hold the offline profile written at the last exit,
+        // or what it had stored under a live map that just ended: put Sidearm's
+        // signals back quietly before the check would call it drift.
         if !crate::mouse_memory::live_overlay::is_active(crate::mouse_memory::config_model())
             && config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists()
             && let Some(config) = read_config(config_dir)

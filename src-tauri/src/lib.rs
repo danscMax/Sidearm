@@ -2960,6 +2960,10 @@ async fn restore_synapse_startup(app: AppHandle) -> Result<(), CommandError> {
 /// Set once exit work began: no capture restart may write the mice after it.
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
+pub(crate) fn is_shutting_down() -> bool {
+    SHUTTING_DOWN.load(Ordering::SeqCst)
+}
+
 /// Exit work for the mice, once per process — a clean exit and the end of the
 /// Windows session both run it. Stops the capture helper first (an orphaned
 /// helper keeps its mouse hook alive and swallows back/forward after exit),

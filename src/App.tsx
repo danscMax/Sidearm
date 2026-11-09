@@ -29,7 +29,6 @@ import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { SynapseNotice } from "./components/SynapseNotice";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
-import { MouseWorkspace } from "./components/MouseWorkspace";
 import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
@@ -263,7 +262,7 @@ function App() {
     return () => unlisten?.();
   }, [showToast, t]);
 
-  // Mouse-path states feed the Mouse tab; notices (kept by the backend until
+  // Mouse-path states feed the mouse's Performance tab; notices (kept by the backend until
   // taken, so one raised at startup is not lost) become a toast.
   const [mouseStates, setMouseStates] = useState<MouseStatusKind[]>([]);
   useEffect(() => {
@@ -744,7 +743,7 @@ function App() {
       e.preventDefault();
       updateDraft((c) => removeBinding(c, selectedBinding.id));
     } else if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-      // Number keys 1-4: switch workspace tabs
+      // Number keys: switch workspace tabs in sidebar order
       const modeIndex = Number(e.key) - 1;
       if (modeIndex >= 0 && modeIndex < workspaceModeCopy.length) {
         switchWorkspaceMode(workspaceModeCopy[modeIndex].value);
@@ -1149,15 +1148,7 @@ function App() {
                 throttledControlIds={runtime.throttledControlIds}
                 heatmapEnabledRef={heatmapEnabledRef}
                 showToast={showToast}
-              />
-            ) : workspaceMode === "mouse" ? (
-              <MouseWorkspace
-                activeConfig={activeConfig}
-                profiles={profiles}
-                activeProfile={activeProfile}
                 runtimeProfileId={runtimeProfileId}
-                setSelectedProfileId={setSelectedProfileId}
-                updateDraft={updateDraft}
                 mouseStates={mouseStates}
               />
             ) : workspaceMode === "settings" ? (

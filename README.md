@@ -70,8 +70,8 @@ Synapse completely.
   Works together with a V2 HyperSpeed: each mouse keeps its own HyperShift layer, and
   assignments can be copied from one mouse to the other.
 - **Razer Naga V2 Pro, Naga Pro, Naga X** — recognised: DPI, polling rate and battery
-  work, the buttons work as a custom device. **Own one?** Press **Help verify** in the
-  Mouse tab: Sidearm reads the mouse (without changing it) and opens a
+  work, the buttons work as a custom device. **Own one?** Press **Help verify** on the
+  mouse's Performance tab: Sidearm reads the mouse (without changing it) and opens a
   [Device Report](https://github.com/danscMax/Sidearm/issues/new?template=device_report.yml)
   — that report is how the model gets full support.
 - **Any other mouse, keyboard or macro pad that sends keys** — add it as a custom
@@ -181,7 +181,7 @@ Synapse, Razer Central и фоновых служб Razer. Synapse можно у
   скопировать с одной мыши на другую.
 - **Razer Naga V2 Pro, Naga Pro, Naga X** — распознаются: DPI, частота опроса и заряд
   работают, кнопки — как у своего устройства. **Есть такая мышь?** Нажмите
-  **«Помочь проверить»** во вкладке «Мышь»: Sidearm прочитает мышь (ничего не меняя) и
+  **«Помочь проверить»** на вкладке мыши «Производительность»: Sidearm прочитает мышь (ничего не меняя) и
   откроет [отчёт об устройстве](https://github.com/danscMax/Sidearm/issues/new?template=device_report.yml)
   — по нему модель получит полную поддержку.
 - **Любая другая мышь, клавиатура или макропад, которые шлют клавиши** — добавляются

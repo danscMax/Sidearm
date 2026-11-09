@@ -76,12 +76,6 @@
       "body": "Buttons and rules of the selected profile.",
       "meta": "Button assignments"
     },
-    "mouse": {
-      "label": "Mouse",
-      "heading": "Mouse",
-      "body": "Mouse DPI, polling rate and battery.",
-      "meta": "Mouse settings"
-    },
     "debug": {
       "label": "Diagnostics",
       "heading": "Diagnostics",
@@ -433,7 +427,7 @@
     "rulesHeader": "APPLICATION RULES",
     "addRule": "+ Add rule",
     "addRuleTooltip": "Bind an application to this profile. When the app gains focus, the profile switches automatically.",
-    "emptyHint": "No rules yet. Click '+ Add rule' to bind an application to this profile. When the bound app gains focus, the profile switches automatically.",
+    "emptyHint": "No app switches to this profile yet:",
     "exportProfile": "Export profile",
     "importProfile": "Import profile",
     "heatmapOn": "Heatmap: on",
@@ -457,7 +451,9 @@
     "defaultName": "New profile",
     "duplicateName": "{{name}} (copy)",
     "importName": "{{name}} (imported)",
-    "importSuffix": "imported"
+    "importSuffix": "imported",
+    "stripApps": "Turns on in:",
+    "stripAddApp": "+ App"
   },
   "newRule": {
     "title": "New rule",
@@ -1167,7 +1163,17 @@
     "pickPhotoTitle": "Pick a device photo",
     "photoImportError": "Couldn't import the photo.",
     "placeHotspots": "Place buttons",
-    "placingHint": "Click a button in the list, then click its spot on the photo. Placement auto-advances to the next unplaced button."
+    "placingHint": "Click a button in the list, then click its spot on the photo. Placement auto-advances to the next unplaced button.",
+    "cardsLabel": "Devices",
+    "chipBattery": "{{percent}}%",
+    "chipDpi": "{{dpi}} DPI",
+    "chipPoll": "{{hz}} Hz",
+    "chipSlot": "slot {{n}}",
+    "chipControls": "{{count}} buttons",
+    "notConnected": "not connected",
+    "tabButtons": "Buttons",
+    "tabPerformance": "Performance",
+    "tabMemory": "Mouse memory"
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",
@@ -1392,9 +1398,6 @@
     }
   },
   "mouse": {
-    "profilePicker": "Profile",
-    "profilePickerHelp": "Pick a profile to set the mouse up for it. “● now” marks the profile Sidearm applies right now.",
-    "profileActiveNow": "{{name}} ● now",
     "batteryHeader": "Mouse battery",
     "batteryInTray": "On the tray icon",
     "offlineHeader": "Without Sidearm",
@@ -1439,7 +1442,7 @@
     "dpiUnit": "DPI",
     "dpiCaption": "From {{min}} to {{max}}. Applies to both axes.",
     "apply": "Apply",
-    "stageInfo": "Choose DPI presets or enter a custom value under Mouse → Sensitivity. DPI Up/Down uses those stages while Sidearm is running.",
+    "stageInfo": "Choose DPI presets or enter a custom value on the mouse's Performance tab → Sensitivity. DPI Up/Down uses those stages while Sidearm is running.",
     "liveHeader": "Mouse readings",
     "liveHelp": "Read from the device. Saved profile settings are shown separately below.",
     "liveDpi": "Current sensitivity",
@@ -1461,8 +1464,6 @@
     },
     "manualDpiHint": "Enter a custom DPI. With five stages, it replaces the selected stage.",
     "dpiManual": "Manual",
-    "devicePicker": "Mouse",
-    "devicePickerHelp": "Several mice are connected: choose the one this page reads and sets.",
     "slotNeedsMouse": "Connect the mouse to see its slots.",
     "slotSelected": "selected on the mouse now",
     "slotsHeader": "Profiles in the mouse's memory",
@@ -1559,7 +1560,7 @@
       "snippetTags": "Snippet has tags: {{tags}}.",
       "dpiSwitched": "DPI: {{dpi}}.",
       "dpiProfileMissing": "Select a profile before testing DPI controls.",
-      "dpiStagesMissing": "Configure DPI stages in the Mouse tab for this profile first.",
+      "dpiStagesMissing": "Set DPI stages for this profile first: the mouse card → Performance.",
       "dpiFailed": "Could not change DPI: {{detail}}",
       "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected."
     },

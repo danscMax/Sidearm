@@ -7,15 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- One screen per profile and mouse: the profile strip on top lists the apps that switch
+  to the profile (click one to edit it, "+ App" adds one), mouse cards show battery, DPI,
+  poll rate and slot, and a built-in mouse has Buttons, Performance and Mouse memory
+  tabs. The separate Mouse page is gone; "All rules" still shows every profile's rules.
+
 ### Added
 - Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
   wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
   live button map that Sidearm restores when it stops.
-- Naga V3 Pro onboard slots: in the Mouse tab a profile can be linked to one of the
+- Naga V3 Pro onboard slots: on the mouse's Mouse memory tab a profile can be linked to one of the
   mouse's slots; on exit every linked profile is stored in its slot, so its simple
   assignments work without Sidearm. Slots are never switched while Sidearm runs.
 - Two mice at once (V2 HyperSpeed and V3 Pro): each keeps its own HyperShift layer.
-  The Mouse tab shows a mouse picker; each mouse has its own DPI, DPI stages and
+  Each mouse has its own DPI, DPI stages and
   poll rate per profile (`Profile.deviceMouse`; existing values become the own settings of every
   built-in mouse in the config, a mouse added later starts without any).
 - Copy assignments from one mouse to the other (Profiles → Copy from another mouse),

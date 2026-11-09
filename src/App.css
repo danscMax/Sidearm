@@ -2001,27 +2001,154 @@ input[type="radio"] {
 
 /* ── Device switcher + generic-device view ─────────────────────────── */
 
-.device-bar {
+/* Profile strip: the edited profile and the apps that switch to it. */
+.profile-strip {
   display: flex;
-  justify-content: center;
   align-items: center;
-  gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
+  gap: var(--space-sm);
   width: 100%;
+  padding: var(--space-sm) var(--space-md);
+  margin-bottom: var(--space-md);
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-md);
 }
 
-/* Single-device setup: the lone add button anchors to the right edge instead
-   of floating centered in an empty strip (UI-review V11). */
-.device-bar > .action-button:only-child {
-  margin-left: auto;
+.profile-strip__name {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--c-text-bright);
 }
 
-.device-bar__track .pill-track__pill {
-  max-width: 180px;
+.profile-strip__label {
+  font-size: var(--fs-caption);
+  color: var(--c-text-subtle);
+}
+
+.profile-strip__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-strip__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 200px;
+  padding: 3px 10px;
+  font-size: var(--fs-small);
+  color: var(--c-text);
+  background: var(--c-surface-alt);
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-pill);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+}
+
+.profile-strip__chip:hover {
+  border-color: var(--c-border-hover);
+  color: var(--c-text-bright);
+}
+
+.profile-strip__chip--disabled {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+
+.profile-strip__chip--add {
+  color: var(--c-accent);
+  border-style: dashed;
+  background: transparent;
+}
+
+.profile-strip__icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+/* Device cards: one per mouse / user device, the selected one is edited. */
+.device-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm);
+  width: 100%;
+  margin-bottom: var(--space-sm);
+}
+
+.device-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-xs);
+  min-width: 160px;
+  max-width: 280px;
+  padding: var(--space-sm) var(--space-md);
+  text-align: left;
+  color: inherit;
+  background: var(--c-card-bg);
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 150ms ease, background 150ms ease;
+}
+
+.device-card:hover {
+  border-color: var(--c-border-hover);
+}
+
+.device-card--active {
+  border-color: var(--c-border-active);
+  background: var(--c-accent-dim);
+}
+
+.device-card--offline .device-card__chips {
+  color: var(--c-text-subtle);
+}
+
+.device-card--add {
+  justify-content: center;
+  min-width: 0;
+  color: var(--c-accent);
+  border-style: dashed;
+  background: transparent;
+}
+
+.device-card__name {
+  max-width: 100%;
+  font-weight: 600;
+  color: var(--c-text-bright);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.device-card--add .device-card__name {
+  color: inherit;
+}
+
+.device-card__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+}
+
+.device-card__chip + .device-card__chip::before {
+  content: "· ";
+}
+
+/* The built-in mouse's tabs: buttons, performance, memory. */
+.device-tabs {
+  align-self: flex-start;
+  margin-bottom: var(--space-md);
 }
 
 .gdv__header {

@@ -10,12 +10,6 @@ import { PillTrack } from "./PillTrack";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
-  mouse: (
-    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="4" y="1.5" width="8" height="13" rx="4" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M8 1.5v4.5M4 6h8" stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  ),
   profiles: (
     <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
@@ -89,10 +83,7 @@ export function Sidebar({
           <strong>{selectedDeviceName ?? activeConfig?.settings?.deviceName ?? t("app.deviceFallback")}</strong>
         </div>
       </div>
-      {workspaceModeCopy
-        // The Mouse workspace talks to the built-in Naga only.
-        .filter((mode) => mode.value !== "mouse" || (activeConfig?.devices.some((d) => d.builtin) ?? false))
-        .map((mode) => (
+      {workspaceModeCopy.map((mode) => (
         <button
           key={mode.value}
           type="button"

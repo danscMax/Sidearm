@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { OFFLINE_PROFILE_ACTIVE, RAZER_NAGA_DEVICE_ID, type AppConfig, type MouseOverrides, type Profile } from "../lib/config";
+import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type MouseOverrides, type Profile } from "../lib/config";
 import { uiText } from "../lib/ui-text";
 import { setProfileDeviceSlot, setProfileMouse } from "../lib/config-editing";
 import {
@@ -10,7 +10,6 @@ import {
   getOnboardBanks,
   listenMouseBattery,
   listenNativeMiceChanged,
-  listNativeMice,
   normalizeCommandError,
   openDeviceReportIssue,
   setKeySignals,
@@ -21,17 +20,23 @@ import type { MouseSettings as MouseSettingsState, MouseStatusKind, NativeModelI
 import { PillTrack } from "./PillTrack";
 import { dpiStageChoices, dpiStagesForValue } from "../lib/dpi-stages";
 import { listenActionExecutionEvent } from "../lib/backend";
-import { Notice, SelectField, SettingRow, Toggle } from "./shared";
+import { Notice, SettingRow, Toggle } from "./shared";
 
 export interface MouseWorkspaceProps {
   activeConfig: AppConfig;
+  /** The built-in device whose mouse this shows (the selected mouse card). */
+  deviceId: string;
+  /** "performance": readings, the profile's DPI / poll rate, signals.
+   *  "memory": onboard slots and the profile kept for use without Sidearm. */
+  section: "performance" | "memory";
+  /** Called after a confirmed write to the mouse (the cards re-read it). */
+  onWritten?: () => void;
   /** Profiles in the sidebar's order. */
   profiles: Profile[];
   /** The profile being edited — the same selection as the sidebar. */
   activeProfile: Profile | null;
   /** The profile the runtime applies now: its edits reach the mouse at once. */
   runtimeProfileId: string | null;
-  setSelectedProfileId: (id: string | null) => void;
   updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
   /** Active mouse-path states (`mouse_status`), shown as warnings on top. */
   mouseStates: MouseStatusKind[];
@@ -43,15 +48,17 @@ const STATE_MESSAGE: Partial<Record<MouseStatusKind, string>> = {
   mouseUnreachable: "mouse.statusMouseUnreachable",
 };
 
-/** The "Mouse" workspace: a profile switcher on top, the selected profile's own
- *  DPI / poll rate (written into the mouse on every switch to that profile), and
- *  the battery with the tray-badge switch. */
+/** One mouse's tabs beside its buttons: "performance" (live readings, the
+ *  edited profile's own DPI / poll rate for this mouse, side-button signals)
+ *  and "memory" (onboard slots, the profile kept for use without Sidearm). */
 export function MouseWorkspace({
   activeConfig,
+  deviceId,
+  section,
+  onWritten,
   profiles,
   activeProfile,
   runtimeProfileId,
-  setSelectedProfileId,
   updateDraft,
   mouseStates,
 }: MouseWorkspaceProps) {
@@ -79,10 +86,7 @@ export function MouseWorkspace({
     queuedWrite: ((deviceId?: string) => Promise<MouseSettingsState>) | null;
   }>({ alive: false, version: 0, pending: false, queued: false, queuedWrite: null });
   const reportPending = useRef(false);
-  // Several connected mice: the one this page reads and writes.
-  const [mice, setMice] = useState<NativeModelInfo[]>([]);
-  const [chosenMouse, setChosenMouse] = useState<string | null>(null);
-  const target = (mice.find((mouse) => mouse.deviceId === chosenMouse) ?? mice[0])?.deviceId;
+  const target = deviceId;
   const targetRef = useRef(target);
   const [banks, setBanks] = useState<OnboardBanks | null>(null);
 
@@ -108,6 +112,7 @@ export function MouseWorkspace({
         setDevice(readings.value);
         setReadAt(Date.now());
         setWriteConfirmed(writing);
+        if (writing) onWritten?.();
         setError(descriptor.status === "rejected" ? normalizeCommandError(descriptor.reason).message : null);
       } else {
         // A failed refresh must not leave old numbers looking like fresh readings.
@@ -146,9 +151,8 @@ export function MouseWorkspace({
     // The first read comes from the effect on the shown mouse below.
     let subscribed = true;
     const disposers: (() => void)[] = [];
-    void listNativeMice().then((list) => { if (subscribed) setMice(list); }, () => {});
     const subscriptions = [
-      listenNativeMiceChanged((list) => { if (subscribed) setMice(list); }),
+      listenNativeMiceChanged(() => { if (subscribed) refresh(); }),
       listenMouseBattery(() => { if (subscribed) refresh(); }),
       listenActionExecutionEvent("action_executed", (event) => {
         if (subscribed && event.actionType === "mouseAction" && typeof event.summary === "object" && event.summary.key === "execution.dpiSwitched") refresh();
@@ -184,7 +188,7 @@ export function MouseWorkspace({
   }, [model?.deviceId, model?.banks, model?.connected]);
 
   // The profile's own settings for the mouse shown.
-  const mouseId = target ?? model?.deviceId ?? RAZER_NAGA_DEVICE_ID;
+  const mouseId = target;
   const own = activeProfile?.deviceMouse?.[mouseId];
   const profileDpi = own?.mouseDpi;
   const profilePoll = own?.mousePollRateHz;
@@ -290,20 +294,62 @@ export function MouseWorkspace({
     if (device?.dpi !== value) applyNow((deviceId) => setMouseDpi(value, deviceId));
   }
 
-  return (
-    <div className="settings-shell__content">
-      {mice.length > 1 ? (
-        <section className="settings-section">
-          <SettingRow title={t("mouse.devicePicker")} hint={t("mouse.devicePickerHelp")}>
-            <PillTrack
-              items={mice.map((mouse) => ({ key: mouse.deviceId, label: mouse.name }))}
-              active={target ?? ""}
-              // Never blocked by a read in flight: the switch supersedes it.
-              onSelect={(id) => setChosenMouse(id)}
-            />
-          </SettingRow>
+  if (section === "memory") {
+    return (
+      <div className="settings-shell__content">
+      {model?.banks && model.connected ? (
+        <section className="settings-section" aria-label={t("mouse.slotsHeader")}>
+          <SettingRow title={t("mouse.slotsHeader")} hint={t("mouse.slotsHelp", { model: model.name })} />
+          {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : banks.assigned.map((bank) => {
+            const holder = profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === bank);
+            return (
+              <SettingRow key={bank} sub title={t("mouse.slotRow", { n: bank })}
+                hint={banks.active === bank ? t("mouse.slotSelected") : undefined}>
+                <PillTrack
+                  items={[{ key: "", label: t("mouse.slotKeep") },
+                    ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
+                  active={holder?.id ?? ""}
+                  onSelect={(profileId) => updateDraft((config) => profileId
+                    ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
+                    : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config)}
+                />
+              </SettingRow>
+            );
+          })}
         </section>
       ) : null}
+
+      <section className="settings-section">
+        <SettingRow title={t("mouse.offlineHeader")} hint={t("mouse.offlineHelp")}>
+          <PillTrack
+            items={[
+              {
+                key: "",
+                label: t("mouse.offlineFallback", {
+                  name: profiles.find((p) => p.id === activeConfig.settings.fallbackProfileId)?.name ?? "",
+                }),
+              },
+              { key: OFFLINE_PROFILE_ACTIVE, label: t("mouse.offlineActive") },
+              ...profiles
+                .filter((profile) => profile.id !== activeConfig.settings.fallbackProfileId)
+                .map((profile) => ({ key: profile.id, label: profile.name })),
+            ]}
+            active={activeConfig.settings.offlineProfileId ?? ""}
+            onSelect={(id) =>
+              updateDraft((config) => ({
+                ...config,
+                settings: { ...config.settings, offlineProfileId: id || undefined },
+              }))
+            }
+          />
+        </SettingRow>
+      </section>
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-shell__content">
       {mouseStates.flatMap((kind) => {
         const key = STATE_MESSAGE[kind];
         return key ? [<Notice key={kind} variant="warning"><p>{t(key)}</p></Notice>] : [];
@@ -356,23 +402,19 @@ export function MouseWorkspace({
           <button type="button" className="action-button action-button--secondary action-button--small mt-8" onClick={() => void copySummary()}>{t("mouse.copySummary")}</button>
           {summaryCopied !== null ? <p className="panel__muted help-sm" role="status">{t(summaryCopied ? "mouse.summaryCopied" : "mouse.summaryCopyFailed")}</p> : null}
         </> : null}
-      </section>
-      <section className="settings-section">
-        <SettingRow title={t("mouse.profilePicker")} hint={t("mouse.profilePickerHelp")}>
-          <PillTrack
-            items={profiles.map((profile) => ({
-              key: profile.id,
-              label:
-                profile.id === runtimeProfileId
-                  ? t("mouse.profileActiveNow", { name: profile.name })
-                  : profile.name,
-            }))}
-            active={activeProfile?.id ?? ""}
-            onSelect={(id) => setSelectedProfileId(id)}
+        <SettingRow title={t("mouse.batteryInTray")} sub>
+          <Toggle
+            checked={activeConfig.settings.showBatteryInTray ?? false}
+            onChange={(checked) =>
+              updateDraft((config) => ({
+                ...config,
+                settings: { ...config.settings, showBatteryInTray: checked || undefined },
+              }))
+            }
+            ariaLabel={t("mouse.batteryInTray")}
           />
         </SettingRow>
       </section>
-
       {activeProfile ? (
         <section className="settings-section">
           <div className="settings-section__header">
@@ -461,28 +503,6 @@ export function MouseWorkspace({
         </section>
       ) : null}
 
-      {model?.banks && model.connected ? (
-        <section className="settings-section" aria-label={t("mouse.slotsHeader")}>
-          <SettingRow title={t("mouse.slotsHeader")} hint={t("mouse.slotsHelp", { model: model.name })} />
-          {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : banks.assigned.map((bank) => {
-            const holder = profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === bank);
-            return (
-              <SettingRow key={bank} sub title={t("mouse.slotRow", { n: bank })}
-                hint={banks.active === bank ? t("mouse.slotSelected") : undefined}>
-                <PillTrack
-                  items={[{ key: "", label: t("mouse.slotKeep") },
-                    ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
-                  active={holder?.id ?? ""}
-                  onSelect={(profileId) => updateDraft((config) => profileId
-                    ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
-                    : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config)}
-                />
-              </SettingRow>
-            );
-          })}
-        </section>
-      ) : null}
-
       {model?.consumerSignals != null ? (
         <section className="settings-section">
           <SettingRow
@@ -514,44 +534,6 @@ export function MouseWorkspace({
         </section>
       ) : null}
 
-      <section className="settings-section">
-        <SettingRow title={t("mouse.offlineHeader")} hint={t("mouse.offlineHelp")}>
-          <SelectField
-            ariaLabel={t("mouse.offlineHeader")}
-            value={activeConfig.settings.offlineProfileId ?? ""}
-            options={[
-              {
-                value: "",
-                label: t("mouse.offlineFallback", {
-                  name: profiles.find((p) => p.id === activeConfig.settings.fallbackProfileId)?.name ?? "",
-                }),
-              },
-              { value: OFFLINE_PROFILE_ACTIVE, label: t("mouse.offlineActive") },
-              ...profiles
-                .filter((profile) => profile.id !== activeConfig.settings.fallbackProfileId)
-                .map((profile) => ({ value: profile.id, label: profile.name })),
-            ]}
-            onChange={(id) =>
-              updateDraft((config) => ({
-                ...config,
-                settings: { ...config.settings, offlineProfileId: id || undefined },
-              }))
-            }
-          />
-        </SettingRow>
-        <SettingRow title={t("mouse.batteryInTray")} sub>
-          <Toggle
-            checked={activeConfig.settings.showBatteryInTray ?? false}
-            onChange={(checked) =>
-              updateDraft((config) => ({
-                ...config,
-                settings: { ...config.settings, showBatteryInTray: checked || undefined },
-              }))
-            }
-            ariaLabel={t("mouse.batteryInTray")}
-          />
-        </SettingRow>
-      </section>
     </div>
   );
 }

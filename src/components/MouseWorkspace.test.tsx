@@ -37,8 +37,8 @@ afterEach(cleanup);
 function show(overrides: Partial<AppConfig> = {}, runtimeProfileId?: string) {
   const config = { ...makeConfig(), ...overrides };
   const updates = vi.fn();
-  const result = render(<MouseWorkspace activeConfig={config} profiles={config.profiles} activeProfile={config.profiles[0]}
-    runtimeProfileId={runtimeProfileId ?? config.profiles[0].id} setSelectedProfileId={vi.fn()} updateDraft={updates} mouseStates={[]} />);
+  const result = render(<MouseWorkspace activeConfig={config} deviceId="razer-naga" section="performance" profiles={config.profiles} activeProfile={config.profiles[0]}
+    runtimeProfileId={runtimeProfileId ?? config.profiles[0].id} updateDraft={updates} mouseStates={[]} />);
   return { ...result, config, updates };
 }
 
@@ -88,7 +88,7 @@ describe("independent mouse readings", () => {
     const changed = updates.mock.calls[0][0](config) as AppConfig;
     expect(changed.profiles[0].deviceMouse?.["razer-naga"]?.mouseDpi).toBe(1200);
     expect(changed.profiles[0].deviceMouse?.["razer-naga"]?.mouseDpiStages).toEqual([400, 800, 1200, 1600, 3200]);
-    expect(backend.setMouseDpi).toHaveBeenCalledWith(1200, undefined);
+    expect(backend.setMouseDpi).toHaveBeenCalledWith(1200, "razer-naga");
   });
 
   it("edits an inactive profile without changing the mouse or another profile", async () => {
@@ -162,7 +162,7 @@ describe("independent mouse readings", () => {
     await screen.findByText("1100 DPI");
     fireEvent.click(screen.getByRole("button", { name: "Mouse diagnostics" }));
     await screen.findByRole("textbox", { name: "Mouse diagnostics" });
-    expect(backend.getDeviceReport).toHaveBeenCalledWith("summary", undefined);
+    expect(backend.getDeviceReport).toHaveBeenCalledWith("summary", "razer-naga");
     expect(backend.openDeviceReportIssue).not.toHaveBeenCalled();
     expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Copy report" }));

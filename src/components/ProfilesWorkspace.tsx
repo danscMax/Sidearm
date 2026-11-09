@@ -5,6 +5,7 @@ import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from ".
 import { RAZER_NAGA_DEVICE_ID } from "../lib/config";
 import type { FamilySection, ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
+import type { MouseStatusKind } from "../lib/onboard-mapping";
 import { open } from "@tauri-apps/plugin-dialog";
 import { deleteDeviceImage, importDeviceImage } from "../lib/backend";
 import {
@@ -49,7 +50,9 @@ import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
-import { DeviceBar } from "./DeviceBar";
+import { DeviceCards } from "./DeviceCards";
+import { MouseWorkspace } from "./MouseWorkspace";
+import { PillTrack } from "./PillTrack";
 import { GenericDeviceView } from "./GenericDeviceView";
 import { MouseVisualization } from "./MouseVisualization";
 import { Notice, Toggle } from "./shared";
@@ -90,6 +93,9 @@ export interface ProfilesWorkspaceProps {
   throttledControlIds?: Set<string>;
   heatmapEnabledRef?: RefObject<boolean>;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
+  /** The profile the runtime applies now (the mouse tabs write it at once). */
+  runtimeProfileId: string | null;
+  mouseStates: MouseStatusKind[];
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -129,6 +135,8 @@ export function ProfilesWorkspace({
   throttledControlIds,
   heatmapEnabledRef,
   showToast,
+  runtimeProfileId,
+  mouseStates,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
   const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVisualPanel({
@@ -170,6 +178,11 @@ export function ProfilesWorkspace({
   // One-shot signal: a just-created device opens its inline rename (U10).
   const [renameFreshDevice, setRenameFreshDevice] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  // A built-in mouse has three tabs: its buttons, its performance, its memory.
+  const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory">("buttons");
+  // Bumped after a write from the Performance tab so the mouse cards re-read.
+  const [cardsToken, setCardsToken] = useState(0);
+  const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
   const builtinMice = activeConfig.devices.filter((device) => device.builtin && deviceLayout(device.id)).length;
 
   const deviceControlCount = activeDevice
@@ -618,6 +631,236 @@ export function ProfilesWorkspace({
     <div
       className={`profiles-workspace profiles-workspace--layer-${selectedLayer}`}
     >
+      {/* ── Profile strip: the edited profile and the apps that switch to it ── */}
+      {activeProfile ? (
+        <div className="profile-strip">
+          <span className="profile-strip__name">{activeProfile.name}</span>
+          <span className="profile-strip__label">
+            {selectedAppMappings.length > 0 ? t("profile.stripApps") : t("profile.emptyHint")}
+          </span>
+          <span className="profile-strip__chips">
+            {selectedAppMappings.map((mapping) => (
+              <button
+                key={mapping.id}
+                type="button"
+                className={`profile-strip__chip${mapping.enabled ? "" : " profile-strip__chip--disabled"}`}
+                onClick={() => setEditingMappingId(mapping.id)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
+                }}
+                title={mapping.processPath ?? mapping.exe}
+              >
+                <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profile-strip__icon" />
+                {mapping.exe.replace(/\.exe$/i, "")}
+              </button>
+            ))}
+            <button type="button" className="profile-strip__chip profile-strip__chip--add" onClick={openCreateRule} title={t("profile.addRuleTooltip")}>
+              {t("profile.stripAddApp")}
+            </button>
+          </span>
+          <button
+            type="button"
+            className={`action-button action-button--small${allProfilesView ? " action-button--active" : ""}`}
+            aria-pressed={allProfilesView}
+            onClick={() => setAllProfilesView((v) => !v)}
+          >
+            {t("profile.allProfilesToggle")}
+          </button>
+        </div>
+      ) : null}
+
+      {/* ── All rules: every profile's cards, drag to reorder or move ── */}
+      {allProfilesView && activeProfile ? (
+      <>
+      <div className="profiles__section-header">
+        <span>{t("profile.rulesHeader")}</span>
+        <span className="profiles__section-count">{displayedAppMappings.length}</span>
+      </div>
+      <div className="profiles__card-grid">
+        {displayedAppMappings.map((mapping, index) => {
+          const isActive = editingMapping?.id === mapping.id;
+          const isDisabled = !mapping.enabled;
+          const isDragging = draggingMappingId === mapping.id;
+          const isDragOver = dragOverMappingId === mapping.id && draggingMappingId !== mapping.id;
+          // Same-profile neighbours for keyboard reorder (Alt+Arrow). Groups are
+          // contiguous and priority-sorted, so a neighbour in the same profile is
+          // just the adjacent card that shares its profileId.
+          const prevSameProfile =
+            index > 0 && displayedAppMappings[index - 1].profileId === mapping.profileId
+              ? displayedAppMappings[index - 1]
+              : null;
+          const nextSameProfile =
+            index < displayedAppMappings.length - 1 &&
+            displayedAppMappings[index + 1].profileId === mapping.profileId
+              ? displayedAppMappings[index + 1]
+              : null;
+          // In all-rules view, stamp a profile subheader before the first card of
+          // each profile group (rows are flat; the header spans the full grid row).
+          const showGroupHeader =
+            allProfilesView &&
+            (index === 0 || displayedAppMappings[index - 1].profileId !== mapping.profileId);
+          return (
+            <Fragment key={mapping.id}>
+            {showGroupHeader ? (
+              <h4 className="profiles__group-header">
+                {profilesById.get(mapping.profileId)?.name ?? mapping.profileId}
+              </h4>
+            ) : null}
+            <button
+              type="button"
+              draggable
+              className={`profiles__app-card${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}${isDragging ? " profiles__app-card--dragging" : ""}${isDragOver ? " profiles__app-card--drag-over" : ""}`}
+              onClick={() => {
+                // Editing a foreign-profile card switches to its profile first so
+                // the editor (scoped to the active profile) resolves the mapping.
+                if (mapping.profileId !== effectiveProfileId) setSelectedProfileId(mapping.profileId);
+                setEditingMappingId(mapping.id);
+              }}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
+              }}
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              onKeyDown={(e) => {
+                // Keyboard reorder: Alt+Arrow moves the rule within its profile
+                // group. The card keeps its focus because React keys by mapping.id.
+                if (!e.altKey) return;
+                if (e.key === "ArrowUp" && prevSameProfile) {
+                  e.preventDefault();
+                  updateDraft((c) => reorderAppMappingPriority(c, mapping.id, prevSameProfile.id));
+                } else if (e.key === "ArrowDown" && nextSameProfile) {
+                  e.preventDefault();
+                  updateDraft((c) => reorderAppMappingPriority(c, mapping.id, nextSameProfile.id));
+                }
+              }}
+              onDragStart={(e) => {
+                setDraggingMappingId(mapping.id);
+                e.dataTransfer.effectAllowed = "move";
+              }}
+              onDragOver={(e) => {
+                if (!draggingMappingId || draggingMappingId === mapping.id) return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                if (dragOverMappingId !== mapping.id) setDragOverMappingId(mapping.id);
+              }}
+              onDragLeave={() => {
+                if (dragOverMappingId === mapping.id) setDragOverMappingId(null);
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const dragged = draggingMappingId
+                  ? activeConfig.appMappings.find((m) => m.id === draggingMappingId)
+                  : null;
+                setDraggingMappingId(null);
+                setDragOverMappingId(null);
+                if (!dragged || dragged.id === mapping.id) return;
+                if (dragged.profileId === mapping.profileId) {
+                  updateDraft((c) =>
+                    reorderAppMappingPriority(c, dragged.id, mapping.id),
+                  );
+                  return;
+                }
+                // Cross-profile move (only reachable in all-rules view) — re-homes
+                // the rule to another profile, so confirm before committing.
+                const toName =
+                  profilesById.get(mapping.profileId)?.name ?? mapping.profileId;
+                setConfirmModal({
+                  title: t("profile.moveTitle"),
+                  message: t("profile.moveConfirm", {
+                    exe: dragged.exe,
+                    from: profilesById.get(dragged.profileId)?.name ?? dragged.profileId,
+                    to: toName,
+                  }),
+                  confirmLabel: t("profile.moveConfirmLabel"),
+                  onConfirm: () => {
+                    updateDraft((c) =>
+                      moveAppMappingToProfile(c, dragged.id, mapping.id),
+                    );
+                    showToast(t("profile.moved", { to: toName }), "success");
+                    setConfirmModal(null);
+                  },
+                });
+              }}
+              onDragEnd={() => {
+                setDraggingMappingId(null);
+                setDragOverMappingId(null);
+              }}
+            >
+              <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
+              <span className="profiles__app-card-body">
+                <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
+                <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: bindingCountByProfile.get(mapping.profileId) ?? 0, priority: mapping.priority })}</span>
+              </span>
+              <span
+                className="profiles__toggle-wrap"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <Toggle
+                  checked={mapping.enabled}
+                  ariaLabel={mapping.enabled ? t("common.disabled") : t("common.enabled")}
+                  onChange={(checked) =>
+                    updateDraft((c) => upsertAppMapping(c, { ...mapping, enabled: checked }))
+                  }
+                />
+              </span>
+            </button>
+            </Fragment>
+          );
+        })}
+
+        {activeProfile ? (
+          <button
+            type="button"
+            className="profiles__add-card"
+            onClick={openCreateRule}
+            title={t("profile.addRuleTooltip")}
+          >
+            {t("profile.addRule")}
+          </button>
+        ) : null}
+      </div>
+
+      </>
+      ) : null}
+
+      <DeviceCards
+        config={activeConfig}
+        devices={devices}
+        activeDeviceId={activeDevice?.id ?? null}
+        profile={activeProfile}
+        refreshToken={cardsToken}
+        onSelect={onSelectDevice}
+        onAdd={handleAddDevice}
+      />
+      {activeDevice?.builtin && deviceLayout(activeDevice.id) ? (
+        <PillTrack
+          className="device-tabs"
+          items={[
+            { key: "buttons", label: t("device.tabButtons") },
+            { key: "performance", label: t("device.tabPerformance") },
+            { key: "memory", label: t("device.tabMemory") },
+          ]}
+          active={mouseTab}
+          onSelect={setDeviceTab}
+        />
+      ) : null}
+
+      {mouseTab !== "buttons" && activeDevice ? (
+        <MouseWorkspace
+          key={activeDevice.id}
+          activeConfig={activeConfig}
+          deviceId={activeDevice.id}
+          section={mouseTab}
+          onWritten={() => setCardsToken((n) => n + 1)}
+          profiles={activeConfig.profiles}
+          activeProfile={activeProfile}
+          runtimeProfileId={runtimeProfileId}
+          updateDraft={updateDraft}
+          mouseStates={mouseStates}
+        />
+      ) : (
+        <>
       {/* ── Layer indicator + search ── */}
       <div className="profiles-workspace__toolbar">
         <span className={`layer-badge layer-badge--${selectedLayer}`}>
@@ -787,12 +1030,6 @@ export function ProfilesWorkspace({
 
       {/* ── Mouse visualization ── */}
       <div className="profiles__mouse-viz">
-        <DeviceBar
-          devices={devices}
-          activeDeviceId={activeDevice?.id ?? null}
-          onSelect={onSelectDevice}
-          onAdd={handleAddDevice}
-        />
         {activeDevice && !activeDevice.builtin ? (
           <GenericDeviceView
             entries={surfaceEntries}
@@ -944,6 +1181,8 @@ export function ProfilesWorkspace({
           ) : null}
         </div>
       ) : null}
+        </>
+      )}
       {showTransfer ? (
         <DeviceTransferModal
           config={activeConfig}
@@ -958,171 +1197,6 @@ export function ProfilesWorkspace({
         />
       ) : null}
 
-      {/* ── Section header ── */}
-      <div className="profiles__section-header">
-        <span>{t("profile.rulesHeader")}</span>
-        <span className="profiles__section-count">{displayedAppMappings.length}</span>
-        <button
-          type="button"
-          className={`action-button action-button--small${allProfilesView ? " action-button--active" : ""}`}
-          aria-pressed={allProfilesView}
-          onClick={() => setAllProfilesView((v) => !v)}
-        >
-          {t("profile.allProfilesToggle")}
-        </button>
-      </div>
-
-      {/* ── Card grid ── */}
-      <div className="profiles__card-grid">
-        {displayedAppMappings.map((mapping, index) => {
-          const isActive = editingMapping?.id === mapping.id;
-          const isDisabled = !mapping.enabled;
-          const isDragging = draggingMappingId === mapping.id;
-          const isDragOver = dragOverMappingId === mapping.id && draggingMappingId !== mapping.id;
-          // Same-profile neighbours for keyboard reorder (Alt+Arrow). Groups are
-          // contiguous and priority-sorted, so a neighbour in the same profile is
-          // just the adjacent card that shares its profileId.
-          const prevSameProfile =
-            index > 0 && displayedAppMappings[index - 1].profileId === mapping.profileId
-              ? displayedAppMappings[index - 1]
-              : null;
-          const nextSameProfile =
-            index < displayedAppMappings.length - 1 &&
-            displayedAppMappings[index + 1].profileId === mapping.profileId
-              ? displayedAppMappings[index + 1]
-              : null;
-          // In all-rules view, stamp a profile subheader before the first card of
-          // each profile group (rows are flat; the header spans the full grid row).
-          const showGroupHeader =
-            allProfilesView &&
-            (index === 0 || displayedAppMappings[index - 1].profileId !== mapping.profileId);
-          return (
-            <Fragment key={mapping.id}>
-            {showGroupHeader ? (
-              <h4 className="profiles__group-header">
-                {profilesById.get(mapping.profileId)?.name ?? mapping.profileId}
-              </h4>
-            ) : null}
-            <button
-              type="button"
-              draggable
-              className={`profiles__app-card${isActive ? " profiles__app-card--active" : ""}${isDisabled ? " profiles__app-card--disabled" : ""}${isDragging ? " profiles__app-card--dragging" : ""}${isDragOver ? " profiles__app-card--drag-over" : ""}`}
-              onClick={() => {
-                // Editing a foreign-profile card switches to its profile first so
-                // the editor (scoped to the active profile) resolves the mapping.
-                if (mapping.profileId !== effectiveProfileId) setSelectedProfileId(mapping.profileId);
-                setEditingMappingId(mapping.id);
-              }}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                setRuleCtxMenu({ x: e.clientX, y: e.clientY, mappingId: mapping.id });
-              }}
-              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-              onKeyDown={(e) => {
-                // Keyboard reorder: Alt+Arrow moves the rule within its profile
-                // group. The card keeps its focus because React keys by mapping.id.
-                if (!e.altKey) return;
-                if (e.key === "ArrowUp" && prevSameProfile) {
-                  e.preventDefault();
-                  updateDraft((c) => reorderAppMappingPriority(c, mapping.id, prevSameProfile.id));
-                } else if (e.key === "ArrowDown" && nextSameProfile) {
-                  e.preventDefault();
-                  updateDraft((c) => reorderAppMappingPriority(c, mapping.id, nextSameProfile.id));
-                }
-              }}
-              onDragStart={(e) => {
-                setDraggingMappingId(mapping.id);
-                e.dataTransfer.effectAllowed = "move";
-              }}
-              onDragOver={(e) => {
-                if (!draggingMappingId || draggingMappingId === mapping.id) return;
-                e.preventDefault();
-                e.dataTransfer.dropEffect = "move";
-                if (dragOverMappingId !== mapping.id) setDragOverMappingId(mapping.id);
-              }}
-              onDragLeave={() => {
-                if (dragOverMappingId === mapping.id) setDragOverMappingId(null);
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                const dragged = draggingMappingId
-                  ? activeConfig.appMappings.find((m) => m.id === draggingMappingId)
-                  : null;
-                setDraggingMappingId(null);
-                setDragOverMappingId(null);
-                if (!dragged || dragged.id === mapping.id) return;
-                if (dragged.profileId === mapping.profileId) {
-                  updateDraft((c) =>
-                    reorderAppMappingPriority(c, dragged.id, mapping.id),
-                  );
-                  return;
-                }
-                // Cross-profile move (only reachable in all-rules view) — re-homes
-                // the rule to another profile, so confirm before committing.
-                const toName =
-                  profilesById.get(mapping.profileId)?.name ?? mapping.profileId;
-                setConfirmModal({
-                  title: t("profile.moveTitle"),
-                  message: t("profile.moveConfirm", {
-                    exe: dragged.exe,
-                    from: profilesById.get(dragged.profileId)?.name ?? dragged.profileId,
-                    to: toName,
-                  }),
-                  confirmLabel: t("profile.moveConfirmLabel"),
-                  onConfirm: () => {
-                    updateDraft((c) =>
-                      moveAppMappingToProfile(c, dragged.id, mapping.id),
-                    );
-                    showToast(t("profile.moved", { to: toName }), "success");
-                    setConfirmModal(null);
-                  },
-                });
-              }}
-              onDragEnd={() => {
-                setDraggingMappingId(null);
-                setDragOverMappingId(null);
-              }}
-            >
-              <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="profiles__app-card-monogram" />
-              <span className="profiles__app-card-body">
-                <span className="profiles__app-card-name">{mapping.exe.replace(/\.exe$/i, "")}</span>
-                <span className="profiles__app-card-meta">{t("profile.cardMeta", { count: bindingCountByProfile.get(mapping.profileId) ?? 0, priority: mapping.priority })}</span>
-              </span>
-              <span
-                className="profiles__toggle-wrap"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Toggle
-                  checked={mapping.enabled}
-                  ariaLabel={mapping.enabled ? t("common.disabled") : t("common.enabled")}
-                  onChange={(checked) =>
-                    updateDraft((c) => upsertAppMapping(c, { ...mapping, enabled: checked }))
-                  }
-                />
-              </span>
-            </button>
-            </Fragment>
-          );
-        })}
-
-        {activeProfile ? (
-          <button
-            type="button"
-            className="profiles__add-card"
-            onClick={openCreateRule}
-            title={t("profile.addRuleTooltip")}
-          >
-            {t("profile.addRule")}
-          </button>
-        ) : null}
-      </div>
-
-      {displayedAppMappings.length === 0 && activeProfile ? (
-        <div className="props-empty">
-          <p className="props-empty__icon" aria-hidden="true">⊹</p>
-          <p className="props-empty__text">{t("profile.emptyHint")}</p>
-        </div>
-      ) : null}
 
       {/* ── Create-rule card (unified with the editor) ── */}
       {creatingDraft ? (

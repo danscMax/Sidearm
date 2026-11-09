@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- A wheel bound to plain scroll up/down now scrolls without Sidearm: the mouse's memory
+  gets the wheel's own record instead of a silent signal.
 - After Sidearm was killed or crashed, the V3's buttons and wheel stayed silent until its
   profile button was pressed: its capture helper now restores the mouse's own button map.
   A normal exit waits for both mice to finish restoring before it closes.

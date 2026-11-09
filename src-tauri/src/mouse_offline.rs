@@ -129,6 +129,10 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
                 MouseActionKind::MiddleClick => 3,
                 MouseActionKind::MouseBack => 4,
                 MouseActionKind::MouseForward => 5,
+                // The wheel's own records (factory 0x09/0x0a hold these): a
+                // plain scroll is played by the mouse itself without Sidearm.
+                MouseActionKind::ScrollUp => 9,
+                MouseActionKind::ScrollDown => 10,
                 _ => return None,
             }))
         }
@@ -301,6 +305,10 @@ mod tests {
             win: false,
         });
         assert_eq!(onboard_action(&back), Some(OnboardAction::Mouse(4)));
+        for (action, record) in [(MouseActionKind::ScrollUp, 9), (MouseActionKind::ScrollDown, 10)] {
+            let scroll = ActionPayload::MouseAction(MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false });
+            assert_eq!(onboard_action(&scroll), Some(OnboardAction::Mouse(record)), "{action:?}");
+        }
     }
 }
 

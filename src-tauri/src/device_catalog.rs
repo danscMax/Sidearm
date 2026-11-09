@@ -276,7 +276,8 @@ pub static NAGA_V3_PRO: NativeModel = NativeModel {
     native_buttons: &[],
     dpi_min: 100,
     dpi_max: 50_000,
-    poll_rates: &[(1000, 1)],
+    // Measured 2026-11-09: the receiver reported 0x02 at 500 Hz.
+    poll_rates: &[(1000, 0x01), (500, 0x02), (125, 0x08)],
     // Usages come from `live_overlay::USAGES`, one per control and layer.
     consumer: Some(ConsumerSignals {
         interface: 1,

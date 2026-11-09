@@ -287,8 +287,6 @@ export function MouseWorkspace({
     if (device?.dpi !== value) applyNow((deviceId) => setMouseDpi(value, deviceId));
   }
 
-  const slot = model && activeProfile ? activeProfile.deviceSlots?.[model.deviceId] : undefined;
-
   return (
     <div className="settings-shell__content">
       {mice.length > 1 ? (
@@ -460,34 +458,25 @@ export function MouseWorkspace({
         </section>
       ) : null}
 
-      {model?.banks && activeProfile ? (
-        <section className="settings-section">
-          <SettingRow title={t("mouse.slotHeader")} hint={t("mouse.slotHelp", { model: model.name })}>
-            <SelectField
-              ariaLabel={t("mouse.slotHeader")}
-              value={slot === undefined ? "" : String(slot)}
-              disabled={banks === null && slot === undefined}
-              options={[
-                { value: "", label: t("mouse.slotNone") },
-                ...[...new Set([...(banks?.assigned ?? []), ...(slot === undefined ? [] : [slot])])].sort((a, b) => a - b).map((bank) => {
-                  // Who else is stored there, and which slot the mouse is on.
-                  const holder = profiles.find((profile) => profile.id !== activeProfile.id
-                    && profile.deviceSlots?.[model.deviceId] === bank);
-                  const notes = [
-                    ...(holder ? [t("mouse.slotHolder", { name: holder.name })] : []),
-                    ...(banks?.active === bank ? [t("mouse.slotSelected")] : []),
-                  ];
-                  return {
-                    value: String(bank),
-                    label: [t("mouse.slotOption", { n: bank }), ...notes].join(" · "),
-                  };
-                }),
-              ]}
-              onChange={(value) => updateDraft((config) =>
-                setProfileDeviceSlot(config, activeProfile.id, model.deviceId, value ? Number(value) : undefined))}
-            />
-          </SettingRow>
-          {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : null}
+      {model?.banks && model.connected ? (
+        <section className="settings-section" aria-label={t("mouse.slotsHeader")}>
+          <SettingRow title={t("mouse.slotsHeader")} hint={t("mouse.slotsHelp", { model: model.name })} />
+          {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : banks.assigned.map((bank) => {
+            const holder = profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === bank);
+            return (
+              <SettingRow key={bank} sub title={t("mouse.slotRow", { n: bank })}
+                hint={banks.active === bank ? t("mouse.slotSelected") : undefined}>
+                <PillTrack
+                  items={[{ key: "", label: t("mouse.slotKeep") },
+                    ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
+                  active={holder?.id ?? ""}
+                  onSelect={(profileId) => updateDraft((config) => profileId
+                    ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
+                    : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config)}
+                />
+              </SettingRow>
+            );
+          })}
         </section>
       ) : null}
 

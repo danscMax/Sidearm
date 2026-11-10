@@ -70,6 +70,10 @@ pub use capture_backend::capture_helper_main;
 /// Sidearm left (`Sidearm.exe --restore-live-maps <config dir>`).
 #[cfg(target_os = "windows")]
 pub const RESTORE_LIVE_MAPS_ARG: &str = "--restore-live-maps";
+/// Added when Sidearm died: it stored no offline profile, so the restore
+/// process stores it like an exit would.
+#[cfg(target_os = "windows")]
+pub const AFTER_CRASH_ARG: &str = "--after-crash";
 
 /// Held by every running Sidearm app for its whole life; Windows drops it
 /// with the process, so its absence means no Sidearm runs.
@@ -147,7 +151,7 @@ pub(crate) fn live_map_restore_running() -> bool {
 /// a sleeping mouse without its offline profile: a separate process with no
 /// hooks that outlives Sidearm.
 #[cfg(target_os = "windows")]
-pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
+pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path, after_crash: bool) {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -155,6 +159,7 @@ pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
         std::process::Command::new(exe)
             .arg(RESTORE_LIVE_MAPS_ARG)
             .arg(config_dir)
+            .args(after_crash.then_some(AFTER_CRASH_ARG))
             .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
             .spawn()
     });
@@ -169,8 +174,20 @@ pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
 /// Quits when Sidearm turns out alive, after 30 minutes, or once a Sidearm
 /// starts — its own start restores them after this process ends.
 #[cfg(target_os = "windows")]
-pub fn restore_live_maps_main(config_dir: &std::path::Path) {
+pub fn restore_live_maps_main(config_dir: &std::path::Path, after_crash: bool) {
     use std::time::{Duration, Instant};
+    // No Tauri log plugin here: its own file next to Sidearm's logs.
+    if let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(paths::AppPaths::resolve().log_dir.join("restore.log"))
+    {
+        let _ = env_logger::Builder::new()
+            .filter_level(log::LevelFilter::Info)
+            .target(env_logger::Target::Pipe(Box::new(file)))
+            .try_init();
+    }
+    log::info!("[restore] started for {} (after a crash: {after_crash})", config_dir.display());
     // The dying Sidearm's mutex goes when its process has fully ended. Checked
     // before taking the restore mutex: a live Sidearm is never paused by it.
     let grace = Instant::now() + Duration::from_secs(15);
@@ -183,6 +200,17 @@ pub fn restore_live_maps_main(config_dir: &std::path::Path) {
     // One restorer at a time, holding the mutex until it exits.
     let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
     let failed_marker = config_dir.join(mouse_offline::OFFLINE_FAILED_FILE);
+    // The signal kind the dead Sidearm used: the inert records match it.
+    mouse_memory::set_consumer_signals(!config_dir.join(mouse_memory::KEY_SIGNALS_FILE).exists());
+    // A dead Sidearm stored no offline profile, so the mice keep its signals
+    // (the V2's thumbs fall silent): store it like its exit would have.
+    if after_crash
+        && !failed_marker.exists()
+        && let Ok(config) = config::read_and_migrate_config_file(&config_dir.join("config.json"))
+        && let Err(error) = std::fs::write(&failed_marker, mouse_offline::offline_profile_id(&config, None))
+    {
+        log::warn!("[restore] offline profile not queued: {error}");
+    }
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     while !mutex_exists(APP_MUTEX) && Instant::now() < deadline {
         let maps_done = mouse_memory::live_overlay::restore_orphaned(config_dir);
@@ -3123,7 +3151,7 @@ pub(crate) fn shutdown_mouse(app: &AppHandle) {
         if let Ok(config_dir) = resolve_config_dir(app)
             && config_dir.join(mouse_offline::OFFLINE_FAILED_FILE).exists()
         {
-            spawn_live_map_restore(&config_dir);
+            spawn_live_map_restore(&config_dir, false);
         }
     }
 }
@@ -3142,13 +3170,8 @@ fn write_offline_mouse_profile(app: &AppHandle) {
     // Default: the fallback profile. The one in effect at exit depends on which
     // window happened to be focused — a per-app profile full of snippets the
     // mouse cannot play left buttons dead without Sidearm.
-    let in_effect = || store.lock().ok().and_then(|store| store.last_active_profile_id().map(str::to_owned));
-    let profile_id = match config.settings.offline_profile_id.as_deref() {
-        Some(config::OFFLINE_PROFILE_ACTIVE) => in_effect(),
-        Some(id) => config.profiles.iter().any(|p| p.id == id).then(|| id.to_owned()),
-        None => None,
-    }
-    .unwrap_or_else(|| config.settings.fallback_profile_id.clone());
+    let in_effect = store.lock().ok().and_then(|store| store.last_active_profile_id().map(str::to_owned));
+    let profile_id = mouse_offline::offline_profile_id(&config, in_effect);
     mouse_offline::write_offline_profile(&config, &profile_id, &config_dir);
 }
 

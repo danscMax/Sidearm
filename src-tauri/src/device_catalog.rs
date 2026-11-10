@@ -72,6 +72,12 @@ pub struct NativeModel {
     /// poll-rate writes (each confirmed by read-back); button records, the
     /// offline profile and guard restores are refused for it.
     pub verified: bool,
+    /// The firmware plays a plain key record's left Shift `0x02` / left Alt
+    /// `0x04` bits. `false` (the V2 HyperSpeed, measured 2026-10-27 at Raw
+    /// Input) drops them, so its offline shortcuts with Shift or Alt use the
+    /// turbo record; `true` (the V3 Pro, measured 2026-11-10) never gets a
+    /// turbo record, which that firmware may repeat on its own.
+    pub plain_left_modifiers: bool,
 }
 
 /// A model's consumer-page signal path: each key button holds a record of
@@ -215,6 +221,7 @@ pub const NAGA_V2_HYPERSPEED: NativeModel = NativeModel {
         ],
     }),
     verified: true,
+    plain_left_modifiers: false,
 };
 
 // The models below are NOT verified on hardware (`verified: false`): Sidearm
@@ -286,6 +293,7 @@ pub static NAGA_V3_PRO: NativeModel = NativeModel {
         usages: &[],
     }),
     verified: true,
+    plain_left_modifiers: true,
 };
 
 /// Razer Naga V2 Pro (cable `00A7`, HyperSpeed dongle `00A8`). Its 6-button
@@ -321,6 +329,7 @@ pub const NAGA_V2_PRO: NativeModel = NativeModel {
     poll_rates: &[(1000, 0x01), (500, 0x02), (125, 0x08)],
     consumer: None,
     verified: false,
+    plain_left_modifiers: false,
 };
 
 /// Razer Naga Pro (cable `008F`, dongle `0090`). Swappable side plates; which
@@ -355,6 +364,7 @@ pub const NAGA_PRO: NativeModel = NativeModel {
     poll_rates: &[(1000, 0x01), (500, 0x02), (125, 0x08)],
     consumer: None,
     verified: false,
+    plain_left_modifiers: false,
 };
 
 /// Razer Naga X (wired only, `0096`): no mouse 4/5, no tilt, no top buttons.
@@ -382,6 +392,7 @@ pub const NAGA_X: NativeModel = NativeModel {
     poll_rates: &[(1000, 0x01), (500, 0x02), (125, 0x08)],
     consumer: None,
     verified: false,
+    plain_left_modifiers: false,
 };
 
 /// Every natively supported model, probed in this order.

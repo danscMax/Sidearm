@@ -14,9 +14,10 @@
 
 use std::path::Path;
 
-use crate::config::{ActionPayload, AppConfig, Layer, MouseActionKind};
+use crate::config::{ActionPayload, AppConfig, Layer, MouseActionKind, TriggerMode};
+use crate::device_catalog::{NativeModel, Transport};
 use crate::mouse_memory::{
-    OnboardAction, VendorDevice, hid_usage_for_vk, left_modifier_bits, modifier_bits, native_buttons, signal_action,
+    OnboardAction, VendorDevice, binding_target, hid_usage_for_vk, left_modifier_bits, modifier_bits, native_buttons,
     onboard_bindings,
 };
 
@@ -34,62 +35,91 @@ pub struct OfflineRecord {
     pub action: OnboardAction,
 }
 
-/// The records that make the mouse behave like `profile_id` on its own.
-pub fn offline_records(config: &AppConfig, profile_id: &str) -> Vec<OfflineRecord> {
-    let action_of = |control, layer| binding_action(config, profile_id, control, layer);
-    // (control, button id, what the button does when nothing else applies):
-    // Sidearm's own inert signal of a key control, so no leftover vendor macro
-    // plays on a layer nothing else fills.
-    let mut controls: Vec<(String, u8, Option<OnboardAction>)> = onboard_bindings(config)
-        .into_iter()
-        .filter_map(|binding| {
-            let (button_id, signal) = signal_action(&binding)?;
-            Some((binding.control_id, button_id, Some(signal)))
-        })
-        .collect();
-    for (control, button_id, value) in native_buttons() {
-        if matches!(*control, "mouse_4" | "mouse_5") {
-            controls.push(((*control).to_string(), *button_id, Some(OnboardAction::Mouse(*value))));
+/// The records that make `model` behave like `profile_id` on its own — one
+/// rule for every model:
+/// - a binding the firmware can play (a plain press of a key or mouse button)
+///   gets its record; one it cannot (text, macro, launch, a double or triple
+///   press, a chord) gets the model's inert signal, never the old record;
+/// - an unbound control keeps its record, except on layer 1 of Sidearm's own
+///   onboard profile (the onboard path), where a leftover of an earlier
+///   offline profile would play: there it gets the inert signal too;
+/// - layer 1 follows the resolver: the hypershift binding, else the standard
+///   one; under a right-button trigger a left click is a right click;
+/// - the trigger becomes the firmware Hypershift key when a hypershift binding
+///   is playable; the profile button keeps switching banks.
+pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<OfflineRecord> {
+    use crate::mouse_memory::live_overlay::{USAGES, control_id, controls};
+    let own_profile = model.transport == Transport::Onboard;
+    let live = model.live.as_ref();
+    let firmware_trigger = live.and_then(|live| live.firmware_trigger);
+    let settings_trigger = config.settings.hypershift_trigger.trim();
+    // The V3 has a firmware Hypershift button; the onboard path uses the
+    // settings trigger, a native mouse button.
+    let trigger = firmware_trigger.or_else(|| {
+        own_profile
+            .then(|| model.native_buttons.iter().find(|(control, _, _)| *control == settings_trigger))
+            .flatten()
+            .map(|&(_, button, _)| button)
+    });
+    let right_trigger = firmware_trigger.is_none() && settings_trigger == "mouse_right";
+    let signals = onboard_bindings(config);
+    let inert = |index: usize, control: &str, layer: u8| -> Option<OnboardAction> {
+        if !own_profile {
+            return USAGES.get(2 * index + usize::from(layer)).map(|&usage| OnboardAction::Consumer(usage));
         }
-    }
+        if let Some(&(_, _, value)) = model.native_buttons.iter().find(|(id, _, _)| *id == control) {
+            return Some(OnboardAction::Mouse(value));
+        }
+        let binding = signals.iter().find(|binding| binding.control_id == control)?;
+        binding_target(model, binding).ok().map(|(_, action)| action)
+    };
 
     let mut records = Vec::new();
-    let mut uses_hypershift = false;
     let mut layer_one = Vec::new();
-    for (control, button_id, fallback) in &controls {
-        let standard = action_of(control, Layer::Standard).flatten();
-        let hypershift = action_of(control, Layer::Hypershift);
-        uses_hypershift |= matches!(hypershift, Some(Some(_)));
-        if let Some(action) = standard {
-            records.push(OfflineRecord { button_id: *button_id, layer: 0, action });
+    let mut uses_hypershift = false;
+    for (index, (control, button)) in controls(model).into_iter().enumerate() {
+        if Some(button) == live.and_then(|live| live.profile_button) {
+            continue;
         }
-        // Like the resolver: the standard binding fills in only where the
-        // hypershift layer has no binding at all. A hypershift binding the
-        // firmware cannot play leaves Sidearm's inert signal instead.
-        let layer_one_action = match hypershift {
-            Some(Some(action)) => Some(action),
-            Some(None) => *fallback,
-            None => standard.or(*fallback),
+        let id = control_id(model, control);
+        let action = |layer| binding_action(config, model, profile_id, id.as_str(), layer);
+        let standard = action(Layer::Standard);
+        let hypershift = action(Layer::Hypershift);
+        uses_hypershift |= matches!(hypershift, Some(Some(_)));
+        if let Some(found) = standard
+            && let Some(action) = found.or_else(|| inert(index, control, 0))
+        {
+            records.push(OfflineRecord { button_id: button, layer: 0, action });
+        }
+        let layer_one_action = if control == "mouse_left" && right_trigger {
+            Some(OnboardAction::Mouse(2))
+        } else {
+            match hypershift.or(standard) {
+                Some(found) => found.or_else(|| inert(index, control, 1)),
+                None if own_profile => inert(index, control, 1),
+                None => None,
+            }
         };
         if let Some(action) = layer_one_action {
-            layer_one.push(OfflineRecord { button_id: *button_id, layer: 1, action });
+            layer_one.push(OfflineRecord { button_id: button, layer: 1, action });
         }
     }
-    let trigger = native_buttons()
-        .iter()
-        .find(|(control, _, _)| *control == config.settings.hypershift_trigger.trim());
-    if uses_hypershift && let Some((_, trigger_id, _)) = trigger {
+    // Layer 1 plays only under the firmware Hypershift: the onboard path writes
+    // it only with a trigger, a bank always (it may keep its own trigger).
+    if (uses_hypershift && trigger.is_some()) || !own_profile {
         records.extend(layer_one);
-        for layer in [0, 1] {
-            records.push(OfflineRecord { button_id: *trigger_id, layer, action: OnboardAction::Hypershift });
-        }
+    }
+    if uses_hypershift && let Some(trigger) = trigger {
+        records.retain(|record| record.button_id != trigger);
+        records.extend([0, 1].map(|layer| OfflineRecord { button_id: trigger, layer, action: OnboardAction::Hypershift }));
     }
     records
 }
 
 /// `None` means no binding; `Some(None)` means the firmware cannot play it.
-pub(crate) fn binding_action(
+fn binding_action(
     config: &AppConfig,
+    model: &NativeModel,
     profile_id: &str,
     control: &str,
     layer: Layer,
@@ -97,29 +127,36 @@ pub(crate) fn binding_action(
     let binding = config.bindings.iter().find(|b| {
         b.enabled && b.profile_id == profile_id && b.layer == layer && b.control_id.as_str() == control
     })?;
+    // The firmware plays a record on every press, held while the button is
+    // down (a hold): a double or triple press or a chord would fire on one.
+    if matches!(binding.trigger_mode, Some(TriggerMode::DoublePress | TriggerMode::TriplePress | TriggerMode::Chord)) {
+        return Some(None);
+    }
     let action = config.actions.iter().find(|a| a.id == binding.action_id)?;
-    Some(onboard_action(&action.payload))
+    Some(onboard_action(model, &action.payload))
 }
 
-/// The firmware form of an action, when it has one.
-fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
+/// The firmware form of an action on `model`, when it has one.
+fn onboard_action(model: &NativeModel, payload: &ActionPayload) -> Option<OnboardAction> {
     match payload {
         ActionPayload::Shortcut(shortcut) => {
             let (ctrl, shift, alt, win) = (shortcut.ctrl, shortcut.shift, shortcut.alt, shortcut.win);
+            let standard = left_modifier_bits(ctrl, shift, alt, win);
             // Modifier-only (push-to-talk): usage 0 = no key, the firmware holds
-            // just the modifiers while the button is down.
+            // just the modifiers while the button is down. A firmware that drops
+            // the left Shift/Alt gets the right-hand ones (a turbo record cannot
+            // hold; the right Alt is AltGr on some layouts — a known limit).
             if shortcut.key.trim().is_empty() {
-                let modifier = modifier_bits(ctrl, shift, alt, win);
+                let modifier = if model.plain_left_modifiers { standard } else { modifier_bits(ctrl, shift, alt, win) };
                 return (modifier != 0).then_some(OnboardAction::Key { modifier, usage: 0 });
             }
             let usage = hid_usage_for_vk(crate::hotkeys::parse_primary_key(&shortcut.key).ok()?.code)?;
-            // A plain key record drops the left Shift/Alt and the right Alt is
-            // AltGr on some layouts: a shortcut with Shift or Alt is tapped by the
+            // Such a firmware taps a shortcut with Shift or Alt through the
             // turbo record, which plays the real left keys (one tap per press).
-            Some(if shift || alt {
-                OnboardAction::KeyTap { modifier: left_modifier_bits(ctrl, shift, alt, win), usage }
+            Some(if (shift || alt) && !model.plain_left_modifiers {
+                OnboardAction::KeyTap { modifier: standard, usage }
             } else {
-                OnboardAction::Key { modifier: modifier_bits(ctrl, shift, alt, win), usage }
+                OnboardAction::Key { modifier: standard, usage }
             })
         }
         ActionPayload::MouseAction(mouse) if !(mouse.ctrl || mouse.shift || mouse.alt || mouse.win) => {
@@ -138,6 +175,18 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
         }
         _ => None,
     }
+}
+
+/// The profile an exit stores: `Settings.offline_profile_id`, absent = the
+/// fallback profile, `@active` = `in_effect` (the one following the focused
+/// window; a restore process does not know it and takes the fallback).
+pub fn offline_profile_id(config: &AppConfig, in_effect: Option<String>) -> String {
+    match config.settings.offline_profile_id.as_deref() {
+        Some(crate::config::OFFLINE_PROFILE_ACTIVE) => in_effect,
+        Some(id) => config.profiles.iter().any(|p| p.id == id).then(|| id.to_owned()),
+        None => None,
+    }
+    .unwrap_or_else(|| config.settings.fallback_profile_id.clone())
 }
 
 /// Writes the offline profile into every connected mouse. Best effort: a
@@ -164,7 +213,7 @@ pub fn retry_offline_profile(config: &AppConfig, config_dir: &Path) -> bool {
 }
 
 fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, only: Option<&[String]>) {
-    use crate::device_catalog::{CATALOG, Transport};
+    use crate::device_catalog::CATALOG;
     use crate::mouse_memory::live_overlay;
     let wanted = |device_id: &str| only.is_none_or(|ids| ids.iter().any(|id| id == device_id));
     let present = crate::mouse_memory::present_models();
@@ -201,9 +250,10 @@ fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, onl
 }
 
 /// The onboard path's part of [`write_offline_profile`]. Returns the device id
-/// of a mouse that slept through it.
+/// of a mouse that slept through any of it (a record or the DPI): the whole
+/// profile is retried once it answers. A record it refused otherwise is only
+/// logged.
 fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> Option<String> {
-    let records = offline_records(config, profile_id);
     let device = match VendorDevice::open_onboard() {
         Ok(device) => device,
         Err(message) => {
@@ -217,12 +267,17 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         log::info!("[mouse-offline] {} is not verified: offline profile not written", device.model().name);
         return None;
     }
+    let records = plan(config, device.model(), profile_id);
+    let mut asleep = false;
     let failed = records
         .iter()
         .filter(|r| {
             device
                 .write_record(r.button_id, r.layer, r.action)
-                .inspect_err(|e| log::warn!("[mouse-offline] {e}"))
+                .inspect_err(|e| {
+                    log::warn!("[mouse-offline] {e}");
+                    asleep |= crate::mouse_memory::is_no_response(e);
+                })
                 .is_err()
         })
         .count();
@@ -235,6 +290,7 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         && let Err(message) = device.set_dpi(dpi, true)
     {
         log::warn!("[mouse-offline] DPI not stored: {message}");
+        asleep |= crate::mouse_memory::is_no_response(&message);
     }
     if failed == records.len() && !records.is_empty() {
         log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
@@ -245,7 +301,7 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         "[mouse-offline] profile `{profile_id}` written for use without Sidearm: {} records, {failed} failed",
         records.len()
     );
-    None
+    asleep.then(|| device.model().device_id.to_owned())
 }
 
 /// Writes Sidearm's own signals into the onboard-path mouse: its key buttons
@@ -287,61 +343,135 @@ pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Binding, ControlId, MouseActionPayload, ShortcutActionPayload};
+    use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
+
+    fn shortcut(key: &str, ctrl: bool, shift: bool, alt: bool) -> ActionPayload {
+        ActionPayload::Shortcut(ShortcutActionPayload { key: key.into(), ctrl, shift, alt, win: false, raw: None })
+    }
 
     #[test]
-    fn shortcuts_and_mouse_buttons_have_a_firmware_form() {
-        use crate::config::{MouseActionPayload, ShortcutActionPayload};
-        let shortcut = |key: &str, ctrl: bool, shift: bool| {
-            ActionPayload::Shortcut(ShortcutActionPayload {
-                key: key.into(),
-                ctrl,
-                shift,
-                alt: false,
-                win: false,
-                raw: None,
-            })
-        };
-        assert_eq!(
-            onboard_action(&shortcut("T", true, true)),
-            // Tapped through the turbo record, which plays the left Shift.
-            Some(OnboardAction::KeyTap { modifier: 0x03, usage: 0x17 }),
-            "Ctrl+Shift+T"
-        );
-        let alt_f4 = ActionPayload::Shortcut(ShortcutActionPayload {
-            key: "F4".into(),
-            ctrl: false,
-            shift: false,
-            alt: true,
-            win: false,
-            raw: None,
-        });
-        assert_eq!(
-            onboard_action(&alt_f4),
-            Some(OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }),
-            "Alt+F4 taps the real left Alt"
-        );
-        assert_eq!(
-            onboard_action(&shortcut("Delete", false, false)),
-            Some(OnboardAction::Key { modifier: 0, usage: 0x4c })
-        );
-        assert_eq!(
-            onboard_action(&shortcut("", true, true)),
-            Some(OnboardAction::Key { modifier: 0x21, usage: 0 }),
-            "modifier-only is held as bare modifiers"
-        );
-        assert_eq!(onboard_action(&shortcut("", false, false)), None, "empty shortcut");
-        let back = ActionPayload::MouseAction(MouseActionPayload {
-            action: MouseActionKind::MouseBack,
-            ctrl: false,
-            shift: false,
-            alt: false,
-            win: false,
-        });
-        assert_eq!(onboard_action(&back), Some(OnboardAction::Mouse(4)));
-        for (action, record) in [(MouseActionKind::ScrollUp, 9), (MouseActionKind::ScrollDown, 10)] {
-            let scroll = ActionPayload::MouseAction(MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false });
-            assert_eq!(onboard_action(&scroll), Some(OnboardAction::Mouse(record)), "{action:?}");
+    fn the_v2_taps_shift_and_alt_through_the_turbo_record() {
+        let v2 = &NAGA_V2_HYPERSPEED;
+        assert_eq!(onboard_action(v2, &shortcut("T", true, true, false)), Some(OnboardAction::KeyTap { modifier: 0x03, usage: 0x17 }));
+        assert_eq!(onboard_action(v2, &shortcut("F4", false, false, true)), Some(OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }));
+        assert_eq!(onboard_action(v2, &shortcut("Delete", false, false, false)), Some(OnboardAction::Key { modifier: 0, usage: 0x4c }));
+        // A hold cannot be a turbo record: the right-hand keys this firmware plays.
+        assert_eq!(onboard_action(v2, &shortcut("", true, true, false)), Some(OnboardAction::Key { modifier: 0x21, usage: 0 }));
+        assert_eq!(onboard_action(v2, &shortcut("", false, false, false)), None, "empty shortcut");
+    }
+
+    /// The V3 repeats a stored turbo record on its own: plain records with the
+    /// standard mask only, push-to-talk included (its right Alt is AltGr).
+    #[test]
+    fn the_v3_gets_plain_records_with_the_standard_mask() {
+        let v3 = &NAGA_V3_PRO;
+        assert_eq!(onboard_action(v3, &shortcut("F4", false, false, true)), Some(OnboardAction::Key { modifier: 0x04, usage: 0x3d }));
+        assert_eq!(onboard_action(v3, &shortcut("T", true, true, false)), Some(OnboardAction::Key { modifier: 0x03, usage: 0x17 }));
+        assert_eq!(onboard_action(v3, &shortcut("", false, false, true)), Some(OnboardAction::Key { modifier: 0x04, usage: 0 }));
+    }
+
+    #[test]
+    fn mouse_buttons_and_the_wheel_have_a_firmware_form() {
+        let mouse = |action| ActionPayload::MouseAction(MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false });
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            assert_eq!(onboard_action(model, &mouse(MouseActionKind::MouseBack)), Some(OnboardAction::Mouse(4)));
+            assert_eq!(onboard_action(model, &mouse(MouseActionKind::ScrollUp)), Some(OnboardAction::Mouse(9)));
+            assert_eq!(onboard_action(model, &mouse(MouseActionKind::ScrollDown)), Some(OnboardAction::Mouse(10)));
         }
     }
-}
 
+    /// The seed config with no bindings in its first profile, and that profile.
+    fn empty_profile() -> (AppConfig, String) {
+        let mut config = crate::config::default_seed_config();
+        let profile = config.profiles[0].id.clone();
+        config.bindings.retain(|binding| binding.profile_id != profile);
+        (config, profile)
+    }
+
+    fn bind(config: &mut AppConfig, profile: &str, control: &str, layer: Layer, payload: ActionPayload, trigger_mode: Option<TriggerMode>) {
+        let id = format!("test-{control}-{layer:?}");
+        let mut action = config.actions[0].clone();
+        action.id = id.clone();
+        action.payload = payload;
+        config.actions.push(action);
+        config.bindings.push(Binding {
+            id: id.clone(),
+            profile_id: profile.into(),
+            layer,
+            control_id: ControlId::new(control),
+            label: "test".into(),
+            action_id: id,
+            color_tag: None,
+            trigger_mode,
+            chord_partner: None,
+            enabled: true,
+            throttle_ms: None,
+        });
+    }
+
+    fn record(records: &[OfflineRecord], button_id: u8, layer: u8) -> Option<OnboardAction> {
+        records.iter().find(|record| record.button_id == button_id && record.layer == layer).map(|record| record.action)
+    }
+
+    /// The V2's own signal of a key button: its inert offline record.
+    fn v2_signal(config: &AppConfig, control: &str) -> OnboardAction {
+        let binding = onboard_bindings(config).into_iter().find(|binding| binding.control_id == control).unwrap();
+        binding_target(&NAGA_V2_HYPERSPEED, &binding).unwrap().1
+    }
+
+    /// A double press or a text binding would play wrong (a single press, an
+    /// old record): both get the inert signal, on the V2 and in a V3 bank.
+    #[test]
+    fn what_the_firmware_cannot_play_gets_the_inert_signal() {
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("F4", false, false, true), Some(TriggerMode::DoublePress));
+        let text = config.actions.iter().find(|action| action.action_type == crate::config::ActionType::TextSnippet).unwrap().payload.clone();
+        bind(&mut config, &profile, "thumb_02", Layer::Standard, text, None);
+        bind(&mut config, &profile, "thumb_03", Layer::Standard, shortcut("F4", false, false, true), Some(TriggerMode::Hold));
+        let records = plan(&config, &NAGA_V2_HYPERSPEED, &profile);
+        let button = |control| NAGA_V2_HYPERSPEED.button_id_for(control).unwrap();
+        assert_eq!(record(&records, button("thumb_01"), 0), Some(v2_signal(&config, "thumb_01")));
+        assert_eq!(record(&records, button("thumb_02"), 0), Some(v2_signal(&config, "thumb_02")));
+        assert_eq!(record(&records, button("thumb_03"), 0), Some(OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }));
+        assert_eq!(record(&records, button("thumb_04"), 0), None, "an unbound button keeps the session's signal");
+        assert!(records.iter().all(|record| record.layer == 0), "no hypershift binding: layer 1 stays untouched");
+
+        let v3 = |control: &str| crate::mouse_memory::live_overlay::control_id(&NAGA_V3_PRO, control);
+        let mut config = crate::mouse_memory::live_overlay::tests::config_with_v3();
+        let profile = config.profiles[0].id.clone();
+        config.bindings.retain(|binding| binding.profile_id != profile);
+        bind(&mut config, &profile, v3("thumb_01").as_str(), Layer::Standard, shortcut("F4", false, false, true), Some(TriggerMode::DoublePress));
+        let records = plan(&config, &NAGA_V3_PRO, &profile);
+        assert!(matches!(record(&records, 0x40, 0), Some(OnboardAction::Consumer(_))), "{records:?}");
+    }
+
+    /// The V2's offline Hypershift: the settings trigger (the right button)
+    /// becomes the firmware key, a left click under it is a right click, and
+    /// layer 1 of the other key buttons is reset to the inert signal.
+    #[test]
+    fn the_v2_hypershift_follows_the_live_rules() {
+        let (mut config, profile) = empty_profile();
+        assert_eq!(config.settings.hypershift_trigger, "mouse_right");
+        bind(&mut config, &profile, "thumb_01", Layer::Hypershift, shortcut("T", true, false, false), None);
+        let records = plan(&config, &NAGA_V2_HYPERSPEED, &profile);
+        let button = |control| NAGA_V2_HYPERSPEED.button_id_for(control).unwrap();
+        assert_eq!(record(&records, 0x02, 0), Some(OnboardAction::Hypershift));
+        assert_eq!(record(&records, 0x02, 1), Some(OnboardAction::Hypershift));
+        assert_eq!(record(&records, 0x01, 1), Some(OnboardAction::Mouse(2)));
+        assert_eq!(record(&records, button("thumb_01"), 1), Some(OnboardAction::Key { modifier: 0x01, usage: 0x17 }));
+        assert_eq!(record(&records, button("thumb_02"), 1), Some(v2_signal(&config, "thumb_02")));
+    }
+
+    #[test]
+    fn the_offline_profile_falls_back_to_the_fallback_profile() {
+        let (mut config, profile) = empty_profile();
+        let fallback = config.settings.fallback_profile_id.clone();
+        assert_eq!(offline_profile_id(&config, Some(profile.clone())), fallback, "absent setting");
+        config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
+        assert_eq!(offline_profile_id(&config, Some(profile.clone())), profile);
+        assert_eq!(offline_profile_id(&config, None), fallback, "a restore process does not know the profile in effect");
+        config.settings.offline_profile_id = Some("deleted-profile".into());
+        assert_eq!(offline_profile_id(&config, None), fallback);
+    }
+}

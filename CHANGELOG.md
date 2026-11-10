@@ -38,7 +38,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   V3 gets the plain key record Synapse itself stores instead of the turbo one, which
   repeats while the mouse thinks the button is held.
 - A mouse asleep when Sidearm closes gets its profile for use without Sidearm as soon
-  as it wakes, instead of staying silent until the next start.
+  as it wakes, instead of staying silent until the next start. A mouse that slept
+  through part of it (a few buttons, its DPI) is retried too.
+- After Sidearm was killed or crashed, the V2's side buttons no longer stay silent
+  without Sidearm: the restore process stores the offline profile like an exit would.
+- Without Sidearm, a button set to a double or triple press or a chord no longer fires
+  on a single press (the mouse cannot tell them apart): it does nothing instead.
+- Naga V3 Pro: a held modifier without a key (push-to-talk with Alt) is stored with the
+  left Alt instead of the right one, which the Russian layout turns into Ctrl+Alt.
+- Naga V2 HyperSpeed: a button whose assignment cannot live in the mouse (text, macro)
+  no longer plays the shortcut an earlier exit stored there; with HyperShift on the
+  right button, a left click under it is a right click without Sidearm too.
 - A wheel bound to plain scroll up/down now scrolls without Sidearm: the mouse's memory
   gets the wheel's own record instead of a silent signal.
 - After Sidearm was killed or crashed, the V3's buttons and wheel stayed silent until its

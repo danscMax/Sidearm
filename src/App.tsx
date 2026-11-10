@@ -1105,6 +1105,14 @@ function App() {
           switchWorkspaceMode("profiles");
           setRuleSignal({ mappingId });
         }}
+        recognized={runtimeSummary.status === "running" && lastCapture && !lastCapture.ignored
+          ? {
+              exe: lastCapture.exe,
+              processPath: lastCapture.processPath,
+              mappingId: lastCapture.matchedAppMappingId,
+              profileId: lastCapture.resolvedProfileId,
+            }
+          : null}
         onRuleMenu={(mappingId, x, y) => {
           switchWorkspaceMode("profiles");
           setRuleSignal({ mappingId, at: { x, y } });

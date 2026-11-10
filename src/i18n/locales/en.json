@@ -67,7 +67,10 @@
     "start": "START",
     "appCount_one": "{{count}} app",
     "appCount_other": "{{count}} apps",
-    "noApps": "turned on by hand"
+    "noApps": "turned on by hand",
+    "appsCollapse": "Hide apps",
+    "appsExpand": "Show apps",
+    "recognized": "Recognized now"
   },
   "statusbar": {
     "events": "{{count}} events"

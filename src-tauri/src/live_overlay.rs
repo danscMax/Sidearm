@@ -297,7 +297,11 @@ fn offline_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) ->
             continue;
         }
         let id = control_id(model, control);
-        let action = |layer| crate::mouse_offline::binding_action(config, profile_id, id.as_str(), layer);
+        // No turbo record in a bank: the V3 repeats it instead of tapping once.
+        let action = |layer| {
+            crate::mouse_offline::binding_action(config, profile_id, id.as_str(), layer)
+                .map(|action| action.map(OnboardAction::without_turbo))
+        };
         // A binding the firmware cannot play (text, macro, launch) gets a
         // reserved signal that does nothing, never the bank's old record —
         // a factory digit would type into whatever has focus. No binding at
@@ -419,6 +423,14 @@ pub(crate) fn write_offline(
     let device = VendorDevice::open_model(model)?;
     let banks = read_banks(&device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
+    // A bank no profile is linked to any more gets its own records back: what
+    // Sidearm stored there earlier (an old turbo record included) would play on.
+    for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
+        let backup = bank_backup(config_dir, model, bank);
+        if backup.exists() && let Err(error) = restore_bank(&device, bank, &backup) {
+            log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
+        }
+    }
     if plan.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
         return Ok(());
@@ -1169,6 +1181,58 @@ pub(crate) mod tests {
         assert!(!targets.iter().any(|&(button, _, _)| button == 0x43), "an unbound button keeps its record");
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 0, usage: 0x2a }), [2, 1, 0, 0x2a, 0, 0, 0]);
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 1, usage: 0x19 }), [2, 2, 1, 0x19, 0, 0, 0]);
+        // Alt+F4 is held as a plain record, never the turbo one the V3 repeats.
+        let shortcut = config.bindings.iter().find(|binding| binding.id == "v3-test").unwrap().action_id.clone();
+        if let Some(crate::config::ActionPayload::Shortcut(keys)) =
+            config.actions.iter_mut().find(|action| action.id == shortcut).map(|action| &mut action.payload)
+        {
+            (keys.key, keys.ctrl, keys.shift, keys.alt, keys.win) = ("F4".into(), false, false, true, false);
+        }
+        let targets = offline_targets(&config, &NAGA_V3_PRO, &profile);
+        assert!(targets.contains(&(0x41, 1, OnboardAction::Key { modifier: 0x04, usage: 0x3d })));
+        assert!(!targets.iter().any(|(_, _, action)| matches!(action, OnboardAction::KeyTap { .. })));
+    }
+
+    /// Hardware, interactive — **close Sidearm first**; writes the V3's live map
+    /// (RAM, not a bank) and puts it back. Thumbs 1..4 get plain key records
+    /// with the standard mask, as Synapse stores them: LShift, LAlt, then the
+    /// right-hand RShift, RAlt the V2 needs, all with F24. Press 1..4 within 45 s; prints
+    /// what Windows saw. Run: `cargo test v3_plain_left_modifiers -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn v3_plain_left_modifiers() {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
+        let probes = [(0x40, 0x02), (0x41, 0x04), (0x42, 0x20), (0x43, 0x40)];
+        let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, read_bank(&device, LIVE_BANK, button, 0).unwrap())).collect();
+        for (index, &(button, modifier)) in probes.iter().enumerate() {
+            println!("thumb {}: modifier {modifier:#04x} + F24", index + 1);
+            write_bank(&device, LIVE_BANK, button, 0, block(OnboardAction::Key { modifier, usage: 0x73 })).unwrap();
+        }
+        drop(device);
+        println!("press thumbs 1..4 now, one at a time");
+        // Every virtual key, with the time since the start: what each press sent.
+        let start = std::time::Instant::now();
+        let mut held = [false; 256];
+        while start.elapsed() < std::time::Duration::from_secs(45) {
+            for vk in 1..=254u16 {
+                // Mouse buttons are not keys.
+                if matches!(vk, 0x01 | 0x02 | 0x04 | 0x05 | 0x06) {
+                    continue;
+                }
+                let down = unsafe { GetAsyncKeyState(i32::from(vk)) } as u16 & 0x8000 != 0;
+                if down != held[usize::from(vk)] {
+                    held[usize::from(vk)] = down;
+                    println!("{:5.1}s vk {vk:#04x} {}", start.elapsed().as_secs_f32(), if down { "DOWN" } else { "up" });
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("reopen");
+        for (button, record) in saved {
+            write_bank(&device, LIVE_BANK, button, 0, record).unwrap();
+        }
+        println!("records put back");
     }
 
     #[test]

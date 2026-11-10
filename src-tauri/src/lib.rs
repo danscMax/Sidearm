@@ -1824,7 +1824,7 @@ async fn live_map_ready(device_id: String) -> bool {
         tauri::async_runtime::spawn_blocking(move || {
             let present = mouse_memory::present_models();
             let Some(model) = present.iter().find(|model| model.device_id == device_id) else { return false };
-            match mouse_memory::live_overlay::live_models(&present).iter().any(|live| std::ptr::eq(*live, *model)) {
+            match mouse_memory::live_overlay::live_models(&present).iter().any(|live| live.is(model)) {
                 true => mouse_memory::live_overlay::is_ready(model),
                 false => model.transport == device_catalog::Transport::Onboard,
             }

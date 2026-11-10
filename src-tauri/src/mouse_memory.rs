@@ -487,10 +487,7 @@ static DEVICE_LOCKS: [Mutex<()>; crate::device_catalog::CATALOG_LEN] =
     [const { Mutex::new(()) }; crate::device_catalog::CATALOG_LEN];
 
 fn device_lock(model: &'static NativeModel) -> MutexGuard<'static, ()> {
-    let index = crate::device_catalog::CATALOG
-        .iter()
-        .position(|entry| std::ptr::eq(*entry, model))
-        .unwrap_or(0);
+    let index = model.catalog_index();
     // A panic mid-exchange leaves no state behind the lock worth refusing for.
     DEVICE_LOCKS[index].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -589,7 +586,7 @@ impl VendorDevice {
 
     /// Opens `model` under whichever of its PIDs is connected.
     pub fn open_model(model: &'static NativeModel) -> Result<Self, String> {
-        Self::open_first_model(|candidate| std::ptr::eq(candidate, model))
+        Self::open_first_model(|candidate| candidate.is(model))
     }
 
     /// Opens the first catalog model accepted by `wanted`. `Err` carries the

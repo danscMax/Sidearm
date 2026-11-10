@@ -53,7 +53,7 @@ static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CAT
 pub(crate) static CHECK_EXTRA_CONTROLS: AtomicBool = AtomicBool::new(false);
 
 pub fn catalog_index(model: &NativeModel) -> usize {
-    CATALOG.iter().position(|entry| std::ptr::eq(*entry, model)).unwrap_or(0)
+    model.catalog_index()
 }
 
 /// A session owns this model's live map (its legacy guard must stay away).
@@ -94,7 +94,7 @@ pub fn software_hypershift(present: &[&'static NativeModel], live: &[&'static Na
     present.is_empty()
         || present
             .iter()
-            .any(|model| model.transport == Transport::Onboard && !live.iter().any(|item| std::ptr::eq(*item, *model)))
+            .any(|model| model.transport == Transport::Onboard && !live.iter().any(|item| item.is(model)))
 }
 
 /// Every control of `model` in usage order: key buttons, extras, then the
@@ -772,7 +772,7 @@ pub struct Session {
 
 impl Session {
     pub fn matches(&self, model: &NativeModel, targets: &[(u8, u8, OnboardAction)]) -> bool {
-        std::ptr::eq(self.model, model) && self.targets.as_ref() == targets
+        self.model.is(model) && self.targets.as_ref() == targets
     }
 
     /// Starts the worker; `None` when there is nothing to write. A model with

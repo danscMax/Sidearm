@@ -96,6 +96,19 @@ pub struct ConsumerSignals {
 }
 
 impl NativeModel {
+    /// Whether `other` is this model. By name, never by address: a `const`
+    /// model is a fresh value at every use, so two references to the same
+    /// model need not share an address.
+    pub fn is(&self, other: &NativeModel) -> bool {
+        self.name == other.name
+    }
+
+    /// This model's place in [`CATALOG`] (its device lock and live-map flags);
+    /// a model outside the catalog (a test double) takes the first one's.
+    pub fn catalog_index(&self) -> usize {
+        CATALOG.iter().position(|entry| entry.is(self)).unwrap_or(0)
+    }
+
     /// Consumer usage a key button sends on this model, if it has the path.
     pub fn consumer_usage_for(&self, control_id: &str) -> Option<u16> {
         self.consumer.as_ref()?.usages.iter().find(|(id, _)| *id == control_id).map(|(_, usage)| *usage)
@@ -402,6 +415,17 @@ pub const CATALOG_LEN: usize = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_catalog_model_has_its_own_index() {
+        for (index, model) in CATALOG.iter().enumerate() {
+            assert_eq!(model.catalog_index(), index, "{}", model.name);
+        }
+        // A `const` model used directly is the same model as its catalog entry.
+        assert_eq!(NAGA_X.catalog_index(), CATALOG.iter().position(|entry| entry.name == NAGA_X.name).unwrap());
+        let names: std::collections::HashSet<_> = CATALOG.iter().map(|model| model.name).collect();
+        assert_eq!(names.len(), CATALOG.len(), "model names are unique");
+    }
 
     /// The V2 HyperSpeed entry must reproduce the tables v0.9.0 shipped with,
     /// written out here independently of the entry.

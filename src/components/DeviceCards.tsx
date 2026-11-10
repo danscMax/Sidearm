@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, Device, Profile } from "../lib/config";
 import {
@@ -14,8 +14,12 @@ import type { MouseSettings, NativeModelInfo } from "../lib/onboard-mapping";
 /** Live state of each connected built-in mouse, read on mount, on mouse
  *  events and when `refreshToken` changes (a write from the Performance tab) —
  *  never on a timer, so the mice are not polled for a picture. */
-function useMiceState(refreshToken: number): { mice: NativeModelInfo[]; readings: Map<string, MouseSettings | null> } {
-  const [mice, setMice] = useState<NativeModelInfo[]>([]);
+function useMiceState(refreshToken: number): {
+  /** null until the first list arrives. */
+  mice: NativeModelInfo[] | null;
+  readings: Map<string, MouseSettings | null>;
+} {
+  const [mice, setMice] = useState<NativeModelInfo[] | null>(null);
   // null: the mouse was asked and did not answer (asleep, out of range).
   const [readings, setReadings] = useState<Map<string, MouseSettings | null>>(new Map());
   useEffect(() => {
@@ -52,7 +56,9 @@ function useMiceState(refreshToken: number): { mice: NativeModelInfo[]; readings
 }
 
 /** One card per device: the built-in mice with their battery, DPI, poll rate
- *  and the edited profile's slot; user devices with their button count. */
+ *  and the edited profile's slot; user devices with their button count. A
+ *  built-in mouse that is not connected (another PC's, or the seed's when the
+ *  user has another mouse) folds into one "+N not connected" button. */
 export function DeviceCards({
   config,
   devices,
@@ -75,11 +81,31 @@ export function DeviceCards({
   // Selecting a card reads that mouse again (it may have woken up since).
   const [selectToken, setSelectToken] = useState(0);
   const { mice, readings } = useMiceState(refreshToken + selectToken);
+  const [showOffline, setShowOffline] = useState(false);
+  const isBuiltin = (device: Device) => device.builtin && deviceLayout(device.id) !== undefined;
+  const isConnected = (device: Device) => mice?.some((mouse) => mouse.deviceId === device.id) ?? false;
+  // Until the first list arrives every card shows, so nothing jumps away.
+  const folded = (device: Device) => mice !== null && isBuiltin(device) && !isConnected(device);
+  const offline = devices.filter(folded);
+  const visible = devices.filter((device) => !folded(device) || showOffline || device.id === activeDeviceId);
+  const hiddenCount = devices.length - visible.length;
+
+  // The first list: an unplugged mouse picked only by default gives way to a
+  // connected one.
+  const placed = useRef(false);
+  useEffect(() => {
+    if (mice === null || placed.current) return;
+    placed.current = true;
+    const active = devices.find((device) => device.id === activeDeviceId);
+    const connected = devices.find((device) => isBuiltin(device) && isConnected(device));
+    if (active && folded(active) && connected) onSelect(connected.id);
+  }, [mice]);
+
   return (
     <div className="device-cards" role="group" aria-label={t("device.cardsLabel")}>
-      {devices.map((device) => {
-        const builtin = device.builtin && deviceLayout(device.id) !== undefined;
-        const connected = mice.some((mouse) => mouse.deviceId === device.id);
+      {visible.map((device) => {
+        const builtin = isBuiltin(device);
+        const connected = isConnected(device);
         const reading = readings.get(device.id);
         const slot = profile?.deviceSlots?.[device.id];
         const controls = config.physicalControls.filter((control) => control.deviceId === device.id).length;
@@ -118,8 +144,19 @@ export function DeviceCards({
           </button>
         );
       })}
+      {hiddenCount > 0 ? (
+        <button
+          type="button"
+          className="device-card device-card--more"
+          onClick={() => setShowOffline(true)}
+          title={`${t("device.showOfflineHint")}: ${offline.map((device) => device.name).join(", ")}`}
+        >
+          <span className="device-card__name">{t("device.showOffline", { count: hiddenCount })}</span>
+        </button>
+      ) : null}
       <button type="button" className="device-card device-card--add" onClick={onAdd} title={t("device.addDeviceHint")}>
         <span className="device-card__name">{t("device.addDevice")}</span>
+        {visible.length === 0 ? <span className="device-card__chips">{t("device.noneConnected")}</span> : null}
       </button>
     </div>
   );

@@ -49,6 +49,7 @@ import {
   runPreviewAction,
   getDebugLog,
   listenWindowResolutionEvent,
+  listenRuntimeEvent,
 } from "../lib/backend";
 
 const mockedStartRuntime = vi.mocked(startRuntime);
@@ -388,8 +389,13 @@ describe("useRuntime", () => {
   describe("recognized foreground app", () => {
     it("keeps the last window the runtime did not ignore and clears it on stop", async () => {
       let emit: (result: WindowCaptureResult) => void = () => {};
-      vi.mocked(listenWindowResolutionEvent).mockImplementation(async (_name, callback) => {
+      vi.mocked(listenWindowResolutionEvent).mockImplementationOnce(async (_name, callback) => {
         emit = callback as typeof emit;
+        return () => {};
+      });
+      const runtimeListeners: ((summary: RuntimeStateSummary) => void)[] = [];
+      vi.mocked(listenRuntimeEvent).mockImplementation(async (_name, callback) => {
+        runtimeListeners.push(callback as (summary: RuntimeStateSummary) => void);
         return () => {};
       });
       mockedStopRuntime.mockResolvedValue(stoppedSummary);
@@ -408,6 +414,13 @@ describe("useRuntime", () => {
         await result.current.handleStopRuntime();
       });
       expect(result.current.lastRecognized).toBeNull();
+
+      // A runtime that stops by itself (the runtime_stopped event) clears it too.
+      act(() => emit(captureResult));
+      expect(result.current.lastRecognized).toEqual(captureResult);
+      act(() => runtimeListeners.forEach((listener) => listener(stoppedSummary)));
+      expect(result.current.lastRecognized).toBeNull();
+      vi.mocked(listenRuntimeEvent).mockResolvedValue(() => {});
     });
   });
 

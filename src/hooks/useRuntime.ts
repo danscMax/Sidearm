@@ -108,13 +108,17 @@ export function useRuntime(deps: {
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Every runtime state change goes through here: a runtime that is not
+  // running has recognized nothing.
+  function applySummary(summary: RuntimeStateSummary) {
+    setRuntimeSummary(summary);
+    if (summary.status !== "running") setLastRecognized(null);
+  }
+
   // --- useEffectEvent handlers for Tauri listeners ---
 
   const handleRuntimeEvent = useEffectEvent((summary: RuntimeStateSummary) => {
-    startTransition(() => {
-      setRuntimeSummary(summary);
-      if (summary.status !== "running") setLastRecognized(null);
-    });
+    startTransition(() => applySummary(summary));
   });
 
   const handleWindowResolutionEvent = useEffectEvent((result: WindowCaptureResult) => {
@@ -297,7 +301,7 @@ export function useRuntime(deps: {
   async function ensureRuntimeStarted(): Promise<void> {
     try {
       const summary = await startRuntime();
-      startTransition(() => setRuntimeSummary(summary));
+      startTransition(() => applySummary(summary));
       await refreshDebugLog();
     } catch (unknownError) {
       startTransition(() => {
@@ -319,18 +323,15 @@ export function useRuntime(deps: {
   }
 
   async function handleStartRuntime() {
-    await runtimeCommand(() => startRuntime(), (summary) => setRuntimeSummary(summary));
+    await runtimeCommand(() => startRuntime(), applySummary);
   }
 
   async function handleReloadRuntime() {
-    await runtimeCommand(() => reloadRuntime(), (summary) => setRuntimeSummary(summary));
+    await runtimeCommand(() => reloadRuntime(), applySummary);
   }
 
   async function handleStopRuntime() {
-    await runtimeCommand(() => stopRuntime(), (summary) => {
-      setRuntimeSummary(summary);
-      setLastRecognized(null);
-    });
+    await runtimeCommand(() => stopRuntime(), applySummary);
   }
 
   async function handleRehookCapture() {

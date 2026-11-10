@@ -142,7 +142,7 @@ export function SidebarProfiles({
                       </button>
                     );
                   })}
-                  {apps.length > SHOWN_APPS ? (
+                  {apps.length > SHOWN_APPS && (expanded || shown.length < apps.length) ? (
                     <button
                       type="button"
                       className="sidebar-profiles__app sidebar-profiles__app--more"

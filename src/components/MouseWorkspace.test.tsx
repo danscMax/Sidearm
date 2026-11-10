@@ -26,7 +26,7 @@ beforeEach(async () => {
   await i18n.changeLanguage("en");
   vi.mocked(backend.getMouseSettings).mockResolvedValue(readings);
   vi.mocked(backend.getNativeModel).mockResolvedValue({ name: "Naga", deviceId: "razer-naga", banks: false, connected: true, verified: true, consumerSignals: null, dpiMin: 100, dpiMax: 30000, pollRates: [125, 500, 1000] });
-  vi.mocked(backend.listenMouseBattery).mockImplementation(async (callback) => { batteryEvent = () => callback({ percent: 63, low: false }); return vi.fn<() => void>(); });
+  vi.mocked(backend.listenMouseBattery).mockImplementation(async (callback) => { batteryEvent = () => callback({ model: "Razer Naga V2 HyperSpeed", percent: 63, low: false }); return vi.fn<() => void>(); });
   vi.mocked(backend.listenActionExecutionEvent).mockImplementation(async (_name, callback) => { executionEvent = callback as typeof executionEvent; return vi.fn<() => void>(); });
   vi.mocked(backend.getDeviceReport).mockResolvedValue("Sidearm diagnostic summary");
   vi.mocked(backend.setMouseDpi).mockResolvedValue(readings);

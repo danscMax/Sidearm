@@ -1419,7 +1419,7 @@
     "offlineFallback": "{{name}} (fallback)",
     "batteryHelp": "Below 10% Sidearm warns you — at most once a day.",
     "batteryValue": "{{percent}}%",
-    "batteryLow": "Mouse battery low: {{percent}}%",
+    "batteryLow": "{{model}}: battery low, {{percent}}%",
     "reportButton": "Help verify",
     "reportReading": "Reading the mouse… (~20 s)",
     "reportCopied": "Report copied (read-only, the mouse was not changed). Paste it into the GitHub issue that opened (Ctrl+V) and submit it.",
@@ -1586,7 +1586,7 @@
       "startupRestoreFailed": "The saved startup entry could not be restored. It was kept for a retry; no newer entry was overwritten."
     },
     "guard": {
-      "batteryLow": "Mouse battery: {{percent}}%",
+      "batteryLow": "{{model}} battery: {{percent}}%",
       "mappingsNotRestored": "Button assignments were overwritten ({{controls}}), could not restore them.",
       "mappingsRestored": "Razer overwrote the button assignments ({{controls}}) — restored them.",
       "modeNotRestored": "Razer holds the mouse in driver mode — could not return control to Sidearm.",
@@ -1610,7 +1610,7 @@
       "reloadWarnings": "Warnings found after reload: {{warning_count}}.",
       "startWarnings": "Warnings found at startup: {{warning_count}}.",
       "trayActiveProfile": "Active profile: {{profile_name}}",
-      "trayBattery": "\nMouse: {{percent}}%",
+      "trayBattery": "\n{{model}}: {{percent}}%",
       "trayCreateRule": "Create a rule for the active window",
       "trayListen": "Listen to the mouse",
       "trayListening": "listening to the mouse",

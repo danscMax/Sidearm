@@ -517,9 +517,12 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         crate::ui_text!("runtime.trayPaused", "paused")
     });
     #[cfg(target_os = "windows")]
-    let battery_line = onboard_guard::last_battery_percent()
-        .map(|percent| crate::ui_text::native(&crate::ui_text!("runtime.trayBattery", "\nMouse: {percent}%", percent = percent)))
-        .unwrap_or_default();
+    let battery_line: String = onboard_guard::last_batteries()
+        .into_iter()
+        .map(|(model, percent)| {
+            crate::ui_text::native(&crate::ui_text!("runtime.trayBattery", "\n{model}: {percent}%", model = model, percent = percent))
+        })
+        .collect();
     #[cfg(not(target_os = "windows"))]
     let battery_line = String::new();
     let tooltip = crate::ui_text!(

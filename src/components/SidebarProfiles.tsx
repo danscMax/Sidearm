@@ -33,7 +33,7 @@ export function SidebarProfiles({
   onContextMenu: (x: number, y: number, profileId: string) => void;
   onOpenSettings: () => void;
   onEditRule: (mappingId: string) => void;
-  /** Right-click on an app: the rule's menu (move, enable, delete). */
+  /** Right-click on an app: the rule's menu (edit, duplicate, move, delete). */
   onRuleMenu: (mappingId: string, x: number, y: number) => void;
   onAddRule: () => void;
   onToggleAllRules: () => void;

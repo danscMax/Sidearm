@@ -1189,8 +1189,46 @@ pub(crate) mod tests {
             (keys.key, keys.ctrl, keys.shift, keys.alt, keys.win) = ("F4".into(), false, false, true, false);
         }
         let targets = offline_targets(&config, &NAGA_V3_PRO, &profile);
-        assert!(targets.contains(&(0x41, 1, OnboardAction::Key { modifier: crate::mouse_memory::modifier_bits(false, false, true, false), usage: 0x3d })));
+        assert!(targets.contains(&(0x41, 1, OnboardAction::Key { modifier: 0x04, usage: 0x3d })));
         assert!(!targets.iter().any(|(_, _, action)| matches!(action, OnboardAction::KeyTap { .. })));
+    }
+
+    /// Hardware, interactive — **close Sidearm first**; writes the V3's live map
+    /// (RAM, not a bank) and puts it back. Thumbs 1..4 get plain key records
+    /// with the standard left-hand mask, as Synapse stores them: LShift, LAlt,
+    /// LCtrl+LAlt, LShift+LAlt, all with F24. Press 1..4 within 45 s; prints
+    /// what Windows saw. Run: `cargo test v3_plain_left_modifiers -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn v3_plain_left_modifiers() {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
+        let probes = [(0x40, 0x02), (0x41, 0x04), (0x42, 0x05), (0x43, 0x06)];
+        let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, read_bank(&device, LIVE_BANK, button, 0).unwrap())).collect();
+        for (index, &(button, modifier)) in probes.iter().enumerate() {
+            println!("thumb {}: modifier {modifier:#04x} + F24", index + 1);
+            write_bank(&device, LIVE_BANK, button, 0, block(OnboardAction::Key { modifier, usage: 0x73 })).unwrap();
+        }
+        drop(device);
+        println!("press thumbs 1..4 now, one at a time");
+        let watched = [("LCtrl", 0xA2), ("LShift", 0xA0), ("LAlt", 0xA4), ("RCtrl", 0xA3), ("RShift", 0xA1), ("RAlt", 0xA5), ("F24", 0x87)];
+        let mut held = [false; 7];
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(45);
+        while std::time::Instant::now() < end {
+            for (i, (name, vk)) in watched.iter().enumerate() {
+                let down = unsafe { GetAsyncKeyState(*vk) } as u16 & 0x8000 != 0;
+                if down != held[i] {
+                    held[i] = down;
+                    println!("{name} {}", if down { "DOWN" } else { "up" });
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("reopen");
+        for (button, record) in saved {
+            write_bank(&device, LIVE_BANK, button, 0, record).unwrap();
+        }
+        println!("records put back");
     }
 
     #[test]

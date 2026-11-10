@@ -35,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Naga V3 Pro: a shortcut with Alt or Shift stored in a slot (for use without Sidearm)
   no longer repeats on its own every 10 seconds (an Alt+F4 kept closing windows); the
-  V3 gets a plain key record instead of the turbo one, which only the V2 taps once.
+  V3 gets the plain key record Synapse itself stores instead of the turbo one, which
+  repeats while the mouse thinks the button is held.
 - A mouse asleep when Sidearm closes gets its profile for use without Sidearm as soon
   as it wakes, instead of staying silent until the next start.
 - A wheel bound to plain scroll up/down now scrolls without Sidearm: the mouse's memory

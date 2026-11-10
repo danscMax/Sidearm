@@ -363,16 +363,15 @@ pub enum OnboardAction {
 }
 
 impl OnboardAction {
-    /// The same shortcut as a plain held key record (Shift and Alt as the
-    /// right-hand keys), for a mouse whose turbo record is not one tap per
-    /// press: measured 2026-11-10, the Naga V3 Pro kept firing a stored
-    /// Alt+F4 turbo record every 10 s, even with Sidearm closed.
+    /// The same shortcut as a plain key record with the standard HID mask —
+    /// the form Synapse itself stores (Alt+F4 = `02 02 04 3d`). A turbo record
+    /// repeats while the firmware thinks the button is held: measured
+    /// 2026-11-10, the Naga V3 Pro fired a stored Alt+F4 turbo record every
+    /// 10 s on its own, Sidearm closed. (The V2 HyperSpeed drops the left
+    /// Shift/Alt bits of a plain record, so its onboard path keeps the turbo.)
     pub fn without_turbo(self) -> Self {
         match self {
-            Self::KeyTap { modifier, usage } => Self::Key {
-                modifier: modifier_bits(modifier & 0x01 != 0, modifier & 0x02 != 0, modifier & 0x04 != 0, modifier & 0x08 != 0),
-                usage,
-            },
+            Self::KeyTap { modifier, usage } => Self::Key { modifier, usage },
             other => other,
         }
     }
@@ -1357,11 +1356,10 @@ mod tests {
     /// Shift and Alt go out as the right-hand keys: the firmware drops the
     /// left ones (measured).
     #[test]
-    fn without_turbo_holds_the_same_shortcut_with_right_hand_modifiers() {
+    fn without_turbo_is_the_plain_record_synapse_stores() {
         let alt_f4 = OnboardAction::KeyTap { modifier: left_modifier_bits(false, false, true, false), usage: 0x3d };
-        assert_eq!(alt_f4.without_turbo(), OnboardAction::Key { modifier: modifier_bits(false, false, true, false), usage: 0x3d });
-        let ctrl_shift_t = OnboardAction::KeyTap { modifier: left_modifier_bits(true, true, false, false), usage: 0x17 };
-        assert_eq!(ctrl_shift_t.without_turbo(), OnboardAction::Key { modifier: 0x21, usage: 0x17 });
+        assert_eq!(alt_f4.without_turbo(), OnboardAction::Key { modifier: 0x04, usage: 0x3d });
+        assert_eq!(alt_f4.without_turbo().bytes(), [0x02, 0x02, 0x04, 0x3d]);
         assert_eq!(OnboardAction::Mouse(9).without_turbo(), OnboardAction::Mouse(9));
     }
 

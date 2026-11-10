@@ -68,12 +68,17 @@ export function SidebarProfiles({
           const expanded = expandedId === profile.id;
           const current = recognized?.profileId === profile.id ? recognized : null;
           const listed = selected && !collapsed;
+          // A rule deleted or moved since the capture is not in the list: the row shows it.
+          const currentInList = current?.mappingId !== undefined && apps.some((mapping) => mapping.id === current.mappingId);
           // The short list always includes the recognized app.
           const shown = expanded
             ? apps
             : apps.filter((mapping, index) => index < SHOWN_APPS || mapping.id === current?.mappingId);
           return (
-            <li key={profile.id} className={`sidebar-profiles__item${selected ? " sidebar-profiles__item--selected" : ""}`}>
+            <li
+              key={profile.id}
+              className={`sidebar-profiles__item${selected ? " sidebar-profiles__item--selected" : ""}${selected && apps.length > 0 ? " sidebar-profiles__item--foldable" : ""}`}
+            >
               <button
                 type="button"
                 className="sidebar-profiles__row"
@@ -92,7 +97,7 @@ export function SidebarProfiles({
                 {runtimeProfileName === profile.name ? (
                   <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
                 ) : null}
-                {current && !(listed && current.mappingId) ? (
+                {current && !(listed && currentInList) ? (
                   <span className="sidebar-profiles__count sidebar-profiles__count--current" title={t("sidebar.recognized")}>
                     <ExeIcon exe={current.exe} processPath={current.processPath} className="sidebar-profiles__icon" />
                     <span className="sidebar-profiles__app-name">{appName(current.exe)}</span>
@@ -108,7 +113,7 @@ export function SidebarProfiles({
                   type="button"
                   className={`sidebar-profiles__fold${collapsed ? " sidebar-profiles__fold--collapsed" : ""}`}
                   aria-expanded={!collapsed}
-                  aria-label={collapsed ? t("sidebar.appsExpand") : t("sidebar.appsCollapse")}
+                  aria-label={t("sidebar.appsToggle")}
                   title={collapsed ? t("sidebar.appsExpand") : t("sidebar.appsCollapse")}
                   onClick={() => setCollapsed((v) => !v)}
                 >
@@ -124,6 +129,7 @@ export function SidebarProfiles({
                         key={mapping.id}
                         type="button"
                         className={`sidebar-profiles__app${mapping.enabled ? "" : " sidebar-profiles__app--disabled"}${isCurrent ? " sidebar-profiles__app--current" : ""}`}
+                        aria-current={isCurrent ? "true" : undefined}
                         onClick={() => onEditRule(mapping.id)}
                         onContextMenu={(e) => {
                           e.preventDefault();
@@ -136,7 +142,7 @@ export function SidebarProfiles({
                       </button>
                     );
                   })}
-                  {expanded || shown.length < apps.length ? (
+                  {apps.length > SHOWN_APPS ? (
                     <button
                       type="button"
                       className="sidebar-profiles__app sidebar-profiles__app--more"

@@ -48,6 +48,7 @@ import {
   executePreviewAction,
   runPreviewAction,
   getDebugLog,
+  listenWindowResolutionEvent,
 } from "../lib/backend";
 
 const mockedStartRuntime = vi.mocked(startRuntime);
@@ -384,6 +385,32 @@ describe("useRuntime", () => {
   // =========================================================================
   // Debug log refresh
   // =========================================================================
+  describe("recognized foreground app", () => {
+    it("keeps the last window the runtime did not ignore and clears it on stop", async () => {
+      let emit: (result: WindowCaptureResult) => void = () => {};
+      vi.mocked(listenWindowResolutionEvent).mockImplementation(async (_name, callback) => {
+        emit = callback as typeof emit;
+        return () => {};
+      });
+      mockedStopRuntime.mockResolvedValue(stoppedSummary);
+      const { result } = renderHook(() => useRuntime({ setError }));
+      await act(async () => {});
+
+      act(() => emit(captureResult));
+      expect(result.current.lastRecognized).toEqual(captureResult);
+      // Focusing Sidearm itself is ignored: the recognized app stays.
+      const own = { ...captureResult, exe: "Sidearm.exe", ignored: true };
+      act(() => emit(own));
+      expect(result.current.lastCapture).toEqual(own);
+      expect(result.current.lastRecognized).toEqual(captureResult);
+
+      await act(async () => {
+        await result.current.handleStopRuntime();
+      });
+      expect(result.current.lastRecognized).toBeNull();
+    });
+  });
+
   describe("debug log refresh", () => {
     it("refreshDebugLog fetches entries after debounce", async () => {
       const entries = [

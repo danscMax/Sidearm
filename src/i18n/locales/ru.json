@@ -76,7 +76,8 @@
     "appCount_many": "{{count}} приложений",
     "appsCollapse": "Свернуть приложения",
     "appsExpand": "Показать приложения",
-    "recognized": "Распознано сейчас"
+    "recognized": "Распознано сейчас",
+    "appsToggle": "Приложения профиля"
   },
   "statusbar": {
     "events": "{{count}} событий"

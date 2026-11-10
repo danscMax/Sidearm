@@ -2050,7 +2050,7 @@ input[type="radio"] {
 }
 
 /* Room for the fold button beside the name and the runtime dot. */
-.sidebar-profiles__item--selected .sidebar-profiles__row {
+.sidebar-profiles__item--foldable .sidebar-profiles__row {
   padding-right: 34px;
 }
 

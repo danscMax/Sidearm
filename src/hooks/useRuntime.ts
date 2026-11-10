@@ -48,6 +48,9 @@ export interface RuntimeControl {
   captureDelayMs: number;
   setCaptureDelayMs: React.Dispatch<React.SetStateAction<number>>;
   lastCapture: WindowCaptureResult | null;
+  /** The last foreground window the runtime did not ignore (Sidearm's own
+   *  window and shell chrome are ignored); cleared when the runtime stops. */
+  lastRecognized: WindowCaptureResult | null;
   resolutionKeyInput: string;
   setResolutionKeyInput: React.Dispatch<React.SetStateAction<string>>;
   lastResolutionPreview: ResolvedInputPreview | null;
@@ -89,6 +92,7 @@ export function useRuntime(deps: {
   const [debugLog, setDebugLog] = useState<DebugLogEntry[]>([]);
   const [captureDelayMs, setCaptureDelayMs] = useState(2000);
   const [lastCapture, setLastCapture] = useState<WindowCaptureResult | null>(null);
+  const [lastRecognized, setLastRecognized] = useState<WindowCaptureResult | null>(null);
   const [resolutionKeyInput, setResolutionKeyInput] = useState("F13");
   const [lastResolutionPreview, setLastResolutionPreview] =
     useState<ResolvedInputPreview | null>(null);
@@ -109,12 +113,14 @@ export function useRuntime(deps: {
   const handleRuntimeEvent = useEffectEvent((summary: RuntimeStateSummary) => {
     startTransition(() => {
       setRuntimeSummary(summary);
+      if (summary.status !== "running") setLastRecognized(null);
     });
   });
 
   const handleWindowResolutionEvent = useEffectEvent((result: WindowCaptureResult) => {
     startTransition(() => {
       setLastCapture(result);
+      if (!result.ignored) setLastRecognized(result);
     });
   });
 
@@ -321,7 +327,10 @@ export function useRuntime(deps: {
   }
 
   async function handleStopRuntime() {
-    await runtimeCommand(() => stopRuntime(), (summary) => setRuntimeSummary(summary));
+    await runtimeCommand(() => stopRuntime(), (summary) => {
+      setRuntimeSummary(summary);
+      setLastRecognized(null);
+    });
   }
 
   async function handleRehookCapture() {
@@ -380,6 +389,7 @@ export function useRuntime(deps: {
     captureDelayMs,
     setCaptureDelayMs,
     lastCapture,
+    lastRecognized,
     resolutionKeyInput,
     setResolutionKeyInput,
     lastResolutionPreview,

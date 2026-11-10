@@ -70,7 +70,8 @@
     "noApps": "turned on by hand",
     "appsCollapse": "Hide apps",
     "appsExpand": "Show apps",
-    "recognized": "Recognized now"
+    "recognized": "Recognized now",
+    "appsToggle": "Profile apps"
   },
   "statusbar": {
     "events": "{{count}} events"

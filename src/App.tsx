@@ -71,11 +71,11 @@ import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
   createProfile,
+  clearControl,
   duplicateProfile,
   findBinding,
   type Gesture,
   gestureOf,
-  removeBinding,
 } from "./lib/config-editing";
 import type {
   Action,
@@ -750,7 +750,7 @@ function App() {
     ) {
       // Delete/Backspace: clear the selected control's binding
       e.preventDefault();
-      updateDraft((c) => removeBinding(c, selectedBinding.id));
+      updateDraft((c) => clearControl(c, selectedBinding));
     } else if (!e.ctrlKey && !e.altKey && !e.metaKey) {
       // Number keys: switch workspace tabs in sidebar order
       const modeIndex = Number(e.key) - 1;

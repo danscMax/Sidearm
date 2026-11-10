@@ -272,21 +272,32 @@ struct GestureContext {
 
 type PendingGestures = gestures::Gestures<GestureContext>;
 
+/// A shortcut of modifiers alone: it is always held down (push-to-talk).
+fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPreview) -> bool {
+    config.actions.iter().any(|action| {
+        Some(action.id.as_str()) == preview.action_id.as_deref()
+            && matches!(&action.payload, config::ActionPayload::Shortcut(shortcut) if shortcut.key.trim().is_empty())
+    })
+}
+
 /// The press patterns besides the plain press that the resolved control's
 /// bindings answer on its layer. None when its plain press holds a shortcut
 /// down (a hold must start on the press, it cannot wait).
-fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview) -> gestures::Patterns {
+fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview, hypershift: bool) -> gestures::Patterns {
     let (Some(profile), Some(layer), Some(control)) =
         (preview.resolved_profile_id.as_deref(), preview.layer.as_deref(), preview.control_id.as_deref())
     else {
         return gestures::Patterns::default();
     };
-    if preview.trigger_mode == Some(config::TriggerMode::Hold) {
+    // Under HyperShift each pattern falls back to the standard layer on its
+    // own (`resolver::resolve_gesture_preview`).
+    let on_layer = |binding_layer: &str| binding_layer == layer || (hypershift && (binding_layer == "hypershift" || binding_layer == "standard"));
+    if preview.trigger_mode == Some(config::TriggerMode::Hold) || holds_modifiers_only(config, preview) {
         return gestures::Patterns::default();
     }
     let mut patterns = gestures::Patterns::default();
     for binding in config.bindings.iter().filter(|binding| {
-        binding.enabled && binding.profile_id == profile && binding.layer.as_str() == layer && binding.control_id.as_str() == control
+        binding.enabled && binding.profile_id == profile && on_layer(binding.layer.as_str()) && binding.control_id.as_str() == control
     }) {
         match config::Gesture::of(binding.trigger_mode) {
             config::Gesture::LongPress => patterns.long = true,
@@ -296,6 +307,14 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
         }
     }
     patterns
+}
+
+/// Dispatches what the clock settled (long presses, closed tap windows).
+fn fire_due_gestures(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: &AppConfig, gestures: &mut PendingGestures) {
+    let fired = gestures.tick(std::time::Instant::now());
+    if !fired.is_empty() {
+        fire_gestures(app, runtime_store, config, fired);
+    }
 }
 
 /// Dispatches the press patterns the recognizer settled on.
@@ -589,7 +608,7 @@ fn process_encoded_key_event(
     }
 
     // Several press patterns on this button: wait to tell them apart.
-    let patterns = gesture_patterns(config, &preview);
+    let patterns = gesture_patterns(config, &preview, event.is_hypershift);
     if patterns.any() && !event.is_repeat {
         let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
         gestures.press(

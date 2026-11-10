@@ -132,7 +132,9 @@ fn binding_action(
     // down (a hold): it can only play the plain press. A button with only a
     // long, double or triple press, or a chord, would fire on any press.
     let Some(binding) = bindings.clone().find(|b| Gesture::of(b.trigger_mode) == Gesture::Press) else {
-        return bindings.next().map(|_| None);
+        // Under HyperShift a press without its own binding plays the standard
+        // one, as it does while Sidearm runs.
+        return bindings.next().filter(|_| layer != Layer::Hypershift).map(|_| None);
     };
     if binding.trigger_mode == Some(TriggerMode::Chord) {
         return Some(None);

@@ -74,6 +74,11 @@ impl<T: Clone> Gestures<T> {
     /// (taken from the first press of a series).
     pub fn press(&mut self, key: &str, patterns: Patterns, context: T, now: Instant) {
         if let Some(pending) = self.pending.iter_mut().find(|pending| pending.key == key) {
+            // A press after a long press whose release was lost starts over.
+            if pending.long_fired {
+                pending.long_fired = false;
+                pending.taps = 0;
+            }
             pending.held_since = Some(now);
             pending.released_at = None;
             return;
@@ -95,7 +100,10 @@ impl<T: Clone> Gestures<T> {
             return Vec::new();
         };
         let pending = &mut self.pending[index];
-        pending.held_since = None;
+        // A second release of one press (two sources report it) is no tap.
+        if pending.held_since.take().is_none() {
+            return Vec::new();
+        }
         if pending.long_fired {
             self.pending.remove(index);
             return Vec::new();
@@ -249,6 +257,27 @@ mod tests {
         g.release("F13", at(t, 50));
         g.press("F13", ALL, (), at(t, 100));
         assert_eq!(gestures(g.tick(at(t, 350))), [Gesture::Press, Gesture::LongPress]);
+    }
+
+    #[test]
+    fn a_duplicate_release_is_not_a_second_tap() {
+        let t = Instant::now();
+        let mut g = Gestures::default();
+        g.press("F13", ALL, (), t);
+        g.release("F13", at(t, 50));
+        assert!(g.release("F13", at(t, 60)).is_empty());
+        assert_eq!(gestures(g.tick(at(t, 400))), [Gesture::Press]);
+    }
+
+    #[test]
+    fn a_press_after_a_lost_release_starts_over() {
+        let t = Instant::now();
+        let mut g = Gestures::default();
+        g.press("F13", ALL, (), t);
+        assert_eq!(gestures(g.tick(at(t, 300))), [Gesture::LongPress]);
+        // The release never came; the next press is a fresh one.
+        g.press("F13", ALL, (), at(t, 2000));
+        assert_eq!(gestures(g.tick(at(t, 2300))), [Gesture::LongPress]);
     }
 
     #[test]

@@ -65,6 +65,14 @@ fn held(model: &NativeModel) -> std::sync::MutexGuard<'static, Vec<String>> {
     HELD[model.catalog_index()].lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Forgets every held input (the capture helper's stream ended: no release
+/// it reports can arrive).
+pub fn clear_held() {
+    for held in &HELD {
+        held.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clear();
+    }
+}
+
 /// A press (`down`) or release of `input` on `model`.
 pub fn note_input(model: &NativeModel, input: &str, down: bool) {
     let mut held = held(model);
@@ -80,6 +88,10 @@ pub fn note_input(model: &NativeModel, input: &str, down: bool) {
 /// Waits until nothing is held on `model` (at most [`RELEASE_WAIT`]; a release
 /// lost to a sleeping mouse must not stop the map for good).
 fn wait_released(model: &NativeModel) {
+    // Windows is ending the session on the thread that reports releases.
+    if crate::is_shutting_down() {
+        return;
+    }
     let until = std::time::Instant::now() + RELEASE_WAIT;
     let mut waited = false;
     while !held(model).is_empty() {

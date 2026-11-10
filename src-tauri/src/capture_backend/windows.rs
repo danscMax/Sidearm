@@ -1192,9 +1192,10 @@ impl CaptureBackendHandle {
                     .next_deadline()
                     .map_or(POLL_INTERVAL, |at| at.saturating_duration_since(Instant::now()).min(POLL_INTERVAL));
                 let received = event_rx.recv_timeout(wait);
-                let fired = gestures.tick(Instant::now());
-                if !fired.is_empty() {
-                    super::fire_gestures(&worker_app, &worker_runtime_store, &worker_config, fired);
+                // The clock goes after an event: a release that waited in the
+                // channel still counts as the tap it was.
+                if received.is_err() {
+                    super::fire_due_gestures(&worker_app, &worker_runtime_store, &worker_config, &mut gestures);
                 }
                 match received {
                     Ok(event) => {
@@ -1209,6 +1210,7 @@ impl CaptureBackendHandle {
                             &mut held_actions,
                             &mut gestures,
                         );
+                        super::fire_due_gestures(&worker_app, &worker_runtime_store, &worker_config, &mut gestures);
                         match hold_deadline_update(
                             outcome,
                             is_repeat,
@@ -4049,6 +4051,8 @@ fn spawn_capture_helper(
         // EOF — i.e. the helper process has exited/crashed. Flag it so the
         // worker releases holds whose key-ups will now never arrive.
         helper_died.store(true, Ordering::SeqCst);
+        // No release of a reader-reported button can arrive any more.
+        crate::mouse_memory::live_overlay::clear_held();
         if reader_stopping.load(Ordering::SeqCst) {
             return; // `stop()` closed it
         }

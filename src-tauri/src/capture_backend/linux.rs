@@ -209,10 +209,6 @@ impl CaptureBackendHandle {
                         Err(_) => break,
                     },
                 };
-                let fired = gestures.tick(std::time::Instant::now());
-                if !fired.is_empty() {
-                    super::fire_gestures(&worker_app, &worker_runtime_store, &worker_config, fired);
-                }
                 // EventOutcome is only consumed by the Windows stale-hold sweep;
                 // the evdev backend has no such sweep, so ignore it here.
                 if let Some(event) = received {
@@ -226,6 +222,8 @@ impl CaptureBackendHandle {
                         &mut gestures,
                     );
                 }
+                // The clock goes after the event (see the Windows worker).
+                super::fire_due_gestures(&worker_app, &worker_runtime_store, &worker_config, &mut gestures);
             }
 
             // Channel closed -- release all held keys

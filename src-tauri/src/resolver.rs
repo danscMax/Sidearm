@@ -373,6 +373,7 @@ pub fn resolve_gesture_preview(
                         && binding.profile_id == profile_id
                         && binding.layer == Layer::Hypershift
                         && binding.control_id == mapping.control_id
+                        && Gesture::of(binding.trigger_mode) == gesture
                 })
             });
         if hypershift_layer_is_bound {

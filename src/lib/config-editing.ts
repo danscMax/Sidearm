@@ -105,6 +105,12 @@ export function removeBindingsForControls(
   return { config: next, removed: targets.length };
 }
 
+/** Clears a control on one profile and layer: every press pattern of it, so
+ *  no hidden long or double press keeps firing. */
+export function clearControl(config: AppConfig, binding: Binding): AppConfig {
+  return removeBindingsForControls(config, binding.profileId, binding.layer, new Set([binding.controlId])).config;
+}
+
 export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfig {
   // A binding's real identity is its (profileId, controlId, layer) slot — the
   // same uniqueness key the backend validator enforces. Match on that slot OR

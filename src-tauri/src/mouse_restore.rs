@@ -16,6 +16,9 @@ pub const AFTER_CRASH_ARG: &str = "--after-crash";
 const WATCH_ARG: &str = "--watch";
 /// `--spawn-watchdog <config dir> --watch <pid>`: starts the watchdog and ends.
 const SPAWN_WATCHDOG_ARG: &str = "--spawn-watchdog";
+/// `--spawn-restore <config dir>`: starts a restore process and ends (the
+/// `RunOnce` entry at logon).
+const SPAWN_RESTORE_ARG: &str = "--spawn-restore";
 /// Left by a Sidearm whose exit ran to the end (its pid): its watchdog has
 /// nothing to do.
 const CLEAN_EXIT_FILE: &str = "sidearm-clean-exit";
@@ -147,6 +150,12 @@ pub fn mark_clean_exit(config_dir: &Path) {
 /// whether `args` were for one of them.
 pub fn restore_entry(args: &[String]) -> bool {
     let value = |name: &str| args.iter().position(|arg| arg == name).and_then(|index| args.get(index + 1));
+    // The logon entry: start the restore detached and end, so a restore
+    // that waits for a sleeping mouse never holds up the logon.
+    if let Some(dir) = value(SPAWN_RESTORE_ARG) {
+        let _ = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref()]);
+        return true;
+    }
     if let Some(dir) = value(SPAWN_WATCHDOG_ARG) {
         if let Some(pid) = value(WATCH_ARG) {
             let _ = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref(), WATCH_ARG.as_ref(), pid.as_ref()]);
@@ -241,8 +250,8 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
     // until it answers (every 2 s at first, then every minute), and come back
     // at the next logon if Windows ends first.
     let started = Instant::now();
-    let mut next_logon = false;
-    while !mutex_exists(APP_MUTEX) {
+    let mut next_logon = None;
+    'retry: while !mutex_exists(APP_MUTEX) {
         let maps_done = crate::mouse_memory::live_overlay::restore_orphaned(config_dir);
         // A mouse asleep at exit has no offline profile yet: store it once it
         // answers (the marker names the profile; a success removes it).
@@ -254,14 +263,21 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
         if maps_done && !failed_marker.exists() {
             break;
         }
-        if !next_logon {
-            next_logon = set_run_once(config_dir, true);
+        if next_logon.is_none() {
+            next_logon = Some(set_run_once(config_dir, true));
         }
-        let pause = if started.elapsed() < Duration::from_secs(30 * 60) { 2 } else { 60 };
-        std::thread::sleep(Duration::from_secs(pause));
+        // A starting Sidearm is noticed within 2 s either way (it waits for
+        // this process to let go of the mice).
+        let pause = if started.elapsed() < Duration::from_secs(30 * 60) { 1 } else { 30 };
+        for _ in 0..pause {
+            std::thread::sleep(Duration::from_secs(2));
+            if mutex_exists(APP_MUTEX) {
+                break 'retry;
+            }
+        }
     }
     // Done, or a Sidearm started (it restores the mice itself).
-    if next_logon {
+    if next_logon == Some(true) {
         set_run_once(config_dir, false);
     }
 }
@@ -283,7 +299,7 @@ fn set_run_once(config_dir: &Path, on: bool) -> bool {
         return false;
     }
     let Ok(exe) = std::env::current_exe() else { return false };
-    let command = wide(&format!("\"{}\" {RESTORE_LIVE_MAPS_ARG} \"{}\"", exe.display(), config_dir.display()));
+    let command = wide(&format!("\"{}\" {SPAWN_RESTORE_ARG} \"{}\"", exe.display(), config_dir.display()));
     // SAFETY: as above; the data is a NUL-terminated UTF-16 string of the
     // byte length passed.
     let status = unsafe {

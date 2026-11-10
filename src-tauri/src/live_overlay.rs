@@ -569,28 +569,9 @@ fn bank_block(bank: u8, action: OnboardAction) -> [u8; 7] {
     block(action)
 }
 
-fn read_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8) -> Result<[u8; 7], String> {
-    let mut args = [0; 10];
-    args[0] = bank;
-    args[1] = button;
-    args[2] = layer;
-    let reply = device.command(super::CLASS_BUTTON, super::CMD_GET_BUTTON, &args)?;
-    if reply[8..10] != args[..2] {
-        return Err(format!("Readback returned the wrong address for bank {bank}, button {button:#04x}/{layer}"));
-    }
-    let mut record = [0; 7];
-    record.copy_from_slice(&reply[11..18]);
-    Ok(record)
-}
-
 fn write_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8, block: [u8; 7]) -> Result<(), String> {
-    let mut args = [0; 10];
-    args[0] = bank;
-    args[1] = button;
-    args[2] = layer;
-    args[3..].copy_from_slice(&block);
-    device.command(super::CLASS_BUTTON, super::CMD_SET_BUTTON, &args)?;
-    if read_bank(device, bank, button, layer)? != block {
+    device.set_block(bank, button, layer, &block)?;
+    if device.read_block(bank, button, layer)? != block {
         return Err(format!("Write did not read back for bank {bank}, button {button:#04x}/{layer}"));
     }
     Ok(())
@@ -636,7 +617,7 @@ fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), St
     let Some(snapshot) = load_snapshot(device, backup)? else { return Ok(()) };
     let mut failure = None;
     for record in snapshot.records.iter().rev().filter(|record| record.before != record.target) {
-        let result = read_bank(device, bank, record.button, record.layer).and_then(|current| {
+        let result = device.read_block(bank, record.button, record.layer).and_then(|current| {
             if current == record.target {
                 write_bank(device, bank, record.button, record.layer, record.before)
             } else {
@@ -657,7 +638,7 @@ fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), St
 
 fn verify_bank(device: &VendorDevice, bank: u8, records: &[Record]) -> Result<(), String> {
     for record in records {
-        if read_bank(device, bank, record.button, record.layer)? != record.target {
+        if device.read_block(bank, record.button, record.layer)? != record.target {
             return Err(format!("Bank {bank} assignments changed after programming {:#04x}/{}", record.button, record.layer));
         }
     }
@@ -695,7 +676,7 @@ fn repair(device: &VendorDevice, backup: &Path, snapshot: &mut Snapshot) -> Resu
         return Err("Mouse is not in firmware mode".into());
     }
     let mut updated = snapshot.clone();
-    let pending = plan_repair(&mut updated.records, |button, layer| read_bank(device, LIVE_BANK, button, layer))?;
+    let pending = plan_repair(&mut updated.records, |button, layer| device.read_block(LIVE_BANK, button, layer))?;
     // Save any newly observed original values before taking ownership of them.
     if updated.records != snapshot.records {
         save_snapshot(backup, &updated)?;
@@ -728,7 +709,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
         records.push(Record {
             button,
             layer,
-            before: read_bank(device, bank, button, layer)?,
+            before: device.read_block(bank, button, layer)?,
             target: bank_block(bank, action),
         });
     }
@@ -846,7 +827,7 @@ impl Session {
                             last_bank = Some(bank);
                         }
                         let drift = open().and_then(|device| {
-                            confirmed_drift(block(action), || read_bank(&device, LIVE_BANK, button, layer))
+                            confirmed_drift(block(action), || device.read_block(LIVE_BANK, button, layer))
                         });
                         if drift == Ok(true) {
                             // Keep forwarding releases for inputs held before recovery.
@@ -1195,7 +1176,7 @@ pub(crate) mod tests {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
         let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
         let probes = [(0x40, 0x02), (0x41, 0x04), (0x42, 0x20), (0x43, 0x40)];
-        let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, read_bank(&device, LIVE_BANK, button, 0).unwrap())).collect();
+        let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, device.read_block(LIVE_BANK, button, 0).unwrap())).collect();
         for (index, &(button, modifier)) in probes.iter().enumerate() {
             println!("thumb {}: modifier {modifier:#04x} + F24", index + 1);
             write_bank(&device, LIVE_BANK, button, 0, block(OnboardAction::Key { modifier, usage: 0x73 })).unwrap();

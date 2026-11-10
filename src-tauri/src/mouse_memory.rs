@@ -135,8 +135,18 @@ const NOSTORE: u8 = 0x00;
 pub fn battery_percent_from_raw(raw: u8) -> u8 {
     ((u16::from(raw) * 100 + 127) / 255) as u8
 }
-/// `GET_BUTTON` arguments: profile, button, layer, then padding.
-const GET_BUTTON_ARGS: [u8; 10] = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+/// The onboard profile the onboard path keeps its records in.
+const ONBOARD_PROFILE: u8 = 0x01;
+
+/// Argument block of the per-button get/set commands: profile (`0` the live
+/// map, `1` the onboard profile or a V3 bank `1..=5`), button, layer, then the
+/// record (`category, len, values…`; empty for a get).
+fn button_args(profile: u8, button_id: u8, layer: u8, record: &[u8]) -> [u8; 10] {
+    let mut args = [0u8; 10];
+    args[..3].copy_from_slice(&[profile, button_id, layer]);
+    args[3..3 + record.len()].copy_from_slice(record);
+    args
+}
 const COMMAND_STATUS_OK: u8 = 0x02;
 const COMMAND_STATUS_BUSY: u8 = 0x01;
 /// Status of a wireless mouse that did not answer: asleep or out of range.
@@ -664,8 +674,9 @@ impl VendorDevice {
     /// `Err` means the mouse did not echo what we wrote.
     pub fn write_button(&self, button_id: u8, usage: u8, modifier: u8) -> Result<(), String> {
         self.require_verified()?;
+        // A button with no vendor slot (the top buttons) takes the per-button command.
         let Some(slot) = self.model.slot_for(button_id) else {
-            return self.write_key_command(button_id, modifier, usage);
+            return self.write_record(button_id, 0, OnboardAction::Key { modifier, usage });
         };
         let payload = build_record(slot, button_id, usage, modifier);
         for _ in 0..2 {
@@ -678,18 +689,6 @@ impl VendorDevice {
             }
         }
         Err(format!("mouse did not confirm button {button_id:#02x} -> usage {usage:#02x}"))
-    }
-
-    /// A key record for a button with no vendor slot (the top buttons), written
-    /// with [`CMD_SET_BUTTON`] and confirmed by reading it back.
-    fn write_key_command(&self, button_id: u8, modifier: u8, usage: u8) -> Result<(), String> {
-        let args = [0x01, button_id, 0x00, CATEGORY_KEY, 0x02, modifier, usage, 0x00, 0x00, 0x00];
-        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &args)?;
-        if self.holds(button_id, OnboardAction::Key { modifier, usage })? {
-            Ok(())
-        } else {
-            Err(format!("mouse did not confirm button {button_id:#02x} -> usage {usage:#02x}"))
-        }
     }
 
     /// Stores one binding target and requires it to read back. A consumer
@@ -790,12 +789,30 @@ impl VendorDevice {
     /// The stored record of `button_id` on `layer` (`0` standard, `1` the
     /// firmware Hypershift layer).
     pub fn read_button_at(&self, button_id: u8, layer: u8) -> Result<ButtonRecord, String> {
-        let record = self.raw_button_record(button_id, layer)?;
+        let block = self.read_block(ONBOARD_PROFILE, button_id, layer)?;
         Ok(ButtonRecord {
-            category: record[3],
-            modifier: record[5],
-            usage: record[6],
+            category: block[0],
+            modifier: block[2],
+            usage: block[3],
         })
+    }
+
+    /// The 7 record bytes stored at `profile` / `button_id` / `layer`. A reply
+    /// naming another address (another process's request) is refused.
+    pub(crate) fn read_block(&self, profile: u8, button_id: u8, layer: u8) -> Result<[u8; 7], String> {
+        let reply = self.command(CLASS_BUTTON, CMD_GET_BUTTON, &button_args(profile, button_id, layer, &[]))?;
+        if reply[8..10] != [profile, button_id] {
+            return Err(format!("readback returned the wrong address for profile {profile}, button {button_id:#04x}/{layer}"));
+        }
+        let mut block = [0u8; 7];
+        block.copy_from_slice(&reply[11..18]);
+        Ok(block)
+    }
+
+    /// Sends one record to `profile` / `button_id` / `layer`, unverified: the
+    /// callers read it back their own way.
+    pub(crate) fn set_block(&self, profile: u8, button_id: u8, layer: u8, record: &[u8]) -> Result<(), String> {
+        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &button_args(profile, button_id, layer, record)).map(|_| ())
     }
 
     /// Evaluate every independent query; only a failed field becomes unavailable.
@@ -857,15 +874,10 @@ impl VendorDevice {
         })
     }
 
-    /// The 10 record bytes `GET_BUTTON` answers for `button_id` on `layer`.
+    /// The 10 record bytes `GET_BUTTON` answers for `button_id` on `layer`
+    /// (address, then the record), for the device report.
     fn raw_button_record(&self, button_id: u8, layer: u8) -> Result<[u8; 10], String> {
-        let mut args = GET_BUTTON_ARGS;
-        args[1] = button_id;
-        args[2] = layer;
-        let reply = self.command(CLASS_BUTTON, CMD_GET_BUTTON, &args)?;
-        let mut record = [0u8; 10];
-        record.copy_from_slice(&reply[8..18]);
-        Ok(record)
+        Ok(button_args(ONBOARD_PROFILE, button_id, layer, &self.read_block(ONBOARD_PROFILE, button_id, layer)?))
     }
 
     /// Battery charge in percent.
@@ -934,13 +946,7 @@ impl VendorDevice {
         if action.matches(&self.read_button_at(button_id, layer)?) {
             return Ok(());
         }
-        let mut args = [0u8; 10];
-        args[0] = 0x01;
-        args[1] = button_id;
-        args[2] = layer;
-        let bytes = action.bytes();
-        args[3..3 + bytes.len()].copy_from_slice(&bytes);
-        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &args)?;
+        self.set_block(ONBOARD_PROFILE, button_id, layer, &action.bytes())?;
         let held = self.read_button_at(button_id, layer)?;
         if action.matches(&held) {
             Ok(())
@@ -980,14 +986,7 @@ impl VendorDevice {
     /// Writes the standard-layer record of `button_id` back to the plain mouse
     /// button `value` and requires the device to read it back.
     pub fn restore_native_button(&self, button_id: u8, value: u8) -> Result<(), String> {
-        self.require_verified()?;
-        let args = [0x01, button_id, 0x00, CATEGORY_MOUSE, 0x01, value, 0x00, 0x00, 0x00, 0x00];
-        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &args)?;
-        if self.read_button(button_id)?.is_mouse_button(value) {
-            Ok(())
-        } else {
-            Err(format!("button {button_id:#04x} did not read back as mouse button {value}"))
-        }
+        self.write_record(button_id, 0, OnboardAction::Mouse(value))
     }
 
     /// Control ids whose stored record no longer matches `bindings` — the buttons
@@ -1366,7 +1365,7 @@ mod tests {
         reply[0] = COMMAND_STATUS_OK;
         reply[8] = 0x03;
         assert!(reply_matches(&request, &reply));
-        let foreign = build_command(0x1f, CLASS_BUTTON, CMD_GET_BUTTON, &GET_BUTTON_ARGS);
+        let foreign = build_command(0x1f, CLASS_BUTTON, CMD_GET_BUTTON, &button_args(ONBOARD_PROFILE, 0, 0, &[]));
         assert!(!reply_matches(&request, &foreign));
     }
 

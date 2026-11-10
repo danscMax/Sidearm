@@ -12,7 +12,7 @@ use std::{
     collections::HashSet,
     path::{Path, PathBuf},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicBool, Ordering},
         mpsc,
     },
@@ -51,6 +51,51 @@ pub const MAX_BANKS: u8 = 5;
 
 static ACTIVE: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
 static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
+/// Inputs of each mouse that are down right now: its signals as the capture
+/// helper reads them, and the keys and buttons its firmware sends, as raw input
+/// reports them (`system_events`). A live record rewritten while its button is
+/// held strands what the old record pressed: the firmware sends the release
+/// of the new record, and a key stays down (measured 2026-11-10: a stuck
+/// Shift+Enter repeating until Sidearm was killed).
+static HELD: [Mutex<Vec<String>>; CATALOG_LEN] = [const { Mutex::new(Vec::new()) }; CATALOG_LEN];
+/// How long a live-map write waits for the mouse's buttons to be let go.
+const RELEASE_WAIT: Duration = Duration::from_secs(5);
+
+fn held(model: &NativeModel) -> std::sync::MutexGuard<'static, Vec<String>> {
+    HELD[model.catalog_index()].lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// A press (`down`) or release of `input` on `model`.
+pub fn note_input(model: &NativeModel, input: &str, down: bool) {
+    let mut held = held(model);
+    if down {
+        if !held.iter().any(|known| known == input) {
+            held.push(input.to_owned());
+        }
+    } else {
+        held.retain(|known| known != input);
+    }
+}
+
+/// Waits until nothing is held on `model` (at most [`RELEASE_WAIT`]; a release
+/// lost to a sleeping mouse must not stop the map for good).
+fn wait_released(model: &NativeModel) {
+    let until = std::time::Instant::now() + RELEASE_WAIT;
+    let mut waited = false;
+    while !held(model).is_empty() {
+        if std::time::Instant::now() >= until {
+            log::warn!("[naga-live] {} still reports {:?} held; writing anyway", model.name, held(model));
+            held(model).clear();
+            return;
+        }
+        if !waited {
+            log::info!("[naga-live] {} waits for its buttons to be released before writing", model.name);
+            waited = true;
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
 /// The setup wizard's button test: every extra control joins the standard layer.
 pub(crate) static CHECK_EXTRA_CONTROLS: AtomicBool = AtomicBool::new(false);
 
@@ -607,6 +652,10 @@ fn bank_block(bank: u8, action: OnboardAction) -> [u8; 7] {
 }
 
 fn write_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8, block: [u8; 7]) -> Result<(), String> {
+    // A stored bank is not playing; the live map is.
+    if bank == LIVE_BANK {
+        wait_released(device.model());
+    }
     device.set_block(bank, button, layer, &block)?;
     if device.read_block(bank, button, layer)? != block {
         return Err(format!("Write did not read back for bank {bank}, button {button:#04x}/{layer}"));
@@ -996,6 +1045,19 @@ pub(crate) mod tests {
         fake::with(|mouse| mouse.records.insert((LIVE_BANK, 0x40, 0), users));
         restore_bank(&device, LIVE_BANK, &backup).unwrap();
         assert_eq!(fake::with(|mouse| mouse.records[&(LIVE_BANK, 0x40, 0)]), users);
+    }
+
+    #[test]
+    fn held_inputs_are_counted_per_mouse_and_a_release_frees_them() {
+        // NAGA_PRO: no other test sends it input.
+        note_input(&NAGA_PRO, "vk0x0d", true);
+        note_input(&NAGA_PRO, "vk0x0d", true);
+        note_input(&NAGA_PRO, "button1", true);
+        assert_eq!(*held(&NAGA_PRO), ["vk0x0d", "button1"], "a repeated press counts once");
+        note_input(&NAGA_PRO, "vk0x0d", false);
+        note_input(&NAGA_PRO, "button1", false);
+        assert!(held(&NAGA_PRO).is_empty());
+        wait_released(&NAGA_PRO);
     }
 
     #[test]

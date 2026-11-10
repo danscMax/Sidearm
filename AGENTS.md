@@ -105,6 +105,7 @@ Run before declaring a code change done:
 - Frontend: `npm run check` (= `tsc --noEmit` + `knip` dead-code + `cargo clippy`) and `npm run test` (vitest).
 - Rust: `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` and `cargo test --manifest-path src-tauri/Cargo.toml`.
 - Integration smoke: `pwsh -File build_portable.ps1` (release build + WebView2 packaging; build via pwsh, not cmd; also runs cargo audit and full `npm audit --audit-level=high`, including build/test tooling; accepted Rust advisories live in `.cargo/audit.toml`). High/critical npm findings block the gate, lower severities remain visible.
+- Dev runs (`dev.ps1` → `npm run tauri dev`) use the portable app's data: debug builds read `SIDEARM_DATA_DIR` (`paths.rs`), which `dev.ps1` sets to `..\portable\data`, so a test run drives the mice with the one real config. Close the portable Sidearm first (both hold `Local\Sidearm-app`).
 - The desktop UI cannot be rendered headlessly here — visual and screen-reader changes need a manual pass in the running app.
 
 ## User Preferences

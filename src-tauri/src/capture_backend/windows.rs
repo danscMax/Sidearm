@@ -3985,6 +3985,15 @@ fn spawn_capture_helper(
             // Hypershift trigger was held; it wraps the other prefixes.
             let (input, backend) = match reader_line {
                 Some((model, input)) => {
+                    // What is held on this mouse, so its live map is never
+                    // rewritten under a held button (counted even while the
+                    // map is not ready: that is when it is being written).
+                    let signal = input.strip_prefix(HS_PREFIX).unwrap_or(input);
+                    if let Some(released) = signal.strip_prefix("UP:") {
+                        crate::mouse_memory::live_overlay::note_input(model, released, false);
+                    } else if !signal.starts_with("REPEAT:") {
+                        crate::mouse_memory::live_overlay::note_input(model, signal, true);
+                    }
                     if !crate::mouse_memory::live_overlay::events_allowed(model) {
                         continue;
                     }

@@ -237,8 +237,12 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
     {
         crate::mouse_offline::write_marker(&failed_marker, &crate::mouse_offline::offline_profile_id(&config, None));
     }
-    let deadline = Instant::now() + Duration::from_secs(30 * 60);
-    while !mutex_exists(APP_MUTEX) && Instant::now() < deadline {
+    // A mouse that sleeps longer than any wait must not stay silent: retry
+    // until it answers (every 2 s at first, then every minute), and come back
+    // at the next logon if Windows ends first.
+    let started = Instant::now();
+    let mut next_logon = false;
+    while !mutex_exists(APP_MUTEX) {
         let maps_done = crate::mouse_memory::live_overlay::restore_orphaned(config_dir);
         // A mouse asleep at exit has no offline profile yet: store it once it
         // answers (the marker names the profile; a success removes it).
@@ -248,10 +252,47 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
             crate::mouse_offline::retry_offline_profile(&config, config_dir);
         }
         if maps_done && !failed_marker.exists() {
-            return;
+            break;
         }
-        std::thread::sleep(Duration::from_secs(2));
+        if !next_logon {
+            next_logon = set_run_once(config_dir, true);
+        }
+        let pause = if started.elapsed() < Duration::from_secs(30 * 60) { 2 } else { 60 };
+        std::thread::sleep(Duration::from_secs(pause));
     }
+    // Done, or a Sidearm started (it restores the mice itself).
+    if next_logon {
+        set_run_once(config_dir, false);
+    }
+}
+
+/// `RunOnce` value that starts the restore process at the next logon while a
+/// mouse still waits for its restore.
+const RUN_ONCE_VALUE: &str = "SidearmRestoreMice";
+
+/// Adds (`on`) or removes this restore at the next logon. Returns whether it
+/// is registered now.
+fn set_run_once(config_dir: &Path, on: bool) -> bool {
+    use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
+    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let key = wide(r"Software\Microsoft\Windows\CurrentVersion\RunOnce");
+    let value = wide(RUN_ONCE_VALUE);
+    if !on {
+        // SAFETY: both strings are NUL-terminated and outlive the call.
+        unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr()) };
+        return false;
+    }
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let command = wide(&format!("\"{}\" {RESTORE_LIVE_MAPS_ARG} \"{}\"", exe.display(), config_dir.display()));
+    // SAFETY: as above; the data is a NUL-terminated UTF-16 string of the
+    // byte length passed.
+    let status = unsafe {
+        RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), value.as_ptr(), REG_SZ, command.as_ptr().cast(), (command.len() * 2) as u32)
+    };
+    if status != 0 {
+        log::warn!("[restore] restore at the next logon not registered: error {status}");
+    }
+    status == 0
 }
 
 /// Marks this process as a running Sidearm for a restore process, held until

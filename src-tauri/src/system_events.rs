@@ -10,16 +10,17 @@
 use std::{sync::mpsc, thread, time::Duration};
 
 use tauri::{AppHandle, Emitter};
+use crate::device_catalog::NativeModel;
 use windows_sys::Win32::{
     Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM},
     UI::Input::{
         GetRawInputData, GetRawInputDeviceInfoW, HRAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_INPUTSINK, RIDI_DEVICENAME,
-        RID_HEADER, RegisterRawInputDevices,
+        RegisterRawInputDevices,
     },
     System::{LibraryLoader::GetModuleHandleW, Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy}},
     UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, MSG, RegisterClassW, TranslateMessage,
-        WM_DEVICECHANGE, WM_ENDSESSION, WM_INPUT, WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
+        RI_KEY_BREAK, WM_DEVICECHANGE, WM_ENDSESSION, WM_INPUT, WM_QUERYENDSESSION, WNDCLASSW, WS_OVERLAPPED,
     },
 };
 
@@ -100,10 +101,12 @@ fn run_window() {
             log::warn!("[system] system events window not created: {}", std::io::Error::last_os_error());
             return;
         }
-        // Every mouse's input, focused or not: it tells which mouse is in use.
-        let mice = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
-        if RegisterRawInputDevices(&mice, 1, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
-            log::warn!("[system] mouse raw input not registered: {}", std::io::Error::last_os_error());
+        // Every mouse's and keyboard's input, focused or not: it tells which
+        // mouse is in use and which of its buttons are held (a Naga's
+        // firmware types keys through its own keyboard collection).
+        let inputs = [0x02, 0x06].map(|usage| RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: usage, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd });
+        if RegisterRawInputDevices(inputs.as_ptr(), inputs.len() as u32, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
+            log::warn!("[system] raw input not registered: {}", std::io::Error::last_os_error());
         }
         let mut msg: MSG = std::mem::zeroed();
         while GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) > 0 {
@@ -113,31 +116,56 @@ fn run_window() {
     }
 }
 
-/// Tells the battery badge which mouse moved or clicked. Runs for every mouse
-/// report, so it only looks further when the reporting device changes.
-fn note_mouse_input(lparam: LPARAM) {
+/// One raw input report: which catalog mouse sent it (for the battery badge,
+/// looked up only when the reporting device changes) and which of its keys
+/// and buttons went down or up (for `live_overlay::note_input`).
+fn note_raw_input(lparam: LPARAM) {
+    use windows_sys::Win32::UI::Input::{RAWINPUT, RID_INPUT, RIM_TYPEKEYBOARD, RIM_TYPEMOUSE};
     thread_local! {
         static LAST: std::cell::Cell<HANDLE> = const { std::cell::Cell::new(std::ptr::null_mut()) };
-        static MODELS: std::cell::RefCell<std::collections::HashMap<usize, Option<&'static str>>> =
+        static MODELS: std::cell::RefCell<std::collections::HashMap<usize, Option<&'static NativeModel>>> =
             std::cell::RefCell::new(std::collections::HashMap::new());
     }
-    let mut header: RAWINPUTHEADER = unsafe { std::mem::zeroed() };
-    let mut size = size_of::<RAWINPUTHEADER>() as u32;
-    // SAFETY: `lparam` is the HRAWINPUT of this WM_INPUT; the header buffer is
-    // sized as passed.
-    let read = unsafe { GetRawInputData(lparam as HRAWINPUT, RID_HEADER, (&raw mut header).cast(), &mut size, size_of::<RAWINPUTHEADER>() as u32) };
+    let mut input: RAWINPUT = unsafe { std::mem::zeroed() };
+    let mut size = size_of::<RAWINPUT>() as u32;
+    // SAFETY: `lparam` is the HRAWINPUT of this WM_INPUT; a mouse or keyboard
+    // report fits a RAWINPUT, whose size is passed.
+    let read = unsafe { GetRawInputData(lparam as HRAWINPUT, RID_INPUT, (&raw mut input).cast(), &mut size, size_of::<RAWINPUTHEADER>() as u32) };
+    let device = input.header.hDevice;
     // Injected input (ours included) has no device.
-    if read == u32::MAX || header.hDevice.is_null() || LAST.get() == header.hDevice {
+    if read == u32::MAX || device.is_null() {
         return;
     }
-    LAST.set(header.hDevice);
-    let device_id = MODELS.with_borrow_mut(|models| {
-        *models.entry(header.hDevice as usize).or_insert_with(|| {
-            device_name(header.hDevice).and_then(|name| crate::device_catalog::model_for_path(&name)).map(|model| model.device_id)
-        })
-    });
-    if let (Some(device_id), Some(app)) = (device_id, APP.get()) {
-        crate::onboard_guard::note_device_used(app, device_id);
+    let Some(model) = MODELS.with_borrow_mut(|models| {
+        *models
+            .entry(device as usize)
+            .or_insert_with(|| device_name(device).and_then(|name| crate::device_catalog::model_for_path(&name)))
+    }) else {
+        return;
+    };
+    if input.header.dwType == RIM_TYPEKEYBOARD {
+        // SAFETY: the header says this report is a keyboard one.
+        let keyboard = unsafe { input.data.keyboard };
+        let released = keyboard.Flags & RI_KEY_BREAK as u16 != 0;
+        crate::mouse_memory::live_overlay::note_input(model, &format!("vk{:#04x}", keyboard.VKey), !released);
+    } else if input.header.dwType == RIM_TYPEMOUSE {
+        // SAFETY: the header says this report is a mouse one.
+        let flags = unsafe { input.data.mouse.Anonymous.Anonymous.usButtonFlags };
+        // Buttons 1..=5: bit 2n is its press, bit 2n+1 its release.
+        for button in 0..5 {
+            if flags & (1 << (2 * button)) != 0 {
+                crate::mouse_memory::live_overlay::note_input(model, &format!("button{button}"), true);
+            }
+            if flags & (1 << (2 * button + 1)) != 0 {
+                crate::mouse_memory::live_overlay::note_input(model, &format!("button{button}"), false);
+            }
+        }
+    }
+    if LAST.get() != device {
+        LAST.set(device);
+        if let Some(app) = APP.get() {
+            crate::onboard_guard::note_device_used(app, model.device_id);
+        }
     }
 }
 
@@ -157,7 +185,7 @@ fn device_name(device: HANDLE) -> Option<String> {
 unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match message {
         WM_INPUT => {
-            note_mouse_input(lparam);
+            note_raw_input(lparam);
             unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
         }
         WM_DEVICECHANGE => {

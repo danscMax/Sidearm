@@ -426,7 +426,7 @@ fn check_once(
                 return if took_back {
                     Verdict::TookBack
                 } else {
-                    Verdict::Clean(bindings.len() + crate::mouse_memory::native_buttons().len())
+                    Verdict::Clean(bindings.len() + device.model().native_buttons.len())
                 };
             }
             // A button still holding Sidearm's signal of the other kind (the

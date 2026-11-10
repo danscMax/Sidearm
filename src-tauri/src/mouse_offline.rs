@@ -17,7 +17,7 @@ use std::path::Path;
 use crate::config::{ActionPayload, AppConfig, Layer, MouseActionKind, TriggerMode};
 use crate::device_catalog::{NativeModel, Transport};
 use crate::mouse_memory::{
-    OnboardAction, VendorDevice, binding_target, hid_usage_for_vk, left_modifier_bits, modifier_bits, native_buttons,
+    OnboardAction, VendorDevice, binding_target, hid_usage_for_vk, left_modifier_bits, modifier_bits,
     onboard_bindings,
 };
 
@@ -357,7 +357,7 @@ pub fn restore_signals(config: &AppConfig) -> Result<(), String> {
 /// buttons (no firmware Hypershift).
 pub fn write_signals(device: &VendorDevice, config: &AppConfig) -> Result<(), String> {
     device.apply_bindings(&onboard_bindings(config))?;
-    let natives: Vec<&str> = native_buttons().iter().map(|(id, _, _)| *id).collect();
+    let natives: Vec<&str> = device.model().native_buttons.iter().map(|(id, _, _)| *id).collect();
     device.restore_native_buttons(&natives)
 }
 

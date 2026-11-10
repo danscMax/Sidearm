@@ -461,12 +461,6 @@ impl ButtonRecord {
     }
 }
 
-/// Every button that must stay a plain mouse button, as `(control id, vendor
-/// button id, value)`.
-pub fn native_buttons() -> &'static [(&'static str, u8, u8)] {
-    config_model().native_buttons
-}
-
 /// Open handle to the vendor HID collection plus the feature-report plumbing.
 pub struct VendorDevice {
     handle: HANDLE,
@@ -1857,8 +1851,8 @@ mod tests {
         assert!(!hypershift.is_mouse_button(2));
         assert!(right.is_mouse_button(2));
         assert!(!left.is_mouse_button(2), "a left click on the right button is drift too");
-        assert!(native_buttons().contains(&("mouse_right", 0x02, 2)));
-        assert!(native_buttons().contains(&("mouse_4", 0x34, 4)));
+        assert!(config_model().native_buttons.contains(&("mouse_right", 0x02, 2)));
+        assert!(config_model().native_buttons.contains(&("mouse_4", 0x34, 4)));
     }
 
     /// Values the hardware answered with (2026-10-17): battery `0xa9`, poll

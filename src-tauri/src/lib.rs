@@ -143,8 +143,9 @@ pub(crate) fn live_map_restore_running() -> bool {
     mutex_exists(RESTORE_MUTEX)
 }
 
-/// Started by the capture helper when Sidearm died: a separate process with
-/// no hooks, so the helper can exit at once.
+/// Started by the capture helper when Sidearm died, and by an exit that left
+/// a sleeping mouse without its offline profile: a separate process with no
+/// hooks that outlives Sidearm.
 #[cfg(target_os = "windows")]
 pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
     use std::os::windows::process::CommandExt;
@@ -162,8 +163,9 @@ pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
     }
 }
 
-/// Restores the live maps a dead Sidearm left, retrying while a mouse sleeps
-/// (an asleep mouse answers nothing and plays the silent map once it wakes).
+/// Restores the live maps a dead Sidearm left and stores an offline profile an
+/// exit could not, retrying while a mouse sleeps (an asleep mouse answers
+/// nothing and plays Sidearm's silent signals once it wakes).
 /// Quits when Sidearm turns out alive, after 30 minutes, or once a Sidearm
 /// starts — its own start restores them after this process ends.
 #[cfg(target_os = "windows")]
@@ -171,7 +173,7 @@ pub fn restore_live_maps_main(config_dir: &std::path::Path) {
     use std::time::{Duration, Instant};
     // The dying Sidearm's mutex goes when its process has fully ended. Checked
     // before taking the restore mutex: a live Sidearm is never paused by it.
-    let grace = Instant::now() + Duration::from_secs(5);
+    let grace = Instant::now() + Duration::from_secs(15);
     while mutex_exists(APP_MUTEX) {
         if Instant::now() >= grace {
             return;
@@ -180,9 +182,18 @@ pub fn restore_live_maps_main(config_dir: &std::path::Path) {
     }
     // One restorer at a time, holding the mutex until it exits.
     let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
+    let failed_marker = config_dir.join(mouse_offline::OFFLINE_FAILED_FILE);
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     while !mutex_exists(APP_MUTEX) && Instant::now() < deadline {
-        if mouse_memory::live_overlay::restore_orphaned(config_dir) {
+        let maps_done = mouse_memory::live_overlay::restore_orphaned(config_dir);
+        // A mouse asleep at exit has no offline profile yet: store it once it
+        // answers (the marker names the profile; a success removes it).
+        if let Ok(profile_id) = std::fs::read_to_string(&failed_marker)
+            && let Ok(config) = config::read_and_migrate_config_file(&config_dir.join("config.json"))
+        {
+            mouse_offline::write_offline_profile(&config, profile_id.trim(), config_dir);
+        }
+        if maps_done && !failed_marker.exists() {
             return;
         }
         std::thread::sleep(Duration::from_secs(2));
@@ -3106,7 +3117,15 @@ pub(crate) fn shutdown_mouse(app: &AppHandle) {
         log::warn!("[system] a live map was still being restored at exit");
     }
     #[cfg(target_os = "windows")]
-    write_offline_mouse_profile(app);
+    {
+        write_offline_mouse_profile(app);
+        // A mouse that slept through it gets its profile once it wakes.
+        if let Ok(config_dir) = resolve_config_dir(app)
+            && config_dir.join(mouse_offline::OFFLINE_FAILED_FILE).exists()
+        {
+            spawn_live_map_restore(&config_dir);
+        }
+    }
 }
 
 /// On exit: store the profile in effect in the mouse itself, so its simple

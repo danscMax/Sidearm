@@ -363,6 +363,20 @@ pub enum OnboardAction {
 }
 
 impl OnboardAction {
+    /// The same shortcut as a plain held key record (Shift and Alt as the
+    /// right-hand keys), for a mouse whose turbo record is not one tap per
+    /// press: measured 2026-11-10, the Naga V3 Pro kept firing a stored
+    /// Alt+F4 turbo record every 10 s, even with Sidearm closed.
+    pub fn without_turbo(self) -> Self {
+        match self {
+            Self::KeyTap { modifier, usage } => Self::Key {
+                modifier: modifier_bits(modifier & 0x01 != 0, modifier & 0x02 != 0, modifier & 0x04 != 0, modifier & 0x08 != 0),
+                usage,
+            },
+            other => other,
+        }
+    }
+
     /// `category, len, values…` as the set/get-button commands carry them.
     fn bytes(self) -> Vec<u8> {
         match self {
@@ -1342,6 +1356,15 @@ mod tests {
 
     /// Shift and Alt go out as the right-hand keys: the firmware drops the
     /// left ones (measured).
+    #[test]
+    fn without_turbo_holds_the_same_shortcut_with_right_hand_modifiers() {
+        let alt_f4 = OnboardAction::KeyTap { modifier: left_modifier_bits(false, false, true, false), usage: 0x3d };
+        assert_eq!(alt_f4.without_turbo(), OnboardAction::Key { modifier: modifier_bits(false, false, true, false), usage: 0x3d });
+        let ctrl_shift_t = OnboardAction::KeyTap { modifier: left_modifier_bits(true, true, false, false), usage: 0x17 };
+        assert_eq!(ctrl_shift_t.without_turbo(), OnboardAction::Key { modifier: 0x21, usage: 0x17 });
+        assert_eq!(OnboardAction::Mouse(9).without_turbo(), OnboardAction::Mouse(9));
+    }
+
     #[test]
     fn modifier_bits_use_the_keys_the_firmware_plays() {
         assert_eq!(modifier_bits(true, false, false, false), 0x01);

@@ -297,7 +297,11 @@ fn offline_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) ->
             continue;
         }
         let id = control_id(model, control);
-        let action = |layer| crate::mouse_offline::binding_action(config, profile_id, id.as_str(), layer);
+        // No turbo record in a bank: the V3 repeats it instead of tapping once.
+        let action = |layer| {
+            crate::mouse_offline::binding_action(config, profile_id, id.as_str(), layer)
+                .map(|action| action.map(OnboardAction::without_turbo))
+        };
         // A binding the firmware cannot play (text, macro, launch) gets a
         // reserved signal that does nothing, never the bank's old record —
         // a factory digit would type into whatever has focus. No binding at
@@ -1169,6 +1173,16 @@ pub(crate) mod tests {
         assert!(!targets.iter().any(|&(button, _, _)| button == 0x43), "an unbound button keeps its record");
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 0, usage: 0x2a }), [2, 1, 0, 0x2a, 0, 0, 0]);
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 1, usage: 0x19 }), [2, 2, 1, 0x19, 0, 0, 0]);
+        // Alt+F4 is held as a plain record, never the turbo one the V3 repeats.
+        let shortcut = config.bindings.iter().find(|binding| binding.id == "v3-test").unwrap().action_id.clone();
+        if let Some(crate::config::ActionPayload::Shortcut(keys)) =
+            config.actions.iter_mut().find(|action| action.id == shortcut).map(|action| &mut action.payload)
+        {
+            (keys.key, keys.ctrl, keys.shift, keys.alt, keys.win) = ("F4".into(), false, false, true, false);
+        }
+        let targets = offline_targets(&config, &NAGA_V3_PRO, &profile);
+        assert!(targets.contains(&(0x41, 1, OnboardAction::Key { modifier: crate::mouse_memory::modifier_bits(false, false, true, false), usage: 0x3d })));
+        assert!(!targets.iter().any(|(_, _, action)| matches!(action, OnboardAction::KeyTap { .. })));
     }
 
     #[test]

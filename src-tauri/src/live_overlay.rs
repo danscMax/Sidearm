@@ -52,18 +52,14 @@ static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CAT
 /// The setup wizard's button test: every extra control joins the standard layer.
 pub(crate) static CHECK_EXTRA_CONTROLS: AtomicBool = AtomicBool::new(false);
 
-pub fn catalog_index(model: &NativeModel) -> usize {
-    model.catalog_index()
-}
-
 /// A session owns this model's live map (its legacy guard must stay away).
 pub fn is_active(model: &NativeModel) -> bool {
-    ACTIVE[catalog_index(model)].load(Ordering::Acquire)
+    ACTIVE[model.catalog_index()].load(Ordering::Acquire)
 }
 
 /// This model's live map is written and verified.
 pub fn is_ready(model: &NativeModel) -> bool {
-    READY[catalog_index(model)].load(Ordering::Acquire)
+    READY[model.catalog_index()].load(Ordering::Acquire)
 }
 
 /// Whether a press read from this model's HID stream may be dispatched: a
@@ -506,6 +502,17 @@ pub fn wait_idle(limit: Duration) -> bool {
     true
 }
 
+/// Stops `sessions` on a thread of their own and returns at once: each
+/// restores its mouse there, and a mouse stuck in a HID call must not hang
+/// the caller. A new session of the same mouse waits for it (`Session::start`).
+pub fn stop_sessions(mut sessions: Vec<Session>) {
+    if sessions.is_empty() {
+        return;
+    }
+    sessions.iter_mut().for_each(Session::request_stop);
+    let _ = thread::Builder::new().name("live-map-stop".into()).spawn(move || drop(sessions));
+}
+
 /// Puts back every live map a Sidearm process left when it died without
 /// restoring (killed, crashed): run by its capture helper, which outlives it.
 /// Until then the mouse plays Sidearm's signals — every mapped button and the
@@ -791,8 +798,19 @@ impl Session {
         let worker_targets = Arc::clone(&targets);
         let backup = live_backup(&config_dir, model);
         let onboard = (model.transport == Transport::Onboard).then(|| config.clone());
-        let index = catalog_index(model);
-        ACTIVE[index].store(true, Ordering::Release);
+        let index = model.catalog_index();
+        // One session per mouse: `ACTIVE` stays set until the previous one's
+        // drop has restored its map and is done with the rollback file. Its
+        // stop may still run on another thread (`stop_sessions`); a session
+        // that started over it would share that file and flag.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        while ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+            if std::time::Instant::now() >= deadline {
+                log::warn!("[naga-live] {} live map not written: its previous session is still stopping", model.name);
+                return None;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
         let (stop, stopped) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("naga-live".into())
@@ -901,7 +919,7 @@ impl Drop for Session {
         {
             log::error!("[naga-live] {} worker panicked; its live map is restored on the next start", self.model.name);
         }
-        ACTIVE[catalog_index(self.model)].store(false, Ordering::Release);
+        ACTIVE[self.model.catalog_index()].store(false, Ordering::Release);
         // Back on the onboard path: the guard restores its signals at once.
         if self.model.transport == Transport::Onboard {
             crate::onboard_guard::request_check();
@@ -929,7 +947,7 @@ pub(crate) mod tests {
         let (before, target) = (block(OnboardAction::Mouse(1)), block(OnboardAction::Consumer(USAGES[0])));
         let backup = dir.path().join("v3-live.json");
         save_snapshot(&backup, &Snapshot { path: path.into(), records: vec![Record { button: 0x40, layer: 0, before, target }] }).unwrap();
-        fake::install(FakeMouse::default());
+        let _fake = fake::install(FakeMouse::default());
         fake::with(|mouse| {
             mouse.records.insert((LIVE_BANK, 0x40, 0), target);
             mouse.odd_once.insert((LIVE_BANK, 0x40, 0), block(OnboardAction::Mouse(3)));
@@ -938,6 +956,13 @@ pub(crate) mod tests {
         restore_bank(&device, LIVE_BANK, &backup).unwrap();
         assert_eq!(fake::with(|mouse| mouse.records[&(LIVE_BANK, 0x40, 0)]), before);
         assert!(!backup.exists());
+
+        // Read as the user's own record twice: it stays.
+        let users = block(OnboardAction::Key { modifier: 0, usage: 0x68 });
+        save_snapshot(&backup, &Snapshot { path: path.into(), records: vec![Record { button: 0x40, layer: 0, before, target }] }).unwrap();
+        fake::with(|mouse| mouse.records.insert((LIVE_BANK, 0x40, 0), users));
+        restore_bank(&device, LIVE_BANK, &backup).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.records[&(LIVE_BANK, 0x40, 0)]), users);
     }
 
     #[test]

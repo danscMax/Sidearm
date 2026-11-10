@@ -1372,8 +1372,19 @@ pub(crate) mod fake {
         static FAKE: RefCell<Option<FakeMouse>> = const { RefCell::new(None) };
     }
 
-    pub(crate) fn install(mouse: FakeMouse) {
+    /// Installs `mouse` on this thread until the returned guard drops.
+    #[must_use]
+    pub(crate) fn install(mouse: FakeMouse) -> Installed {
         FAKE.with(|cell| *cell.borrow_mut() = Some(mouse));
+        Installed
+    }
+
+    pub(crate) struct Installed;
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            FAKE.with(|cell| *cell.borrow_mut() = None);
+        }
     }
 
     pub(crate) fn with<R>(work: impl FnOnce(&mut FakeMouse) -> R) -> R {

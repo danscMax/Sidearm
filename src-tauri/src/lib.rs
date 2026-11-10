@@ -2996,11 +2996,6 @@ fn shutdown_mouse_once(app: &AppHandle) {
     {
         log::warn!("[system] runtime stop on exit failed: {message}");
     }
-    // The stop gives capture threads 5 s; restoring two mice takes longer.
-    #[cfg(target_os = "windows")]
-    if !mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
-        log::warn!("[system] a live map was still being restored at exit");
-    }
     #[cfg(target_os = "windows")]
     {
         write_offline_mouse_profile(app);

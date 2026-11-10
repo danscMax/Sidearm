@@ -153,7 +153,7 @@ fn repeat_timing(delay: u32, speed: u32) -> (Duration, Duration) {
 /// Prefix of every line a reader writes: `M<catalog index>:`, so the parent
 /// knows which mouse sent it.
 pub(super) fn reader_prefix(model: &NativeModel) -> String {
-    format!("M{}:", crate::mouse_memory::live_overlay::catalog_index(model))
+    format!("M{}:", model.catalog_index())
 }
 
 /// The catalog model of a reader line, and the line without its prefix.

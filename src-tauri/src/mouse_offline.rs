@@ -520,14 +520,22 @@ mod tests {
 
     use crate::mouse_memory::fake::{self, FakeMouse};
 
-    fn fake_v2() -> VendorDevice {
-        fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
-        VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "")
+    fn fake_v2() -> (VendorDevice, fake::Installed) {
+        let installed = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
+        (VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, ""), installed)
+    }
+
+    #[test]
+    fn a_dpi_already_stored_is_not_written_again() {
+        let (device, _fake) = fake_v2();
+        device.set_dpi(1600, true).unwrap();
+        device.set_dpi(1600, true).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.dpi_writes), 1);
     }
 
     #[test]
     fn a_record_already_in_place_is_not_written_again() {
-        let device = fake_v2();
+        let (device, _fake) = fake_v2();
         let f13 = OnboardAction::Key { modifier: 0, usage: 0x68 };
         device.write_record(0x40, 0, f13).unwrap();
         device.write_record(0x40, 0, f13).unwrap();
@@ -547,19 +555,19 @@ mod tests {
         let own = config.profiles.iter_mut().find(|p| p.id == profile).unwrap();
         own.device_mouse = Some([("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: None, mouse_dpi_stages: None })].into());
 
-        let device = fake_v2();
+        let (device, _fake) = fake_v2();
         assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
         let button = NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap();
         assert_eq!(fake::with(|mouse| mouse.records[&(1, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x17]);
         assert!(dir.path().join(OFFLINE_MARKER_FILE).exists());
-        drop(device);
+        drop((device, _fake));
 
-        let device = fake_v2();
+        let (device, _fake) = fake_v2();
         fake::with(|mouse| mouse.asleep_for.push((0x04, 0x85)));
         assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"), "the DPI slept");
-        drop(device);
+        drop((device, _fake));
 
-        let device = fake_v2();
+        let (device, _fake) = fake_v2();
         fake::with(|mouse| mouse.refused.push((0x04, 0x85)));
         assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None, "a refusal is not retried");
     }
@@ -568,7 +576,7 @@ mod tests {
     #[test]
     fn the_exit_puts_the_mouse_speed_back() {
         let (config, profile) = empty_profile();
-        let device = fake_v2();
+        let (device, _fake) = fake_v2();
         fake::with(|mouse| {
             mouse.poll_code = 0x08;
             mouse.dpi.insert(0x00, 1600);

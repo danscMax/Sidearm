@@ -430,6 +430,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_a_live_overlay_wheel_falls_back_to_scrolling() {
+        use crate::config::MouseActionKind::{ScrollDown, ScrollUp};
+        assert_eq!(live_wheel_scroll("v3_wheel_up"), Some(ScrollUp));
+        assert_eq!(live_wheel_scroll("v3_wheel_down"), Some(ScrollDown));
+        assert_eq!(live_wheel_scroll("wheel_up"), None, "the V2 scrolls by itself");
+        assert_eq!(live_wheel_scroll("v3_thumb_01"), None);
+    }
+
+    #[test]
     fn every_catalog_model_has_its_own_index() {
         for (index, model) in CATALOG.iter().enumerate() {
             assert_eq!(model.catalog_index(), index, "{}", model.name);

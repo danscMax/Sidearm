@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- The tray shows the battery of every connected mouse, each with its model name. Before,
+  with a V2 plugged in it showed only the V2's charge, even while you used the V3.
 - A mouse that is not connected (another PC's, or the default Naga when you use a
   different mouse) no longer takes a full card at the top: it folds into one
   "+N not connected" button, and with no supported mouse "+ Device" says so.

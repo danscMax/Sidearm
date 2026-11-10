@@ -70,6 +70,8 @@ export interface MouseSettings {
 
 /** Battery reading from the guard (`mouse_battery`). */
 export interface MouseBatteryEvent {
+  /** Model name of the mouse read. */
+  model: string;
   percent: number;
   low: boolean;
 }

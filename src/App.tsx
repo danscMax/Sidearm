@@ -327,8 +327,8 @@ function App() {
   // the OSD bubble and updates the tray tooltip, which work with the window hidden).
   useEffect(() => {
     let unlisten: (() => void) | undefined;
-    void listenMouseBattery(({ percent, low }) => {
-      if (low) showToast(t("mouse.batteryLow", { percent }), "warning");
+    void listenMouseBattery(({ model, percent, low }) => {
+      if (low) showToast(t("mouse.batteryLow", { model, percent }), "warning");
     }).then((fn) => {
       unlisten = fn;
     });

@@ -1437,7 +1437,7 @@
     "offlineFallback": "{{name}} (основной)",
     "batteryHelp": "При заряде ниже 10% Sidearm предупредит — не чаще раза в сутки.",
     "batteryValue": "{{percent}}%",
-    "batteryLow": "Низкий заряд мыши: {{percent}}%",
+    "batteryLow": "{{model}}: низкий заряд, {{percent}}%",
     "reportButton": "Помочь проверить",
     "reportReading": "Читаю мышь… (~20 с)",
     "reportCopied": "Отчёт скопирован (только чтение, мышь не менялась). Вставьте его в открывшийся issue на GitHub (Ctrl+V) и отправьте.",
@@ -1604,7 +1604,7 @@
       "startupRestoreFailed": "Не удалось восстановить запись автозапуска. Копия сохранена для повторной попытки; новая запись не перезаписывалась."
     },
     "guard": {
-      "batteryLow": "Заряд мыши: {{percent}}%",
+      "batteryLow": "{{model}}: заряд {{percent}}%",
       "mappingsNotRestored": "Назначения кнопок перезаписаны ({{controls}}), восстановить не удалось.",
       "mappingsRestored": "Razer перезаписал назначения кнопок ({{controls}}) — восстановил.",
       "modeNotRestored": "Razer удерживает мышь в режиме драйвера — вернуть управление не удалось.",
@@ -1628,7 +1628,7 @@
       "reloadWarnings": "После перезагрузки обнаружено предупреждений: {{warning_count}}.",
       "startWarnings": "При запуске обнаружено предупреждений: {{warning_count}}.",
       "trayActiveProfile": "Активный профиль: {{profile_name}}",
-      "trayBattery": "\nМышь: {{percent}}%",
+      "trayBattery": "\n{{model}}: {{percent}}%",
       "trayCreateRule": "Создать правило для активного окна",
       "trayListen": "Слушать мышь",
       "trayListening": "слушает мышь",

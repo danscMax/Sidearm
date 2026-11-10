@@ -49,7 +49,7 @@ describe("backend texts", () => {
 
   it("uiText translates a keyed text and falls back to the English", async () => {
     await i18n.changeLanguage("ru");
-    expect(uiText({ text: "x", key: "guard.batteryLow", params: { percent: "9" } })).toBe("Заряд мыши: 9%");
+    expect(uiText({ text: "x", key: "guard.batteryLow", params: { model: "Razer Naga V3 Pro", percent: "9" } })).toBe("Razer Naga V3 Pro: заряд 9%");
     expect(uiText({ text: "English only", key: "no.suchKey" })).toBe("English only");
     expect(uiText("plain")).toBe("plain");
     expect(nativeTexts()["runtime.osdProfileLabel"]).toBe("Профиль:");

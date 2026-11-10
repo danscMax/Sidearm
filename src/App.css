@@ -2227,7 +2227,16 @@ input[type="radio"] {
   white-space: nowrap;
 }
 
-.device-card--add .device-card__name {
+.device-card--more {
+  justify-content: center;
+  min-width: 0;
+  color: var(--c-text-muted);
+  border-style: dashed;
+  background: transparent;
+}
+
+.device-card--add .device-card__name,
+.device-card--more .device-card__name {
   color: inherit;
 }
 

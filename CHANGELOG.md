@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- A mouse that is not connected (another PC's, or the default Naga when you use a
+  different mouse) no longer takes a full card at the top: it folds into one
+  "+N not connected" button, and with no supported mouse "+ Device" says so.
 - Naga V3 Pro: a shortcut with Alt or Shift stored in a slot (for use without Sidearm)
   no longer repeats on its own every 10 seconds (an Alt+F4 kept closing windows); the
   V3 gets the plain key record Synapse itself stores instead of the turbo one, which

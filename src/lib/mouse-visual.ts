@@ -149,23 +149,3 @@ export function parseBindingDragData(raw: string): string | null {
   }
   return null;
 }
-
-/* ── Legend column button lists (shared between both modes) ── */
-
-export const TOP_LEFT_BUTTONS: ControlId[] = [
-  "mouse_left", "top_aux_01", "top_aux_02", "mouse_4",
-];
-
-export const TOP_RIGHT_BUTTONS: ControlId[] = [
-  "mouse_right", "wheel_up", "wheel_click", "mouse_5", "wheel_down",
-];
-
-export const COMBINED_LEFT_BUTTONS: ControlId[] = [
-  "mouse_left", "top_aux_01", "top_aux_02", "mouse_4",
-  "thumb_01", "thumb_02", "thumb_03", "thumb_04", "thumb_05", "thumb_06",
-];
-
-export const COMBINED_RIGHT_BUTTONS: ControlId[] = [
-  "mouse_right", "wheel_up", "wheel_click", "wheel_down", "mouse_5",
-  "thumb_07", "thumb_08", "thumb_09", "thumb_10", "thumb_11", "thumb_12",
-];

@@ -129,6 +129,10 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
                 MouseActionKind::MiddleClick => 3,
                 MouseActionKind::MouseBack => 4,
                 MouseActionKind::MouseForward => 5,
+                // The wheel's own records (factory 0x09/0x0a hold these): a
+                // plain scroll is played by the mouse itself without Sidearm.
+                MouseActionKind::ScrollUp => 9,
+                MouseActionKind::ScrollDown => 10,
                 _ => return None,
             }))
         }
@@ -136,30 +140,49 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
     }
 }
 
-/// Writes the offline profile into the mouse and leaves the marker. Best
-/// effort: a record the mouse refuses is logged and skipped. The marker is only
-/// left when the mouse took a record; a mouse that took none (asleep) leaves
-/// [`OFFLINE_FAILED_FILE`] instead.
+/// Writes the offline profile into every connected mouse. Best effort: a
+/// record the mouse refuses is logged and skipped. The onboard path leaves the
+/// marker only when the mouse took a record; any mouse that took nothing
+/// because it slept leaves [`OFFLINE_FAILED_FILE`] instead, which the next
+/// start reports.
 pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &Path) {
-    if crate::mouse_memory::naga_v3::configured(config)
-        && let Err(error) = crate::mouse_memory::naga_v3::write_offline(config, profile_id, config_dir)
-    {
-        log::warn!("[mouse-offline] Naga V3 Pro profile `{profile_id}` was not stored: {error}");
-    }
-    let records = offline_records(config, profile_id);
+    use crate::device_catalog::Transport;
+    use crate::mouse_memory::live_overlay;
     let failed_marker = config_dir.join(OFFLINE_FAILED_FILE);
-    let device = match VendorDevice::open_v2() {
+    let mut slept = false;
+    for model in crate::mouse_memory::present_models() {
+        if model.transport != Transport::LiveOverlay || !live_overlay::configured(config, model) {
+            continue;
+        }
+        if let Err(error) = live_overlay::write_offline(config, model, profile_id, config_dir) {
+            log::warn!("[mouse-offline] {} profile `{profile_id}` was not stored: {error}", model.name);
+            slept |= crate::mouse_memory::is_no_response(&error);
+        }
+    }
+    let onboard_slept = write_onboard_offline(config, profile_id, config_dir);
+    if slept || onboard_slept {
+        let _ = std::fs::write(&failed_marker, profile_id);
+    } else {
+        let _ = std::fs::remove_file(&failed_marker);
+    }
+}
+
+/// The onboard path's part of [`write_offline_profile`]. Returns whether the
+/// mouse slept through it.
+fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> bool {
+    let records = offline_records(config, profile_id);
+    let device = match VendorDevice::open_onboard() {
         Ok(device) => device,
         Err(message) => {
             // No mouse at all (or one that does not open) is not a sleeping
             // mouse: nothing to tell the user next time.
-            log::warn!("[mouse-offline] mouse not reachable, offline profile not written: {message}");
-            return;
+            log::info!("[mouse-offline] no onboard mouse reachable, onboard profile not written: {message}");
+            return false;
         }
     };
     if !device.model().verified {
         log::info!("[mouse-offline] {} is not verified: offline profile not written", device.model().name);
-        return;
+        return false;
     }
     let failed = records
         .iter()
@@ -172,22 +195,38 @@ pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &
         .count();
     // Profile switches set the DPI live only: store the offline profile's own
     // DPI; a profile without one leaves the mouse's stored DPI alone.
-    if let Some(dpi) = config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| p.mouse_dpi)
+    if let Some(dpi) = config.profiles.iter().find(|p| p.id == profile_id)
+        .and_then(|p| p.mouse_for(device.model().device_id))
+        .and_then(|own| own.mouse_dpi)
+        .map(|dpi| dpi.clamp(device.model().dpi_min, device.model().dpi_max))
         && let Err(message) = device.set_dpi(dpi, true)
     {
         log::warn!("[mouse-offline] DPI not stored: {message}");
     }
     if failed == records.len() && !records.is_empty() {
-        let _ = std::fs::write(&failed_marker, profile_id);
         log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
-        return;
+        return true;
     }
     let _ = std::fs::write(config_dir.join(OFFLINE_MARKER_FILE), profile_id);
-    let _ = std::fs::remove_file(&failed_marker);
     log::info!(
         "[mouse-offline] profile `{profile_id}` written for use without Sidearm: {} records, {failed} failed",
         records.len()
     );
+    false
+}
+
+/// Writes Sidearm's own signals into the onboard-path mouse: its key buttons
+/// and its plain mouse buttons (no firmware Hypershift). Used after the
+/// offline profile and when a mouse leaves the live map for the onboard path —
+/// its live map then plays whatever the mouse stored, not Sidearm's signals.
+pub fn restore_signals(config: &AppConfig) -> Result<(), String> {
+    let device = VendorDevice::open_onboard()?;
+    if !device.model().verified {
+        return Err(format!("{} is not verified", device.model().name));
+    }
+    device.apply_bindings(&onboard_bindings(config))?;
+    let natives: Vec<&str> = native_buttons().iter().map(|(id, _, _)| *id).collect();
+    device.restore_native_buttons(&natives)
 }
 
 /// Puts Sidearm's own signals back when the mouse still holds the offline
@@ -197,16 +236,9 @@ pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
     if !marker.exists() {
         return false;
     }
-    let result = VendorDevice::open_v2().and_then(|device| {
-        if !device.model().verified {
-            // Not the mouse the profile was written into; keep the marker for it.
-            return Err(format!("{} is not verified", device.model().name));
-        }
-        device.apply_bindings(&onboard_bindings(config))?;
-        let natives: Vec<&str> = native_buttons().iter().map(|(id, _, _)| *id).collect();
-        device.restore_native_buttons(&natives)
-    });
-    match result {
+    // An unverified mouse is not the one the profile was written into; the
+    // marker stays for it.
+    match restore_signals(config) {
         Ok(()) => {
             let _ = std::fs::remove_file(&marker);
             log::info!("[mouse-offline] Sidearm signals restored after the offline profile");
@@ -273,6 +305,10 @@ mod tests {
             win: false,
         });
         assert_eq!(onboard_action(&back), Some(OnboardAction::Mouse(4)));
+        for (action, record) in [(MouseActionKind::ScrollUp, 9), (MouseActionKind::ScrollDown, 10)] {
+            let scroll = ActionPayload::MouseAction(MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false });
+            assert_eq!(onboard_action(&scroll), Some(OnboardAction::Mouse(record)), "{action:?}");
+        }
     }
 }
 

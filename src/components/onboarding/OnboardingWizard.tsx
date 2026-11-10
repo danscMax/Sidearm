@@ -1,16 +1,19 @@
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { changeLanguage } from "../../i18n";
 import {
   type AdminAutostartStatus,
-  checkSynapseInstalled,
   getAdminAutostartStatus,
-  getNagaV3CaptureReady,
+  getLiveMapReady,
+  getSynapseStatus,
   isRunningAsAdmin,
   listenActionExecutionEvent,
   listenEncodedKeyEvent,
+  listenNativeMiceChanged,
+  listNativeMice,
   normalizeCommandError,
+  recoverFromSynapse,
   relaunchAsAdmin,
   restoreOnboardControl,
   setAdminAutostart,
@@ -18,260 +21,279 @@ import {
   startRuntime,
 } from "../../lib/backend";
 import type { AppConfig } from "../../lib/config";
-import { usesNagaV3Ring } from "../../lib/onboard-mapping";
+import { deviceControlId, deviceLayout, layoutControlId, type DeviceLayout } from "../../lib/devices";
+import { displayNameForControl, displayNameForControlId } from "../../lib/labels";
+import type { NativeModelInfo } from "../../lib/onboard-mapping";
 import type { ActionExecutionEvent, EncodedKeyEvent } from "../../lib/runtime";
 import { NagaIllustration } from "./NagaIllustration";
 import { ModalShell } from "../shared";
 import "./onboarding.css";
 
 type StepKey = "welcome" | "mouse" | "live" | "extras" | "admin" | "tryit";
-const STEPS: StepKey[] = ["welcome", "mouse", "live", "admin", "tryit"];
-const NAGA_V3_STEPS: StepKey[] = ["welcome", "live", "extras", "tryit"];
-const V3_EXTRA_LABELS = {
-  v3_top_aux_01: "control.name.dpiPlus",
-  v3_top_aux_02: "control.name.dpiMinus",
-  v3_wheel_left: "control.name.v3TiltLeft",
-  v3_wheel_right: "control.name.v3TiltRight",
-  v3_wheel_click: "control.name.wheelClick",
-  v3_wheel_up: "control.name.wheelUp",
-  v3_wheel_down: "control.name.wheelDown",
-  v3_top_special_01: "control.name.v3ScrollMode",
-  v3_top_special_02: "control.name.v3ScrollAux",
-  v3_top_special_03: "control.name.v3ProfileButton",
-};
-
 type Lang = "ru" | "en";
-type CheckState = "ok" | "bad" | "pending";
+type CheckState = "ok" | "warn" | "bad" | "pending";
+type SynapseState = "pending" | "ok" | "running" | "unknown" | "closing";
+
+/** How long the button check waits for the mouse before offering a way out. */
+const READY_TIMEOUT_MS = 15_000;
 
 interface OnboardingWizardProps {
   config: AppConfig;
   /** Persist a new config (parent wires this to the autosave/persistence hook). */
   applyConfig: (next: AppConfig) => void;
-  /** Hide the wizard. */
-  onClose: () => void;
+  /** Hide the wizard; `deviceId` is the mouse it set up, to show next. */
+  onClose: (deviceId: string | null) => void;
 }
 
-/** Map a bare F-key string (F13..F24) to a 1-based Naga button number, or null. */
-function fkeyToButton(encodedKey: string): number | null {
-  const m = /^F(\d{1,2})$/.exec(encodedKey.trim());
-  if (!m) return null;
-  const n = Number(m[1]);
-  if (n >= 13 && n <= 24) return n - 12;
-  return null;
+/** The steps for a mouse: writing onboard memory only on the onboard path,
+ *  the checks only for a verified model. */
+export function wizardSteps(mouse: NativeModelInfo | null, layout: DeviceLayout | undefined): StepKey[] {
+  const steps: StepKey[] = ["welcome"];
+  if (mouse?.verified && layout) {
+    if (!layout.firmwareTrigger) steps.push("mouse");
+    steps.push("live");
+    if (layout.checkedExtras.length > 0) steps.push("extras");
+  }
+  steps.push("admin", "tryit");
+  return steps;
+}
+
+/** The side button (1–12) of `deviceId` a press came from, and whether its
+ *  encoding is the hypershift layer's own (keyboard fallback), or null. */
+export function thumbOf(config: AppConfig, deviceId: string, encodedKey: string): { button: number; hypershift: boolean } | null {
+  const mapping = config.encoderMappings.find((item) =>
+    item.encodedKey === encodedKey
+    && config.physicalControls.some((control) => control.id === item.controlId && control.deviceId === deviceId));
+  const match = /^thumb_(0[1-9]|1[0-2])$/.exec(layoutControlId(mapping?.controlId ?? ""));
+  return match && mapping ? { button: Number(match[1]), hypershift: mapping.layer === "hypershift" } : null;
 }
 
 export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWizardProps) {
   const { t, i18n } = useTranslation();
   const lang: Lang = i18n.language?.startsWith("en") ? "en" : "ru";
-  // Onboarding copy lives in locales/{ru,en}.json under `onboarding.*` (single
-  // source of truth). Pull the whole nested block as one object so the JSX below
-  // keeps its `T.section.key` shape; re-resolves on language switch.
-  const T = t("onboarding", { returnObjects: true }) as unknown as Copy;
-  const nagaV3 = usesNagaV3Ring(config);
-  const steps = nagaV3 ? NAGA_V3_STEPS : STEPS;
 
-  const [stepIdx, setStepIdx] = useState(0);
+  // Mice plugged in now; null until the first answer.
+  const [mice, setMice] = useState<NativeModelInfo[] | null>(null);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const mouse = mice?.find((item) => item.deviceId === chosen) ?? (mice?.length === 1 ? mice[0] : null);
+  const deviceId = mouse?.deviceId ?? null;
+  const layout = deviceLayout(deviceId);
+  const steps = wizardSteps(mouse, layout);
+
+  // By name: the step list depends on the mouse, which loads later. A saved
+  // step means setup restarted as administrator from that step.
+  const [stepKey, setStepKey] = useState<StepKey>(() => (config.settings.onboardingStep !== undefined ? "admin" : "welcome"));
+  const stepIdx = Math.max(0, steps.indexOf(stepKey));
   const step = steps[stepIdx];
+  // A step that no longer exists (its mouse was unplugged) is left for good.
+  useEffect(() => {
+    if (mice !== null && !steps.includes(stepKey)) setStepKey(steps[0]);
+  });
+  const testingButtons = step === "live" || step === "extras";
 
-  // Pre-flight. "ok" = Razer Synapse is neither installed nor running: Sidearm
-  // writes the mouse itself, and a running Synapse rewrites the buttons.
-  const [synapseOk, setSynapseOk] = useState<CheckState>("pending");
-  const [v3Synapse, setV3Synapse] = useState<CheckState | "unknown">("pending");
+  const [synapse, setSynapse] = useState<SynapseState>("pending");
+  const [synapseError, setSynapseError] = useState<string | null>(null);
+  const [disableStartup, setDisableStartup] = useState(false);
   const [elevated, setElevated] = useState<CheckState>("pending");
 
-  // Live test
+  // Button check
+  const [ready, setReady] = useState(false);
+  const [timedOut, setTimedOut] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  const readyRef = useRef(false);
+  const [fullCheck, setFullCheck] = useState(false);
   const [detected, setDetected] = useState<Set<number>>(new Set());
   const [detectedShifted, setDetectedShifted] = useState<Set<number>>(new Set());
   const [detectedExtras, setDetectedExtras] = useState<Set<string>>(new Set());
   const [missedHold, setMissedHold] = useState<number | null>(null);
   const [lastShifted, setLastShifted] = useState(false);
-  const [fullCheck, setFullCheck] = useState(false);
-  const [v3Ready, setV3Ready] = useState(false);
-  const liveVerification = useRef(false);
   const [activeBtn, setActiveBtn] = useState<number | null>(null);
-  const [lastButton, setLastButton] = useState<number | null>(null);
   const activeTimer = useRef<number | null>(null);
 
-  // "Write to the mouse" on the mouse step
   const [mouseWritten, setMouseWritten] = useState(false);
   const [mouseWriteError, setMouseWriteError] = useState<string | null>(null);
 
-  // Admin
   const [admin, setAdmin] = useState<AdminAutostartStatus | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [relaunchError, setRelaunchError] = useState<string | null>(null);
 
-  // Finale
   const [fired, setFired] = useState<ActionExecutionEvent | null>(null);
-  const [runtimeSetupError, setRuntimeSetupError] = useState<string | null>(null);
+  const [runtimeError, setRuntimeError] = useState<string | null>(null);
 
-  const detectedCount = detected.size;
-  const v3Total = fullCheck ? 12 : 1;
-  const v3StandardCount = fullCheck ? detectedCount : Number(detected.has(1));
-  const v3ShiftedCount = fullCheck ? detectedShifted.size : Number(detectedShifted.has(1));
-  const checkingShifted = v3StandardCount === v3Total;
-  const v3Confirmed = checkingShifted && v3ShiftedCount === v3Total;
-  const v3Instruction = v3Confirmed ? "confirmed"
+  const trigger = layout?.firmwareTrigger
+    ? deviceControlId(layout, layout.firmwareTrigger)
+    : config.settings.hypershiftTrigger === "none" ? null : config.settings.hypershiftTrigger ?? "mouse_right";
+  // The device's own name for its trigger (the V3 names its ring button).
+  const triggerControl = config.physicalControls.find((control) => control.id === trigger);
+  const triggerName = !trigger ? "" : triggerControl ? displayNameForControl(triggerControl) : displayNameForControlId(trigger);
+  const total = fullCheck ? 12 : 1;
+  const standardCount = fullCheck ? detected.size : Number(detected.has(1));
+  const shiftedCount = fullCheck ? detectedShifted.size : Number(detectedShifted.has(1));
+  const checkingShifted = trigger !== null && standardCount === total;
+  const confirmed = standardCount === total && (trigger === null || shiftedCount === total);
+  const instruction = confirmed ? "confirmed"
     : checkingShifted ? (fullCheck ? "holdAll" : "holdOne") : (fullCheck ? "pressAll" : "pressOne");
-  const extrasComplete = detectedExtras.size === Object.keys(V3_EXTRA_LABELS).length;
-  const testingButtons = step === "live" || step === "extras";
+  const extras = layout?.checkedExtras ?? [];
 
-  const checkV3Synapse = useCallback(async () => {
-    setV3Synapse("pending");
+  const refreshMice = useCallback(async () => {
     try {
-      setV3Synapse(await checkSynapseInstalled(true) ? "bad" : "ok");
+      setMice(await listNativeMice());
     } catch {
-      setV3Synapse("unknown");
+      setMice([]);
     }
   }, []);
 
-  useEffect(() => {
-    if (nagaV3 && step === "welcome") void checkV3Synapse();
-  }, [nagaV3, step, checkV3Synapse]);
+  const checkSynapse = useCallback(async () => {
+    setSynapse("pending");
+    setSynapseError(null);
+    try {
+      setSynapse((await getSynapseStatus()).running ? "running" : "ok");
+    } catch {
+      setSynapse("unknown");
+    }
+  }, []);
+
+  const closeSynapse = useCallback(async () => {
+    setSynapse("closing");
+    setSynapseError(null);
+    try {
+      // The recovery needs the runtime: it restores the mouse and restarts capture.
+      await startRuntime();
+      const result = await recoverFromSynapse(disableStartup, true);
+      if (result.startupError) setSynapseError(normalizeCommandError(result.startupError).message);
+      setSynapse((await getSynapseStatus()).running ? "running" : "ok");
+    } catch (err) {
+      setSynapseError(normalizeCommandError(err).message);
+      setSynapse("running");
+    }
+  }, [disableStartup]);
 
   const receiveKey = useEffectEvent((e: EncodedKeyEvent) => {
-    if (e.isKeyUp) return;
-    if (nagaV3 && (!liveVerification.current || e.backend !== "windows-hid-naga-v3")) return;
-    const control = nagaV3
-      ? config.encoderMappings.find((item) => item.layer === "standard" && item.encodedKey === e.encodedKey)
-      : undefined;
-    if (nagaV3 && step === "extras") {
-      if (control && !e.isHypershift && Object.hasOwn(V3_EXTRA_LABELS, control.controlId)) {
-        const id = control.controlId;
+    if (e.isKeyUp || !deviceId || !layout) return;
+    // A press counts only from the chosen mouse once its map is verified: its
+    // own HID stream, or the keyboard hook (F13–F24 mode), where only this
+    // mouse's encodings match below.
+    const fromMouse = e.backend.startsWith("hid:") ? e.backend === `hid:${deviceId}` : true;
+    if (!readyRef.current || !fromMouse) return;
+    if (step === "extras") {
+      const mapping = config.encoderMappings.find((item) => item.layer === "standard" && item.encodedKey === e.encodedKey);
+      const id = mapping ? layoutControlId(mapping.controlId) : null;
+      if (id && !e.isHypershift && mapping && deviceControlId(layout, id) === mapping.controlId
+        && extras.some(([extra]) => extra === id)) {
         setDetectedExtras((prev) => prev.has(id) ? prev : new Set([...prev, id]));
       }
       return;
     }
-    const btn = nagaV3
-      ? Number(/^v3_thumb_(0[1-9]|1[0-2])$/.exec(control?.controlId ?? "")?.[1]) || null
-      : fkeyToButton(e.encodedKey);
-    if (btn === null) return;
-    const shifted = nagaV3 && e.isHypershift === true;
-    if (nagaV3 && (fullCheck || btn === 1)) {
-      setMissedHold(checkingShifted && !v3Confirmed && !shifted ? btn : null);
-    }
+    const press = thumbOf(config, deviceId, e.encodedKey);
+    if (press === null) return;
+    const btn = press.button;
+    const shifted = e.isHypershift === true || press.hypershift;
+    if (fullCheck || btn === 1) setMissedHold(checkingShifted && !confirmed && !shifted ? btn : null);
     setLastShifted(shifted);
     setActiveBtn(btn);
-    setLastButton(btn);
-    const mark = shifted ? setDetectedShifted : setDetected;
-    mark((prev) => prev.has(btn) ? prev : new Set([...prev, btn]));
+    (shifted ? setDetectedShifted : setDetected)((prev) => prev.has(btn) ? prev : new Set([...prev, btn]));
     if (activeTimer.current) window.clearTimeout(activeTimer.current);
     activeTimer.current = window.setTimeout(() => setActiveBtn(null), 220);
   });
 
-  // --- one-time setup: start runtime, run checks, subscribe to live events ---
+  // One-time: checks and live event subscriptions.
   useEffect(() => {
-    let unlistenKey: (() => void) | null = null;
-    let unlistenAction: (() => void) | null = null;
     let cancelled = false;
-
-    if (!nagaV3) {
-      void startRuntime()
-        .then(() => !cancelled && setRuntimeSetupError(null))
-        .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
-      void checkSynapseInstalled()
-        .then((present) => !cancelled && setSynapseOk(present ? "bad" : "ok"))
-        .catch(() => !cancelled && setSynapseOk("bad"));
-      void isRunningAsAdmin()
-        .then((ok) => !cancelled && setElevated(ok ? "ok" : "bad"))
-        .catch(() => !cancelled && setElevated("bad"));
-      void getAdminAutostartStatus()
-        .then((s) => !cancelled && setAdmin(s))
-        .catch((err) => !cancelled && setAdminError(normalizeCommandError(err).message));
-    }
-
-    void listenEncodedKeyEvent("encoded_key_received", (event) => receiveKey(event))
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlistenKey = fn;
-      })
-      .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
-
-    void listenActionExecutionEvent("action_executed", (e: ActionExecutionEvent) => {
-      setFired(e);
-    })
-      .then((fn) => {
-        if (cancelled) fn();
-        else unlistenAction = fn;
-      })
-      .catch((err) => !cancelled && setRuntimeSetupError(normalizeCommandError(err).message));
-
+    const unlisten: (() => void)[] = [];
+    const keep = (promise: Promise<() => void>) => {
+      void promise.then((fn) => (cancelled ? fn() : unlisten.push(fn)))
+        .catch((err) => !cancelled && setRuntimeError(normalizeCommandError(err).message));
+    };
+    void refreshMice();
+    void checkSynapse();
+    void isRunningAsAdmin()
+      .then((ok) => !cancelled && setElevated(ok ? "ok" : "bad"))
+      .catch(() => !cancelled && setElevated("bad"));
+    void getAdminAutostartStatus()
+      .then((status) => !cancelled && setAdmin(status))
+      .catch((err) => !cancelled && setAdminError(normalizeCommandError(err).message));
+    keep(listenNativeMiceChanged((next) => setMice(next)));
+    keep(listenEncodedKeyEvent("encoded_key_received", (event) => receiveKey(event)));
+    keep(listenActionExecutionEvent("action_executed", (event) => setFired(event)));
     return () => {
       cancelled = true;
-      unlistenKey?.();
-      unlistenAction?.();
+      unlisten.forEach((fn) => fn());
       if (activeTimer.current) window.clearTimeout(activeTimer.current);
     };
-  }, []);
+  }, [refreshMice, checkSynapse]);
 
-  // While the live hardware-test step is open, suppress real action execution
-  // so pressing Naga buttons only lights up the tester (no search/delete/etc.).
-  // Always cleared when leaving the step or unmounting.
+  // While the buttons are checked, actions do not run and the extra controls
+  // join the live map; both end when the step does.
+  const checkExtras = extras.length > 0;
   useEffect(() => {
-    if (!testingButtons) return;
-
+    if (!testingButtons || !deviceId) return;
     let cancelled = false;
     let poll: number | undefined;
-    const reportError = (err: unknown) => {
-      if (!cancelled) setRuntimeSetupError(normalizeCommandError(err).message);
-    };
+    const started = Date.now();
     const checkReady = async () => {
-      const ready = await getNagaV3CaptureReady();
+      const now = await getLiveMapReady(deviceId);
       if (cancelled) return;
-      liveVerification.current = ready;
-      setV3Ready(ready);
+      readyRef.current = now;
+      setReady(now);
+      if (!now && Date.now() - started > READY_TIMEOUT_MS) setTimedOut(true);
       poll = window.setTimeout(() => void checkReady().catch(reportError), 500);
     };
-    setV3Ready(false);
-    setRuntimeSetupError(null);
-    void setInputCaptureMode(true, nagaV3).then(async () => {
-      if (cancelled || !nagaV3) return;
-      await startRuntime();
-      if (!cancelled) await checkReady();
-    }).catch(reportError);
-
+    const reportError = (err: unknown) => !cancelled && setRuntimeError(normalizeCommandError(err).message);
+    readyRef.current = false;
+    setReady(false);
+    setTimedOut(false);
+    setRuntimeError(null);
+    void setInputCaptureMode(true, checkExtras)
+      .then(() => startRuntime())
+      .then(async () => {
+        if (!cancelled) await checkReady();
+      })
+      .catch(reportError);
     return () => {
       cancelled = true;
       window.clearTimeout(poll);
-      liveVerification.current = false;
-      void setInputCaptureMode(false, nagaV3).catch((err) => {
+      readyRef.current = false;
+      void setInputCaptureMode(false, checkExtras).catch((err) => {
         console.error("Could not leave onboarding capture mode:", err);
       });
     };
-  }, [testingButtons, nagaV3]);
+  }, [testingButtons, deviceId, checkExtras, attempt]);
 
-  const complete = useCallback(() => {
-    applyConfig({ ...config, settings: { ...config.settings, onboardingCompleted: true } });
-    onClose();
-  }, [config, applyConfig, onClose]);
+  // The finale needs the runtime for a real press.
+  useEffect(() => {
+    if (step !== "tryit") return;
+    void startRuntime().catch((err) => setRuntimeError(normalizeCommandError(err).message));
+  }, [step]);
 
-  // Keyboard containment + Escape-to-skip handled by ModalShell.
+  const finish = useCallback(() => {
+    applyConfig({ ...config, settings: { ...config.settings, onboardingCompleted: true, onboardingStep: undefined } });
+    onClose(deviceId);
+  }, [config, applyConfig, onClose, deviceId]);
+
   const cardRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // On each step change, move focus to that step's heading so screen readers
-    // announce the new step (the SPA route-change pattern). Headings aren't
-    // focusable by default, so make the current one programmatically focusable.
+    // Move focus to the step heading so screen readers announce the new step.
     const heading = cardRef.current?.querySelector<HTMLElement>(".onb-step__title");
     if (heading) {
       heading.tabIndex = -1;
       heading.focus();
     }
-  }, [stepIdx, v3Ready]);
+  }, [step, ready]);
 
-  const goNext = useCallback(() => {
-    // Keep the setState updater pure: decide from the current index in the
-    // closure and run the side effect (complete()) outside it, so StrictMode's
-    // double-invoked updater can't fire complete() twice.
-    if (stepIdx >= steps.length - 1) {
-      complete();
-    } else {
-      setStepIdx((i) => i + 1);
-    }
-  }, [stepIdx, steps.length, complete]);
-  const goBack = useCallback(() => setStepIdx((i) => Math.max(0, i - 1)), []);
+  const goNext = () => (stepIdx >= steps.length - 1 ? finish() : setStepKey(steps[stepIdx + 1]));
+  const goBack = () => setStepKey(steps[Math.max(0, stepIdx - 1)]);
 
-  const writeMouse = useCallback(async () => {
+  // Another mouse starts its checks from scratch.
+  useEffect(() => {
+    setDetected(new Set());
+    setDetectedShifted(new Set());
+    setDetectedExtras(new Set());
+    setFullCheck(false);
+    setMissedHold(null);
+  }, [deviceId]);
+
+  async function writeMouse() {
     setMouseWriteError(null);
     setMouseWritten(false);
     try {
@@ -280,402 +302,307 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     } catch (err) {
       setMouseWriteError(normalizeCommandError(err).message);
     }
-  }, []);
+  }
 
-  const toggleAdmin = useCallback(async () => {
+  async function enableAdmin() {
     setAdminBusy(true);
     setAdminError(null);
     try {
-      // Enabling autostart only registers the scheduled task — it does NOT
-      // elevate the current session, so `elevated` stays as-is (the welcome
-      // check only flips to OK after an actual elevated relaunch / next logon).
-      const next = await setAdminAutostart(true);
-      setAdmin(next);
+      setAdmin(await setAdminAutostart(true));
     } catch (err) {
       setAdminError(normalizeCommandError(err).message);
     } finally {
       setAdminBusy(false);
     }
-  }, []);
+  }
 
-  // Relaunch the current session elevated. On success the process exits and a
-  // new elevated one starts; onboarding reopens (flag still false) with the
-  // admin check green. Only the UAC-declined / failure path returns here.
-  const handleRelaunch = useCallback(async () => {
+  // The elevated instance reopens setup at this step.
+  async function relaunch() {
     setRelaunchError(null);
+    applyConfig({ ...config, settings: { ...config.settings, onboardingStep: steps.indexOf("admin") } });
     try {
       await relaunchAsAdmin();
     } catch (err) {
       setRelaunchError(normalizeCommandError(err).message);
     }
-  }, []);
+  }
 
-
-  const readiness = useMemo<CheckState>(() => {
-    if (synapseOk === "pending" || elevated === "pending") return "pending";
-    return synapseOk === "ok" ? "ok" : "bad";
-  }, [synapseOk, elevated]);
+  // Choosing between two mice is a question, not a problem; an unverified
+  // model works, just without the checks.
+  const mouseState: CheckState = mice === null || (mice.length > 1 && !mouse) ? "pending"
+    : mouse?.verified ? "ok" : mouse ? "warn" : "bad";
+  const nextDisabled =
+    (step === "welcome" && (synapse === "pending" || synapse === "running" || synapse === "closing"
+      || (mice !== null && mice.length > 1 && !chosen)));
+  const skipping = (step === "live" && !confirmed) || (step === "extras" && detectedExtras.size < extras.length);
+  const nextLabel = stepIdx === steps.length - 1 ? t("onboarding.finish")
+    : step === "live" && !confirmed ? t("onboarding.check.skip")
+      : step === "extras" && detectedExtras.size < extras.length ? t("onboarding.check.skipExtras")
+        : t("onboarding.next");
 
   return (
     <ModalShell
-      onClose={complete}
+      onClose={finish}
       backdropClassName="onb-overlay"
       className="onb-card"
       dialogRef={cardRef}
-      ariaLabel={T.ariaTitle}
+      ariaLabel={t("onboarding.ariaTitle")}
       dismissOnBackdropClick={false}
     >
-        <div className="onb-header">
-          <span className="onb-header__title">{T.brand}</span>
-          <div className="onb-lang" role="group" aria-label={T.ariaLanguage}>
-            <button
-              type="button"
-              className={lang === "ru" ? "is-active" : ""}
-              onClick={() => changeLanguage("ru")}
-            >
-              RU
+      <div className="onb-header">
+        <span className="onb-header__title">{t("onboarding.brand")}</span>
+        <div className="onb-lang" role="group" aria-label={t("onboarding.ariaLanguage")}>
+          {(["ru", "en"] as const).map((code) => (
+            <button key={code} type="button" className={lang === code ? "is-active" : ""}
+              aria-pressed={lang === code} onClick={() => changeLanguage(code)}>
+              {code.toUpperCase()}
             </button>
-            <button
-              type="button"
-              className={lang === "en" ? "is-active" : ""}
-              onClick={() => changeLanguage("en")}
-            >
-              EN
-            </button>
-          </div>
-          <button type="button" className="onb-skip" onClick={complete}>
-            {T.skip}
-          </button>
+          ))}
         </div>
+        <button type="button" className="onb-skip" onClick={finish}>{t("onboarding.skip")}</button>
+      </div>
 
-        <div className="onb-progress" role="progressbar" aria-valuemin={1} aria-valuemax={steps.length} aria-valuenow={stepIdx + 1}>
-          {steps.map((s, i) => (
+      <ol className="onb-progress" aria-label={t("onboarding.ariaSteps")}>
+        {steps.map((key, i) => (
+          <li key={key}>
             <button
-              key={s}
               type="button"
-              aria-label={`${i + 1}/${steps.length}`}
+              aria-label={t("onboarding.stepLabel", { n: i + 1, total: steps.length, name: t(`onboarding.stepName.${key}`) })}
               aria-current={i === stepIdx ? "step" : undefined}
               disabled={i > stepIdx}
               className={`onb-dot ${i === stepIdx ? "is-current" : i < stepIdx ? "is-done" : ""}`}
-              onClick={() => i < stepIdx && setStepIdx(i)}
+              onClick={() => i < stepIdx && setStepKey(key)}
             />
-          ))}
-        </div>
+          </li>
+        ))}
+      </ol>
 
-        <div className="onb-body">
-          <div className="onb-step" key={step}>
-            {step === "welcome" && nagaV3 && (
-              <>
-                <h2 className="onb-step__title">Razer Naga V3 Pro</h2>
-                <p className="onb-step__lead">{t("onboarding.v3.welcome")}</p>
-                <div className="onb-result" role="status">
-                  {t(`onboarding.v3.synapse.${v3Synapse}`)}
-                </div>
-                {(v3Synapse === "bad" || v3Synapse === "unknown") && (
+      <div className="onb-body">
+        <div className="onb-step" key={step}>
+          {step === "welcome" && (
+            <>
+              <h2 className="onb-step__title">{t("onboarding.welcome.title")}</h2>
+              <p className="onb-step__lead">{t("onboarding.welcome.lead")}</p>
+              {mice !== null && mice.length > 1 && (
+                <fieldset className="onb-choice">
+                  <legend className="onb-step__section-title">{t("onboarding.device.choose")}</legend>
+                  {mice.map((item) => (
+                    <label key={item.deviceId} className={`onb-choice__option${chosen === item.deviceId ? " is-active" : ""}`}>
+                      <input type="radio" name="onb-mouse" value={item.deviceId}
+                        checked={chosen === item.deviceId} onChange={() => setChosen(item.deviceId)} />
+                      <span>{item.name}</span>
+                    </label>
+                  ))}
+                  <span className="panel__muted">{t("onboarding.device.later")}</span>
+                </fieldset>
+              )}
+              <div className="onb-step__section-title">{t("onboarding.welcome.checks")}</div>
+              <div className="onb-checks">
+                <CheckRow
+                  state={mouseState}
+                  label={mouse ? mouse.name : t("onboarding.device.label")}
+                  hint={mice === null ? t("onboarding.checkPending")
+                    : !mouse ? t(mice.length > 1 ? "onboarding.device.pick" : "onboarding.device.none")
+                      : mouse.verified ? t("onboarding.device.found") : t("onboarding.device.unverified")}
+                  action={mice !== null && mice.length === 0 ? (
+                    <button type="button" className="onb-check__action" onClick={() => void refreshMice()}>
+                      {t("onboarding.retry")}
+                    </button>
+                  ) : undefined}
+                />
+                <CheckRow
+                  state={synapse === "ok" ? "ok" : synapse === "running" ? "bad" : "pending"}
+                  label={t("onboarding.synapse.label")}
+                  hint={t(`onboarding.synapse.${synapse}`)}
+                  action={synapse === "unknown" ? (
+                    <button type="button" className="onb-check__action" onClick={() => void checkSynapse()}>
+                      {t("onboarding.retry")}
+                    </button>
+                  ) : undefined}
+                />
+                <CheckRow
+                  state={elevated === "bad" ? "warn" : elevated}
+                  label={t("onboarding.welcome.cElevated")}
+                  hint={t(elevated === "ok" ? "onboarding.checkOk" : elevated === "bad" ? "onboarding.welcome.elevatedHint" : "onboarding.checkPending")}
+                />
+              </div>
+              {synapse === "running" && (
+                <div className="onb-synapse" role="alert">
+                  <p>{t("onboarding.synapse.explain")}</p>
+                  <label className="onb-synapse__startup">
+                    <input type="checkbox" checked={disableStartup} onChange={(e) => setDisableStartup(e.target.checked)} />
+                    {t("onboarding.synapse.startup")}
+                  </label>
                   <div className="onb-actions">
-                    <button type="button" className="onb-btn ghost" onClick={() => void checkV3Synapse()}>
-                      {t("onboarding.v3.synapse.retry")}
+                    <button type="button" className="onb-btn primary" onClick={() => void closeSynapse()}>
+                      {t("onboarding.synapse.close")}
+                    </button>
+                    <button type="button" className="onb-btn ghost" onClick={() => void checkSynapse()}>
+                      {t("onboarding.retry")}
                     </button>
                   </div>
-                )}
-              </>
-            )}
-            {step === "welcome" && !nagaV3 && (
-              <>
-                <h2 className="onb-step__title">{T.welcome.title}</h2>
-                <p className="onb-step__lead">{T.welcome.lead}</p>
-                <div className="onb-step__section-title">{T.welcome.checks}</div>
-                <div className="onb-checks">
-                  <CheckRow
-                    state={synapseOk}
-                    label={T.welcome.cSynapse}
-                    hint={synapseOk === "bad" ? T.welcome.synapseHint : hintFor(synapseOk, T)}
-                  />
-                  <CheckRow
-                    state={elevated}
-                    label={T.welcome.cElevated}
-                    hint={hintFor(elevated, T)}
-                    action={
-                      elevated === "bad" ? (
-                        <button
-                          type="button"
-                          className="onb-check__action"
-                          onClick={() => void handleRelaunch()}
-                        >
-                          {T.welcome.relaunch}
-                        </button>
-                      ) : undefined
-                    }
-                  />
-                  <CheckRow state={readiness} label={T.welcome.cNaga} hint={T.welcome.nagaHint} />
                 </div>
-                {relaunchError ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot bad" /> {relaunchError}
-                  </div>
-                ) : null}
-              </>
-            )}
+              )}
+              {synapseError && <div className="onb-result" role="alert">{synapseError}</div>}
+              {mice !== null && mice.length === 0 && (
+                <p className="onb-step__lead onb-step__lead--note">{t("onboarding.device.noneNote")}</p>
+              )}
+            </>
+          )}
 
-            {step === "mouse" && (
-              <>
-                <h2 className="onb-step__title">{T.mouse.title}</h2>
-                <p className="onb-step__lead">{T.mouse.lead}</p>
-                <ol className="onb-steps-list">
-                  <li>{T.mouse.s1}</li>
-                  <li>{T.mouse.s2}</li>
-                </ol>
+          {step === "mouse" && (
+            <>
+              <h2 className="onb-step__title">{t("onboarding.mouse.title")}</h2>
+              <p className="onb-step__lead">{t("onboarding.mouse.lead")}</p>
+              <div className="onb-actions">
+                <button type="button" className="onb-btn primary" onClick={() => void writeMouse()}>
+                  {t("onboarding.mouse.write")}
+                </button>
+              </div>
+              {mouseWritten && <div className="onb-result"><span className="onb-check__dot ok" /> {t("onboarding.mouse.written")}</div>}
+              {mouseWriteError && (
+                <div className="onb-result" role="alert">
+                  <span className="onb-check__dot bad" /> {t("onboarding.mouse.failed")}
+                  <span className="panel__muted">{mouseWriteError}</span>
+                </div>
+              )}
+            </>
+          )}
+
+          {testingButtons && !ready && (
+            <>
+              <h2 className="onb-step__title">{t(timedOut ? "onboarding.check.timeoutTitle" : "onboarding.check.preparingTitle")}</h2>
+              <p className="onb-step__lead" role="status">
+                {t(timedOut ? "onboarding.check.timeout" : "onboarding.check.preparing")}
+              </p>
+              {timedOut && (
                 <div className="onb-actions">
-                  <button type="button" className="onb-btn primary" onClick={() => void writeMouse()}>
-                    {T.mouse.write}
+                  <button type="button" className="onb-btn primary" onClick={() => setAttempt(attempt + 1)}>
+                    {t("onboarding.retry")}
                   </button>
                 </div>
-                {mouseWritten && (
-                  <div className="onb-result">
-                    <span className="onb-check__dot ok" /> {T.mouse.written}
-                  </div>
-                )}
-                {mouseWriteError && (
-                  <div className="onb-result">
-                    <span className="onb-check__dot bad" /> {mouseWriteError}
-                  </div>
-                )}
-              </>
-            )}
+              )}
+              {runtimeError && <div className="onb-result" role="alert">{runtimeError}</div>}
+            </>
+          )}
+          {step === "live" && ready && (
+            <>
+              <h2 className="onb-step__title">{t("onboarding.check.title")}</h2>
+              <p className="onb-step__lead" role="status">{t(`onboarding.check.${instruction}`, { trigger: triggerName })}</p>
+              {checkingShifted && !confirmed && missedHold !== null && (
+                <div className="onb-result" role="status">{t("onboarding.check.missedHold", { button: missedHold, trigger: triggerName })}</div>
+              )}
+              <NagaIllustration
+                detected={checkingShifted ? detectedShifted : detected}
+                active={lastShifted === checkingShifted ? activeBtn : null}
+                label={t("onboarding.ariaNaga")}
+              />
+              <div className="onb-live-readout" role="status">
+                <div>{t("onboarding.check.standardProgress", { count: standardCount, total })}</div>
+                {trigger && <div>{t("onboarding.check.heldProgress", { count: shiftedCount, total, trigger: triggerName })}</div>}
+              </div>
+              <button type="button" className="onb-btn ghost" onClick={() => {
+                setFullCheck(!fullCheck);
+                setMissedHold(null);
+              }}>
+                {t(fullCheck ? "onboarding.check.checkOne" : "onboarding.check.checkAll", { count: trigger ? 24 : 12 })}
+              </button>
+              {runtimeError && <div className="onb-result" role="alert">{runtimeError}</div>}
+            </>
+          )}
+          {step === "extras" && ready && (
+            <>
+              <h2 className="onb-step__title">{t("onboarding.check.extrasTitle")}</h2>
+              <p className="onb-step__lead">{t("onboarding.check.extrasLead", { trigger: triggerName })}</p>
+              <p role="status">{t("onboarding.check.extrasProgress", { count: detectedExtras.size, total: extras.length })}</p>
+              <div className="onb-checks onb-checks--extras">
+                {extras.map(([id, label]) => {
+                  const state = detectedExtras.has(id) ? "ok" : "pending";
+                  return <CheckRow key={id} state={state} label={t(label)} hint={t(state === "ok" ? "onboarding.check.extraSeen" : "onboarding.check.extraWaiting")} />;
+                })}
+              </div>
+              {runtimeError && <div className="onb-result" role="alert">{runtimeError}</div>}
+            </>
+          )}
 
-            {testingButtons && nagaV3 && !v3Ready && (
-              <>
-                <h2 className="onb-step__title">{t("onboarding.v3.preparingTitle")}</h2>
-                {runtimeSetupError
-                  ? <div className="onb-result" role="alert">{runtimeSetupError}</div>
-                  : <p className="onb-step__lead" role="status">{t("onboarding.v3.preparing")}</p>}
-              </>
-            )}
-            {step === "live" && nagaV3 && v3Ready && (
-              <>
-                <h2 className="onb-step__title">{t("onboarding.v3.check")}</h2>
-                <p className="onb-step__lead" role="status">{t(`onboarding.v3.${v3Instruction}`)}</p>
-                {checkingShifted && !v3Confirmed && missedHold !== null && (
-                  <div className="onb-result" role="status">{t("onboarding.v3.missedHold", { button: missedHold })}</div>
-                )}
-                <NagaIllustration
-                  detected={checkingShifted ? detectedShifted : detected}
-                  active={lastShifted === checkingShifted ? activeBtn : null}
-                  label={T.ariaNaga}
-                />
-                <div className="onb-live-readout" role="status">
-                  <div>{t("onboarding.v3.standardProgress", { count: v3StandardCount, total: v3Total })}</div>
-                  <div>{t("onboarding.v3.heldProgress", { count: v3ShiftedCount, total: v3Total })}</div>
-                </div>
-                <button type="button" className="onb-btn ghost" onClick={() => {
-                  setFullCheck(!fullCheck);
-                  setMissedHold(null);
-                }}>
-                  {t(fullCheck ? "onboarding.v3.checkOne" : "onboarding.v3.checkAll")}
-                </button>
-                {runtimeSetupError && <div className="onb-result" role="alert">{runtimeSetupError}</div>}
-              </>
-            )}
-            {step === "extras" && v3Ready && (
-              <>
-                <h2 className="onb-step__title">{t("onboarding.v3.extrasTitle")}</h2>
-                <p className="onb-step__lead">{t("onboarding.v3.extrasLead")}</p>
-                <p role="status">{t("onboarding.v3.extrasProgress", {
-                  count: detectedExtras.size,
-                  total: Object.keys(V3_EXTRA_LABELS).length,
-                })}</p>
-                <div className="onb-checks onb-checks--extras">
-                  {Object.entries(V3_EXTRA_LABELS).map(([id, label]) => {
-                    const state = detectedExtras.has(id) ? "ok" : "pending";
-                    return <CheckRow key={id} state={state} label={t(label)} hint={t(state === "ok" ? "onboarding.v3.extraSeen" : "onboarding.v3.extraWaiting")} />;
-                  })}
-                </div>
-                {runtimeSetupError && <div className="onb-result" role="alert">{runtimeSetupError}</div>}
-              </>
-            )}
-            {step === "live" && !nagaV3 && (
-              <>
-                <h2 className="onb-step__title">{T.live.title}</h2>
-                <p className="onb-step__lead">{T.live.lead}</p>
-                <NagaIllustration detected={detected} active={activeBtn} label={T.ariaNaga} />
-                <div className="onb-live-readout">
-                  {lastButton !== null ? (
-                    <>
-                      {T.live.last} <strong>{lastButton}</strong> — {detectedCount}/12
-                    </>
-                  ) : (
-                    T.live.waiting
+          {step === "admin" && (
+            <>
+              <h2 className="onb-step__title">{t("onboarding.admin.title")}</h2>
+              <p className="onb-step__lead">{t("onboarding.admin.lead")}</p>
+              {elevated === "ok" ? (
+                <div className="onb-result"><span className="onb-check__dot ok" /> {t("onboarding.admin.already")}</div>
+              ) : (
+                <>
+                  {admin?.enabled && (
+                    <div className="onb-result"><span className="onb-check__dot ok" /> {t("onboarding.admin.autostartConfigured")}</div>
                   )}
-                </div>
-                {detectedCount >= 12 && (
-                  <div className="onb-result">
-                    <span className="onb-check__dot ok" /> {T.live.allDone}
-                  </div>
-                )}
-                {runtimeSetupError ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot bad" /> {runtimeSetupError}
-                  </div>
-                ) : null}
-              </>
-            )}
-
-            {step === "admin" && (
-              <>
-                <h2 className="onb-step__title">{T.admin.title}</h2>
-                <p className="onb-step__lead">{T.admin.lead}</p>
-                {elevated === "ok" ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot ok" /> {T.admin.already}
-                  </div>
-                ) : admin?.enabled ? (
-                  <>
-                    <div className="onb-result">
-                      <span className="onb-check__dot ok" /> {T.admin.autostartConfigured}
-                    </div>
-                    <div className="onb-actions">
-                      <button type="button" className="onb-btn primary" onClick={() => void handleRelaunch()}>
-                        {T.admin.relaunch}
-                      </button>
-                    </div>
-                  </>
-                ) : (
                   <div className="onb-actions">
-                    <button
-                      type="button"
-                      className="onb-btn primary"
-                      onClick={() => void toggleAdmin()}
-                      disabled={adminBusy}
-                    >
-                      {adminBusy ? T.admin.busy : T.admin.enable}
-                    </button>
-                    <button type="button" className="onb-btn ghost" onClick={() => void handleRelaunch()}>
-                      {T.admin.relaunch}
+                    {!admin?.enabled && (
+                      <button type="button" className="onb-btn primary" onClick={() => void enableAdmin()} disabled={adminBusy}>
+                        {adminBusy ? t("onboarding.admin.busy") : t("onboarding.admin.enable")}
+                      </button>
+                    )}
+                    <button type="button" className={admin?.enabled ? "onb-btn primary" : "onb-btn ghost"} onClick={() => void relaunch()}>
+                      {t("onboarding.admin.relaunch")}
                     </button>
                   </div>
-                )}
-                {relaunchError ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot bad" /> {relaunchError}
-                  </div>
-                ) : null}
-                {adminError ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot bad" /> {adminError}
-                  </div>
-                ) : null}
-                <p className="onb-step__lead onb-step__lead--note">
-                  {T.admin.note}
-                </p>
-              </>
-            )}
+                </>
+              )}
+              {relaunchError && <div className="onb-result" role="alert"><span className="onb-check__dot bad" /> {relaunchError}</div>}
+              {adminError && <div className="onb-result" role="alert"><span className="onb-check__dot bad" /> {adminError}</div>}
+              <p className="onb-step__lead onb-step__lead--note">{t("onboarding.admin.note")}</p>
+            </>
+          )}
 
-            {step === "tryit" && nagaV3 && (
-              <>
-                <h2 className="onb-step__title">{t("onboarding.v3.ready")}</h2>
-                <p className="onb-step__lead">{t("onboarding.v3.assign")}</p>
-              </>
-            )}
-            {step === "tryit" && !nagaV3 && (
-              <>
-                <h2 className="onb-step__title">{T.tryit.title}</h2>
-                <p className="onb-step__lead">{T.tryit.lead}</p>
-                {fired ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot ok" />
-                    {T.tryit.fired}: <strong className="onb-result__value">{fired.actionPretty}</strong>
-                    {fired.resolvedProfileName ? `(${fired.resolvedProfileName})` : ""}
-                  </div>
-                ) : (
-                  <div className="onb-result is-pending">{T.tryit.waiting}</div>
-                )}
-                {runtimeSetupError ? (
-                  <div className="onb-result">
-                    <span className="onb-check__dot bad" /> {runtimeSetupError}
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
+          {step === "tryit" && (
+            <>
+              <h2 className="onb-step__title">{t("onboarding.tryit.title")}</h2>
+              <p className="onb-step__lead">{t("onboarding.tryit.lead")}</p>
+              {fired ? (
+                <div className="onb-result">
+                  <span className="onb-check__dot ok" />
+                  {t("onboarding.tryit.fired")}: <strong className="onb-result__value">{fired.actionPretty}</strong>
+                  {fired.resolvedProfileName ? ` (${fired.resolvedProfileName})` : ""}
+                </div>
+              ) : (
+                <div className="onb-result is-pending">{t("onboarding.tryit.waiting")}</div>
+              )}
+              <div className="onb-actions">
+                <button type="button" className="onb-btn ghost" onClick={finish}>{t("onboarding.tryit.assign")}</button>
+              </div>
+              {runtimeError && <div className="onb-result" role="alert">{runtimeError}</div>}
+            </>
+          )}
         </div>
+      </div>
 
-        <div className="onb-footer">
-          <button type="button" className="onb-btn ghost" onClick={goBack} disabled={stepIdx === 0}>
-            {T.back}
-          </button>
-          <div className="onb-spacer" />
-          <button type="button" className="onb-btn primary" onClick={goNext} disabled={nagaV3 && (
-            (step === "welcome" && (v3Synapse === "pending" || v3Synapse === "bad")) ||
-            (step === "live" && (!v3Ready || !v3Confirmed))
-          )}>
-            {stepIdx === steps.length - 1 ? T.finish
-              : step === "extras" && !extrasComplete ? t("onboarding.v3.skipExtras") : T.next}
-          </button>
-        </div>
+      <div className="onb-footer">
+        <button type="button" className="onb-btn ghost" onClick={goBack} disabled={stepIdx === 0}>
+          {t("onboarding.back")}
+        </button>
+        <div className="onb-spacer" />
+        {/* Skipping a check is allowed but never the suggested action. */}
+        <button type="button" className={skipping ? "onb-btn ghost" : "onb-btn primary"} onClick={goNext} disabled={nextDisabled}>
+          {nextLabel}
+        </button>
+      </div>
     </ModalShell>
   );
 }
 
-function CheckRow({
-  state,
-  label,
-  hint,
-  action,
-}: {
+function CheckRow({ state, label, hint, action }: {
   state: CheckState;
   label: string;
   hint: string;
-  /** Optional inline affordance shown in place of the hint (e.g. a fix button). */
+  /** Optional inline action shown next to the hint (e.g. a retry button). */
   action?: ReactNode;
 }) {
-  const dot = state === "ok" ? "ok" : state === "bad" ? "bad" : "pending";
   return (
     <div className="onb-check">
-      <span className={`onb-check__dot ${dot}`} />
+      <span className={`onb-check__dot ${state}`} aria-hidden="true" />
       <span className="onb-check__label">{label}</span>
-      {action ?? <span className="onb-check__hint">{hint}</span>}
+      <span className="onb-check__hint">{hint}</span>
+      {action}
     </div>
   );
-}
-
-function hintFor(state: CheckState, T: Copy): string {
-  if (state === "ok") return T.checkOk;
-  if (state === "bad") return T.checkBad;
-  return T.checkPending;
-}
-
-interface Copy {
-  brand: string;
-  ariaTitle: string;
-  ariaLanguage: string;
-  ariaNaga: string;
-  skip: string;
-  back: string;
-  next: string;
-  finish: string;
-  checkOk: string;
-  checkBad: string;
-  checkPending: string;
-  welcome: {
-    title: string;
-    lead: string;
-    checks: string;
-    cSynapse: string;
-    cElevated: string;
-    cNaga: string;
-    nagaHint: string;
-    relaunch: string;
-    synapseHint: string;
-  };
-  mouse: {
-    title: string;
-    lead: string;
-    s1: string;
-    s2: string;
-    write: string;
-    written: string;
-  };
-  live: { title: string; lead: string; waiting: string; last: string; allDone: string };
-  admin: { title: string; lead: string; enable: string; busy: string; already: string; autostartConfigured: string; relaunch: string; note: string };
-  tryit: { title: string; lead: string; waiting: string; fired: string };
 }

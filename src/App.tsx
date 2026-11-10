@@ -29,7 +29,6 @@ import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { SynapseNotice } from "./components/SynapseNotice";
 import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
-import { MouseWorkspace } from "./components/MouseWorkspace";
 import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
@@ -49,6 +48,7 @@ import {
   listenMouseStatus,
   getMouseStatus,
   getNativeModel,
+  listenNativeMiceChanged,
   reloadRuntime,
   setKeySignals,
   setNativeTexts,
@@ -62,10 +62,11 @@ import {
   setAdminAutostart,
 } from "./lib/backend";
 import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels";
-import { MOUSE_STATUS_NOTICES, type MouseStatusKind } from "./lib/onboard-mapping";
+import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
-import { isBuiltinControl, NAGA_V3_DEVICE_ID, usesNagaV3Ring } from "./lib/onboard-mapping";
+import { isBuiltinControl } from "./lib/onboard-mapping";
+import { deviceControlId, deviceLayout, hasDevice, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -158,7 +159,7 @@ function App() {
     undoStack,
     redoStack,
     activeConfig,
-    refreshConfig, updateDraft, handleUndo, handleRedo,
+    refreshConfig, refreshAfterSave, updateDraft, handleUndo, handleRedo,
   } = persistence;
 
   // Razer conveniences (Synapse import, factory-defaults toast) only make
@@ -261,7 +262,7 @@ function App() {
     return () => unlisten?.();
   }, [showToast, t]);
 
-  // Mouse-path states feed the Mouse tab; notices (kept by the backend until
+  // Mouse-path states feed the mouse's Performance tab; notices (kept by the backend until
   // taken, so one raised at startup is not lost) become a toast.
   const [mouseStates, setMouseStates] = useState<MouseStatusKind[]>([]);
   useEffect(() => {
@@ -401,6 +402,26 @@ function App() {
     return () => unlisten?.();
   }, [switchWorkspaceMode]);
 
+  // A mouse plugged in while Sidearm runs: loading the config adds its device
+  // (the backend seeds it), so reload once one is missing.
+  const reloadForNewMouse = useEffectEvent((mice: NativeModelInfo[]) => {
+    if (activeConfig && mice.some((mouse) => mouse.verified && !hasDevice(activeConfig, mouse.deviceId))) {
+      void refreshAfterSave();
+    }
+  });
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void listenNativeMiceChanged((mice) => reloadForNewMouse(mice)).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
   // Tray quick-rule found no usable target window (only Sidearm was in front) —
   // tell the user instead of failing silently.
   useEffect(() => {
@@ -527,6 +548,9 @@ function App() {
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
+  // A rule chosen in the sidebar opens in the assignments screen's editor.
+  const [editRuleSignal, setEditRuleSignal] = useState<string | null>(null);
+  const [allRulesView, setAllRulesView] = useState(false);
   // Tray "Create rule for active window" capture, consumed by ProfilesWorkspace.
   const [quickRuleCapture, setQuickRuleCapture] = useState<WindowCaptureResult | null>(null);
 
@@ -542,9 +566,9 @@ function App() {
   });
   useEffect(() => {
     if (!migrationChecked || showMigrationDialog || viewState !== "ready" || !activeConfig || autoStartedRuntime.current) return;
-    // The first V3 check starts capture after Synapse preflight and applies the
-    // test map directly. Starting here would apply a map and then undo it.
-    if (!activeConfig.settings.onboardingCompleted && usesNagaV3Ring(activeConfig)) return;
+    // A first-run setup starts capture itself, after its Razer Synapse check.
+    // Re-running setup later must not leave the buttons dead at autostart.
+    if (activeConfig.settings.onboardingCompleted === undefined) return;
     autoStartedRuntime.current = true;
     startInitialRuntime();
   }, [activeConfig, migrationChecked, showMigrationDialog, viewState]);
@@ -697,9 +721,8 @@ function App() {
       }
     } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && !e.ctrlKey && !e.altKey && !e.metaKey) {
       // Arrow keys: navigate between hotspots
-      const hotspotIds = effectiveDeviceId === NAGA_V3_DEVICE_ID
-        ? ALL_HOTSPOT_IDS.map((id) => "v3_" + id)
-        : ALL_HOTSPOT_IDS;
+      const layout = deviceLayout(effectiveDeviceId);
+      const hotspotIds = layout ? ALL_HOTSPOT_IDS.map((id) => deviceControlId(layout, id)) : ALL_HOTSPOT_IDS;
       const availableIds = hotspotIds.filter((id) => activeConfig?.physicalControls.some((control) =>
         control.id === id && control.deviceId === effectiveDeviceId));
       if (availableIds.length > 0 && selectedControlId) {
@@ -723,7 +746,7 @@ function App() {
       e.preventDefault();
       updateDraft((c) => removeBinding(c, selectedBinding.id));
     } else if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-      // Number keys 1-4: switch workspace tabs
+      // Number keys: switch workspace tabs in sidebar order
       const modeIndex = Number(e.key) - 1;
       if (modeIndex >= 0 && modeIndex < workspaceModeCopy.length) {
         switchWorkspaceMode(workspaceModeCopy[modeIndex].value);
@@ -1038,9 +1061,7 @@ function App() {
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
                 isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
-                  && control.id === (control.deviceId === NAGA_V3_DEVICE_ID
-                    ? "v3_hypershift_button"
-                    : activeConfig.settings.hypershiftTrigger ?? "mouse_right"),
+                  && control.id === hypershiftControlId(activeConfig, control.deviceId),
               };
             }) ?? [],
       })),
@@ -1078,6 +1099,20 @@ function App() {
         setConfirmModal={setConfirmModal}
         activeConfig={activeConfig}
         selectedDeviceName={activeDevice?.name}
+        allRules={allRulesView}
+        onEditRule={(mappingId) => {
+          switchWorkspaceMode("profiles");
+          setEditRuleSignal(mappingId);
+        }}
+        onAddRule={() => {
+          switchWorkspaceMode("profiles");
+          setAddRuleSignal(true);
+        }}
+        onToggleAllRules={() => {
+          // From another screen the button opens the rules rather than hiding them.
+          setAllRulesView((v) => workspaceMode !== "profiles" || !v);
+          switchWorkspaceMode("profiles");
+        }}
       />
 
       <div className="content">
@@ -1103,6 +1138,9 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 addRuleSignal={addRuleSignal}
                 onAddRuleHandled={() => setAddRuleSignal(false)}
+                editRuleSignal={editRuleSignal}
+                onEditRuleHandled={() => setEditRuleSignal(null)}
+                allProfilesView={allRulesView}
                 quickRuleCapture={quickRuleCapture}
                 onQuickRuleHandled={() => setQuickRuleCapture(null)}
                 lastCapture={lastCapture}
@@ -1117,10 +1155,6 @@ function App() {
                 devices={devices}
                 activeDeviceId={effectiveDeviceId}
                 onSelectDevice={handleSelectDevice}
-                onSetupNagaV3={() => {
-                  handleSelectDevice(NAGA_V3_DEVICE_ID);
-                  setShowOnboarding(true);
-                }}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}
                 onSelectLayer={(layer) => setSelectedLayer(layer)}
@@ -1134,15 +1168,7 @@ function App() {
                 throttledControlIds={runtime.throttledControlIds}
                 heatmapEnabledRef={heatmapEnabledRef}
                 showToast={showToast}
-              />
-            ) : workspaceMode === "mouse" ? (
-              <MouseWorkspace
-                activeConfig={activeConfig}
-                profiles={profiles}
-                activeProfile={activeProfile}
                 runtimeProfileId={runtimeProfileId}
-                setSelectedProfileId={setSelectedProfileId}
-                updateDraft={updateDraft}
                 mouseStates={mouseStates}
               />
             ) : workspaceMode === "settings" ? (
@@ -1273,8 +1299,8 @@ function App() {
         <OnboardingWizard
           config={activeConfig}
           applyConfig={(next) => updateDraft(() => next, { immediate: true })}
-          onClose={() => {
-            if (usesNagaV3Ring(activeConfig)) handleSelectDevice(NAGA_V3_DEVICE_ID);
+          onClose={(deviceId) => {
+            if (deviceId && hasDevice(activeConfig, deviceId)) handleSelectDevice(deviceId);
             setShowOnboarding(false);
           }}
         />

@@ -51,6 +51,7 @@ export interface AppPersistence {
 
   // Functions
   refreshConfig: () => Promise<boolean>;
+  refreshAfterSave: () => Promise<boolean>;
   updateDraft: (
     updateConfig: (config: AppConfig) => AppConfig,
     options?: UpdateDraftOptions,
@@ -163,7 +164,10 @@ export function useAppPersistence(
         onOnboardWriteFailedRef.current?.(report.failed.join(", "));
       }
     } catch (unknownError) {
-      onOnboardWriteFailedRef.current?.(normalizeCommandError(unknownError).message);
+      const error = normalizeCommandError(unknownError);
+      // No onboard-path mouse plugged in: the guard writes it when one appears.
+      if (error.code === "onboard_not_connected") return;
+      onOnboardWriteFailedRef.current?.(error.message);
     }
   }
 
@@ -232,6 +236,18 @@ export function useAppPersistence(
         }
       }
     }
+  }
+
+  /** Saves a pending edit first, then reloads: for a config the backend
+   *  changed itself (a newly connected mouse got its device). */
+  async function refreshAfterSave(): Promise<boolean> {
+    // A save in flight drains the queue itself; wait until both are done.
+    while (isSavingRef.current || saveQueueRef.current) {
+      clearTimeout(saveTimerRef.current);
+      if (isSavingRef.current) await new Promise((resolve) => setTimeout(resolve, 50));
+      else await flushSave();
+    }
+    return refreshConfig();
   }
 
   async function refreshConfig(): Promise<boolean> {
@@ -324,6 +340,7 @@ export function useAppPersistence(
     activeWarnings,
     activePath,
     refreshConfig,
+    refreshAfterSave,
     updateDraft,
     handleUndo,
     handleRedo,

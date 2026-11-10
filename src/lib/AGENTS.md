@@ -6,12 +6,14 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 ## Ownership
 
-- `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v4.schema.json`).
+- `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v5.schema.json`).
 - `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe.
 - `conflict-detection.ts` — shortcut conflicts within a device, profile, and layer, plus `bindingMatchesQuery` (label/shortcut/action-content search).
 - `dpi-stages.ts` — pure, model-limited DPI choices and manual-value application for the single sensitivity control. Displaying defaults does not persist them; explicit application preserves the five-stage limit and custom saved values.
 - `onboard-mapping.ts` also defines the mouse snapshot IPC: three nullable readings, status and per-field UiText warnings/details. A missing read is not zero and does not erase saved profile settings. `getDeviceReport(detail)` keeps absent/full compatible with the existing verification scan.
 - `backend.ts` — typed wrappers over Tauri `invoke` (the only place `invoke` is called).
+- `devices.ts` — one `DeviceLayout` per built-in mouse (mirrors the Rust catalog's `device_id`/`control_prefix`): views, hotspots, legend columns, firmware HyperShift button, wizard extras; `layoutControlId`/`deviceControlId` translate between a device's control ids and the shared layout ids. Model differences in the UI live here only.
+- `device-transfer.ts` — copying assignments between built-in mice (`planDeviceTransfer`/`applyDeviceTransfer`: same layout place, V2 side buttons ↔ V3 tilt, cloned actions, keep/replace) and placing an imported profile's bindings on a chosen mouse (`retargetImportedBindings`).
 - `helpers.ts`, `labels.ts`, `menu-helpers.ts`, `action-helpers.ts`, `command-palette-helpers.ts`, `verification-*`, `*-transfer.ts`, `synapse-import.ts`, `mouse-visual.ts`, `onboard-mapping.ts` (thumb + top-button bindings handed to `verify_onboard_mapping`, mirroring Rust `onboard_bindings`, `isBuiltinControl` for hiding the built-in device's signals, plus the takeover event type and the `NativeModelInfo` limits of `get_native_model`), `constants/`.
 
 ## Local Contracts

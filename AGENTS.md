@@ -93,7 +93,7 @@ Windows-first desktop app that remaps a programmable mouse (Razer Naga) and keyb
 - Code comments in English.
 - All user-facing text goes through i18next with matching `en.json` + `ru.json` keys — never hardcode UI strings. That includes text the Rust backend produces: no Russian (or other non-English) literals in Rust — see `src-tauri/AGENTS.md` (`ui_text!`).
 - No AI/assistant attribution anywhere (commits, PRs, code, docs).
-- Config is the source of truth: schema-first (`schemas/config.v4.schema.json` at the repo root, runtime-validated), atomic writes, rolling + daily backups, corrupt-recovery. The TS `AppConfig` (`src/lib/config.ts`) and Rust structs must stay in sync with the schema.
+- Config is the source of truth: schema-first (`schemas/config.v5.schema.json` at the repo root, runtime-validated), atomic writes, rolling + daily backups, corrupt-recovery. The TS `AppConfig` (`src/lib/config.ts`) and Rust structs must stay in sync with the schema.
 - Adding an `ActionType` touches many mirrored sites — see `src/components/action-picker/AGENTS.md`.
 - `CONTEXT.md` defines button identity, profile assignment, and the global HyperShift role; keep the role distinct from an executable action.
 - Fix root causes, not symptoms. Reuse existing shared primitives/helpers before adding new ones.
@@ -113,7 +113,7 @@ Run before declaring a code change done:
 - Diagnose to root cause before proposing fixes; explain what could break.
 - Commit when authorized; do not push/merge/release without explicit approval.
 - Run verification locally or on MiniPC. Do not start cloud CI jobs or add cloud verification gates; preserve cloud usage limits.
-- Portable packaging intentionally stops all running Sidearm processes on the build machine. Treat assembly as an interruption of those apps even when its output directory is isolated; do not narrow this behavior to one executable path.
+- Portable packaging intentionally stops all running Sidearm processes on the build machine: the app first (the Sidearm whose parent is not a Sidearm), then it waits up to 30 s for the `--restore-live-maps` process its helper starts to put the mice's live maps back, then stops whatever is left (a restorer waiting for a sleeping mouse; the next start restores). Treat assembly as an interruption of those apps even when its output directory is isolated; do not narrow this behavior to one executable path.
 - Use computer control only for brief necessary UI actions. Release it before builds, transfers, analysis or waiting for the user.
 
 ## Child DOX Index

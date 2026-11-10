@@ -1,9 +1,4 @@
 import type { AppConfig, ControlId } from "./config";
-export const NAGA_V3_DEVICE_ID = "razer-naga-v3";
-
-export function nagaLayoutControlId(controlId: ControlId): ControlId {
-  return controlId.startsWith("v3_") ? controlId.slice(3) : controlId;
-}
 
 /**
  * One thumb binding the mouse can hold in its own memory. The backend owns the
@@ -64,10 +59,6 @@ export function isBuiltinControl(config: AppConfig, controlId: ControlId | strin
   return config.devices.some((device) => device.id === control.deviceId && device.builtin === true);
 }
 
-export function usesNagaV3Ring(config: AppConfig): boolean {
-  return config.devices.some((device) => device.id === NAGA_V3_DEVICE_ID);
-}
-
 /** Live mouse settings; the mouse stores them, so they are not in the config. */
 export interface MouseSettings {
   batteryPercent: number | null;
@@ -83,9 +74,19 @@ export interface MouseBatteryEvent {
   low: boolean;
 }
 
+/** Onboard banks of a mouse (Rust `live_overlay::Banks`). */
+export interface OnboardBanks {
+  /** Banks holding a profile, ascending (1–5). */
+  assigned: number[];
+  /** The bank the mouse plays now. */
+  active: number;
+}
+
 /** The natively driven model's limits (Rust `NativeModelInfo`, from the device catalog). */
 export interface NativeModelInfo {
   name: string;
+  /** Config device its controls belong to. */
+  deviceId: string;
   dpiMin: number;
   dpiMax: number;
   /** Supported poll rates in Hz, ascending. */
@@ -94,6 +95,8 @@ export interface NativeModelInfo {
   verified: boolean;
   /** The model is plugged in now (else it is the config's model). */
   connected: boolean;
+  /** The mouse stores profiles in onboard banks (slots). */
+  banks: boolean;
   /** `null`: the model has no consumer path; else whether its key buttons send
    *  consumer signals (read by Sidearm) rather than `F13`..`F24`. */
   consumerSignals: boolean | null;

@@ -1,6 +1,6 @@
 # Config schema v4
 
-The current schema is `schemas/config.v4.schema.json`. Version 4 retains the
+Superseded by [config schema v5](CONFIG-SCHEMA-V5.md). Version 4 retains the
 device, control, assignment and global HyperShift model documented in
 [config schema v3](CONFIG-SCHEMA-V3.md).
 

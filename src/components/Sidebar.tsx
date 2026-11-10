@@ -5,17 +5,10 @@ import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
-import { ProfileDropdown } from "./ProfileDropdown";
-import { PillTrack } from "./PillTrack";
+import { SidebarProfiles } from "./SidebarProfiles";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
-  mouse: (
-    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="4" y="1.5" width="8" height="13" rx="4" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M8 1.5v4.5M4 6h8" stroke="currentColor" strokeWidth="1.3" />
-    </svg>
-  ),
   profiles: (
     <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
@@ -53,6 +46,10 @@ export function Sidebar({
   setConfirmModal,
   activeConfig,
   selectedDeviceName,
+  allRules,
+  onEditRule,
+  onAddRule,
+  onToggleAllRules,
 }: {
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
@@ -67,6 +64,11 @@ export function Sidebar({
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   activeConfig?: AppConfig | null;
   selectedDeviceName?: string;
+  /** The all-rules view of the assignments screen. */
+  allRules: boolean;
+  onEditRule: (mappingId: string) => void;
+  onAddRule: () => void;
+  onToggleAllRules: () => void;
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
@@ -89,10 +91,7 @@ export function Sidebar({
           <strong>{selectedDeviceName ?? activeConfig?.settings?.deviceName ?? t("app.deviceFallback")}</strong>
         </div>
       </div>
-      {workspaceModeCopy
-        // The Mouse workspace talks to the built-in Naga only.
-        .filter((mode) => mode.value !== "mouse" || (activeConfig?.devices.some((d) => d.builtin) ?? false))
-        .map((mode) => (
+      {workspaceModeCopy.map((mode) => (
         <button
           key={mode.value}
           type="button"
@@ -132,43 +131,19 @@ export function Sidebar({
             </button>
           </div>
         </div>
-        {profiles.length <= 3 ? (
-          <PillTrack
-            className="pill-track--sidebar"
-            active={effectiveProfileId ?? ""}
-            onSelect={(id) => startTransition(() => onSelectProfile(id))}
-            items={profiles.map((p) => ({ key: p.id, label: p.name }))}
-            pillProps={(item) => ({
-              onDoubleClick: (e) => {
-                e.preventDefault();
-                onSwitchMode("settings");
-              },
-              onContextMenu: (e) => {
-                e.preventDefault();
-                setCtxMenu({ x: e.clientX, y: e.clientY, profileId: item.key });
-              },
-            })}
-            renderTrailing={(item) =>
-              runtimeStatus === "running" && runtimeResolvedProfileName === item.label ? (
-                <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
-              ) : null
-            }
-          />
-        ) : (
-          <ProfileDropdown
-            profiles={profiles}
-            effectiveProfileId={effectiveProfileId}
-            runtimeResolvedProfileName={runtimeResolvedProfileName}
-            runtimeStatus={runtimeStatus}
-            onSelectProfile={(id) => {
-              startTransition(() => onSelectProfile(id));
-            }}
-            onSwitchMode={onSwitchMode}
-            onContextMenu={(x, y, profileId) =>
-              setCtxMenu({ x, y, profileId })
-            }
-          />
-        )}
+        <SidebarProfiles
+          profiles={profiles}
+          appMappings={activeConfig?.appMappings ?? []}
+          effectiveProfileId={effectiveProfileId}
+          runtimeProfileName={runtimeStatus === "running" ? runtimeResolvedProfileName : null}
+          allRules={allRules}
+          onSelect={onSelectProfile}
+          onContextMenu={(x, y, profileId) => setCtxMenu({ x, y, profileId })}
+          onOpenSettings={() => onSwitchMode("settings")}
+          onEditRule={onEditRule}
+          onAddRule={onAddRule}
+          onToggleAllRules={onToggleAllRules}
+        />
         {runtimeStatus === "running" && profiles.some((p) => p.name === runtimeResolvedProfileName) ? (
           <p className="sidebar__profile-legend help-caption">
             <span className="pill-track__active-dot sidebar__profile-legend-dot" aria-hidden="true" />

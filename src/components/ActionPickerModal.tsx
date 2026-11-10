@@ -4,7 +4,8 @@ import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
-import { isBuiltinControl, isKeyButton, nagaLayoutControlId, NAGA_V3_DEVICE_ID } from "../lib/onboard-mapping";
+import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
+import { controlLayout, layoutControlId } from "../lib/devices";
 import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
 import {
@@ -111,10 +112,12 @@ export function ActionPickerModal({
 
   // Encoder signal state (user devices only — see isBuiltinControl)
   const builtinControl = controlId ? isBuiltinControl(config, controlId) : false;
-  const nagaV3 = config.physicalControls.some((control) => control.id === controlId && control.deviceId === NAGA_V3_DEVICE_ID);
-  const currentTrigger = nagaV3 ? "none" : config.settings.hypershiftTrigger ?? "mouse_right";
-  const isCurrentTrigger = builtinControl && controlId === currentTrigger;
-  const canBeTrigger = builtinControl && !nagaV3 && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
+  const layout = controlId ? controlLayout(config, controlId) : undefined;
+  // A firmware trigger is fixed in the mouse; only the software one can move.
+  const softwareTrigger = builtinControl && !layout?.firmwareTrigger;
+  const currentTrigger = softwareTrigger ? config.settings.hypershiftTrigger ?? "mouse_right" : "none";
+  const isCurrentTrigger = softwareTrigger && controlId === currentTrigger;
+  const canBeTrigger = softwareTrigger && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
   // A global modifier role is not an executable, profile-specific ActionType.
   const categories = [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
@@ -123,15 +126,15 @@ export function ActionPickerModal({
   ];
   // The mouse reports one key button at a time only with consumer signals; in
   // F13..F24 mode two arrive together. Asked once per opened key button.
-  const keyButton = builtinControl && controlId !== undefined && isKeyButton(nagaLayoutControlId(controlId));
+  const keyButton = builtinControl && controlId !== undefined && isKeyButton(layoutControlId(controlId));
   const [consumerSignals, setConsumerSignals] = useState(false);
   useEffect(() => {
     if (!keyButton) return;
-    void getNativeModel().then(
+    void getNativeModel(layout?.deviceId).then(
       (model) => setConsumerSignals(model.consumerSignals === true),
       () => setConsumerSignals(false),
     );
-  }, [keyButton]);
+  }, [keyButton, layout?.deviceId]);
   const currentEncoderMapping = controlId && selectedLayer
     ? config.encoderMappings.find(
         (m) => m.controlId === controlId && m.layer === selectedLayer,

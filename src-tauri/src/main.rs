@@ -9,6 +9,19 @@ fn main() {
         return;
     }
 
+    // A Sidearm that died left the mice playing its silent signals: put their
+    // own maps back once they answer (spawned by the orphaned capture helper).
+    #[cfg(target_os = "windows")]
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if let Some(pos) = args.iter().position(|arg| arg == sidearm_lib::RESTORE_LIVE_MAPS_ARG) {
+            if let Some(dir) = args.get(pos + 1) {
+                sidearm_lib::restore_live_maps_main(std::path::Path::new(dir));
+            }
+            return;
+        }
+    }
+
     // Elevated one-shot helper: registers/deletes the admin autostart task on
     // behalf of a non-elevated Sidearm, then exits with the result code.
     #[cfg(target_os = "windows")]

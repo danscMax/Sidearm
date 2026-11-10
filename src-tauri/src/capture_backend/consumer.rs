@@ -150,16 +150,27 @@ fn repeat_timing(delay: u32, speed: u32) -> (Duration, Duration) {
 /// report, and reopens after the dongle sleeps or is unplugged; `hyper` tells
 /// whether the Hypershift trigger is held, read when a report arrives (the
 /// stamp is a capture-time decision, as for the keyboard hook).
-pub(super) const NAGA_V3_PREFIX: &str = "V3:";
-pub(super) const NAGA_V2_PREFIX: &str = "V2:";
+/// Prefix of every line a reader writes: `M<catalog index>:`, so the parent
+/// knows which mouse sent it.
+pub(super) fn reader_prefix(model: &NativeModel) -> String {
+    format!("M{}:", crate::mouse_memory::live_overlay::catalog_index(model))
+}
+
+/// The catalog model of a reader line, and the line without its prefix.
+pub(super) fn split_reader_line(line: &str) -> Option<(&'static NativeModel, &str)> {
+    let rest = line.strip_prefix('M')?;
+    let (index, rest) = rest.split_once(':')?;
+    let model = crate::device_catalog::CATALOG.get(index.parse::<usize>().ok()?)?;
+    Some((model, rest))
+}
 
 pub(super) fn spawn_reader(
     signals: Vec<ConsumerSignal>,
     model: &'static NativeModel,
     hyper: fn() -> bool,
     report_status: bool,
-    signal_prefix: &'static str,
 ) {
+    let signal_prefix = reader_prefix(model);
     let Some(consumer) = &model.consumer else { return };
     let report_id = consumer.report_id;
     let (delay, period) = keyboard_repeat_timing();
@@ -169,17 +180,17 @@ pub(super) fn spawn_reader(
         // every two seconds and must not flood the log.
         let mut last_error = String::new();
         loop {
-            match read_until_lost(&mut translator, model, report_id, hyper, report_status, signal_prefix) {
+            match read_until_lost(&mut translator, model, report_id, hyper, report_status, &signal_prefix) {
                 Ok(()) => return, // the parent is gone
                 Err(message) => {
-                    if !emit(&translator.release_all(hyper()), signal_prefix) {
+                    if !emit(&translator.release_all(hyper()), &signal_prefix) {
                         return;
                     }
                     // Warn level: the parent logs it as a warning — while this
                     // lasts the key buttons do nothing; the status line puts it
                     // in the Mouse tab.
                     // The parent keeps the state, so repeating it is harmless.
-                    if report_status && !emit(&[STATUS_UNREADABLE.to_string()], "") {
+                    if report_status && !emit(&[STATUS_UNREADABLE.to_string()], &signal_prefix) {
                         return;
                     }
                     if message != last_error && report_status {
@@ -251,7 +262,7 @@ fn read_until_lost(
         return Err(format!("CreateEventW: {}", std::io::Error::last_os_error()));
     }
     log::info!("[consumer] reading button signals from {path}");
-    if report_status && !emit(&[STATUS_READABLE.to_string()], "") {
+    if report_status && !emit(&[STATUS_READABLE.to_string()], signal_prefix) {
         unsafe {
             CloseHandle(event);
             CloseHandle(handle);
@@ -359,8 +370,10 @@ mod tests {
 
     #[test]
     fn naga_v3_reports_translate_all_thumb_presses_and_releases_on_both_layers() {
-        let config = crate::mouse_memory::naga_v3::tests::config_with_v3();
-        let signals = crate::mouse_memory::naga_v3::signals(&config, true, false);
+        let config = crate::mouse_memory::live_overlay::tests::config_with_v3();
+        let signals = crate::mouse_memory::live_overlay::overlay(&config, &crate::device_catalog::NAGA_V3_PRO, true, false)
+            .unwrap()
+            .signals;
         let mut reader = Translator::new(signals.clone(), Duration::from_millis(500), Duration::from_millis(100));
         let now = Instant::now();
         for (index, signal) in signals[..24].iter().enumerate() {

@@ -2,10 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { Action, Binding, PhysicalControl } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
 import { buildHotspotTooltip } from "./labels";
+import { COMBINED_RIGHT_BUTTONS, TOP_RIGHT_BUTTONS } from "./devices";
 import {
   actionLabel,
-  TOP_RIGHT_BUTTONS,
-  COMBINED_RIGHT_BUTTONS,
   buildBindingDragData,
   heatIntensity,
   legendCellClass,

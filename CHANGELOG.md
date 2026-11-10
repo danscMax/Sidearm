@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- One screen per profile and mouse: the sidebar lists the profiles with the apps that
+  switch to each (click one to edit it, "+ App" adds one, "All rules" shows every
+  profile's rules), mouse cards show battery, DPI, poll rate and slot, and a built-in
+  mouse has Buttons, Performance and Mouse memory tabs. The separate Mouse page is gone.
+
+### Added
+- Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
+  wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
+  live button map that Sidearm restores when it stops.
+- Naga V3 Pro onboard slots: on the mouse's Mouse memory tab a profile can be linked to one of the
+  mouse's slots; on exit every linked profile is stored in its slot, so its simple
+  assignments work without Sidearm. Slots are never switched while Sidearm runs.
+- Two mice at once (V2 HyperSpeed and V3 Pro): each keeps its own HyperShift layer.
+  Each mouse has its own DPI, DPI stages and
+  poll rate per profile (`Profile.deviceMouse`; existing values become the own settings of every
+  built-in mouse in the config, a mouse added later starts without any).
+- Copy assignments from one mouse to the other (Profiles → Copy from another mouse),
+  with a preview of what is copied and what is left out. A profile file exported from
+  another mouse is imported onto the mouse shown.
+- Setup finds the connected mice and asks which one to set up when there are two,
+  says so when there is none, checks Razer Synapse and can close it, waits at most
+  15 s for the mouse before offering Check again or skipping, checks HyperShift for
+  every model and resumes at the same step after Restart as administrator.
+
+### Fixed
+- A wheel bound to plain scroll up/down now scrolls without Sidearm: the mouse's memory
+  gets the wheel's own record instead of a silent signal.
+- After Sidearm was killed or crashed, the V3's buttons and wheel stayed silent until its
+  profile button was pressed: its capture helper now restores the mouse's own button map.
+  A normal exit waits for both mice to finish restoring before it closes.
+- A connected mouse that does not answer (asleep) says so on its card instead of showing
+  nothing.
+- Plugging a mouse in or out while Sidearm runs switches each mouse to the path it
+  needs; a V2 alone no longer stays in two-mouse mode after a V3 was seen once, so
+  V2 Pro, Naga Pro and Naga X buttons and the F13–F24 switch work again there.
+- Shutting down, restarting or signing out of Windows now restores the mouse and
+  stores the offline profile, like a normal exit. Two mice restore in parallel.
+- A live-map rollback file still matches after the receiver moves to another USB port.
+- One misread record during repair no longer becomes the "original" written back on exit.
+- A V3 that slept through the exit now leaves the "offline profile not stored" notice.
+- "Side buttons unreadable" is tracked per mouse: an unplugged V3 no longer raises it.
+- Config warnings from loading are no longer dropped when a new mouse is added.
+
+### Compatibility
+- The config moves to schema v5 (`Profile.deviceSlots`, `Profile.deviceMouse`, DPI up to 50000). v2–v4 configs
+  migrate on load. Back up `data/config.json` before updating; older versions refuse
+  a v5 config instead of recovering an older backup over it.
+
 ## [0.11.8] — 2026-11-06
 
 ### Added

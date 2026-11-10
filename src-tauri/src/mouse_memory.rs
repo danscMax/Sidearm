@@ -875,9 +875,13 @@ impl VendorDevice {
     }
 
     /// The 10 record bytes `GET_BUTTON` answers for `button_id` on `layer`
-    /// (address, then the record), for the device report.
+    /// (address, then the record) exactly as the mouse sent them, unchecked:
+    /// the device report characterizes models whose replies are not known yet.
     fn raw_button_record(&self, button_id: u8, layer: u8) -> Result<[u8; 10], String> {
-        Ok(button_args(ONBOARD_PROFILE, button_id, layer, &self.read_block(ONBOARD_PROFILE, button_id, layer)?))
+        let reply = self.command(CLASS_BUTTON, CMD_GET_BUTTON, &button_args(ONBOARD_PROFILE, button_id, layer, &[]))?;
+        let mut record = [0u8; 10];
+        record.copy_from_slice(&reply[8..18]);
+        Ok(record)
     }
 
     /// Battery charge in percent.

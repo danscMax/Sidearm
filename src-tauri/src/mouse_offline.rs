@@ -197,19 +197,16 @@ pub(crate) fn restore_live_speed(device: &VendorDevice, config: &AppConfig, prof
     let own = config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| p.mouse_for(model.device_id));
     let original = crate::mouse_speed::originals(model.device_id);
     let poll = own.and_then(|own| own.mouse_poll_rate_hz).filter(|hz| model.poll_code_for_hz(*hz).is_some());
-    if let Some(hz) = poll.or(original.poll_rate_hz)
-        && device.poll_rate_hz()? != hz
-    {
-        device.set_poll_rate_hz(hz)?;
-    }
+    let poll_result = match poll.or(original.poll_rate_hz) {
+        Some(hz) if device.poll_rate_hz()? != hz => device.set_poll_rate_hz(hz),
+        _ => Ok(()),
+    };
     let dpi = own.and_then(|own| own.mouse_dpi).map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
-    if dpi_too
-        && let Some(dpi) = dpi.or(original.dpi)
-        && device.dpi()? != dpi
-    {
-        device.set_dpi(dpi, false)?;
-    }
-    Ok(())
+    let dpi_result = match dpi.or(original.dpi) {
+        Some(dpi) if dpi_too && device.dpi()? != dpi => device.set_dpi(dpi, false),
+        _ => Ok(()),
+    };
+    poll_result.and(dpi_result)
 }
 
 /// Writes the offline profile into every connected mouse. Best effort: a

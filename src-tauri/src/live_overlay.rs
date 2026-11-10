@@ -403,9 +403,9 @@ pub(crate) fn write_offline(
     let banks = read_banks(&device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
     let mut asleep = None;
-    // The bank reselect below sets the DPI; the poll rate stays what the last
-    // profile switch left.
-    if let Err(error) = crate::mouse_offline::restore_live_speed(&device, config, offline_profile, false) {
+    // The bank reselect below sets the DPI (no linked bank: no reselect); the
+    // poll rate stays what the last profile switch left.
+    if let Err(error) = crate::mouse_offline::restore_live_speed(&device, config, offline_profile, plan.is_empty()) {
         log::warn!("[mouse-offline] {} poll rate not put back: {error}", model.name);
         note_asleep(&mut asleep, error);
     }

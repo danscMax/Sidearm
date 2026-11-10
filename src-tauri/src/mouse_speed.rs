@@ -35,10 +35,18 @@ pub fn originals(device_id: &str) -> Originals {
     ORIGINALS.lock().ok().and_then(|all| all.iter().find(|(id, _)| *id == device_id).map(|(_, kept)| *kept)).unwrap_or_default()
 }
 
-/// The user set the mouse's speed by hand: that is the one to come back to.
-pub fn forget_originals(device_id: &str) {
-    if let Ok(mut all) = ORIGINALS.lock() {
-        all.retain(|(id, _)| *id != device_id);
+/// The user set the mouse's DPI and/or poll rate by hand (`true` fields): that
+/// is the value to come back to.
+pub fn forget_originals(device_id: &str, dpi: bool, poll_rate: bool) {
+    if let Ok(mut all) = ORIGINALS.lock()
+        && let Some((_, kept)) = all.iter_mut().find(|(id, _)| *id == device_id)
+    {
+        if dpi {
+            kept.dpi = None;
+        }
+        if poll_rate {
+            kept.poll_rate_hz = None;
+        }
     }
 }
 
@@ -238,7 +246,9 @@ mod tests {
         remember("test-mouse", Originals { poll_rate_hz: Some(1000), ..Default::default() });
         remember("test-mouse", Originals { dpi: Some(800), poll_rate_hz: Some(125) });
         assert_eq!(originals("test-mouse"), Originals { dpi: Some(800), poll_rate_hz: Some(1000) });
-        forget_originals("test-mouse");
+        forget_originals("test-mouse", true, false);
+        assert_eq!(originals("test-mouse"), Originals { dpi: None, poll_rate_hz: Some(1000) });
+        forget_originals("test-mouse", false, true);
         assert_eq!(originals("test-mouse"), Originals::default());
     }
 }

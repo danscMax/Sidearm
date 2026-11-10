@@ -140,9 +140,17 @@ pub fn spawn(app: AppHandle, runtime_store: Arc<Mutex<RuntimeStore>>, config_dir
 /// before it ([`wait_tick`]), so no tick puts signals over the offline profile.
 static TICK: Mutex<()> = Mutex::new(());
 
-/// Returns once a guard tick in progress has finished.
+/// Returns once a guard tick in progress has finished, or after 5 s: a tick
+/// can wait on the main thread (tray, OSD), which may be the one calling this.
 pub fn wait_tick() {
-    drop(TICK.lock());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while matches!(TICK.try_lock(), Err(std::sync::TryLockError::WouldBlock)) {
+        if std::time::Instant::now() >= deadline {
+            log::warn!("[onboard-guard] a tick still runs at exit");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 /// Set by the Mouse tab's signal switch: the rewrite it causes is not news.

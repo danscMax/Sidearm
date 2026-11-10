@@ -2978,8 +2978,13 @@ pub(crate) fn is_shutting_down() -> bool {
 pub(crate) fn shutdown_mouse(app: &AppHandle) {
     // The session end and the app exit can race: the second caller waits for
     // the first, so the process never ends in the middle of the writes.
-    static SHUTDOWN: std::sync::Once = std::sync::Once::new();
-    SHUTDOWN.call_once(|| shutdown_mouse_once(app));
+    // A Mutex, not a Once: a first run that panicked must not abort the second
+    // caller (from a window procedure) with a poisoned Once.
+    static SHUTDOWN: Mutex<bool> = Mutex::new(false);
+    let mut done = SHUTDOWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !std::mem::replace(&mut *done, true) {
+        shutdown_mouse_once(app);
+    }
 }
 
 fn shutdown_mouse_once(app: &AppHandle) {
@@ -3234,7 +3239,7 @@ async fn get_mouse_settings(device_id: Option<String>) -> Result<mouse_settings:
 async fn set_mouse_dpi(dpi: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
     with_mouse_settings(device_id, move |device| {
         device.set_dpi(dpi, true)?;
-        mouse_speed::forget_originals(device.model().device_id);
+        mouse_speed::forget_originals(device.model().device_id, true, false);
         Ok(())
     })
     .await
@@ -3246,7 +3251,7 @@ async fn set_mouse_dpi(dpi: u16, device_id: Option<String>) -> Result<mouse_sett
 async fn set_mouse_poll_rate(hz: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
     with_mouse_settings(device_id, move |device| {
         device.set_poll_rate_hz(hz)?;
-        mouse_speed::forget_originals(device.model().device_id);
+        mouse_speed::forget_originals(device.model().device_id, false, true);
         Ok(())
     })
     .await

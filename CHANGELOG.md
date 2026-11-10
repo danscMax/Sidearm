@@ -48,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   left Alt instead of the right one, which the Russian layout turns into Ctrl+Alt.
 - Closing Sidearm puts back the poll rate and DPI the per-app profiles changed (the
   offline profile's own, else what the mouse had before), instead of leaving the last
-  app's speed in the mouse.
+  app's speed in the mouse. After a crash only the offline profile's own values are set.
 - Shutting Windows down while Sidearm closes can no longer cut the mouse writes short,
   and the background check can no longer write Sidearm's signals over the profile
   stored for use without Sidearm.

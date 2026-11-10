@@ -559,6 +559,30 @@ pub enum TriggerMode {
     TriplePress,
     Hold,
     Chord,
+    /// Fires once the button has been held past the long-press threshold.
+    LongPress,
+}
+
+/// The press pattern a binding answers on its control. One control and layer
+/// holds at most one binding per gesture: the plain press (with its hold and
+/// chord variants), a long press, a double and a triple press.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Gesture {
+    Press,
+    LongPress,
+    DoublePress,
+    TriplePress,
+}
+
+impl Gesture {
+    pub fn of(mode: Option<TriggerMode>) -> Self {
+        match mode {
+            Some(TriggerMode::LongPress) => Self::LongPress,
+            Some(TriggerMode::DoublePress) => Self::DoublePress,
+            Some(TriggerMode::TriplePress) => Self::TriplePress,
+            None | Some(TriggerMode::Press | TriggerMode::Hold | TriggerMode::Chord) => Self::Press,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1606,10 +1630,11 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
             ));
         }
         let binding_key = format!(
-            "{}::{}::{}",
+            "{}::{}::{}::{:?}",
             binding.profile_id,
             binding.control_id.as_str(),
-            binding.layer.as_str()
+            binding.layer.as_str(),
+            Gesture::of(binding.trigger_mode)
         );
         if !binding_keys.insert(binding_key.clone()) {
             errors.push(format!(

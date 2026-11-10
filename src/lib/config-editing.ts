@@ -13,6 +13,7 @@ import type {
   PhysicalControl,
   Profile,
   SnippetLibraryItem,
+  TriggerMode,
   MouseOverrides,
 } from "./config";
 import { clampPriority, uniqueStrings } from "./helpers";
@@ -38,18 +39,30 @@ const TOP_PANEL_MAP: Record<string, { standard: string | null; hypershift: strin
   wheel_down: { standard: null, hypershift: "Ctrl+Alt+F17" },
 };
 
+/** The press pattern a binding answers on its control (Rust `config::Gesture`):
+ *  a control and layer hold one binding per gesture. Hold and chord are
+ *  variants of the plain press. */
+export type Gesture = "press" | "longPress" | "doublePress" | "triplePress";
+export const GESTURES: readonly Gesture[] = ["press", "longPress", "doublePress", "triplePress"];
+
+export function gestureOf(mode: TriggerMode | undefined): Gesture {
+  return mode === "longPress" || mode === "doublePress" || mode === "triplePress" ? mode : "press";
+}
+
 export function findBinding(
   config: AppConfig,
   profileId: string,
   layer: Layer,
   controlId: ControlId,
+  gesture: Gesture = "press",
 ): Binding | null {
   return (
     config.bindings.find(
       (binding) =>
         binding.profileId === profileId &&
         binding.layer === layer &&
-        binding.controlId === controlId,
+        binding.controlId === controlId &&
+        gestureOf(binding.triggerMode) === gesture,
     ) ?? null
   );
 }
@@ -105,7 +118,8 @@ export function upsertBinding(config: AppConfig, nextBinding: Binding): AppConfi
       binding.id === nextBinding.id ||
       (binding.profileId === nextBinding.profileId &&
         binding.controlId === nextBinding.controlId &&
-        binding.layer === nextBinding.layer),
+        binding.layer === nextBinding.layer &&
+        gestureOf(binding.triggerMode) === gestureOf(nextBinding.triggerMode)),
   );
 
   if (bindingIndex === -1) {
@@ -773,18 +787,20 @@ export function ensurePlaceholderBinding(
   profileId: string,
   layer: Layer,
   control: PhysicalControl,
+  gesture: Gesture = "press",
 ): EnsurePlaceholderBindingResult {
-  const existingBinding = findBinding(config, profileId, layer, control.id);
+  const existingBinding = findBinding(config, profileId, layer, control.id, gesture);
   if (existingBinding) {
     return { config, bindingId: existingBinding.id };
   }
 
-  const baseActionId = makeActionId(profileId, layer, control.id);
+  const suffix = gesture === "press" ? "" : `-${gesture}`;
+  const baseActionId = makeActionId(profileId, layer, control.id) + suffix;
   const actionIdSet = new Set(config.actions.map((action) => action.id));
   const actionId = actionIdSet.has(baseActionId)
     ? baseActionId
     : nextUniqueId(actionIdSet, baseActionId);
-  const baseBindingId = makeBindingId(profileId, layer, control.id);
+  const baseBindingId = makeBindingId(profileId, layer, control.id) + suffix;
   const bindingId = nextUniqueId(new Set(config.bindings.map((binding) => binding.id)), baseBindingId);
 
   const nextBinding: Binding = {
@@ -795,6 +811,7 @@ export function ensurePlaceholderBinding(
     label: `Unassigned - ${control.defaultName}`,
     actionId: actionId,
     enabled: false,
+    ...(gesture === "press" ? {} : { triggerMode: gesture }),
   };
 
   if (actionIdSet.has(actionId)) {
@@ -1307,7 +1324,8 @@ export function duplicateBinding(
   // Remove existing binding for target if any
   const filteredBindings = config.bindings.filter(
     (b) =>
-      !(b.profileId === binding.profileId && b.layer === layer && b.controlId === targetControlId),
+      !(b.profileId === binding.profileId && b.layer === layer && b.controlId === targetControlId
+        && gestureOf(b.triggerMode) === gestureOf(binding.triggerMode)),
   );
 
   const nextBindings = [...filteredBindings, newBinding];
@@ -1444,7 +1462,8 @@ export function applyBindingImport(
       !(
         b.profileId === targetProfileId &&
         b.layer === targetLayer &&
-        b.controlId === targetControlId
+        b.controlId === targetControlId &&
+        gestureOf(b.triggerMode) === gestureOf(data.binding.triggerMode)
       ),
   );
   const newBinding: Binding = {
@@ -1491,7 +1510,8 @@ export function copyBindingBetweenProfiles(
       !(
         b.profileId === targetProfileId &&
         b.layer === targetLayer &&
-        b.controlId === targetControlId
+        b.controlId === targetControlId &&
+        gestureOf(b.triggerMode) === gestureOf(binding.triggerMode)
       ),
   );
   const newBinding: Binding = {

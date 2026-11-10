@@ -3247,6 +3247,19 @@ code {
   border-bottom: 1px solid var(--c-border);
 }
 
+.action-picker__gestures {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.action-picker__gesture-dot {
+  margin-left: 4px;
+  color: var(--c-accent);
+}
+
 .action-picker__header h2 {
   margin: 0;
   font-size: var(--fs-body);

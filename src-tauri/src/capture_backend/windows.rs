@@ -1173,6 +1173,8 @@ impl CaptureBackendHandle {
             // we force-release to recover.
             let mut held_last_seen: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
+            // Buttons whose press pattern (long, double, triple) is still open.
+            let mut gestures = super::PendingGestures::default();
             // Generous timeout: a wireless source button can pause its auto-repeat
             // stream for several seconds mid-hold (RF dropout) while physically
             // held. 2s force-released those live holds, cutting off push-to-talk.
@@ -1185,7 +1187,16 @@ impl CaptureBackendHandle {
             const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
             loop {
-                match event_rx.recv_timeout(POLL_INTERVAL) {
+                // Wake for the next long press or closing tap window too.
+                let wait = gestures
+                    .next_deadline()
+                    .map_or(POLL_INTERVAL, |at| at.saturating_duration_since(Instant::now()).min(POLL_INTERVAL));
+                let received = event_rx.recv_timeout(wait);
+                let fired = gestures.tick(Instant::now());
+                if !fired.is_empty() {
+                    super::fire_gestures(&worker_app, &worker_runtime_store, &worker_config, fired);
+                }
+                match received {
                     Ok(event) => {
                         let encoded_key = event.encoded_key.clone();
                         let is_repeat = event.is_repeat;
@@ -1196,6 +1207,7 @@ impl CaptureBackendHandle {
                             &worker_app_name,
                             event,
                             &mut held_actions,
+                            &mut gestures,
                         );
                         match hold_deadline_update(
                             outcome,

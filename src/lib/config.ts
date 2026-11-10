@@ -30,7 +30,7 @@ export type ActionType =
   | "disabled"
   | "repairClipboard";
 
-export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord";
+export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord" | "longPress";
 
 export type PasteMode = "clipboardPaste" | "sendText";
 

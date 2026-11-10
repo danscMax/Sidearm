@@ -540,7 +540,8 @@
             "doublePress",
             "triplePress",
             "hold",
-            "chord"
+            "chord",
+            "longPress"
           ]
         },
         "chordPartner": {

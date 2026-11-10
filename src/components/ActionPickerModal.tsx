@@ -8,9 +8,13 @@ import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
 import { controlLayout, layoutControlId } from "../lib/devices";
 import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
+import { PillTrack } from "./PillTrack";
 import {
   expectedEncodedKeyForControl,
   ensurePlaceholderBinding,
+  findBinding,
+  GESTURES,
+  type Gesture,
   isPlaceholderAction,
   nextUniqueId,
   removeBinding,
@@ -54,6 +58,14 @@ const TRIGGER_LABEL_KEYS: Record<TriggerMode, string> = {
   triplePress: "picker.triggerTriplePress",
   hold: "picker.triggerHold",
   chord: "picker.triggerChord",
+  longPress: "picker.triggerLongPress",
+};
+
+const GESTURE_LABEL_KEYS: Record<Gesture, string> = {
+  press: "picker.gesturePress",
+  longPress: "picker.gestureLongPress",
+  doublePress: "picker.gestureDoublePress",
+  triplePress: "picker.gestureTriplePress",
 };
 
 export function ActionPickerModal({
@@ -64,6 +76,8 @@ export function ActionPickerModal({
   layerLabel,
   controlId,
   selectedLayer,
+  gesture = "press",
+  onGestureChange,
   onSave,
   onCancel,
 }: {
@@ -74,6 +88,10 @@ export function ActionPickerModal({
   layerLabel?: string;
   controlId?: ControlId;
   selectedLayer?: Layer;
+  /** Which press pattern of the control this edits (its own binding). */
+  gesture?: Gesture;
+  /** Shows the press-pattern tabs; picking one edits that pattern's binding. */
+  onGestureChange?: (gesture: Gesture) => void;
   onSave: (config: AppConfig) => void;
   onCancel: () => void;
 }) {
@@ -121,7 +139,7 @@ export function ActionPickerModal({
   // A global modifier role is not an executable, profile-specific ActionType.
   const categories = [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
-    ...(canBeTrigger ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
+    ...(canBeTrigger && gesture === "press" ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
     ...ACTION_CATEGORIES,
   ];
   // The mouse reports one key button at a time only with consumer signals; in
@@ -271,7 +289,7 @@ export function ActionPickerModal({
     if (!targetBinding) {
       const control = config.physicalControls.find((c) => c.id === controlId);
       if (!control || !profileId || !selectedLayer) return;
-      const result = ensurePlaceholderBinding(nextConfig, profileId, selectedLayer, control);
+      const result = ensurePlaceholderBinding(nextConfig, profileId, selectedLayer, control, gesture);
       nextConfig = result.config;
       targetBinding = nextConfig.bindings.find((b) => b.id === result.bindingId) ?? null;
     }
@@ -309,7 +327,7 @@ export function ActionPickerModal({
         // first-time assignment sits on a disabled placeholder action+binding
         // (enabled:false), so treat placeholder as "new" and enable it.
         enabled: existingAction ? targetBinding.enabled : true,
-        triggerMode: triggerModeDraft === "press" ? undefined : triggerModeDraft,
+        triggerMode: gesture !== "press" ? gesture : triggerModeDraft === "press" ? undefined : triggerModeDraft,
         chordPartner: triggerModeDraft === "chord" && chordPartnerDraft
           ? chordPartnerDraft as ControlId
           : undefined,
@@ -397,6 +415,25 @@ export function ActionPickerModal({
           </div>
           <CloseButton onClick={onCancel} ariaLabel={t("common.close")} className="action-picker__close" />
         </div>
+
+        {onGestureChange && controlId && profileId && selectedLayer ? (
+          <div className="action-picker__gestures">
+            <PillTrack
+              className="pill-track--compact"
+              items={GESTURES.map((key) => ({ key, label: t(GESTURE_LABEL_KEYS[key]) }))}
+              active={gesture}
+              onSelect={onGestureChange}
+              renderTrailing={(item) => {
+                const other = findBinding(config, profileId, selectedLayer, controlId, item.key);
+                const action = other ? config.actions.find((a) => a.id === other.actionId) : undefined;
+                return other?.enabled && !isPlaceholderAction(action) ? (
+                  <span className="action-picker__gesture-dot" aria-label={t("picker.gestureAssigned")}>•</span>
+                ) : null;
+              }}
+            />
+            <p className="panel__muted help-sm">{t("picker.gestureHelp")}</p>
+          </div>
+        ) : null}
 
         <div className="action-picker__body">
           <nav className="action-picker__categories">
@@ -566,7 +603,7 @@ export function ActionPickerModal({
               </summary>
               <div className="picker-advanced__body">
                 <div className={`picker-two-col${triggerModeDraft === "chord" ? " picker-two-col--single" : ""}`}>
-                  <TriggerModeEditor
+                  {gesture === "press" ? <TriggerModeEditor
                     triggerMode={triggerModeDraft}
                     onChange={setTriggerModeDraft}
                     chordPartner={chordPartnerDraft}
@@ -576,7 +613,7 @@ export function ActionPickerModal({
                     physicalControls={config.physicalControls}
                     bindings={config.bindings}
                     sideButtonsOneAtATime={keyButton && consumerSignals}
-                  />
+                  /> : null}
                   <label className="field">
                     <span className="field__label">
                       {t("picker.throttleLabel")}

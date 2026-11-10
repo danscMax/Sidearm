@@ -126,6 +126,7 @@ fn binding_action(
 ) -> Option<Option<OnboardAction>> {
     let binding = config.bindings.iter().find(|b| {
         b.enabled && b.profile_id == profile_id && b.layer == layer && b.control_id.as_str() == control
+            && crate::config::Gesture::of(b.trigger_mode) == crate::config::Gesture::Press
     })?;
     // The firmware plays a record on every press, held while the button is
     // down (a hold): a double or triple press or a chord would fire on one.

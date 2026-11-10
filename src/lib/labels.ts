@@ -278,6 +278,8 @@ function labelForTriggerMode(mode: TriggerMode): string {
       return i18n.t("visualization.triggerHold");
     case "chord":
       return i18n.t("visualization.triggerChord");
+    case "longPress":
+      return i18n.t("visualization.triggerLongPress");
   }
 }
 

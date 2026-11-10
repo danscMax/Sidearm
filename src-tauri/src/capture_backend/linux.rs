@@ -195,17 +195,37 @@ impl CaptureBackendHandle {
             let mut held_actions: HashMap<String, crate::input_synthesis::HeldShortcutState> =
                 HashMap::new();
 
-            while let Ok(event) = event_rx.recv() {
+            let mut gestures = super::PendingGestures::default();
+            loop {
+                // Wake for the next long press or closing tap window too.
+                let received = match gestures.next_deadline() {
+                    Some(at) => match event_rx.recv_timeout(at.saturating_duration_since(std::time::Instant::now())) {
+                        Ok(event) => Some(event),
+                        Err(mpsc::RecvTimeoutError::Timeout) => None,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                    },
+                    None => match event_rx.recv() {
+                        Ok(event) => Some(event),
+                        Err(_) => break,
+                    },
+                };
+                let fired = gestures.tick(std::time::Instant::now());
+                if !fired.is_empty() {
+                    super::fire_gestures(&worker_app, &worker_runtime_store, &worker_config, fired);
+                }
                 // EventOutcome is only consumed by the Windows stale-hold sweep;
                 // the evdev backend has no such sweep, so ignore it here.
-                let _ = process_encoded_key_event(
-                    &worker_app,
-                    &worker_runtime_store,
-                    &worker_config,
-                    &worker_app_name,
-                    event,
-                    &mut held_actions,
-                );
+                if let Some(event) = received {
+                    let _ = process_encoded_key_event(
+                        &worker_app,
+                        &worker_runtime_store,
+                        &worker_config,
+                        &worker_app_name,
+                        event,
+                        &mut held_actions,
+                        &mut gestures,
+                    );
+                }
             }
 
             // Channel closed -- release all held keys

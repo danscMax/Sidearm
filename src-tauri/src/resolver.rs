@@ -2,7 +2,7 @@ use std::sync::OnceLock;
 
 use serde::Serialize;
 
-use crate::config::{AppConfig, AppMapping, EncoderMapping, Layer, Profile, TriggerMode};
+use crate::config::{AppConfig, AppMapping, EncoderMapping, Gesture, Layer, Profile, TriggerMode};
 
 const REGEX_PREFIX: &str = "regex:";
 
@@ -273,6 +273,22 @@ pub fn resolve_input_preview_with_overrides(
     override_profile_id: Option<&str>,
     force_hypershift: bool,
 ) -> ResolvedInputPreview {
+    resolve_gesture_preview(config, encoded_key, exe, title, process_path, override_profile_id, force_hypershift, Gesture::Press)
+}
+
+/// [`resolve_input_preview_with_overrides`] for one press pattern of the
+/// control: the binding answering `gesture` on the resolved layer.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_gesture_preview(
+    config: &AppConfig,
+    encoded_key: &str,
+    exe: &str,
+    title: &str,
+    process_path: Option<&str>,
+    override_profile_id: Option<&str>,
+    force_hypershift: bool,
+    gesture: Gesture,
+) -> ResolvedInputPreview {
     let normalized_key = normalized_encoded_key(encoded_key);
     let profile_resolution = resolve_profile_for_app_context_with_override(
         config,
@@ -376,6 +392,7 @@ pub fn resolve_input_preview_with_overrides(
                     && binding.profile_id == profile_id
                     && binding.layer == layer
                     && binding.control_id == mapping.control_id
+                    && Gesture::of(binding.trigger_mode) == gesture
             })
         });
     let action = binding.and_then(|binding| {
@@ -763,6 +780,26 @@ mod tests {
             priority,
             mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
         }
+    }
+
+    #[test]
+    fn each_press_pattern_resolves_its_own_binding() {
+        let mut config = test_config(vec![]);
+        let mut long = config.bindings[0].clone();
+        long.id = "binding-long".into();
+        long.action_id = "action-long".into();
+        long.trigger_mode = Some(TriggerMode::LongPress);
+        config.bindings.insert(0, long);
+        let mut action = config.actions[0].clone();
+        action.id = "action-long".into();
+        config.actions.push(action);
+
+        let press = resolve_input_preview(&config, "F13", "chrome.exe", "Docs", None);
+        assert_eq!(press.binding_id.as_deref(), Some("binding-default-standard-thumb-01"), "the plain press, not the first binding");
+        let held = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, false, Gesture::LongPress);
+        assert_eq!(held.binding_id.as_deref(), Some("binding-long"));
+        let double = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, false, Gesture::DoublePress);
+        assert_eq!(double.status, ResolutionStatus::Unresolved);
     }
 
     #[test]

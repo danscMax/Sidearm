@@ -1,5 +1,5 @@
 import type { Action, AppConfig, Binding, ControlId, Layer } from "./config";
-import { makeRandomId } from "./config-editing";
+import { gestureOf, makeRandomId } from "./config-editing";
 import { deviceControlId, deviceLayout, layoutControlId } from "./devices";
 
 /**
@@ -49,7 +49,7 @@ function translate(config: AppConfig, fromDevice: string, toDevice: string, cont
 function occupant(config: AppConfig, profileId: string, layer: Layer, control: ControlId, binding: Binding): Binding | undefined {
   return config.bindings.find((other) =>
     other.profileId === profileId && other.layer === layer && other.controlId === control
-    && (other.triggerMode ?? "press") === (binding.triggerMode ?? "press"));
+    && gestureOf(other.triggerMode) === gestureOf(binding.triggerMode));
 }
 
 /** What a copy of these profiles' bindings would do, binding by binding. */

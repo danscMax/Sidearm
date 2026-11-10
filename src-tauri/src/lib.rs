@@ -188,10 +188,10 @@ pub fn restore_live_maps_main(config_dir: &std::path::Path) {
         let maps_done = mouse_memory::live_overlay::restore_orphaned(config_dir);
         // A mouse asleep at exit has no offline profile yet: store it once it
         // answers (the marker names the profile; a success removes it).
-        if let Ok(profile_id) = std::fs::read_to_string(&failed_marker)
+        if failed_marker.exists()
             && let Ok(config) = config::read_and_migrate_config_file(&config_dir.join("config.json"))
         {
-            mouse_offline::write_offline_profile(&config, profile_id.trim(), config_dir);
+            mouse_offline::retry_offline_profile(&config, config_dir);
         }
         if maps_done && !failed_marker.exists() {
             return;

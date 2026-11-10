@@ -423,6 +423,14 @@ pub(crate) fn write_offline(
     let device = VendorDevice::open_model(model)?;
     let banks = read_banks(&device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
+    // A bank no profile is linked to any more gets its own records back: what
+    // Sidearm stored there earlier (an old turbo record included) would play on.
+    for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
+        let backup = bank_backup(config_dir, model, bank);
+        if backup.exists() && let Err(error) = restore_bank(&device, bank, &backup) {
+            log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
+        }
+    }
     if plan.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
         return Ok(());

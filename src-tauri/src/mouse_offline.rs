@@ -143,33 +143,66 @@ fn onboard_action(payload: &ActionPayload) -> Option<OnboardAction> {
 /// Writes the offline profile into every connected mouse. Best effort: a
 /// record the mouse refuses is logged and skipped. The onboard path leaves the
 /// marker only when the mouse took a record; any mouse that took nothing
-/// because it slept leaves [`OFFLINE_FAILED_FILE`] instead, which the next
-/// start reports.
+/// because it slept leaves [`OFFLINE_FAILED_FILE`] instead (the profile on its
+/// first line, then the device id of each such mouse), which the next start
+/// reports and the restore process retries ([`retry_offline_profile`]).
 pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &Path) {
-    use crate::device_catalog::Transport;
+    write_offline_to(config, profile_id, config_dir, None);
+}
+
+/// Writes the profile [`OFFLINE_FAILED_FILE`] names into the mice it names,
+/// and no other (a mouse that took it must not be rewritten every retry).
+/// Returns whether nothing is left pending.
+pub fn retry_offline_profile(config: &AppConfig, config_dir: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(config_dir.join(OFFLINE_FAILED_FILE)) else { return true };
+    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
+    let Some(profile_id) = lines.next() else { return true };
+    let pending: Vec<String> = lines.map(str::to_owned).collect();
+    // A marker without mice (older format) retries them all.
+    write_offline_to(config, profile_id, config_dir, (!pending.is_empty()).then_some(pending.as_slice()));
+    !config_dir.join(OFFLINE_FAILED_FILE).exists()
+}
+
+fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, only: Option<&[String]>) {
+    use crate::device_catalog::{CATALOG, Transport};
     use crate::mouse_memory::live_overlay;
-    let failed_marker = config_dir.join(OFFLINE_FAILED_FILE);
-    let mut slept = false;
-    for model in crate::mouse_memory::present_models() {
-        if model.transport != Transport::LiveOverlay || !live_overlay::configured(config, model) {
+    let wanted = |device_id: &str| only.is_none_or(|ids| ids.iter().any(|id| id == device_id));
+    let present = crate::mouse_memory::present_models();
+    let mut slept: Vec<String> = Vec::new();
+    for model in &present {
+        if model.transport != Transport::LiveOverlay || !live_overlay::configured(config, model) || !wanted(model.device_id) {
             continue;
         }
         if let Err(error) = live_overlay::write_offline(config, model, profile_id, config_dir) {
             log::warn!("[mouse-offline] {} profile `{profile_id}` was not stored: {error}", model.name);
-            slept |= crate::mouse_memory::is_no_response(&error);
+            if crate::mouse_memory::is_no_response(&error) {
+                slept.push(model.device_id.to_owned());
+            }
         }
     }
-    let onboard_slept = write_onboard_offline(config, profile_id, config_dir);
-    if slept || onboard_slept {
-        let _ = std::fs::write(&failed_marker, profile_id);
-    } else {
+    let onboard_wanted = CATALOG.iter().any(|model| model.transport == Transport::Onboard && wanted(model.device_id));
+    if onboard_wanted && let Some(device_id) = write_onboard_offline(config, profile_id, config_dir) {
+        slept.push(device_id);
+    }
+    // A retry keeps waiting for a mouse that is switched off for now.
+    if let Some(ids) = only {
+        for id in ids {
+            if !present.iter().any(|model| model.device_id == id.as_str()) && !slept.contains(id) {
+                slept.push(id.clone());
+            }
+        }
+    }
+    let failed_marker = config_dir.join(OFFLINE_FAILED_FILE);
+    if slept.is_empty() {
         let _ = std::fs::remove_file(&failed_marker);
+    } else {
+        let _ = std::fs::write(&failed_marker, std::iter::once(profile_id.to_owned()).chain(slept).collect::<Vec<_>>().join("\n"));
     }
 }
 
-/// The onboard path's part of [`write_offline_profile`]. Returns whether the
-/// mouse slept through it.
-fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> bool {
+/// The onboard path's part of [`write_offline_profile`]. Returns the device id
+/// of a mouse that slept through it.
+fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> Option<String> {
     let records = offline_records(config, profile_id);
     let device = match VendorDevice::open_onboard() {
         Ok(device) => device,
@@ -177,12 +210,12 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
             // No mouse at all (or one that does not open) is not a sleeping
             // mouse: nothing to tell the user next time.
             log::info!("[mouse-offline] no onboard mouse reachable, onboard profile not written: {message}");
-            return false;
+            return None;
         }
     };
     if !device.model().verified {
         log::info!("[mouse-offline] {} is not verified: offline profile not written", device.model().name);
-        return false;
+        return None;
     }
     let failed = records
         .iter()
@@ -205,14 +238,14 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
     }
     if failed == records.len() && !records.is_empty() {
         log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
-        return true;
+        return Some(device.model().device_id.to_owned());
     }
     let _ = std::fs::write(config_dir.join(OFFLINE_MARKER_FILE), profile_id);
     log::info!(
         "[mouse-offline] profile `{profile_id}` written for use without Sidearm: {} records, {failed} failed",
         records.len()
     );
-    false
+    None
 }
 
 /// Writes Sidearm's own signals into the onboard-path mouse: its key buttons

@@ -20,7 +20,7 @@ pub struct Originals {
 static ORIGINALS: Mutex<Vec<(&'static str, Originals)>> = Mutex::new(Vec::new());
 
 /// Keeps the first value seen for each field of `device_id`.
-fn remember(device_id: &'static str, seen: Originals) {
+pub(crate) fn remember(device_id: &'static str, seen: Originals) {
     let Ok(mut all) = ORIGINALS.lock() else { return };
     let index = all.iter().position(|(id, _)| *id == device_id).unwrap_or_else(|| {
         all.push((device_id, Originals::default()));

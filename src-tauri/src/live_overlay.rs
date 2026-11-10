@@ -920,6 +920,26 @@ pub(crate) mod tests {
         config
     }
 
+    /// A single odd read while restoring does not cost a record its original.
+    #[test]
+    fn one_odd_read_does_not_drop_the_original() {
+        use crate::mouse_memory::fake::{self, FakeMouse};
+        let dir = tempfile::tempdir().unwrap();
+        let path = r"\\?\hid#vid_1532&pid_00e8&mi_00#x";
+        let (before, target) = (block(OnboardAction::Mouse(1)), block(OnboardAction::Consumer(USAGES[0])));
+        let backup = dir.path().join("v3-live.json");
+        save_snapshot(&backup, &Snapshot { path: path.into(), records: vec![Record { button: 0x40, layer: 0, before, target }] }).unwrap();
+        fake::install(FakeMouse::default());
+        fake::with(|mouse| {
+            mouse.records.insert((LIVE_BANK, 0x40, 0), target);
+            mouse.odd_once.insert((LIVE_BANK, 0x40, 0), block(OnboardAction::Mouse(3)));
+        });
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, path);
+        restore_bank(&device, LIVE_BANK, &backup).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.records[&(LIVE_BANK, 0x40, 0)]), before);
+        assert!(!backup.exists());
+    }
+
     #[test]
     fn sidearm_signals_are_told_apart_from_records_to_keep() {
         let (index, (_, button)) = controls(&NAGA_V3_PRO).into_iter().enumerate().nth(1).unwrap();

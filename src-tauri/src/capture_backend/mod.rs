@@ -479,7 +479,7 @@ fn process_encoded_key_event(
     );
 
     let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
-    if let Some(action) = native_v3_scroll(&preview, own_window) {
+    if let Some(action) = native_wheel_scroll(&preview, own_window) {
         if !event.is_repeat
             && let Err(error) = crate::input_synthesis::send_mouse_action(
                 &config::MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false },
@@ -765,7 +765,9 @@ fn process_encoded_key_event(
     EventOutcome::Handled
 }
 
-fn native_v3_scroll(
+/// A live-overlay mouse's wheel with no active assignment: Sidearm scrolls
+/// (the live map holds silent signals there).
+fn native_wheel_scroll(
     preview: &resolver::ResolvedInputPreview,
     own_window: bool,
 ) -> Option<config::MouseActionKind> {
@@ -774,11 +776,10 @@ fn native_v3_scroll(
     {
         return None;
     }
-    match preview.control_id.as_deref() {
-        Some("v3_wheel_up") => Some(config::MouseActionKind::ScrollUp),
-        Some("v3_wheel_down") => Some(config::MouseActionKind::ScrollDown),
-        _ => None,
-    }
+    #[cfg(target_os = "windows")]
+    return crate::device_catalog::live_wheel_scroll(preview.control_id.as_deref()?);
+    #[cfg(not(target_os = "windows"))]
+    None
 }
 
 fn can_execute_in_own_window(payload: Option<&config::ActionPayload>) -> bool {
@@ -1040,7 +1041,7 @@ mod own_window_tests {
     #[cfg(target_os = "windows")]
     #[test]
     fn v3_wheel_falls_back_to_scroll_without_an_active_assignment() {
-        use super::{native_v3_scroll, resolver};
+        use super::{native_wheel_scroll, resolver};
         let mut config = crate::mouse_memory::live_overlay::tests::config_with_v3();
         let key = config.encoder_mappings.iter().find(|mapping|
             mapping.control_id.as_str() == "v3_wheel_down" && mapping.layer == config::Layer::Standard
@@ -1048,7 +1049,7 @@ mod own_window_tests {
         let resolve = |config: &config::AppConfig| resolver::resolve_input_preview(
             config, &key, "notepad.exe", "Test", None,
         );
-        assert_eq!(native_v3_scroll(&resolve(&config), false), Some(config::MouseActionKind::ScrollDown));
+        assert_eq!(native_wheel_scroll(&resolve(&config), false), Some(config::MouseActionKind::ScrollDown));
         let mut binding = config.bindings.iter().find(|binding|
             binding.profile_id == config.settings.fallback_profile_id && binding.enabled
         ).unwrap().clone();
@@ -1057,8 +1058,8 @@ mod own_window_tests {
         binding.control_id = config::ControlId::new("v3_wheel_down");
         config.bindings.push(binding);
         let assigned = resolve(&config);
-        assert_eq!(native_v3_scroll(&assigned, false), None);
-        assert_eq!(native_v3_scroll(&assigned, true), Some(config::MouseActionKind::ScrollDown));
+        assert_eq!(native_wheel_scroll(&assigned, false), None);
+        assert_eq!(native_wheel_scroll(&assigned, true), Some(config::MouseActionKind::ScrollDown));
     }
 
     #[test]

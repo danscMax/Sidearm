@@ -95,6 +95,19 @@ pub struct ConsumerSignals {
     pub usages: &'static [(&'static str, u16)],
 }
 
+/// The scroll a live-overlay model's wheel control stands for: its live map
+/// holds silent signals, so with no active assignment Sidearm scrolls itself.
+pub fn live_wheel_scroll(control_id: &str) -> Option<crate::config::MouseActionKind> {
+    use crate::config::MouseActionKind::{ScrollDown, ScrollUp};
+    CATALOG.iter().filter(|model| model.transport == Transport::LiveOverlay).find_map(|model| {
+        match control_id.strip_prefix(model.control_prefix)? {
+            "wheel_up" => Some(ScrollUp),
+            "wheel_down" => Some(ScrollDown),
+            _ => None,
+        }
+    })
+}
+
 impl NativeModel {
     /// Whether `other` is this model. By name, never by address: a `const`
     /// model is a fresh value at every use, so two references to the same

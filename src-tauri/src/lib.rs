@@ -24,7 +24,7 @@ mod mouse_restore;
 #[cfg(target_os = "windows")]
 mod mouse_speed;
 #[cfg(target_os = "windows")]
-pub use mouse_restore::{AFTER_CRASH_ARG, RESTORE_LIVE_MAPS_ARG, restore_live_maps_main};
+pub use mouse_restore::restore_entry;
 #[cfg(target_os = "windows")]
 pub(crate) use mouse_restore::{live_map_restore_running, spawn_live_map_restore};
 #[cfg(target_os = "windows")]
@@ -3006,10 +3006,12 @@ fn shutdown_mouse_once(app: &AppHandle) {
     {
         write_offline_mouse_profile(app);
         // A mouse that slept through it gets its profile once it wakes.
-        if let Ok(config_dir) = resolve_config_dir(app)
-            && config_dir.join(mouse_offline::OFFLINE_FAILED_FILE).exists()
-        {
-            spawn_live_map_restore(&config_dir, false);
+        if let Ok(config_dir) = resolve_config_dir(app) {
+            if config_dir.join(mouse_offline::OFFLINE_FAILED_FILE).exists() {
+                spawn_live_map_restore(&config_dir, false);
+            }
+            // Last: an exit cut short leaves the watchdog to finish it.
+            mouse_restore::mark_clean_exit(&config_dir);
         }
     }
 }
@@ -3700,6 +3702,8 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             match resolve_config_dir(app.handle()) {
                 Ok(config_dir) => {
+                    // Restores the mice should this Sidearm be killed with its helper.
+                    mouse_restore::spawn_watchdog(&config_dir);
                     // Before the guard and the capture runtime read it.
                     let key_signals = config_dir.join(mouse_memory::KEY_SIGNALS_FILE).exists();
                     mouse_memory::set_consumer_signals(!key_signals);

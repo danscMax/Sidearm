@@ -189,6 +189,14 @@ pub fn offline_profile_id(config: &AppConfig, in_effect: Option<String>) -> Stri
     .unwrap_or_else(|| config.settings.fallback_profile_id.clone())
 }
 
+/// Writes a marker file atomically; a failure is logged (the marker is the only
+/// trace of what the mouse holds).
+pub(crate) fn write_marker(path: &Path, text: &str) {
+    if let Err(error) = crate::config::persist_atomically(path, |file| std::io::Write::write_all(file, text.as_bytes())) {
+        log::warn!("[mouse-offline] {} not written: {error}", path.display());
+    }
+}
+
 /// Puts back the live speed the per-app profiles changed: the offline
 /// profile's own poll rate (and DPI with `dpi_too`; a V3 bank switch sets its
 /// own), else what the mouse had before Sidearm's first switch this run.
@@ -265,7 +273,7 @@ fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, onl
     if slept.is_empty() {
         let _ = std::fs::remove_file(&failed_marker);
     } else {
-        let _ = std::fs::write(&failed_marker, std::iter::once(profile_id.to_owned()).chain(slept).collect::<Vec<_>>().join("\n"));
+        write_marker(&failed_marker, &std::iter::once(profile_id.to_owned()).chain(slept).collect::<Vec<_>>().join("\n"));
     }
 }
 
@@ -287,6 +295,11 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         log::info!("[mouse-offline] {} is not verified: offline profile not written", device.model().name);
         return None;
     }
+    write_onboard_offline_on(&device, config, profile_id, config_dir)
+}
+
+/// [`write_onboard_offline`] into an open, verified `device`.
+fn write_onboard_offline_on(device: &VendorDevice, config: &AppConfig, profile_id: &str, config_dir: &Path) -> Option<String> {
     let records = plan(config, device.model(), profile_id);
     let mut asleep = false;
     let failed = records
@@ -312,7 +325,7 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         log::warn!("[mouse-offline] DPI not stored: {message}");
         asleep |= crate::mouse_memory::is_no_response(&message);
     }
-    if let Err(message) = restore_live_speed(&device, config, profile_id, true) {
+    if let Err(message) = restore_live_speed(device, config, profile_id, true) {
         log::warn!("[mouse-offline] live DPI / poll rate not put back: {message}");
         asleep |= crate::mouse_memory::is_no_response(&message);
     }
@@ -320,7 +333,7 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
         return Some(device.model().device_id.to_owned());
     }
-    let _ = std::fs::write(config_dir.join(OFFLINE_MARKER_FILE), profile_id);
+    write_marker(&config_dir.join(OFFLINE_MARKER_FILE), profile_id);
     log::info!(
         "[mouse-offline] profile `{profile_id}` written for use without Sidearm: {} records, {failed} failed",
         records.len()
@@ -503,5 +516,74 @@ mod tests {
         assert_eq!(offline_profile_id(&config, None), fallback, "a restore process does not know the profile in effect");
         config.settings.offline_profile_id = Some("deleted-profile".into());
         assert_eq!(offline_profile_id(&config, None), fallback);
+    }
+
+    use crate::mouse_memory::fake::{self, FakeMouse};
+
+    fn fake_v2() -> (VendorDevice, fake::Installed) {
+        let installed = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
+        (VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, ""), installed)
+    }
+
+    #[test]
+    fn a_dpi_already_stored_is_not_written_again() {
+        let (device, _fake) = fake_v2();
+        device.set_dpi(1600, true).unwrap();
+        device.set_dpi(1600, true).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.dpi_writes), 1);
+    }
+
+    #[test]
+    fn a_record_already_in_place_is_not_written_again() {
+        let (device, _fake) = fake_v2();
+        let f13 = OnboardAction::Key { modifier: 0, usage: 0x68 };
+        device.write_record(0x40, 0, f13).unwrap();
+        device.write_record(0x40, 0, f13).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.writes.len()), 1);
+        device.write_record(0x40, 0, OnboardAction::Key { modifier: 0, usage: 0x69 }).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.writes.len()), 2);
+    }
+
+    /// The V2's offline profile lands in the mouse as planned; a mouse that
+    /// slept through part of it is retried, one that refused it is not.
+    #[test]
+    fn the_v2_offline_write_retries_only_a_sleeping_mouse() {
+        use crate::config::MouseOverrides;
+        let dir = tempfile::tempdir().unwrap();
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
+        let own = config.profiles.iter_mut().find(|p| p.id == profile).unwrap();
+        own.device_mouse = Some([("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: None, mouse_dpi_stages: None })].into());
+
+        let (device, _fake) = fake_v2();
+        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
+        let button = NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap();
+        assert_eq!(fake::with(|mouse| mouse.records[&(1, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x17]);
+        assert!(dir.path().join(OFFLINE_MARKER_FILE).exists());
+        drop((device, _fake));
+
+        let (device, _fake) = fake_v2();
+        fake::with(|mouse| mouse.asleep_for.push((0x04, 0x85)));
+        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"), "the DPI slept");
+        drop((device, _fake));
+
+        let (device, _fake) = fake_v2();
+        fake::with(|mouse| mouse.refused.push((0x04, 0x85)));
+        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None, "a refusal is not retried");
+    }
+
+    /// The exit puts back the speed a per-app profile changed.
+    #[test]
+    fn the_exit_puts_the_mouse_speed_back() {
+        let (config, profile) = empty_profile();
+        let (device, _fake) = fake_v2();
+        fake::with(|mouse| {
+            mouse.poll_code = 0x08;
+            mouse.dpi.insert(0x00, 1600);
+        });
+        crate::mouse_speed::remember("razer-naga", crate::mouse_speed::Originals { dpi: Some(800), poll_rate_hz: Some(1000) });
+        restore_live_speed(&device, &config, &profile, true).unwrap();
+        crate::mouse_speed::forget_originals("razer-naga", true, true);
+        assert_eq!(fake::with(|mouse| (mouse.poll_code, mouse.dpi[&0x00])), (0x01, 800));
     }
 }

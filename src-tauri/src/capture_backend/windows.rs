@@ -1106,14 +1106,14 @@ impl CaptureBackendHandle {
             .iter()
             .filter(|(_, overlay)| !overlay.signals.is_empty())
             .map(|(model, overlay)| ReaderInit {
-                model: live_overlay::catalog_index(model),
+                model: model.catalog_index(),
                 signals: overlay.signals.clone(),
                 software_layer: false,
             })
             .collect();
         if !onboard_signals.is_empty() {
             readers.push(ReaderInit {
-                model: live_overlay::catalog_index(mouse_memory::config_model()),
+                model: mouse_memory::config_model().catalog_index(),
                 signals: onboard_signals,
                 software_layer: true,
             });
@@ -1130,8 +1130,7 @@ impl CaptureBackendHandle {
                 stale.push(session);
             }
         }
-        stale.iter_mut().for_each(|session| session.request_stop());
-        drop(stale);
+        crate::mouse_memory::live_overlay::stop_sessions(stale);
         if !kept.is_empty() {
             log::info!("[capture] Keeping {} live button map(s) on config reload", kept.len());
         }
@@ -1370,10 +1369,11 @@ impl CaptureBackendHandle {
     pub(super) fn stop(self) -> Result<(), String> {
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 
-        // Every mouse restores at once; dropping waits for all of them.
-        let mut live_sessions = self.live_sessions;
-        live_sessions.iter_mut().for_each(|session| session.request_stop());
-        drop(live_sessions);
+        // Every mouse restores at once, on its own thread: a mouse stuck in a
+        // HID call must not hang the stop (and with it the app's exit).
+        // The exit waits for them (`shutdown_mouse`), a restart per mouse
+        // (`Session::start`).
+        crate::mouse_memory::live_overlay::stop_sessions(self.live_sessions);
         let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
         if posted == 0 {
             return Err(format!(
@@ -3925,7 +3925,7 @@ fn spawn_capture_helper(
             let reader_line = super::consumer::split_reader_line(trimmed);
             if let Some((model, status)) = reader_line.filter(|(_, rest)| rest.starts_with("STATUS:")) {
                 // Unreadable while any mouse's reader cannot read its collection.
-                let index = crate::mouse_memory::live_overlay::catalog_index(model);
+                let index = model.catalog_index();
                 unreadable[index] = status == super::consumer::STATUS_UNREADABLE;
                 crate::mouse_status::set_state(
                     Some(&app),

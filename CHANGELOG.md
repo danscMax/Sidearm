@@ -52,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Shutting Windows down while Sidearm closes can no longer cut the mouse writes short,
   and the background check can no longer write Sidearm's signals over the profile
   stored for use without Sidearm.
+- A single misread while Sidearm restores a mouse no longer drops that button's
+  original record; a lost rollback file no longer makes Sidearm's own silent signal the
+  "original" of a mouse button.
+- The DPI is no longer rewritten into the mouse's memory on every exit when it has not
+  changed, and the Naga V3 Pro's own fallback key signals no longer trigger needless
+  takeover checks.
 - "Restart as administrator" waits for the old Sidearm to finish restoring the mice
   instead of being turned away by it.
 - Naga V2 HyperSpeed: a button whose assignment cannot live in the mouse (text, macro)

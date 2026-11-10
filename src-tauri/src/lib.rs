@@ -1824,7 +1824,7 @@ async fn live_map_ready(device_id: String) -> bool {
         tauri::async_runtime::spawn_blocking(move || {
             let present = mouse_memory::present_models();
             let Some(model) = present.iter().find(|model| model.device_id == device_id) else { return false };
-            match mouse_memory::live_overlay::live_models(&present).iter().any(|live| std::ptr::eq(*live, *model)) {
+            match mouse_memory::live_overlay::live_models(&present).iter().any(|live| live.is(model)) {
                 true => mouse_memory::live_overlay::is_ready(model),
                 false => model.transport == device_catalog::Transport::Onboard,
             }
@@ -2996,7 +2996,8 @@ fn shutdown_mouse_once(app: &AppHandle) {
     {
         log::warn!("[system] runtime stop on exit failed: {message}");
     }
-    // The stop gives capture threads 5 s; restoring two mice takes longer.
+    // Every session still restoring its mouse — the stop's own, and any a
+    // config reload handed off — finishes before the offline write.
     #[cfg(target_os = "windows")]
     if !mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
         log::warn!("[system] a live map was still being restored at exit");

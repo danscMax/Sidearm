@@ -487,10 +487,7 @@ static DEVICE_LOCKS: [Mutex<()>; crate::device_catalog::CATALOG_LEN] =
     [const { Mutex::new(()) }; crate::device_catalog::CATALOG_LEN];
 
 fn device_lock(model: &'static NativeModel) -> MutexGuard<'static, ()> {
-    let index = crate::device_catalog::CATALOG
-        .iter()
-        .position(|entry| std::ptr::eq(*entry, model))
-        .unwrap_or(0);
+    let index = model.catalog_index();
     // A panic mid-exchange leaves no state behind the lock worth refusing for.
     DEVICE_LOCKS[index].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
@@ -589,7 +586,7 @@ impl VendorDevice {
 
     /// Opens `model` under whichever of its PIDs is connected.
     pub fn open_model(model: &'static NativeModel) -> Result<Self, String> {
-        Self::open_first_model(|candidate| std::ptr::eq(candidate, model))
+        Self::open_first_model(|candidate| candidate.is(model))
     }
 
     /// Opens the first catalog model accepted by `wanted`. `Err` carries the
@@ -917,6 +914,13 @@ impl VendorDevice {
             return Err(format!("DPI {dpi} is outside {min}..={max}"));
         }
         let [hi, lo] = dpi.to_be_bytes();
+        // Every exit stores the offline DPI: one already held on both axes is
+        // not rewritten.
+        let mut args = [0u8; 7];
+        args[0] = storage;
+        if self.command(CLASS_DPI, CMD_GET_DPI, &args)?[9..13] == [hi, lo, hi, lo] {
+            return Ok(());
+        }
         self.command(CLASS_DPI, CMD_SET_DPI, &[storage, hi, lo, hi, lo, 0x00, 0x00])?;
         match self.dpi_in(storage)? {
             read if read == dpi => Ok(()),
@@ -1057,9 +1061,7 @@ impl VendorDevice {
     fn command(&self, class: u8, command: u8, args: &[u8]) -> Result<[u8; PAYLOAD_LEN], String> {
         let payload = build_command(self.model.transaction_id, class, command, args);
         for _ in 0..COMMAND_RETRIES {
-            self.set_payload(&payload)?;
-            std::thread::sleep(COMMAND_SETTLE);
-            let reply = self.read_reply()?;
+            let reply = self.exchange(&payload)?;
             match reply[0] {
                 // Razer's driver shares this report from another process: a
                 // reply to someone else's request is not ours — ask again.
@@ -1077,6 +1079,17 @@ impl VendorDevice {
             }
         }
         Err(format!("command {class:#04x}/{command:#04x} stayed busy"))
+    }
+
+    /// One request and its reply.
+    fn exchange(&self, payload: &[u8; PAYLOAD_LEN]) -> Result<[u8; PAYLOAD_LEN], String> {
+        #[cfg(test)]
+        if let Some(reply) = fake::exchange(payload) {
+            return Ok(reply);
+        }
+        self.set_payload(payload)?;
+        std::thread::sleep(COMMAND_SETTLE);
+        self.read_reply()
     }
 
     /// Reads a feature reply without selecting a slot: command-class replies
@@ -1326,6 +1339,103 @@ fn find_leaf(parent: HKEY, class: String, needle: &str) -> Result<Vec<String>, S
     }
     unsafe { RegCloseKey(class_key) };
     if paths.is_empty() { Err(NO_INTERFACE.to_string()) } else { Ok(paths) }
+}
+
+/// An in-memory mouse for tests: [`VendorDevice::command`] talks to it instead
+/// of HID while one is installed on the test's thread. It keeps button records
+/// per (profile, button, layer), DPI per storage and the poll code, and can
+/// sleep (status `0x04`) or refuse (status `0x03`) chosen commands.
+#[cfg(test)]
+pub(crate) mod fake {
+    use super::*;
+    use std::cell::RefCell;
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    pub(crate) struct FakeMouse {
+        pub records: HashMap<(u8, u8, u8), [u8; 7]>,
+        /// Every record write, in order.
+        pub writes: Vec<(u8, u8, u8)>,
+        /// A block one next read of that address returns instead (a firmware
+        /// transition), then the stored one again.
+        pub odd_once: HashMap<(u8, u8, u8), [u8; 7]>,
+        pub dpi: HashMap<u8, u16>,
+        pub dpi_writes: usize,
+        pub poll_code: u8,
+        /// Commands answered as a sleeping mouse, as `(class, command)`.
+        pub asleep_for: Vec<(u8, u8)>,
+        /// Commands refused with another status.
+        pub refused: Vec<(u8, u8)>,
+    }
+
+    thread_local! {
+        static FAKE: RefCell<Option<FakeMouse>> = const { RefCell::new(None) };
+    }
+
+    /// Installs `mouse` on this thread until the returned guard drops.
+    #[must_use]
+    pub(crate) fn install(mouse: FakeMouse) -> Installed {
+        FAKE.with(|cell| *cell.borrow_mut() = Some(mouse));
+        Installed
+    }
+
+    pub(crate) struct Installed;
+
+    impl Drop for Installed {
+        fn drop(&mut self) {
+            FAKE.with(|cell| *cell.borrow_mut() = None);
+        }
+    }
+
+    pub(crate) fn with<R>(work: impl FnOnce(&mut FakeMouse) -> R) -> R {
+        FAKE.with(|cell| work(cell.borrow_mut().as_mut().expect("a fake mouse is installed")))
+    }
+
+    pub(super) fn exchange(payload: &[u8; PAYLOAD_LEN]) -> Option<[u8; PAYLOAD_LEN]> {
+        FAKE.with(|cell| {
+            let mut cell = cell.borrow_mut();
+            let mouse = cell.as_mut()?;
+            let (class, command) = (payload[6], payload[7]);
+            let args = &payload[8..18];
+            let key = (args[0], args[1], args[2]);
+            let mut reply = *payload;
+            reply[0] = if mouse.asleep_for.contains(&(class, command)) {
+                COMMAND_STATUS_NO_RESPONSE
+            } else if mouse.refused.contains(&(class, command)) {
+                0x03
+            } else {
+                COMMAND_STATUS_OK
+            };
+            if reply[0] != COMMAND_STATUS_OK {
+                return Some(reply);
+            }
+            match (class, command) {
+                (CLASS_BUTTON, CMD_GET_BUTTON) => {
+                    let block = mouse.odd_once.remove(&key).or_else(|| mouse.records.get(&key).copied()).unwrap_or_default();
+                    reply[11..18].copy_from_slice(&block);
+                }
+                (CLASS_BUTTON, CMD_SET_BUTTON) => {
+                    let mut block = [0u8; 7];
+                    block.copy_from_slice(&args[3..10]);
+                    mouse.records.insert(key, block);
+                    mouse.writes.push(key);
+                }
+                (CLASS_DPI, CMD_GET_DPI) => {
+                    let [hi, lo] = mouse.dpi.get(&args[0]).copied().unwrap_or(800).to_be_bytes();
+                    reply[9..13].copy_from_slice(&[hi, lo, hi, lo]);
+                }
+                (CLASS_DPI, CMD_SET_DPI) => {
+                    mouse.dpi.insert(args[0], u16::from_be_bytes([args[1], args[2]]));
+                    mouse.dpi_writes += 1;
+                }
+                (CLASS_CONTROL, CMD_GET_POLL_RATE) => reply[8] = mouse.poll_code,
+                (CLASS_CONTROL, CMD_SET_POLL_RATE) => mouse.poll_code = args[0],
+                // Mode reads answer `MODE_NORMAL` (args echo zeros).
+                _ => {}
+            }
+            Some(reply)
+        })
+    }
 }
 
 #[cfg(test)]

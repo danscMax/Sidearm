@@ -95,7 +95,33 @@ pub struct ConsumerSignals {
     pub usages: &'static [(&'static str, u16)],
 }
 
+/// The scroll a live-overlay model's wheel control stands for: its live map
+/// holds silent signals, so with no active assignment Sidearm scrolls itself.
+pub fn live_wheel_scroll(control_id: &str) -> Option<crate::config::MouseActionKind> {
+    use crate::config::MouseActionKind::{ScrollDown, ScrollUp};
+    CATALOG.iter().filter(|model| model.transport == Transport::LiveOverlay).find_map(|model| {
+        match control_id.strip_prefix(model.control_prefix)? {
+            "wheel_up" => Some(ScrollUp),
+            "wheel_down" => Some(ScrollDown),
+            _ => None,
+        }
+    })
+}
+
 impl NativeModel {
+    /// Whether `other` is this model. By name, never by address: a `const`
+    /// model is a fresh value at every use, so two references to the same
+    /// model need not share an address.
+    pub fn is(&self, other: &NativeModel) -> bool {
+        self.name == other.name
+    }
+
+    /// This model's place in [`CATALOG`] (its device lock and live-map flags);
+    /// a model outside the catalog (a test double) takes the first one's.
+    pub fn catalog_index(&self) -> usize {
+        CATALOG.iter().position(|entry| entry.is(self)).unwrap_or(0)
+    }
+
     /// Consumer usage a key button sends on this model, if it has the path.
     pub fn consumer_usage_for(&self, control_id: &str) -> Option<u16> {
         self.consumer.as_ref()?.usages.iter().find(|(id, _)| *id == control_id).map(|(_, usage)| *usage)
@@ -402,6 +428,26 @@ pub const CATALOG_LEN: usize = 5;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_live_overlay_wheel_falls_back_to_scrolling() {
+        use crate::config::MouseActionKind::{ScrollDown, ScrollUp};
+        assert_eq!(live_wheel_scroll("v3_wheel_up"), Some(ScrollUp));
+        assert_eq!(live_wheel_scroll("v3_wheel_down"), Some(ScrollDown));
+        assert_eq!(live_wheel_scroll("wheel_up"), None, "the V2 scrolls by itself");
+        assert_eq!(live_wheel_scroll("v3_thumb_01"), None);
+    }
+
+    #[test]
+    fn every_catalog_model_has_its_own_index() {
+        for (index, model) in CATALOG.iter().enumerate() {
+            assert_eq!(model.catalog_index(), index, "{}", model.name);
+        }
+        // A `const` model used directly is the same model as its catalog entry.
+        assert_eq!(NAGA_X.catalog_index(), CATALOG.iter().position(|entry| entry.name == NAGA_X.name).unwrap());
+        let names: std::collections::HashSet<_> = CATALOG.iter().map(|model| model.name).collect();
+        assert_eq!(names.len(), CATALOG.len(), "model names are unique");
+    }
 
     /// The V2 HyperSpeed entry must reproduce the tables v0.9.0 shipped with,
     /// written out here independently of the entry.

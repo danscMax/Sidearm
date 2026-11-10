@@ -189,6 +189,14 @@ pub fn offline_profile_id(config: &AppConfig, in_effect: Option<String>) -> Stri
     .unwrap_or_else(|| config.settings.fallback_profile_id.clone())
 }
 
+/// Writes a marker file atomically; a failure is logged (the marker is the only
+/// trace of what the mouse holds).
+pub(crate) fn write_marker(path: &Path, text: &str) {
+    if let Err(error) = crate::config::persist_atomically(path, |file| std::io::Write::write_all(file, text.as_bytes())) {
+        log::warn!("[mouse-offline] {} not written: {error}", path.display());
+    }
+}
+
 /// Puts back the live speed the per-app profiles changed: the offline
 /// profile's own poll rate (and DPI with `dpi_too`; a V3 bank switch sets its
 /// own), else what the mouse had before Sidearm's first switch this run.
@@ -265,7 +273,7 @@ fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, onl
     if slept.is_empty() {
         let _ = std::fs::remove_file(&failed_marker);
     } else {
-        let _ = std::fs::write(&failed_marker, std::iter::once(profile_id.to_owned()).chain(slept).collect::<Vec<_>>().join("\n"));
+        write_marker(&failed_marker, &std::iter::once(profile_id.to_owned()).chain(slept).collect::<Vec<_>>().join("\n"));
     }
 }
 
@@ -320,7 +328,7 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
         return Some(device.model().device_id.to_owned());
     }
-    let _ = std::fs::write(config_dir.join(OFFLINE_MARKER_FILE), profile_id);
+    write_marker(&config_dir.join(OFFLINE_MARKER_FILE), profile_id);
     log::info!(
         "[mouse-offline] profile `{profile_id}` written for use without Sidearm: {} records, {failed} failed",
         records.len()

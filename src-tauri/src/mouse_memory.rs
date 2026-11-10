@@ -917,6 +917,13 @@ impl VendorDevice {
             return Err(format!("DPI {dpi} is outside {min}..={max}"));
         }
         let [hi, lo] = dpi.to_be_bytes();
+        // Every exit stores the offline DPI: one already held on both axes is
+        // not rewritten.
+        let mut args = [0u8; 7];
+        args[0] = storage;
+        if self.command(CLASS_DPI, CMD_GET_DPI, &args)?[9..13] == [hi, lo, hi, lo] {
+            return Ok(());
+        }
         self.command(CLASS_DPI, CMD_SET_DPI, &[storage, hi, lo, hi, lo, 0x00, 0x00])?;
         match self.dpi_in(storage)? {
             read if read == dpi => Ok(()),

@@ -137,9 +137,8 @@ pub fn restore_live_maps_main(config_dir: &std::path::Path, after_crash: bool) {
     if after_crash
         && !failed_marker.exists()
         && let Ok(config) = crate::config::read_and_migrate_config_file(&config_dir.join("config.json"))
-        && let Err(error) = std::fs::write(&failed_marker, crate::mouse_offline::offline_profile_id(&config, None))
     {
-        log::warn!("[restore] offline profile not queued: {error}");
+        crate::mouse_offline::write_marker(&failed_marker, &crate::mouse_offline::offline_profile_id(&config, None));
     }
     let deadline = Instant::now() + Duration::from_secs(30 * 60);
     while !mutex_exists(APP_MUTEX) && Instant::now() < deadline {

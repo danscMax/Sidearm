@@ -131,6 +131,28 @@ pub fn configure(config: &mut AppConfig, present: &[&'static NativeModel]) -> bo
     changed
 }
 
+/// Modifier sets of the reserved key-mode aliases (`<mods>+F13`..`F24`). Never
+/// `Ctrl+Alt+Shift` alone: that is Synapse's Hypershift encoding.
+const ALIAS_MODIFIERS: [&str; 9] = [
+    "Ctrl+Shift", "Alt+Shift", "Ctrl+Win", "Shift+Win", "Alt+Win",
+    "Ctrl+Shift+Win", "Ctrl+Alt+Win", "Alt+Shift+Win", "Ctrl+Alt+Shift+Win",
+];
+
+/// Every reserved key-mode alias, normalized, in assignment order.
+fn key_aliases() -> impl Iterator<Item = String> {
+    ALIAS_MODIFIERS
+        .into_iter()
+        .flat_map(|mods| (13..=24).map(move |key| format!("{mods}+F{key}")))
+        .filter_map(|alias| crate::hotkeys::normalize_hotkey(&alias).ok())
+}
+
+/// Whether `encoded_key` is one of Sidearm's own key-mode aliases.
+pub fn is_key_alias(encoded_key: &str) -> bool {
+    static ALIASES: std::sync::OnceLock<HashSet<String>> = std::sync::OnceLock::new();
+    let aliases = ALIASES.get_or_init(|| key_aliases().collect());
+    crate::hotkeys::normalize_hotkey(encoded_key).is_ok_and(|key| aliases.contains(&key))
+}
+
 /// The model's device with its controls and one reserved encoding per control
 /// and layer, and no bindings.
 fn add_device(config: &mut AppConfig, model: &NativeModel) {
@@ -167,13 +189,7 @@ fn add_device(config: &mut AppConfig, model: &NativeModel) {
         .iter()
         .filter_map(|mapping| crate::hotkeys::normalize_hotkey(&mapping.encoded_key).ok())
         .collect();
-    let mut aliases = [
-        "Ctrl+Shift", "Alt+Shift", "Ctrl+Win", "Shift+Win", "Alt+Win",
-        "Ctrl+Shift+Win", "Ctrl+Alt+Win", "Alt+Shift+Win", "Ctrl+Alt+Shift+Win",
-    ]
-    .into_iter()
-    .flat_map(|mods| (13..=24).map(move |key| format!("{mods}+F{key}")))
-    .filter_map(|alias| crate::hotkeys::normalize_hotkey(&alias).ok());
+    let mut aliases = key_aliases();
     for id in remappable {
         for layer in [Layer::Standard, Layer::Hypershift] {
             if let Some(encoded_key) = aliases.find(|alias| taken.insert(alias.clone())) {
@@ -506,9 +522,7 @@ pub fn restore_orphaned(config_dir: &Path) -> bool {
         match VendorDevice::open_model(model).and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
             // Same as a session's end: the onboard path's signals come back at the next start.
             Ok(()) if model.transport == Transport::Onboard => {
-                if let Err(error) = std::fs::write(config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map") {
-                    log::warn!("[naga-live] {} signals marker not written: {error}", model.name);
-                }
+                crate::mouse_offline::write_marker(&config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map");
             }
             Ok(()) => {}
             Err(error) => {
@@ -552,6 +566,17 @@ fn migrate_legacy(config_dir: &Path, legacy: &str, name: String) -> PathBuf {
         log::warn!("[naga-live] Could not rename {}: {error}", legacy.display());
     }
     path
+}
+
+/// Whether `block` is exactly the reserved consumer signal Sidearm writes for
+/// `button` on `layer` of `model` — never a user's own record of that shape
+/// (an F13 the user bound stays theirs).
+fn is_own_signal(model: &NativeModel, button: u8, layer: u8, block: [u8; 7]) -> bool {
+    controls(model)
+        .iter()
+        .position(|&(_, id)| id == button)
+        .and_then(|index| USAGES.get(2 * index + usize::from(layer)))
+        .is_some_and(|&usage| block == self::block(OnboardAction::Consumer(usage)))
 }
 
 fn block(action: OnboardAction) -> [u8; 7] {
@@ -617,12 +642,10 @@ fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), St
     let Some(snapshot) = load_snapshot(device, backup)? else { return Ok(()) };
     let mut failure = None;
     for record in snapshot.records.iter().rev().filter(|record| record.before != record.target) {
-        let result = device.read_block(bank, record.button, record.layer).and_then(|current| {
-            if current == record.target {
-                write_bank(device, bank, record.button, record.layer, record.before)
-            } else {
-                Ok(())
-            }
+        // Read as something else twice: the user's own change, kept. A single
+        // odd read is a firmware transition, not a reason to give the record up.
+        let result = confirmed_drift(record.target, || device.read_block(bank, record.button, record.layer)).and_then(|changed| {
+            if changed { Ok(()) } else { write_bank(device, bank, record.button, record.layer, record.before) }
         });
         if let Err(error) = result {
             failure.get_or_insert(error);
@@ -705,13 +728,19 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     }
     restore_bank(device, bank, backup)?;
     let mut records = Vec::with_capacity(targets.len());
+    let model = device.model();
     for &(button, layer, action) in targets {
-        records.push(Record {
-            button,
-            layer,
-            before: device.read_block(bank, button, layer)?,
-            target: bank_block(bank, action),
-        });
+        let mut before = device.read_block(bank, button, layer)?;
+        // A map no session restored (its rollback file lost) still holds
+        // Sidearm's signal: a native button gets its plain record back as the
+        // original, anything else keeps it and says so.
+        if is_own_signal(model, button, layer, before) {
+            match model.native_buttons.iter().find(|&&(_, id, _)| id == button) {
+                Some(&(_, _, value)) => before = block(OnboardAction::Mouse(value)),
+                None => log::warn!("[naga-live] {} {button:#04x}/{layer} holds a Sidearm signal with no original", model.name),
+            }
+        }
+        records.push(Record { button, layer, before, target: bank_block(bank, action) });
     }
     let snapshot = Snapshot { path: device.path.clone(), records };
     if snapshot.records.is_empty() {
@@ -844,10 +873,8 @@ impl Session {
                     // The restored map plays what the mouse had stored (often the
                     // offline profile), not Sidearm's onboard signals: mark it so
                     // the guard, or the next live session, writes them back.
-                    if onboard.is_some()
-                        && let Err(error) = std::fs::write(config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map")
-                    {
-                        log::warn!("[naga-live] {} signals marker not written: {error}", model.name);
+                    if onboard.is_some() {
+                        crate::mouse_offline::write_marker(&config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map");
                     }
                 }
             })
@@ -891,6 +918,17 @@ pub(crate) mod tests {
         let mut config = crate::config::default_seed_config();
         add_device(&mut config, &NAGA_V3_PRO);
         config
+    }
+
+    #[test]
+    fn sidearm_signals_are_told_apart_from_records_to_keep() {
+        let (index, (_, button)) = controls(&NAGA_V3_PRO).into_iter().enumerate().nth(1).unwrap();
+        let own = |layer: u8| block(OnboardAction::Consumer(USAGES[2 * index + usize::from(layer)]));
+        assert!(is_own_signal(&NAGA_V3_PRO, button, 0, own(0)));
+        assert!(is_own_signal(&NAGA_V3_PRO, button, 1, own(1)));
+        assert!(!is_own_signal(&NAGA_V3_PRO, button, 0, own(1)), "another layer's signal");
+        assert!(!is_own_signal(&NAGA_V3_PRO, button, 0, block(OnboardAction::Key { modifier: 0, usage: 0x68 })), "the user's F13");
+        assert!(!is_own_signal(&NAGA_V3_PRO, button, 0, block(OnboardAction::Mouse(1))));
     }
 
     #[test]

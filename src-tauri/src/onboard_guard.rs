@@ -163,10 +163,12 @@ pub fn request_check() {
     }
 }
 
-/// Feeds the guard a captured signal. Sidearm writes bare `F13`..`F24` (thumbs)
-/// and `Alt+F23`/`Alt+F24` (top buttons) only, so an `F13`..`F24` with Ctrl, Shift
-/// or Win came from a record someone else stored — Synapse's Hypershift encoding
-/// is `Ctrl+Alt+Shift+Fxx`. Cheap enough for the per-keystroke path.
+/// Feeds the guard a captured signal. The onboard path writes bare `F13`..`F24`
+/// (thumbs) and `Alt+F23`/`Alt+F24` (top buttons), a live map its reserved
+/// key-mode aliases (`live_overlay::is_key_alias`); any other `F13`..`F24`
+/// with Ctrl, Shift or Win came from a record someone else stored — Synapse's
+/// Hypershift encoding is `Ctrl+Alt+Shift+Fxx`. Cheap enough for the
+/// per-keystroke path.
 pub fn note_signal(encoded_key: &str) {
     if is_foreign_encoding(encoded_key) {
         request_check();
@@ -183,6 +185,7 @@ fn is_foreign_encoding(encoded_key: &str) -> bool {
         && ["Ctrl+", "Shift+", "Win+"]
             .iter()
             .any(|modifier| encoded_key.contains(modifier))
+        && !crate::mouse_memory::live_overlay::is_key_alias(encoded_key)
 }
 
 fn run(
@@ -681,5 +684,8 @@ mod tests {
         assert!(!is_foreign_encoding("Alt+F23"));
         assert!(!is_foreign_encoding("Ctrl+F12"));
         assert!(!is_foreign_encoding("Ctrl+Shift+T"));
+        // The V3's own key-mode aliases are Sidearm's.
+        assert!(!is_foreign_encoding("Ctrl+Shift+F13"));
+        assert!(!is_foreign_encoding("Ctrl+Alt+Shift+Win+F24"));
     }
 }

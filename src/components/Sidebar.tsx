@@ -48,6 +48,7 @@ export function Sidebar({
   selectedDeviceName,
   allRules,
   onEditRule,
+  onRuleMenu,
   onAddRule,
   onToggleAllRules,
 }: {
@@ -67,6 +68,7 @@ export function Sidebar({
   /** The all-rules view of the assignments screen. */
   allRules: boolean;
   onEditRule: (mappingId: string) => void;
+  onRuleMenu: (mappingId: string, x: number, y: number) => void;
   onAddRule: () => void;
   onToggleAllRules: () => void;
 }) {
@@ -141,6 +143,7 @@ export function Sidebar({
           onContextMenu={(x, y, profileId) => setCtxMenu({ x, y, profileId })}
           onOpenSettings={() => onSwitchMode("settings")}
           onEditRule={onEditRule}
+          onRuleMenu={onRuleMenu}
           onAddRule={onAddRule}
           onToggleAllRules={onToggleAllRules}
         />

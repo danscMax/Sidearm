@@ -1371,12 +1371,9 @@ impl CaptureBackendHandle {
 
         // Every mouse restores at once, on its own thread: a mouse stuck in a
         // HID call must not hang the stop (and with it the app's exit).
-        if !self.live_sessions.is_empty() {
-            crate::mouse_memory::live_overlay::stop_sessions(self.live_sessions);
-            if !crate::mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
-                log::warn!("[capture] a live map was still being restored after 30 s");
-            }
-        }
+        // The exit waits for them (`shutdown_mouse`), a restart per mouse
+        // (`Session::start`).
+        crate::mouse_memory::live_overlay::stop_sessions(self.live_sessions);
         let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
         if posted == 0 {
             return Err(format!(

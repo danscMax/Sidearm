@@ -2996,6 +2996,12 @@ fn shutdown_mouse_once(app: &AppHandle) {
     {
         log::warn!("[system] runtime stop on exit failed: {message}");
     }
+    // Every session still restoring its mouse — the stop's own, and any a
+    // config reload handed off — finishes before the offline write.
+    #[cfg(target_os = "windows")]
+    if !mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
+        log::warn!("[system] a live map was still being restored at exit");
+    }
     #[cfg(target_os = "windows")]
     {
         write_offline_mouse_profile(app);

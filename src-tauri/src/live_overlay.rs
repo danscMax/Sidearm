@@ -1195,15 +1195,15 @@ pub(crate) mod tests {
 
     /// Hardware, interactive — **close Sidearm first**; writes the V3's live map
     /// (RAM, not a bank) and puts it back. Thumbs 1..4 get plain key records
-    /// with the standard left-hand mask, as Synapse stores them: LShift, LAlt,
-    /// LCtrl+LAlt, LShift+LAlt, all with F24. Press 1..4 within 45 s; prints
+    /// with the standard mask, as Synapse stores them: LShift, LAlt, then the
+    /// right-hand RShift, RAlt the V2 needs, all with F24. Press 1..4 within 45 s; prints
     /// what Windows saw. Run: `cargo test v3_plain_left_modifiers -- --ignored --nocapture`.
     #[test]
     #[ignore]
     fn v3_plain_left_modifiers() {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
         let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
-        let probes = [(0x40, 0x02), (0x41, 0x04), (0x42, 0x05), (0x43, 0x06)];
+        let probes = [(0x40, 0x02), (0x41, 0x04), (0x42, 0x20), (0x43, 0x40)];
         let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, read_bank(&device, LIVE_BANK, button, 0).unwrap())).collect();
         for (index, &(button, modifier)) in probes.iter().enumerate() {
             println!("thumb {}: modifier {modifier:#04x} + F24", index + 1);
@@ -1211,15 +1211,19 @@ pub(crate) mod tests {
         }
         drop(device);
         println!("press thumbs 1..4 now, one at a time");
-        let watched = [("LCtrl", 0xA2), ("LShift", 0xA0), ("LAlt", 0xA4), ("RCtrl", 0xA3), ("RShift", 0xA1), ("RAlt", 0xA5), ("F24", 0x87)];
-        let mut held = [false; 7];
-        let end = std::time::Instant::now() + std::time::Duration::from_secs(45);
-        while std::time::Instant::now() < end {
-            for (i, (name, vk)) in watched.iter().enumerate() {
-                let down = unsafe { GetAsyncKeyState(*vk) } as u16 & 0x8000 != 0;
-                if down != held[i] {
-                    held[i] = down;
-                    println!("{name} {}", if down { "DOWN" } else { "up" });
+        // Every virtual key, with the time since the start: what each press sent.
+        let start = std::time::Instant::now();
+        let mut held = [false; 256];
+        while start.elapsed() < std::time::Duration::from_secs(45) {
+            for vk in 1..=254u16 {
+                // Mouse buttons are not keys.
+                if matches!(vk, 0x01 | 0x02 | 0x04 | 0x05 | 0x06) {
+                    continue;
+                }
+                let down = unsafe { GetAsyncKeyState(i32::from(vk)) } as u16 & 0x8000 != 0;
+                if down != held[usize::from(vk)] {
+                    held[usize::from(vk)] = down;
+                    println!("{:5.1}s vk {vk:#04x} {}", start.elapsed().as_secs_f32(), if down { "DOWN" } else { "up" });
                 }
             }
             std::thread::sleep(std::time::Duration::from_millis(5));

@@ -44,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   without Sidearm: the restore process stores the offline profile like an exit would.
   This also covers "End task" in Task Manager, which ends Sidearm and its capture
   helper together: a small watchdog started with Sidearm does the restore then.
+- Closing Sidearm no longer writes a mouse's live button map just to undo it, when the
+  mouse woke while Sidearm was closing (the exit took up to 15 seconds longer).
+- A sleeping mouse no longer fills the log with the same warning every 2 seconds, and
+  the V2's first side button no longer logs a false "no original" warning.
 - Without Sidearm, a button set to a double or triple press or a chord no longer fires
   on a single press (the mouse cannot tell them apart): it does nothing instead.
 - Naga V3 Pro: a held modifier without a key (push-to-talk with Alt) is stored with the

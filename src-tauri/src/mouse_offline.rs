@@ -370,14 +370,23 @@ pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
     }
     // An unverified mouse is not the one the profile was written into; the
     // marker stays for it.
-    match restore_signals(config) {
+    // Retried every couple of seconds while the mouse sleeps: say each new
+    // failure once.
+    static LAST_FAILURE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    let result = restore_signals(config);
+    let mut last = LAST_FAILURE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    match result {
         Ok(()) => {
+            *last = None;
             let _ = std::fs::remove_file(&marker);
             log::info!("[mouse-offline] Sidearm signals restored after the offline profile");
             true
         }
         Err(message) => {
-            log::warn!("[mouse-offline] restore after the offline profile failed: {message}");
+            if last.as_ref() != Some(&message) {
+                log::warn!("[mouse-offline] restore after the offline profile failed: {message}");
+                *last = Some(message);
+            }
             false
         }
     }

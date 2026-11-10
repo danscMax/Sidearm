@@ -36,6 +36,8 @@ pub(crate) const USAGES: [u16; 44] = [
     0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e,
 ];
 const RETRY: Duration = Duration::from_secs(2);
+/// A session told to stop before it took the mouse.
+const STOPPING: &str = "stopping";
 /// Bank argument of the live map; stored banks are `1..=MAX_BANKS`.
 const LIVE_BANK: u8 = 0;
 
@@ -579,11 +581,14 @@ fn migrate_legacy(config_dir: &Path, legacy: &str, name: String) -> PathBuf {
 /// `button` on `layer` of `model` — never a user's own record of that shape
 /// (an F13 the user bound stays theirs).
 fn is_own_signal(model: &NativeModel, button: u8, layer: u8, block: [u8; 7]) -> bool {
-    controls(model)
-        .iter()
-        .position(|&(_, id)| id == button)
-        .and_then(|index| USAGES.get(2 * index + usize::from(layer)))
-        .is_some_and(|&usage| block == self::block(OnboardAction::Consumer(usage)))
+    let controls = controls(model);
+    let Some(index) = controls.iter().position(|&(_, id)| id == button) else { return false };
+    // The V2's onboard signal for thumb_01 is the same usage as this slot's
+    // live signal: there it is the button's own record, not a leftover.
+    let onboard = model.consumer_usage_for(controls[index].0).map(|usage| self::block(OnboardAction::Consumer(usage)));
+    USAGES
+        .get(2 * index + usize::from(layer))
+        .is_some_and(|&usage| block == self::block(OnboardAction::Consumer(usage)) && Some(block) != onboard)
 }
 
 fn block(action: OnboardAction) -> [u8; 7] {
@@ -849,6 +854,11 @@ impl Session {
                             return Err("Offline assignments are still pending".into());
                         }
                     }
+                    // Stopped while the signals went back (an exit): leave the
+                    // mouse as it is rather than write a map only to undo it.
+                    if stopped.try_recv() != Err(mpsc::TryRecvError::Empty) {
+                        return Err(STOPPING.to_owned());
+                    }
                     let snapshot = apply_bank(&open()?, LIVE_BANK, &backup, &worker_targets)?;
                     log::info!("[naga-live] {} verified {} live assignments", model.name, snapshot.records.len());
                     *active = Some(snapshot);
@@ -860,7 +870,7 @@ impl Session {
                     loop {
                         match attempt(&mut active) {
                             Ok(()) => break,
-                            Err(message) if message != super::NO_INTERFACE && last_error.as_ref() != Some(&message) => {
+                            Err(message) if message != super::NO_INTERFACE && message != STOPPING && last_error.as_ref() != Some(&message) => {
                                 log::warn!("[naga-live] {} waiting to configure live assignments: {message}", model.name);
                                 last_error = Some(message);
                             }
@@ -997,6 +1007,10 @@ pub(crate) mod tests {
         assert!(!is_own_signal(&NAGA_V3_PRO, button, 0, own(1)), "another layer's signal");
         assert!(!is_own_signal(&NAGA_V3_PRO, button, 0, block(OnboardAction::Key { modifier: 0, usage: 0x68 })), "the user's F13");
         assert!(!is_own_signal(&NAGA_V3_PRO, button, 0, block(OnboardAction::Mouse(1))));
+        // V2 thumb_01 stores consumer 0x10 while Sidearm runs, which is also
+        // its live signal on layer 0: that record is the original.
+        assert!(!is_own_signal(&NAGA_V2_HYPERSPEED, 0x40, 0, block(OnboardAction::Consumer(0x10))));
+        assert!(is_own_signal(&NAGA_V2_HYPERSPEED, 0x40, 1, block(OnboardAction::Consumer(0x11))));
     }
 
     #[test]

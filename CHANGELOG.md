@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The tray shows the battery of every connected mouse on one short line ("V3 Pro 100% ·
-  V2 9%"), and the tray badge follows the mouse you use. Before, with a V2 plugged in it
+  V2 9%"), and the tray badge follows the mouse you move or click. Before, with a V2 plugged in it
   showed only the V2's charge, even while you used the V3.
 - A mouse that wakes up shows its battery and DPI on its card within 20 seconds instead
   of "not answering" until the next 5-minute check.

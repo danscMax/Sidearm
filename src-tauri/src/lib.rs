@@ -566,7 +566,7 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
 
 /// Reload config from disk and rebuild the tray menu. Use this from triggers
 /// that have no config in hand (setup, tray profile click, pause toggle).
-fn rebuild_tray_menu(app: &AppHandle) {
+pub(crate) fn rebuild_tray_menu(app: &AppHandle) {
     let config_dir = resolve_app_paths(app).config_dir.clone();
     match load_or_initialize_config(&config_dir) {
         Ok(response) => rebuild_tray_menu_from_config(app, &response.config),

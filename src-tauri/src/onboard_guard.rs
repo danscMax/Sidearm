@@ -88,9 +88,9 @@ pub fn last_battery_percent() -> Option<u8> {
         .or_else(|| batteries.iter().map(|&(_, percent)| percent).min())
 }
 
-/// Called for every button press Sidearm handles: the tray badge follows the
-/// mouse in use.
-pub fn note_device_used(app: &AppHandle, config: &crate::config::AppConfig, device_id: &str) {
+/// Called when a mouse moves or clicks (raw input, `system_events`) and for
+/// every button press Sidearm handles: the tray badge follows the mouse in use.
+pub fn note_device_used(app: &AppHandle, device_id: &str) {
     let changed = {
         let mut used = LAST_USED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let changed = used.as_deref() != Some(device_id);
@@ -101,7 +101,7 @@ pub fn note_device_used(app: &AppHandle, config: &crate::config::AppConfig, devi
     };
     let tracked = batteries().iter().any(|(model, _)| model.device_id == device_id);
     if changed && tracked {
-        crate::rebuild_tray_menu_from_config(app, config);
+        crate::rebuild_tray_menu(app);
     }
 }
 

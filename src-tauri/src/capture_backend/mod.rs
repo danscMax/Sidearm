@@ -814,7 +814,7 @@ fn run_fire_and_forget(
     if let Some(control) = preview.control_id.as_deref()
         && let Some(physical) = config.physical_controls.iter().find(|physical| physical.id.as_str() == control)
     {
-        crate::onboard_guard::note_device_used(app, config, &physical.device_id);
+        crate::onboard_guard::note_device_used(app, &physical.device_id);
     }
     match executor::run_preview_action(config, preview) {
         Ok(mut execution) => {

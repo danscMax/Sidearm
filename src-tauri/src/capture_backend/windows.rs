@@ -1370,10 +1370,16 @@ impl CaptureBackendHandle {
     pub(super) fn stop(self) -> Result<(), String> {
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
 
-        // Every mouse restores at once; dropping waits for all of them.
+        // Every mouse restores at once, on its own thread: a mouse stuck in a
+        // HID call must not hang the stop (and with it the app's exit).
         let mut live_sessions = self.live_sessions;
         live_sessions.iter_mut().for_each(|session| session.request_stop());
-        drop(live_sessions);
+        if !live_sessions.is_empty() {
+            let _ = std::thread::Builder::new().name("live-map-stop".into()).spawn(move || drop(live_sessions));
+            if !crate::mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
+                log::warn!("[capture] a live map was still being restored after 30 s");
+            }
+        }
         let posted = unsafe { PostThreadMessageW(self.hook_thread_id, WM_QUIT, 0, 0) };
         if posted == 0 {
             return Err(format!(

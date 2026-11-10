@@ -89,16 +89,25 @@ pub fn live_map_restore_running() -> bool {
     mutex_exists(RESTORE_MUTEX)
 }
 
-/// Starts this exe with `args`, detached and windowless.
+/// Starts this exe with `args`, detached, windowless and without Sidearm's
+/// standard handles. It also leaves a job Sidearm runs in when the job allows
+/// that (a job's end would take it along), else stays in it.
 fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
-    std::process::Command::new(std::env::current_exe()?)
-        .args(args)
-        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-        .spawn()
-        .map(|_| ())
+    const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+    let spawn = |flags: u32| {
+        std::process::Command::new(std::env::current_exe()?)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(flags)
+            .spawn()
+            .map(|_| ())
+    };
+    spawn(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(CREATE_NO_WINDOW | DETACHED_PROCESS))
 }
 
 /// Started by the capture helper when Sidearm died, and by an exit that left
@@ -121,6 +130,8 @@ pub fn spawn_live_map_restore(config_dir: &Path, after_crash: bool) {
 /// (`--spawn-watchdog`): with its parent gone, the watchdog is no part of
 /// Sidearm's process tree and survives that.
 pub fn spawn_watchdog(config_dir: &Path) {
+    // A mark an earlier Sidearm left (its watchdog gone) must not pass for this one's.
+    let _ = std::fs::remove_file(config_dir.join(CLEAN_EXIT_FILE));
     let pid = std::process::id().to_string();
     if let Err(error) = spawn_detached(&[SPAWN_WATCHDOG_ARG.as_ref(), config_dir.as_os_str(), WATCH_ARG.as_ref(), pid.as_ref()]) {
         log::warn!("[system] mouse watchdog not started: {error}");
@@ -160,16 +171,19 @@ fn exited_cleanly(config_dir: &Path, pid: u32) -> bool {
 
 /// Blocks until process `pid` has ended (at once when it is gone already).
 fn wait_for_exit(pid: u32) {
-    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError};
     use windows_sys::Win32::System::Threading::{INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
-    // SAFETY: the handle is checked and closed; a failed open means the
-    // process is gone (or not ours to wait on, which is then treated alike).
+    // SAFETY: the handle is checked and closed. A failed open is a process
+    // already gone; any other reason is logged, and the restore's own check
+    // (`APP_MUTEX`) then finds a live Sidearm and leaves the mice alone.
     unsafe {
         let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
-        if !handle.is_null() {
-            WaitForSingleObject(handle, INFINITE);
-            CloseHandle(handle);
+        if handle.is_null() {
+            log::info!("[restore] Sidearm {pid} not opened (error {}): taken as ended", GetLastError());
+            return;
         }
+        WaitForSingleObject(handle, INFINITE);
+        CloseHandle(handle);
     }
 }
 

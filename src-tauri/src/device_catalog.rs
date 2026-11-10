@@ -433,9 +433,26 @@ pub const NAGA_X: NativeModel = NativeModel {
 pub static CATALOG: &[&NativeModel; CATALOG_LEN] = &[&NAGA_V2_HYPERSPEED, &NAGA_V2_PRO, &NAGA_PRO, &NAGA_X, &NAGA_V3_PRO];
 pub const CATALOG_LEN: usize = 5;
 
+/// The catalog model a device path (`\\?\HID#VID_1532&PID_00E8&MI_00#…`)
+/// belongs to, by its VID and PID.
+pub fn model_for_path(path: &str) -> Option<&'static NativeModel> {
+    let path = path.to_ascii_uppercase();
+    CATALOG.iter().copied().find(|model| {
+        model.pids.iter().any(|pid| path.contains(&format!("VID_{:04X}&PID_{pid:04X}", model.vid)))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_device_path_names_its_model() {
+        let path = r"\\?\HID#VID_1532&PID_00e8&MI_00#8&2d0d4e1&0&0000#{378de44c-56ef-11d1-bc8c-00a0c91405dd}";
+        assert_eq!(model_for_path(path).map(|model| model.name), Some(NAGA_V3_PRO.name));
+        assert_eq!(model_for_path(r"\\?\HID#VID_1532&PID_00B4&MI_00#x").map(|model| model.name), Some(NAGA_V2_HYPERSPEED.name));
+        assert!(model_for_path(r"\\?\HID#VID_046D&PID_C52B&MI_00#x").is_none(), "another vendor's mouse");
+    }
 
     #[test]
     fn only_a_live_overlay_wheel_falls_back_to_scrolling() {

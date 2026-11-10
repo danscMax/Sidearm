@@ -13,8 +13,9 @@
 //! slot, bytes 5..8 are the record marker, the record itself is bytes 9..14
 //! (`button_id, layer, 0x02, 0x02, modifier, hid_usage`) and byte 88 is a
 //! checksum over bytes 2..87 — the status and slot bytes are excluded. `layer`
-//! selects which of the button's two records is meant; the mouse emits the
-//! `0x00` one, so that is the only one written here.
+//! selects which of the button's two records is meant: `0x00` is the standard
+//! one, `0x01` plays only while the firmware Hypershift key is held, so the
+//! slot path writes `0x00` only (layer 1 goes through `write_record`).
 //!
 //! The slot query cannot cold-read: a `GET_REPORT` answers only with what the
 //! previous `SET_REPORT` stored — selecting a slot with the empty marker
@@ -61,10 +62,12 @@ pub const PAYLOAD_LEN: usize = 90;
 const RECORD_MARKER: [u8; 4] = [0x0a, 0x02, 0x0c, 0x01];
 /// First HID usage of the function keys the thumb column can be mapped to.
 const USAGE_F13: u8 = 0x68;
-/// HID modifier mask bits of a key record. Shift and Alt are the RIGHT-hand
-/// keys: this firmware never plays the left Shift (`0x02`) or left Alt
-/// (`0x04`) bit, alone or combined (measured 2026-10-27 at the Raw Input level:
-/// every other bit — both Ctrl, both Win, right Shift, right Alt — arrives).
+/// HID modifier mask bits of a V2 HyperSpeed key record. Shift and Alt are the
+/// RIGHT-hand keys: that firmware never plays the left Shift (`0x02`) or left
+/// Alt (`0x04`) bit, alone or combined (measured 2026-10-27 at the Raw Input
+/// level: every other bit — both Ctrl, both Win, right Shift, right Alt —
+/// arrives). A model with `plain_left_modifiers` takes the standard mask
+/// ([`left_modifier_bits`]) instead.
 /// Limit: on a layout with AltGr (Russian) Windows adds Ctrl to the right Alt,
 /// so `Alt+X` plays as `Ctrl+Alt+X` there. A thumb's bare `F13`..`F24` has
 /// mask `0x00`.
@@ -132,8 +135,18 @@ const NOSTORE: u8 = 0x00;
 pub fn battery_percent_from_raw(raw: u8) -> u8 {
     ((u16::from(raw) * 100 + 127) / 255) as u8
 }
-/// `GET_BUTTON` arguments: profile, button, layer, then padding.
-const GET_BUTTON_ARGS: [u8; 10] = [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00];
+/// The onboard profile the onboard path keeps its records in.
+const ONBOARD_PROFILE: u8 = 0x01;
+
+/// Argument block of the per-button get/set commands: profile (`0` the live
+/// map, `1` the onboard profile or a V3 bank `1..=5`), button, layer, then the
+/// record (`category, len, values…`; empty for a get).
+fn button_args(profile: u8, button_id: u8, layer: u8, record: &[u8]) -> [u8; 10] {
+    let mut args = [0u8; 10];
+    args[..3].copy_from_slice(&[profile, button_id, layer]);
+    args[3..3 + record.len()].copy_from_slice(record);
+    args
+}
 const COMMAND_STATUS_OK: u8 = 0x02;
 const COMMAND_STATUS_BUSY: u8 = 0x01;
 /// Status of a wireless mouse that did not answer: asleep or out of range.
@@ -233,7 +246,7 @@ pub fn consumer_signals_enabled() -> bool {
 /// any modifiers) are accepted — keys no application uses, so the mouse can
 /// never fire a real shortcut on its own. Shared by the write path and the
 /// drift check so both agree on what "this binding is in place" means.
-fn binding_target(model: &NativeModel, binding: &OnboardBinding) -> Result<(u8, OnboardAction), String> {
+pub(crate) fn binding_target(model: &NativeModel, binding: &OnboardBinding) -> Result<(u8, OnboardAction), String> {
     target_in_mode(model, binding, CONSUMER_SIGNALS.load(Ordering::Relaxed))
 }
 
@@ -248,12 +261,6 @@ fn target_in_mode(model: &NativeModel, binding: &OnboardBinding, consumer: bool)
     let usage = usage_for_key(&spec.key.display_name)
         .ok_or_else(|| format!("{} cannot live in onboard memory", spec.key.display_name))?;
     Ok((button_id, OnboardAction::Key { modifier: modifier_mask(&spec.modifiers), usage }))
-}
-
-/// The record Sidearm's own signal for `binding` takes on the config's model
-/// (`None` when it has none), for the offline profile's inert fallback.
-pub fn signal_action(binding: &OnboardBinding) -> Option<(u8, OnboardAction)> {
-    binding_target(config_model(), binding).ok()
 }
 
 /// One key button the capture helper reads from the consumer collection: its
@@ -348,11 +355,13 @@ pub struct ButtonRecord {
 /// A record the firmware plays back on its own, without Sidearm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnboardAction {
-    /// A key held while the button is down, with a modifier mask from
+    /// A key held while the button is down: the standard HID mask
+    /// ([`left_modifier_bits`]) on a model with `plain_left_modifiers`, else
     /// [`modifier_bits`] (Shift and Alt as the right-hand keys).
     Key { modifier: u8, usage: u8 },
     /// One tap of a key per press, with a standard HID mask ([`left_modifier_bits`]):
-    /// the turbo record, the only one that plays the left Shift and Alt.
+    /// the turbo record, the V2 HyperSpeed's only one that plays the left Shift
+    /// and Alt. Never for a model with `plain_left_modifiers`.
     KeyTap { modifier: u8, usage: u8 },
     /// A plain mouse button (`1` left … `5` forward).
     Mouse(u8),
@@ -363,19 +372,6 @@ pub enum OnboardAction {
 }
 
 impl OnboardAction {
-    /// The same shortcut as a plain key record with the standard HID mask —
-    /// the form Synapse itself stores (Alt+F4 = `02 02 04 3d`). A turbo record
-    /// repeats while the firmware thinks the button is held: measured
-    /// 2026-11-10, the Naga V3 Pro fired a stored Alt+F4 turbo record every
-    /// 10 s on its own, Sidearm closed. (The V2 HyperSpeed drops the left
-    /// Shift/Alt bits of a plain record, so its onboard path keeps the turbo.)
-    pub fn without_turbo(self) -> Self {
-        match self {
-            Self::KeyTap { modifier, usage } => Self::Key { modifier, usage },
-            other => other,
-        }
-    }
-
     /// `category, len, values…` as the set/get-button commands carry them.
     fn bytes(self) -> Vec<u8> {
         match self {
@@ -678,8 +674,9 @@ impl VendorDevice {
     /// `Err` means the mouse did not echo what we wrote.
     pub fn write_button(&self, button_id: u8, usage: u8, modifier: u8) -> Result<(), String> {
         self.require_verified()?;
+        // A button with no vendor slot (the top buttons) takes the per-button command.
         let Some(slot) = self.model.slot_for(button_id) else {
-            return self.write_key_command(button_id, modifier, usage);
+            return self.write_record(button_id, 0, OnboardAction::Key { modifier, usage });
         };
         let payload = build_record(slot, button_id, usage, modifier);
         for _ in 0..2 {
@@ -692,18 +689,6 @@ impl VendorDevice {
             }
         }
         Err(format!("mouse did not confirm button {button_id:#02x} -> usage {usage:#02x}"))
-    }
-
-    /// A key record for a button with no vendor slot (the top buttons), written
-    /// with [`CMD_SET_BUTTON`] and confirmed by reading it back.
-    fn write_key_command(&self, button_id: u8, modifier: u8, usage: u8) -> Result<(), String> {
-        let args = [0x01, button_id, 0x00, CATEGORY_KEY, 0x02, modifier, usage, 0x00, 0x00, 0x00];
-        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &args)?;
-        if self.holds(button_id, OnboardAction::Key { modifier, usage })? {
-            Ok(())
-        } else {
-            Err(format!("mouse did not confirm button {button_id:#02x} -> usage {usage:#02x}"))
-        }
     }
 
     /// Stores one binding target and requires it to read back. A consumer
@@ -804,12 +789,30 @@ impl VendorDevice {
     /// The stored record of `button_id` on `layer` (`0` standard, `1` the
     /// firmware Hypershift layer).
     pub fn read_button_at(&self, button_id: u8, layer: u8) -> Result<ButtonRecord, String> {
-        let record = self.raw_button_record(button_id, layer)?;
+        let block = self.read_block(ONBOARD_PROFILE, button_id, layer)?;
         Ok(ButtonRecord {
-            category: record[3],
-            modifier: record[5],
-            usage: record[6],
+            category: block[0],
+            modifier: block[2],
+            usage: block[3],
         })
+    }
+
+    /// The 7 record bytes stored at `profile` / `button_id` / `layer`. A reply
+    /// naming another address (another process's request) is refused.
+    pub(crate) fn read_block(&self, profile: u8, button_id: u8, layer: u8) -> Result<[u8; 7], String> {
+        let reply = self.command(CLASS_BUTTON, CMD_GET_BUTTON, &button_args(profile, button_id, layer, &[]))?;
+        if reply[8..10] != [profile, button_id] {
+            return Err(format!("readback returned the wrong address for profile {profile}, button {button_id:#04x}/{layer}"));
+        }
+        let mut block = [0u8; 7];
+        block.copy_from_slice(&reply[11..18]);
+        Ok(block)
+    }
+
+    /// Sends one record to `profile` / `button_id` / `layer`, unverified: the
+    /// callers read it back their own way.
+    pub(crate) fn set_block(&self, profile: u8, button_id: u8, layer: u8, record: &[u8]) -> Result<(), String> {
+        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &button_args(profile, button_id, layer, record)).map(|_| ())
     }
 
     /// Evaluate every independent query; only a failed field becomes unavailable.
@@ -871,12 +874,11 @@ impl VendorDevice {
         })
     }
 
-    /// The 10 record bytes `GET_BUTTON` answers for `button_id` on `layer`.
+    /// The 10 record bytes `GET_BUTTON` answers for `button_id` on `layer`
+    /// (address, then the record) exactly as the mouse sent them, unchecked:
+    /// the device report characterizes models whose replies are not known yet.
     fn raw_button_record(&self, button_id: u8, layer: u8) -> Result<[u8; 10], String> {
-        let mut args = GET_BUTTON_ARGS;
-        args[1] = button_id;
-        args[2] = layer;
-        let reply = self.command(CLASS_BUTTON, CMD_GET_BUTTON, &args)?;
+        let reply = self.command(CLASS_BUTTON, CMD_GET_BUTTON, &button_args(ONBOARD_PROFILE, button_id, layer, &[]))?;
         let mut record = [0u8; 10];
         record.copy_from_slice(&reply[8..18]);
         Ok(record)
@@ -941,16 +943,14 @@ impl VendorDevice {
 
     /// Stores `action` as the record of `button_id` on `layer` and requires it
     /// to read back (measured: a layer-1 key and a layer-0 mouse button both
-    /// read back exactly as written).
+    /// read back exactly as written). A record already in place is not written
+    /// again: every exit and every retry of a sleeping mouse would wear it.
     pub fn write_record(&self, button_id: u8, layer: u8, action: OnboardAction) -> Result<(), String> {
         self.require_verified()?;
-        let mut args = [0u8; 10];
-        args[0] = 0x01;
-        args[1] = button_id;
-        args[2] = layer;
-        let bytes = action.bytes();
-        args[3..3 + bytes.len()].copy_from_slice(&bytes);
-        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &args)?;
+        if action.matches(&self.read_button_at(button_id, layer)?) {
+            return Ok(());
+        }
+        self.set_block(ONBOARD_PROFILE, button_id, layer, &action.bytes())?;
         let held = self.read_button_at(button_id, layer)?;
         if action.matches(&held) {
             Ok(())
@@ -990,14 +990,7 @@ impl VendorDevice {
     /// Writes the standard-layer record of `button_id` back to the plain mouse
     /// button `value` and requires the device to read it back.
     pub fn restore_native_button(&self, button_id: u8, value: u8) -> Result<(), String> {
-        self.require_verified()?;
-        let args = [0x01, button_id, 0x00, CATEGORY_MOUSE, 0x01, value, 0x00, 0x00, 0x00, 0x00];
-        self.command(CLASS_BUTTON, CMD_SET_BUTTON, &args)?;
-        if self.read_button(button_id)?.is_mouse_button(value) {
-            Ok(())
-        } else {
-            Err(format!("button {button_id:#04x} did not read back as mouse button {value}"))
-        }
+        self.write_record(button_id, 0, OnboardAction::Mouse(value))
     }
 
     /// Control ids whose stored record no longer matches `bindings` — the buttons
@@ -1204,8 +1197,7 @@ fn build_record(slot: u8, button_id: u8, usage: u8, modifier: u8) -> [u8; PAYLOA
     payload[1] = slot;
     payload[5..9].copy_from_slice(&RECORD_MARKER);
     payload[9] = button_id;
-    // Which of the button's two records the firmware emits: only the `0x00`
-    // layer reaches the OS, a `0x01` here stores a copy the mouse never sends.
+    // The standard record; layer 1 plays only under the firmware Hypershift.
     payload[10] = 0x00;
     payload[11] = 0x02;
     payload[12] = 0x02;
@@ -1353,14 +1345,11 @@ mod tests {
         assert!(!OnboardAction::Key { modifier: 0x04, usage: 0x3d }.matches(&held));
     }
 
-    /// Shift and Alt go out as the right-hand keys: the firmware drops the
-    /// left ones (measured).
+    /// Alt+F4 as Synapse stores it: a plain record with the standard mask.
     #[test]
-    fn without_turbo_is_the_plain_record_synapse_stores() {
-        let alt_f4 = OnboardAction::KeyTap { modifier: left_modifier_bits(false, false, true, false), usage: 0x3d };
-        assert_eq!(alt_f4.without_turbo(), OnboardAction::Key { modifier: 0x04, usage: 0x3d });
-        assert_eq!(alt_f4.without_turbo().bytes(), [0x02, 0x02, 0x04, 0x3d]);
-        assert_eq!(OnboardAction::Mouse(9).without_turbo(), OnboardAction::Mouse(9));
+    fn a_plain_key_record_is_the_form_synapse_stores() {
+        let alt_f4 = OnboardAction::Key { modifier: left_modifier_bits(false, false, true, false), usage: 0x3d };
+        assert_eq!(alt_f4.bytes(), [0x02, 0x02, 0x04, 0x3d]);
     }
 
     #[test]
@@ -1380,7 +1369,7 @@ mod tests {
         reply[0] = COMMAND_STATUS_OK;
         reply[8] = 0x03;
         assert!(reply_matches(&request, &reply));
-        let foreign = build_command(0x1f, CLASS_BUTTON, CMD_GET_BUTTON, &GET_BUTTON_ARGS);
+        let foreign = build_command(0x1f, CLASS_BUTTON, CMD_GET_BUTTON, &button_args(ONBOARD_PROFILE, 0, 0, &[]));
         assert!(!reply_matches(&request, &foreign));
     }
 
@@ -1637,7 +1626,7 @@ mod tests {
         let device = VendorDevice::open_connected().expect("connect a catalog mouse");
         let bindings: Vec<OnboardBinding> = (1..=4).map(|i| binding(&format!("thumb_{i:02}"), "F24")).collect();
         let saved = snapshot(&device, &bindings);
-        // `SIDEARM_PROBE_TURBO=1`: TurboModeKey (`0d`, period 1000 ms) records
+        // `SIDEARM_PROBE_TURBO=1`: TurboModeKey (`0d`, period 10 s) records
         // with the left modifiers instead.
         let turbo: [&[u8]; 4] = [&[0x0d, 0x04, 0x04, 0x73, 0x27, 0x10], &[0x0d, 0x04, 0x02, 0x73, 0x27, 0x10], &[0x0d, 0x04, 0x06, 0x73, 0x27, 0x10], &[0x0d, 0x04, 0x05, 0x73, 0x27, 0x10]];
         let usages: [&[u8]; 4] = [&[0x02, 0x02, 0x00, 0xe2], &[0x02, 0x02, 0x20, 0xe2], &[0x02, 0x02, 0x00, 0xe1], &[0x02, 0x03, 0x00, 0xe2, 0x3d]];

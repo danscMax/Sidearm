@@ -873,10 +873,10 @@ fn run_live_mouse_action(
             return Err(stages_missing());
         }
         #[cfg(target_os = "windows")]
-        let result = crate::onboard_guard::step_profile_dpi(profile, payload.action == MouseActionKind::DpiUp);
+        let result = crate::mouse_speed::step_profile_dpi(profile, payload.action == MouseActionKind::DpiUp);
         #[cfg(target_os = "windows")]
         // Stages exist, but only for a mouse that is not connected.
-        if result.as_ref().is_err_and(|message| message == crate::onboard_guard::NO_DPI_STAGES) {
+        if result.as_ref().is_err_and(|message| message == crate::mouse_speed::NO_DPI_STAGES) {
             return Err(execution_error("execution_failed", "execution",
                 crate::ui_text!("execution.dpiStagesOtherMouse", "This profile has DPI stages only for a mouse that is not connected."),
                 Some(preview.encoded_key.clone()), action_id));

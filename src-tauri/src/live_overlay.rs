@@ -30,7 +30,7 @@ use crate::{
 
 /// Reserved Consumer Page usages within the one-byte range the devices emit,
 /// one per control index and layer (`2 * index + layer`).
-const USAGES: [u16; 44] = [
+pub(crate) const USAGES: [u16; 44] = [
     0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
     0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f, 0x37, 0x38, 0x39,
     0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e,
@@ -99,7 +99,7 @@ pub fn software_hypershift(present: &[&'static NativeModel], live: &[&'static Na
 
 /// Every control of `model` in usage order: key buttons, extras, then the
 /// native buttons (the V2's mouse buttons and wheel).
-fn controls(model: &NativeModel) -> Vec<(&'static str, u8)> {
+pub(crate) fn controls(model: &NativeModel) -> Vec<(&'static str, u8)> {
     let extras = model.live.as_ref().map_or(&[][..], |live| live.extras);
     model
         .key_buttons
@@ -286,45 +286,22 @@ fn key_action(encoded_key: &str) -> Option<OnboardAction> {
     })
 }
 
-/// Records a bank needs so that `profile_id` works without Sidearm.
+/// The offline plan of `profile_id` ([`crate::mouse_offline::plan`]) as bank
+/// targets.
 fn offline_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<(u8, u8, OnboardAction)> {
-    let Some(live) = &model.live else { return Vec::new() };
-    let mut targets = Vec::new();
-    let mut uses_hypershift = false;
-    for (index, (control, button)) in controls(model).into_iter().enumerate() {
-        // The profile button keeps switching banks without Sidearm.
-        if Some(button) == live.profile_button {
-            continue;
-        }
-        let id = control_id(model, control);
-        // No turbo record in a bank: the V3 repeats it instead of tapping once.
-        let action = |layer| {
-            crate::mouse_offline::binding_action(config, profile_id, id.as_str(), layer)
-                .map(|action| action.map(OnboardAction::without_turbo))
-        };
-        // A binding the firmware cannot play (text, macro, launch) gets a
-        // reserved signal that does nothing, never the bank's old record —
-        // a factory digit would type into whatever has focus. No binding at
-        // all keeps the bank's own record.
-        let play = |layer: u8, found: Option<Option<OnboardAction>>| {
-            found.map(|action| action.unwrap_or(OnboardAction::Consumer(USAGES[2 * index + usize::from(layer)])))
-        };
-        let standard = action(Layer::Standard);
-        let hypershift = action(Layer::Hypershift);
-        uses_hypershift |= matches!(hypershift, Some(Some(_)));
-        if let Some(action) = play(0, standard) {
-            targets.push((button, 0, action));
-        }
-        // Like the resolver: the standard binding fills in only where the
-        // hypershift layer has none.
-        if let Some(action) = play(1, hypershift.or(standard)) {
-            targets.push((button, 1, action));
-        }
+    crate::mouse_offline::plan(config, model, profile_id)
+        .into_iter()
+        .map(|record| (record.button_id, record.layer, record.action))
+        .collect()
+}
+
+/// Keeps the first error of a mouse that did not answer: the store is retried
+/// once it wakes. Any other refusal is only logged — retrying it every two
+/// seconds would wear the mouse's storage.
+fn note_asleep(asleep: &mut Option<String>, error: String) {
+    if super::is_no_response(&error) && asleep.is_none() {
+        *asleep = Some(error);
     }
-    if uses_hypershift && let Some(trigger) = live.firmware_trigger {
-        targets.extend([0, 1].map(|layer| (trigger, layer, OnboardAction::Hypershift)));
-    }
-    targets
 }
 
 /// The onboard banks a mouse reports.
@@ -413,7 +390,9 @@ fn bank_plan<'a>(config: &'a AppConfig, model: &NativeModel, banks: &Banks, offl
 }
 
 /// Stores the profiles linked to banks in the mouse of `model`, each verified
-/// by reading it back. Banks with no linked profile are left as they are.
+/// by reading it back. Banks with no linked profile are left as they are. An
+/// error from a mouse that stopped answering anywhere in it (a bank, its DPI,
+/// the bank reselect) is returned, so the store is retried as a whole.
 pub(crate) fn write_offline(
     config: &AppConfig,
     model: &'static NativeModel,
@@ -423,17 +402,25 @@ pub(crate) fn write_offline(
     let device = VendorDevice::open_model(model)?;
     let banks = read_banks(&device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
+    let mut asleep = None;
+    // The bank reselect below sets the DPI (no linked bank: no reselect); the
+    // poll rate stays what the last profile switch left.
+    if let Err(error) = crate::mouse_offline::restore_live_speed(&device, config, offline_profile, plan.is_empty()) {
+        log::warn!("[mouse-offline] {} poll rate not put back: {error}", model.name);
+        note_asleep(&mut asleep, error);
+    }
     // A bank no profile is linked to any more gets its own records back: what
     // Sidearm stored there earlier (an old turbo record included) would play on.
     for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
         let backup = bank_backup(config_dir, model, bank);
         if backup.exists() && let Err(error) = restore_bank(&device, bank, &backup) {
             log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
+            note_asleep(&mut asleep, error);
         }
     }
     if plan.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
-        return Ok(());
+        return asleep.map_or(Ok(()), Err);
     }
     for &(bank, profile_id) in &plan {
         let backup = bank_backup(config_dir, model, bank);
@@ -458,15 +445,19 @@ pub(crate) fn write_offline(
             let dpi = dpi.clamp(model.dpi_min, model.dpi_max);
             match device.set_dpi_in(bank, dpi) {
                 Ok(()) => log::info!("[mouse-offline] {} bank {bank} DPI {dpi} stored", model.name),
-                Err(error) => log::warn!("[mouse-offline] {} bank {bank} DPI not stored: {error}", model.name),
+                Err(error) => {
+                    log::warn!("[mouse-offline] {} bank {bank} DPI not stored: {error}", model.name);
+                    note_asleep(&mut asleep, error);
+                }
             }
         }
     }
     // The records are stored either way; playing them at once is a convenience.
     if let Err(error) = select_bank(&device, exit_bank(&plan, &banks, offline_profile)) {
         log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
+        note_asleep(&mut asleep, error);
     }
-    Ok(())
+    asleep.map_or(Ok(()), Err)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -578,28 +569,9 @@ fn bank_block(bank: u8, action: OnboardAction) -> [u8; 7] {
     block(action)
 }
 
-fn read_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8) -> Result<[u8; 7], String> {
-    let mut args = [0; 10];
-    args[0] = bank;
-    args[1] = button;
-    args[2] = layer;
-    let reply = device.command(super::CLASS_BUTTON, super::CMD_GET_BUTTON, &args)?;
-    if reply[8..10] != args[..2] {
-        return Err(format!("Readback returned the wrong address for bank {bank}, button {button:#04x}/{layer}"));
-    }
-    let mut record = [0; 7];
-    record.copy_from_slice(&reply[11..18]);
-    Ok(record)
-}
-
 fn write_bank(device: &VendorDevice, bank: u8, button: u8, layer: u8, block: [u8; 7]) -> Result<(), String> {
-    let mut args = [0; 10];
-    args[0] = bank;
-    args[1] = button;
-    args[2] = layer;
-    args[3..].copy_from_slice(&block);
-    device.command(super::CLASS_BUTTON, super::CMD_SET_BUTTON, &args)?;
-    if read_bank(device, bank, button, layer)? != block {
+    device.set_block(bank, button, layer, &block)?;
+    if device.read_block(bank, button, layer)? != block {
         return Err(format!("Write did not read back for bank {bank}, button {button:#04x}/{layer}"));
     }
     Ok(())
@@ -645,7 +617,7 @@ fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), St
     let Some(snapshot) = load_snapshot(device, backup)? else { return Ok(()) };
     let mut failure = None;
     for record in snapshot.records.iter().rev().filter(|record| record.before != record.target) {
-        let result = read_bank(device, bank, record.button, record.layer).and_then(|current| {
+        let result = device.read_block(bank, record.button, record.layer).and_then(|current| {
             if current == record.target {
                 write_bank(device, bank, record.button, record.layer, record.before)
             } else {
@@ -666,7 +638,7 @@ fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), St
 
 fn verify_bank(device: &VendorDevice, bank: u8, records: &[Record]) -> Result<(), String> {
     for record in records {
-        if read_bank(device, bank, record.button, record.layer)? != record.target {
+        if device.read_block(bank, record.button, record.layer)? != record.target {
             return Err(format!("Bank {bank} assignments changed after programming {:#04x}/{}", record.button, record.layer));
         }
     }
@@ -704,7 +676,7 @@ fn repair(device: &VendorDevice, backup: &Path, snapshot: &mut Snapshot) -> Resu
         return Err("Mouse is not in firmware mode".into());
     }
     let mut updated = snapshot.clone();
-    let pending = plan_repair(&mut updated.records, |button, layer| read_bank(device, LIVE_BANK, button, layer))?;
+    let pending = plan_repair(&mut updated.records, |button, layer| device.read_block(LIVE_BANK, button, layer))?;
     // Save any newly observed original values before taking ownership of them.
     if updated.records != snapshot.records {
         save_snapshot(backup, &updated)?;
@@ -737,7 +709,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
         records.push(Record {
             button,
             layer,
-            before: read_bank(device, bank, button, layer)?,
+            before: device.read_block(bank, button, layer)?,
             target: bank_block(bank, action),
         });
     }
@@ -855,7 +827,7 @@ impl Session {
                             last_bank = Some(bank);
                         }
                         let drift = open().and_then(|device| {
-                            confirmed_drift(block(action), || read_bank(&device, LIVE_BANK, button, layer))
+                            confirmed_drift(block(action), || device.read_block(LIVE_BANK, button, layer))
                         });
                         if drift == Ok(true) {
                             // Keep forwarding releases for inputs held before recovery.
@@ -1204,7 +1176,7 @@ pub(crate) mod tests {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
         let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
         let probes = [(0x40, 0x02), (0x41, 0x04), (0x42, 0x20), (0x43, 0x40)];
-        let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, read_bank(&device, LIVE_BANK, button, 0).unwrap())).collect();
+        let saved: Vec<(u8, [u8; 7])> = probes.iter().map(|&(button, _)| (button, device.read_block(LIVE_BANK, button, 0).unwrap())).collect();
         for (index, &(button, modifier)) in probes.iter().enumerate() {
             println!("thumb {}: modifier {modifier:#04x} + F24", index + 1);
             write_bank(&device, LIVE_BANK, button, 0, block(OnboardAction::Key { modifier, usage: 0x73 })).unwrap();

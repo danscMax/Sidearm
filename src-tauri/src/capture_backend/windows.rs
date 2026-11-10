@@ -3269,7 +3269,7 @@ pub fn capture_helper_main() {
                     // (and makes sure Sidearm is really gone), so this one exits
                     // at once and releases its hooks.
                     if !exit_requested && let Some(dir) = &config_dir {
-                        crate::spawn_live_map_restore(dir);
+                        crate::spawn_live_map_restore(dir, true);
                     }
                     log::info!("[capture-helper] stdin closed, posting WM_QUIT.");
                     unsafe {

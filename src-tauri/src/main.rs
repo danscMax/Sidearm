@@ -16,7 +16,8 @@ fn main() {
         let args: Vec<String> = std::env::args().collect();
         if let Some(pos) = args.iter().position(|arg| arg == sidearm_lib::RESTORE_LIVE_MAPS_ARG) {
             if let Some(dir) = args.get(pos + 1) {
-                sidearm_lib::restore_live_maps_main(std::path::Path::new(dir));
+                let after_crash = args.iter().any(|arg| arg == sidearm_lib::AFTER_CRASH_ARG);
+                sidearm_lib::restore_live_maps_main(std::path::Path::new(dir), after_crash);
             }
             return;
         }

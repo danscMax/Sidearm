@@ -894,7 +894,7 @@ pub(crate) fn emit_profile_resolved_and_notify(
                 .as_deref()
                 .and_then(|id| config.profiles.iter().find(|p| p.id == id))
             {
-                crate::onboard_guard::apply_profile_mouse_settings(profile);
+                crate::mouse_speed::apply_profile_mouse_settings(profile);
             }
         }
     }

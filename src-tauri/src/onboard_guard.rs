@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -136,192 +136,25 @@ pub fn spawn(app: AppHandle, runtime_store: Arc<Mutex<RuntimeStore>>, config_dir
         .ok();
 }
 
-/// Applies a profile's own DPI / poll rate to each connected mouse, from that
-/// mouse's own settings (fields left unset keep the mouse as it is). Runs on its own thread: it is called from the capture
-/// path on a profile switch and must not delay the key that caused it. The
-/// device lock serializes it with the guard tick.
-pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
-    if profile.device_mouse.as_ref().is_none_or(|own| own.values().all(|own| own.mouse_dpi.is_none() && own.mouse_poll_rate_hz.is_none())) {
-        return;
+/// Held for one guard tick's work; the exit waits for a tick that began
+/// before it ([`wait_tick`]), so no tick puts signals over the offline profile.
+static TICK: Mutex<()> = Mutex::new(());
+
+/// Returns once a guard tick in progress has finished, or after 5 s: a tick
+/// can wait on the main thread (tray, OSD), which may be the one calling this.
+pub fn wait_tick() {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while matches!(TICK.try_lock(), Err(std::sync::TryLockError::WouldBlock)) {
+        if std::time::Instant::now() >= deadline {
+            log::warn!("[onboard-guard] a tick still runs at exit");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(20));
     }
-    let name = profile.name.clone();
-    let profile = profile.clone();
-    // Every switch spawns its own thread and the device lock does not keep their
-    // order: a switch that waited behind a newer one must not undo it.
-    let generation = PROFILE_SWITCHES.fetch_add(1, Ordering::SeqCst) + 1;
-    std::thread::Builder::new()
-        .name("profile-mouse".into())
-        .spawn(move || {
-            // Every connected mouse takes its own settings; one asleep mouse
-            // does not hold back the other.
-            let mice = match connected_mice() {
-                Ok(mice) => mice,
-                Err(message) => {
-                    log::warn!("[onboard-guard] profile `{name}`: mouse settings not applied: {message}");
-                    return;
-                }
-            };
-            for device in mice {
-                if PROFILE_SWITCHES.load(Ordering::SeqCst) != generation {
-                    log::debug!("[onboard-guard] profile `{name}`: superseded by a newer switch");
-                    return;
-                }
-                let model = device.model();
-                let Some((dpi, poll_rate_hz)) = switch_values(&profile, model) else { continue };
-                let result = (|| {
-                    let mut written = false;
-                    if let Some(hz) = poll_rate_hz
-                        && device.poll_rate_hz()? != hz
-                    {
-                        device.set_poll_rate_hz(hz)?;
-                        written = true;
-                    }
-                    // Live only: the mouse keeps its stored DPI for use without
-                    // Sidearm, and a switch per alt-tab must not wear its storage.
-                    if let Some(dpi) = dpi
-                        && device.dpi()? != dpi
-                    {
-                        device.set_dpi(dpi, false)?;
-                        written = true;
-                    }
-                    Ok::<_, String>(written)
-                })();
-                match result {
-                    Ok(false) => log::debug!("[onboard-guard] profile `{name}`: {} settings already in place", model.name),
-                    Ok(true) => log::info!(
-                        "[onboard-guard] profile `{name}`: {} DPI {dpi:?}, poll {poll_rate_hz:?} Hz written", model.name
-                    ),
-                    Err(message) => {
-                        log::warn!("[onboard-guard] profile `{name}`: {} settings not applied: {message}", model.name)
-                    }
-                }
-            }
-        })
-        .ok();
 }
 
 /// Set by the Mouse tab's signal switch: the rewrite it causes is not news.
 pub static USER_SWITCHED_SIGNALS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-/// Profile switches so far; the newest one owns the mouse's DPI / poll rate.
-static PROFILE_SWITCHES: AtomicU64 = AtomicU64::new(0);
-
-/// Select the next higher/lower configured stage. The end stops rather than wrapping.
-/// A DPI value not exactly on a stage (e.g. after Synapse takes control) moves
-/// to the nearest stage in the requested direction.
-fn next_dpi_stage(stages: &[u16], current: u16, up: bool) -> Result<u16, String> {
-    if stages.is_empty() {
-        return Err("Configure DPI stages for the active profile first".into());
-    }
-    let mut sorted = stages.to_vec();
-    sorted.sort_unstable();
-    sorted.dedup();
-    if up {
-        Ok(sorted.iter().copied().find(|value| *value > current).unwrap_or(current))
-    } else {
-        Ok(sorted.iter().copied().rev().find(|value| *value < current).unwrap_or(current))
-    }
-}
-
-/// The DPI and poll rate a profile switch writes into `model`: that mouse's
-/// own settings, within its range. `None`: the profile has none for it.
-fn switch_values(profile: &crate::config::Profile, model: &crate::device_catalog::NativeModel) -> Option<(Option<u16>, Option<u16>)> {
-    let own = profile.mouse_for(model.device_id)?;
-    Some((
-        own.mouse_dpi.map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max)),
-        own.mouse_poll_rate_hz.filter(|hz| model.poll_code_for_hz(*hz).is_some()),
-    ))
-}
-
-/// The DPI stages `model` steps through: its own, within its range.
-fn playable_stages(profile: &crate::config::Profile, model: &crate::device_catalog::NativeModel) -> Option<Vec<u16>> {
-    let stages = profile.mouse_for(model.device_id)?.mouse_dpi_stages.as_deref()?;
-    Some(stages.iter().copied().filter(|dpi| (model.dpi_min..=model.dpi_max).contains(dpi)).collect())
-}
-
-/// `step_profile_dpi` error when no connected mouse has stages in the profile.
-pub const NO_DPI_STAGES: &str = "no connected mouse has DPI stages in this profile";
-
-/// Apply a DPI Up/Down binding using the resolved profile's list, rather than
-/// mutating another profile or the saved startup DPI. Device verification fails
-/// explicitly when the wireless mouse is asleep or disconnected.
-#[cfg(target_os = "windows")]
-pub fn step_profile_dpi(profile: &crate::config::Profile, up: bool) -> Result<u16, String> {
-    // Each mouse steps through its own stages within its range; one without
-    // stages, or asleep, is skipped.
-    let mut last = Err(NO_DPI_STAGES.to_string());
-    for device in connected_mice()? {
-        let model = device.model();
-        let Some(playable) = playable_stages(profile, model) else { continue };
-        let step = (|| {
-            let current = device.dpi()?;
-            let desired = next_dpi_stage(&playable, current, up)?;
-            if desired != current {
-                device.set_dpi(desired, false)?;
-            }
-            Ok::<_, String>(desired)
-        })();
-        if let Err(message) = &step {
-            log::warn!("[onboard-guard] {} DPI step not applied: {message}", model.name);
-        }
-        if last.is_err() {
-            last = step;
-        }
-    }
-    last
-}
-
-/// Every connected native mouse, opened one after another (each holds only its
-/// own device lock). `Err` when none opens.
-#[cfg(target_os = "windows")]
-fn connected_mice() -> Result<Vec<VendorDevice>, String> {
-    let present = crate::mouse_memory::present_models();
-    let mice: Vec<_> = present.iter().filter_map(|model| VendorDevice::open_model(model).ok()).collect();
-    if mice.is_empty() {
-        // Same error as before for a missing or unopenable mouse.
-        return VendorDevice::open_connected().map(|device| vec![device]);
-    }
-    Ok(mice)
-}
-
-#[cfg(test)]
-mod dpi_stage_tests {
-    use super::{next_dpi_stage, playable_stages, switch_values};
-    use crate::config::{MouseOverrides, Profile};
-    use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
-
-    #[test]
-    fn each_mouse_takes_its_own_settings_within_its_range() {
-        let mut profile: Profile = crate::config::default_seed_config().profiles[0].clone();
-        profile.device_mouse = Some([
-            ("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: Some(250), mouse_dpi_stages: None }),
-            ("razer-naga-v3".to_owned(), MouseOverrides { mouse_dpi: Some(45_000), mouse_poll_rate_hz: Some(1000), mouse_dpi_stages: Some(vec![800, 45_000]) }),
-        ].into());
-        assert_eq!(switch_values(&profile, &NAGA_V2_HYPERSPEED), Some((Some(1600), None)), "250 Hz is not a V2 rate");
-        assert_eq!(switch_values(&profile, &NAGA_V3_PRO), Some((Some(45_000), Some(1000))));
-        assert_eq!(playable_stages(&profile, &NAGA_V2_HYPERSPEED), None, "no stages of its own");
-        assert_eq!(playable_stages(&profile, &NAGA_V3_PRO), Some(vec![800, 45_000]));
-        profile.device_mouse.as_mut().unwrap().get_mut("razer-naga").unwrap().mouse_dpi_stages = Some(vec![800, 40_000]);
-        assert_eq!(playable_stages(&profile, &NAGA_V2_HYPERSPEED), Some(vec![800]), "beyond the V2's range");
-        profile.device_mouse = None;
-        assert_eq!(switch_values(&profile, &NAGA_V3_PRO), None);
-    }
-
-    #[test]
-    fn steps_clamp_and_recover_from_unknown_values() {
-        let s = [1600, 400, 3200, 800];
-        assert_eq!(next_dpi_stage(&s, 800, true).unwrap(), 1600);
-        assert_eq!(next_dpi_stage(&s, 800, false).unwrap(), 400);
-        assert_eq!(next_dpi_stage(&s, 1600, true).unwrap(), 3200);
-        assert_eq!(next_dpi_stage(&s, 400, false).unwrap(), 400);
-        assert_eq!(next_dpi_stage(&s, 3200, true).unwrap(), 3200);
-        assert_eq!(next_dpi_stage(&s, 900, true).unwrap(), 1600);
-        assert_eq!(next_dpi_stage(&s, 900, false).unwrap(), 800);
-        assert_eq!(next_dpi_stage(&s, 6400, true).unwrap(), 6400);
-        assert_eq!(next_dpi_stage(&s, 100, false).unwrap(), 100);
-        assert!(next_dpi_stage(&[], 800, true).is_err());
-    }
-}
 
 /// Asks the guard for a check now instead of at its next tick.
 pub fn request_check() {
@@ -410,6 +243,8 @@ fn run(
         razer_was_running = razer_running;
 
         // The exit is writing the offline profile: never put signals over it.
+        // Held to the end of the tick, which the exit waits for.
+        let _tick = TICK.lock();
         if crate::is_shutting_down() {
             wait = POLL_INTERVAL;
             continue;
@@ -806,6 +641,7 @@ fn takeover_message(event: &TakeoverEvent) -> crate::ui_text::UiText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[test]
     fn recovery_transitions_are_not_hidden_by_notification_cooldown() {
         let now = Instant::now();

@@ -20,6 +20,14 @@ mod mouse_settings;
 #[cfg(target_os = "windows")]
 mod mouse_offline;
 #[cfg(target_os = "windows")]
+mod mouse_restore;
+#[cfg(target_os = "windows")]
+mod mouse_speed;
+#[cfg(target_os = "windows")]
+pub use mouse_restore::{AFTER_CRASH_ARG, RESTORE_LIVE_MAPS_ARG, restore_live_maps_main};
+#[cfg(target_os = "windows")]
+pub(crate) use mouse_restore::{live_map_restore_running, spawn_live_map_restore};
+#[cfg(target_os = "windows")]
 mod mouse_status;
 #[cfg(target_os = "windows")]
 mod onboard_guard;
@@ -66,139 +74,6 @@ type CurrentGlobalShortcut = Arc<Mutex<Option<String>>>;
 use capture_backend::RuntimeController;
 pub use capture_backend::capture_helper_main;
 
-/// Argument of the one-shot process that restores the live maps a dead
-/// Sidearm left (`Sidearm.exe --restore-live-maps <config dir>`).
-#[cfg(target_os = "windows")]
-pub const RESTORE_LIVE_MAPS_ARG: &str = "--restore-live-maps";
-
-/// Held by every running Sidearm app for its whole life; Windows drops it
-/// with the process, so its absence means no Sidearm runs.
-#[cfg(target_os = "windows")]
-const APP_MUTEX: &str = "Local\\Sidearm-app";
-/// Held by the live-map restore process: a Sidearm starting meanwhile leaves
-/// the mice alone until it ends (two processes must not talk to one receiver).
-#[cfg(target_os = "windows")]
-const RESTORE_MUTEX: &str = "Local\\Sidearm-live-map-restore";
-
-/// Creates a named mutex every process of this user can open, an elevated
-/// Sidearm's included (a default DACL would hide it from a non-elevated one);
-/// `None` when it exists already or cannot be created.
-#[cfg(target_os = "windows")]
-fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
-    use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, LocalFree},
-        Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, SECURITY_ATTRIBUTES},
-        System::Threading::CreateMutexW,
-    };
-    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
-    // Full access for authenticated users: openable at any elevation.
-    let sddl: Vec<u16> = "D:(A;;GA;;;AU)".encode_utf16().chain(Some(0)).collect();
-    let mut descriptor = std::ptr::null_mut();
-    // SAFETY: NUL-terminated strings; CreateMutexW copies the descriptor, which
-    // is freed right after; the handle is kept until the process ends.
-    unsafe {
-        if ConvertStringSecurityDescriptorToSecurityDescriptorW(sddl.as_ptr(), 1, &mut descriptor, std::ptr::null_mut()) == 0 {
-            log::warn!("[system] mutex {} not created: security descriptor error {}", String::from_utf16_lossy(&name[..name.len() - 1]), GetLastError());
-            return None;
-        }
-        let attributes = SECURITY_ATTRIBUTES {
-            nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
-            lpSecurityDescriptor: descriptor,
-            bInheritHandle: 0,
-        };
-        let handle = CreateMutexW(&attributes, 0, name.as_ptr());
-        let existed = GetLastError() == ERROR_ALREADY_EXISTS;
-        LocalFree(descriptor);
-        if handle.is_null() {
-            return None;
-        }
-        if existed {
-            CloseHandle(handle);
-            return None;
-        }
-        Some(handle)
-    }
-}
-
-/// Whether a named mutex exists: one that refuses access exists too (an older
-/// or foreign DACL), so the check never fails open.
-#[cfg(target_os = "windows")]
-fn mutex_exists(name: &str) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
-    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
-    // SAFETY: a NUL-terminated name; the handle is closed at once.
-    unsafe {
-        let handle = windows_sys::Win32::System::Threading::OpenMutexW(windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE, 0, name.as_ptr());
-        if handle.is_null() {
-            return GetLastError() == ERROR_ACCESS_DENIED;
-        }
-        CloseHandle(handle);
-        true
-    }
-}
-
-/// Whether a restore process still owns the mice (live sessions wait for it).
-#[cfg(target_os = "windows")]
-pub(crate) fn live_map_restore_running() -> bool {
-    mutex_exists(RESTORE_MUTEX)
-}
-
-/// Started by the capture helper when Sidearm died, and by an exit that left
-/// a sleeping mouse without its offline profile: a separate process with no
-/// hooks that outlives Sidearm.
-#[cfg(target_os = "windows")]
-pub(crate) fn spawn_live_map_restore(config_dir: &std::path::Path) {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
-    let started = std::env::current_exe().and_then(|exe| {
-        std::process::Command::new(exe)
-            .arg(RESTORE_LIVE_MAPS_ARG)
-            .arg(config_dir)
-            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-            .spawn()
-    });
-    if let Err(error) = started {
-        log::warn!("[capture-helper] live-map restore process not started: {error}");
-    }
-}
-
-/// Restores the live maps a dead Sidearm left and stores an offline profile an
-/// exit could not, retrying while a mouse sleeps (an asleep mouse answers
-/// nothing and plays Sidearm's silent signals once it wakes).
-/// Quits when Sidearm turns out alive, after 30 minutes, or once a Sidearm
-/// starts — its own start restores them after this process ends.
-#[cfg(target_os = "windows")]
-pub fn restore_live_maps_main(config_dir: &std::path::Path) {
-    use std::time::{Duration, Instant};
-    // The dying Sidearm's mutex goes when its process has fully ended. Checked
-    // before taking the restore mutex: a live Sidearm is never paused by it.
-    let grace = Instant::now() + Duration::from_secs(15);
-    while mutex_exists(APP_MUTEX) {
-        if Instant::now() >= grace {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    // One restorer at a time, holding the mutex until it exits.
-    let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
-    let failed_marker = config_dir.join(mouse_offline::OFFLINE_FAILED_FILE);
-    let deadline = Instant::now() + Duration::from_secs(30 * 60);
-    while !mutex_exists(APP_MUTEX) && Instant::now() < deadline {
-        let maps_done = mouse_memory::live_overlay::restore_orphaned(config_dir);
-        // A mouse asleep at exit has no offline profile yet: store it once it
-        // answers (the marker names the profile; a success removes it).
-        if failed_marker.exists()
-            && let Ok(config) = config::read_and_migrate_config_file(&config_dir.join("config.json"))
-        {
-            mouse_offline::retry_offline_profile(&config, config_dir);
-        }
-        if maps_done && !failed_marker.exists() {
-            return;
-        }
-        std::thread::sleep(Duration::from_secs(2));
-    }
-}
 #[cfg(target_os = "windows")]
 pub use admin_autostart::{HELPER_ARG as ADMIN_AUTOSTART_HELPER_ARG, helper_main as admin_autostart_helper_main};
 use command_error::CommandError;
@@ -2248,6 +2123,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
             .chain(std::iter::once(0))
             .collect();
         let verb_w: Vec<u16> = "runas\0".encode_utf16().collect();
+        let params_w: Vec<u16> = mouse_restore::RELAUNCHED_ARG.encode_utf16().chain(std::iter::once(0)).collect();
 
         // ShellExecuteW returns an HINSTANCE; values <= 32 indicate failure.
         // SE_ERR_ACCESSDENIED (5) is the code we get when the user cancels UAC.
@@ -2256,7 +2132,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
                 std::ptr::null_mut(),
                 verb_w.as_ptr(),
                 exe_w.as_ptr(),
-                std::ptr::null(),
+                params_w.as_ptr(),
                 std::ptr::null(),
                 SW_SHOWNORMAL,
             )
@@ -2988,12 +2864,9 @@ fn restore_and_verify_onboard(config: &AppConfig) -> Result<(), CommandError> {
     let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
     device.ensure_normal_mode()
         .map_err(|msg| CommandError::new("onboard_mode_stuck", msg, None))?;
+    mouse_offline::write_signals(&device, config)
+        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
     let bindings = mouse_memory::onboard_bindings(config);
-    device.apply_bindings(&bindings)
-        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
-    let native: Vec<_> = mouse_memory::native_buttons().iter().map(|(id, _, _)| *id).collect();
-    device.restore_native_buttons(&native)
-        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
     if device.mode().map_err(CommandError::internal)? != mouse_memory::MODE_NORMAL
         || !device.drifted_bindings(&bindings).map_err(CommandError::internal)?.is_empty()
         || !device.drifted_native_buttons().map_err(CommandError::internal)?.is_empty() {
@@ -3103,9 +2976,21 @@ pub(crate) fn is_shutting_down() -> bool {
 /// helper keeps its mouse hook alive and swallows back/forward after exit),
 /// which also restores every live map, then stores the offline profile.
 pub(crate) fn shutdown_mouse(app: &AppHandle) {
-    if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
-        return;
+    // The session end and the app exit can race: the second caller waits for
+    // the first, so the process never ends in the middle of the writes.
+    // A Mutex, not a Once: a first run that panicked must not abort the second
+    // caller (from a window procedure) with a poisoned Once.
+    static SHUTDOWN: Mutex<bool> = Mutex::new(false);
+    let mut done = SHUTDOWN.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !std::mem::replace(&mut *done, true) {
+        shutdown_mouse_once(app);
     }
+}
+
+fn shutdown_mouse_once(app: &AppHandle) {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    #[cfg(target_os = "windows")]
+    onboard_guard::wait_tick();
     if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()
         && let Err(message) = controller.stop()
     {
@@ -3123,7 +3008,7 @@ pub(crate) fn shutdown_mouse(app: &AppHandle) {
         if let Ok(config_dir) = resolve_config_dir(app)
             && config_dir.join(mouse_offline::OFFLINE_FAILED_FILE).exists()
         {
-            spawn_live_map_restore(&config_dir);
+            spawn_live_map_restore(&config_dir, false);
         }
     }
 }
@@ -3142,13 +3027,8 @@ fn write_offline_mouse_profile(app: &AppHandle) {
     // Default: the fallback profile. The one in effect at exit depends on which
     // window happened to be focused — a per-app profile full of snippets the
     // mouse cannot play left buttons dead without Sidearm.
-    let in_effect = || store.lock().ok().and_then(|store| store.last_active_profile_id().map(str::to_owned));
-    let profile_id = match config.settings.offline_profile_id.as_deref() {
-        Some(config::OFFLINE_PROFILE_ACTIVE) => in_effect(),
-        Some(id) => config.profiles.iter().any(|p| p.id == id).then(|| id.to_owned()),
-        None => None,
-    }
-    .unwrap_or_else(|| config.settings.fallback_profile_id.clone());
+    let in_effect = store.lock().ok().and_then(|store| store.last_active_profile_id().map(str::to_owned));
+    let profile_id = mouse_offline::offline_profile_id(&config, in_effect);
     mouse_offline::write_offline_profile(&config, &profile_id, &config_dir);
 }
 
@@ -3357,14 +3237,24 @@ async fn get_mouse_settings(device_id: Option<String>) -> Result<mouse_settings:
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn set_mouse_dpi(dpi: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
-    with_mouse_settings(device_id, move |device| device.set_dpi(dpi, true)).await
+    with_mouse_settings(device_id, move |device| {
+        device.set_dpi(dpi, true)?;
+        mouse_speed::forget_originals(device.model().device_id, true, false);
+        Ok(())
+    })
+    .await
 }
 
 /// Sets the mouse poll rate (125/500/1000 Hz) and returns the settings read back.
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn set_mouse_poll_rate(hz: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
-    with_mouse_settings(device_id, move |device| device.set_poll_rate_hz(hz)).await
+    with_mouse_settings(device_id, move |device| {
+        device.set_poll_rate_hz(hz)?;
+        mouse_speed::forget_originals(device.model().device_id, false, true);
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(target_os = "windows")]
@@ -3616,9 +3506,8 @@ fn epoch_seconds_string() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Marks this process as a running Sidearm for a live-map restore process.
     #[cfg(target_os = "windows")]
-    let _app_mutex = create_mutex(APP_MUTEX);
+    let _app_mutex = mouse_restore::claim_app();
     // Safety net: release all modifier keys if we panic while holding keys.
     // NOTE: This only works with panic="unwind" (the default). If Cargo.toml
     // sets panic="abort" for release, this hook won't run in release builds.
@@ -3716,11 +3605,8 @@ pub fn run() {
         // surface the already-running window instead. The capture helper is
         // exempt: it returns at main.rs on `--capture-helper` before the Tauri
         // Builder ever runs, so it never acquires this lock.
-        // ponytail: relaunch_as_admin spawns a fresh elevated Sidearm.exe then
-        // app.exit(0)s immediately, freeing this lock before the elevated
-        // cold-start checks it (the old process wins the race virtually always).
-        // If that race ever flips, pass a sentinel arg and exit here instead of
-        // focusing. Upgrade path noted, not built — no evidence it's needed.
+        // relaunch_as_admin starts the elevated Sidearm with `--relaunched`,
+        // which waits for the old process to end before it gets here.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 bring_to_front(&window);
@@ -4229,18 +4115,6 @@ pub fn run() {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn a_named_mutex_is_single_and_goes_with_its_handle() {
-        let name = format!(r"Local\Sidearm-test-{}", std::process::id());
-        assert!(!mutex_exists(&name));
-        let handle = create_mutex(&name).expect("first create");
-        assert!(mutex_exists(&name));
-        assert!(create_mutex(&name).is_none(), "a second holder is refused");
-        unsafe { windows_sys::Win32::Foundation::CloseHandle(handle) };
-        assert!(!mutex_exists(&name));
-    }
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")

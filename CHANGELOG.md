@@ -46,6 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on a single press (the mouse cannot tell them apart): it does nothing instead.
 - Naga V3 Pro: a held modifier without a key (push-to-talk with Alt) is stored with the
   left Alt instead of the right one, which the Russian layout turns into Ctrl+Alt.
+- Closing Sidearm puts back the poll rate and DPI the per-app profiles changed (the
+  offline profile's own, else what the mouse had before), instead of leaving the last
+  app's speed in the mouse.
+- Shutting Windows down while Sidearm closes can no longer cut the mouse writes short,
+  and the background check can no longer write Sidearm's signals over the profile
+  stored for use without Sidearm.
+- "Restart as administrator" waits for the old Sidearm to finish restoring the mice
+  instead of being turned away by it.
 - Naga V2 HyperSpeed: a button whose assignment cannot live in the mouse (text, macro)
   no longer plays the shortcut an earlier exit stored there; with HyperShift on the
   right button, a left click under it is a right click without Sidearm too.

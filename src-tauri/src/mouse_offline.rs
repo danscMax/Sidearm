@@ -189,6 +189,29 @@ pub fn offline_profile_id(config: &AppConfig, in_effect: Option<String>) -> Stri
     .unwrap_or_else(|| config.settings.fallback_profile_id.clone())
 }
 
+/// Puts back the live speed the per-app profiles changed: the offline
+/// profile's own poll rate (and DPI with `dpi_too`; a V3 bank switch sets its
+/// own), else what the mouse had before Sidearm's first switch this run.
+pub(crate) fn restore_live_speed(device: &VendorDevice, config: &AppConfig, profile_id: &str, dpi_too: bool) -> Result<(), String> {
+    let model = device.model();
+    let own = config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| p.mouse_for(model.device_id));
+    let original = crate::onboard_guard::originals(model.device_id);
+    let poll = own.and_then(|own| own.mouse_poll_rate_hz).filter(|hz| model.poll_code_for_hz(*hz).is_some());
+    if let Some(hz) = poll.or(original.poll_rate_hz)
+        && device.poll_rate_hz()? != hz
+    {
+        device.set_poll_rate_hz(hz)?;
+    }
+    let dpi = own.and_then(|own| own.mouse_dpi).map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
+    if dpi_too
+        && let Some(dpi) = dpi.or(original.dpi)
+        && device.dpi()? != dpi
+    {
+        device.set_dpi(dpi, false)?;
+    }
+    Ok(())
+}
+
 /// Writes the offline profile into every connected mouse. Best effort: a
 /// record the mouse refuses is logged and skipped. The onboard path leaves the
 /// marker only when the mouse took a record; any mouse that took nothing
@@ -290,6 +313,10 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
         && let Err(message) = device.set_dpi(dpi, true)
     {
         log::warn!("[mouse-offline] DPI not stored: {message}");
+        asleep |= crate::mouse_memory::is_no_response(&message);
+    }
+    if let Err(message) = restore_live_speed(&device, config, profile_id, true) {
+        log::warn!("[mouse-offline] live DPI / poll rate not put back: {message}");
         asleep |= crate::mouse_memory::is_no_response(&message);
     }
     if failed == records.len() && !records.is_empty() {

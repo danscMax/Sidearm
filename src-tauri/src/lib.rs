@@ -79,6 +79,9 @@ pub const AFTER_CRASH_ARG: &str = "--after-crash";
 /// with the process, so its absence means no Sidearm runs.
 #[cfg(target_os = "windows")]
 const APP_MUTEX: &str = "Local\\Sidearm-app";
+/// Passed to the elevated Sidearm a relaunch starts (`relaunch_as_admin`).
+#[cfg(target_os = "windows")]
+const RELAUNCHED_ARG: &str = "--relaunched";
 /// Held by the live-map restore process: a Sidearm starting meanwhile leaves
 /// the mice alone until it ends (two processes must not talk to one receiver).
 #[cfg(target_os = "windows")]
@@ -2276,6 +2279,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
             .chain(std::iter::once(0))
             .collect();
         let verb_w: Vec<u16> = "runas\0".encode_utf16().collect();
+        let params_w: Vec<u16> = RELAUNCHED_ARG.encode_utf16().chain(std::iter::once(0)).collect();
 
         // ShellExecuteW returns an HINSTANCE; values <= 32 indicate failure.
         // SE_ERR_ACCESSDENIED (5) is the code we get when the user cancels UAC.
@@ -2284,7 +2288,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
                 std::ptr::null_mut(),
                 verb_w.as_ptr(),
                 exe_w.as_ptr(),
-                std::ptr::null(),
+                params_w.as_ptr(),
                 std::ptr::null(),
                 SW_SHOWNORMAL,
             )
@@ -3131,9 +3135,16 @@ pub(crate) fn is_shutting_down() -> bool {
 /// helper keeps its mouse hook alive and swallows back/forward after exit),
 /// which also restores every live map, then stores the offline profile.
 pub(crate) fn shutdown_mouse(app: &AppHandle) {
-    if SHUTTING_DOWN.swap(true, Ordering::SeqCst) {
-        return;
-    }
+    // The session end and the app exit can race: the second caller waits for
+    // the first, so the process never ends in the middle of the writes.
+    static SHUTDOWN: std::sync::Once = std::sync::Once::new();
+    SHUTDOWN.call_once(|| shutdown_mouse_once(app));
+}
+
+fn shutdown_mouse_once(app: &AppHandle) {
+    SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    #[cfg(target_os = "windows")]
+    onboard_guard::wait_tick();
     if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()
         && let Err(message) = controller.stop()
     {
@@ -3380,14 +3391,24 @@ async fn get_mouse_settings(device_id: Option<String>) -> Result<mouse_settings:
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn set_mouse_dpi(dpi: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
-    with_mouse_settings(device_id, move |device| device.set_dpi(dpi, true)).await
+    with_mouse_settings(device_id, move |device| {
+        device.set_dpi(dpi, true)?;
+        onboard_guard::forget_originals(device.model().device_id);
+        Ok(())
+    })
+    .await
 }
 
 /// Sets the mouse poll rate (125/500/1000 Hz) and returns the settings read back.
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn set_mouse_poll_rate(hz: u16, device_id: Option<String>) -> Result<mouse_settings::MouseSettings, CommandError> {
-    with_mouse_settings(device_id, move |device| device.set_poll_rate_hz(hz)).await
+    with_mouse_settings(device_id, move |device| {
+        device.set_poll_rate_hz(hz)?;
+        onboard_guard::forget_originals(device.model().device_id);
+        Ok(())
+    })
+    .await
 }
 
 #[cfg(target_os = "windows")]
@@ -3641,6 +3662,16 @@ fn epoch_seconds_string() -> String {
 pub fn run() {
     // Marks this process as a running Sidearm for a live-map restore process.
     #[cfg(target_os = "windows")]
+    // An elevated relaunch starts while the old Sidearm still restores its mice
+    // on exit, and the single-instance lock would turn this one away: wait for
+    // it to end first.
+    #[cfg(target_os = "windows")]
+    if std::env::args().any(|arg| arg == RELAUNCHED_ARG) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while mutex_exists(APP_MUTEX) && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
+    }
     let _app_mutex = create_mutex(APP_MUTEX);
     // Safety net: release all modifier keys if we panic while holding keys.
     // NOTE: This only works with panic="unwind" (the default). If Cargo.toml
@@ -3739,11 +3770,8 @@ pub fn run() {
         // surface the already-running window instead. The capture helper is
         // exempt: it returns at main.rs on `--capture-helper` before the Tauri
         // Builder ever runs, so it never acquires this lock.
-        // ponytail: relaunch_as_admin spawns a fresh elevated Sidearm.exe then
-        // app.exit(0)s immediately, freeing this lock before the elevated
-        // cold-start checks it (the old process wins the race virtually always).
-        // If that race ever flips, pass a sentinel arg and exit here instead of
-        // focusing. Upgrade path noted, not built — no evidence it's needed.
+        // relaunch_as_admin starts the elevated Sidearm with `--relaunched`,
+        // which waits for the old process to end before it gets here.
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
             if let Some(window) = app.get_webview_window("main") {
                 bring_to_front(&window);

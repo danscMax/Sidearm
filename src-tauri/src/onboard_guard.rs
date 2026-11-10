@@ -136,19 +136,63 @@ pub fn spawn(app: AppHandle, runtime_store: Arc<Mutex<RuntimeStore>>, config_dir
         .ok();
 }
 
+/// Held for one guard tick's work; the exit waits for a tick that began
+/// before it ([`wait_tick`]), so no tick puts signals over the offline profile.
+static TICK: Mutex<()> = Mutex::new(());
+
+/// Returns once a guard tick in progress has finished.
+pub fn wait_tick() {
+    drop(TICK.lock());
+}
+
+/// The live DPI / poll rate of a mouse before Sidearm's per-profile switches
+/// first changed them this run: an exit puts them back where the offline
+/// profile sets none (without Sidearm the mouse would keep the last app's speed).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Originals {
+    pub dpi: Option<u16>,
+    pub poll_rate_hz: Option<u16>,
+}
+
+static ORIGINALS: Mutex<Vec<(&'static str, Originals)>> = Mutex::new(Vec::new());
+
+/// Keeps the first value seen for each field of `device_id`.
+fn remember(device_id: &'static str, seen: Originals) {
+    let Ok(mut all) = ORIGINALS.lock() else { return };
+    let index = all.iter().position(|(id, _)| *id == device_id).unwrap_or_else(|| {
+        all.push((device_id, Originals::default()));
+        all.len() - 1
+    });
+    let kept = &mut all[index].1;
+    kept.dpi = kept.dpi.or(seen.dpi);
+    kept.poll_rate_hz = kept.poll_rate_hz.or(seen.poll_rate_hz);
+}
+
+pub fn originals(device_id: &str) -> Originals {
+    ORIGINALS.lock().ok().and_then(|all| all.iter().find(|(id, _)| *id == device_id).map(|(_, kept)| *kept)).unwrap_or_default()
+}
+
+/// The user set the mouse's speed by hand: that is the one to come back to.
+pub fn forget_originals(device_id: &str) {
+    if let Ok(mut all) = ORIGINALS.lock() {
+        all.retain(|(id, _)| *id != device_id);
+    }
+}
+
 /// Applies a profile's own DPI / poll rate to each connected mouse, from that
 /// mouse's own settings (fields left unset keep the mouse as it is). Runs on its own thread: it is called from the capture
 /// path on a profile switch and must not delay the key that caused it. The
 /// device lock serializes it with the guard tick.
 pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
+    // Every switch spawns its own thread and the device lock does not keep their
+    // order: a switch that waited behind a newer one must not undo it — a newer
+    // switch to a profile without settings included.
+    let generation = PROFILE_SWITCHES.fetch_add(1, Ordering::SeqCst) + 1;
     if profile.device_mouse.as_ref().is_none_or(|own| own.values().all(|own| own.mouse_dpi.is_none() && own.mouse_poll_rate_hz.is_none())) {
         return;
     }
     let name = profile.name.clone();
     let profile = profile.clone();
-    // Every switch spawns its own thread and the device lock does not keep their
-    // order: a switch that waited behind a newer one must not undo it.
-    let generation = PROFILE_SWITCHES.fetch_add(1, Ordering::SeqCst) + 1;
     std::thread::Builder::new()
         .name("profile-mouse".into())
         .spawn(move || {
@@ -166,23 +210,31 @@ pub fn apply_profile_mouse_settings(profile: &crate::config::Profile) {
                     log::debug!("[onboard-guard] profile `{name}`: superseded by a newer switch");
                     return;
                 }
+                // The exit puts the mouse's own speed back.
+                if crate::is_shutting_down() {
+                    return;
+                }
                 let model = device.model();
                 let Some((dpi, poll_rate_hz)) = switch_values(&profile, model) else { continue };
                 let result = (|| {
                     let mut written = false;
-                    if let Some(hz) = poll_rate_hz
-                        && device.poll_rate_hz()? != hz
-                    {
-                        device.set_poll_rate_hz(hz)?;
-                        written = true;
+                    if let Some(hz) = poll_rate_hz {
+                        let current = device.poll_rate_hz()?;
+                        if current != hz {
+                            remember(model.device_id, Originals { poll_rate_hz: Some(current), ..Default::default() });
+                            device.set_poll_rate_hz(hz)?;
+                            written = true;
+                        }
                     }
                     // Live only: the mouse keeps its stored DPI for use without
                     // Sidearm, and a switch per alt-tab must not wear its storage.
-                    if let Some(dpi) = dpi
-                        && device.dpi()? != dpi
-                    {
-                        device.set_dpi(dpi, false)?;
-                        written = true;
+                    if let Some(dpi) = dpi {
+                        let current = device.dpi()?;
+                        if current != dpi {
+                            remember(model.device_id, Originals { dpi: Some(current), ..Default::default() });
+                            device.set_dpi(dpi, false)?;
+                            written = true;
+                        }
                     }
                     Ok::<_, String>(written)
                 })();
@@ -257,6 +309,7 @@ pub fn step_profile_dpi(profile: &crate::config::Profile, up: bool) -> Result<u1
             let current = device.dpi()?;
             let desired = next_dpi_stage(&playable, current, up)?;
             if desired != current {
+                remember(model.device_id, Originals { dpi: Some(current), ..Default::default() });
                 device.set_dpi(desired, false)?;
             }
             Ok::<_, String>(desired)
@@ -410,6 +463,8 @@ fn run(
         razer_was_running = razer_running;
 
         // The exit is writing the offline profile: never put signals over it.
+        // Held to the end of the tick, which the exit waits for.
+        let _tick = TICK.lock();
         if crate::is_shutting_down() {
             wait = POLL_INTERVAL;
             continue;
@@ -806,6 +861,16 @@ fn takeover_message(event: &TakeoverEvent) -> crate::ui_text::UiText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn originals_keep_the_first_value_until_forgotten() {
+        remember("test-mouse", Originals { poll_rate_hz: Some(1000), ..Default::default() });
+        remember("test-mouse", Originals { dpi: Some(800), poll_rate_hz: Some(125) });
+        assert_eq!(originals("test-mouse"), Originals { dpi: Some(800), poll_rate_hz: Some(1000) });
+        forget_originals("test-mouse");
+        assert_eq!(originals("test-mouse"), Originals::default());
+    }
+
     #[test]
     fn recovery_transitions_are_not_hidden_by_notification_cooldown() {
         let now = Instant::now();

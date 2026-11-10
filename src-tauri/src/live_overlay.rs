@@ -403,6 +403,12 @@ pub(crate) fn write_offline(
     let banks = read_banks(&device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
     let mut asleep = None;
+    // The bank reselect below sets the DPI; the poll rate stays what the last
+    // profile switch left.
+    if let Err(error) = crate::mouse_offline::restore_live_speed(&device, config, offline_profile, false) {
+        log::warn!("[mouse-offline] {} poll rate not put back: {error}", model.name);
+        note_asleep(&mut asleep, error);
+    }
     // A bank no profile is linked to any more gets its own records back: what
     // Sidearm stored there earlier (an old turbo record included) would play on.
     for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {

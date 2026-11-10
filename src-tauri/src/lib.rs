@@ -517,12 +517,14 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         crate::ui_text!("runtime.trayPaused", "paused")
     });
     #[cfg(target_os = "windows")]
-    let battery_line: String = onboard_guard::last_batteries()
+    // One line for every mouse: Windows cuts the tooltip at 64 characters.
+    let batteries: Vec<String> = onboard_guard::last_batteries()
         .into_iter()
         .map(|(model, percent)| {
-            crate::ui_text::native(&crate::ui_text!("runtime.trayBattery", "\n{model}: {percent}%", model = model, percent = percent))
+            crate::ui_text::native(&crate::ui_text!("runtime.trayBattery", "{model} {percent}%", model = model.short_name, percent = percent))
         })
         .collect();
+    let battery_line = if batteries.is_empty() { String::new() } else { format!("\n{}", batteries.join(" · ")) };
     #[cfg(not(target_os = "windows"))]
     let battery_line = String::new();
     let tooltip = crate::ui_text!(

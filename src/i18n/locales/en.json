@@ -1610,7 +1610,7 @@
       "reloadWarnings": "Warnings found after reload: {{warning_count}}.",
       "startWarnings": "Warnings found at startup: {{warning_count}}.",
       "trayActiveProfile": "Active profile: {{profile_name}}",
-      "trayBattery": "\n{{model}}: {{percent}}%",
+      "trayBattery": "{{model}} {{percent}}%",
       "trayCreateRule": "Create a rule for the active window",
       "trayListen": "Listen to the mouse",
       "trayListening": "listening to the mouse",

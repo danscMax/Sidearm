@@ -28,7 +28,7 @@ import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { SynapseNotice } from "./components/SynapseNotice";
-import { ProfilesWorkspace } from "./components/ProfilesWorkspace";
+import { ProfilesWorkspace, type RuleSignal } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
 import { Sidebar } from "./components/Sidebar";
@@ -548,8 +548,9 @@ function App() {
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
-  // A rule chosen in the sidebar opens in the assignments screen's editor.
-  const [editRuleSignal, setEditRuleSignal] = useState<string | null>(null);
+  // A rule chosen in the sidebar: opened in the assignments screen's editor,
+  // or its menu at the click point (`at`).
+  const [ruleSignal, setRuleSignal] = useState<RuleSignal | null>(null);
   const [allRulesView, setAllRulesView] = useState(false);
   // Tray "Create rule for active window" capture, consumed by ProfilesWorkspace.
   const [quickRuleCapture, setQuickRuleCapture] = useState<WindowCaptureResult | null>(null);
@@ -1102,7 +1103,11 @@ function App() {
         allRules={allRulesView}
         onEditRule={(mappingId) => {
           switchWorkspaceMode("profiles");
-          setEditRuleSignal(mappingId);
+          setRuleSignal({ mappingId });
+        }}
+        onRuleMenu={(mappingId, x, y) => {
+          switchWorkspaceMode("profiles");
+          setRuleSignal({ mappingId, at: { x, y } });
         }}
         onAddRule={() => {
           switchWorkspaceMode("profiles");
@@ -1138,8 +1143,8 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 addRuleSignal={addRuleSignal}
                 onAddRuleHandled={() => setAddRuleSignal(false)}
-                editRuleSignal={editRuleSignal}
-                onEditRuleHandled={() => setEditRuleSignal(null)}
+                ruleSignal={ruleSignal}
+                onRuleSignalHandled={() => setRuleSignal(null)}
                 allProfilesView={allRulesView}
                 quickRuleCapture={quickRuleCapture}
                 onQuickRuleHandled={() => setQuickRuleCapture(null)}

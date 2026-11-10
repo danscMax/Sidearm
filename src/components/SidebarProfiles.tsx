@@ -19,6 +19,7 @@ export function SidebarProfiles({
   onContextMenu,
   onOpenSettings,
   onEditRule,
+  onRuleMenu,
   onAddRule,
   onToggleAllRules,
 }: {
@@ -32,6 +33,8 @@ export function SidebarProfiles({
   onContextMenu: (x: number, y: number, profileId: string) => void;
   onOpenSettings: () => void;
   onEditRule: (mappingId: string) => void;
+  /** Right-click on an app: the rule's menu (edit, duplicate, move, delete). */
+  onRuleMenu: (mappingId: string, x: number, y: number) => void;
   onAddRule: () => void;
   onToggleAllRules: () => void;
 }) {
@@ -78,6 +81,10 @@ export function SidebarProfiles({
                       type="button"
                       className={`sidebar-profiles__app${mapping.enabled ? "" : " sidebar-profiles__app--disabled"}`}
                       onClick={() => onEditRule(mapping.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        onRuleMenu(mapping.id, e.clientX, e.clientY);
+                      }}
                       title={mapping.processPath ?? mapping.exe}
                     >
                       <ExeIcon exe={mapping.exe} processPath={mapping.processPath} className="sidebar-profiles__icon" />

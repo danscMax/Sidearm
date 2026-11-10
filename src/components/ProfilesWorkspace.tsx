@@ -60,15 +60,20 @@ import { ExeIcon } from "./ExeIcon";
 import { AppMappingModal } from "./AppMappingModal";
 import { CaptureControls } from "./CaptureControls";
 
+/** A rule picked in the sidebar: open its editor, or its menu at `at`. */
+export interface RuleSignal {
+  mappingId: string;
+  at?: { x: number; y: number };
+}
+
 export interface ProfilesWorkspaceProps {
   activeConfig: AppConfig;
   activeProfile: Profile | null;
   effectiveProfileId: string | null;
   addRuleSignal: boolean;
   onAddRuleHandled: () => void;
-  /** A rule picked in the sidebar: open it in the editor. */
-  editRuleSignal: string | null;
-  onEditRuleHandled: () => void;
+  ruleSignal: RuleSignal | null;
+  onRuleSignalHandled: () => void;
   /** Every profile's rule cards (the sidebar's "All rules"). */
   allProfilesView: boolean;
   quickRuleCapture: WindowCaptureResult | null;
@@ -113,8 +118,8 @@ export function ProfilesWorkspace({
   effectiveProfileId,
   addRuleSignal,
   onAddRuleHandled,
-  editRuleSignal,
-  onEditRuleHandled,
+  ruleSignal,
+  onRuleSignalHandled,
   allProfilesView,
   quickRuleCapture,
   onQuickRuleHandled,
@@ -379,11 +384,12 @@ export function ProfilesWorkspace({
   }, [addRuleSignal]);
 
   useEffect(() => {
-    if (editRuleSignal) {
-      setEditingMappingId(editRuleSignal);
-      onEditRuleHandled();
+    if (ruleSignal) {
+      if (ruleSignal.at) setRuleCtxMenu({ ...ruleSignal.at, mappingId: ruleSignal.mappingId });
+      else setEditingMappingId(ruleSignal.mappingId);
+      onRuleSignalHandled();
     }
-  }, [editRuleSignal]);
+  }, [ruleSignal]);
 
   // Drag-reorder state for the profile rules grid.
   const [draggingMappingId, setDraggingMappingId] = useState<string | null>(null);

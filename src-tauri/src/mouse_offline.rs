@@ -195,7 +195,7 @@ pub fn offline_profile_id(config: &AppConfig, in_effect: Option<String>) -> Stri
 pub(crate) fn restore_live_speed(device: &VendorDevice, config: &AppConfig, profile_id: &str, dpi_too: bool) -> Result<(), String> {
     let model = device.model();
     let own = config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| p.mouse_for(model.device_id));
-    let original = crate::onboard_guard::originals(model.device_id);
+    let original = crate::mouse_speed::originals(model.device_id);
     let poll = own.and_then(|own| own.mouse_poll_rate_hz).filter(|hz| model.poll_code_for_hz(*hz).is_some());
     if let Some(hz) = poll.or(original.poll_rate_hz)
         && device.poll_rate_hz()? != hz
@@ -340,6 +340,12 @@ pub fn restore_signals(config: &AppConfig) -> Result<(), String> {
     if !device.model().verified {
         return Err(format!("{} is not verified", device.model().name));
     }
+    write_signals(&device, config)
+}
+
+/// Sidearm's own signals into `device`: its key buttons, then its plain mouse
+/// buttons (no firmware Hypershift).
+pub fn write_signals(device: &VendorDevice, config: &AppConfig) -> Result<(), String> {
     device.apply_bindings(&onboard_bindings(config))?;
     let natives: Vec<&str> = native_buttons().iter().map(|(id, _, _)| *id).collect();
     device.restore_native_buttons(&natives)

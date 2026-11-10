@@ -1,7 +1,9 @@
-//! The processes around a Sidearm that ended: the hook-free restore process a
-//! dead Sidearm's capture helper (or an exit with a sleeping mouse) starts,
-//! and the named mutexes that keep it and a running Sidearm off one receiver
-//! at a time.
+//! The processes around a Sidearm that ended: the hook-free restore process —
+//! started as a watchdog with every Sidearm, by a dead Sidearm's capture
+//! helper, or by an exit with a sleeping mouse — and the named mutexes that
+//! keep it and a running Sidearm off one receiver at a time.
+
+use std::path::Path;
 
 /// Argument of the one-shot process that restores the live maps a dead
 /// Sidearm left (`Sidearm.exe --restore-live-maps <config dir>`).
@@ -9,6 +11,14 @@ pub const RESTORE_LIVE_MAPS_ARG: &str = "--restore-live-maps";
 /// Added when Sidearm died: it stored no offline profile, so the restore
 /// process stores it like an exit would.
 pub const AFTER_CRASH_ARG: &str = "--after-crash";
+/// `--watch <pid>`: the restore process first waits for that Sidearm to end,
+/// and restores only when it ended without its exit (killed, crashed).
+const WATCH_ARG: &str = "--watch";
+/// `--spawn-watchdog <config dir> --watch <pid>`: starts the watchdog and ends.
+const SPAWN_WATCHDOG_ARG: &str = "--spawn-watchdog";
+/// Left by a Sidearm whose exit ran to the end (its pid): its watchdog has
+/// nothing to do.
+const CLEAN_EXIT_FILE: &str = "sidearm-clean-exit";
 
 /// Held by every running Sidearm app for its whole life; Windows drops it
 /// with the process, so its absence means no Sidearm runs.
@@ -79,23 +89,87 @@ pub fn live_map_restore_running() -> bool {
     mutex_exists(RESTORE_MUTEX)
 }
 
-/// Started by the capture helper when Sidearm died, and by an exit that left
-/// a sleeping mouse without its offline profile: a separate process with no
-/// hooks that outlives Sidearm.
-pub fn spawn_live_map_restore(config_dir: &std::path::Path, after_crash: bool) {
+/// Starts this exe with `args`, detached and windowless.
+fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
-    let started = std::env::current_exe().and_then(|exe| {
-        std::process::Command::new(exe)
-            .arg(RESTORE_LIVE_MAPS_ARG)
-            .arg(config_dir)
-            .args(after_crash.then_some(AFTER_CRASH_ARG))
-            .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
-            .spawn()
-    });
-    if let Err(error) = started {
+    std::process::Command::new(std::env::current_exe()?)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        .spawn()
+        .map(|_| ())
+}
+
+/// Started by the capture helper when Sidearm died, and by an exit that left
+/// a sleeping mouse without its offline profile: a separate process with no
+/// hooks that outlives Sidearm.
+pub fn spawn_live_map_restore(config_dir: &Path, after_crash: bool) {
+    let mut args = vec![RESTORE_LIVE_MAPS_ARG.as_ref(), config_dir.as_os_str()];
+    if after_crash {
+        args.push(AFTER_CRASH_ARG.as_ref());
+    }
+    if let Err(error) = spawn_detached(&args) {
         log::warn!("[capture-helper] live-map restore process not started: {error}");
+    }
+}
+
+/// Starts this Sidearm's watchdog: a restore process that waits for it to end
+/// and restores the mice when it ended without its exit. "End task" in Task
+/// Manager takes Sidearm and its capture helper together, so the helper cannot
+/// be the one to notice. It goes through a process that ends at once
+/// (`--spawn-watchdog`): with its parent gone, the watchdog is no part of
+/// Sidearm's process tree and survives that.
+pub fn spawn_watchdog(config_dir: &Path) {
+    let pid = std::process::id().to_string();
+    if let Err(error) = spawn_detached(&[SPAWN_WATCHDOG_ARG.as_ref(), config_dir.as_os_str(), WATCH_ARG.as_ref(), pid.as_ref()]) {
+        log::warn!("[system] mouse watchdog not started: {error}");
+    }
+}
+
+/// The end of a clean exit: this Sidearm's watchdog has nothing to do.
+pub fn mark_clean_exit(config_dir: &Path) {
+    crate::mouse_offline::write_marker(&config_dir.join(CLEAN_EXIT_FILE), &std::process::id().to_string());
+}
+
+/// The restore processes' entry (`main.rs`, before Tauri starts). Returns
+/// whether `args` were for one of them.
+pub fn restore_entry(args: &[String]) -> bool {
+    let value = |name: &str| args.iter().position(|arg| arg == name).and_then(|index| args.get(index + 1));
+    if let Some(dir) = value(SPAWN_WATCHDOG_ARG) {
+        if let Some(pid) = value(WATCH_ARG) {
+            let _ = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref(), WATCH_ARG.as_ref(), pid.as_ref()]);
+        }
+        return true;
+    }
+    let Some(dir) = value(RESTORE_LIVE_MAPS_ARG) else { return false };
+    let watch = value(WATCH_ARG).and_then(|pid| pid.parse().ok());
+    restore_live_maps_main(Path::new(dir), args.iter().any(|arg| arg == AFTER_CRASH_ARG), watch);
+    true
+}
+
+/// Whether Sidearm `pid` left the clean-exit mark (taken here: it is read once).
+fn exited_cleanly(config_dir: &Path, pid: u32) -> bool {
+    let mark = config_dir.join(CLEAN_EXIT_FILE);
+    let clean = std::fs::read_to_string(&mark).is_ok_and(|text| text.trim() == pid.to_string());
+    if clean {
+        let _ = std::fs::remove_file(&mark);
+    }
+    clean
+}
+
+/// Blocks until process `pid` has ended (at once when it is gone already).
+fn wait_for_exit(pid: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject};
+    // SAFETY: the handle is checked and closed; a failed open means the
+    // process is gone (or not ours to wait on, which is then treated alike).
+    unsafe {
+        let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+        if !handle.is_null() {
+            WaitForSingleObject(handle, INFINITE);
+            CloseHandle(handle);
+        }
     }
 }
 
@@ -104,7 +178,7 @@ pub fn spawn_live_map_restore(config_dir: &std::path::Path, after_crash: bool) {
 /// nothing and plays Sidearm's silent signals once it wakes).
 /// Quits when Sidearm turns out alive, after 30 minutes, or once a Sidearm
 /// starts — its own start restores them after this process ends.
-pub fn restore_live_maps_main(config_dir: &std::path::Path, after_crash: bool) {
+pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Option<u32>) {
     use std::time::{Duration, Instant};
     // No Tauri log plugin here: its own file next to Sidearm's logs.
     if let Ok(file) = std::fs::OpenOptions::new()
@@ -116,6 +190,15 @@ pub fn restore_live_maps_main(config_dir: &std::path::Path, after_crash: bool) {
             .filter_level(log::LevelFilter::Info)
             .target(env_logger::Target::Pipe(Box::new(file)))
             .try_init();
+    }
+    let mut after_crash = after_crash;
+    if let Some(pid) = watch {
+        wait_for_exit(pid);
+        if exited_cleanly(config_dir, pid) {
+            return;
+        }
+        log::warn!("[restore] Sidearm {pid} ended without its exit (killed or crashed): restoring the mice");
+        after_crash = true;
     }
     log::info!("[restore] started for {} (after a crash: {after_crash})", config_dir.display());
     // The dying Sidearm's mutex goes when its process has fully ended. Checked
@@ -174,6 +257,17 @@ pub fn claim_app() -> Option<windows_sys::Win32::Foundation::HANDLE> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_this_sidearms_clean_exit_mark_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!exited_cleanly(dir.path(), 4242), "no mark: killed");
+        std::fs::write(dir.path().join(CLEAN_EXIT_FILE), "1111").unwrap();
+        assert!(!exited_cleanly(dir.path(), 4242), "another Sidearm's mark");
+        mark_clean_exit(dir.path());
+        assert!(exited_cleanly(dir.path(), std::process::id()));
+        assert!(!dir.path().join(CLEAN_EXIT_FILE).exists(), "the mark is taken");
+    }
 
     #[test]
     fn a_named_mutex_is_single_and_goes_with_its_handle() {

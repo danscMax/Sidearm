@@ -775,6 +775,8 @@ pub struct Session {
     worker: Option<thread::JoinHandle<()>>,
     model: &'static NativeModel,
     targets: Arc<[(u8, u8, OnboardAction)]>,
+    /// Set once the worker holds this mouse's `ACTIVE` flag.
+    claimed: Arc<AtomicBool>,
 }
 
 impl Session {
@@ -799,22 +801,27 @@ impl Session {
         let backup = live_backup(&config_dir, model);
         let onboard = (model.transport == Transport::Onboard).then(|| config.clone());
         let index = model.catalog_index();
-        // One session per mouse: `ACTIVE` stays set until the previous one's
-        // drop has restored its map and is done with the rollback file. Its
-        // stop may still run on another thread (`stop_sessions`); a session
-        // that started over it would share that file and flag.
-        let deadline = std::time::Instant::now() + Duration::from_secs(30);
-        while ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
-            if std::time::Instant::now() >= deadline {
-                log::warn!("[naga-live] {} live map not written: its previous session is still stopping", model.name);
-                return None;
-            }
-            thread::sleep(Duration::from_millis(100));
-        }
+        let claimed = Arc::new(AtomicBool::new(false));
+        let worker_claimed = Arc::clone(&claimed);
         let (stop, stopped) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("naga-live".into())
             .spawn(move || {
+                // One session per mouse: `ACTIVE` stays set until the previous
+                // one's drop has restored its map and is done with the rollback
+                // file, which may take a while on the stop thread
+                // (`stop_sessions`). Wait for it here, as long as it takes,
+                // without holding up whoever started this session.
+                let mut waited = false;
+                while ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
+                    if !std::mem::replace(&mut waited, true) {
+                        log::info!("[naga-live] {} waits for its previous session to finish restoring", model.name);
+                    }
+                    if stopped.recv_timeout(Duration::from_millis(100)) != Err(mpsc::RecvTimeoutError::Timeout) {
+                        return;
+                    }
+                }
+                worker_claimed.store(true, Ordering::Release);
                 let open = || VendorDevice::open_model(model);
                 let attempt = |active: &mut Option<Snapshot>| {
                     // The last session's maps are still being restored by another process.
@@ -896,12 +903,9 @@ impl Session {
                     }
                 }
             })
-            .inspect_err(|error| {
-                ACTIVE[index].store(false, Ordering::Release);
-                log::warn!("[naga-live] {} could not start worker: {error}", model.name);
-            })
+            .inspect_err(|error| log::warn!("[naga-live] {} could not start worker: {error}", model.name))
             .ok()?;
-        Some(Self { stop: Some(stop), worker: Some(worker), model, targets })
+        Some(Self { stop: Some(stop), worker: Some(worker), model, targets, claimed })
     }
 
     /// Asks the worker to restore and stop without waiting for it, so several
@@ -919,7 +923,11 @@ impl Drop for Session {
         {
             log::error!("[naga-live] {} worker panicked; its live map is restored on the next start", self.model.name);
         }
-        ACTIVE[self.model.catalog_index()].store(false, Ordering::Release);
+        // Only a session that got the mouse gives it up: one stopped while it
+        // still waited must not clear its predecessor's flag.
+        if self.claimed.load(Ordering::Acquire) {
+            ACTIVE[self.model.catalog_index()].store(false, Ordering::Release);
+        }
         // Back on the onboard path: the guard restores its signals at once.
         if self.model.transport == Transport::Onboard {
             crate::onboard_guard::request_check();

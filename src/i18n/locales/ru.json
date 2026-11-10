@@ -1628,7 +1628,7 @@
       "reloadWarnings": "После перезагрузки обнаружено предупреждений: {{warning_count}}.",
       "startWarnings": "При запуске обнаружено предупреждений: {{warning_count}}.",
       "trayActiveProfile": "Активный профиль: {{profile_name}}",
-      "trayBattery": "\n{{model}}: {{percent}}%",
+      "trayBattery": "{{model}} {{percent}}%",
       "trayCreateRule": "Создать правило для активного окна",
       "trayListen": "Слушать мышь",
       "trayListening": "слушает мышь",

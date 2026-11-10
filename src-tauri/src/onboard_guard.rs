@@ -62,22 +62,47 @@ const LOW_BATTERY_PERCENT: u8 = 10;
 const LOW_BATTERY_WARN_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 /// File next to the config holding the unix time of the last low warning.
 const LOW_BATTERY_STAMP_FILE: &str = "mouse-battery-warned";
-/// Last battery level of each connected mouse, by model name. A mouse that
-/// sleeps keeps its last reading; an unplugged one drops out.
-static BATTERIES: Mutex<Vec<(&'static str, u8)>> = Mutex::new(Vec::new());
+/// Last battery level of each connected mouse. A mouse that sleeps keeps its
+/// last reading; an unplugged one drops out.
+static BATTERIES: Mutex<Vec<(&'static NativeModel, u8)>> = Mutex::new(Vec::new());
+/// Config device of the mouse whose button Sidearm handled last.
+static LAST_USED: Mutex<Option<String>> = Mutex::new(None);
 
-fn batteries() -> std::sync::MutexGuard<'static, Vec<(&'static str, u8)>> {
+fn batteries() -> std::sync::MutexGuard<'static, Vec<(&'static NativeModel, u8)>> {
     BATTERIES.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// Each connected mouse's battery from the guard's last reads.
-pub fn last_batteries() -> Vec<(&'static str, u8)> {
+pub fn last_batteries() -> Vec<(&'static NativeModel, u8)> {
     batteries().clone()
 }
 
-/// The lowest of them: the tray badge shows the mouse to charge first.
+/// The tray badge: the mouse used last, else the one to charge first.
 pub fn last_battery_percent() -> Option<u8> {
-    batteries().iter().map(|&(_, percent)| percent).min()
+    let used = LAST_USED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
+    let batteries = batteries();
+    batteries
+        .iter()
+        .find(|(model, _)| used.as_deref() == Some(model.device_id))
+        .map(|&(_, percent)| percent)
+        .or_else(|| batteries.iter().map(|&(_, percent)| percent).min())
+}
+
+/// Called for every button press Sidearm handles: the tray badge follows the
+/// mouse in use.
+pub fn note_device_used(app: &AppHandle, config: &crate::config::AppConfig, device_id: &str) {
+    let changed = {
+        let mut used = LAST_USED.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let changed = used.as_deref() != Some(device_id);
+        if changed {
+            *used = Some(device_id.to_owned());
+        }
+        changed
+    };
+    let tracked = batteries().iter().any(|(model, _)| model.device_id == device_id);
+    if changed && tracked {
+        crate::rebuild_tray_menu_from_config(app, config);
+    }
 }
 
 /// Payload of [`EVENT_MOUSE_BATTERY`].
@@ -307,8 +332,8 @@ fn run(
         );
         if full {
             last_full = Some(Instant::now());
-            poll_batteries(app, config_dir);
         }
+        poll_batteries(app, config_dir, !full);
         // `Absent` stays suspect: a mouse plugged back in gets a full scan.
         suspect = !matches!(verdict, Verdict::Clean(_) | Verdict::ModeOnly | Verdict::ReadOnly);
         if full {
@@ -473,13 +498,26 @@ fn check_once(
 
 /// Reads the battery of every connected mouse, not just the one the guard
 /// checks, and drops the mice that were unplugged.
-fn poll_batteries(app: &AppHandle, config_dir: &Path) {
+/// With `only_silent`, only the mice whose last read failed are asked: every
+/// tick, so a mouse that wakes shows up within one tick, not at the next full
+/// scan.
+fn poll_batteries(app: &AppHandle, config_dir: &Path, only_silent: bool) {
+    // Mice whose last battery read got no answer (asleep, out of range).
+    static SILENT: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+    let silent = || SILENT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if only_silent && silent().is_empty() {
+        return;
+    }
     let Some(config) = read_config(config_dir) else { return };
-    let present = crate::mouse_memory::present_models();
+    let mut present = crate::mouse_memory::present_models();
+    silent().retain(|name| present.iter().any(|model| model.name == *name));
+    if only_silent {
+        present.retain(|model| silent().contains(&model.name));
+    }
     let unplugged = {
         let mut batteries = batteries();
         let before = batteries.len();
-        batteries.retain(|(name, _)| present.iter().any(|model| model.name == *name));
+        batteries.retain(|(kept, _)| present.iter().any(|model| model.name == kept.name));
         batteries.len() != before
     };
     if unplugged {
@@ -487,8 +525,22 @@ fn poll_batteries(app: &AppHandle, config_dir: &Path) {
     }
     for model in present {
         match VendorDevice::open_model(model).and_then(|device| device.battery_percent()) {
-            Ok(percent) => report_battery(app, &config, config_dir, model, percent),
-            Err(message) => log::debug!("[onboard-guard] {} battery unreadable: {message}", model.name),
+            Ok(percent) => {
+                let woke = {
+                    let mut silent = silent();
+                    let before = silent.len();
+                    silent.retain(|name| *name != model.name);
+                    silent.len() != before
+                };
+                report_battery(app, &config, config_dir, model, percent, woke);
+            }
+            Err(message) => {
+                log::debug!("[onboard-guard] {} battery unreadable: {message}", model.name);
+                let mut silent = silent();
+                if !silent.contains(&model.name) {
+                    silent.push(model.name);
+                }
+            }
         }
     }
 }
@@ -497,7 +549,7 @@ fn poll_batteries(app: &AppHandle, config_dir: &Path) {
 /// badge) and the UI when it changed, and warns when it is low — at most once a
 /// day per mouse, remembered in [`LOW_BATTERY_STAMP_FILE`] so a restart does
 /// not repeat it.
-fn report_battery(app: &AppHandle, config: &crate::config::AppConfig, config_dir: &Path, model: &'static NativeModel, percent: u8) {
+fn report_battery(app: &AppHandle, config: &crate::config::AppConfig, config_dir: &Path, model: &'static NativeModel, percent: u8, woke: bool) {
     let stamp_path = config_dir.join(format!("{LOW_BATTERY_STAMP_FILE}-{}", model.device_id));
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -509,15 +561,15 @@ fn report_battery(app: &AppHandle, config: &crate::config::AppConfig, config_dir
     let low = should_warn_low(percent, last_warned, now);
     let previous = {
         let mut batteries = batteries();
-        match batteries.iter_mut().find(|(name, _)| *name == model.name) {
+        match batteries.iter_mut().find(|(kept, _)| kept.name == model.name) {
             Some(entry) => Some(std::mem::replace(&mut entry.1, percent)),
             None => {
-                batteries.push((model.name, percent));
+                batteries.push((model, percent));
                 None
             }
         }
     };
-    if previous != Some(percent) || low {
+    if previous != Some(percent) || low || woke {
         crate::rebuild_tray_menu_from_config(app, config);
         let _ = app.emit(EVENT_MOUSE_BATTERY, BatteryEvent { model: model.name, percent, low });
     }
@@ -673,6 +725,20 @@ fn takeover_message(event: &TakeoverEvent) -> crate::ui_text::UiText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_tray_badge_follows_the_mouse_in_use() {
+        use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
+        *batteries() = vec![(&NAGA_V2_HYPERSPEED, 9), (&NAGA_V3_PRO, 100)];
+        *LAST_USED.lock().unwrap() = None;
+        assert_eq!(last_battery_percent(), Some(9), "nothing used yet: the one to charge");
+        *LAST_USED.lock().unwrap() = Some(NAGA_V3_PRO.device_id.into());
+        assert_eq!(last_battery_percent(), Some(100));
+        *LAST_USED.lock().unwrap() = Some("custom".into());
+        assert_eq!(last_battery_percent(), Some(9), "a device without a battery");
+        batteries().clear();
+        *LAST_USED.lock().unwrap() = None;
+    }
 
     #[test]
     fn recovery_transitions_are_not_hidden_by_notification_cooldown() {

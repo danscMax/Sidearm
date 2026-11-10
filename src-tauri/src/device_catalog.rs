@@ -37,6 +37,9 @@ pub struct LiveSpec {
 #[derive(Debug)]
 pub struct NativeModel {
     pub name: &'static str,
+    /// Name short enough for the tray tooltip, which Windows cuts at 64
+    /// characters.
+    pub short_name: &'static str,
     /// Config device this model's controls belong to.
     pub device_id: &'static str,
     /// Prefix of this model's control ids in the config (`v3_thumb_01`).
@@ -187,6 +190,7 @@ pub struct NativeModelInfo {
 /// Razer Naga V2 HyperSpeed, measured on hardware (2026-10-16/17).
 pub const NAGA_V2_HYPERSPEED: NativeModel = NativeModel {
     name: "Razer Naga V2 HyperSpeed",
+    short_name: "V2",
     device_id: crate::config::RAZER_NAGA_DEVICE_ID,
     control_prefix: "",
     transport: Transport::Onboard,
@@ -270,6 +274,7 @@ const THUMBS: [(&str, u8); 12] = [
 /// live map (`Transport::LiveOverlay`), never the onboard-profile path.
 pub static NAGA_V3_PRO: NativeModel = NativeModel {
     name: "Razer Naga V3 Pro",
+    short_name: "V3 Pro",
     device_id: "razer-naga-v3",
     control_prefix: "v3_",
     transport: Transport::LiveOverlay,
@@ -326,6 +331,7 @@ pub static NAGA_V3_PRO: NativeModel = NativeModel {
 /// plate (`0x50..=0x55`) has no control ids yet.
 pub const NAGA_V2_PRO: NativeModel = NativeModel {
     name: "Razer Naga V2 Pro",
+    short_name: "V2 Pro",
     device_id: crate::config::RAZER_NAGA_DEVICE_ID,
     control_prefix: "",
     transport: Transport::Onboard,
@@ -362,6 +368,7 @@ pub const NAGA_V2_PRO: NativeModel = NativeModel {
 /// plate answers on which ids is unknown.
 pub const NAGA_PRO: NativeModel = NativeModel {
     name: "Razer Naga Pro",
+    short_name: "Naga Pro",
     device_id: crate::config::RAZER_NAGA_DEVICE_ID,
     control_prefix: "",
     transport: Transport::Onboard,
@@ -396,6 +403,7 @@ pub const NAGA_PRO: NativeModel = NativeModel {
 /// Razer Naga X (wired only, `0096`): no mouse 4/5, no tilt, no top buttons.
 pub const NAGA_X: NativeModel = NativeModel {
     name: "Razer Naga X",
+    short_name: "Naga X",
     device_id: crate::config::RAZER_NAGA_DEVICE_ID,
     control_prefix: "",
     transport: Transport::Onboard,

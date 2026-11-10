@@ -55,6 +55,7 @@ The Rust backend: low-level keyboard capture, Razer-encoding detection, action e
 
 - `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings` (zero warnings) and `cargo test --manifest-path src-tauri/Cargo.toml`.
 - `cargo` is at `C:\Users\User\.cargo\bin\cargo.exe` (not on the bash PATH).
+- Mouse logic without hardware: `mouse_memory::fake::FakeMouse` (tests only) answers `VendorDevice::command` on the test's thread — button records per profile/button/layer, DPI per storage, poll code, a one-time odd read, sleeping (`0x04`) or refused commands. Pair it with `VendorDevice::test_handle`, and drop one handle before opening the next of the same model (each holds the model's device lock).
 
 ## Child DOX Index
 

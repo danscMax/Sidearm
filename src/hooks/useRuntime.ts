@@ -48,6 +48,9 @@ export interface RuntimeControl {
   captureDelayMs: number;
   setCaptureDelayMs: React.Dispatch<React.SetStateAction<number>>;
   lastCapture: WindowCaptureResult | null;
+  /** The last foreground window the runtime did not ignore (Sidearm's own
+   *  window and shell chrome are ignored); cleared when the runtime stops. */
+  lastRecognized: WindowCaptureResult | null;
   resolutionKeyInput: string;
   setResolutionKeyInput: React.Dispatch<React.SetStateAction<string>>;
   lastResolutionPreview: ResolvedInputPreview | null;
@@ -89,6 +92,7 @@ export function useRuntime(deps: {
   const [debugLog, setDebugLog] = useState<DebugLogEntry[]>([]);
   const [captureDelayMs, setCaptureDelayMs] = useState(2000);
   const [lastCapture, setLastCapture] = useState<WindowCaptureResult | null>(null);
+  const [lastRecognized, setLastRecognized] = useState<WindowCaptureResult | null>(null);
   const [resolutionKeyInput, setResolutionKeyInput] = useState("F13");
   const [lastResolutionPreview, setLastResolutionPreview] =
     useState<ResolvedInputPreview | null>(null);
@@ -104,17 +108,23 @@ export function useRuntime(deps: {
 
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Every runtime state change goes through here: a runtime that is not
+  // running has recognized nothing.
+  function applySummary(summary: RuntimeStateSummary) {
+    setRuntimeSummary(summary);
+    if (summary.status !== "running") setLastRecognized(null);
+  }
+
   // --- useEffectEvent handlers for Tauri listeners ---
 
   const handleRuntimeEvent = useEffectEvent((summary: RuntimeStateSummary) => {
-    startTransition(() => {
-      setRuntimeSummary(summary);
-    });
+    startTransition(() => applySummary(summary));
   });
 
   const handleWindowResolutionEvent = useEffectEvent((result: WindowCaptureResult) => {
     startTransition(() => {
       setLastCapture(result);
+      if (!result.ignored) setLastRecognized(result);
     });
   });
 
@@ -291,7 +301,7 @@ export function useRuntime(deps: {
   async function ensureRuntimeStarted(): Promise<void> {
     try {
       const summary = await startRuntime();
-      startTransition(() => setRuntimeSummary(summary));
+      startTransition(() => applySummary(summary));
       await refreshDebugLog();
     } catch (unknownError) {
       startTransition(() => {
@@ -313,15 +323,15 @@ export function useRuntime(deps: {
   }
 
   async function handleStartRuntime() {
-    await runtimeCommand(() => startRuntime(), (summary) => setRuntimeSummary(summary));
+    await runtimeCommand(() => startRuntime(), applySummary);
   }
 
   async function handleReloadRuntime() {
-    await runtimeCommand(() => reloadRuntime(), (summary) => setRuntimeSummary(summary));
+    await runtimeCommand(() => reloadRuntime(), applySummary);
   }
 
   async function handleStopRuntime() {
-    await runtimeCommand(() => stopRuntime(), (summary) => setRuntimeSummary(summary));
+    await runtimeCommand(() => stopRuntime(), applySummary);
   }
 
   async function handleRehookCapture() {
@@ -380,6 +390,7 @@ export function useRuntime(deps: {
     captureDelayMs,
     setCaptureDelayMs,
     lastCapture,
+    lastRecognized,
     resolutionKeyInput,
     setResolutionKeyInput,
     lastResolutionPreview,

@@ -73,7 +73,11 @@
     "appCount_other": "{{count}} приложений",
     "noApps": "включается вручную",
     "appCount_few": "{{count}} приложения",
-    "appCount_many": "{{count}} приложений"
+    "appCount_many": "{{count}} приложений",
+    "appsCollapse": "Свернуть приложения",
+    "appsExpand": "Показать приложения",
+    "recognized": "Распознано сейчас",
+    "appsToggle": "Приложения профиля"
   },
   "statusbar": {
     "events": "{{count}} событий"

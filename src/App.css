@@ -2016,8 +2016,42 @@ input[type="radio"] {
 }
 
 .sidebar-profiles__item {
+  position: relative;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
+}
+
+/* Folds the selected profile's app list (top-right of its row). */
+.sidebar-profiles__fold {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--c-text-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: transform 150ms ease, color 120ms;
+}
+
+.sidebar-profiles__fold:hover {
+  color: var(--c-text-bright);
+  background: var(--c-card-bg);
+}
+
+.sidebar-profiles__fold--collapsed {
+  transform: rotate(-90deg);
+}
+
+/* Room for the fold button beside the name and the runtime dot. */
+.sidebar-profiles__item--foldable .sidebar-profiles__row {
+  padding-right: 34px;
 }
 
 .sidebar-profiles__item--selected {
@@ -2065,6 +2099,16 @@ input[type="radio"] {
   color: var(--c-text-subtle);
 }
 
+/* The recognized app in place of the count: folded list or another profile. */
+.sidebar-profiles__count--current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: var(--fs-caption);
+  color: var(--c-accent);
+}
+
 .sidebar-profiles__apps {
   display: grid;
   gap: 2px;
@@ -2089,6 +2133,13 @@ input[type="radio"] {
 .sidebar-profiles__app:hover {
   background: var(--c-card-bg);
   color: var(--c-text-bright);
+}
+
+/* The recognized app in the open list. */
+.sidebar-profiles__app--current {
+  color: var(--c-text-bright);
+  background: var(--c-accent-dim);
+  box-shadow: inset 2px 0 0 var(--c-accent);
 }
 
 .sidebar-profiles__app--disabled {

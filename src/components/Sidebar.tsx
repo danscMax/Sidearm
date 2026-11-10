@@ -5,7 +5,7 @@ import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
-import { SidebarProfiles } from "./SidebarProfiles";
+import { SidebarProfiles, type RecognizedApp } from "./SidebarProfiles";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
 const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
@@ -51,6 +51,7 @@ export function Sidebar({
   onRuleMenu,
   onAddRule,
   onToggleAllRules,
+  recognized,
 }: {
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
@@ -71,6 +72,8 @@ export function Sidebar({
   onRuleMenu: (mappingId: string, x: number, y: number) => void;
   onAddRule: () => void;
   onToggleAllRules: () => void;
+  /** The foreground app the runtime recognized last (null while stopped). */
+  recognized: RecognizedApp | null;
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
@@ -144,6 +147,7 @@ export function Sidebar({
           onOpenSettings={() => onSwitchMode("settings")}
           onEditRule={onEditRule}
           onRuleMenu={onRuleMenu}
+          recognized={recognized}
           onAddRule={onAddRule}
           onToggleAllRules={onToggleAllRules}
         />

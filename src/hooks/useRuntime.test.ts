@@ -48,6 +48,8 @@ import {
   executePreviewAction,
   runPreviewAction,
   getDebugLog,
+  listenWindowResolutionEvent,
+  listenRuntimeEvent,
 } from "../lib/backend";
 
 const mockedStartRuntime = vi.mocked(startRuntime);
@@ -384,6 +386,44 @@ describe("useRuntime", () => {
   // =========================================================================
   // Debug log refresh
   // =========================================================================
+  describe("recognized foreground app", () => {
+    it("keeps the last window the runtime did not ignore and clears it on stop", async () => {
+      let emit: (result: WindowCaptureResult) => void = () => {};
+      vi.mocked(listenWindowResolutionEvent).mockImplementationOnce(async (_name, callback) => {
+        emit = callback as typeof emit;
+        return () => {};
+      });
+      const runtimeListeners: ((summary: RuntimeStateSummary) => void)[] = [];
+      vi.mocked(listenRuntimeEvent).mockImplementation(async (_name, callback) => {
+        runtimeListeners.push(callback as (summary: RuntimeStateSummary) => void);
+        return () => {};
+      });
+      mockedStopRuntime.mockResolvedValue(stoppedSummary);
+      const { result } = renderHook(() => useRuntime({ setError }));
+      await act(async () => {});
+
+      act(() => emit(captureResult));
+      expect(result.current.lastRecognized).toEqual(captureResult);
+      // Focusing Sidearm itself is ignored: the recognized app stays.
+      const own = { ...captureResult, exe: "Sidearm.exe", ignored: true };
+      act(() => emit(own));
+      expect(result.current.lastCapture).toEqual(own);
+      expect(result.current.lastRecognized).toEqual(captureResult);
+
+      await act(async () => {
+        await result.current.handleStopRuntime();
+      });
+      expect(result.current.lastRecognized).toBeNull();
+
+      // A runtime that stops by itself (the runtime_stopped event) clears it too.
+      act(() => emit(captureResult));
+      expect(result.current.lastRecognized).toEqual(captureResult);
+      act(() => runtimeListeners.forEach((listener) => listener(stoppedSummary)));
+      expect(result.current.lastRecognized).toBeNull();
+      vi.mocked(listenRuntimeEvent).mockResolvedValue(() => {});
+    });
+  });
+
   describe("debug log refresh", () => {
     it("refreshDebugLog fetches entries after debounce", async () => {
       const entries = [

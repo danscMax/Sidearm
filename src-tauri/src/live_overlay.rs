@@ -801,7 +801,9 @@ impl Session {
         let backup = live_backup(&config_dir, model);
         let onboard = (model.transport == Transport::Onboard).then(|| config.clone());
         let index = model.catalog_index();
-        let claimed = Arc::new(AtomicBool::new(false));
+        // A free mouse is claimed at once, so it reads as active as soon as
+        // this returns; a busy one is waited for on the worker.
+        let claimed = Arc::new(AtomicBool::new(ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok()));
         let worker_claimed = Arc::clone(&claimed);
         let (stop, stopped) = mpsc::channel();
         let worker = thread::Builder::new()
@@ -812,16 +814,24 @@ impl Session {
                 // file, which may take a while on the stop thread
                 // (`stop_sessions`). Wait for it here, as long as it takes,
                 // without holding up whoever started this session.
-                let mut waited = false;
-                while ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_err() {
-                    if !std::mem::replace(&mut waited, true) {
-                        log::info!("[naga-live] {} waits for its previous session to finish restoring", model.name);
-                    }
-                    if stopped.recv_timeout(Duration::from_millis(100)) != Err(mpsc::RecvTimeoutError::Timeout) {
-                        return;
+                if !worker_claimed.load(Ordering::Acquire) {
+                    log::info!("[naga-live] {} waits for its previous session to finish restoring", model.name);
+                    loop {
+                        if stopped.recv_timeout(Duration::from_millis(100)) != Err(mpsc::RecvTimeoutError::Timeout) {
+                            return;
+                        }
+                        if ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                            // Stopped meanwhile (the exit may already have
+                            // seen every mouse idle): give the mouse back.
+                            if stopped.try_recv() != Err(mpsc::TryRecvError::Empty) {
+                                ACTIVE[index].store(false, Ordering::Release);
+                                return;
+                            }
+                            worker_claimed.store(true, Ordering::Release);
+                            break;
+                        }
                     }
                 }
-                worker_claimed.store(true, Ordering::Release);
                 let open = || VendorDevice::open_model(model);
                 let attempt = |active: &mut Option<Snapshot>| {
                     // The last session's maps are still being restored by another process.
@@ -903,7 +913,12 @@ impl Session {
                     }
                 }
             })
-            .inspect_err(|error| log::warn!("[naga-live] {} could not start worker: {error}", model.name))
+            .inspect_err(|error| {
+                if claimed.load(Ordering::Acquire) {
+                    ACTIVE[index].store(false, Ordering::Release);
+                }
+                log::warn!("[naga-live] {} could not start worker: {error}", model.name);
+            })
             .ok()?;
         Some(Self { stop: Some(stop), worker: Some(worker), model, targets, claimed })
     }

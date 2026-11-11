@@ -71,6 +71,9 @@
     "appsCollapse": "Hide apps",
     "appsExpand": "Show apps",
     "recognized": "Recognized now",
+    "now": "now: {{app}}",
+    "nowFallback": "now: {{app}} · no rule",
+    "recognizedFallbackHint": "The app in front now. It has no rule of its own, so the default profile is in use.",
     "appsToggle": "Profile apps"
   },
   "statusbar": {

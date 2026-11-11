@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-11
+
 ### Changed
 - One screen per profile and mouse: the sidebar lists the profiles with the apps that
   switch to each (click one to edit it, "+ App" adds one, "All rules" shows every

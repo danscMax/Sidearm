@@ -28,6 +28,18 @@ const CLEAN_EXIT_FILE: &str = "sidearm-clean-exit";
 const APP_MUTEX: &str = "Local\\Sidearm-app";
 /// Passed to the elevated Sidearm a relaunch starts (`relaunch_as_admin`).
 pub const RELAUNCHED_ARG: &str = "--relaunched";
+/// Created by a Sidearm when its exit begins and held until its process ends:
+/// a Sidearm starting meanwhile waits for it to be gone (`claim_app`).
+const EXITING_MUTEX: &str = "Local\\Sidearm-exiting";
+/// How long a starting Sidearm waits for an exiting (or relaunching) one.
+const PREDECESSOR_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Marks this Sidearm as exiting, for the rest of its life (`claim_app`).
+pub fn mark_exiting() {
+    // The handle is never closed: Windows drops the mutex with the process.
+    let _ = create_mutex(EXITING_MUTEX);
+}
+
 /// Held by the live-map restore process: a Sidearm starting meanwhile leaves
 /// the mice alone until it ends (two processes must not talk to one receiver).
 const RESTORE_MUTEX: &str = "Local\\Sidearm-live-map-restore";
@@ -337,8 +349,13 @@ fn set_run_once(config_dir: &Path, on: bool) -> bool {
 /// Sidearm still restores its mice on exit, and the single-instance lock would
 /// turn it away: it waits up to 60 s for that one to end first.
 pub fn claim_app() -> Option<windows_sys::Win32::Foundation::HANDLE> {
-    if std::env::args().any(|arg| arg == RELAUNCHED_ARG) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    // A Sidearm still exiting (its exit can wait on a sleeping mouse for many
+    // seconds) or the one an admin relaunch replaces: start once it is gone.
+    // Overlapping, both used one WebView2 data folder (`data\EBWebView`), whose
+    // environments share their processes: the new window sometimes never came
+    // up, and with it no capture.
+    if std::env::args().any(|arg| arg == RELAUNCHED_ARG) || mutex_exists(EXITING_MUTEX) {
+        let deadline = std::time::Instant::now() + PREDECESSOR_WAIT;
         while mutex_exists(APP_MUTEX) && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }

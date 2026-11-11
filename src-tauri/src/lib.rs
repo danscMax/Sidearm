@@ -3008,6 +3008,9 @@ pub(crate) fn shutdown_mouse(app: &AppHandle) {
 
 fn shutdown_mouse_once(app: &AppHandle) {
     SHUTTING_DOWN.store(true, Ordering::SeqCst);
+    // A Sidearm started from now on waits for this one to be gone.
+    #[cfg(target_os = "windows")]
+    mouse_restore::mark_exiting();
     #[cfg(target_os = "windows")]
     onboard_guard::wait_tick();
     if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()

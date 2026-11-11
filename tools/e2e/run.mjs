@@ -380,6 +380,26 @@ async function main() {
     check("asleep mouse queued", fs.existsSync(path.join(world.data, "mouse-offline-failed")));
     world.edit(V2, (state) => { state.asleep = false; });
     check("queued profile written after waking", await world.waitFor(() => (fs.existsSync(path.join(world.data, "mouse-offline-failed")) ? "" : "gone"), /gone/, 30000));
+
+    // 9. Started while the last exit still waits on a sleeping mouse: the new
+    // Sidearm waits for it to be gone (one WebView2 data folder), then takes
+    // the mice over from the restorer that exit left once the V2 wakes.
+    await world.waitFor(() => "", /never/, 3000);
+    world.start();
+    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, world.log().length - 1);
+    await sleep(1500);
+    // As slow to not answer as a real sleeping mouse: the exit takes seconds.
+    world.edit(V2, (state) => { state.asleep = true; state.asleepDelayMs = 300; });
+    mark = world.log().length;
+    fs.writeFileSync(path.join(world.mice, "quit"), "");
+    check("exit waits on the sleeping mouse", await world.waitFor(() => world.log(), /V2 HyperSpeed recovery pending until next start/, 30000, mark));
+    fs.rmSync(path.join(world.mice, "quit"), { force: true });
+    mark = world.log().length;
+    world.start();
+    check("a Sidearm started during an exit starts capture", await world.waitFor(() => world.log(), /Capture started/, 90000, mark));
+    world.edit(V2, (state) => { state.asleep = false; state.asleepDelayMs = 0; });
+    check("…and writes its live maps", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 40000, mark));
+    await world.quit();
   } finally {
     world.cleanup();
   }

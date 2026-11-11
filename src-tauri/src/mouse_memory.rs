@@ -1410,6 +1410,9 @@ pub(crate) mod fake {
         pub refused: Vec<(u8, u8)>,
         /// Every command is answered as a sleeping mouse.
         pub asleep: bool,
+        /// How long a sleeping fake mouse takes to say so (a real one's
+        /// unanswered commands make an exit take many seconds).
+        pub asleep_delay_ms: u64,
         /// Raw battery level (`0..=255`).
         pub battery: u8,
         /// Onboard banks holding a profile, and the one playing (a V3).
@@ -1470,7 +1473,11 @@ pub(crate) mod fake {
             return Some(reply);
         }
         #[cfg(feature = "fake-mice")]
-        if let Some(reply) = files::with(model, |mouse| answer(mouse, payload)) {
+        if let Some((reply, delay)) =
+            files::with(model, |mouse| (answer(mouse, payload), if mouse.asleep { mouse.asleep_delay_ms } else { 0 }))
+        {
+            // Outside the file lock: the other processes' commands go on meanwhile.
+            std::thread::sleep(std::time::Duration::from_millis(delay));
             return Some(reply);
         }
         let _ = model;

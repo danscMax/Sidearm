@@ -48,6 +48,12 @@ fn scoped(name: &str) -> String {
 }
 
 fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
+    open_mutex(name, false)
+}
+
+/// [`create_mutex`], or with `keep_existing` also a handle to one that exists
+/// already: holding it keeps the mutex alive for as long as this process runs.
+fn open_mutex(name: &str, keep_existing: bool) -> Option<windows_sys::Win32::Foundation::HANDLE> {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, LocalFree},
         Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, SECURITY_ATTRIBUTES},
@@ -75,7 +81,7 @@ fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
         if handle.is_null() {
             return None;
         }
-        if existed {
+        if existed && !keep_existing {
             CloseHandle(handle);
             return None;
         }
@@ -337,12 +343,29 @@ pub fn claim_app() -> Option<windows_sys::Win32::Foundation::HANDLE> {
             std::thread::sleep(std::time::Duration::from_millis(200));
         }
     }
-    create_mutex(APP_MUTEX)
+    // A Sidearm still exiting holds it too (its exit waits on a sleeping mouse
+    // for many seconds): hold it anyway. Turned away, this Sidearm ran without
+    // it, and a restore process took it for gone and kept the mice for good.
+    open_mutex(APP_MUTEX, true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The app mutex is held even when an exiting Sidearm still holds it: it
+    /// stays while this one runs, after the other one let go.
+    #[test]
+    fn a_starting_sidearm_holds_the_app_mutex_its_predecessor_still_holds() {
+        let name = format!("Local\\Sidearm-test-mutex-{}", std::process::id());
+        let exiting = create_mutex(&name).expect("first holder");
+        assert!(create_mutex(&name).is_none(), "one restorer at a time");
+        let starting = open_mutex(&name, true).expect("held although it exists");
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(exiting) };
+        assert!(mutex_exists(&name), "still held by the starting one");
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(starting) };
+        assert!(!mutex_exists(&name));
+    }
 
     #[test]
     fn only_this_sidearms_clean_exit_mark_counts() {

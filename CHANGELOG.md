@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- A Sidearm started while the previous one was still exiting (waiting on a sleeping
+  mouse) never took the mice over: both kept playing their stored profile. Also: an
+  "HS + HS2" assignment failed to save, and a mouse plugged in asleep stayed "not
+  answering" until clicked.
 - A button press while no window is in front (the screen just locked, a window just closed)
   is no longer dropped: it uses the default profile.
 - An older Sidearm (an autostart of an old build) no longer replaces a newer settings file

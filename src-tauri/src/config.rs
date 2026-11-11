@@ -268,6 +268,11 @@ pub struct Settings {
     /// `"none"`. The trigger button itself never reaches the applications.
     #[serde(default = "default_hypershift_trigger")]
     pub hypershift_trigger: String,
+    /// The trigger is a held press only: a quick press with nothing else
+    /// pressed meanwhile plays the button's own click (the right click of a
+    /// right-button trigger). Off: the trigger never clicks (Synapse).
+    #[serde(default)]
+    pub hypershift_tap: bool,
     /// Draw the mouse battery level as a badge on the tray icon.
     #[serde(default)]
     pub show_battery_in_tray: bool,
@@ -2057,6 +2062,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             onboarding_completed: false,
             onboarding_step: None,
             hypershift_trigger: default_hypershift_trigger(),
+            hypershift_tap: false,
             show_battery_in_tray: false,
             offline_profile_id: None,
         },

@@ -43,7 +43,17 @@ describe("button role editor", () => {
     expect(screen.getByText(/перенесён с кнопки «ПКМ»/)).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
     save();
-    expect(onSave.mock.calls[0]![0]).toEqual({ ...config, settings: { ...config.settings, hypershiftTrigger: "mouse_4" } });
+    expect(onSave.mock.calls[0]![0]).toEqual({ ...config, settings: { ...config.settings, hypershiftTrigger: "mouse_4", hypershiftTap: false } });
+  });
+
+  it("puts the modifier on the held press, keeping the quick press a click", () => {
+    const config = makeConfig();
+    const onSave = vi.fn<(config: AppConfig) => void>();
+    render(<ActionPickerModal config={config} bindingId={null} profileId="p1" controlId="mouse_4" selectedLayer="standard"
+      gesture="longPress" onGestureChange={vi.fn()} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /HyperShift · удержание/ }));
+    save();
+    expect(onSave.mock.calls[0]![0].settings).toMatchObject({ hypershiftTrigger: "mouse_4", hypershiftTap: true });
   });
 
   it("restores the native role and explicitly turns off the global modifier", () => {

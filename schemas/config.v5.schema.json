@@ -275,6 +275,10 @@
           "default": "mouse_right",
           "description": "Physical control acting as the software Hypershift modifier while held: presses during the hold resolve through the 'hypershift' layer and the left mouse button produces a right click. 'none' disables Hypershift. Only buttons the mouse still reports as native mouse buttons work (a button remapped into a keystroke by the onboard memory never reaches the mouse hook)."
         },
+        "hypershiftTap": {
+          "type": "boolean",
+          "description": "The Hypershift trigger acts only when held: a quick press with nothing else pressed meanwhile plays the button's own click."
+        },
         "showBatteryInTray": {
           "type": "boolean"
         },

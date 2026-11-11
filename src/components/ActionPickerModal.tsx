@@ -137,12 +137,15 @@ export function ActionPickerModal({
   // A firmware trigger is fixed in the mouse; only the software one can move.
   const softwareTrigger = builtinControl && !layout?.firmwareTrigger;
   const currentTrigger = softwareTrigger ? config.settings.hypershiftTrigger ?? "mouse_right" : "none";
-  const isCurrentTrigger = softwareTrigger && controlId === currentTrigger;
+  // The role sits on the plain press (the button never clicks) or on the
+  // held press (a quick press still clicks: `hypershiftTap`).
+  const roleTab: Gesture = config.settings.hypershiftTap ? "longPress" : "press";
+  const isCurrentTrigger = softwareTrigger && controlId === currentTrigger && gesture === roleTab;
   const canBeTrigger = softwareTrigger && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
   // A global modifier role is not an executable, profile-specific ActionType.
   const categories = [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
-    ...(canBeTrigger && gesture === "press" ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
+    ...(canBeTrigger && (gesture === "press" || gesture === "longPress") ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
     ...ACTION_CATEGORIES,
   ];
   // The mouse reports one key button at a time only with consumer signals; in
@@ -279,7 +282,10 @@ export function ActionPickerModal({
   function buildSave(): AppConfig | null {
     if (effectiveCategory === "hypershift") {
       if (!canBeTrigger || !controlId) return null;
-      return { ...config, settings: { ...config.settings, hypershiftTrigger: controlId as HypershiftTrigger } };
+      return {
+        ...config,
+        settings: { ...config.settings, hypershiftTrigger: controlId as HypershiftTrigger, hypershiftTap: gesture === "longPress" },
+      };
     }
     let nextConfig = isCurrentTrigger
       ? { ...config, settings: { ...config.settings, hypershiftTrigger: "none" as const } }

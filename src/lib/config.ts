@@ -76,6 +76,8 @@ export interface Settings {
   repairClipboardOnCopy?: boolean;
   /** Defaults to `mouse_right` when absent. */
   hypershiftTrigger?: HypershiftTrigger;
+  /** The trigger works on a held press; a quick press clicks the button. */
+  hypershiftTap?: boolean;
   /** Draw the mouse battery level as a badge on the tray icon. */
   showBatteryInTray?: boolean;
   /** Profile written into the mouse on exit; absent = the fallback profile,

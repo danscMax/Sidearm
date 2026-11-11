@@ -71,8 +71,11 @@ import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
   createProfile,
+  clearControl,
   duplicateProfile,
-  removeBinding,
+  findBinding,
+  type Gesture,
+  gestureOf,
 } from "./lib/config-editing";
 import type {
   Action,
@@ -542,6 +545,8 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");
   const [actionPickerOpen, setActionPickerOpen] = useState(false);
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
+  // Which press pattern of the control the picker edits; each has its own binding.
+  const [actionPickerGesture, setActionPickerGesture] = useState<Gesture>("press");
   const [confirmModal, setConfirmModal] = useState<ConfirmModalRequest | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -745,7 +750,7 @@ function App() {
     ) {
       // Delete/Backspace: clear the selected control's binding
       e.preventDefault();
-      updateDraft((c) => removeBinding(c, selectedBinding.id));
+      updateDraft((c) => clearControl(c, selectedBinding));
     } else if (!e.ctrlKey && !e.altKey && !e.metaKey) {
       // Number keys: switch workspace tabs in sidebar order
       const modeIndex = Number(e.key) - 1;
@@ -1001,7 +1006,8 @@ function App() {
           .filter(
             (binding) =>
               binding.profileId === effectiveProfileId &&
-              binding.layer === selectedLayer,
+              binding.layer === selectedLayer &&
+              gestureOf(binding.triggerMode) === "press",
           )
           .map((binding) => [binding.controlId, binding]) ?? [],
       ),
@@ -1262,8 +1268,18 @@ function App() {
       </div>
       {actionPickerOpen && activeConfig ? (
         <ActionPickerModal
+          key={actionPickerGesture}
           config={activeConfig}
-          bindingId={actionPickerBindingId}
+          bindingId={
+            actionPickerGesture === "press"
+              ? actionPickerBindingId
+              : effectiveProfileId && selectedControlId
+                ? findBinding(activeConfig, effectiveProfileId, selectedLayer, selectedControlId, actionPickerGesture)?.id ?? null
+                : null
+          }
+          gesture={actionPickerGesture}
+          onGestureChange={setActionPickerGesture}
+          onApply={(nextConfig) => updateDraft(() => nextConfig, { immediate: true })}
           profileId={effectiveProfileId ?? undefined}
           controlLabel={selectedControl ? displayNameForControl(selectedControl) : undefined}
           layerLabel={labelForLayer(selectedLayer)}
@@ -1277,11 +1293,13 @@ function App() {
             startTransition(() => {
               setActionPickerOpen(false);
               setActionPickerBindingId(null);
+              setActionPickerGesture("press");
             });
           }}
           onCancel={() => {
             setActionPickerOpen(false);
             setActionPickerBindingId(null);
+            setActionPickerGesture("press");
           }}
         />
       ) : null}

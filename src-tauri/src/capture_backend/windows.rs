@@ -1173,6 +1173,8 @@ impl CaptureBackendHandle {
             // we force-release to recover.
             let mut held_last_seen: std::collections::HashMap<String, Instant> =
                 std::collections::HashMap::new();
+            // Buttons whose press pattern (long, double, triple) is still open.
+            let mut gestures = super::PendingGestures::default();
             // Generous timeout: a wireless source button can pause its auto-repeat
             // stream for several seconds mid-hold (RF dropout) while physically
             // held. 2s force-released those live holds, cutting off push-to-talk.
@@ -1185,7 +1187,17 @@ impl CaptureBackendHandle {
             const POLL_INTERVAL: Duration = Duration::from_millis(500);
 
             loop {
-                match event_rx.recv_timeout(POLL_INTERVAL) {
+                // Wake for the next long press or closing tap window too.
+                let wait = gestures
+                    .next_deadline()
+                    .map_or(POLL_INTERVAL, |at| at.saturating_duration_since(Instant::now()).min(POLL_INTERVAL));
+                let received = event_rx.recv_timeout(wait);
+                // The clock goes after an event: a release that waited in the
+                // channel still counts as the tap it was.
+                if received.is_err() {
+                    super::fire_due_gestures(&worker_app, &worker_runtime_store, &worker_config, &mut gestures);
+                }
+                match received {
                     Ok(event) => {
                         let encoded_key = event.encoded_key.clone();
                         let is_repeat = event.is_repeat;
@@ -1196,7 +1208,9 @@ impl CaptureBackendHandle {
                             &worker_app_name,
                             event,
                             &mut held_actions,
+                            &mut gestures,
                         );
+                        super::fire_due_gestures(&worker_app, &worker_runtime_store, &worker_config, &mut gestures);
                         match hold_deadline_update(
                             outcome,
                             is_repeat,
@@ -1561,7 +1575,7 @@ fn process_helper_key_event(
     // Stamped at capture time: the parent resolves the layer immediately, so a
     // fast trigger release must not retro-classify a press already in flight.
     // Read here (the hook path), never at dispatch time.
-    let hyper_prefix = if HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
+    let hyper_prefix = if hyper_active_and_used() {
         HS_PREFIX
     } else {
         ""
@@ -1786,6 +1800,21 @@ static HELPER_HYPER_TRIGGER: AtomicU8 = AtomicU8::new(HYPER_TRIGGER_OFF);
 /// True while the trigger button is physically held. Written by the mouse hook,
 /// read by the keyboard hook when it stamps a matched key as hypershift-layer.
 static HELPER_HYPER_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// `Settings.hypershift_tap`: a quick press of the trigger, with nothing else
+/// pressed while it was held, plays the trigger button's own click.
+static HELPER_HYPER_TAP: AtomicBool = AtomicBool::new(false);
+/// Something was pressed while the trigger was held (the layer was used), so
+/// its release is no click.
+static HELPER_HYPER_USED: AtomicBool = AtomicBool::new(false);
+
+/// The trigger is held: whatever arrives now uses the layer.
+fn hyper_active_and_used() -> bool {
+    let held = HELPER_HYPER_ACTIVE.load(Ordering::Relaxed);
+    if held {
+        HELPER_HYPER_USED.store(true, Ordering::Relaxed);
+    }
+    held
+}
 /// True between a left-down we translated into a right-down and its matching
 /// left-up, so the injected right click stays balanced even when the trigger is
 /// released first — an application must never be left with the right button
@@ -1817,7 +1846,7 @@ const MOUSE_PROBE_FAIL_THRESHOLD: u32 = 2;
 /// translated click: down + up) until Windows silently drops the hook. The
 /// callback therefore only enqueues; a dedicated thread injects. A *passive*
 /// mouse hook costs that thread nothing (same measurement: 1–4 ms per event).
-static HYPER_INJECT_TX: OnceLock<mpsc::Sender<bool>> = OnceLock::new();
+static HYPER_INJECT_TX: OnceLock<mpsc::Sender<(u8, bool)>> = OnceLock::new();
 /// Right-button injections enqueued but not yet performed. Drained before the
 /// helper exits, so a translated click can never leave the right button down.
 static HYPER_INJECT_PENDING: AtomicUsize = AtomicUsize::new(0);
@@ -1886,6 +1915,7 @@ fn hyper_mouse_action(
     is_down: bool,
     trigger_held: bool,
     lmb_translated: bool,
+    tap: bool,
 ) -> HyperMouseAction {
     if button == trigger {
         return HyperMouseAction::SetTriggerHeld(is_down);
@@ -1903,8 +1933,9 @@ fn hyper_mouse_action(
         };
     }
     // Left-down becomes a right-down while the trigger is held. With the left
-    // button itself as the trigger there is nothing to translate.
-    if trigger != HYPER_TRIGGER_LEFT && trigger_held {
+    // button itself as the trigger there is nothing to translate, and a
+    // trigger that clicks on a quick press has its own right click.
+    if trigger != HYPER_TRIGGER_LEFT && trigger_held && !tap {
         HyperMouseAction::InjectRightDown
     } else {
         HyperMouseAction::Pass
@@ -1985,12 +2016,12 @@ fn is_remote_session() -> bool {
 
 /// Hand a right-button injection to the injector thread. Never blocks and never
 /// calls Win32, so it is safe inside the hook callback.
-fn queue_hyper_injection(down: bool) {
+fn queue_hyper_injection(button: u8, down: bool) {
     let Some(tx) = HYPER_INJECT_TX.get() else {
         return;
     };
     HYPER_INJECT_PENDING.fetch_add(1, Ordering::AcqRel);
-    if tx.send(down).is_err() {
+    if tx.send((button, down)).is_err() {
         HYPER_INJECT_PENDING.fetch_sub(1, Ordering::AcqRel);
     }
 }
@@ -1998,7 +2029,7 @@ fn queue_hyper_injection(down: bool) {
 /// Spawn the thread that performs the mouse hook's right-button injections.
 /// Idempotent; call before installing the mouse hook so no callback misses it.
 fn start_hyper_injector() {
-    let (tx, rx) = mpsc::channel::<bool>();
+    let (tx, rx) = mpsc::channel::<(u8, bool)>();
     if HYPER_INJECT_TX.set(tx).is_err() {
         return;
     }
@@ -2011,8 +2042,8 @@ fn start_hyper_injector() {
                 };
                 SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
             }
-            while let Ok(down) = rx.recv() {
-                unsafe { inject_right_button(down) };
+            while let Ok((button, down)) = rx.recv() {
+                unsafe { inject_button(button, down) };
                 HYPER_INJECT_PENDING.fetch_sub(1, Ordering::AcqRel);
             }
         });
@@ -2038,18 +2069,27 @@ fn drain_pending_hyper_injections(budget: std::time::Duration) {
 ///
 /// Runs on the injector thread only — never inside a hook callback (see
 /// [`HYPER_INJECT_TX`]).
-unsafe fn inject_right_button(down: bool) {
+unsafe fn inject_button(button: u8, down: bool) {
     use std::mem::size_of;
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-        MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, SendInput,
+        MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, MOUSEEVENTF_RIGHTDOWN,
+        MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, SendInput,
     };
+    use windows_sys::Win32::UI::WindowsAndMessaging::{XBUTTON1, XBUTTON2};
 
-    let flags = if down {
-        MOUSEEVENTF_RIGHTDOWN
-    } else {
-        MOUSEEVENTF_RIGHTUP
+    let (flags, data) = match (button, down) {
+        (HYPER_TRIGGER_LEFT, true) => (MOUSEEVENTF_LEFTDOWN, 0),
+        (HYPER_TRIGGER_LEFT, false) => (MOUSEEVENTF_LEFTUP, 0),
+        (HYPER_TRIGGER_MIDDLE, true) => (MOUSEEVENTF_MIDDLEDOWN, 0),
+        (HYPER_TRIGGER_MIDDLE, false) => (MOUSEEVENTF_MIDDLEUP, 0),
+        (HYPER_TRIGGER_X1, true) => (MOUSEEVENTF_XDOWN, i32::from(XBUTTON1)),
+        (HYPER_TRIGGER_X1, false) => (MOUSEEVENTF_XUP, i32::from(XBUTTON1)),
+        (HYPER_TRIGGER_X2, true) => (MOUSEEVENTF_XDOWN, i32::from(XBUTTON2)),
+        (HYPER_TRIGGER_X2, false) => (MOUSEEVENTF_XUP, i32::from(XBUTTON2)),
+        (_, true) => (MOUSEEVENTF_RIGHTDOWN, 0),
+        (_, false) => (MOUSEEVENTF_RIGHTUP, 0),
     };
-    let input = crate::input_synthesis::make_mouse_input(flags, 0);
+    let input = crate::input_synthesis::make_mouse_input(flags, data);
     unsafe {
         SendInput(
             1,
@@ -2074,7 +2114,7 @@ unsafe fn inject_right_button(down: bool) {
 /// `CallNextHookEx` untouched, so the per-move cost is one flag store.
 unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_param: isize) -> isize {
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        CallNextHookEx, MSLLHOOKSTRUCT, WM_MOUSEMOVE,
+        CallNextHookEx, MSLLHOOKSTRUCT, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL,
     };
 
     let pass_through = || unsafe { CallNextHookEx(std::ptr::null_mut(), code, w_param, l_param) };
@@ -2117,6 +2157,13 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             trigger
         };
         let trigger_held = HELPER_HYPER_ACTIVE.load(Ordering::Relaxed);
+        if trigger_held
+            && (msg == WM_MOUSEWHEEL
+                || msg == WM_MOUSEHWHEEL
+                || mouse_button_code(msg, ms.mouseData).is_some_and(|(button, down)| down && button != trigger))
+        {
+            HELPER_HYPER_USED.store(true, Ordering::Relaxed);
+        }
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData)
             && (button == HYPER_TRIGGER_X1 || button == HYPER_TRIGGER_X2)
             && button != trigger
@@ -2152,6 +2199,7 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             is_down,
             trigger_held,
             HELPER_LMB_TRANSLATED.load(Ordering::Relaxed),
+            HELPER_HYPER_TAP.load(Ordering::Relaxed),
         )
     }))
     .unwrap_or(HyperMouseAction::Pass);
@@ -2161,7 +2209,14 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
     match action {
         HyperMouseAction::Pass => pass_through(),
         HyperMouseAction::SetTriggerHeld(held) => {
+            let used = HELPER_HYPER_USED.swap(false, Ordering::Relaxed);
             HELPER_HYPER_ACTIVE.store(held, Ordering::Relaxed);
+            // A quick press that used no layer: the button's own click.
+            if !held && !used && HELPER_HYPER_TAP.load(Ordering::Relaxed) {
+                let trigger = HELPER_HYPER_TRIGGER.load(Ordering::Relaxed);
+                queue_hyper_injection(trigger, true);
+                queue_hyper_injection(trigger, false);
+            }
             1
         }
         HyperMouseAction::InjectRightDown => {
@@ -2172,12 +2227,12 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
                 ));
             });
             wake_helper_loop();
-            queue_hyper_injection(true);
+            queue_hyper_injection(HYPER_TRIGGER_RIGHT, true);
             1
         }
         HyperMouseAction::InjectRightUp => {
             HELPER_LMB_TRANSLATED.store(false, Ordering::Relaxed);
-            queue_hyper_injection(false);
+            queue_hyper_injection(HYPER_TRIGGER_RIGHT, false);
             1
         }
         HyperMouseAction::CaptureButtonDown(button, line) => {
@@ -2360,11 +2415,11 @@ mod mouse_hook_tests {
     #[test]
     fn trigger_press_and_release_only_toggle_the_held_state() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true, false, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true, false, false, false),
             HyperMouseAction::SetTriggerHeld(true),
         );
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false, true, false, false),
             HyperMouseAction::SetTriggerHeld(false),
         );
     }
@@ -2373,11 +2428,11 @@ mod mouse_hook_tests {
     #[test]
     fn other_buttons_always_pass_through() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_MIDDLE, true, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_MIDDLE, true, true, false, false),
             HyperMouseAction::Pass,
         );
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_X1, true, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_X1, true, true, false, false),
             HyperMouseAction::Pass,
         );
     }
@@ -2386,16 +2441,30 @@ mod mouse_hook_tests {
     #[test]
     fn left_click_becomes_a_right_click_while_the_trigger_is_held() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, true, false, false),
             HyperMouseAction::InjectRightDown,
         );
     }
 
     /// A left click without the trigger stays a left click.
     #[test]
+    fn a_clicking_trigger_leaves_the_left_button_alone() {
+        // `hypershiftTap`: the right button clicks itself on a quick press, so
+        // the left one stays a left click (assignable on the layer).
+        assert_eq!(
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, true, false, true),
+            HyperMouseAction::Pass
+        );
+        assert_eq!(
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true, false, false, true),
+            HyperMouseAction::SetTriggerHeld(true)
+        );
+    }
+
+    #[test]
     fn left_click_passes_through_without_the_trigger() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, false, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, false, false, false),
             HyperMouseAction::Pass,
         );
     }
@@ -2405,7 +2474,7 @@ mod mouse_hook_tests {
     #[test]
     fn left_trigger_never_translates_itself() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_LEFT, HYPER_TRIGGER_LEFT, true, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_LEFT, HYPER_TRIGGER_LEFT, true, true, false, false),
             HyperMouseAction::SetTriggerHeld(true),
         );
     }
@@ -2415,15 +2484,15 @@ mod mouse_hook_tests {
     #[test]
     fn translated_click_stays_balanced_when_the_trigger_is_released_first() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true, true, false, false),
             HyperMouseAction::InjectRightDown,
         );
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false, true, false, false),
             HyperMouseAction::SetTriggerHeld(false),
         );
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, false, false, true),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, false, false, true, false),
             HyperMouseAction::InjectRightUp,
         );
     }
@@ -2432,7 +2501,7 @@ mod mouse_hook_tests {
     #[test]
     fn untranslated_left_up_passes_through() {
         assert_eq!(
-            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, false, true, false),
+            hyper_mouse_action(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, false, true, false, false),
             HyperMouseAction::Pass,
         );
     }
@@ -3117,6 +3186,8 @@ pub fn capture_helper_main() {
         /// `Settings.hypershift_trigger` (a control id). Absent = Hypershift off.
         #[serde(default)]
         hypershift_trigger: Option<String>,
+        #[serde(default)]
+        hypershift_tap: bool,
         /// Key buttons read from the mouse's consumer collection. Empty = the
         /// mouse sends `F13`..`F24`, which the keyboard hook catches.
         #[serde(default)]
@@ -3139,6 +3210,7 @@ pub fn capture_helper_main() {
                     modifier_stale_gc_ms: None,
                     replayed_modifier_force_release_ms: None,
                     hypershift_trigger: None,
+                    hypershift_tap: false,
                     readers: Vec::new(),
                     firmware_hypershift: false,
                     config_dir: None,
@@ -3156,10 +3228,12 @@ pub fn capture_helper_main() {
         modifier_stale_gc_ms,
         replayed_modifier_force_release_ms,
         hypershift_trigger,
+        hypershift_tap,
         readers,
         firmware_hypershift,
         config_dir,
     } = init;
+    HELPER_HYPER_TAP.store(hypershift_tap, Ordering::Relaxed);
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
@@ -3208,7 +3282,7 @@ pub fn capture_helper_main() {
         log::info!("[capture-helper] {}: {} button signals read from the mouse.", model.name, reader.signals.len());
         // A firmware layer arrives in the signal itself; the onboard path's
         // layer is the software trigger's state.
-        let hyper: fn() -> bool = if reader.software_layer { || HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) } else { || false };
+        let hyper: fn() -> bool = if reader.software_layer { hyper_active_and_used } else { || false };
         super::consumer::spawn_reader(reader.signals, model, hyper, true);
     }
     HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
@@ -3861,6 +3935,7 @@ fn spawn_capture_helper(
         #[serde(skip_serializing_if = "Option::is_none")]
         replayed_modifier_force_release_ms: Option<u64>,
         hypershift_trigger: &'a str,
+        hypershift_tap: bool,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         readers: Vec<ReaderInit>,
         firmware_hypershift: bool,
@@ -3871,6 +3946,7 @@ fn spawn_capture_helper(
         modifier_stale_gc_ms: config.settings.modifier_stale_gc_ms,
         replayed_modifier_force_release_ms: config.settings.replayed_modifier_force_release_ms,
         hypershift_trigger: config.settings.hypershift_trigger.trim(),
+        hypershift_tap: config.settings.hypershift_tap,
         readers,
         firmware_hypershift,
         config_dir: &config_dir,
@@ -3973,6 +4049,15 @@ fn spawn_capture_helper(
             // Hypershift trigger was held; it wraps the other prefixes.
             let (input, backend) = match reader_line {
                 Some((model, input)) => {
+                    // What is held on this mouse, so its live map is never
+                    // rewritten under a held button (counted even while the
+                    // map is not ready: that is when it is being written).
+                    let signal = input.strip_prefix(HS_PREFIX).unwrap_or(input);
+                    if let Some(released) = signal.strip_prefix("UP:") {
+                        crate::mouse_memory::live_overlay::note_input(model, released, false);
+                    } else if !signal.starts_with("REPEAT:") {
+                        crate::mouse_memory::live_overlay::note_input(model, signal, true);
+                    }
                     if !crate::mouse_memory::live_overlay::events_allowed(model) {
                         continue;
                     }
@@ -4028,6 +4113,8 @@ fn spawn_capture_helper(
         // EOF — i.e. the helper process has exited/crashed. Flag it so the
         // worker releases holds whose key-ups will now never arrive.
         helper_died.store(true, Ordering::SeqCst);
+        // No release of a reader-reported button can arrive any more.
+        crate::mouse_memory::live_overlay::clear_held();
         if reader_stopping.load(Ordering::SeqCst) {
             return; // `stop()` closed it
         }

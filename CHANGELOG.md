@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mouse has Buttons, Performance and Mouse memory tabs. The separate Mouse page is gone.
 
 ### Added
+- HyperShift on a held button: put the HyperShift role on the "Hold" tab of a button (the right
+  button, say) and a quick press stays its normal click, while holding it opens the HyperShift
+  layer. Each button can also have its own hold, double and triple press action.
 - Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
   wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
   live button map that Sidearm restores when it stops.
@@ -33,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- A mouse asleep when Sidearm closed no longer stays without its buttons after 30 minutes:
+  the restore keeps waiting for it (once a minute after the first half hour) and comes back
+  after a restart of Windows.
+- Sidearm no longer rewrites a mouse's live buttons while one of its buttons is held: the
+  key the old assignment pressed could stay down (a Shift+Enter kept repeating).
 - The tray shows the battery of every connected mouse on one short line ("V3 Pro 100% ·
   V2 9%"), and the tray badge follows the mouse you move or click. Before, with a V2 plugged in it
   showed only the V2's charge, even while you used the V3.

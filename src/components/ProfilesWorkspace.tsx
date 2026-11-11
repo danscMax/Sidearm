@@ -22,7 +22,7 @@ import {
   findDuplicateAppMapping,
   importProfile,
   placeDeviceHotspot,
-  removeBinding,
+  clearControl,
   removeBindingsForControls,
   removeControl,
   removeDevice,
@@ -1387,7 +1387,7 @@ export function ProfilesWorkspace({
                 danger: true,
                 disabled: !binding,
                 onClick: () => {
-                  if (binding) updateDraft((c) => removeBinding(c, binding.id));
+                  if (binding) updateDraft((c) => clearControl(c, binding));
                 },
               },
             ]}

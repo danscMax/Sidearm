@@ -12,6 +12,9 @@ use std::{
 };
 
 pub const PORTABLE_MARKER: &str = "sidearm.portable";
+/// Data folder of a debug build, when set (see [`AppPaths::resolve`]).
+#[cfg(debug_assertions)]
+const DEV_DATA_DIR_ENV: &str = "SIDEARM_DATA_DIR";
 const DATA_DIR_NAME: &str = "data";
 const LOG_DIR_NAME: &str = "logs";
 const SNAPSHOTS_DIR_NAME: &str = "snapshots";
@@ -45,6 +48,24 @@ impl AppPaths {
     /// Resolve paths at startup. Never panics — always returns usable paths.
     pub fn resolve() -> Self {
         let exe_dir = current_exe_dir();
+        // Debug builds only: `dev.ps1` points the dev app at the portable
+        // data, so a test run drives the mice with the same config the
+        // portable app writes into them (a stale roaming config once left
+        // both mice with old assignments).
+        #[cfg(debug_assertions)]
+        if let Some(data_dir) = std::env::var_os(DEV_DATA_DIR_ENV).map(PathBuf::from)
+            && ensure_writable(&data_dir).is_ok()
+        {
+            return Self {
+                mode: PathMode::Portable,
+                config_dir: data_dir.clone(),
+                log_dir: data_dir.join(LOG_DIR_NAME),
+                snapshots_dir: data_dir.join(SNAPSHOTS_DIR_NAME),
+                exe_dir,
+                portable_marker_present: false,
+                fallback_reason: None,
+            };
+        }
         let marker_present = exe_dir
             .as_ref()
             .map(|dir| dir.join(PORTABLE_MARKER).is_file())

@@ -41,6 +41,7 @@ fn should_notify_elevated(last: &mut Option<String>, exe: &str) -> bool {
     true
 }
 
+mod gestures;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -255,6 +256,104 @@ pub(super) enum EventOutcome {
     DroppedAsHeldDuplicate,
 }
 
+/// What a press of a button with several press patterns is dispatched with
+/// once its pattern is known: the press's own window and layer.
+#[derive(Clone)]
+struct GestureContext {
+    encoded_key: String,
+    exe: String,
+    title: String,
+    process_path: Option<String>,
+    manual_profile_override: Option<String>,
+    is_hypershift: bool,
+    own_window: bool,
+    is_fg_elevated: bool,
+}
+
+type PendingGestures = gestures::Gestures<GestureContext>;
+
+/// A shortcut of modifiers alone: it is always held down (push-to-talk).
+fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPreview) -> bool {
+    config.actions.iter().any(|action| {
+        Some(action.id.as_str()) == preview.action_id.as_deref()
+            && matches!(&action.payload, config::ActionPayload::Shortcut(shortcut) if shortcut.key.trim().is_empty())
+    })
+}
+
+/// The press patterns besides the plain press that the resolved control's
+/// bindings answer on its layer. None when its plain press holds a shortcut
+/// down (a hold must start on the press, it cannot wait).
+fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview, hypershift: bool) -> gestures::Patterns {
+    let (Some(profile), Some(layer), Some(control)) =
+        (preview.resolved_profile_id.as_deref(), preview.layer.as_deref(), preview.control_id.as_deref())
+    else {
+        return gestures::Patterns::default();
+    };
+    // Under HyperShift each pattern falls back to the standard layer on its
+    // own (`resolver::resolve_gesture_preview`).
+    let on_layer = |binding_layer: &str| binding_layer == layer || (hypershift && (binding_layer == "hypershift" || binding_layer == "standard"));
+    if preview.trigger_mode == Some(config::TriggerMode::Hold) || holds_modifiers_only(config, preview) {
+        return gestures::Patterns::default();
+    }
+    let mut patterns = gestures::Patterns::default();
+    for binding in config.bindings.iter().filter(|binding| {
+        binding.enabled && binding.profile_id == profile && on_layer(binding.layer.as_str()) && binding.control_id.as_str() == control
+    }) {
+        match config::Gesture::of(binding.trigger_mode) {
+            config::Gesture::LongPress => patterns.long = true,
+            config::Gesture::DoublePress => patterns.double = true,
+            config::Gesture::TriplePress => patterns.triple = true,
+            config::Gesture::Press => {}
+        }
+    }
+    patterns
+}
+
+/// Dispatches what the clock settled (long presses, closed tap windows).
+fn fire_due_gestures(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: &AppConfig, gestures: &mut PendingGestures) {
+    let fired = gestures.tick(std::time::Instant::now());
+    if !fired.is_empty() {
+        fire_gestures(app, runtime_store, config, fired);
+    }
+}
+
+/// Dispatches the press patterns the recognizer settled on.
+fn fire_gestures(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    config: &AppConfig,
+    fired: Vec<(GestureContext, config::Gesture)>,
+) {
+    for (context, gesture) in fired {
+        let preview = resolver::resolve_gesture_preview(
+            config,
+            &context.encoded_key,
+            &context.exe,
+            &context.title,
+            context.process_path.as_deref(),
+            context.manual_profile_override.as_deref(),
+            context.is_hypershift,
+            gesture,
+        );
+        if preview.status != resolver::ResolutionStatus::Resolved {
+            log::info!("[capture] {gesture:?} of {} not dispatched: {}", context.encoded_key, preview.reason);
+            continue;
+        }
+        let payload = config
+            .actions
+            .iter()
+            .find(|action| Some(action.id.as_str()) == preview.action_id.as_deref())
+            .map(|action| &action.payload);
+        if context.own_window && !can_execute_in_own_window(payload) {
+            log::info!("[capture] {gesture:?} of {} not dispatched: own window", context.encoded_key);
+            continue;
+        }
+        log::info!("[capture] {gesture:?} of {}", context.encoded_key);
+        run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), context.is_fg_elevated);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn process_encoded_key_event(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
@@ -262,6 +361,7 @@ fn process_encoded_key_event(
     app_name: &str,
     event: EncodedKeyEvent,
     held_actions: &mut std::collections::HashMap<String, crate::input_synthesis::HeldShortcutState>,
+    gestures: &mut PendingGestures,
 ) -> EventOutcome {
     // Accumulate log entries locally and flush in a single lock at the end to
     // avoid acquiring the runtime_store mutex multiple times per keypress.
@@ -297,6 +397,21 @@ fn process_encoded_key_event(
         log::info!("[capture] Not dispatched {}: live-capture mode", event.encoded_key);
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
+    }
+
+    // A button whose press pattern is being told apart: its release and
+    // repeats belong to the recognizer.
+    if gestures.tracks(&event.encoded_key) {
+        if event.is_key_up {
+            let fired = gestures.release(&event.encoded_key, std::time::Instant::now());
+            flush_log_entries(runtime_store, log_entries);
+            fire_gestures(app, runtime_store, config, fired);
+            return EventOutcome::Handled;
+        }
+        if event.is_repeat {
+            flush_log_entries(runtime_store, log_entries);
+            return EventOutcome::Handled;
+        }
     }
 
     // --- Key-up path: release any held shortcut ---
@@ -488,6 +603,29 @@ fn process_encoded_key_event(
         {
             log::warn!("[capture] Native V3 scroll failed: {error}");
         }
+        flush_log_entries(runtime_store, log_entries);
+        return EventOutcome::Handled;
+    }
+
+    // Several press patterns on this button: wait to tell them apart.
+    let patterns = gesture_patterns(config, &preview, event.is_hypershift);
+    if patterns.any() && !event.is_repeat {
+        let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
+        gestures.press(
+            &event.encoded_key,
+            patterns,
+            GestureContext {
+                encoded_key: event.encoded_key.clone(),
+                exe: exe.to_owned(),
+                title: title.to_owned(),
+                process_path: process_path.map(str::to_owned),
+                manual_profile_override: manual_profile_override.clone(),
+                is_hypershift: event.is_hypershift,
+                own_window,
+                is_fg_elevated,
+            },
+            std::time::Instant::now(),
+        );
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
     }
@@ -745,7 +883,6 @@ fn process_encoded_key_event(
                 runtime_store,
                 config,
                 &preview,
-                &event,
                 log_entries,
                 is_fg_elevated,
             );
@@ -756,7 +893,6 @@ fn process_encoded_key_event(
             runtime_store,
             config,
             &preview,
-            &event,
             log_entries,
             is_fg_elevated,
         );
@@ -797,7 +933,6 @@ fn run_fire_and_forget(
     runtime_store: &Arc<Mutex<RuntimeStore>>,
     config: &AppConfig,
     preview: &resolver::ResolvedInputPreview,
-    _event: &EncodedKeyEvent,
     mut log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
     is_fg_elevated: bool,
 ) {

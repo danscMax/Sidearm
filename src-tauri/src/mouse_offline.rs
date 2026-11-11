@@ -124,12 +124,19 @@ fn binding_action(
     control: &str,
     layer: Layer,
 ) -> Option<Option<OnboardAction>> {
-    let binding = config.bindings.iter().find(|b| {
+    use crate::config::Gesture;
+    let mut bindings = config.bindings.iter().filter(|b| {
         b.enabled && b.profile_id == profile_id && b.layer == layer && b.control_id.as_str() == control
-    })?;
+    });
     // The firmware plays a record on every press, held while the button is
-    // down (a hold): a double or triple press or a chord would fire on one.
-    if matches!(binding.trigger_mode, Some(TriggerMode::DoublePress | TriggerMode::TriplePress | TriggerMode::Chord)) {
+    // down (a hold): it can only play the plain press. A button with only a
+    // long, double or triple press, or a chord, would fire on any press.
+    let Some(binding) = bindings.clone().find(|b| Gesture::of(b.trigger_mode) == Gesture::Press) else {
+        // Under HyperShift a press without its own binding plays the standard
+        // one, as it does while Sidearm runs.
+        return bindings.next().filter(|_| layer != Layer::Hypershift).map(|_| None);
+    };
+    if binding.trigger_mode == Some(TriggerMode::Chord) {
         return Some(None);
     }
     let action = config.actions.iter().find(|a| a.id == binding.action_id)?;

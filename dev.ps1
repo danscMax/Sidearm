@@ -20,6 +20,10 @@ $PROJECT_DIR = $PSScriptRoot
 $TAURI_DIR   = Join-Path $PROJECT_DIR 'src-tauri'
 $VITE_PORT   = 45173
 
+# The dev app uses the portable app's data (debug builds read
+# SIDEARM_DATA_DIR, src-tauri/src/paths.rs): one config drives the mice.
+$env:SIDEARM_DATA_DIR = Join-Path (Split-Path $PROJECT_DIR -Parent) 'portable\data'
+
 $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
 
 # App version (for banner) -- read from package.json, best-effort.

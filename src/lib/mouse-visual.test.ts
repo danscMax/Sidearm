@@ -25,7 +25,7 @@ describe("physical right button and configured HyperShift", () => {
     const entry = { ...assignedEntry(), isHypershiftTrigger: true };
     expect(actionLabel(entry)).toBe("HyperShift · удержание");
     expect(tooltipText(entry, "Native")).toContain("HyperShift · удержание");
-    expect(buildHotspotTooltip({ ...entry, binding: { ...entry.binding!, triggerMode: "press" } }, "standard", undefined, 0)).toContain("Удержание");
+    expect(buildHotspotTooltip({ ...entry, binding: { ...entry.binding!, triggerMode: "press" } }, "standard", undefined, 0)).toContain("Держать, пока зажата");
     expect(actionLabel({ ...entry, isHypershiftTrigger: false })).toBe("Ctrl+C");
   });
 });

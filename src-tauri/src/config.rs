@@ -268,6 +268,11 @@ pub struct Settings {
     /// `"none"`. The trigger button itself never reaches the applications.
     #[serde(default = "default_hypershift_trigger")]
     pub hypershift_trigger: String,
+    /// The trigger is a held press only: a quick press with nothing else
+    /// pressed meanwhile plays the button's own click (the right click of a
+    /// right-button trigger). Off: the trigger never clicks (Synapse).
+    #[serde(default)]
+    pub hypershift_tap: bool,
     /// Draw the mouse battery level as a badge on the tray icon.
     #[serde(default)]
     pub show_battery_in_tray: bool,
@@ -559,6 +564,30 @@ pub enum TriggerMode {
     TriplePress,
     Hold,
     Chord,
+    /// Fires once the button has been held past the long-press threshold.
+    LongPress,
+}
+
+/// The press pattern a binding answers on its control. One control and layer
+/// holds at most one binding per gesture: the plain press (with its hold and
+/// chord variants), a long press, a double and a triple press.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Gesture {
+    Press,
+    LongPress,
+    DoublePress,
+    TriplePress,
+}
+
+impl Gesture {
+    pub fn of(mode: Option<TriggerMode>) -> Self {
+        match mode {
+            Some(TriggerMode::LongPress) => Self::LongPress,
+            Some(TriggerMode::DoublePress) => Self::DoublePress,
+            Some(TriggerMode::TriplePress) => Self::TriplePress,
+            None | Some(TriggerMode::Press | TriggerMode::Hold | TriggerMode::Chord) => Self::Press,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1606,10 +1635,11 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
             ));
         }
         let binding_key = format!(
-            "{}::{}::{}",
+            "{}::{}::{}::{:?}",
             binding.profile_id,
             binding.control_id.as_str(),
-            binding.layer.as_str()
+            binding.layer.as_str(),
+            Gesture::of(binding.trigger_mode)
         );
         if !binding_keys.insert(binding_key.clone()) {
             errors.push(format!(
@@ -2032,6 +2062,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             onboarding_completed: false,
             onboarding_step: None,
             hypershift_trigger: default_hypershift_trigger(),
+            hypershift_tap: false,
             show_battery_in_tray: false,
             offline_profile_id: None,
         },

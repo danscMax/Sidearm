@@ -39,8 +39,6 @@ export function TriggerModeEditor({
         onChange={onChange}
         options={[
           { value: "press", label: t("picker.triggerPress") },
-          { value: "doublePress", label: t("picker.triggerDoublePress") },
-          { value: "triplePress", label: t("picker.triggerTriplePress") },
           { value: "hold", label: t("picker.triggerHold") },
           { value: "chord", label: t("picker.triggerChord") },
         ]}

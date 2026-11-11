@@ -55,6 +55,8 @@ export function triggerBadge(mode: TriggerMode | undefined, labels: TriggerBadge
       return "· 2×";
     case "triplePress":
       return "· 3×";
+    case "longPress":
+      return "· ⌛";
     case "hold":
       return `· ${labels.hold}`;
     case "chord":

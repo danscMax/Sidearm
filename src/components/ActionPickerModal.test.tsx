@@ -43,7 +43,17 @@ describe("button role editor", () => {
     expect(screen.getByText(/перенесён с кнопки «ПКМ»/)).toBeTruthy();
     expect(onSave).not.toHaveBeenCalled();
     save();
-    expect(onSave.mock.calls[0]![0]).toEqual({ ...config, settings: { ...config.settings, hypershiftTrigger: "mouse_4" } });
+    expect(onSave.mock.calls[0]![0]).toEqual({ ...config, settings: { ...config.settings, hypershiftTrigger: "mouse_4", hypershiftTap: false } });
+  });
+
+  it("puts the modifier on the held press, keeping the quick press a click", () => {
+    const config = makeConfig();
+    const onSave = vi.fn<(config: AppConfig) => void>();
+    render(<ActionPickerModal config={config} bindingId={null} profileId="p1" controlId="mouse_4" selectedLayer="standard"
+      gesture="longPress" onGestureChange={vi.fn()} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /HyperShift · удержание/ }));
+    save();
+    expect(onSave.mock.calls[0]![0].settings).toMatchObject({ hypershiftTrigger: "mouse_4", hypershiftTap: true });
   });
 
   it("restores the native role and explicitly turns off the global modifier", () => {
@@ -117,5 +127,23 @@ describe("button role editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Клавиатура/ }));
     expect(screen.queryByRole("button", { name: /HyperShift · удержание/ })).toBeNull();
     expect(screen.queryByText(/удержание которой Sidearm умеет считывать/)).toBeNull();
+  });
+});
+
+describe("press pattern tabs", () => {
+  it("keeps a tab's edit when switching to another tab, without closing", () => {
+    const config = makeConfig();
+    const onSave = vi.fn<(config: AppConfig) => void>();
+    const onApply = vi.fn<(config: AppConfig) => void>();
+    const onGestureChange = vi.fn();
+    render(<ActionPickerModal config={config} bindingId={null} profileId="p1" controlId="thumb_01" selectedLayer="standard"
+      gesture="longPress" onGestureChange={onGestureChange} onApply={onApply} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Двойное/ }));
+    expect(onGestureChange).toHaveBeenCalledWith("doublePress");
+    expect(onSave).not.toHaveBeenCalled();
+    const applied = onApply.mock.calls[0][0];
+    const long = applied.bindings.find((b) => b.controlId === "thumb_01" && b.triggerMode === "longPress");
+    expect(applied.actions.find((a) => a.id === long?.actionId)?.type).toBe("disabled");
   });
 });

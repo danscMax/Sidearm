@@ -98,9 +98,15 @@ export function SidebarProfiles({
                   <span className="pill-track__active-dot" title={t("sidebar.activeRuntime")} />
                 ) : null}
                 {current && !(listed && currentInList) ? (
-                  <span className="sidebar-profiles__count sidebar-profiles__count--current" title={t("sidebar.recognized")}>
+                  <span
+                    className="sidebar-profiles__count sidebar-profiles__count--current"
+                    title={current.mappingId === undefined ? t("sidebar.recognizedFallbackHint") : t("sidebar.recognized")}
+                  >
                     <ExeIcon exe={current.exe} processPath={current.processPath} className="sidebar-profiles__icon" />
-                    <span className="sidebar-profiles__app-name">{appName(current.exe)}</span>
+                    {/* The app in front now, not a rule: an app without a rule lands in the default profile. */}
+                    <span className="sidebar-profiles__app-name">
+                      {t(current.mappingId === undefined ? "sidebar.nowFallback" : "sidebar.now", { app: appName(current.exe) })}
+                    </span>
                   </span>
                 ) : (
                   <span className="sidebar-profiles__count">

@@ -1263,6 +1263,9 @@ struct AppPathsInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     fallback_reason: Option<String>,
     needs_portable_migration_prompt: bool,
+    /// A test run against virtual mice: the window stays hidden, so it neither
+    /// covers the user's screen nor counts as the active window.
+    test_run: bool,
 }
 
 #[tauri::command]
@@ -1277,6 +1280,7 @@ async fn get_app_paths(app: AppHandle) -> Result<AppPathsInfo, CommandError> {
         portable_marker_present: paths.portable_marker_present,
         fallback_reason: paths.fallback_reason.clone(),
         needs_portable_migration_prompt,
+        test_run: fake_mode(),
     })
 }
 
@@ -2972,6 +2976,16 @@ async fn restore_synapse_startup(app: AppHandle) -> Result<(), CommandError> {
 /// Set once exit work began: no capture restart may write the mice after it.
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
+/// A `fake-mice` test build running against virtual mice (`SIDEARM_FAKE_MICE`):
+/// no USB, and no input sent to the desktop.
+pub(crate) fn fake_mode() -> bool {
+    #[cfg(all(target_os = "windows", feature = "fake-mice"))]
+    if mouse_memory::fake::files::dir().is_some() {
+        return true;
+    }
+    false
+}
+
 pub(crate) fn is_shutting_down() -> bool {
     SHUTTING_DOWN.load(Ordering::SeqCst)
 }
@@ -3606,24 +3620,31 @@ pub fn run() {
     // `manage`, so hand the setup closure its own handle.
     let runtime_store_for_guard = runtime_store.clone();
 
-    tauri::Builder::default()
-        // Single-instance guard MUST be the first plugin registered. A second
-        // independent main instance (e.g. admin-autostart racing a manual
-        // launch) would fight over the keyboard hook and clobber config, so we
-        // surface the already-running window instead. The capture helper is
-        // exempt: it returns at main.rs on `--capture-helper` before the Tauri
-        // Builder ever runs, so it never acquires this lock.
-        // relaunch_as_admin starts the elevated Sidearm with `--relaunched`,
-        // which waits for the old process to end before it gets here.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(window) = app.get_webview_window("main") {
-                bring_to_front(&window);
-            }
-            // Surface the blocked duplicate launch: log lands in Diagnostics, the
-            // event drives a toast in the existing window.
-            log::warn!("Duplicate launch ignored — focused the existing window");
-            let _ = app.emit(EVENT_SINGLE_INSTANCE_BLOCKED, ());
-        }))
+    let builder = tauri::Builder::default();
+    // A test run against virtual mice runs beside the user's own Sidearm.
+    let builder = if fake_mode() {
+        builder
+    } else {
+        builder
+            // Single-instance guard MUST be the first plugin registered. A second
+            // independent main instance (e.g. admin-autostart racing a manual
+            // launch) would fight over the keyboard hook and clobber config, so we
+            // surface the already-running window instead. The capture helper is
+            // exempt: it returns at main.rs on `--capture-helper` before the Tauri
+            // Builder ever runs, so it never acquires this lock.
+            // relaunch_as_admin starts the elevated Sidearm with `--relaunched`,
+            // which waits for the old process to end before it gets here.
+            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+                if let Some(window) = app.get_webview_window("main") {
+                    bring_to_front(&window);
+                }
+                // Surface the blocked duplicate launch: log lands in Diagnostics, the
+                // event drives a toast in the existing window.
+                log::warn!("Duplicate launch ignored — focused the existing window");
+                let _ = app.emit(EVENT_SINGLE_INSTANCE_BLOCKED, ());
+            }))
+    };
+    builder
         .plugin(
             tauri_plugin_log::Builder::new()
                 .clear_targets()

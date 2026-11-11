@@ -43,6 +43,28 @@ pub fn spawn(app: AppHandle) {
     if let Err(error) = spawned {
         log::warn!("[system] device watcher not started: {error}");
     }
+    // Virtual mice are plugged in and out as files: no WM_DEVICECHANGE.
+    if crate::fake_mode() {
+        let _ = thread::Builder::new().name("fake-mice".into()).spawn(|| {
+            let mut last = crate::mouse_memory::present_models().len();
+            loop {
+                thread::sleep(Duration::from_secs(1));
+                // The run asks the app to quit with a `quit` file beside the mice.
+                if let Some(quit) = crate::mouse_memory::fake_quit_file()
+                    && std::fs::remove_file(&quit).is_ok()
+                    && let Some(app) = APP.get()
+                {
+                    log::info!("[system] quit requested by a test run");
+                    app.exit(0);
+                }
+                let now = crate::mouse_memory::present_models().len();
+                if now != last && let Some(changed) = CHANGED.get() {
+                    let _ = changed.send(());
+                }
+                last = now;
+            }
+        });
+    }
     if let Err(error) = thread::Builder::new().name("system-events".into()).spawn(run_window) {
         log::warn!("[system] system events window not started: {error}");
     }
@@ -105,7 +127,8 @@ fn run_window() {
         // mouse is in use and which of its buttons are held (a Naga's
         // firmware types keys through its own keyboard collection).
         let inputs = [0x02, 0x06].map(|usage| RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: usage, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd });
-        if RegisterRawInputDevices(inputs.as_ptr(), inputs.len() as u32, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
+        // A test run must not count the real mouse's clicks as the fake ones'.
+        if !crate::fake_mode() && RegisterRawInputDevices(inputs.as_ptr(), inputs.len() as u32, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
             log::warn!("[system] raw input not registered: {}", std::io::Error::last_os_error());
         }
         let mut msg: MSG = std::mem::zeroed();

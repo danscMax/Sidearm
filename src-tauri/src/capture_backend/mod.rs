@@ -516,16 +516,11 @@ fn process_encoded_key_event(
         manual_profile_override.as_deref(),
     ) {
         Ok(result) => result,
+        // No window in front (a locked screen, a window just closed, a desktop
+        // switch): the press still counts, on the profile no app chose.
         Err(message) => {
-            let error = RuntimeErrorEvent {
-                category: "windowCapture".into(),
-                message: message.into(),
-                encoded_key: Some(event.encoded_key.clone()),
-                action_id: None,
-                created_at: runtime::timestamp_millis(),
-            };
-            emit_runtime_error(app, runtime_store, &error);
-            return EventOutcome::Handled;
+            log::info!("[capture] {}: no active window ({message}); the default profile applies", event.encoded_key);
+            window_capture::without_foreground_window(config, manual_profile_override.as_deref())
         }
     };
 
@@ -686,7 +681,7 @@ fn process_encoded_key_event(
     // is focused so injected shortcuts cannot operate its own editor.
     let resolved_action = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
     if own_window && !can_execute_in_own_window(resolved_action.map(|action| &action.payload)) {
-        log::info!("[capture] Not dispatched {}: Sidearm's own window", preview.encoded_key);
+        log::info!("[capture] Not dispatched {}: Sidearm's own window ({:?})", preview.encoded_key, capture_result.title);
         log_entries.push((
             "capture",
             crate::ui_text!(
@@ -722,7 +717,8 @@ fn process_encoded_key_event(
             })
             .unwrap_or(false);
 
-    let is_hold_shortcut = preview.action_type.as_deref() == Some("shortcut")
+    let is_hold_shortcut = !crate::fake_mode()
+        && preview.action_type.as_deref() == Some("shortcut")
         && (preview.trigger_mode == Some(config::TriggerMode::Hold) || is_modifier_only_shortcut);
 
     // Per-binding throttle (tap/press paths only). Hold shortcuts press once and
@@ -951,7 +947,13 @@ fn run_fire_and_forget(
     {
         crate::onboard_guard::note_device_used(app, &physical.device_id);
     }
-    match executor::run_preview_action(config, preview) {
+    // A test run against virtual mice resolves and reports, but sends nothing.
+    let executed = if crate::fake_mode() {
+        executor::execute_preview_action(config, preview)
+    } else {
+        executor::run_preview_action(config, preview)
+    };
+    match executed {
         Ok(mut execution) => {
             if is_fg_elevated {
                 execution.warnings.push(crate::ui_text!(

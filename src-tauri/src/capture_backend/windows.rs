@@ -3234,6 +3234,10 @@ pub fn capture_helper_main() {
         config_dir,
     } = init;
     HELPER_HYPER_TAP.store(hypershift_tap, Ordering::Relaxed);
+    // A test run against virtual mice must not take the real mouse's buttons.
+    if crate::fake_mode() {
+        HELPER_HYPER_TRIGGER.store(HYPER_TRIGGER_OFF, Ordering::Relaxed);
+    }
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
@@ -3273,7 +3277,7 @@ pub fn capture_helper_main() {
 
     // 2. Initialize thread-local state for the LL hook callback
     HELPER_CAPTURES_SIDE_BUTTONS.store(
-        registrations.iter().any(|reg| reg.button.is_some()),
+        !crate::fake_mode() && registrations.iter().any(|reg| reg.button.is_some()),
         Ordering::Relaxed,
     );
     HELPER_REGISTRATIONS.with(|cell| *cell.borrow_mut() = registrations);

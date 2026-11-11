@@ -486,6 +486,17 @@ fn device_lock(model: &'static NativeModel) -> MutexGuard<'static, ()> {
     DEVICE_LOCKS[index].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The file a test run creates to make its fake-mice app quit.
+#[cfg(feature = "fake-mice")]
+pub(crate) fn fake_quit_file() -> Option<std::path::PathBuf> {
+    Some(fake::files::dir()?.join("quit"))
+}
+
+#[cfg(not(feature = "fake-mice"))]
+pub(crate) fn fake_quit_file() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// Catalog models whose vendor interface is present right now (the receiver
 /// is plugged in; the mouse itself may sleep). When Windows cannot list (the
 /// list changes mid-read during a plug burst), the last answer stands: a
@@ -516,6 +527,10 @@ fn models_in(paths: &[String]) -> Vec<&'static NativeModel> {
 
 /// Upper-cased paths of every HID interface Windows reports as present.
 fn present_hid_paths() -> Result<Vec<String>, String> {
+    #[cfg(feature = "fake-mice")]
+    if let Some(paths) = fake::files::present_paths() {
+        return Ok(paths);
+    }
     use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
         CM_GET_DEVICE_INTERFACE_LIST_PRESENT, CM_Get_Device_Interface_List_SizeW, CM_Get_Device_Interface_ListW,
         CR_BUFFER_SMALL, CR_SUCCESS,
@@ -606,6 +621,12 @@ impl VendorDevice {
     fn open(model: &'static NativeModel, pid: u16) -> Result<Self, String> {
         let exclusive = device_lock(model);
         let paths = find_paths(&interface_needle(model.vid, pid, model.interface))?;
+        // A fake mouse answers through `fake::exchange`: no handle to open.
+        #[cfg(feature = "fake-mice")]
+        if fake::files::dir().is_some() {
+            let path = paths.into_iter().next().ok_or_else(|| NO_INTERFACE.to_string())?;
+            return Ok(Self { handle: INVALID_HANDLE_VALUE, _exclusive: exclusive, model, pid, path });
+        }
         let (handle, path) = open_first(&paths, |path| {
             let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
             // No requested rights: the vendor collection is held by Razer's driver
@@ -1077,8 +1098,8 @@ impl VendorDevice {
 
     /// One request and its reply.
     fn exchange(&self, payload: &[u8; PAYLOAD_LEN]) -> Result<[u8; PAYLOAD_LEN], String> {
-        #[cfg(test)]
-        if let Some(reply) = fake::exchange(payload) {
+        #[cfg(any(test, feature = "fake-mice"))]
+        if let Some(reply) = fake::exchange(self.model, payload) {
             return Ok(reply);
         }
         self.set_payload(payload)?;
@@ -1093,6 +1114,10 @@ impl VendorDevice {
     }
 
     fn set_payload(&self, payload: &[u8; PAYLOAD_LEN]) -> Result<(), String> {
+        #[cfg(any(test, feature = "fake-mice"))]
+        if fake::set_slot(self.model, payload) {
+            return Ok(());
+        }
         let mut buffer = [0u8; PAYLOAD_LEN + 1];
         buffer[0] = REPORT_ID;
         buffer[1..].copy_from_slice(payload);
@@ -1106,6 +1131,10 @@ impl VendorDevice {
     }
 
     fn get_payload(&self, slot: u8) -> Result<[u8; PAYLOAD_LEN], String> {
+        #[cfg(any(test, feature = "fake-mice"))]
+        if let Some(payload) = fake::get_slot(self.model, slot) {
+            return Ok(payload);
+        }
         let mut buffer = [0u8; PAYLOAD_LEN + 1];
         buffer[0] = REPORT_ID;
         buffer[1] = slot;
@@ -1223,6 +1252,11 @@ fn record_matches(written: &[u8; PAYLOAD_LEN], read: &[u8; PAYLOAD_LEN]) -> bool
 /// registry keeps leaves of devices no longer present (another USB port, a
 /// re-paired dongle) and only the live one opens.
 pub fn consumer_collection_paths(model: &NativeModel) -> Result<Vec<String>, String> {
+    // A fake mouse's buttons come through a pipe a test writes.
+    #[cfg(feature = "fake-mice")]
+    if fake::files::dir().is_some() {
+        return Ok(vec![fake::files::report_pipe(model)]);
+    }
     let consumer = model.consumer.as_ref().ok_or_else(|| format!("{} has no consumer signals", model.name))?;
     let paths: Vec<String> = model
         .pids
@@ -1240,6 +1274,10 @@ fn collection_needle(vid: u16, pid: u16, interface: u8, collection: u8) -> Strin
 }
 
 fn find_paths(needle: &str) -> Result<Vec<String>, String> {
+    #[cfg(feature = "fake-mice")]
+    if let Some(paths) = fake::files::present_paths() {
+        return Ok(paths.into_iter().filter(|path| path.contains(needle)).collect());
+    }
     let classes_path: Vec<u16> = DEVICE_CLASSES
         .encode_utf16()
         .chain(std::iter::once(0))
@@ -1335,37 +1373,75 @@ fn find_leaf(parent: HKEY, class: String, needle: &str) -> Result<Vec<String>, S
     if paths.is_empty() { Err(NO_INTERFACE.to_string()) } else { Ok(paths) }
 }
 
-/// An in-memory mouse for tests: [`VendorDevice::command`] talks to it instead
-/// of HID while one is installed on the test's thread. It keeps button records
-/// per (profile, button, layer), DPI per storage and the poll code, and can
-/// sleep (status `0x04`) or refuse (status `0x03`) chosen commands.
-#[cfg(test)]
+/// A mouse that answers [`VendorDevice::command`] without hardware: records
+/// per (profile or bank, button, layer), DPI per storage, the poll code, the
+/// battery, a V3's onboard banks and a slot path; it can sleep (status `0x04`)
+/// or refuse (status `0x03`) chosen commands. Unit tests install one on their
+/// thread; a build with the `fake-mice` feature run with `SIDEARM_FAKE_MICE`
+/// set keeps one per model in `<dir>/<device id>.json`, shared by the app, its
+/// capture helper and the restore process (no file = not plugged in).
+#[cfg(any(test, feature = "fake-mice"))]
 pub(crate) mod fake {
     use super::*;
     use std::cell::RefCell;
     use std::collections::HashMap;
 
-    #[derive(Default)]
+    #[derive(Default, Clone, serde::Serialize, serde::Deserialize)]
+    #[serde(default, rename_all = "camelCase")]
     pub(crate) struct FakeMouse {
+        #[serde(with = "record_list")]
         pub records: HashMap<(u8, u8, u8), [u8; 7]>,
         /// Every record write, in order.
+        #[serde(skip)]
         pub writes: Vec<(u8, u8, u8)>,
         /// A block one next read of that address returns instead (a firmware
         /// transition), then the stored one again.
+        #[serde(skip)]
         pub odd_once: HashMap<(u8, u8, u8), [u8; 7]>,
         pub dpi: HashMap<u8, u16>,
+        #[serde(skip)]
         pub dpi_writes: usize,
         pub poll_code: u8,
         /// Commands answered as a sleeping mouse, as `(class, command)`.
+        #[serde(skip)]
         pub asleep_for: Vec<(u8, u8)>,
         /// Commands refused with another status.
+        #[serde(skip)]
         pub refused: Vec<(u8, u8)>,
+        /// Every command is answered as a sleeping mouse.
+        pub asleep: bool,
+        /// Raw battery level (`0..=255`).
+        pub battery: u8,
+        /// Onboard banks holding a profile, and the one playing (a V3).
+        pub banks: Vec<u8>,
+        pub active_bank: u8,
+        /// Slot-path payloads by slot, as the last `SET_REPORT` left them.
+        pub slots: HashMap<u8, Vec<u8>>,
+    }
+
+    /// JSON object keys are strings: records travel as a list.
+    mod record_list {
+        use std::collections::HashMap;
+
+        type Records = HashMap<(u8, u8, u8), [u8; 7]>;
+
+        pub fn serialize<S: serde::Serializer>(records: &Records, serializer: S) -> Result<S::Ok, S::Error> {
+            let mut list: Vec<(u8, u8, u8, [u8; 7])> = records.iter().map(|(&(p, b, l), &block)| (p, b, l, block)).collect();
+            list.sort_unstable();
+            serde::Serialize::serialize(&list, serializer)
+        }
+
+        pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Records, D::Error> {
+            let list: Vec<(u8, u8, u8, [u8; 7])> = serde::Deserialize::deserialize(deserializer)?;
+            Ok(list.into_iter().map(|(p, b, l, block)| ((p, b, l), block)).collect())
+        }
     }
 
     thread_local! {
         static FAKE: RefCell<Option<FakeMouse>> = const { RefCell::new(None) };
     }
 
+    #[cfg(test)]
     /// Installs `mouse` on this thread until the returned guard drops.
     #[must_use]
     pub(crate) fn install(mouse: FakeMouse) -> Installed {
@@ -1373,62 +1449,188 @@ pub(crate) mod fake {
         Installed
     }
 
+    #[cfg(test)]
     pub(crate) struct Installed;
 
+    #[cfg(test)]
     impl Drop for Installed {
         fn drop(&mut self) {
             FAKE.with(|cell| *cell.borrow_mut() = None);
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn with<R>(work: impl FnOnce(&mut FakeMouse) -> R) -> R {
         FAKE.with(|cell| work(cell.borrow_mut().as_mut().expect("a fake mouse is installed")))
     }
 
-    pub(super) fn exchange(payload: &[u8; PAYLOAD_LEN]) -> Option<[u8; PAYLOAD_LEN]> {
-        FAKE.with(|cell| {
-            let mut cell = cell.borrow_mut();
-            let mouse = cell.as_mut()?;
-            let (class, command) = (payload[6], payload[7]);
-            let args = &payload[8..18];
-            let key = (args[0], args[1], args[2]);
-            let mut reply = *payload;
-            reply[0] = if mouse.asleep_for.contains(&(class, command)) {
-                COMMAND_STATUS_NO_RESPONSE
-            } else if mouse.refused.contains(&(class, command)) {
-                0x03
-            } else {
-                COMMAND_STATUS_OK
-            };
-            if reply[0] != COMMAND_STATUS_OK {
-                return Some(reply);
+    /// The reply of the fake mouse `model` stands for, when there is one.
+    pub(super) fn exchange(model: &NativeModel, payload: &[u8; PAYLOAD_LEN]) -> Option<[u8; PAYLOAD_LEN]> {
+        if let Some(reply) = FAKE.with(|cell| cell.borrow_mut().as_mut().map(|mouse| answer(mouse, payload))) {
+            return Some(reply);
+        }
+        #[cfg(feature = "fake-mice")]
+        if let Some(reply) = files::with(model, |mouse| answer(mouse, payload)) {
+            return Some(reply);
+        }
+        let _ = model;
+        None
+    }
+
+    fn answer(mouse: &mut FakeMouse, payload: &[u8; PAYLOAD_LEN]) -> [u8; PAYLOAD_LEN] {
+        let (class, command) = (payload[6], payload[7]);
+        let args = &payload[8..18];
+        let key = (args[0], args[1], args[2]);
+        let mut reply = *payload;
+        reply[0] = if mouse.asleep || mouse.asleep_for.contains(&(class, command)) {
+            COMMAND_STATUS_NO_RESPONSE
+        } else if mouse.refused.contains(&(class, command)) {
+            0x03
+        } else {
+            COMMAND_STATUS_OK
+        };
+        if reply[0] != COMMAND_STATUS_OK {
+            return reply;
+        }
+        match (class, command) {
+            (CLASS_BUTTON, CMD_GET_BUTTON) => {
+                let block = mouse.odd_once.remove(&key).or_else(|| mouse.records.get(&key).copied()).unwrap_or_default();
+                reply[11..18].copy_from_slice(&block);
             }
-            match (class, command) {
-                (CLASS_BUTTON, CMD_GET_BUTTON) => {
-                    let block = mouse.odd_once.remove(&key).or_else(|| mouse.records.get(&key).copied()).unwrap_or_default();
-                    reply[11..18].copy_from_slice(&block);
-                }
-                (CLASS_BUTTON, CMD_SET_BUTTON) => {
-                    let mut block = [0u8; 7];
-                    block.copy_from_slice(&args[3..10]);
-                    mouse.records.insert(key, block);
-                    mouse.writes.push(key);
-                }
-                (CLASS_DPI, CMD_GET_DPI) => {
-                    let [hi, lo] = mouse.dpi.get(&args[0]).copied().unwrap_or(800).to_be_bytes();
-                    reply[9..13].copy_from_slice(&[hi, lo, hi, lo]);
-                }
-                (CLASS_DPI, CMD_SET_DPI) => {
-                    mouse.dpi.insert(args[0], u16::from_be_bytes([args[1], args[2]]));
-                    mouse.dpi_writes += 1;
-                }
-                (CLASS_CONTROL, CMD_GET_POLL_RATE) => reply[8] = mouse.poll_code,
-                (CLASS_CONTROL, CMD_SET_POLL_RATE) => mouse.poll_code = args[0],
-                // Mode reads answer `MODE_NORMAL` (args echo zeros).
-                _ => {}
+            (CLASS_BUTTON, CMD_SET_BUTTON) => {
+                let mut block = [0u8; 7];
+                block.copy_from_slice(&args[3..10]);
+                mouse.records.insert(key, block);
+                mouse.writes.push(key);
             }
-            Some(reply)
-        })
+            (CLASS_DPI, CMD_GET_DPI) => {
+                let [hi, lo] = mouse.dpi.get(&args[0]).copied().unwrap_or(800).to_be_bytes();
+                reply[9..13].copy_from_slice(&[hi, lo, hi, lo]);
+            }
+            (CLASS_DPI, CMD_SET_DPI) => {
+                mouse.dpi.insert(args[0], u16::from_be_bytes([args[1], args[2]]));
+                mouse.dpi_writes += 1;
+            }
+            (CLASS_CONTROL, CMD_GET_POLL_RATE) => reply[8] = mouse.poll_code,
+            (CLASS_CONTROL, CMD_SET_POLL_RATE) => mouse.poll_code = args[0],
+            (CLASS_POWER, CMD_GET_BATTERY) => reply[9] = mouse.battery,
+            (FAKE_CLASS_BANKS, 0x80) => reply[8] = mouse.banks.len() as u8,
+            (FAKE_CLASS_BANKS, 0x81) => {
+                reply[8] = 5;
+                reply[9..14].fill(0);
+                for (slot, bank) in reply[9..14].iter_mut().zip(&mouse.banks) {
+                    *slot = *bank;
+                }
+            }
+            (FAKE_CLASS_BANKS, 0x84) => reply[8] = mouse.active_bank,
+            // Selecting a bank reloads the live map (bank 0) from it.
+            (FAKE_CLASS_BANKS, 0x04) if mouse.banks.contains(&args[0]) => {
+                mouse.active_bank = args[0];
+                let loaded: Vec<_> = mouse.records.iter().filter(|((bank, _, _), _)| *bank == args[0]).map(|(&(_, b, l), &block)| ((0, b, l), block)).collect();
+                mouse.records.extend(loaded);
+            }
+            // Mode reads answer `MODE_NORMAL` (args echo zeros).
+            _ => {}
+        }
+        reply
+    }
+
+    /// The onboard banks' command class (`live_overlay`).
+    const FAKE_CLASS_BANKS: u8 = 0x05;
+
+    /// The slot path (`write_button`): a `SET_REPORT` stores the payload under
+    /// its slot, a `GET_REPORT` of that slot returns it.
+    pub(super) fn set_slot(model: &NativeModel, payload: &[u8; PAYLOAD_LEN]) -> bool {
+        let stored = FAKE.with(|cell| cell.borrow_mut().as_mut().map(|mouse| mouse.slots.insert(payload[0], payload.to_vec())).is_some());
+        #[cfg(feature = "fake-mice")]
+        let stored = stored || files::with(model, |mouse| mouse.slots.insert(payload[0], payload.to_vec())).is_some();
+        let _ = model;
+        stored
+    }
+
+    pub(super) fn get_slot(model: &NativeModel, slot: u8) -> Option<[u8; PAYLOAD_LEN]> {
+        let read = |mouse: &mut FakeMouse| {
+            let mut payload = [0u8; PAYLOAD_LEN];
+            if let Some(stored) = mouse.slots.get(&slot) {
+                payload.copy_from_slice(stored);
+            }
+            payload
+        };
+        if let Some(payload) = FAKE.with(|cell| cell.borrow_mut().as_mut().map(read)) {
+            return Some(payload);
+        }
+        #[cfg(feature = "fake-mice")]
+        if let Some(payload) = files::with(model, read) {
+            return Some(payload);
+        }
+        let _ = model;
+        None
+    }
+
+    /// The app's fake mice: one JSON file per plugged-in model.
+    #[cfg(feature = "fake-mice")]
+    pub(crate) mod files {
+        use super::FakeMouse;
+        use crate::device_catalog::{CATALOG, NativeModel};
+        use std::path::PathBuf;
+
+        /// `SIDEARM_FAKE_MICE`: the folder of the fake mice; unset = real hardware.
+        pub(crate) fn dir() -> Option<PathBuf> {
+            std::env::var_os("SIDEARM_FAKE_MICE").map(PathBuf::from)
+        }
+
+        fn state_path(model: &NativeModel) -> Option<PathBuf> {
+            Some(dir()?.join(format!("{}.json", model.device_id)))
+        }
+
+        /// Runs `work` on `model`'s fake mouse under a file lock (the app, its
+        /// helper and the restore process share it; the lock goes with a killed
+        /// process). `None`: fake mode is off or the mouse is unplugged.
+        pub(crate) fn with<R>(model: &NativeModel, work: impl FnOnce(&mut FakeMouse) -> R) -> Option<R> {
+            let path = state_path(model)?;
+            if !path.exists() {
+                return None;
+            }
+            let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(path.with_extension("lock")).ok()?;
+            lock.lock().ok()?;
+            let mut mouse: FakeMouse = serde_json::from_slice(&std::fs::read(&path).ok()?).ok()?;
+            let result = work(&mut mouse);
+            let temp = path.with_extension("tmp");
+            let saved = serde_json::to_vec_pretty(&mouse).ok().and_then(|bytes| std::fs::write(&temp, bytes).ok()).and_then(|()| std::fs::rename(&temp, &path).ok());
+            if saved.is_none() {
+                log::warn!("[fake-mice] {} not saved", path.display());
+            }
+            Some(result)
+        }
+
+        /// Upper-cased HID paths of the plugged-in fake mice: the vendor
+        /// interface and, for a model with signals, the consumer collection.
+        pub(crate) fn present_paths() -> Option<Vec<String>> {
+            dir()?;
+            Some(
+                CATALOG
+                    .iter()
+                    .filter(|model| state_path(model).is_some_and(|path| path.exists()))
+                    .flat_map(|model| {
+                        let pid = model.pids[0];
+                        let mut paths = vec![format!("\\\\?\\HID#VID_{:04X}&PID_{pid:04X}&MI_{:02X}#FAKE", model.vid, model.interface)];
+                        if let Some(consumer) = &model.consumer {
+                            paths.push(format!(
+                                "\\\\?\\HID#VID_{:04X}&PID_{pid:04X}&MI_{:02X}&COL{:02X}#FAKE",
+                                model.vid, consumer.interface, consumer.collection
+                            ));
+                        }
+                        paths
+                    })
+                    .collect(),
+            )
+        }
+
+        /// The pipe a test writes `model`'s button reports into (the consumer
+        /// reader opens it instead of the HID collection).
+        pub(crate) fn report_pipe(model: &NativeModel) -> String {
+            format!("\\\\.\\pipe\\sidearm-fake-{}", model.device_id)
+        }
     }
 }
 

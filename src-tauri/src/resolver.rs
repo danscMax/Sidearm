@@ -285,14 +285,14 @@ pub struct HeldLayers {
 }
 
 impl HeldLayers {
-    /// The layers a press tries, most specific first; the mapping's own layer
-    /// is the last resort. An empty "both" layer falls to HyperShift.
-    fn candidates(self) -> &'static [Layer] {
+    /// The layer a press plays while these triggers are held, `None` for the
+    /// mapping's own layer.
+    fn layer(self) -> Option<Layer> {
         match (self.hypershift, self.hypershift2) {
-            (true, true) => &[Layer::HypershiftBoth, Layer::Hypershift],
-            (false, true) => &[Layer::Hypershift2],
-            (true, false) => &[Layer::Hypershift],
-            (false, false) => &[],
+            (true, true) => Some(Layer::HypershiftBoth),
+            (false, true) => Some(Layer::Hypershift2),
+            (true, false) => Some(Layer::Hypershift),
+            (false, false) => None,
         }
     }
 }
@@ -398,10 +398,17 @@ pub fn resolve_gesture_preview(
             })
         })
     };
-    let layer = held.candidates().iter().copied().find(|&layer| bound(layer)).unwrap_or(match mapping.layer {
-        Layer::Hypershift => Layer::Standard,
-        other => other,
-    });
+    // HyperShift falls back to the standard binding; the HyperShift 2 layers
+    // stand alone (owner's call, 2026-11-11): what is not assigned there does
+    // nothing.
+    let layer = match held.layer() {
+        Some(Layer::Hypershift) if !bound(Layer::Hypershift) => Layer::Standard,
+        Some(layer) => layer,
+        None => match mapping.layer {
+            Layer::Hypershift => Layer::Standard,
+            other => other,
+        },
+    };
     let binding = profile_resolution
         .resolved_profile_id
         .as_deref()
@@ -818,14 +825,16 @@ mod tests {
         assert_eq!(layer_of(&config, false, false).as_deref(), Some("standard"));
         assert_eq!(layer_of(&config, true, false).as_deref(), Some("hypershift"));
         assert_eq!(layer_of(&config, false, true).as_deref(), Some("hypershift2"));
-        assert_eq!(layer_of(&config, true, true).as_deref(), Some("hypershift"), "an empty 'both' layer falls to HyperShift");
+        assert_eq!(layer_of(&config, true, true).as_deref(), Some("hypershiftBoth"), "an empty 'both' layer plays nothing, never HyperShift's");
         let mut both = base.clone();
         both.id = "binding-both".into();
         both.layer = Layer::HypershiftBoth;
         config.bindings.push(both);
         assert_eq!(layer_of(&config, true, true).as_deref(), Some("hypershiftBoth"));
         config.bindings.retain(|binding| binding.layer != Layer::Hypershift2);
-        assert_eq!(layer_of(&config, false, true).as_deref(), Some("standard"), "an empty HyperShift 2 layer falls to standard");
+        assert_eq!(layer_of(&config, false, true).as_deref(), Some("hypershift2"), "an empty HyperShift 2 layer plays nothing, never standard");
+        let empty = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, HeldLayers { hypershift: false, hypershift2: true }, Gesture::Press);
+        assert_eq!(empty.action_id, None);
     }
 
     #[test]

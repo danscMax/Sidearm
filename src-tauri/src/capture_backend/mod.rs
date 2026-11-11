@@ -294,14 +294,12 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
     else {
         return gestures::Patterns::default();
     };
-    // Under a held trigger each pattern falls back on its own
-    // (`resolver::resolve_gesture_preview`): every layer it may land on counts.
+    // Under HyperShift each pattern falls back to the standard layer on its
+    // own (`resolver::resolve_gesture_preview`); the HyperShift 2 layers have
+    // no fallback.
     let on_layer = |binding_layer: &str| {
         binding_layer == layer
-            || ((held.hypershift || held.hypershift2) && binding_layer == "standard")
-            || (held.hypershift && binding_layer == "hypershift")
-            || (held.hypershift2 && binding_layer == "hypershift2")
-            || (held.hypershift && held.hypershift2 && binding_layer == "hypershiftBoth")
+            || (held.hypershift && !held.hypershift2 && (binding_layer == "hypershift" || binding_layer == "standard"))
     };
     if preview.trigger_mode == Some(config::TriggerMode::Hold) || holds_modifiers_only(config, preview) {
         return gestures::Patterns::default();

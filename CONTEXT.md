@@ -14,7 +14,7 @@ A control's action in one profile and layer. An absent assignment leaves the ori
 _Avoid_: Treating an absent assignment as a disabled button.
 
 **Layer**:
-One set of assignments a profile gives its controls: the standard layer, HyperShift, HyperShift 2, and "HS + HS2" (both triggers held). A layer without an assignment for a button falls back: "HS + HS2" to HyperShift, then standard; HyperShift 2 to standard.
+One set of assignments a profile gives its controls: the standard layer, HyperShift, HyperShift 2, and "HS + HS2" (both triggers held). An empty button on HyperShift plays its standard assignment; on HyperShift 2 and "HS + HS2" it does nothing (those layers stand alone).
 _Avoid_: Mode, bank (a bank is a profile stored in the mouse).
 
 **HyperShift role**:

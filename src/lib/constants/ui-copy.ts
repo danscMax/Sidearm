@@ -56,8 +56,9 @@ export const layerCopy: Array<{ value: Layer; label: string }> = [
 export const FALLBACK_LAYERS: Record<Layer, readonly Layer[]> = {
   standard: [],
   hypershift: ["standard"],
-  hypershift2: ["standard"],
-  hypershiftBoth: ["hypershift", "standard"],
+  // The HyperShift 2 layers stand alone: empty there means nothing.
+  hypershift2: [],
+  hypershiftBoth: [],
 };
 
 /** Single source of truth for action-type i18n KEYS. Both `editableActionTypes`

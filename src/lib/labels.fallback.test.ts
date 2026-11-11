@@ -24,8 +24,9 @@ describe("fallback label on HyperShift layers", () => {
   });
 
   it("falls back in the resolver's order", () => {
-    expect(FALLBACK_LAYERS.hypershiftBoth).toEqual(["hypershift", "standard"]);
-    expect(FALLBACK_LAYERS.hypershift2).toEqual(["standard"]);
+    expect(FALLBACK_LAYERS.hypershift).toEqual(["standard"]);
+    expect(FALLBACK_LAYERS.hypershiftBoth).toEqual([]);
+    expect(FALLBACK_LAYERS.hypershift2).toEqual([]);
     expect(FALLBACK_LAYERS.standard).toEqual([]);
   });
 });

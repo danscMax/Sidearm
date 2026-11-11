@@ -323,6 +323,15 @@ async function main() {
     check("right held + thumb → HyperShift 2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_04", "hypershift2"), 5000, mark));
     await sleep(500);
     check("…and the used trigger does not click", !/HyperShift 2 click/.test(world.log().slice(mark)));
+    // Thumb 3 has standard and HyperShift actions but none on HyperShift 2:
+    // that layer stands alone, so the press does nothing.
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(100);
+    await world.press(V3, v3Usage(3, 0));
+    world.nativeButton(V3, RIGHT, false);
+    check("an empty HyperShift 2 button does nothing", await world.waitFor(() => world.log(), /Key-down received for \S+ \(hypershift: false, hypershift2: true/, 5000, mark)
+      && (await sleep(500), !/Dispatching action for [^\n]*control v3_thumb_03/.test(world.log().slice(mark))));
     mark = world.log().length;
     world.nativeButton(V3, RIGHT, true);
     await sleep(80);

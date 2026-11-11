@@ -289,6 +289,9 @@ const RUN_ONCE_VALUE: &str = "SidearmRestoreMice";
 /// Adds (`on`) or removes this restore at the next logon. Returns whether it
 /// is registered now.
 fn set_run_once(config_dir: &Path, on: bool) -> bool {
+    if crate::fake_mode() {
+        return false;
+    }
     use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
     let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
     let key = wide(r"Software\Microsoft\Windows\CurrentVersion\RunOnce");

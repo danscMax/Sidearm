@@ -722,7 +722,8 @@ fn process_encoded_key_event(
             })
             .unwrap_or(false);
 
-    let is_hold_shortcut = preview.action_type.as_deref() == Some("shortcut")
+    let is_hold_shortcut = !crate::fake_mode()
+        && preview.action_type.as_deref() == Some("shortcut")
         && (preview.trigger_mode == Some(config::TriggerMode::Hold) || is_modifier_only_shortcut);
 
     // Per-binding throttle (tap/press paths only). Hold shortcuts press once and
@@ -951,7 +952,13 @@ fn run_fire_and_forget(
     {
         crate::onboard_guard::note_device_used(app, &physical.device_id);
     }
-    match executor::run_preview_action(config, preview) {
+    // A test run against virtual mice resolves and reports, but sends nothing.
+    let executed = if crate::fake_mode() {
+        executor::execute_preview_action(config, preview)
+    } else {
+        executor::run_preview_action(config, preview)
+    };
+    match executed {
         Ok(mut execution) => {
             if is_fg_elevated {
                 execution.warnings.push(crate::ui_text!(

@@ -2972,6 +2972,16 @@ async fn restore_synapse_startup(app: AppHandle) -> Result<(), CommandError> {
 /// Set once exit work began: no capture restart may write the mice after it.
 static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
+/// A `fake-mice` test build running against virtual mice (`SIDEARM_FAKE_MICE`):
+/// no USB, and no input sent to the desktop.
+pub(crate) fn fake_mode() -> bool {
+    #[cfg(all(target_os = "windows", feature = "fake-mice"))]
+    if mouse_memory::fake::files::dir().is_some() {
+        return true;
+    }
+    false
+}
+
 pub(crate) fn is_shutting_down() -> bool {
     SHUTTING_DOWN.load(Ordering::SeqCst)
 }
@@ -3615,7 +3625,13 @@ pub fn run() {
         // Builder ever runs, so it never acquires this lock.
         // relaunch_as_admin starts the elevated Sidearm with `--relaunched`,
         // which waits for the old process to end before it gets here.
-        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // A test run ends the app it started: `Sidearm.exe --quit`.
+            if fake_mode() && args.iter().any(|arg| arg == "--quit") {
+                log::info!("[system] quit requested by a test run");
+                app.exit(0);
+                return;
+            }
             if let Some(window) = app.get_webview_window("main") {
                 bring_to_front(&window);
             }

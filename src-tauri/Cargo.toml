@@ -19,6 +19,9 @@ tauri-build = { version = "2", features = [] }
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+# Test builds only: virtual mice instead of USB (`SIDEARM_FAKE_MICE`), no input sent
+# to the desktop. Never in a release.
+fake-mice = []
 
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }

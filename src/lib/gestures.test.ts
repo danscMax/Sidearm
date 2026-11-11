@@ -15,6 +15,13 @@ describe("press patterns on one button", () => {
     expect(held?.id).toBe(long.bindingId);
     expect(held?.id).not.toBe(press?.id);
     expect(gestureOf(held?.triggerMode)).toBe("longPress");
+    // The schema's id token: lowercase kebab only.
+    for (const gesture of ["longPress", "doublePress", "triplePress"] as const) {
+      const made = ensurePlaceholderBinding(config, "p1", "standard", control, gesture);
+      const binding = made.config.bindings.find((b) => b.id === made.bindingId)!;
+      expect(binding.id).toMatch(/^[a-z][a-z0-9-]*$/);
+      expect(binding.actionId).toMatch(/^[a-z][a-z0-9-]*$/);
+    }
     expect(findBinding(next, "p1", "standard", "thumb_01", "doublePress")).toBeNull();
 
     // Saving the long press replaces only the long press.

@@ -800,7 +800,8 @@ export function ensurePlaceholderBinding(
     return { config, bindingId: existingBinding.id };
   }
 
-  const suffix = gesture === "press" ? "" : `-${gesture}`;
+  // Ids are lowercase kebab (schema `idToken`): doublePress → -double-press.
+  const suffix = gesture === "press" ? "" : `-${gesture.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
   const baseActionId = makeActionId(profileId, layer, control.id) + suffix;
   const actionIdSet = new Set(config.actions.map((action) => action.id));
   const actionId = actionIdSet.has(baseActionId)

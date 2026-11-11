@@ -9,7 +9,7 @@ import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
 import type { ControlSurfaceEntry } from "./constants";
 import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
-import { controlAssignmentLabel, displayNameForControl } from "./labels";
+import { controlAssignmentLabel, displayNameForControl, fallbackLabel } from "./labels";
 
 export type ViewTab = "top" | "side" | "combined" | "bottom";
 
@@ -89,7 +89,7 @@ export function actionLabel(
     const badge = triggerBadge(entry.binding.triggerMode, opts.triggerLabels);
     return badge ? `${base} ${badge}` : base;
   }
-  return displayNameForControl(entry.control);
+  return fallbackLabel(entry) ?? displayNameForControl(entry.control);
 }
 
 /**
@@ -111,7 +111,7 @@ export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string)
   const name = displayNameForControl(entry.control);
   if (entry.isHypershiftTrigger) return `${name}\n${controlAssignmentLabel(entry)}`;
   if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
-    return `${name}\n${unassignedLabel}`;
+    return `${name}\n${fallbackLabel(entry) ?? unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   const catLabel = cat ? i18n.t(cat.label) : "";

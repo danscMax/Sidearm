@@ -409,7 +409,7 @@ export function MouseVisualizationSvg({
         >
           {label}
         </text>
-        {entry?.isHypershiftTrigger && <text x={labelX} y={labelY - fs - 4} textAnchor="middle" className="mouse-svg__assignment">{t("visualization.hypershiftBadge")}</text>}
+        {entry?.isHypershiftTrigger && <text x={labelX} y={labelY - fs - 4} textAnchor="middle" className="mouse-svg__assignment">{t(entry.isHypershift2Trigger ? "visualization.hypershift2Badge" : "visualization.hypershiftBadge")}</text>}
         {/* Heatmap count */}
         {heatCountText(id) ? (
           <text

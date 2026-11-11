@@ -4181,6 +4181,12 @@ fn spawn_capture_helper(
         readers.iter().filter(|reader| !reader.software_layer).find_map(|reader| {
             let model = crate::device_catalog::CATALOG.get(reader.model)?;
             let codes = hypershift2_codes(config, model, software_trigger);
+            if hypershift2_codes(config, model, HYPER_TRIGGER_OFF).len() != codes.len() {
+                log::warn!(
+                    "[capture] {}: a HyperShift 2 trigger on the HyperShift button (another mouse holds HyperShift in Sidearm) is ignored",
+                    model.name
+                );
+            }
             (!codes.is_empty()).then_some((reader.model, codes))
         })
     };

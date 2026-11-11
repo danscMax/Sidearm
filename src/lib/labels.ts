@@ -234,9 +234,18 @@ export function displayNameForControlId(controlId: string): string {
 
 /** The native hook reserves the configured trigger, independently of bindings. */
 export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
-  return entry.isHypershiftTrigger
-    ? i18n.t("visualization.hypershiftAssignment")
-    : surfacePrimaryLabel(entry.binding, entry.action);
+  if (entry.isHypershiftTrigger) {
+    return i18n.t(entry.isHypershift2Trigger ? "visualization.hypershift2Assignment" : "visualization.hypershiftAssignment");
+  }
+  return fallbackLabel(entry) ?? surfacePrimaryLabel(entry.binding, entry.action);
+}
+
+/** "Ctrl+C · from Standard" for a control with no assignment of its own on
+ *  this layer; null when it has one or nothing falls through. */
+export function fallbackLabel(entry: ControlSurfaceEntry): string | null {
+  const own = entry.binding?.enabled && entry.action && entry.action.type !== "disabled";
+  if (own || !entry.fallback) return null;
+  return i18n.t("visualization.fallbackAssignment", { action: entry.fallback.action.displayName, layer: labelForLayer(entry.fallback.layer) });
 }
 
 /** Exercise only gestures supported by this user's current capture settings. */

@@ -52,6 +52,14 @@ export const layerCopy: Array<{ value: Layer; label: string }> = [
   { value: "hypershiftBoth", label: "layer.hypershiftBoth" },
 ];
 
+/** Layers an empty control falls back to, nearest first (the resolver's order). */
+export const FALLBACK_LAYERS: Record<Layer, readonly Layer[]> = {
+  standard: [],
+  hypershift: ["standard"],
+  hypershift2: ["standard"],
+  hypershiftBoth: ["hypershift", "standard"],
+};
+
 /** Single source of truth for action-type i18n KEYS. Both `editableActionTypes`
  *  and `ACTION_CATEGORIES` derive their `label` from here so the two lists
  *  cannot drift. Each value is an i18n key — resolve with `t(key)` at render. */

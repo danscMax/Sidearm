@@ -67,7 +67,7 @@ import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
 import { isBuiltinControl } from "./lib/onboard-mapping";
-import { deviceControlId, deviceLayout, hasDevice, hypershiftControlId } from "./lib/devices";
+import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -92,6 +92,7 @@ import type {
 } from "./lib/runtime";
 import {
   controlFamilyOrder,
+  FALLBACK_LAYERS,
   sideViewHotspots,
   topViewHotspots,
   workspaceModeCopy,
@@ -1021,6 +1022,18 @@ function App() {
       ),
     [activeConfig, effectiveProfileId, selectedLayer],
   );
+  // What an empty control plays on a HyperShift layer: the most specific
+  // layer below with an enabled plain press (as the resolver falls back).
+  const fallbackFor = (controlId: ControlId): { action: Action; layer: Layer } | null => {
+    if (!activeConfig) return null;
+    for (const layer of FALLBACK_LAYERS[selectedLayer]) {
+      const binding = activeConfig.bindings.find((b) => b.profileId === effectiveProfileId && b.layer === layer
+        && b.controlId === controlId && b.enabled && gestureOf(b.triggerMode) === "press");
+      const action = binding ? actionById.get(binding.actionId) : undefined;
+      if (action && action.type !== "disabled") return { action, layer };
+    }
+    return null;
+  };
   const encoderByControlId = useMemo(
     () =>
       new Map<ControlId, EncoderMapping>(
@@ -1076,7 +1089,10 @@ function App() {
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
                 isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
-                  && control.id === hypershiftControlId(activeConfig, control.deviceId),
+                  && (control.id === hypershiftControlId(activeConfig, control.deviceId)
+                    || control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId)),
+                isHypershift2Trigger: control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId),
+                fallback: fallbackFor(control.id),
               };
             }) ?? [],
       })),

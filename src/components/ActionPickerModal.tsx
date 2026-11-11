@@ -6,7 +6,7 @@ import { displayNameForControlId } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
-import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
+import { getNativeModel, listNativeMice, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
 import { PillTrack } from "./PillTrack";
 import {
@@ -146,6 +146,15 @@ export function ActionPickerModal({
   const canBeTrigger2 = !!controlId && !!profileId && canBeHypershift2Trigger(config, controlId);
   const isCurrentTrigger2 = canBeTrigger2 && gesture === "longPress"
     && hypershift2ControlId(config, profileId, layout?.deviceId) === controlId;
+  // An unverified Naga keeps HyperShift in Sidearm's own trigger: the same
+  // button cannot also be HyperShift 2 then (the backend drops it).
+  const [softwareTriggerMouse, setSoftwareTriggerMouse] = useState(false);
+  useEffect(() => {
+    if (!canBeTrigger2) return;
+    void listNativeMice().then((mice) => setSoftwareTriggerMouse(mice.some((mouse) => !mouse.verified)), () => {});
+  }, [canBeTrigger2]);
+  const hypershift2Conflict = canBeTrigger2 && softwareTriggerMouse && !!controlId
+    && (config.settings.hypershiftTrigger ?? "mouse_right") === layoutControlId(controlId);
   // A global modifier role is not an executable, profile-specific ActionType.
   const categories = [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
@@ -531,6 +540,9 @@ export function ActionPickerModal({
             ) : null}
             {effectiveCategory === "hypershift2" ? (
               <Notice variant="info">{t("picker.hypershift2Scope")}</Notice>
+            ) : null}
+            {effectiveCategory === "hypershift2" && hypershift2Conflict ? (
+              <Notice variant="warning">{t("picker.hypershift2SoftwareConflict")}</Notice>
             ) : null}
             {isCurrentTrigger2 && effectiveCategory !== "hypershift2" ? (
               <Notice variant="warning">{t("picker.hypershift2Remove")}</Notice>

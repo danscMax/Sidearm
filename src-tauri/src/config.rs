@@ -13,7 +13,11 @@ use tempfile::NamedTempFile;
 use thiserror::Error;
 
 const CONFIG_FILE_NAME: &str = "config.json";
-const SCHEMA_VERSION: i32 = 5;
+/// Bumped on every schema change (a new field or enum value): an older Sidearm
+/// then sees a newer config and leaves it alone instead of quarantining it as
+/// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
+/// with the default one).
+const SCHEMA_VERSION: i32 = 6;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -1008,14 +1012,14 @@ pub fn builtin_naga_device() -> Device {
     }
 }
 
-/// Migrate supported v2/v3/v4 configs to v5 without changing profile assignments.
+/// Migrate supported v2..=v5 configs to the current version without changing profile assignments.
 /// V2 gains the built-in Naga device. Controls without a `deviceId` were tagged
 /// `razer-naga` by the serde default.
 fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=4) {
+    if matches!(config.version, 2..=5) {
         config.version = SCHEMA_VERSION;
     }
 }

@@ -42,6 +42,8 @@ fn should_notify_elevated(last: &mut Option<String>, exe: &str) -> bool {
 }
 
 mod gestures;
+#[cfg(all(test, target_os = "windows"))]
+mod raw_probe;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]

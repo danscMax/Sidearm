@@ -1,8 +1,8 @@
 # Open Issues
 
 - Status: active unresolved issues and risks
-- Canonical planning source: `docs/PROJECT-BACKLOG.md`
-- Updated: 2026-05-23
+- Planning history: `docs/PROJECT-BACKLOG.md` (historical); shipped work: `CHANGELOG.md`; decisions: `docs/adr/`
+- Updated: 2026-05-23; WIN-002 re-checked 2026-11-11 (still open)
 
 ## P2
 

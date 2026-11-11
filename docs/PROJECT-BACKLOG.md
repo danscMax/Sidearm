@@ -3,11 +3,11 @@
 - Project: `Sidearm`
 - Original: `2026-03-08`
 - Rebuilt: `2026-05-23`
-- Current version: `0.1.16`
+- Current version: see `CHANGELOG.md` (v0.12.2 on 2026-11-11; this file was last rebuilt at `0.1.16`)
 - Last update: `2026-05-29` — closed external-review items `FIXES_2026-05-23.md` §1:
   P0-1, P1-1, P2-1, P2-2, P2-3, P2-4 (see that file's status block). Still open:
   P1-2 (PR CI gate) and §2 donor integrations.
-- Status: canonical backlog and execution source of truth
+- Status: **historical** — not kept current since 2026-05-29. What shipped is in `CHANGELOG.md`, design decisions in `docs/adr/`. Open items below were re-checked on 2026-11-11 (see Active Focus).
 
 ## Reconciliation note (2026-05-23)
 
@@ -344,10 +344,10 @@ Preserved for ID continuity; all `done` unless noted:
 
 Open, in priority order:
 
-1. **WIN-002** (P2) — validate clipboard restore for long snippets (`input_synthesis::paste_via_clipboard`)
+1. **WIN-002** (P2) — validate clipboard restore for long snippets (`input_synthesis::paste_via_clipboard`) — still open 2026-11-11 (`input_synthesis.rs:1121`)
 2. **WIN-003** (P2) — protected-window / secure-desktop validation
 3. **WIN-001 Phase 3** (P1-residual, release-gated) — production code-signing
-4. **ACT-001** (P3) — live-injection E2E harness
+4. **ACT-001** (P3) — live-injection E2E harness — partly done: `npm run e2e` runs the whole app against virtual V2/V3 mice (presses, layers, exit, watchdog, sleep) with injection simulated; real `SendInput` into target apps is still manual
 5. **VIS-003** (P2, deferred) — original illustration, design-led
 
 Done 2026-05-23: **UI-CLEAN-001** — removed the no-op clipboardPaste selector + dead `clipboard.rs`.
@@ -369,7 +369,7 @@ Done 2026-05-23: **UI-CLEAN-001** — removed the no-op clipboardPaste selector 
 - config schema: `docs/CONFIG-SCHEMA-V2.md`
 - device catalog / verification: `docs/ADDING-A-MODEL.md`,
   `docs/DEVICE-VERIFICATION-MATRIX.md`
-- ADRs: `docs/adr/0001…0004`
+- ADRs: `docs/adr/0001…0005` (0005: four layers, per-profile HyperShift 2)
 - changelog: `CHANGELOG.md`
 - *(removed dead refs: `PROJECT-HANDOFF-2026-03-08.md`, `UI-REDESIGN-TODO.md` —
   do not exist)*

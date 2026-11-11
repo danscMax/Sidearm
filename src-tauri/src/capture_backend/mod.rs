@@ -516,16 +516,11 @@ fn process_encoded_key_event(
         manual_profile_override.as_deref(),
     ) {
         Ok(result) => result,
+        // No window in front (a locked screen, a window just closed, a desktop
+        // switch): the press still counts, on the profile no app chose.
         Err(message) => {
-            let error = RuntimeErrorEvent {
-                category: "windowCapture".into(),
-                message: message.into(),
-                encoded_key: Some(event.encoded_key.clone()),
-                action_id: None,
-                created_at: runtime::timestamp_millis(),
-            };
-            emit_runtime_error(app, runtime_store, &error);
-            return EventOutcome::Handled;
+            log::info!("[capture] {}: no active window ({message}); the default profile applies", event.encoded_key);
+            window_capture::without_foreground_window(config, manual_profile_override.as_deref())
         }
     };
 
@@ -686,7 +681,7 @@ fn process_encoded_key_event(
     // is focused so injected shortcuts cannot operate its own editor.
     let resolved_action = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
     if own_window && !can_execute_in_own_window(resolved_action.map(|action| &action.payload)) {
-        log::info!("[capture] Not dispatched {}: Sidearm's own window", preview.encoded_key);
+        log::info!("[capture] Not dispatched {}: Sidearm's own window ({:?})", preview.encoded_key, capture_result.title);
         log_entries.push((
             "capture",
             crate::ui_text!(

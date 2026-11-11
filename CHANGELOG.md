@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every model and resumes at the same step after Restart as administrator.
 
 ### Fixed
+- A button press while no window is in front (the screen just locked, a window just closed)
+  is no longer dropped: it uses the default profile.
+- An older Sidearm (an autostart of an old build) no longer replaces a newer settings file
+  with an empty one: the settings version now changes with every new setting.
 - A mouse asleep when Sidearm closed no longer stays without its buttons after 30 minutes:
   the restore keeps waiting for it (once a minute after the first half hour) and comes back
   after a restart of Windows.

@@ -562,8 +562,14 @@ function App() {
 
 
   useEffect(() => {
-    // The window starts hidden to avoid a white flash before React mounts.
-    void getCurrentWindow().show();
+    // The window starts hidden to avoid a white flash before React mounts. A
+    // test run against virtual mice keeps it hidden.
+    void getAppPaths().then(
+      (paths) => {
+        if (!paths.testRun) void getCurrentWindow().show();
+      },
+      () => getCurrentWindow().show(),
+    );
     void refreshConfig();
   }, []);
 

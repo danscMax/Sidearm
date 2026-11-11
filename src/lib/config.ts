@@ -369,6 +369,8 @@ export interface AppPathsInfo {
   portableMarkerPresent: boolean;
   fallbackReason?: string;
   needsPortableMigrationPrompt: boolean;
+  /** A test run against virtual mice: the window stays hidden. */
+  testRun: boolean;
 }
 
 type BackupKind =

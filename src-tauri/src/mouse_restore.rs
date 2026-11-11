@@ -35,13 +35,25 @@ const RESTORE_MUTEX: &str = "Local\\Sidearm-live-map-restore";
 /// Creates a named mutex every process of this user can open, an elevated
 /// Sidearm's included (a default DACL would hide it from a non-elevated one);
 /// `None` when it exists already or cannot be created.
+/// A test run against virtual mice keeps its own mutexes, so it runs beside
+/// the user's Sidearm without either seeing the other.
+fn scoped(name: &str) -> String {
+    match std::env::var("SIDEARM_FAKE_MICE") {
+        Ok(dir) if crate::fake_mode() => {
+            let hash = dir.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3));
+            format!("{name}-test-{hash:016x}")
+        }
+        _ => name.to_owned(),
+    }
+}
+
 fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, GetLastError, LocalFree},
         Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, SECURITY_ATTRIBUTES},
         System::Threading::CreateMutexW,
     };
-    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    let name: Vec<u16> = scoped(name).encode_utf16().chain(Some(0)).collect();
     // Full access for authenticated users: openable at any elevation.
     let sddl: Vec<u16> = "D:(A;;GA;;;AU)".encode_utf16().chain(Some(0)).collect();
     let mut descriptor = std::ptr::null_mut();
@@ -75,7 +87,7 @@ fn create_mutex(name: &str) -> Option<windows_sys::Win32::Foundation::HANDLE> {
 /// or foreign DACL), so the check never fails open.
 fn mutex_exists(name: &str) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
-    let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+    let name: Vec<u16> = scoped(name).encode_utf16().chain(Some(0)).collect();
     // SAFETY: a NUL-terminated name; the handle is closed at once.
     unsafe {
         let handle = windows_sys::Win32::System::Threading::OpenMutexW(windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE, 0, name.as_ptr());

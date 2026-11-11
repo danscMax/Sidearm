@@ -486,6 +486,17 @@ fn device_lock(model: &'static NativeModel) -> MutexGuard<'static, ()> {
     DEVICE_LOCKS[index].lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+/// The file a test run creates to make its fake-mice app quit.
+#[cfg(feature = "fake-mice")]
+pub(crate) fn fake_quit_file() -> Option<std::path::PathBuf> {
+    Some(fake::files::dir()?.join("quit"))
+}
+
+#[cfg(not(feature = "fake-mice"))]
+pub(crate) fn fake_quit_file() -> Option<std::path::PathBuf> {
+    None
+}
+
 /// Catalog models whose vendor interface is present right now (the receiver
 /// is plugged in; the mouse itself may sleep). When Windows cannot list (the
 /// list changes mid-read during a plug burst), the last answer stands: a

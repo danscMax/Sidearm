@@ -86,6 +86,21 @@ pub fn capture_active_window_with_resolution_with_override(
     Ok(capture_result)
 }
 
+/// What a press resolves against when no window is in front: no app, so the
+/// manual override or the fallback profile.
+pub fn without_foreground_window(config: &AppConfig, manual_profile_override: Option<&str>) -> WindowCaptureResult {
+    let nothing = RawWindowCapture {
+        hwnd: String::new(),
+        pid: 0,
+        exe: String::new(),
+        process_path: String::new(),
+        title: String::new(),
+        captured_at: crate::runtime::timestamp_millis(),
+        is_elevated: false,
+    };
+    resolve_capture_result_with_override(config, nothing, manual_profile_override)
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct RawWindowCapture {
     pub(crate) hwnd: String,
@@ -143,7 +158,9 @@ fn resolve_capture_result_with_override(
 /// Returns true if the foreground window belongs to our own process.
 /// Uses PID comparison — foolproof regardless of exe naming (hyphens vs spaces).
 fn should_ignore_window(foreground_pid: u32) -> bool {
-    foreground_pid == std::process::id()
+    // A test run's window stays hidden, yet Windows can still name it the
+    // foreground right after launch: no window of it is ever in use.
+    foreground_pid == std::process::id() && !crate::fake_mode()
 }
 
 /// Returns true if the foreground is Windows shell chrome (taskbar / tray /
@@ -190,6 +207,14 @@ mod tests {
         ControlFamily, ControlId, EncoderMapping, Layer, MappingSource, OsdAnimation, OsdFontSize,
         OsdPosition, PhysicalControl, Profile, Settings, SnippetLibraryItem,
     };
+
+    #[test]
+    fn a_press_with_no_window_in_front_uses_the_fallback_profile() {
+        let config = test_config(Vec::new());
+        let result = without_foreground_window(&config, None);
+        assert_eq!(result.resolved_profile_id.as_deref(), Some(config.settings.fallback_profile_id.as_str()));
+        assert!(!result.ignored);
+    }
 
     #[test]
     fn shell_chrome_is_ignored_but_file_explorer_is_not() {

@@ -49,6 +49,14 @@ pub fn spawn(app: AppHandle) {
             let mut last = crate::mouse_memory::present_models().len();
             loop {
                 thread::sleep(Duration::from_secs(1));
+                // The run asks the app to quit with a `quit` file beside the mice.
+                if let Some(quit) = crate::mouse_memory::fake_quit_file()
+                    && std::fs::remove_file(&quit).is_ok()
+                    && let Some(app) = APP.get()
+                {
+                    log::info!("[system] quit requested by a test run");
+                    app.exit(0);
+                }
                 let now = crate::mouse_memory::present_models().len();
                 if now != last && let Some(changed) = CHANGED.get() {
                     let _ = changed.send(());

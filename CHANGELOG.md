@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mouse has Buttons, Performance and Mouse memory tabs. The separate Mouse page is gone.
 
 ### Added
+- HyperShift on a held button: put the HyperShift role on the "Hold" tab of a button (the right
+  button, say) and a quick press stays its normal click, while holding it opens the HyperShift
+  layer. Each button can also have its own hold, double and triple press action.
 - Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
   wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
   live button map that Sidearm restores when it stops.

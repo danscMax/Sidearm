@@ -1848,6 +1848,8 @@ thread_local! {
     static RAW_PRESSES: std::cell::RefCell<[Option<(std::time::Instant, bool)>; 6]> = const { std::cell::RefCell::new([None; 6]) };
     /// A trigger press swallowed before raw input said who sent it.
     static PENDING_TRIGGER2: std::cell::Cell<Option<(u8, std::time::Instant)>> = const { std::cell::Cell::new(None) };
+    /// A trigger-button press passed as another device's: its release passes too.
+    static PASSED_TRIGGER2: std::cell::Cell<Option<u8>> = const { std::cell::Cell::new(None) };
     /// Raw input device handle → whether it is the HyperShift 2 mouse.
     static RAW_DEVICES: std::cell::RefCell<std::collections::HashMap<usize, bool>> = std::cell::RefCell::new(std::collections::HashMap::new());
 }
@@ -1909,6 +1911,10 @@ fn settle_pending_trigger2(button: u8, ours: bool) {
     if ours {
         apply_trigger2(button, true);
     } else {
+        if HELPER_HYPER2_HELD.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF {
+            HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
+        }
+        PASSED_TRIGGER2.set(Some(button));
         queue_hyper_injection(button, true);
     }
 }
@@ -1967,38 +1973,80 @@ fn register_raw_mouse_input() -> bool {
 /// Buttons that may be a HyperShift 2 trigger (never the left one).
 const HYPER2_CODES: [u8; 4] = [HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_MIDDLE, HYPER_TRIGGER_X1, HYPER_TRIGGER_X2];
 
-/// What a button event means for HyperShift 2: `Some(true)` the trigger goes
-/// down, `Some(false)` the held one comes up, `None` not the trigger. A press
-/// of the button already marked held starts a fresh hold: its release was
-/// missed (the hook was dropped and reinstalled, the secure desktop took it),
-/// and passing the press through would leave its release swallowed — a right
-/// button stuck down.
-fn hypershift2_step(trigger: u8, held: u8, button: u8, is_down: bool) -> Option<bool> {
-    if is_down && button != HYPER_TRIGGER_OFF && (button == trigger || button == held) {
-        Some(true)
-    } else if !is_down && held != HYPER_TRIGGER_OFF && button == held {
-        Some(false)
-    } else {
-        None
+/// HyperShift 2 state one button event is judged against.
+#[derive(Clone, Copy, Debug, Default)]
+struct Trigger2State {
+    /// The profile's trigger button (`HYPER_TRIGGER_OFF` = none).
+    trigger: u8,
+    /// The trigger button being held as the layer.
+    held: u8,
+    /// A press of this button held back until raw input says who sent it.
+    pending: Option<u8>,
+    /// A press of this button passed as another device's (its release passes too).
+    passed: Option<u8>,
+}
+
+/// What the mouse hook does with one button event against HyperShift 2.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Trigger2 {
+    /// Not the trigger: the usual handling (a press while held uses the layer).
+    Other,
+    /// The trigger mouse's press: hold the layer.
+    Hold,
+    /// The held trigger's release.
+    Release,
+    /// Another device (a touchpad, another mouse) pressed that button: pass it.
+    PassPress,
+    /// The release of a press passed as another device's: pass it too.
+    PassRelease,
+    /// Who pressed is not known yet: swallow until raw input says.
+    HoldBack,
+    /// The release of a press still held back: play the whole click.
+    ReplayClick,
+}
+
+/// `who`: `None` when raw input is off (every press is the trigger mouse's),
+/// else who pressed (`Some(None)` not known yet). A release is matched to its
+/// own press first, so another device's click never ends the layer — a held
+/// V3 right button and a touchpad right click left the touchpad's button stuck
+/// down. A press of the button already marked held is a fresh hold: its
+/// release was missed (the hook was dropped, the secure desktop took it), and
+/// passing the press would leave its release swallowed.
+fn trigger2_decision(state: Trigger2State, who: Option<Option<bool>>, button: u8, is_down: bool) -> Trigger2 {
+    if !is_down {
+        return if state.pending == Some(button) {
+            Trigger2::ReplayClick
+        } else if state.passed == Some(button) {
+            Trigger2::PassRelease
+        } else if state.held != HYPER_TRIGGER_OFF && button == state.held {
+            Trigger2::Release
+        } else {
+            Trigger2::Other
+        };
+    }
+    if button == HYPER_TRIGGER_OFF || (button != state.trigger && button != state.held) {
+        return Trigger2::Other;
+    }
+    match who {
+        None | Some(Some(true)) => Trigger2::Hold,
+        Some(Some(false)) => Trigger2::PassPress,
+        Some(None) => Trigger2::HoldBack,
     }
 }
 
-/// A button event against the HyperShift 2 state (mouse hook and fake mice):
-/// `Some(held)` when it is the trigger going down or up — swallow it and
-/// [`apply_trigger2`] — else `None`, after marking the held trigger as used.
-fn hypershift2_event(trigger: u8, button: u8, is_down: bool) -> Option<bool> {
-    let held = HELPER_HYPER2_HELD.load(Ordering::Relaxed);
-    if let Some(now) = hypershift2_step(trigger, held, button, is_down) {
-        // The software trigger held meanwhile was used: no click of its own.
-        if is_down && HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
+/// A press while the layer is held uses it (no click on the trigger's
+/// release); a HyperShift 2 press uses a held software trigger too.
+fn note_press_for_triggers(decision: Trigger2, held: u8, is_down: bool) {
+    if !is_down {
+        return;
+    }
+    if decision == Trigger2::Hold {
+        if HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
             HELPER_HYPER_USED.store(true, Ordering::Relaxed);
         }
-        return Some(now);
-    }
-    if held != HYPER_TRIGGER_OFF && is_down {
+    } else if held != HYPER_TRIGGER_OFF {
         HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
     }
-    None
 }
 
 /// The trigger went down or up; let go with nothing pressed meanwhile, the
@@ -2019,10 +2067,14 @@ fn apply_trigger2(button: u8, held: bool) {
 /// Fake mice: a native button of the HyperShift 2 mouse, as the mouse hook
 /// would see it (report `0x7F` on its pipe).
 pub(super) fn fake_native_button(button: u8, is_down: bool) {
-    let trigger = HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed);
-    match hypershift2_event(trigger, button, is_down) {
-        Some(held) => apply_trigger2(button, held),
-        None => log::info!("[capture-helper] native button {button} {} passed through", if is_down { "down" } else { "up" }),
+    let held = HELPER_HYPER2_HELD.load(Ordering::Relaxed);
+    let state = Trigger2State { trigger: HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed), held, ..Trigger2State::default() };
+    let decision = trigger2_decision(state, None, button, is_down);
+    note_press_for_triggers(decision, held, is_down);
+    match decision {
+        Trigger2::Hold => apply_trigger2(button, true),
+        Trigger2::Release => apply_trigger2(button, false),
+        _ => log::info!("[capture-helper] native button {button} {} passed through", if is_down { "down" } else { "up" }),
     }
 }
 
@@ -2487,31 +2539,40 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             HELPER_HYPER2_HELD.load(Ordering::Relaxed)
         };
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData) {
-            let trigger2 = if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) };
-            if let Some(held) = hypershift2_event(trigger2, button, is_down) {
-                if !held || !HELPER_RAW_INPUT.load(Ordering::Relaxed) {
-                    return HyperMouseAction::SetTrigger2Held(button, held);
+            let state = Trigger2State {
+                trigger: if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) },
+                held: held2,
+                pending: PENDING_TRIGGER2.get().map(|(pending, _)| pending),
+                passed: PASSED_TRIGGER2.get(),
+            };
+            // Which device pressed a trigger button, from raw input.
+            let who = HELPER_RAW_INPUT.load(Ordering::Relaxed).then(|| {
+                let candidate = is_down && button != HYPER_TRIGGER_OFF && (button == state.trigger || button == state.held);
+                let raw = if candidate { RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)].take()) } else { None };
+                trigger2_source(raw, std::time::Instant::now())
+            });
+            let decision = trigger2_decision(state, who, button, is_down);
+            note_press_for_triggers(decision, held2, is_down);
+            match decision {
+                Trigger2::Other => {}
+                Trigger2::Hold => return HyperMouseAction::SetTrigger2Held(button, true),
+                Trigger2::Release => return HyperMouseAction::SetTrigger2Held(button, false),
+                Trigger2::PassPress => {
+                    PASSED_TRIGGER2.set(Some(button));
+                    return HyperMouseAction::Pass;
                 }
-                // Which device pressed it: the HyperShift 2 mouse holds the
-                // layer, any other (touchpad, another mouse) clicks as usual.
-                let raw = RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)].take());
-                return match trigger2_source(raw, std::time::Instant::now()) {
-                    Some(true) => HyperMouseAction::SetTrigger2Held(button, true),
-                    Some(false) => HyperMouseAction::Pass,
-                    None => {
-                        PENDING_TRIGGER2.set(Some((button, std::time::Instant::now())));
-                        HyperMouseAction::HoldBackTrigger2
-                    }
-                };
-            }
-            // The release of a press still held back: another device's quick
-            // click (its raw input never came) — play the whole click.
-            if !is_down
-                && let Some((pending, _)) = PENDING_TRIGGER2.get()
-                && pending == button
-            {
-                PENDING_TRIGGER2.set(None);
-                return HyperMouseAction::ReplayClick(button);
+                Trigger2::PassRelease => {
+                    PASSED_TRIGGER2.set(None);
+                    return HyperMouseAction::Pass;
+                }
+                Trigger2::HoldBack => {
+                    PENDING_TRIGGER2.set(Some((button, std::time::Instant::now())));
+                    return HyperMouseAction::HoldBackTrigger2;
+                }
+                Trigger2::ReplayClick => {
+                    PENDING_TRIGGER2.set(None);
+                    return HyperMouseAction::ReplayClick(button);
+                }
             }
         } else if held2 != HYPER_TRIGGER_OFF && (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
             HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
@@ -2785,17 +2846,41 @@ mod mouse_hook_tests {
     /// even after a profile change turned the trigger off.
     #[test]
     fn hypershift2_trigger_holds_and_its_release_follows_the_held_button() {
-        use super::{HYPER_TRIGGER_OFF, hypershift2_step};
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, true), Some(true));
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, true), None);
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false), Some(false));
+        use super::{HYPER_TRIGGER_OFF, Trigger2, Trigger2State, trigger2_decision};
+        let state = |trigger, held| Trigger2State { trigger, held, ..Trigger2State::default() };
+        let r = HYPER_TRIGGER_RIGHT;
+        assert_eq!(trigger2_decision(state(r, HYPER_TRIGGER_OFF), None, r, true), Trigger2::Hold);
+        assert_eq!(trigger2_decision(state(HYPER_TRIGGER_OFF, HYPER_TRIGGER_OFF), None, r, true), Trigger2::Other);
+        // A profile change mid-hold still sees the release.
+        assert_eq!(trigger2_decision(state(HYPER_TRIGGER_OFF, r), None, r, false), Trigger2::Release);
         // A release without its press (held before the profile had it) is not ours.
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, false), None);
+        assert_eq!(trigger2_decision(state(r, HYPER_TRIGGER_OFF), None, r, false), Trigger2::Other);
         // Its release was missed: the next press starts a fresh hold, never
         // passes through (its release would be swallowed — stuck down).
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true), Some(true));
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true), Some(true));
-        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true), None);
+        assert_eq!(trigger2_decision(state(r, r), None, r, true), Trigger2::Hold);
+        assert_eq!(trigger2_decision(state(HYPER_TRIGGER_OFF, r), None, r, true), Trigger2::Hold);
+        assert_eq!(trigger2_decision(state(r, r), None, HYPER_TRIGGER_LEFT, true), Trigger2::Other);
+    }
+
+    /// Raw input on: the trigger mouse holds the layer, another device's
+    /// press and release both pass — also while the trigger mouse holds it.
+    #[test]
+    fn another_devices_click_on_the_trigger_button_passes_whole() {
+        use super::{HYPER_TRIGGER_OFF, Trigger2, Trigger2State, trigger2_decision};
+        let r = HYPER_TRIGGER_RIGHT;
+        let idle = Trigger2State { trigger: r, held: HYPER_TRIGGER_OFF, ..Trigger2State::default() };
+        assert_eq!(trigger2_decision(idle, Some(Some(true)), r, true), Trigger2::Hold);
+        assert_eq!(trigger2_decision(idle, Some(Some(false)), r, true), Trigger2::PassPress);
+        assert_eq!(trigger2_decision(idle, Some(None), r, true), Trigger2::HoldBack);
+        // The V3's right is held; the touchpad clicks right.
+        let held = Trigger2State { trigger: r, held: r, ..Trigger2State::default() };
+        assert_eq!(trigger2_decision(held, Some(Some(false)), r, true), Trigger2::PassPress);
+        let touchpad_down = Trigger2State { passed: Some(r), ..held };
+        assert_eq!(trigger2_decision(touchpad_down, Some(None), r, false), Trigger2::PassRelease, "never ends the V3's layer");
+        assert_eq!(trigger2_decision(held, Some(None), r, false), Trigger2::Release);
+        // A press still held back when its release comes: the whole click.
+        let waiting = Trigger2State { pending: Some(r), ..held };
+        assert_eq!(trigger2_decision(waiting, Some(None), r, false), Trigger2::ReplayClick);
     }
 
     /// Raw input decides who pressed the trigger: a fresh raw press of the

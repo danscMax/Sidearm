@@ -78,6 +78,7 @@ export function ActionPickerModal({
   selectedLayer,
   gesture = "press",
   onGestureChange,
+  onApply,
   onSave,
   onCancel,
 }: {
@@ -92,6 +93,8 @@ export function ActionPickerModal({
   gesture?: Gesture;
   /** Shows the press-pattern tabs; picking one edits that pattern's binding. */
   onGestureChange?: (gesture: Gesture) => void;
+  /** Applies a tab's edit without closing (on a tab switch). */
+  onApply?: (config: AppConfig) => void;
   onSave: (config: AppConfig) => void;
   onCancel: () => void;
 }) {
@@ -272,28 +275,27 @@ export function ActionPickerModal({
     conditions: conditionsDraft,
   };
 
-  function handleSave() {
+  /** The config with this tab's edit in it; null when it cannot be saved. */
+  function buildSave(): AppConfig | null {
     if (effectiveCategory === "hypershift") {
-      if (!canBeTrigger || !controlId) return;
-      onSave({ ...config, settings: { ...config.settings, hypershiftTrigger: controlId as HypershiftTrigger } });
-      return;
+      if (!canBeTrigger || !controlId) return null;
+      return { ...config, settings: { ...config.settings, hypershiftTrigger: controlId as HypershiftTrigger } };
     }
     let nextConfig = isCurrentTrigger
       ? { ...config, settings: { ...config.settings, hypershiftTrigger: "none" as const } }
       : config;
     if (effectiveCategory === "native") {
-      onSave(binding ? removeBinding(nextConfig, binding.id) : nextConfig);
-      return;
+      return binding ? removeBinding(nextConfig, binding.id) : nextConfig;
     }
     let targetBinding = binding;
     if (!targetBinding) {
       const control = config.physicalControls.find((c) => c.id === controlId);
-      if (!control || !profileId || !selectedLayer) return;
+      if (!control || !profileId || !selectedLayer) return null;
       const result = ensurePlaceholderBinding(nextConfig, profileId, selectedLayer, control, gesture);
       nextConfig = result.config;
       targetBinding = nextConfig.bindings.find((b) => b.id === result.bindingId) ?? null;
     }
-    if (!targetBinding) return;
+    if (!targetBinding) return null;
     const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
     // Reuse the new slot's action id so Save cannot leave an orphan placeholder.
     if (!existingAction) {
@@ -347,7 +349,21 @@ export function ActionPickerModal({
       });
     }
 
-    onSave(nextConfig);
+    return nextConfig;
+  }
+
+  function handleSave() {
+    const next = buildSave();
+    if (next) onSave(next);
+  }
+
+  /** Another press pattern's tab: this tab's edit is kept (applied without
+   *  closing), so several patterns can be set in one go. */
+  function switchGesture(next: Gesture) {
+    if (next === gesture || !onGestureChange) return;
+    const saved = saveDisabled ? null : buildSave();
+    if (saved && saved !== config) onApply?.(saved);
+    onGestureChange(next);
   }
 
   async function handleTest() {
@@ -422,7 +438,7 @@ export function ActionPickerModal({
               className="pill-track--compact"
               items={GESTURES.map((key) => ({ key, label: t(GESTURE_LABEL_KEYS[key]) }))}
               active={gesture}
-              onSelect={onGestureChange}
+              onSelect={switchGesture}
               renderTrailing={(item) => {
                 const other = findBinding(config, profileId, selectedLayer, controlId, item.key);
                 const action = other ? config.actions.find((a) => a.id === other.actionId) : undefined;

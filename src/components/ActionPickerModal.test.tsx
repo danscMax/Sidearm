@@ -119,3 +119,21 @@ describe("button role editor", () => {
     expect(screen.queryByText(/удержание которой Sidearm умеет считывать/)).toBeNull();
   });
 });
+
+describe("press pattern tabs", () => {
+  it("keeps a tab's edit when switching to another tab, without closing", () => {
+    const config = makeConfig();
+    const onSave = vi.fn<(config: AppConfig) => void>();
+    const onApply = vi.fn<(config: AppConfig) => void>();
+    const onGestureChange = vi.fn();
+    render(<ActionPickerModal config={config} bindingId={null} profileId="p1" controlId="thumb_01" selectedLayer="standard"
+      gesture="longPress" onGestureChange={onGestureChange} onApply={onApply} onSave={onSave} onCancel={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Двойное/ }));
+    expect(onGestureChange).toHaveBeenCalledWith("doublePress");
+    expect(onSave).not.toHaveBeenCalled();
+    const applied = onApply.mock.calls[0][0];
+    const long = applied.bindings.find((b) => b.controlId === "thumb_01" && b.triggerMode === "longPress");
+    expect(applied.actions.find((a) => a.id === long?.actionId)?.type).toBe("disabled");
+  });
+});

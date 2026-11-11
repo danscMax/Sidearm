@@ -1279,6 +1279,7 @@ function App() {
           }
           gesture={actionPickerGesture}
           onGestureChange={setActionPickerGesture}
+          onApply={(nextConfig) => updateDraft(() => nextConfig, { immediate: true })}
           profileId={effectiveProfileId ?? undefined}
           controlLabel={selectedControl ? displayNameForControl(selectedControl) : undefined}
           layerLabel={labelForLayer(selectedLayer)}

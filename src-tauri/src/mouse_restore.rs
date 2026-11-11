@@ -350,4 +350,24 @@ mod tests {
         unsafe { windows_sys::Win32::Foundation::CloseHandle(handle) };
         assert!(!mutex_exists(&name));
     }
+
+    /// Writes and removes the real HKCU RunOnce value (run by hand:
+    /// `cargo test -- --ignored run_once`).
+    #[test]
+    #[ignore]
+    fn run_once_registers_a_detached_restore_and_is_removed() {
+        let read = || {
+            std::process::Command::new("reg")
+                .args(["query", r"HKCU\Software\Microsoft\Windows\CurrentVersion\RunOnce", "/v", RUN_ONCE_VALUE])
+                .output()
+                .map(|out| String::from_utf8_lossy(&out.stdout).into_owned())
+                .unwrap_or_default()
+        };
+        let dir = Path::new(r"C:\Temp\sidearm test");
+        assert!(set_run_once(dir, true));
+        let value = read();
+        assert!(value.contains(SPAWN_RESTORE_ARG) && value.contains(r#""C:\Temp\sidearm test""#), "{value}");
+        set_run_once(dir, false);
+        assert!(!read().contains(RUN_ONCE_VALUE));
+    }
 }

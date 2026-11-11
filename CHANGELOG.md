@@ -23,7 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   button choose "HyperShift 2 · hold". While it is held the V3's buttons use the HyperShift 2
   layer (with the ring-finger HyperShift held too, the "HS + HS2" layer); a quick press is a
   right click. Profiles without it keep the right button as it is, so holding it in a game
-  still works. HyperShift 2 is not stored in the mouse for use without Sidearm.
+  still works. Only the V3's right button is the trigger: a touchpad's or another mouse's
+  right button keeps working as usual. HyperShift 2 is not stored in the mouse for use without Sidearm.
 - Razer Naga V3 Pro (2.4 GHz receiver, 12-button side plate): side and top buttons,
   wheel, tilt, the ring-finger HyperShift button, DPI and battery, through a reversible
   live button map that Sidearm restores when it stops.

@@ -1826,6 +1826,144 @@ static HELPER_HYPER2_HELD: AtomicU8 = AtomicU8::new(HYPER_TRIGGER_OFF);
 static HELPER_HYPER2_USED: AtomicBool = AtomicBool::new(false);
 /// Parent → helper: `HS2:<code>`.
 const HYPER2_COMMAND: &str = "HS2:";
+/// Catalog index of the HyperShift 2 mouse (`usize::MAX` = none): raw input
+/// tells its presses from another mouse's or the touchpad's.
+static HELPER_HYPER2_MODEL: AtomicUsize = AtomicUsize::new(usize::MAX);
+/// Raw input reports which device pressed a button (measured on the notebook
+/// 2026-11-11: also for a press the mouse hook swallowed, up to a fraction of a
+/// millisecond before or after the hook sees it; a touchpad's click comes
+/// without a device). False when it could not be registered: every press
+/// then counts as the HyperShift 2 mouse's, as before.
+static HELPER_RAW_INPUT: AtomicBool = AtomicBool::new(false);
+/// How old a raw press may be to belong to the press the hook sees now.
+const RAW_PRESS_MATCH: std::time::Duration = std::time::Duration::from_millis(50);
+/// How long a swallowed trigger press waits for raw input before it counts as
+/// another device's and is played back.
+const RAW_PRESS_WAIT: std::time::Duration = std::time::Duration::from_millis(60);
+
+thread_local! {
+    /// The last raw press of each button code (`HYPER_TRIGGER_*`): when, and
+    /// whether the HyperShift 2 mouse sent it. Hook and raw input share the
+    /// helper's thread.
+    static RAW_PRESSES: std::cell::RefCell<[Option<(std::time::Instant, bool)>; 6]> = const { std::cell::RefCell::new([None; 6]) };
+    /// A trigger press swallowed before raw input said who sent it.
+    static PENDING_TRIGGER2: std::cell::Cell<Option<(u8, std::time::Instant)>> = const { std::cell::Cell::new(None) };
+    /// Raw input device handle → whether it is the HyperShift 2 mouse.
+    static RAW_DEVICES: std::cell::RefCell<std::collections::HashMap<usize, bool>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Whether a raw press seen at `raw` belongs to a hook press at `now`, and
+/// from which device: `Some(true)` the HyperShift 2 mouse, `Some(false)`
+/// another one, `None` not known (yet).
+fn trigger2_source(raw: Option<(std::time::Instant, bool)>, now: std::time::Instant) -> Option<bool> {
+    raw.filter(|(at, _)| now.saturating_duration_since(*at) <= RAW_PRESS_MATCH).map(|(_, ours)| ours)
+}
+
+/// Raw input of the helper's mouse-input window: remembers who pressed each
+/// button and settles a trigger press the hook is holding back.
+fn note_raw_mouse(l_param: isize) {
+    use windows_sys::Win32::UI::Input::{GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTHEADER, RID_INPUT, RIM_TYPEMOUSE};
+    let mut input: RAWINPUT = unsafe { std::mem::zeroed() };
+    let mut size = size_of::<RAWINPUT>() as u32;
+    // SAFETY: `l_param` is this WM_INPUT's HRAWINPUT; a mouse report fits a RAWINPUT.
+    let read = unsafe { GetRawInputData(l_param as HRAWINPUT, RID_INPUT, (&raw mut input).cast(), &mut size, size_of::<RAWINPUTHEADER>() as u32) };
+    if read == u32::MAX || input.header.dwType != RIM_TYPEMOUSE {
+        return;
+    }
+    // SAFETY: the header says this report is a mouse one.
+    let flags = unsafe { input.data.mouse.Anonymous.Anonymous.usButtonFlags };
+    // RI_MOUSE_*_DOWN of right, middle, X1, X2.
+    let pressed: Vec<u8> = [(0x0004, HYPER_TRIGGER_RIGHT), (0x0010, HYPER_TRIGGER_MIDDLE), (0x0040, HYPER_TRIGGER_X1), (0x0100, HYPER_TRIGGER_X2)]
+        .into_iter()
+        .filter(|(bit, _)| flags & bit != 0)
+        .map(|(_, code)| code)
+        .collect();
+    if pressed.is_empty() {
+        return;
+    }
+    let device = input.header.hDevice;
+    // No device: injected, or a precision touchpad's click.
+    let ours = !device.is_null()
+        && RAW_DEVICES.with_borrow_mut(|devices| {
+            *devices.entry(device as usize).or_insert_with(|| {
+                let model = crate::device_catalog::CATALOG.get(HELPER_HYPER2_MODEL.load(Ordering::Relaxed));
+                raw_device_name(device).and_then(|name| crate::device_catalog::model_for_path(&name)).zip(model).is_some_and(|(found, wanted)| found.is(wanted))
+            })
+        });
+    let now = std::time::Instant::now();
+    for button in pressed {
+        if let Some((pending, _)) = PENDING_TRIGGER2.get()
+            && pending == button
+        {
+            PENDING_TRIGGER2.set(None);
+            settle_pending_trigger2(button, ours);
+        } else {
+            RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)] = Some((now, ours)));
+        }
+    }
+}
+
+/// A held-back trigger press, now known: the HyperShift 2 mouse's starts the
+/// hold; another device's is played back (its release passes as usual).
+fn settle_pending_trigger2(button: u8, ours: bool) {
+    if ours {
+        apply_trigger2(button, true);
+    } else {
+        queue_hyper_injection(button, true);
+    }
+}
+
+/// A held-back trigger press raw input never explained: another device's.
+fn expire_pending_trigger2() {
+    if let Some((button, at)) = PENDING_TRIGGER2.get()
+        && at.elapsed() >= RAW_PRESS_WAIT
+    {
+        PENDING_TRIGGER2.set(None);
+        settle_pending_trigger2(button, false);
+    }
+}
+
+fn raw_device_name(device: windows_sys::Win32::Foundation::HANDLE) -> Option<String> {
+    use windows_sys::Win32::UI::Input::{GetRawInputDeviceInfoW, RIDI_DEVICENAME};
+    let mut chars = 0u32;
+    // SAFETY: the first call reports the length, the second fills that many.
+    unsafe {
+        GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, std::ptr::null_mut(), &mut chars);
+        let mut name = vec![0u16; chars as usize];
+        let written = GetRawInputDeviceInfoW(device, RIDI_DEVICENAME, name.as_mut_ptr().cast(), &mut chars);
+        (written != u32::MAX && written > 0).then(|| String::from_utf16_lossy(&name[..(written as usize).min(name.len())]))
+    }
+}
+
+unsafe extern "system" fn raw_input_proc(hwnd: windows_sys::Win32::Foundation::HWND, message: u32, w_param: usize, l_param: isize) -> isize {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{DefWindowProcW, WM_INPUT};
+    if message == WM_INPUT {
+        // A panic must not unwind across this callback.
+        let _ = std::panic::catch_unwind(|| note_raw_mouse(l_param));
+    }
+    unsafe { DefWindowProcW(hwnd, message, w_param, l_param) }
+}
+
+/// A hidden window on the helper's thread receiving every mouse's raw input
+/// (`RIDEV_INPUTSINK`), so HyperShift 2 knows which device pressed its button.
+fn register_raw_mouse_input() -> bool {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::Input::{RAWINPUTDEVICE, RIDEV_INPUTSINK, RegisterRawInputDevices};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, RegisterClassW, WNDCLASSW, WS_OVERLAPPED};
+    let class: Vec<u16> = "SidearmHelperRawInput\0".encode_utf16().collect();
+    // SAFETY: NUL-terminated class name; the window lives as long as the helper.
+    unsafe {
+        let instance = GetModuleHandleW(std::ptr::null());
+        let wc = WNDCLASSW { lpfnWndProc: Some(raw_input_proc), hInstance: instance, lpszClassName: class.as_ptr(), ..std::mem::zeroed() };
+        RegisterClassW(&wc);
+        let hwnd = CreateWindowExW(0, class.as_ptr(), class.as_ptr(), WS_OVERLAPPED, 0, 0, 0, 0, std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null());
+        if hwnd.is_null() {
+            return false;
+        }
+        let device = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
+        RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) != 0
+    }
+}
 /// Buttons that may be a HyperShift 2 trigger (never the left one).
 const HYPER2_CODES: [u8; 4] = [HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_MIDDLE, HYPER_TRIGGER_X1, HYPER_TRIGGER_X2];
 
@@ -2039,6 +2177,10 @@ enum HyperMouseAction {
     SetTriggerHeld(bool),
     /// Swallow the HyperShift 2 trigger's press/release (that button, held).
     SetTrigger2Held(u8, bool),
+    /// Swallow a trigger press until raw input says which device sent it.
+    HoldBackTrigger2,
+    /// Swallow a release and play the whole click of that button.
+    ReplayClick(u8),
     /// Swallow the left button and enqueue a synthetic right-down.
     InjectRightDown,
     /// Swallow the left button and enqueue the balancing right-up.
@@ -2347,7 +2489,29 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData) {
             let trigger2 = if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) };
             if let Some(held) = hypershift2_event(trigger2, button, is_down) {
-                return HyperMouseAction::SetTrigger2Held(button, held);
+                if !held || !HELPER_RAW_INPUT.load(Ordering::Relaxed) {
+                    return HyperMouseAction::SetTrigger2Held(button, held);
+                }
+                // Which device pressed it: the HyperShift 2 mouse holds the
+                // layer, any other (touchpad, another mouse) clicks as usual.
+                let raw = RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)].take());
+                return match trigger2_source(raw, std::time::Instant::now()) {
+                    Some(true) => HyperMouseAction::SetTrigger2Held(button, true),
+                    Some(false) => HyperMouseAction::Pass,
+                    None => {
+                        PENDING_TRIGGER2.set(Some((button, std::time::Instant::now())));
+                        HyperMouseAction::HoldBackTrigger2
+                    }
+                };
+            }
+            // The release of a press still held back: another device's quick
+            // click (its raw input never came) — play the whole click.
+            if !is_down
+                && let Some((pending, _)) = PENDING_TRIGGER2.get()
+                && pending == button
+            {
+                PENDING_TRIGGER2.set(None);
+                return HyperMouseAction::ReplayClick(button);
             }
         } else if held2 != HYPER_TRIGGER_OFF && (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
             HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
@@ -2417,6 +2581,12 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
         }
         HyperMouseAction::SetTrigger2Held(button, held) => {
             apply_trigger2(button, held);
+            1
+        }
+        HyperMouseAction::HoldBackTrigger2 => 1,
+        HyperMouseAction::ReplayClick(button) => {
+            queue_hyper_injection(button, true);
+            queue_hyper_injection(button, false);
             1
         }
         HyperMouseAction::InjectRightDown => {
@@ -2626,6 +2796,19 @@ mod mouse_hook_tests {
         assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true), Some(true));
         assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true), Some(true));
         assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true), None);
+    }
+
+    /// Raw input decides who pressed the trigger: a fresh raw press of the
+    /// HyperShift 2 mouse holds the layer, another device's clicks, an old or
+    /// missing one is not known yet.
+    #[test]
+    fn a_trigger_press_belongs_to_the_device_raw_input_saw_just_now() {
+        use super::{RAW_PRESS_MATCH, trigger2_source};
+        let now = std::time::Instant::now();
+        assert_eq!(trigger2_source(Some((now, true)), now), Some(true));
+        assert_eq!(trigger2_source(Some((now, false)), now + std::time::Duration::from_millis(5)), Some(false));
+        assert_eq!(trigger2_source(Some((now, true)), now + RAW_PRESS_MATCH * 3), None, "a previous click's");
+        assert_eq!(trigger2_source(None, now), None);
     }
 
     /// Per profile, only a button the mouse reports natively, never the left
@@ -3494,6 +3677,7 @@ pub fn capture_helper_main() {
     );
     // Fake mice drive it through their pipe (`fake_native_button`); no hook.
     HELPER_HYPER2_ENABLED.store(hypershift2_model.is_some(), Ordering::Relaxed);
+    HELPER_HYPER2_MODEL.store(hypershift2_model.unwrap_or(usize::MAX), Ordering::Relaxed);
 
     if let Some(ms) = modifier_stale_gc_ms {
         let clamped = ms.clamp(500, 30_000);
@@ -3575,6 +3759,15 @@ pub fn capture_helper_main() {
     //     LowLevelHooksTimeout — see HYPER_INJECT_TX).
     start_hyper_injector();
     let mut mouse_hook = unsafe { install_mouse_hook(hmod) };
+    // HyperShift 2 tells the trigger mouse's presses from other devices' by
+    // raw input; without it every press counts as that mouse's.
+    if HELPER_HYPER2_ENABLED.load(Ordering::Relaxed) && !crate::fake_mode() {
+        let registered = register_raw_mouse_input();
+        HELPER_RAW_INPUT.store(registered, Ordering::Relaxed);
+        if !registered {
+            log::warn!("[capture-helper] raw mouse input not registered: {} — every press of the HyperShift 2 button counts as its mouse's", std::io::Error::last_os_error());
+        }
+    }
 
     // 4. Spawn stdin watcher — reads commands from parent.
     //    "REHOOK" → reinstall LL hook (WM_APP + 1)
@@ -3652,7 +3845,7 @@ pub fn capture_helper_main() {
         // Compute wait timeout: if we have pending modifiers, wake up in
         // time to replay them (20ms buffer).  Otherwise use the normal
         // health check interval.
-        let wait_timeout = PENDING_MODIFIERS.with(|cell| {
+        let wait_timeout = if PENDING_TRIGGER2.get().is_some() { 5 } else { PENDING_MODIFIERS.with(|cell| {
             let pending = cell.borrow();
             if pending.is_empty() {
                 HOOK_HEALTH_CHECK_INTERVAL_MS
@@ -3662,7 +3855,7 @@ pub fn capture_helper_main() {
                 let remaining = 20u32.saturating_sub(elapsed);
                 remaining.max(1) // at least 1ms to avoid busy-wait
             }
-        });
+        }) };
 
         // Wait for messages OR timeout (health check / modifier replay).
         let wait_result = unsafe {
@@ -3958,6 +4151,7 @@ pub fn capture_helper_main() {
 
         // Check for pending modifiers that have timed out and replay them.
         flush_expired_pending_modifiers();
+        expire_pending_trigger2();
 
         // Garbage-collect stale CONSUMED_MODIFIER_VKS entries.  Prevents a
         // lost Razer modifier-up (e.g. from alt-tab focus change) from
@@ -4206,9 +4400,8 @@ fn spawn_capture_helper(
         hypershift_trigger_code(&config.settings.hypershift_trigger)
     };
     // The mouse whose native button is some profile's HyperShift 2 trigger.
-    // shortcut: the hook cannot tell pointing devices apart, so one such mouse
-    // at a time, and in a profile with the trigger every mouse's and touchpad's
-    // button of that kind is the trigger; raw input could attribute it.
+    // shortcut: one such mouse at a time (raw input attributes a press to it);
+    // a second would need a trigger per raw input device.
     let hypershift2 = {
         readers.iter().filter(|reader| !reader.software_layer).find_map(|reader| {
             let model = crate::device_catalog::CATALOG.get(reader.model)?;

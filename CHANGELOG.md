@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] — 2026-11-11
+
+### Fixed
+- HyperShift 2: a touchpad (or another mouse's) right click while the V3's right button
+  held the HyperShift 2 layer ended the layer and left the right button pressed in the
+  app. Another device's click on that button now passes whole and never touches the
+  layer.
+
 ## [0.12.0] — 2026-11-11
 
 ### Changed

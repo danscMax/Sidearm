@@ -14,9 +14,9 @@ A control's action in one profile and layer. An absent assignment leaves the ori
 _Avoid_: Treating an absent assignment as a disabled button.
 
 **Layer**:
-One set of assignments a profile gives its controls: the standard layer, and one or more HyperShift layers that replace it while their trigger is held.
+One set of assignments a profile gives its controls: the standard layer, HyperShift, HyperShift 2, and "HS + HS2" (both triggers held). A layer without an assignment for a button falls back: "HS + HS2" to HyperShift, then standard; HyperShift 2 to standard.
 _Avoid_: Mode, bank (a bank is a profile stored in the mouse).
 
 **HyperShift role**:
-The button held to activate one HyperShift layer across all profiles for its device. Each HyperShift layer has its own trigger; which layer a trigger opens is the same in every profile, only the assignments on that layer differ per profile. The role takes precedence over that button's ordinary assignment without deleting it. In simultaneous Naga capture, each mouse reports its own layer.
-_Avoid_: Profile action, unassigned button, a per-profile trigger.
+The button held to activate a HyperShift layer for its device. The HyperShift trigger is the same in every profile. The HyperShift 2 trigger is set per profile (a profile without one keeps that button ordinary, e.g. for holding it in a game); it is a native mouse button, and a quick press with nothing else pressed is its own click. The role takes precedence over that button's ordinary assignment without deleting it. In simultaneous Naga capture, each mouse reports its own layer.
+_Avoid_: Profile action, unassigned button.

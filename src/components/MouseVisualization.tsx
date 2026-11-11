@@ -36,6 +36,7 @@ export function MouseVisualization({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  layers,
   onContextMenu,
   executionCounts,
   executionHistory,
@@ -89,6 +90,7 @@ export function MouseVisualization({
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          layers={layers}
           onContextMenu={onContextMenu}
           executionCounts={executionCounts}
           executionHistory={executionHistory}
@@ -317,7 +319,7 @@ export function MouseVisualization({
         )}
       </div>
 
-      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} />
+      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} layers={layers} />
     </div>
   );
 }

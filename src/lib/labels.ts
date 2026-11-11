@@ -152,7 +152,7 @@ export function labelForCapability(controlStatus: PhysicalControl["capabilitySta
 }
 
 export function labelForLayer(layer: Layer): string {
-  return layer === "standard" ? i18n.t("layer.standard") : i18n.t("layer.hypershift");
+  return i18n.t(`layer.${layer}`);
 }
 
 export function labelForVerificationResult(result: VerificationStepResult): string {

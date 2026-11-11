@@ -184,6 +184,8 @@ function addProfileBindings(config, profile) {
     ["v3_thumb_02", "standard", "doublePress", "H"],
     ["v3_thumb_03", "standard", undefined, "L"],
     ["v3_thumb_03", "hypershift", undefined, "K"],
+    // Bound only on the HyperShift 2 layer: still needs its live-map signal.
+    ["v3_wheel_click", "hypershift2", undefined, "M"],
   ];
   const controls = new Set(ours.map(([control]) => control));
   config.bindings = config.bindings.filter((b) => !(b.profileId === profile && controls.has(b.controlId)));
@@ -229,6 +231,8 @@ async function main() {
     check("V3 live map written", await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000, mark));
     check("V2 live map written", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 30000, mark));
     check("V3 file holds the live map", liveRecords(world.mouse(V3)).length > 0);
+    const wheelClick = liveRecords(world.mouse(V3)).find(([, button, layer]) => button === 0x03 && layer === 0);
+    check("a HyperShift 2-only button gets a signal", wheelClick?.[3]?.[0] === 0x0a, JSON.stringify(wheelClick));
     await sleep(1500);
 
     // 2. A plain press dispatches its action (simulated).

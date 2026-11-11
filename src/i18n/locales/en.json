@@ -205,6 +205,8 @@
   "layer": {
     "standard": "Standard",
     "hypershift": "Hypershift",
+    "hypershift2": "HyperShift 2",
+    "hypershiftBoth": "HS + HS2",
     "neutral": "Layer {{n}}",
     "standardDesc": "Primary layer for assignments and signals.",
     "hypershiftDesc": "Secondary layer with separate bindings and validation."
@@ -871,6 +873,10 @@
     "hypershiftReplace": "HyperShift will move from {{button}} to this button in all profiles.",
     "hypershiftRemove": "Saving a different function here will turn off this HyperShift modifier in all profiles.",
     "hypershiftPreview": "Hold to activate HyperShift · all profiles",
+    "hypershift2": "HyperShift 2 · hold",
+    "hypershift2Scope": "This profile only. While this button is held, this mouse's buttons use the HyperShift 2 layer (with HyperShift held too, the HS + HS2 layer). A quick press with nothing else pressed is an ordinary click. While held, the button itself is not pressed in Windows: dragging or holding with it does not work in this profile.",
+    "hypershift2Remove": "Saving a different function here will turn off HyperShift 2 on this button in this profile.",
+    "hypershift2Preview": "Hold to activate HyperShift 2 · this profile",
     "title": "Assign action",
     "test": "Test",
     "testCountdown": "Testing in {{n}}… switch to your target window",
@@ -953,6 +959,7 @@
     "categoryDesc": {
       "native": "Keep the device's original behaviour.",
       "hypershift": "A held modifier that activates the second layer of assignments.",
+      "hypershift2": "A held modifier of this mouse that activates the third layer of assignments in this profile.",
       "shortcut": "Sends a keyboard shortcut to the active window.",
       "mouseAction": "A mouse click, scroll or button — optionally with modifiers.",
       "textSnippet": "Types ready-made text or a snippet from the library.",

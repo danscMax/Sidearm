@@ -11,9 +11,11 @@ interface LayerPillsProps {
   /** Generic (non-Razer) devices label the layers neutrally — "Hypershift"
    *  is Naga vocabulary (UI-review U4/UX7). */
   neutralLabels?: boolean;
+  /** Layers offered; absent = standard and HyperShift. */
+  layers?: readonly Layer[];
 }
 
-export function LayerPills({ selectedLayer, onSelectLayer, neutralLabels }: LayerPillsProps) {
+export function LayerPills({ selectedLayer, onSelectLayer, neutralLabels, layers = ["standard", "hypershift"] }: LayerPillsProps) {
   const { t } = useTranslation();
   return (
     <div className="mouse-visual-tabs__footer">
@@ -22,7 +24,7 @@ export function LayerPills({ selectedLayer, onSelectLayer, neutralLabels }: Laye
         indicatorModifier={selectedLayer}
         active={selectedLayer}
         onSelect={onSelectLayer}
-        items={layerCopy.map((layer, index) => ({
+        items={layerCopy.filter((layer) => layers.includes(layer.value)).map((layer, index) => ({
           key: layer.value,
           label: neutralLabels ? t("layer.neutral", { n: index + 1 }) : t(layer.label),
         }))}

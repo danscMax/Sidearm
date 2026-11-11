@@ -48,6 +48,8 @@ export const verificationScopeCopy: Array<{
 export const layerCopy: Array<{ value: Layer; label: string }> = [
   { value: "standard", label: "layer.standard" },
   { value: "hypershift", label: "layer.hypershift" },
+  { value: "hypershift2", label: "layer.hypershift2" },
+  { value: "hypershiftBoth", label: "layer.hypershiftBoth" },
 ];
 
 /** Single source of truth for action-type i18n KEYS. Both `editableActionTypes`

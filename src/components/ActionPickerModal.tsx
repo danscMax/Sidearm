@@ -5,7 +5,7 @@ import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/confi
 import { displayNameForControlId } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
-import { controlLayout, layoutControlId } from "../lib/devices";
+import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
 import { getNativeModel, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
 import { PillTrack } from "./PillTrack";
@@ -142,10 +142,15 @@ export function ActionPickerModal({
   const roleTab: Gesture = config.settings.hypershiftTap ? "longPress" : "press";
   const isCurrentTrigger = softwareTrigger && controlId === currentTrigger && gesture === roleTab;
   const canBeTrigger = softwareTrigger && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
+  // HyperShift 2 is per profile and only a held press (a quick press clicks).
+  const canBeTrigger2 = !!controlId && !!profileId && canBeHypershift2Trigger(config, controlId);
+  const isCurrentTrigger2 = canBeTrigger2 && gesture === "longPress"
+    && hypershift2ControlId(config, profileId, layout?.deviceId) === controlId;
   // A global modifier role is not an executable, profile-specific ActionType.
   const categories = [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
     ...(canBeTrigger && (gesture === "press" || gesture === "longPress") ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
+    ...(canBeTrigger2 && gesture === "longPress" ? [{ id: "hypershift2", icon: "H2", label: "picker.hypershift2", actionType: "hypershift2" }] : []),
     ...ACTION_CATEGORIES,
   ];
   // The mouse reports one key button at a time only with consumer signals; in
@@ -175,6 +180,7 @@ export function ActionPickerModal({
 
   const [activeCategory, setActiveCategory] = useState(() => {
     if (isCurrentTrigger) return "hypershift";
+    if (isCurrentTrigger2) return "hypershift2";
     if (existingAction) {
       return ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut";
     }
@@ -287,9 +293,16 @@ export function ActionPickerModal({
         settings: { ...config.settings, hypershiftTrigger: controlId as HypershiftTrigger, hypershiftTap: gesture === "longPress" },
       };
     }
+    if (effectiveCategory === "hypershift2") {
+      if (!canBeTrigger2 || !controlId || !profileId) return null;
+      return setHypershift2Trigger(config, profileId, controlId, true);
+    }
     let nextConfig = isCurrentTrigger
       ? { ...config, settings: { ...config.settings, hypershiftTrigger: "none" as const } }
       : config;
+    if (isCurrentTrigger2 && controlId && profileId) {
+      nextConfig = setHypershift2Trigger(nextConfig, profileId, controlId, false);
+    }
     if (effectiveCategory === "native") {
       return binding ? removeBinding(nextConfig, binding.id) : nextConfig;
     }
@@ -399,7 +412,7 @@ export function ActionPickerModal({
     }
   }
 
-  const roleCategory = effectiveCategory === "native" || effectiveCategory === "hypershift";
+  const roleCategory = effectiveCategory === "native" || effectiveCategory === "hypershift" || effectiveCategory === "hypershift2";
   const saveDisabled = roleCategory ? false : isSaveDisabled(effectiveCategory, drafts);
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [
@@ -409,7 +422,8 @@ export function ActionPickerModal({
   ].filter(Boolean);
   const advancedSummary = advancedTags.length > 0 ? advancedTags.join(" · ") : t("picker.advancedDefaults");
   const previewText = roleCategory
-    ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview" : "picker.nativePreview")
+    ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview"
+      : effectiveCategory === "hypershift2" ? "picker.hypershift2Preview" : "picker.nativePreview")
     : describeAction(effectiveCategory, drafts, t, config.profiles);
   const activeCat = categories.find((c) => c.id === effectiveCategory);
 
@@ -514,6 +528,12 @@ export function ActionPickerModal({
                   <Notice variant="warning">{t("picker.hypershiftReplace", { button: displayNameForControlId(currentTrigger) })}</Notice>
                 ) : null}
               </div>
+            ) : null}
+            {effectiveCategory === "hypershift2" ? (
+              <Notice variant="info">{t("picker.hypershift2Scope")}</Notice>
+            ) : null}
+            {isCurrentTrigger2 && effectiveCategory !== "hypershift2" ? (
+              <Notice variant="warning">{t("picker.hypershift2Remove")}</Notice>
             ) : null}
             {effectiveCategory === "native" ? (
               <Notice variant="info">{t("picker.nativeHint")}</Notice>

@@ -38,6 +38,8 @@
   --c-warning-light: #e7c46f;
   --c-info: #5c9add;
   --c-hypershift: #e8943a;
+  --c-hypershift2: #a57ee8;
+  --c-hypershift-both: #e05f8c;
   --radius-xs: 6px;
   --radius-sm: 8px;
   --radius-md: 10px;
@@ -445,6 +447,12 @@ select::checkmark {
 
 .pill-track__indicator--hypershift {
   background: var(--c-hypershift);
+}
+.pill-track__indicator--hypershift2 {
+  background: var(--c-hypershift2);
+}
+.pill-track__indicator--hypershiftBoth {
+  background: var(--c-hypershift-both);
 }
 
 .pill-track__pill {
@@ -1947,6 +1955,16 @@ input[type="radio"] {
   --layer-accent: var(--c-hypershift);
   --layer-rgb: 232, 148, 58;
   --layer-border-rgb: 255, 190, 100;
+}
+.mouse-visual-tabs[data-layer="hypershift2"] {
+  --layer-accent: var(--c-hypershift2);
+  --layer-rgb: 165, 126, 232;
+  --layer-border-rgb: 195, 165, 255;
+}
+.mouse-visual-tabs[data-layer="hypershiftBoth"] {
+  --layer-accent: var(--c-hypershift-both);
+  --layer-rgb: 224, 95, 140;
+  --layer-border-rgb: 255, 140, 180;
 }
 
 .mouse-visual-tabs__nav {
@@ -6516,6 +6534,16 @@ input[type="search"]::-webkit-search-decoration {
   color: var(--c-hypershift);
   background: rgba(232, 148, 58, 0.1);
   border: 1px solid rgba(232, 148, 58, 0.35);
+}
+.layer-badge--hypershift2 {
+  color: var(--c-hypershift2);
+  background: rgba(165, 126, 232, 0.1);
+  border: 1px solid rgba(165, 126, 232, 0.35);
+}
+.layer-badge--hypershiftBoth {
+  color: var(--c-hypershift-both);
+  background: rgba(224, 95, 140, 0.1);
+  border: 1px solid rgba(224, 95, 140, 0.35);
 }
 
 .search-field {

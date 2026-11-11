@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
 import { RAZER_NAGA_DEVICE_ID } from "../lib/config";
-import type { FamilySection, ViewState } from "../lib/constants";
+import { layerCopy, type FamilySection, type ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -44,8 +44,8 @@ import {
   findShortcutConflicts,
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
-import { displayNameForControl } from "../lib/labels";
-import { defaultLayout, deviceLayout } from "../lib/devices";
+import { displayNameForControl, labelForLayer } from "../lib/labels";
+import { defaultLayout, deviceLayers, deviceLayout } from "../lib/devices";
 import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
@@ -849,12 +849,11 @@ export function ProfilesWorkspace({
           {/* Both labels are rendered (the inactive one hidden) so the badge
               always reserves the width of the widest layer name — toggling the
               layer never shifts the search field beside it. */}
-          <span className="layer-badge__opt" aria-hidden={selectedLayer === "hypershift"}>
-            {t("layer.standard")}
-          </span>
-          <span className="layer-badge__opt" aria-hidden={selectedLayer !== "hypershift"}>
-            {t("layer.hypershift")}
-          </span>
+          {layerCopy.map((layer) => (
+            <span key={layer.value} className="layer-badge__opt" aria-hidden={selectedLayer !== layer.value}>
+              {t(layer.label)}
+            </span>
+          ))}
         </span>
         <span className="search-field">
           <svg className="search-field__icon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -916,7 +915,7 @@ export function ProfilesWorkspace({
                   >
                     <span className="profiles__search-result-profile">{r.profileName}</span>
                     <span className="profiles__search-result-meta">
-                      {(r.binding.layer === "hypershift" ? t("layer.hypershift") : t("layer.standard"))}
+                      {labelForLayer(r.binding.layer)}
                       {" · "}{r.controlName}{" · "}{r.binding.label}
                     </span>
                   </button>
@@ -1072,6 +1071,7 @@ export function ProfilesWorkspace({
               setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
             }
             onSelectLayer={onSelectLayer}
+            layers={deviceLayers(activeConfig, effectiveProfileId, activeDevice?.id, selectedLayer)}
             executionCounts={executionCounts}
             executionHistory={executionHistory}
             throttledControlIds={throttledControlIds}

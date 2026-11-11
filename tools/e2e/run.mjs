@@ -310,7 +310,7 @@ async function main() {
     console.log(`\n${passed}/${results.length} passed — FAILED. Logs: ${world.data}\\logs`);
   } else {
     await sleep(2000);
-    fs.rmSync(world.root, { recursive: true, force: true });
+    fs.rmSync(world.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     console.log(`\n${passed}/${results.length} passed.`);
   }
   process.exit(failed ? 1 : 0);

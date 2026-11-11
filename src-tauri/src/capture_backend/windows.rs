@@ -1828,9 +1828,13 @@ const HYPER2_COMMAND: &str = "HS2:";
 const HYPER2_CODES: [u8; 4] = [HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_MIDDLE, HYPER_TRIGGER_X1, HYPER_TRIGGER_X2];
 
 /// What a button event means for HyperShift 2: `Some(true)` the trigger goes
-/// down, `Some(false)` the held one comes up, `None` not the trigger.
+/// down, `Some(false)` the held one comes up, `None` not the trigger. A press
+/// of the button already marked held starts a fresh hold: its release was
+/// missed (the hook was dropped and reinstalled, the secure desktop took it),
+/// and passing the press through would leave its release swallowed — a right
+/// button stuck down.
 fn hypershift2_step(trigger: u8, held: u8, button: u8, is_down: bool) -> Option<bool> {
-    if is_down && held == HYPER_TRIGGER_OFF && trigger != HYPER_TRIGGER_OFF && button == trigger {
+    if is_down && button != HYPER_TRIGGER_OFF && (button == trigger || button == held) {
         Some(true)
     } else if !is_down && held != HYPER_TRIGGER_OFF && button == held {
         Some(false)
@@ -1903,12 +1907,24 @@ fn install_hypershift2_switch(
         return;
     }
     drop(switch);
-    let manual = runtime_store.lock().ok().and_then(|store| store.manual_profile_override().map(str::to_owned));
-    if let Ok(result) = window_capture::capture_active_window_with_resolution_with_override(config, "", None, manual.as_deref())
-        && !result.ignored
-    {
-        follow_profile_hypershift2(result.resolved_profile_id.as_deref());
-    }
+    // A profile chosen by hand, else the window in front, else (Sidearm's own
+    // window in front, as after a save) the last window seen.
+    let (manual, last) = runtime_store
+        .lock()
+        .ok()
+        .map(|store| {
+            let last = store.last_foreground_window().and_then(|result| result.resolved_profile_id.clone());
+            (store.manual_profile_override().map(str::to_owned), last)
+        })
+        .unwrap_or_default();
+    let profile = manual.or_else(|| {
+        window_capture::capture_active_window_with_resolution_with_override(config, "", None, None)
+            .ok()
+            .filter(|result| !result.ignored)
+            .and_then(|result| result.resolved_profile_id)
+            .or(last)
+    });
+    follow_profile_hypershift2(profile.as_deref());
 }
 
 /// Turns the HyperShift 2 trigger on or off for the profile now in effect.
@@ -2286,6 +2302,9 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData) {
             let trigger2 = if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) };
             if let Some(held) = hypershift2_step(trigger2, held2, button, is_down) {
+                if is_down && HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
+                    HELPER_HYPER_USED.store(true, Ordering::Relaxed);
+                }
                 return HyperMouseAction::SetTrigger2Held(button, held);
             }
             if held2 != HYPER_TRIGGER_OFF && is_down {
@@ -2569,6 +2588,10 @@ mod mouse_hook_tests {
         assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false), Some(false));
         // A release without its press (held before the profile had it) is not ours.
         assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, false), None);
+        // Its release was missed: the next press starts a fresh hold, never
+        // passes through (its release would be swallowed — stuck down).
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true), Some(true));
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, true), Some(true));
         assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true), None);
     }
 
@@ -4149,8 +4172,9 @@ fn spawn_capture_helper(
         hypershift_trigger_code(&config.settings.hypershift_trigger)
     };
     // The mouse whose native button is some profile's HyperShift 2 trigger.
-    // shortcut: one such mouse at a time (the hook cannot tell two apart);
-    // a second would need raw input to attribute the button.
+    // shortcut: the hook cannot tell pointing devices apart, so one such mouse
+    // at a time, and in a profile with the trigger every mouse's and touchpad's
+    // button of that kind is the trigger; raw input could attribute it.
     let hypershift2 = if crate::fake_mode() {
         None
     } else {

@@ -998,6 +998,8 @@ fn run_fire_and_forget(
                 && let Ok(mut store) = runtime_store.lock()
             {
                 store.set_manual_profile_override(Some(p.target_profile_id.clone()));
+                drop(store);
+                follow_manual_profile(&p.target_profile_id);
             }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
         }
@@ -1016,6 +1018,15 @@ fn run_fire_and_forget(
 /// Emit the resolved-profile event and, when the active profile changed, show
 /// the OSD. Shared by the manual key-event path and the per-OS foreground
 /// watchers (the tail was previously copied in mod.rs, windows.rs, linux.rs).
+/// A profile chosen by hand (tray, ProfileSwitch action): the HyperShift 2
+/// trigger follows it at once, without waiting for a window change.
+pub(crate) fn follow_manual_profile(profile_id: &str) {
+    #[cfg(target_os = "windows")]
+    windows::follow_profile_hypershift2(Some(profile_id));
+    #[cfg(not(target_os = "windows"))]
+    let _ = profile_id;
+}
+
 pub(crate) fn emit_profile_resolved_and_notify(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,

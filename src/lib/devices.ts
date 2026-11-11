@@ -193,6 +193,24 @@ export function deviceLayers(config: AppConfig, profileId: string | null | undef
   return extra ? ["standard", "hypershift", "hypershift2", "hypershiftBoth"] : ["standard", "hypershift"];
 }
 
+/** Whether any enabled binding of a real action sits on a device's controls. */
+function hasAssignments(config: AppConfig, deviceId: string): boolean {
+  const controls = new Set(config.physicalControls.filter((control) => control.deviceId === deviceId).map((control) => control.id));
+  return config.bindings.some((binding) => binding.enabled && controls.has(binding.controlId)
+    && config.actions.some((action) => action.id === binding.actionId && action.type !== "disabled"));
+}
+
+/** The connected built-in mouse to greet: in the config, nothing assigned to
+ *  it yet, not dismissed; with another built-in mouse to copy from if one has
+ *  assignments. */
+export function newMouseNotice(config: AppConfig, connected: readonly string[], dismissed: readonly string[]) {
+  const mice = config.devices.filter((device) => device.builtin && deviceLayout(device.id));
+  const device = mice.find((mouse) => connected.includes(mouse.id) && !dismissed.includes(mouse.id) && !hasAssignments(config, mouse.id));
+  if (!device) return null;
+  const copyFrom = mice.find((mouse) => mouse.id !== device.id && hasAssignments(config, mouse.id)) ?? null;
+  return { device, copyFrom };
+}
+
 /** Whether a built-in device of this id is in the config. */
 export function hasDevice(config: AppConfig, deviceId: string): boolean {
   return config.devices.some((device) => device.id === deviceId);

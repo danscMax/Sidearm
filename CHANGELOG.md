@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - HyperShift on a held button: put the HyperShift role on the "Hold" tab of a button (the right
   button, say) and a quick press stays its normal click, while holding it opens the HyperShift
   layer. Each button can also have its own hold, double and triple press action.
+- A newly connected mouse with no assignments says so and offers to copy another mouse's
+  assignments or to run the setup.
 - HyperShift 2 on the V3 Pro's right button, per profile: on the "Hold" tab of the right
   button choose "HyperShift 2 · hold". While it is held the V3's buttons use the HyperShift 2
   layer (with the ring-finger HyperShift held too, the "HS + HS2" layer); a quick press is a

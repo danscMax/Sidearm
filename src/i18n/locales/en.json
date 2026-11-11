@@ -874,7 +874,7 @@
     "hypershiftRemove": "Saving a different function here will turn off this HyperShift modifier in all profiles.",
     "hypershiftPreview": "Hold to activate HyperShift · all profiles",
     "hypershift2": "HyperShift 2 · hold",
-    "hypershift2Scope": "This profile only. While this button is held, this mouse's buttons use the HyperShift 2 layer (with HyperShift held too, the HS + HS2 layer). A quick press with nothing else pressed is an ordinary click. While held, the button itself is not pressed in Windows: dragging or holding with it does not work in this profile.",
+    "hypershift2Scope": "This profile only. While this button is held, this mouse's buttons use the HyperShift 2 layer (with HyperShift held too, the HS + HS2 layer). A quick press with nothing else pressed is an ordinary click. While held, the button itself is not pressed in Windows: dragging or holding with it does not work in this profile. Windows does not tell which mouse a right button came from, so other mice's and the touchpad's right button behave the same way.",
     "hypershift2Remove": "Saving a different function here will turn off HyperShift 2 on this button in this profile.",
     "hypershift2Preview": "Hold to activate HyperShift 2 · this profile",
     "title": "Assign action",
@@ -1653,6 +1653,12 @@
     "system": {
       "restoringMouse": "Sidearm is restoring the mouse buttons"
     }
+  },
+  "newMouse": {
+    "message": "{{name}} is connected. It has no assignments yet, so its side buttons do nothing.",
+    "copy": "Copy assignments from {{name}}",
+    "setup": "Run the setup",
+    "later": "Hide"
   },
   "transfer": {
     "open": "Copy from another mouse",

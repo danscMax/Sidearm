@@ -72,6 +72,9 @@ export interface ProfilesWorkspaceProps {
   effectiveProfileId: string | null;
   addRuleSignal: boolean;
   onAddRuleHandled: () => void;
+  /** Open "Copy from another mouse" onto the mouse shown (new-mouse notice). */
+  transferSignal: boolean;
+  onTransferHandled: () => void;
   ruleSignal: RuleSignal | null;
   onRuleSignalHandled: () => void;
   /** Every profile's rule cards (the sidebar's "All rules"). */
@@ -118,6 +121,8 @@ export function ProfilesWorkspace({
   effectiveProfileId,
   addRuleSignal,
   onAddRuleHandled,
+  transferSignal,
+  onTransferHandled,
   ruleSignal,
   onRuleSignalHandled,
   allProfilesView,
@@ -191,6 +196,7 @@ export function ProfilesWorkspace({
   // One-shot signal: a just-created device opens its inline rename (U10).
   const [renameFreshDevice, setRenameFreshDevice] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [transferAll, setTransferAll] = useState(false);
   // A built-in mouse has three tabs: its buttons, its performance, its memory.
   const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory">("buttons");
   // Bumped after a write from the Performance tab so the mouse cards re-read.
@@ -382,6 +388,14 @@ export function ProfilesWorkspace({
       onAddRuleHandled();
     }
   }, [addRuleSignal]);
+
+  useEffect(() => {
+    if (transferSignal) {
+      setTransferAll(true);
+      setShowTransfer(true);
+      onTransferHandled();
+    }
+  }, [transferSignal]);
 
   useEffect(() => {
     if (ruleSignal) {
@@ -1170,10 +1184,12 @@ export function ProfilesWorkspace({
           config={activeConfig}
           activeDeviceId={activeDevice?.id ?? null}
           activeProfileId={activeProfile?.id ?? null}
-          onClose={() => setShowTransfer(false)}
+          allProfiles={transferAll}
+          onClose={() => { setShowTransfer(false); setTransferAll(false); }}
           onApply={(next, copied) => {
             updateDraft(() => next);
             setShowTransfer(false);
+            setTransferAll(false);
             showToast(t("transfer.done", { count: copied }), "success");
           }}
         />

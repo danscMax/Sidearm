@@ -28,6 +28,7 @@ import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { SynapseNotice } from "./components/SynapseNotice";
+import { NewMouseNotice } from "./components/NewMouseNotice";
 import { ProfilesWorkspace, type RuleSignal } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
@@ -553,6 +554,7 @@ function App() {
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
+  const [transferSignal, setTransferSignal] = useState(false);
   // A rule chosen in the sidebar: opened in the assignments screen's editor,
   // or its menu at the click point (`at`).
   const [ruleSignal, setRuleSignal] = useState<RuleSignal | null>(null);
@@ -1163,6 +1165,8 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 addRuleSignal={addRuleSignal}
                 onAddRuleHandled={() => setAddRuleSignal(false)}
+                transferSignal={transferSignal}
+                onTransferHandled={() => setTransferSignal(false)}
                 ruleSignal={ruleSignal}
                 onRuleSignalHandled={() => setRuleSignal(null)}
                 allProfilesView={allRulesView}
@@ -1367,6 +1371,15 @@ function App() {
         <SynapseNotice
           enabled={runtimeSummary.status === "running" && !!activeConfig?.devices.some((device) => device.builtin)}
           hypershiftTrigger={activeConfig?.settings.hypershiftTrigger ?? "mouse_right"}
+        />
+        <NewMouseNotice
+          config={activeConfig}
+          onCopy={(deviceId) => {
+            setActiveDeviceId(deviceId);
+            setWorkspaceMode("profiles");
+            setTransferSignal(true);
+          }}
+          onSetup={() => setShowOnboarding(true)}
         />
         <Toast toast={toasts[0] ?? null} onDismiss={() => setToasts((current) => current.slice(1))} />
       </div>

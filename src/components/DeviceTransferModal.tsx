@@ -12,19 +12,21 @@ interface DeviceTransferModalProps {
   /** The mouse shown now: the default target. */
   activeDeviceId: string | null;
   activeProfileId: string | null;
+  /** Start with every profile selected (a new mouse takes them all). */
+  allProfiles?: boolean;
   onApply: (next: AppConfig, copied: number) => void;
   onClose: () => void;
 }
 
 /** Copies assignments from one built-in mouse to another, with a preview of
  *  what is copied and what is left out. */
-export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, onApply, onClose }: DeviceTransferModalProps) {
+export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, allProfiles, onApply, onClose }: DeviceTransferModalProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const mice = config.devices.filter((device) => device.builtin && deviceLayout(device.id));
   const [to, setTo] = useState(mice.find((device) => device.id === activeDeviceId)?.id ?? mice[mice.length - 1]?.id ?? "");
   const [from, setFrom] = useState(mice.find((device) => device.id !== to)?.id ?? "");
-  const [scope, setScope] = useState<"profile" | "all">(activeProfileId ? "profile" : "all");
+  const [scope, setScope] = useState<"profile" | "all">(activeProfileId && !allProfiles ? "profile" : "all");
   const [conflict, setConflict] = useState<TransferConflict>("keep");
 
   const profileIds = scope === "all" || !activeProfileId ? config.profiles.map((profile) => profile.id) : [activeProfileId];

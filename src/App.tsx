@@ -28,6 +28,7 @@ import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
 import { SynapseImportModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { SynapseNotice } from "./components/SynapseNotice";
+import { NewMouseNotice } from "./components/NewMouseNotice";
 import { ProfilesWorkspace, type RuleSignal } from "./components/ProfilesWorkspace";
 import { SettingsWorkspace, type SettingsDeepLink } from "./components/SettingsWorkspace";
 import { ErrorPanel } from "./components/shared";
@@ -66,7 +67,7 @@ import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
 import { isBuiltinControl } from "./lib/onboard-mapping";
-import { deviceControlId, deviceLayout, hasDevice, hypershiftControlId } from "./lib/devices";
+import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
@@ -91,6 +92,7 @@ import type {
 } from "./lib/runtime";
 import {
   controlFamilyOrder,
+  FALLBACK_LAYERS,
   sideViewHotspots,
   topViewHotspots,
   workspaceModeCopy,
@@ -553,6 +555,7 @@ function App() {
   // Cross-component "open the add-rule dialog" request from the command palette.
   // ProfilesWorkspace consumes it on mount/change and calls back to reset.
   const [addRuleSignal, setAddRuleSignal] = useState(false);
+  const [transferSignal, setTransferSignal] = useState(false);
   // A rule chosen in the sidebar: opened in the assignments screen's editor,
   // or its menu at the click point (`at`).
   const [ruleSignal, setRuleSignal] = useState<RuleSignal | null>(null);
@@ -1019,6 +1022,18 @@ function App() {
       ),
     [activeConfig, effectiveProfileId, selectedLayer],
   );
+  // What an empty control plays on a HyperShift layer: the most specific
+  // layer below with an enabled plain press (as the resolver falls back).
+  const fallbackFor = (controlId: ControlId): { action: Action; layer: Layer } | null => {
+    if (!activeConfig) return null;
+    for (const layer of FALLBACK_LAYERS[selectedLayer]) {
+      const binding = activeConfig.bindings.find((b) => b.profileId === effectiveProfileId && b.layer === layer
+        && b.controlId === controlId && b.enabled && gestureOf(b.triggerMode) === "press");
+      const action = binding ? actionById.get(binding.actionId) : undefined;
+      if (action && action.type !== "disabled") return { action, layer };
+    }
+    return null;
+  };
   const encoderByControlId = useMemo(
     () =>
       new Map<ControlId, EncoderMapping>(
@@ -1074,7 +1089,10 @@ function App() {
                   : encoderByControlId.get(control.id) ?? null,
                 isSelected: control.id === selectedControlId,
                 isHypershiftTrigger: isBuiltinControl(activeConfig, control.id)
-                  && control.id === hypershiftControlId(activeConfig, control.deviceId),
+                  && (control.id === hypershiftControlId(activeConfig, control.deviceId)
+                    || control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId)),
+                isHypershift2Trigger: control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId),
+                fallback: fallbackFor(control.id),
               };
             }) ?? [],
       })),
@@ -1163,6 +1181,8 @@ function App() {
                 effectiveProfileId={effectiveProfileId}
                 addRuleSignal={addRuleSignal}
                 onAddRuleHandled={() => setAddRuleSignal(false)}
+                transferSignal={transferSignal}
+                onTransferHandled={() => setTransferSignal(false)}
                 ruleSignal={ruleSignal}
                 onRuleSignalHandled={() => setRuleSignal(null)}
                 allProfilesView={allRulesView}
@@ -1367,6 +1387,15 @@ function App() {
         <SynapseNotice
           enabled={runtimeSummary.status === "running" && !!activeConfig?.devices.some((device) => device.builtin)}
           hypershiftTrigger={activeConfig?.settings.hypershiftTrigger ?? "mouse_right"}
+        />
+        <NewMouseNotice
+          config={activeConfig}
+          onCopy={(deviceId) => {
+            setActiveDeviceId(deviceId);
+            setWorkspaceMode("profiles");
+            setTransferSignal(true);
+          }}
+          onSetup={() => setShowOnboarding(true)}
         />
         <Toast toast={toasts[0] ?? null} onDismiss={() => setToasts((current) => current.slice(1))} />
       </div>

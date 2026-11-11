@@ -23,7 +23,8 @@
         3,
         4,
         5,
-        6
+        6,
+        7
       ]
     },
     "settings": {
@@ -99,7 +100,9 @@
       "type": "string",
       "enum": [
         "standard",
-        "hypershift"
+        "hypershift",
+        "hypershift2",
+        "hypershiftBoth"
       ]
     },
     "controlFamily": {
@@ -347,6 +350,11 @@
             "minimum": 1,
             "maximum": 5
           }
+        },
+        "hypershift2Triggers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/controlId" },
+          "description": "This profile's HyperShift 2 triggers, at most one per mouse: held, that mouse's buttons play the hypershift2 layer; let go with nothing pressed meanwhile, it clicks."
         },
         "deviceMouse": {
           "type": "object",

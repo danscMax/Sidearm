@@ -18,8 +18,11 @@ const EXE = path.join(TARGET, "debug", "sidearm.exe");
 const V2 = "razer-naga";
 const V3 = "razer-naga-v3";
 
-// V3 signals: `live_overlay::USAGES[2 * control index + layer]`; the thumbs come first.
+// Live-map signals: `live_overlay::USAGES[2 * control index + layer]`; the thumbs come first.
 const v3Usage = (thumb, layer) => 0x10 + 2 * (thumb - 1) + layer;
+const v2Usage = v3Usage;
+// Mouse-hook button codes (`HYPER_TRIGGER_*` in capture_backend/windows.rs).
+const RIGHT = 2;
 
 const results = [];
 let failed = false;
@@ -85,11 +88,19 @@ class World {
     }
   }
 
-  report(device, usage) {
+  /** One consumer report: the usages held now. The V2 reports one key button
+   *  at a time (measured: a second press releases the first). */
+  report(device, ...usages) {
+    if (device === V2 && usages.length > 1) throw new Error("the V2 reports one button at a time");
     const report = Buffer.alloc(8);
     report[0] = 0x02;
-    report.writeUInt16LE(usage, 1);
+    usages.forEach((usage, index) => report.writeUInt16LE(usage, 1 + 2 * index));
     this.pipes[device].socket?.write(report);
+  }
+
+  /** A native mouse button as the mouse hook would see it (fake-mice report 0x7F). */
+  nativeButton(device, button, down) {
+    this.pipes[device].socket?.write(Buffer.from([0x7f, button, down ? 1 : 0, 0, 0, 0, 0, 0]));
   }
 
   async press(device, usage, holdMs = 60) {
@@ -170,6 +181,15 @@ const bankRecords = (state, bank) => state.records.filter(([b]) => b === bank);
 function addBindings(config) {
   // Every profile: which one applies follows the foreground window.
   for (const profile of config.profiles.map((p) => p.id)) addProfileBindings(config, profile);
+  for (const profile of config.profiles) profile.hypershift2Triggers = ["v3_mouse_right"];
+  // A profile without HyperShift 2, reached by thumb 6 (ProfileSwitch).
+  config.profiles.push({ id: "e2e-plain", name: "E2E plain", enabled: true, priority: 99 });
+  for (const profile of config.profiles.filter((p) => p.id !== "e2e-plain")) {
+    const actionId = `e2e-${profile.id}-switch`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    config.bindings = config.bindings.filter((b) => !(b.profileId === profile.id && b.controlId === "v3_thumb_06"));
+    config.actions.push({ id: actionId, type: "profileSwitch", displayName: "E2E switch", payload: { targetProfileId: "e2e-plain" } });
+    config.bindings.push({ id: `${actionId}-binding`, profileId: profile.id, layer: "standard", controlId: "v3_thumb_06", label: "E2E switch", actionId, enabled: true });
+  }
   // The default profile lives in V3 bank 1 (written at exit).
   const fallback = config.profiles.find((p) => p.id === config.settings.fallbackProfileId);
   fallback.deviceSlots = { ...(fallback.deviceSlots ?? {}), [V3]: 1 };
@@ -184,6 +204,14 @@ function addProfileBindings(config, profile) {
     ["v3_thumb_02", "standard", "doublePress", "H"],
     ["v3_thumb_03", "standard", undefined, "L"],
     ["v3_thumb_03", "hypershift", undefined, "K"],
+    // Bound only on the HyperShift 2 layer: still needs its live-map signal.
+    ["v3_wheel_click", "hypershift2", undefined, "M"],
+    ["v3_thumb_04", "standard", undefined, "P"],
+    ["v3_thumb_04", "hypershift2", undefined, "N"],
+    ["v3_thumb_04", "hypershiftBoth", undefined, "O"],
+    // The V2: a hold-to-release check.
+    ["thumb_01", "standard", undefined, "Q"],
+    ["thumb_02", "standard", undefined, "R"],
   ];
   const controls = new Set(ours.map(([control]) => control));
   config.bindings = config.bindings.filter((b) => !(b.profileId === profile && controls.has(b.controlId)));
@@ -229,6 +257,8 @@ async function main() {
     check("V3 live map written", await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000, mark));
     check("V2 live map written", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 30000, mark));
     check("V3 file holds the live map", liveRecords(world.mouse(V3)).length > 0);
+    const wheelClick = liveRecords(world.mouse(V3)).find(([, button, layer]) => button === 0x03 && layer === 0);
+    check("a HyperShift 2-only button gets a signal", wheelClick?.[3]?.[0] === 0x0a, JSON.stringify(wheelClick));
     await sleep(1500);
 
     // 2. A plain press dispatches its action (simulated).
@@ -268,6 +298,50 @@ async function main() {
     check("live-map repair waits for a held button", waited);
     check("…and repairs after the release", await world.waitFor(() => world.log(), /repaired \d+ of \d+ live assignments/, 15000, mark));
 
+    // 5b. The V2 reports one button at a time: a second press releases the first.
+    mark = world.log().length;
+    world.report(V2, v2Usage(1, 0));
+    await sleep(150);
+    world.report(V2, v2Usage(2, 0));
+    await sleep(150);
+    world.report(V2);
+    const v2Order = await world.waitFor(() => world.log(), (t) => {
+      const lines = t.split(/\r?\n/);
+      const firstUp = lines.findIndex((line) => line.includes("Key-up received"));
+      const secondDown = lines.findIndex((line, i) => i > 0 && line.includes("Key-down received") && lines.slice(0, i).some((l) => l.includes("Key-down received")));
+      return firstUp >= 0 && secondDown > firstUp;
+    }, 5000, mark);
+    check("V2: a second button releases the first", v2Order);
+
+    // 5c. HyperShift 2 on the V3's right button (the mouse hook's path, fed by the pipe).
+    check("HyperShift 2 trigger sent for the profile", /HyperShift 2 trigger for this profile: 2/.test(world.log()));
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(100);
+    await world.press(V3, v3Usage(4, 0));
+    world.nativeButton(V3, RIGHT, false);
+    check("right held + thumb → HyperShift 2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_04", "hypershift2"), 5000, mark));
+    await sleep(500);
+    check("…and the used trigger does not click", !/HyperShift 2 click/.test(world.log().slice(mark)));
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(80);
+    world.nativeButton(V3, RIGHT, false);
+    check("a quick right press clicks", await world.waitFor(() => world.log(), /HyperShift 2 click \(simulated, button 2\)/, 5000, mark));
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(100);
+    await world.press(V3, v3Usage(4, 1)); // the ring button's firmware layer
+    world.nativeButton(V3, RIGHT, false);
+    check("right + ring + thumb → HS + HS2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_04", "hypershiftBoth"), 5000, mark));
+    mark = world.log().length;
+    await world.press(V3, v3Usage(6, 0));
+    check("a profile without HyperShift 2 turns it off", await world.waitFor(() => world.log(), /HyperShift 2 trigger for this profile: 0/, 5000, mark));
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    world.nativeButton(V3, RIGHT, false);
+    check("…and the right button passes through", await world.waitFor(() => world.log(), /native button 2 down passed through/, 5000, mark));
+
     // 6. Quit: offline profiles in both mice, live maps restored, clean exit.
     mark = world.log().length;
     check("quit ends the app", await world.quit());
@@ -306,7 +380,7 @@ async function main() {
     console.log(`\n${passed}/${results.length} passed — FAILED. Logs: ${world.data}\\logs`);
   } else {
     await sleep(2000);
-    fs.rmSync(world.root, { recursive: true, force: true });
+    fs.rmSync(world.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
     console.log(`\n${passed}/${results.length} passed.`);
   }
   process.exit(failed ? 1 : 0);

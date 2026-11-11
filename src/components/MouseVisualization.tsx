@@ -36,6 +36,7 @@ export function MouseVisualization({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  layers,
   onContextMenu,
   executionCounts,
   executionHistory,
@@ -89,6 +90,7 @@ export function MouseVisualization({
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          layers={layers}
           onContextMenu={onContextMenu}
           executionCounts={executionCounts}
           executionHistory={executionHistory}
@@ -153,7 +155,11 @@ export function MouseVisualization({
           {...getInteractionProps(entry.control.id)}
         >
           {resolveControlBadge(pos.label)}
-          {entry.isHypershiftTrigger && !layout.firmwareTrigger && <span className="mouse-visual__assignment" aria-hidden="true">{t("visualization.hypershiftBadge")}</span>}
+          {entry.isHypershiftTrigger && (entry.isHypershift2Trigger || !layout.firmwareTrigger) && (
+            <span className="mouse-visual__assignment" aria-hidden="true">
+              {t(entry.isHypershift2Trigger ? "visualization.hypershift2Badge" : "visualization.hypershiftBadge")}
+            </span>
+          )}
         </button>
       );
     });
@@ -172,7 +178,7 @@ export function MouseVisualization({
         interaction={interaction}
         multiSelectedControlIds={multiSelectedControlIds}
         badgeFor={(id) => resolveControlBadge(hotspots[layoutControlId(id)]?.label ?? layoutControlId(id))}
-        actionLabelFor={(entry) => layout.firmwareTrigger && entry.isHypershiftTrigger
+        actionLabelFor={(entry) => layout.firmwareTrigger && entry.isHypershiftTrigger && !entry.isHypershift2Trigger
           ? t("visualization.firmwareHypershift")
           : actionLabel(entry, { triggerLabels })}
         unassignedLabel={t("visualization.unassigned")}
@@ -317,7 +323,7 @@ export function MouseVisualization({
         )}
       </div>
 
-      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} />
+      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} layers={layers} />
     </div>
   );
 }

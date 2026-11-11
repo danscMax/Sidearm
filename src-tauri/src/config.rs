@@ -17,7 +17,7 @@ const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -318,6 +318,12 @@ pub struct Profile {
     /// moved here on load (`migrate_mouse_settings`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_mouse: Option<std::collections::BTreeMap<String, MouseOverrides>>,
+    /// This profile's HyperShift 2 triggers, one per mouse at most (a control
+    /// id names its mouse; a native button the mouse still reports): held,
+    /// that mouse's buttons play the `hypershift2` layer; let go with nothing
+    /// pressed meanwhile, it clicks. Other profiles keep the button as it is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hypershift2_triggers: Vec<String>,
 }
 
 /// A mouse's own settings within a profile; absent fields leave the mouse as it is.
@@ -499,6 +505,11 @@ pub struct PhysicalControl {
 pub enum Layer {
     Standard,
     Hypershift,
+    /// While a mouse's HyperShift 2 trigger is held (`Profile.hypershift2_triggers`).
+    Hypershift2,
+    /// While both HyperShift triggers of a mouse are held.
+    #[serde(rename = "hypershiftBoth")]
+    HypershiftBoth,
 }
 
 impl Layer {
@@ -506,6 +517,8 @@ impl Layer {
         match self {
             Self::Standard => "standard",
             Self::Hypershift => "hypershift",
+            Self::Hypershift2 => "hypershift2",
+            Self::HypershiftBoth => "hypershiftBoth",
         }
     }
 }
@@ -1019,7 +1032,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=5) {
+    if matches!(config.version, 2..=6) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -3261,7 +3274,7 @@ fn profile(id: &str, name: &str, priority: i32, description: Option<&str>) -> Pr
         description: description.map(str::to_owned),
         enabled: true,
         priority,
-        mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+        mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
     }
 }
 
@@ -3900,7 +3913,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (6, 0x5e32_a1d9_f1f1_3cfc);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (7, 0xc323_3040_ca0a_77af);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -4118,7 +4131,7 @@ mod edge_proptests {
             description: None,
             enabled: true,
             priority: 0,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
         }];
         cfg.settings.fallback_profile_id = "p1".into();
         cfg.app_mappings = vec![];
@@ -4276,7 +4289,7 @@ mod edge_proptests {
             description: Some("desc".into()),
             enabled: false,
             priority: i32::MAX,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
         };
         let json = serde_json::to_string(&p).unwrap();
         let back: Profile = serde_json::from_str(&json).unwrap();
@@ -4390,7 +4403,7 @@ mod edge_proptests {
                 description: None,
                 enabled: true,
                 priority,
-                mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+                mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
             };
             let json = serde_json::to_string(&p).unwrap();
             let back: Profile = serde_json::from_str(&json).unwrap();
@@ -4521,7 +4534,7 @@ mod edge_proptests {
                     description: None,
                     enabled: true,
                     priority: i as i32,
-                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
                 })
                 .collect();
             cfg.settings.fallback_profile_id = "p0".into();

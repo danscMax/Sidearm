@@ -4,6 +4,7 @@ import { ModalShell } from "./shared";
 import { useListKeyboard } from "../hooks/useListKeyboard";
 import { filterPaletteResults } from "../lib/command-palette-helpers";
 import type { Action, Binding, SnippetLibraryItem } from "../lib/config";
+import { labelForLayer } from "../lib/labels";
 
 /* ─────────────────────────────────────────────────────────
    Command Palette — commands + cross-profile bindings/snippets
@@ -79,7 +80,7 @@ export function CommandPalette({
 
   const layerLabel = useCallback(
     (layer: Binding["layer"]) =>
-      layer === "hypershift" ? t("layer.hypershift") : t("layer.standard"),
+      labelForLayer(layer),
     [t],
   );
 

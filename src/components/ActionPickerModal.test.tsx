@@ -7,6 +7,7 @@ import { ensurePlaceholderBinding, makeActionId, makeBindingId } from "../lib/co
 
 vi.mock("../lib/backend", () => ({
   getNativeModel: vi.fn().mockResolvedValue({ consumerSignals: false }),
+  listNativeMice: vi.fn().mockResolvedValue([]),
   liveTestAction: vi.fn(), listenEncodedKeyEvent: vi.fn(), normalizeCommandError: vi.fn(),
 }));
 afterEach(cleanup);

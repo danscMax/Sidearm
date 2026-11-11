@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
 import { RAZER_NAGA_DEVICE_ID } from "../lib/config";
-import type { FamilySection, ViewState } from "../lib/constants";
+import { layerCopy, type FamilySection, type ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -44,8 +44,8 @@ import {
   findShortcutConflicts,
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
-import { displayNameForControl } from "../lib/labels";
-import { defaultLayout, deviceLayout } from "../lib/devices";
+import { displayNameForControl, labelForLayer } from "../lib/labels";
+import { defaultLayout, deviceLayers, deviceLayout } from "../lib/devices";
 import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
@@ -72,6 +72,9 @@ export interface ProfilesWorkspaceProps {
   effectiveProfileId: string | null;
   addRuleSignal: boolean;
   onAddRuleHandled: () => void;
+  /** Open "Copy from another mouse" onto the mouse shown (new-mouse notice). */
+  transferSignal: boolean;
+  onTransferHandled: () => void;
   ruleSignal: RuleSignal | null;
   onRuleSignalHandled: () => void;
   /** Every profile's rule cards (the sidebar's "All rules"). */
@@ -118,6 +121,8 @@ export function ProfilesWorkspace({
   effectiveProfileId,
   addRuleSignal,
   onAddRuleHandled,
+  transferSignal,
+  onTransferHandled,
   ruleSignal,
   onRuleSignalHandled,
   allProfilesView,
@@ -191,6 +196,7 @@ export function ProfilesWorkspace({
   // One-shot signal: a just-created device opens its inline rename (U10).
   const [renameFreshDevice, setRenameFreshDevice] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [transferAll, setTransferAll] = useState(false);
   // A built-in mouse has three tabs: its buttons, its performance, its memory.
   const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory">("buttons");
   // Bumped after a write from the Performance tab so the mouse cards re-read.
@@ -382,6 +388,14 @@ export function ProfilesWorkspace({
       onAddRuleHandled();
     }
   }, [addRuleSignal]);
+
+  useEffect(() => {
+    if (transferSignal) {
+      setTransferAll(true);
+      setShowTransfer(true);
+      onTransferHandled();
+    }
+  }, [transferSignal]);
 
   useEffect(() => {
     if (ruleSignal) {
@@ -849,12 +863,11 @@ export function ProfilesWorkspace({
           {/* Both labels are rendered (the inactive one hidden) so the badge
               always reserves the width of the widest layer name — toggling the
               layer never shifts the search field beside it. */}
-          <span className="layer-badge__opt" aria-hidden={selectedLayer === "hypershift"}>
-            {t("layer.standard")}
-          </span>
-          <span className="layer-badge__opt" aria-hidden={selectedLayer !== "hypershift"}>
-            {t("layer.hypershift")}
-          </span>
+          {layerCopy.map((layer) => (
+            <span key={layer.value} className="layer-badge__opt" aria-hidden={selectedLayer !== layer.value}>
+              {t(layer.label)}
+            </span>
+          ))}
         </span>
         <span className="search-field">
           <svg className="search-field__icon" width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -916,7 +929,7 @@ export function ProfilesWorkspace({
                   >
                     <span className="profiles__search-result-profile">{r.profileName}</span>
                     <span className="profiles__search-result-meta">
-                      {(r.binding.layer === "hypershift" ? t("layer.hypershift") : t("layer.standard"))}
+                      {labelForLayer(r.binding.layer)}
                       {" · "}{r.controlName}{" · "}{r.binding.label}
                     </span>
                   </button>
@@ -1072,6 +1085,7 @@ export function ProfilesWorkspace({
               setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
             }
             onSelectLayer={onSelectLayer}
+            layers={deviceLayers(activeConfig, effectiveProfileId, activeDevice?.id, selectedLayer)}
             executionCounts={executionCounts}
             executionHistory={executionHistory}
             throttledControlIds={throttledControlIds}
@@ -1170,10 +1184,12 @@ export function ProfilesWorkspace({
           config={activeConfig}
           activeDeviceId={activeDevice?.id ?? null}
           activeProfileId={activeProfile?.id ?? null}
-          onClose={() => setShowTransfer(false)}
+          allProfiles={transferAll}
+          onClose={() => { setShowTransfer(false); setTransferAll(false); }}
           onApply={(next, copied) => {
             updateDraft(() => next);
             setShowTransfer(false);
+            setTransferAll(false);
             showToast(t("transfer.done", { count: copied }), "success");
           }}
         />

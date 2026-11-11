@@ -1,4 +1,4 @@
-export type Layer = "standard" | "hypershift";
+export type Layer = "standard" | "hypershift" | "hypershift2" | "hypershiftBoth";
 
 export type ControlFamily = "thumbGrid" | "topPanel" | "wheel" | "system";
 
@@ -98,6 +98,8 @@ export interface Profile {
   deviceSlots?: Record<string, number>;
   /** Each mouse's own DPI / poll rate / stages with this profile, by device id. */
   deviceMouse?: Record<string, MouseOverrides>;
+  /** This profile's HyperShift 2 triggers, at most one per mouse (control ids). */
+  hypershift2Triggers?: ControlId[];
 }
 
 /** A mouse's own settings within a profile; absent fields leave the mouse as it is. */

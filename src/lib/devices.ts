@@ -1,4 +1,4 @@
-import type { AppConfig, ControlId } from "./config";
+import type { AppConfig, ControlId, Layer } from "./config";
 import { RAZER_NAGA_DEVICE_ID } from "./config";
 import {
   combinedViewHotspots,
@@ -22,6 +22,9 @@ export interface DeviceLayout {
   /** Layout id of the button the firmware holds as HyperShift; absent = the
    *  software trigger from `settings.hypershiftTrigger`. */
   firmwareTrigger?: ControlId;
+  /** Layout ids of the buttons a profile may hold as HyperShift 2
+   *  (`Profile.hypershift2Triggers`): buttons the mouse keeps native. */
+  hypershift2Triggers?: readonly ControlId[];
   /** Photo tabs in display order. */
   views: ViewTab[];
   /** Whether the schematic (SVG) view exists for this layout. */
@@ -87,6 +90,7 @@ const NAGA_V3_LAYOUT: DeviceLayout = {
   deviceId: NAGA_V3_DEVICE_ID,
   controlPrefix: "v3_",
   firmwareTrigger: "hypershift_button",
+  hypershift2Triggers: ["mouse_right"],
   views: ["combined", "top", "side", "bottom"],
   schematic: false,
   tabLabels: {
@@ -153,6 +157,58 @@ export function hypershiftControlId(config: AppConfig, deviceId: string): Contro
   if (layout.firmwareTrigger) return deviceControlId(layout, layout.firmwareTrigger);
   const trigger = config.settings.hypershiftTrigger ?? "mouse_right";
   return trigger === "none" ? null : deviceControlId(layout, trigger);
+}
+
+/** Whether a control may be a profile's HyperShift 2 trigger. */
+export function canBeHypershift2Trigger(config: AppConfig, controlId: ControlId): boolean {
+  return controlLayout(config, controlId)?.hypershift2Triggers?.includes(layoutControlId(controlId)) ?? false;
+}
+
+/** The profile's HyperShift 2 trigger on a device, if it has one. */
+export function hypershift2ControlId(config: AppConfig, profileId: string | null | undefined, deviceId: string | null | undefined): ControlId | null {
+  const triggers = config.profiles.find((profile) => profile.id === profileId)?.hypershift2Triggers ?? [];
+  return triggers.find((id) => deviceId && controlLayout(config, id)?.deviceId === deviceId) ?? null;
+}
+
+/** The config with `controlId` as the profile's HyperShift 2 trigger on its
+ *  mouse (replacing that mouse's previous one), or with it removed. */
+export function setHypershift2Trigger(config: AppConfig, profileId: string, controlId: ControlId, on: boolean): AppConfig {
+  const deviceId = controlLayout(config, controlId)?.deviceId;
+  return {
+    ...config,
+    profiles: config.profiles.map((profile) => {
+      if (profile.id !== profileId) return profile;
+      const others = (profile.hypershift2Triggers ?? []).filter((id) => controlLayout(config, id)?.deviceId !== deviceId);
+      const next = on ? [...others, controlId] : others;
+      const { hypershift2Triggers: _old, ...rest } = profile;
+      return next.length > 0 ? { ...rest, hypershift2Triggers: next } : rest;
+    }),
+  };
+}
+
+/** Layers a device shows for a profile: the HyperShift 2 ones only while
+ *  that profile holds a HyperShift 2 trigger on it (or one is selected). */
+export function deviceLayers(config: AppConfig, profileId: string | null | undefined, deviceId: string | null | undefined, selected: Layer): Layer[] {
+  const extra = hypershift2ControlId(config, profileId, deviceId) !== null || selected === "hypershift2" || selected === "hypershiftBoth";
+  return extra ? ["standard", "hypershift", "hypershift2", "hypershiftBoth"] : ["standard", "hypershift"];
+}
+
+/** Whether any enabled binding of a real action sits on a device's controls. */
+function hasAssignments(config: AppConfig, deviceId: string): boolean {
+  const controls = new Set(config.physicalControls.filter((control) => control.deviceId === deviceId).map((control) => control.id));
+  return config.bindings.some((binding) => binding.enabled && controls.has(binding.controlId)
+    && config.actions.some((action) => action.id === binding.actionId && action.type !== "disabled"));
+}
+
+/** The connected built-in mouse to greet: in the config, nothing assigned to
+ *  it yet, not dismissed; with another built-in mouse to copy from if one has
+ *  assignments. */
+export function newMouseNotice(config: AppConfig, connected: readonly string[], dismissed: readonly string[]) {
+  const mice = config.devices.filter((device) => device.builtin && deviceLayout(device.id));
+  const device = mice.find((mouse) => connected.includes(mouse.id) && !dismissed.includes(mouse.id) && !hasAssignments(config, mouse.id));
+  if (!device) return null;
+  const copyFrom = mice.find((mouse) => mouse.id !== device.id && hasAssignments(config, mouse.id)) ?? null;
+  return { device, copyFrom };
 }
 
 /** Whether a built-in device of this id is in the config. */

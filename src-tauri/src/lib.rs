@@ -3918,6 +3918,7 @@ pub fn run() {
                             if let Ok(mut store) = app.state::<Arc<Mutex<RuntimeStore>>>().lock() {
                                 store.set_manual_profile_override(Some(profile_id.clone()));
                             }
+                            capture_backend::follow_manual_profile(&profile_id);
                             let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
                             rebuild_tray_menu(&app);
                             log::info!("[tray] active profile set to `{profile_id}` from tray");

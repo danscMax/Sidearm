@@ -42,6 +42,8 @@ fn should_notify_elevated(last: &mut Option<String>, exe: &str) -> bool {
 }
 
 mod gestures;
+#[cfg(all(test, target_os = "windows"))]
+mod raw_probe;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -89,6 +91,9 @@ pub struct EncodedKeyEvent {
     /// the trigger state when the worker gets around to the event would race a
     /// fast press/release.
     pub is_hypershift: bool,
+    /// `true` when the press arrived while its mouse's HyperShift 2 trigger
+    /// was held (stamped `H2:` by the helper, as `is_hypershift` is).
+    pub is_hypershift2: bool,
 }
 
 #[derive(Default)]
@@ -265,7 +270,7 @@ struct GestureContext {
     title: String,
     process_path: Option<String>,
     manual_profile_override: Option<String>,
-    is_hypershift: bool,
+    held: resolver::HeldLayers,
     own_window: bool,
     is_fg_elevated: bool,
 }
@@ -283,15 +288,21 @@ fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPre
 /// The press patterns besides the plain press that the resolved control's
 /// bindings answer on its layer. None when its plain press holds a shortcut
 /// down (a hold must start on the press, it cannot wait).
-fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview, hypershift: bool) -> gestures::Patterns {
+fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview, held: resolver::HeldLayers) -> gestures::Patterns {
     let (Some(profile), Some(layer), Some(control)) =
         (preview.resolved_profile_id.as_deref(), preview.layer.as_deref(), preview.control_id.as_deref())
     else {
         return gestures::Patterns::default();
     };
-    // Under HyperShift each pattern falls back to the standard layer on its
-    // own (`resolver::resolve_gesture_preview`).
-    let on_layer = |binding_layer: &str| binding_layer == layer || (hypershift && (binding_layer == "hypershift" || binding_layer == "standard"));
+    // Under a held trigger each pattern falls back on its own
+    // (`resolver::resolve_gesture_preview`): every layer it may land on counts.
+    let on_layer = |binding_layer: &str| {
+        binding_layer == layer
+            || ((held.hypershift || held.hypershift2) && binding_layer == "standard")
+            || (held.hypershift && binding_layer == "hypershift")
+            || (held.hypershift2 && binding_layer == "hypershift2")
+            || (held.hypershift && held.hypershift2 && binding_layer == "hypershiftBoth")
+    };
     if preview.trigger_mode == Some(config::TriggerMode::Hold) || holds_modifiers_only(config, preview) {
         return gestures::Patterns::default();
     }
@@ -332,7 +343,7 @@ fn fire_gestures(
             &context.title,
             context.process_path.as_deref(),
             context.manual_profile_override.as_deref(),
-            context.is_hypershift,
+            context.held,
             gesture,
         );
         if preview.status != resolver::ResolutionStatus::Resolved {
@@ -383,9 +394,10 @@ fn process_encoded_key_event(
     // leaves only its key-up in the file log.
     if !event.is_key_up {
         log::info!(
-            "[capture] Key-down received for {} (hypershift: {}, repeat: {})",
+            "[capture] Key-down received for {} (hypershift: {}, hypershift2: {}, repeat: {})",
             event.encoded_key,
             event.is_hypershift,
+            event.is_hypershift2,
             event.is_repeat
         );
     }
@@ -578,14 +590,16 @@ fn process_encoded_key_event(
         )
     };
 
-    let preview = resolver::resolve_input_preview_with_overrides(
+    let held = resolver::HeldLayers { hypershift: event.is_hypershift, hypershift2: event.is_hypershift2 };
+    let preview = resolver::resolve_gesture_preview(
         config,
         &event.encoded_key,
         exe,
         title,
         process_path,
         manual_profile_override.as_deref(),
-        event.is_hypershift,
+        held,
+        config::Gesture::Press,
     );
 
     let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
@@ -602,25 +616,22 @@ fn process_encoded_key_event(
         return EventOutcome::Handled;
     }
 
+    let context = || GestureContext {
+        encoded_key: event.encoded_key.clone(),
+        exe: exe.to_owned(),
+        title: title.to_owned(),
+        process_path: process_path.map(str::to_owned),
+        manual_profile_override: manual_profile_override.clone(),
+        held,
+        own_window,
+        is_fg_elevated,
+    };
+
     // Several press patterns on this button: wait to tell them apart.
-    let patterns = gesture_patterns(config, &preview, event.is_hypershift);
+    let patterns = gesture_patterns(config, &preview, held);
     if patterns.any() && !event.is_repeat {
         let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
-        gestures.press(
-            &event.encoded_key,
-            patterns,
-            GestureContext {
-                encoded_key: event.encoded_key.clone(),
-                exe: exe.to_owned(),
-                title: title.to_owned(),
-                process_path: process_path.map(str::to_owned),
-                manual_profile_override: manual_profile_override.clone(),
-                is_hypershift: event.is_hypershift,
-                own_window,
-                is_fg_elevated,
-            },
-            std::time::Instant::now(),
-        );
+        gestures.press(&event.encoded_key, patterns, context(), std::time::Instant::now());
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
     }
@@ -989,6 +1000,8 @@ fn run_fire_and_forget(
                 && let Ok(mut store) = runtime_store.lock()
             {
                 store.set_manual_profile_override(Some(p.target_profile_id.clone()));
+                drop(store);
+                follow_manual_profile(&p.target_profile_id);
             }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
         }
@@ -1007,6 +1020,15 @@ fn run_fire_and_forget(
 /// Emit the resolved-profile event and, when the active profile changed, show
 /// the OSD. Shared by the manual key-event path and the per-OS foreground
 /// watchers (the tail was previously copied in mod.rs, windows.rs, linux.rs).
+/// A profile chosen by hand (tray, ProfileSwitch action): the HyperShift 2
+/// trigger follows it at once, without waiting for a window change.
+pub(crate) fn follow_manual_profile(profile_id: &str) {
+    #[cfg(target_os = "windows")]
+    windows::follow_profile_hypershift2(Some(profile_id));
+    #[cfg(not(target_os = "windows"))]
+    let _ = profile_id;
+}
+
 pub(crate) fn emit_profile_resolved_and_notify(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
@@ -1019,6 +1041,8 @@ pub(crate) fn emit_profile_resolved_and_notify(
         // Remember the real foreground window (so the tray "create rule" path can
         // fall back to it — at tray-click time the live foreground is Sidearm) and
         // decide whether the profile changed, in a single lock acquisition.
+        #[cfg(target_os = "windows")]
+        windows::follow_profile_hypershift2(capture_result.resolved_profile_id.as_deref());
         let should_notify = if let Ok(mut store) = runtime_store.lock() {
             store.set_last_foreground_window(capture_result.clone());
             store.notify_profile_change(capture_result.resolved_profile_id.as_deref())

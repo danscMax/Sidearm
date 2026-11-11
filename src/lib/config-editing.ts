@@ -801,7 +801,7 @@ export function ensurePlaceholderBinding(
   }
 
   // Ids are lowercase kebab (schema `idToken`): doublePress → -double-press.
-  const suffix = gesture === "press" ? "" : `-${gesture.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`;
+  const suffix = gesture === "press" ? "" : `-${kebabToken(gesture)}`;
   const baseActionId = makeActionId(profileId, layer, control.id) + suffix;
   const actionIdSet = new Set(config.actions.map((action) => action.id));
   const actionId = actionIdSet.has(baseActionId)
@@ -1560,12 +1560,18 @@ export function keepBindingDisableOthers(
   return next;
 }
 
+/** A camelCase name as an id token (schema `idToken` is lowercase kebab):
+ *  `hypershiftBoth` → `hypershift-both`, `doublePress` → `double-press`. */
+function kebabToken(name: string): string {
+  return name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+}
+
 export function makeBindingId(
   profileId: string,
   layer: Layer,
   controlId: ControlId,
 ): string {
-  return `binding-${profileId}-${layer}-${normalizeControlToken(controlId)}`;
+  return `binding-${profileId}-${kebabToken(layer)}-${normalizeControlToken(controlId)}`;
 }
 
 export function makeActionId(
@@ -1573,7 +1579,7 @@ export function makeActionId(
   layer: Layer,
   controlId: ControlId,
 ): string {
-  return `action-${profileId}-${layer}-${normalizeControlToken(controlId)}`;
+  return `action-${profileId}-${kebabToken(layer)}-${normalizeControlToken(controlId)}`;
 }
 
 export function makeSnippetId(name: string): string {

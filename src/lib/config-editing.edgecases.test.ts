@@ -977,6 +977,22 @@ describe("invariant: createDefaultActionMenuItem / createDefaultSubmenuItem id u
   });
 });
 
+describe("ids of a new assignment match the schema idToken", () => {
+  it("every layer and press pattern gives lowercase kebab ids", () => {
+    const control = { id: "v3_thumb_01" as ControlId, deviceId: "razer-naga-v3", family: "thumbGrid" as const, defaultName: "Thumb 1", remappable: true, capabilityStatus: "verified" as const };
+    const layers = ["standard", "hypershift", "hypershift2", "hypershiftBoth"] as const;
+    const gestures = ["press", "longPress", "doublePress", "triplePress"] as const;
+    for (const layer of layers) {
+      for (const gesture of gestures) {
+        const result = ensurePlaceholderBinding(minCfg({ profiles: [makeProfile("main")] }), "main", layer, control, gesture);
+        const binding = result.config.bindings.find((b) => b.id === result.bindingId)!;
+        expect(binding.id).toMatch(/^[a-z][a-z0-9-]*$/);
+        expect(binding.actionId).toMatch(/^[a-z][a-z0-9-]*$/);
+      }
+    }
+  });
+});
+
 describe("invariant: ensurePlaceholderBinding is idempotent", () => {
   it("calling ensurePlaceholderBinding twice never adds a second binding for the same slot", () => {
     const control = {

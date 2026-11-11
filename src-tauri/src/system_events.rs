@@ -86,6 +86,10 @@ fn watch_mice(app: &AppHandle, changes: &mpsc::Receiver<()>) {
         let consumer = crate::mouse_memory::consumer_signals_enabled();
         let mice: Vec<_> = crate::mouse_memory::present_models().into_iter().map(|model| model.info(true, consumer)).collect();
         let _ = app.emit(EVENT_NATIVE_MICE_CHANGED, &mice);
+        // A full guard scan reads the new mouse's battery: asleep, it is then
+        // asked every tick and its waking reaches the device cards
+        // (`mouse_battery`), which otherwise keep "not answering".
+        crate::onboard_guard::request_check();
         if let Err(error) = crate::reload_capture(app) {
             log::warn!("[system] capture restart after a device change failed: {error}");
         }

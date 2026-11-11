@@ -1786,9 +1786,11 @@ static HELPER_CAPTURES_SIDE_BUTTONS: AtomicBool = AtomicBool::new(false);
 
 /// Whether the helper needs its mouse hook at all.
 fn mouse_hook_wanted() -> bool {
-    HELPER_HYPER_TRIGGER.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF
+    // A test run against virtual mice never takes the real mouse's buttons.
+    !crate::fake_mode()
+        && (HELPER_HYPER_TRIGGER.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF
         || HELPER_CAPTURES_SIDE_BUTTONS.load(Ordering::Relaxed)
-        || HELPER_HYPER2_ENABLED.load(Ordering::Relaxed)
+        || HELPER_HYPER2_ENABLED.load(Ordering::Relaxed))
 }
 
 /// Trigger the helper acts on (`HYPER_TRIGGER_OFF` = Hypershift disabled).
@@ -1840,6 +1842,49 @@ fn hypershift2_step(trigger: u8, held: u8, button: u8, is_down: bool) -> Option<
         Some(false)
     } else {
         None
+    }
+}
+
+/// A button event against the HyperShift 2 state (mouse hook and fake mice):
+/// `Some(held)` when it is the trigger going down or up — swallow it and
+/// [`apply_trigger2`] — else `None`, after marking the held trigger as used.
+fn hypershift2_event(trigger: u8, button: u8, is_down: bool) -> Option<bool> {
+    let held = HELPER_HYPER2_HELD.load(Ordering::Relaxed);
+    if let Some(now) = hypershift2_step(trigger, held, button, is_down) {
+        // The software trigger held meanwhile was used: no click of its own.
+        if is_down && HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
+            HELPER_HYPER_USED.store(true, Ordering::Relaxed);
+        }
+        return Some(now);
+    }
+    if held != HYPER_TRIGGER_OFF && is_down {
+        HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
+    }
+    None
+}
+
+/// The trigger went down or up; let go with nothing pressed meanwhile, the
+/// button's own click (on the injector thread; logged only with fake mice).
+fn apply_trigger2(button: u8, held: bool) {
+    let used = HELPER_HYPER2_USED.swap(false, Ordering::Relaxed);
+    HELPER_HYPER2_HELD.store(if held { button } else { HYPER_TRIGGER_OFF }, Ordering::Relaxed);
+    if !held && !used {
+        if crate::fake_mode() {
+            log::info!("[capture-helper] HyperShift 2 click (simulated, button {button})");
+        } else {
+            queue_hyper_injection(button, true);
+            queue_hyper_injection(button, false);
+        }
+    }
+}
+
+/// Fake mice: a native button of the HyperShift 2 mouse, as the mouse hook
+/// would see it (report `0x7F` on its pipe).
+pub(super) fn fake_native_button(button: u8, is_down: bool) {
+    let trigger = HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed);
+    match hypershift2_event(trigger, button, is_down) {
+        Some(held) => apply_trigger2(button, held),
+        None => log::info!("[capture-helper] native button {button} {} passed through", if is_down { "down" } else { "up" }),
     }
 }
 
@@ -2301,14 +2346,8 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
         };
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData) {
             let trigger2 = if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) };
-            if let Some(held) = hypershift2_step(trigger2, held2, button, is_down) {
-                if is_down && HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
-                    HELPER_HYPER_USED.store(true, Ordering::Relaxed);
-                }
+            if let Some(held) = hypershift2_event(trigger2, button, is_down) {
                 return HyperMouseAction::SetTrigger2Held(button, held);
-            }
-            if held2 != HYPER_TRIGGER_OFF && is_down {
-                HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
             }
         } else if held2 != HYPER_TRIGGER_OFF && (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
             HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
@@ -2377,13 +2416,7 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             1
         }
         HyperMouseAction::SetTrigger2Held(button, held) => {
-            let used = HELPER_HYPER2_USED.swap(false, Ordering::Relaxed);
-            HELPER_HYPER2_HELD.store(if held { button } else { HYPER_TRIGGER_OFF }, Ordering::Relaxed);
-            // Let go with nothing pressed meanwhile: the button's own click.
-            if !held && !used {
-                queue_hyper_injection(button, true);
-                queue_hyper_injection(button, false);
-            }
+            apply_trigger2(button, held);
             1
         }
         HyperMouseAction::InjectRightDown => {
@@ -3459,7 +3492,8 @@ pub fn capture_helper_main() {
             .unwrap_or(HYPER_TRIGGER_OFF),
         Ordering::Relaxed,
     );
-    HELPER_HYPER2_ENABLED.store(hypershift2_model.is_some() && !crate::fake_mode(), Ordering::Relaxed);
+    // Fake mice drive it through their pipe (`fake_native_button`); no hook.
+    HELPER_HYPER2_ENABLED.store(hypershift2_model.is_some(), Ordering::Relaxed);
 
     if let Some(ms) = modifier_stale_gc_ms {
         let clamped = ms.clamp(500, 30_000);
@@ -4175,9 +4209,7 @@ fn spawn_capture_helper(
     // shortcut: the hook cannot tell pointing devices apart, so one such mouse
     // at a time, and in a profile with the trigger every mouse's and touchpad's
     // button of that kind is the trigger; raw input could attribute it.
-    let hypershift2 = if crate::fake_mode() {
-        None
-    } else {
+    let hypershift2 = {
         readers.iter().filter(|reader| !reader.software_layer).find_map(|reader| {
             let model = crate::device_catalog::CATALOG.get(reader.model)?;
             let codes = hypershift2_codes(config, model, software_trigger);

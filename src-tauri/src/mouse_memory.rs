@@ -1610,6 +1610,9 @@ pub(crate) mod fake {
             Some(
                 CATALOG
                     .iter()
+                    // One file is one mouse: the first catalog model of its
+                    // device id (the V2 family shares `razer-naga`).
+                    .filter(|model| CATALOG.iter().find(|first| first.device_id == model.device_id).is_some_and(|first| first.is(model)))
                     .filter(|model| state_path(model).is_some_and(|path| path.exists()))
                     .flat_map(|model| {
                         let pid = model.pids[0];

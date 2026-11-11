@@ -14,6 +14,8 @@ const HS_PREFIX: &str = "HS:";
 /// Outermost stamp of a reader line sent while its mouse's HyperShift 2
 /// trigger is held (`H2:HS:F13`).
 pub(super) const H2_PREFIX: &str = "H2:";
+/// Report id a fake mouse's pipe uses for a native mouse button.
+const FAKE_NATIVE_BUTTON: u8 = 0x7f;
 /// A hold with no report for this long is released: the device reports changes
 /// only, so a mouse that powered off mid-press (dongle still present) never
 /// sends the release. It cannot be asked instead — measured 2026-10-27: its
@@ -328,6 +330,12 @@ fn read_until_lost(
         }
         if unsafe { GetOverlappedResult(handle, &overlapped, &mut read, 0) } == 0 {
             break Err(format!("read: {}", std::io::Error::last_os_error()));
+        }
+        // Fake mice: a native mouse button for the mouse hook's HyperShift 2
+        // path (`FAKE_NATIVE_BUTTON`, button code, down).
+        if crate::fake_mode() && read >= 3 && buffer[0] == FAKE_NATIVE_BUTTON {
+            super::windows::fake_native_button(buffer[1], buffer[2] != 0);
+            continue;
         }
         let Some(usages) = held_usages(&buffer[..read as usize], report_id) else {
             continue;

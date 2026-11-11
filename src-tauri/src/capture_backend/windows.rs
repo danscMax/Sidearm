@@ -292,7 +292,8 @@ pub(super) struct CaptureBackendHandle {
 }
 
 struct HelperHandle {
-    stdin_pipe: std::process::ChildStdin,
+    /// Shared with the HyperShift 2 switch (`follow_profile_hypershift2`).
+    stdin_pipe: Arc<Mutex<std::process::ChildStdin>>,
     child: std::process::Child,
     reader_thread: JoinHandle<()>,
     /// Set by `stop()` before it closes the helper: that exit is no crash.
@@ -301,10 +302,7 @@ struct HelperHandle {
 
 impl HelperHandle {
     fn send_command(&mut self, cmd: &str) -> Result<(), String> {
-        use std::io::Write;
-        writeln!(self.stdin_pipe, "{cmd}")
-            .and_then(|()| self.stdin_pipe.flush())
-            .map_err(|e| format!("Failed to send command to helper: {e}"))
+        write_helper_line(&self.stdin_pipe, cmd).map_err(|e| format!("Failed to send command to helper: {e}"))
     }
 }
 
@@ -1404,17 +1402,14 @@ impl CaptureBackendHandle {
         // Signal helper to exit by closing its stdin pipe, then wait for cleanup
         if let Some(helper) = self.helper {
             let HelperHandle {
-                mut stdin_pipe,
+                stdin_pipe,
                 mut child,
                 reader_thread,
                 stopping,
             } = helper;
             stopping.store(true, Ordering::SeqCst);
             // A stop says so first: stdin closing without it means Sidearm died.
-            {
-                use std::io::Write;
-                let _ = writeln!(stdin_pipe, "{HELPER_EXIT}").and_then(|()| stdin_pipe.flush());
-            }
+            let _ = write_helper_line(&stdin_pipe, HELPER_EXIT);
             drop(stdin_pipe);
 
             // Bounded wait: poll try_wait() up to 5 seconds, then force-kill
@@ -1793,6 +1788,7 @@ static HELPER_CAPTURES_SIDE_BUTTONS: AtomicBool = AtomicBool::new(false);
 fn mouse_hook_wanted() -> bool {
     HELPER_HYPER_TRIGGER.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF
         || HELPER_CAPTURES_SIDE_BUTTONS.load(Ordering::Relaxed)
+        || HELPER_HYPER2_ENABLED.load(Ordering::Relaxed)
 }
 
 /// Trigger the helper acts on (`HYPER_TRIGGER_OFF` = Hypershift disabled).
@@ -1815,6 +1811,126 @@ fn hyper_active_and_used() -> bool {
     }
     held
 }
+/// A mouse has a HyperShift 2 trigger in some profile: the mouse hook is
+/// needed even while the profile in effect has none.
+static HELPER_HYPER2_ENABLED: AtomicBool = AtomicBool::new(false);
+/// The profile in effect's HyperShift 2 trigger (`HS2:<code>` from the
+/// parent on every profile change), `HYPER_TRIGGER_OFF` = none.
+static HELPER_HYPER2_TRIGGER: AtomicU8 = AtomicU8::new(HYPER_TRIGGER_OFF);
+/// The HyperShift 2 trigger being held, kept apart from the setting so a
+/// profile change mid-hold still sees its release.
+static HELPER_HYPER2_HELD: AtomicU8 = AtomicU8::new(HYPER_TRIGGER_OFF);
+/// Something was pressed while the HyperShift 2 trigger was held.
+static HELPER_HYPER2_USED: AtomicBool = AtomicBool::new(false);
+/// Parent → helper: `HS2:<code>`.
+const HYPER2_COMMAND: &str = "HS2:";
+/// Buttons that may be a HyperShift 2 trigger (never the left one).
+const HYPER2_CODES: [u8; 4] = [HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_MIDDLE, HYPER_TRIGGER_X1, HYPER_TRIGGER_X2];
+
+/// What a button event means for HyperShift 2: `Some(true)` the trigger goes
+/// down, `Some(false)` the held one comes up, `None` not the trigger.
+fn hypershift2_step(trigger: u8, held: u8, button: u8, is_down: bool) -> Option<bool> {
+    if is_down && held == HYPER_TRIGGER_OFF && trigger != HYPER_TRIGGER_OFF && button == trigger {
+        Some(true)
+    } else if !is_down && held != HYPER_TRIGGER_OFF && button == held {
+        Some(false)
+    } else {
+        None
+    }
+}
+
+/// A reader's `H2:` stamp: the trigger is held. A press in `lines` uses the
+/// layer, so the trigger's release is no click.
+fn hyper2_stamp(lines: &[String]) -> bool {
+    let held = HELPER_HYPER2_HELD.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF;
+    let press = |line: &String| {
+        let line = line.strip_prefix(HS_PREFIX).unwrap_or(line);
+        !line.starts_with("UP:") && !line.starts_with("REPEAT:")
+    };
+    if held && lines.iter().any(press) {
+        HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
+    }
+    held
+}
+
+/// Each profile's HyperShift 2 trigger on `model` as a mouse-hook button code:
+/// a button the mouse still reports natively (not in its live map), never
+/// the left one or the software HyperShift trigger.
+fn hypershift2_codes(config: &AppConfig, model: &crate::device_catalog::NativeModel, software_trigger: u8) -> Vec<(String, u8)> {
+    config
+        .profiles
+        .iter()
+        .filter_map(|profile| {
+            let code = profile.hypershift2_triggers.iter().find_map(|id| {
+                let name = id.strip_prefix(model.control_prefix)?;
+                let code = hypershift_trigger_code(name);
+                let native = !model.native_buttons.iter().any(|(button, _, _)| *button == name);
+                (native && HYPER2_CODES.contains(&code) && code != software_trigger).then_some(code)
+            })?;
+            Some((profile.id.clone(), code))
+        })
+        .collect()
+}
+
+/// Writes one command line to the helper.
+fn write_helper_line(stdin: &Mutex<std::process::ChildStdin>, line: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut pipe = stdin.lock().map_err(|_| std::io::Error::other("helper stdin lock poisoned"))?;
+    writeln!(pipe, "{line}").and_then(|()| pipe.flush())
+}
+
+/// What a profile change needs to switch the HyperShift 2 trigger: the
+/// running helper, each profile's trigger code, the code last sent.
+struct Hypershift2Switch {
+    stdin: std::sync::Weak<Mutex<std::process::ChildStdin>>,
+    codes: Vec<(String, u8)>,
+    sent: Option<u8>,
+}
+
+static HYPERSHIFT2_SWITCH: Mutex<Option<Hypershift2Switch>> = Mutex::new(None);
+
+/// Points the switch at a new helper (`None`: no mouse has a trigger) and
+/// sends the trigger of the profile in effect now.
+fn install_hypershift2_switch(
+    stdin: &Arc<Mutex<std::process::ChildStdin>>,
+    codes: Option<Vec<(String, u8)>>,
+    config: &AppConfig,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+) {
+    let Ok(mut switch) = HYPERSHIFT2_SWITCH.lock() else { return };
+    *switch = codes.map(|codes| Hypershift2Switch { stdin: Arc::downgrade(stdin), codes, sent: None });
+    if switch.is_none() {
+        return;
+    }
+    drop(switch);
+    let manual = runtime_store.lock().ok().and_then(|store| store.manual_profile_override().map(str::to_owned));
+    if let Ok(result) = window_capture::capture_active_window_with_resolution_with_override(config, "", None, manual.as_deref())
+        && !result.ignored
+    {
+        follow_profile_hypershift2(result.resolved_profile_id.as_deref());
+    }
+}
+
+/// Turns the HyperShift 2 trigger on or off for the profile now in effect.
+pub(super) fn follow_profile_hypershift2(profile_id: Option<&str>) {
+    let Ok(mut guard) = HYPERSHIFT2_SWITCH.lock() else { return };
+    let Some(switch) = guard.as_mut() else { return };
+    let code = profile_id
+        .and_then(|id| switch.codes.iter().find(|(profile, _)| profile == id))
+        .map_or(HYPER_TRIGGER_OFF, |(_, code)| *code);
+    if switch.sent == Some(code) {
+        return;
+    }
+    let Some(stdin) = switch.stdin.upgrade() else { return };
+    match write_helper_line(&stdin, &format!("{HYPER2_COMMAND}{code}")) {
+        Ok(()) => {
+            switch.sent = Some(code);
+            log::info!("[capture] HyperShift 2 trigger for this profile: {code}");
+        }
+        Err(error) => log::warn!("[capture] HyperShift 2 switch not sent: {error}"),
+    }
+}
+
 /// True between a left-down we translated into a right-down and its matching
 /// left-up, so the injected right click stays balanced even when the trigger is
 /// released first — an application must never be left with the right button
@@ -1860,6 +1976,8 @@ enum HyperMouseAction {
     Pass,
     /// Swallow the trigger press/release and record the new held state.
     SetTriggerHeld(bool),
+    /// Swallow the HyperShift 2 trigger's press/release (that button, held).
+    SetTrigger2Held(u8, bool),
     /// Swallow the left button and enqueue a synthetic right-down.
     InjectRightDown,
     /// Swallow the left button and enqueue the balancing right-up.
@@ -2150,12 +2268,32 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
         // Under RDP the buttons come from the client's mouse, not this machine's:
         // swallowing the trigger there kills every remote right click, so the
         // software Hypershift layer stays off for the life of a remote session.
-        let trigger = if is_remote_session() {
+        let remote = is_remote_session();
+        let trigger = if remote {
             HELPER_HYPER_ACTIVE.store(false, Ordering::Relaxed);
             HYPER_TRIGGER_OFF
         } else {
             trigger
         };
+        // HyperShift 2 first: its trigger is never the software trigger, and
+        // under RDP it is off too (the buttons are the client's).
+        let held2 = if remote {
+            HELPER_HYPER2_HELD.store(HYPER_TRIGGER_OFF, Ordering::Relaxed);
+            HYPER_TRIGGER_OFF
+        } else {
+            HELPER_HYPER2_HELD.load(Ordering::Relaxed)
+        };
+        if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData) {
+            let trigger2 = if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) };
+            if let Some(held) = hypershift2_step(trigger2, held2, button, is_down) {
+                return HyperMouseAction::SetTrigger2Held(button, held);
+            }
+            if held2 != HYPER_TRIGGER_OFF && is_down {
+                HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
+            }
+        } else if held2 != HYPER_TRIGGER_OFF && (msg == WM_MOUSEWHEEL || msg == WM_MOUSEHWHEEL) {
+            HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
+        }
         let trigger_held = HELPER_HYPER_ACTIVE.load(Ordering::Relaxed);
         if trigger_held
             && (msg == WM_MOUSEWHEEL
@@ -2216,6 +2354,16 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
                 let trigger = HELPER_HYPER_TRIGGER.load(Ordering::Relaxed);
                 queue_hyper_injection(trigger, true);
                 queue_hyper_injection(trigger, false);
+            }
+            1
+        }
+        HyperMouseAction::SetTrigger2Held(button, held) => {
+            let used = HELPER_HYPER2_USED.swap(false, Ordering::Relaxed);
+            HELPER_HYPER2_HELD.store(if held { button } else { HYPER_TRIGGER_OFF }, Ordering::Relaxed);
+            // Let go with nothing pressed meanwhile: the button's own click.
+            if !held && !used {
+                queue_hyper_injection(button, true);
+                queue_hyper_injection(button, false);
             }
             1
         }
@@ -2409,6 +2557,42 @@ mod mouse_hook_tests {
             wheel: Some(axis),
             button: None,
         }
+    }
+
+    /// HyperShift 2: the profile's trigger goes down; the held one comes up
+    /// even after a profile change turned the trigger off.
+    #[test]
+    fn hypershift2_trigger_holds_and_its_release_follows_the_held_button() {
+        use super::{HYPER_TRIGGER_OFF, hypershift2_step};
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, true), Some(true));
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, true), None);
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, false), Some(false));
+        // A release without its press (held before the profile had it) is not ours.
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_OFF, HYPER_TRIGGER_RIGHT, false), None);
+        assert_eq!(hypershift2_step(HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_RIGHT, HYPER_TRIGGER_LEFT, true), None);
+    }
+
+    /// Per profile, only a button the mouse reports natively, never the left
+    /// one or the software trigger, and only for the mouse it names.
+    #[test]
+    fn hypershift2_codes_take_each_profiles_native_trigger() {
+        use super::{HYPER_TRIGGER_OFF, hypershift2_codes};
+        use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
+        let mut config = crate::config::default_seed_config();
+        let mut work = config.profiles[0].clone();
+        work.id = "work".into();
+        work.hypershift2_triggers = vec!["v3_mouse_right".into()];
+        let mut game = work.clone();
+        game.id = "game".into();
+        game.hypershift2_triggers = Vec::new();
+        let mut odd = work.clone();
+        odd.id = "odd".into();
+        odd.hypershift2_triggers = vec!["v3_mouse_left".into(), "mouse_right".into()];
+        config.profiles = vec![work, game, odd];
+        assert_eq!(hypershift2_codes(&config, &NAGA_V3_PRO, HYPER_TRIGGER_OFF), vec![("work".to_owned(), HYPER_TRIGGER_RIGHT)]);
+        assert!(hypershift2_codes(&config, &NAGA_V3_PRO, HYPER_TRIGGER_RIGHT).is_empty());
+        // The V2's right button is in its live map (firmware HyperShift).
+        assert!(hypershift2_codes(&config, &NAGA_V2_HYPERSPEED, HYPER_TRIGGER_OFF).is_empty());
     }
 
     /// The trigger button is a pure modifier: swallowed, never clicked.
@@ -3188,6 +3372,10 @@ pub fn capture_helper_main() {
         hypershift_trigger: Option<String>,
         #[serde(default)]
         hypershift_tap: bool,
+        /// Catalog index of the mouse a HyperShift 2 trigger belongs to; the
+        /// trigger itself follows the profile (`HS2:<code>` commands).
+        #[serde(default)]
+        hypershift2_model: Option<usize>,
         /// Key buttons read from the mouse's consumer collection. Empty = the
         /// mouse sends `F13`..`F24`, which the keyboard hook catches.
         #[serde(default)]
@@ -3211,6 +3399,7 @@ pub fn capture_helper_main() {
                     replayed_modifier_force_release_ms: None,
                     hypershift_trigger: None,
                     hypershift_tap: false,
+                    hypershift2_model: None,
                     readers: Vec::new(),
                     firmware_hypershift: false,
                     config_dir: None,
@@ -3229,25 +3418,25 @@ pub fn capture_helper_main() {
         replayed_modifier_force_release_ms,
         hypershift_trigger,
         hypershift_tap,
+        hypershift2_model,
         readers,
         firmware_hypershift,
         config_dir,
     } = init;
     HELPER_HYPER_TAP.store(hypershift_tap, Ordering::Relaxed);
-    // A test run against virtual mice must not take the real mouse's buttons.
-    if crate::fake_mode() {
-        HELPER_HYPER_TRIGGER.store(HYPER_TRIGGER_OFF, Ordering::Relaxed);
-    }
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
+    // A test run against virtual mice must not take the real mouse's buttons.
     HELPER_HYPER_TRIGGER.store(
-        hypershift_trigger.filter(|_| !firmware_hypershift)
+        hypershift_trigger
+            .filter(|_| !firmware_hypershift && !crate::fake_mode())
             .as_deref()
             .map(hypershift_trigger_code)
             .unwrap_or(HYPER_TRIGGER_OFF),
         Ordering::Relaxed,
     );
+    HELPER_HYPER2_ENABLED.store(hypershift2_model.is_some() && !crate::fake_mode(), Ordering::Relaxed);
 
     if let Some(ms) = modifier_stale_gc_ms {
         let clamped = ms.clamp(500, 30_000);
@@ -3287,7 +3476,9 @@ pub fn capture_helper_main() {
         // A firmware layer arrives in the signal itself; the onboard path's
         // layer is the software trigger's state.
         let hyper: fn() -> bool = if reader.software_layer { hyper_active_and_used } else { || false };
-        super::consumer::spawn_reader(reader.signals, model, hyper, true);
+        let stamp2: fn(&[String]) -> bool =
+            if hypershift2_model == Some(reader.model) { hyper2_stamp } else { |_| false };
+        super::consumer::spawn_reader(reader.signals, model, hyper, stamp2, true);
     }
     HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
     HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
@@ -3359,6 +3550,11 @@ pub fn capture_helper_main() {
                     let cmd = buf.trim();
                     if cmd == HELPER_EXIT {
                         exit_requested = true;
+                    } else if let Some(code) = cmd.strip_prefix(HYPER2_COMMAND) {
+                        let code = code.parse().ok().filter(|code| HYPER2_CODES.contains(code)).unwrap_or(HYPER_TRIGGER_OFF);
+                        if HELPER_HYPER2_ENABLED.load(Ordering::Relaxed) {
+                            HELPER_HYPER2_TRIGGER.store(code, Ordering::Relaxed);
+                        }
                     } else if cmd == "REHOOK" {
                         log::info!("[capture-helper] REHOOK command received.");
                         unsafe {
@@ -3940,17 +4136,37 @@ fn spawn_capture_helper(
         replayed_modifier_force_release_ms: Option<u64>,
         hypershift_trigger: &'a str,
         hypershift_tap: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hypershift2_model: Option<usize>,
         #[serde(skip_serializing_if = "Vec::is_empty")]
         readers: Vec<ReaderInit>,
         firmware_hypershift: bool,
         config_dir: &'a std::path::Path,
     }
+    let software_trigger = if firmware_hypershift {
+        HYPER_TRIGGER_OFF
+    } else {
+        hypershift_trigger_code(&config.settings.hypershift_trigger)
+    };
+    // The mouse whose native button is some profile's HyperShift 2 trigger.
+    // shortcut: one such mouse at a time (the hook cannot tell two apart);
+    // a second would need raw input to attribute the button.
+    let hypershift2 = if crate::fake_mode() {
+        None
+    } else {
+        readers.iter().filter(|reader| !reader.software_layer).find_map(|reader| {
+            let model = crate::device_catalog::CATALOG.get(reader.model)?;
+            let codes = hypershift2_codes(config, model, software_trigger);
+            (!codes.is_empty()).then_some((reader.model, codes))
+        })
+    };
     let init = HelperInit {
         registrations: &helper_regs,
         modifier_stale_gc_ms: config.settings.modifier_stale_gc_ms,
         replayed_modifier_force_release_ms: config.settings.replayed_modifier_force_release_ms,
         hypershift_trigger: config.settings.hypershift_trigger.trim(),
         hypershift_tap: config.settings.hypershift_tap,
+        hypershift2_model: hypershift2.as_ref().map(|(model, _)| *model),
         readers,
         firmware_hypershift,
         config_dir: &config_dir,
@@ -3970,6 +4186,8 @@ fn spawn_capture_helper(
         let _ = child.kill();
         return None;
     }
+    let stdin_pipe = Arc::new(Mutex::new(stdin_pipe));
+    install_hypershift2_switch(&stdin_pipe, hypershift2.map(|(_, codes)| codes), config, &runtime_store);
 
     log::info!(
         "[capture] Capture helper spawned (pid {}), {} modifier-combo registrations.",
@@ -4056,7 +4274,8 @@ fn spawn_capture_helper(
                     // What is held on this mouse, so its live map is never
                     // rewritten under a held button (counted even while the
                     // map is not ready: that is when it is being written).
-                    let signal = input.strip_prefix(HS_PREFIX).unwrap_or(input);
+                    let signal = input.strip_prefix(super::consumer::H2_PREFIX).unwrap_or(input);
+                    let signal = signal.strip_prefix(HS_PREFIX).unwrap_or(signal);
                     if let Some(released) = signal.strip_prefix("UP:") {
                         crate::mouse_memory::live_overlay::note_input(model, released, false);
                     } else if !signal.starts_with("REPEAT:") {
@@ -4068,6 +4287,10 @@ fn spawn_capture_helper(
                     (input, hid_backend(model))
                 }
                 None => (trimmed, BACKEND_LL_HOOK.to_owned()),
+            };
+            let (is_hypershift2, input) = match input.strip_prefix(super::consumer::H2_PREFIX) {
+                Some(rest) => (true, rest),
+                None => (false, input),
             };
             let (is_hypershift, rest) = match input.strip_prefix(HS_PREFIX) {
                 Some(rest) => (true, rest),
@@ -4097,6 +4320,7 @@ fn spawn_capture_helper(
                 is_repeat,
                 is_key_up,
                 is_hypershift,
+                is_hypershift2,
             }) {
                 // Consumer stalled — this key press was dropped. Rate-limit the
                 // warning so a sustained stall can't re-create the v0.1.15 log
@@ -4285,6 +4509,7 @@ fn run_hotkey_message_loop(
                     // The RegisterHotKey path has no mouse hook, so it cannot
                     // observe the Hypershift trigger.
                     is_hypershift: false,
+                    is_hypershift2: false,
                 });
             } else {
                 log::warn!("[capture] Received WM_HOTKEY with unrecognized id {hotkey_id}");

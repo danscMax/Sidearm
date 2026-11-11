@@ -339,7 +339,6 @@ mod tests {
                 onboarding_step: None,
                 hypershift_trigger: "mouse_right".into(),
                 hypershift_tap: false,
-                hypershift2_triggers: Vec::new(),
                 show_battery_in_tray: false,
                 offline_profile_id: None,
             },
@@ -406,7 +405,7 @@ mod tests {
             description: None,
             enabled: true,
             priority,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
         }
     }
 
@@ -496,7 +495,6 @@ mod edge_proptests {
                 onboarding_step: None,
                 hypershift_trigger: "mouse_right".into(),
                 hypershift_tap: false,
-                hypershift2_triggers: Vec::new(),
                 show_battery_in_tray: false,
                 offline_profile_id: None,
             },
@@ -507,7 +505,7 @@ mod edge_proptests {
                     description: None,
                     enabled: true,
                     priority: 0,
-                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
                 },
                 Profile {
                     id: "p1".into(),
@@ -515,7 +513,7 @@ mod edge_proptests {
                     description: None,
                     enabled: true,
                     priority: 100,
-                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+                    mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
                 },
             ],
             devices: vec![crate::config::builtin_naga_device()],

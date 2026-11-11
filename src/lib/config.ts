@@ -78,8 +78,6 @@ export interface Settings {
   hypershiftTrigger?: HypershiftTrigger;
   /** The trigger works on a held press; a quick press clicks the button. */
   hypershiftTap?: boolean;
-  /** HyperShift 2 triggers, at most one per mouse (control ids). */
-  hypershift2Triggers?: ControlId[];
   /** Draw the mouse battery level as a badge on the tray icon. */
   showBatteryInTray?: boolean;
   /** Profile written into the mouse on exit; absent = the fallback profile,
@@ -100,6 +98,8 @@ export interface Profile {
   deviceSlots?: Record<string, number>;
   /** Each mouse's own DPI / poll rate / stages with this profile, by device id. */
   deviceMouse?: Record<string, MouseOverrides>;
+  /** This profile's HyperShift 2 triggers, at most one per mouse (control ids). */
+  hypershift2Triggers?: ControlId[];
 }
 
 /** A mouse's own settings within a profile; absent fields leave the mouse as it is. */

@@ -11,6 +11,9 @@ use crate::mouse_memory::ConsumerSignal;
 use crate::device_catalog::NativeModel;
 
 const HS_PREFIX: &str = "HS:";
+/// Outermost stamp of a reader line sent while its mouse's HyperShift 2
+/// trigger is held (`H2:HS:F13`).
+pub(super) const H2_PREFIX: &str = "H2:";
 /// A hold with no report for this long is released: the device reports changes
 /// only, so a mouse that powered off mid-press (dongle still present) never
 /// sends the release. It cannot be asked instead — measured 2026-10-27: its
@@ -164,10 +167,13 @@ pub(super) fn split_reader_line(line: &str) -> Option<(&'static NativeModel, &st
     Some((model, rest))
 }
 
+/// `stamp2` tells whether lines about to be sent belong to the HyperShift 2
+/// layer (it sees them, so a press can mark the trigger as used).
 pub(super) fn spawn_reader(
     signals: Vec<ConsumerSignal>,
     model: &'static NativeModel,
     hyper: fn() -> bool,
+    stamp2: fn(&[String]) -> bool,
     report_status: bool,
 ) {
     let signal_prefix = reader_prefix(model);
@@ -180,10 +186,10 @@ pub(super) fn spawn_reader(
         // every two seconds and must not flood the log.
         let mut last_error = String::new();
         loop {
-            match read_until_lost(&mut translator, model, report_id, hyper, report_status, &signal_prefix) {
+            match read_until_lost(&mut translator, model, report_id, hyper, stamp2, report_status, &signal_prefix) {
                 Ok(()) => return, // the parent is gone
                 Err(message) => {
-                    if !emit(&translator.release_all(hyper()), &signal_prefix) {
+                    if !emit_stamped(&translator.release_all(hyper()), &signal_prefix, stamp2) {
                         return;
                     }
                     // Warn level: the parent logs it as a warning — while this
@@ -217,12 +223,22 @@ fn emit(lines: &[String], prefix: &str) -> bool {
     lines.iter().all(|line| writeln!(out, "{prefix}{line}").is_ok()) && out.flush().is_ok()
 }
 
+/// [`emit`] with the `H2:` stamp when `stamp2` says so.
+fn emit_stamped(lines: &[String], prefix: &str, stamp2: fn(&[String]) -> bool) -> bool {
+    if stamp2(lines) {
+        emit(lines, &format!("{prefix}{H2_PREFIX}"))
+    } else {
+        emit(lines, prefix)
+    }
+}
+
 /// Reads reports until the device fails (`Err`, reopen) or stdout closes (`Ok`).
 fn read_until_lost(
     translator: &mut Translator,
     model: &NativeModel,
     report_id: u8,
     hyper: fn() -> bool,
+    stamp2: fn(&[String]) -> bool,
     report_status: bool,
     signal_prefix: &str,
 ) -> Result<(), String> {
@@ -297,7 +313,7 @@ fn read_until_lost(
                         log::warn!("[consumer] hold released after {HOLD_GIVE_UP_AFTER:?} without a report");
                         lines.extend(translator.release_all(hyper()));
                     }
-                    if !emit(&lines, signal_prefix) {
+                    if !emit_stamped(&lines, signal_prefix, stamp2) {
                         break Some(Ok(()));
                     }
                 }
@@ -316,7 +332,7 @@ fn read_until_lost(
         let Some(usages) = held_usages(&buffer[..read as usize], report_id) else {
             continue;
         };
-        if !emit(&translator.report(&usages, Instant::now(), hyper()), signal_prefix) {
+        if !emit_stamped(&translator.report(&usages, Instant::now(), hyper()), signal_prefix, stamp2) {
             break Ok(());
         }
     };

@@ -271,8 +271,11 @@ fn has_action(config: &AppConfig, control: &ControlId, layer: Layer) -> bool {
     config.bindings.iter().any(|binding| {
         binding.enabled
             && binding.control_id == *control
-            // The hypershift layer falls back to the standard binding.
-            && (binding.layer == layer || layer == Layer::Hypershift)
+            // The hypershift layer falls back to the standard binding; a
+            // HyperShift 2 press arrives as the standard record's signal.
+            && (binding.layer == layer
+                || layer == Layer::Hypershift
+                || (layer == Layer::Standard && binding.layer == Layer::Hypershift2))
             && config
                 .actions
                 .iter()

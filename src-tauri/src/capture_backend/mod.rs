@@ -89,6 +89,9 @@ pub struct EncodedKeyEvent {
     /// the trigger state when the worker gets around to the event would race a
     /// fast press/release.
     pub is_hypershift: bool,
+    /// `true` when the press arrived while its mouse's HyperShift 2 trigger
+    /// was held (stamped `H2:` by the helper, as `is_hypershift` is).
+    pub is_hypershift2: bool,
 }
 
 #[derive(Default)]
@@ -270,30 +273,7 @@ struct GestureContext {
     is_fg_elevated: bool,
 }
 
-/// A held HyperShift 2 trigger: its mouse's presses play the `hypershift2`
-/// layer until it is let go; let go unused, it plays its own press.
-struct Hypershift2Hold {
-    /// The mouse it belongs to (`EncodedKeyEvent.backend`, `hid:<device>`).
-    backend: String,
-    control: String,
-    used: bool,
-    /// The trigger's own press, for a release with nothing pressed meanwhile.
-    press: GestureContext,
-}
-
-/// What the capture worker keeps between events: press patterns still being
-/// told apart, and the held HyperShift 2 triggers.
-#[derive(Default)]
-struct PendingGestures {
-    patterns: gestures::Gestures<GestureContext>,
-    hypershift2: Vec<Hypershift2Hold>,
-}
-
-impl PendingGestures {
-    fn next_deadline(&self) -> Option<std::time::Instant> {
-        self.patterns.next_deadline()
-    }
-}
+type PendingGestures = gestures::Gestures<GestureContext>;
 
 /// A shortcut of modifiers alone: it is always held down (push-to-talk).
 fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPreview) -> bool {
@@ -340,7 +320,7 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
 
 /// Dispatches what the clock settled (long presses, closed tap windows).
 fn fire_due_gestures(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: &AppConfig, gestures: &mut PendingGestures) {
-    let fired = gestures.patterns.tick(std::time::Instant::now());
+    let fired = gestures.tick(std::time::Instant::now());
     if !fired.is_empty() {
         fire_gestures(app, runtime_store, config, fired);
     }
@@ -412,9 +392,10 @@ fn process_encoded_key_event(
     // leaves only its key-up in the file log.
     if !event.is_key_up {
         log::info!(
-            "[capture] Key-down received for {} (hypershift: {}, repeat: {})",
+            "[capture] Key-down received for {} (hypershift: {}, hypershift2: {}, repeat: {})",
             event.encoded_key,
             event.is_hypershift,
+            event.is_hypershift2,
             event.is_repeat
         );
     }
@@ -430,22 +411,9 @@ fn process_encoded_key_event(
 
     // A button whose press pattern is being told apart: its release and
     // repeats belong to the recognizer.
-    // A HyperShift 2 trigger's release: unused, it was a plain press.
-    if event.is_key_up
-        && let Some(control) = resolver::control_for_key(config, &event.encoded_key)
-        && let Some(index) = gestures.hypershift2.iter().position(|hold| hold.backend == event.backend && hold.control == control)
-    {
-        let hold = gestures.hypershift2.remove(index);
-        flush_log_entries(runtime_store, log_entries);
-        if !hold.used {
-            fire_gestures(app, runtime_store, config, vec![(hold.press, config::Gesture::Press)]);
-        }
-        return EventOutcome::Handled;
-    }
-
-    if gestures.patterns.tracks(&event.encoded_key) {
+    if gestures.tracks(&event.encoded_key) {
         if event.is_key_up {
-            let fired = gestures.patterns.release(&event.encoded_key, std::time::Instant::now());
+            let fired = gestures.release(&event.encoded_key, std::time::Instant::now());
             flush_log_entries(runtime_store, log_entries);
             fire_gestures(app, runtime_store, config, fired);
             return EventOutcome::Handled;
@@ -620,15 +588,7 @@ fn process_encoded_key_event(
         )
     };
 
-    // This mouse's HyperShift 2 trigger held: its presses use that layer, and
-    // the trigger is no longer a plain press.
-    let hypershift2 = gestures
-        .hypershift2
-        .iter_mut()
-        .find(|hold| hold.backend == event.backend)
-        .map(|hold| hold.used = true)
-        .is_some();
-    let held = resolver::HeldLayers { hypershift: event.is_hypershift, hypershift2 };
+    let held = resolver::HeldLayers { hypershift: event.is_hypershift, hypershift2: event.is_hypershift2 };
     let preview = resolver::resolve_gesture_preview(
         config,
         &event.encoded_key,
@@ -665,26 +625,11 @@ fn process_encoded_key_event(
         is_fg_elevated,
     };
 
-    // A HyperShift 2 trigger (of a mouse that reports its own buttons): held,
-    // it switches that mouse's layer instead of acting.
-    if let Some(control) = preview.control_id.as_deref()
-        && event.backend.starts_with("hid:")
-        && config.settings.hypershift2_triggers.iter().any(|trigger| trigger == control)
-    {
-        if !event.is_repeat && !gestures.hypershift2.iter().any(|hold| hold.backend == event.backend) {
-            log::info!("[capture] HyperShift 2 held ({control})");
-            let press = GestureContext { held: resolver::HeldLayers { hypershift2: false, ..held }, ..context() };
-            gestures.hypershift2.push(Hypershift2Hold { backend: event.backend.clone(), control: control.to_owned(), used: false, press });
-        }
-        flush_log_entries(runtime_store, log_entries);
-        return EventOutcome::Handled;
-    }
-
     // Several press patterns on this button: wait to tell them apart.
     let patterns = gesture_patterns(config, &preview, held);
     if patterns.any() && !event.is_repeat {
         let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
-        gestures.patterns.press(&event.encoded_key, patterns, context(), std::time::Instant::now());
+        gestures.press(&event.encoded_key, patterns, context(), std::time::Instant::now());
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
     }
@@ -1083,6 +1028,8 @@ pub(crate) fn emit_profile_resolved_and_notify(
         // Remember the real foreground window (so the tray "create rule" path can
         // fall back to it — at tray-click time the live foreground is Sidearm) and
         // decide whether the profile changed, in a single lock acquisition.
+        #[cfg(target_os = "windows")]
+        windows::follow_profile_hypershift2(capture_result.resolved_profile_id.as_deref());
         let should_notify = if let Ok(mut store) = runtime_store.lock() {
             store.set_last_foreground_window(capture_result.clone());
             store.notify_profile_change(capture_result.resolved_profile_id.as_deref())

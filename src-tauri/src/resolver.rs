@@ -569,17 +569,6 @@ fn mapping_source_name(mapping: &EncoderMapping) -> &'static str {
     }
 }
 
-/// The control an encoded key belongs to (its encoder mapping), if exactly one.
-pub fn control_for_key(config: &AppConfig, encoded_key: &str) -> Option<String> {
-    let key = normalized_encoded_key(encoded_key);
-    let mut found = config
-        .encoder_mappings
-        .iter()
-        .filter(|mapping| normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&key));
-    let mapping = found.next()?;
-    found.next().is_none().then(|| mapping.control_id.as_str().to_owned())
-}
-
 fn normalized_encoded_key(raw: &str) -> String {
     crate::hotkeys::normalize_hotkey(raw).unwrap_or_else(|_| raw.trim().to_owned())
 }
@@ -743,7 +732,6 @@ mod tests {
                 onboarding_step: None,
                 hypershift_trigger: "mouse_right".into(),
                 hypershift_tap: false,
-                hypershift2_triggers: Vec::new(),
                 show_battery_in_tray: false,
                 offline_profile_id: None,
             },
@@ -810,7 +798,7 @@ mod tests {
             description: None,
             enabled: true,
             priority,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
         }
     }
 
@@ -1151,7 +1139,6 @@ mod edge_proptests {
                 onboarding_step: None,
                 hypershift_trigger: "mouse_right".into(),
                 hypershift_tap: false,
-                hypershift2_triggers: Vec::new(),
                 show_battery_in_tray: false,
                 offline_profile_id: None,
             },
@@ -1211,7 +1198,7 @@ mod edge_proptests {
             description: None,
             enabled,
             priority: 0,
-            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None,
+            mouse_dpi: None, mouse_poll_rate_hz: None, mouse_dpi_stages: None, device_slots: None, device_mouse: None, hypershift2_triggers: Vec::new(),
         }
     }
 

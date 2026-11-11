@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] — 2026-11-11
+
 ### Fixed
 - Sidearm started while the previous one was still closing (waiting on a sleeping mouse)
   sometimes came up without its window and without the mice. It now waits for the

@@ -23,7 +23,8 @@
         3,
         4,
         5,
-        6
+        6,
+        7
       ]
     },
     "settings": {
@@ -99,7 +100,9 @@
       "type": "string",
       "enum": [
         "standard",
-        "hypershift"
+        "hypershift",
+        "hypershift2",
+        "hypershiftBoth"
       ]
     },
     "controlFamily": {
@@ -279,6 +282,11 @@
         "hypershiftTap": {
           "type": "boolean",
           "description": "The Hypershift trigger acts only when held: a quick press with nothing else pressed meanwhile plays the button's own click."
+        },
+        "hypershift2Triggers": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/controlId" },
+          "description": "HyperShift 2 triggers, at most one per mouse: held, that mouse's buttons play the hypershift2 layer; a quick press plays the trigger's own press."
         },
         "showBatteryInTray": {
           "type": "boolean"

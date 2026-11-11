@@ -265,12 +265,35 @@ struct GestureContext {
     title: String,
     process_path: Option<String>,
     manual_profile_override: Option<String>,
-    is_hypershift: bool,
+    held: resolver::HeldLayers,
     own_window: bool,
     is_fg_elevated: bool,
 }
 
-type PendingGestures = gestures::Gestures<GestureContext>;
+/// A held HyperShift 2 trigger: its mouse's presses play the `hypershift2`
+/// layer until it is let go; let go unused, it plays its own press.
+struct Hypershift2Hold {
+    /// The mouse it belongs to (`EncodedKeyEvent.backend`, `hid:<device>`).
+    backend: String,
+    control: String,
+    used: bool,
+    /// The trigger's own press, for a release with nothing pressed meanwhile.
+    press: GestureContext,
+}
+
+/// What the capture worker keeps between events: press patterns still being
+/// told apart, and the held HyperShift 2 triggers.
+#[derive(Default)]
+struct PendingGestures {
+    patterns: gestures::Gestures<GestureContext>,
+    hypershift2: Vec<Hypershift2Hold>,
+}
+
+impl PendingGestures {
+    fn next_deadline(&self) -> Option<std::time::Instant> {
+        self.patterns.next_deadline()
+    }
+}
 
 /// A shortcut of modifiers alone: it is always held down (push-to-talk).
 fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPreview) -> bool {
@@ -283,15 +306,21 @@ fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPre
 /// The press patterns besides the plain press that the resolved control's
 /// bindings answer on its layer. None when its plain press holds a shortcut
 /// down (a hold must start on the press, it cannot wait).
-fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview, hypershift: bool) -> gestures::Patterns {
+fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview, held: resolver::HeldLayers) -> gestures::Patterns {
     let (Some(profile), Some(layer), Some(control)) =
         (preview.resolved_profile_id.as_deref(), preview.layer.as_deref(), preview.control_id.as_deref())
     else {
         return gestures::Patterns::default();
     };
-    // Under HyperShift each pattern falls back to the standard layer on its
-    // own (`resolver::resolve_gesture_preview`).
-    let on_layer = |binding_layer: &str| binding_layer == layer || (hypershift && (binding_layer == "hypershift" || binding_layer == "standard"));
+    // Under a held trigger each pattern falls back on its own
+    // (`resolver::resolve_gesture_preview`): every layer it may land on counts.
+    let on_layer = |binding_layer: &str| {
+        binding_layer == layer
+            || ((held.hypershift || held.hypershift2) && binding_layer == "standard")
+            || (held.hypershift && binding_layer == "hypershift")
+            || (held.hypershift2 && binding_layer == "hypershift2")
+            || (held.hypershift && held.hypershift2 && binding_layer == "hypershiftBoth")
+    };
     if preview.trigger_mode == Some(config::TriggerMode::Hold) || holds_modifiers_only(config, preview) {
         return gestures::Patterns::default();
     }
@@ -311,7 +340,7 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
 
 /// Dispatches what the clock settled (long presses, closed tap windows).
 fn fire_due_gestures(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: &AppConfig, gestures: &mut PendingGestures) {
-    let fired = gestures.tick(std::time::Instant::now());
+    let fired = gestures.patterns.tick(std::time::Instant::now());
     if !fired.is_empty() {
         fire_gestures(app, runtime_store, config, fired);
     }
@@ -332,7 +361,7 @@ fn fire_gestures(
             &context.title,
             context.process_path.as_deref(),
             context.manual_profile_override.as_deref(),
-            context.is_hypershift,
+            context.held,
             gesture,
         );
         if preview.status != resolver::ResolutionStatus::Resolved {
@@ -401,9 +430,22 @@ fn process_encoded_key_event(
 
     // A button whose press pattern is being told apart: its release and
     // repeats belong to the recognizer.
-    if gestures.tracks(&event.encoded_key) {
+    // A HyperShift 2 trigger's release: unused, it was a plain press.
+    if event.is_key_up
+        && let Some(control) = resolver::control_for_key(config, &event.encoded_key)
+        && let Some(index) = gestures.hypershift2.iter().position(|hold| hold.backend == event.backend && hold.control == control)
+    {
+        let hold = gestures.hypershift2.remove(index);
+        flush_log_entries(runtime_store, log_entries);
+        if !hold.used {
+            fire_gestures(app, runtime_store, config, vec![(hold.press, config::Gesture::Press)]);
+        }
+        return EventOutcome::Handled;
+    }
+
+    if gestures.patterns.tracks(&event.encoded_key) {
         if event.is_key_up {
-            let fired = gestures.release(&event.encoded_key, std::time::Instant::now());
+            let fired = gestures.patterns.release(&event.encoded_key, std::time::Instant::now());
             flush_log_entries(runtime_store, log_entries);
             fire_gestures(app, runtime_store, config, fired);
             return EventOutcome::Handled;
@@ -578,14 +620,24 @@ fn process_encoded_key_event(
         )
     };
 
-    let preview = resolver::resolve_input_preview_with_overrides(
+    // This mouse's HyperShift 2 trigger held: its presses use that layer, and
+    // the trigger is no longer a plain press.
+    let hypershift2 = gestures
+        .hypershift2
+        .iter_mut()
+        .find(|hold| hold.backend == event.backend)
+        .map(|hold| hold.used = true)
+        .is_some();
+    let held = resolver::HeldLayers { hypershift: event.is_hypershift, hypershift2 };
+    let preview = resolver::resolve_gesture_preview(
         config,
         &event.encoded_key,
         exe,
         title,
         process_path,
         manual_profile_override.as_deref(),
-        event.is_hypershift,
+        held,
+        config::Gesture::Press,
     );
 
     let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
@@ -602,25 +654,37 @@ fn process_encoded_key_event(
         return EventOutcome::Handled;
     }
 
+    let context = || GestureContext {
+        encoded_key: event.encoded_key.clone(),
+        exe: exe.to_owned(),
+        title: title.to_owned(),
+        process_path: process_path.map(str::to_owned),
+        manual_profile_override: manual_profile_override.clone(),
+        held,
+        own_window,
+        is_fg_elevated,
+    };
+
+    // A HyperShift 2 trigger (of a mouse that reports its own buttons): held,
+    // it switches that mouse's layer instead of acting.
+    if let Some(control) = preview.control_id.as_deref()
+        && event.backend.starts_with("hid:")
+        && config.settings.hypershift2_triggers.iter().any(|trigger| trigger == control)
+    {
+        if !event.is_repeat && !gestures.hypershift2.iter().any(|hold| hold.backend == event.backend) {
+            log::info!("[capture] HyperShift 2 held ({control})");
+            let press = GestureContext { held: resolver::HeldLayers { hypershift2: false, ..held }, ..context() };
+            gestures.hypershift2.push(Hypershift2Hold { backend: event.backend.clone(), control: control.to_owned(), used: false, press });
+        }
+        flush_log_entries(runtime_store, log_entries);
+        return EventOutcome::Handled;
+    }
+
     // Several press patterns on this button: wait to tell them apart.
-    let patterns = gesture_patterns(config, &preview, event.is_hypershift);
+    let patterns = gesture_patterns(config, &preview, held);
     if patterns.any() && !event.is_repeat {
         let _ = app.emit(EVENT_CONTROL_RESOLVED, &preview);
-        gestures.press(
-            &event.encoded_key,
-            patterns,
-            GestureContext {
-                encoded_key: event.encoded_key.clone(),
-                exe: exe.to_owned(),
-                title: title.to_owned(),
-                process_path: process_path.map(str::to_owned),
-                manual_profile_override: manual_profile_override.clone(),
-                is_hypershift: event.is_hypershift,
-                own_window,
-                is_fg_elevated,
-            },
-            std::time::Instant::now(),
-        );
+        gestures.patterns.press(&event.encoded_key, patterns, context(), std::time::Instant::now());
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
     }

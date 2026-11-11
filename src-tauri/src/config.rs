@@ -17,7 +17,7 @@ const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 6;
+const SCHEMA_VERSION: i32 = 7;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -277,6 +277,11 @@ pub struct Settings {
     /// right-button trigger). Off: the trigger never clicks (Synapse).
     #[serde(default)]
     pub hypershift_tap: bool,
+    /// HyperShift 2 triggers, one per mouse at most (a control id names its
+    /// mouse): held, the mouse's buttons play the `hypershift2` layer; a quick
+    /// press with nothing else pressed plays the trigger's own press.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hypershift2_triggers: Vec<String>,
     /// Draw the mouse battery level as a badge on the tray icon.
     #[serde(default)]
     pub show_battery_in_tray: bool,
@@ -499,6 +504,11 @@ pub struct PhysicalControl {
 pub enum Layer {
     Standard,
     Hypershift,
+    /// While a mouse's HyperShift 2 trigger is held (`Settings.hypershift2_triggers`).
+    Hypershift2,
+    /// While both HyperShift triggers of a mouse are held.
+    #[serde(rename = "hypershiftBoth")]
+    HypershiftBoth,
 }
 
 impl Layer {
@@ -506,6 +516,8 @@ impl Layer {
         match self {
             Self::Standard => "standard",
             Self::Hypershift => "hypershift",
+            Self::Hypershift2 => "hypershift2",
+            Self::HypershiftBoth => "hypershiftBoth",
         }
     }
 }
@@ -1019,7 +1031,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=5) {
+    if matches!(config.version, 2..=6) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -2067,6 +2079,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             onboarding_step: None,
             hypershift_trigger: default_hypershift_trigger(),
             hypershift_tap: false,
+            hypershift2_triggers: Vec::new(),
             show_battery_in_tray: false,
             offline_profile_id: None,
         },
@@ -3900,7 +3913,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (6, 0x5e32_a1d9_f1f1_3cfc);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (7, 0xc20f_e66f_ae9f_bf2c);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

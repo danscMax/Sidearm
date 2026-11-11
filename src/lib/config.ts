@@ -1,4 +1,4 @@
-export type Layer = "standard" | "hypershift";
+export type Layer = "standard" | "hypershift" | "hypershift2" | "hypershiftBoth";
 
 export type ControlFamily = "thumbGrid" | "topPanel" | "wheel" | "system";
 
@@ -78,6 +78,8 @@ export interface Settings {
   hypershiftTrigger?: HypershiftTrigger;
   /** The trigger works on a held press; a quick press clicks the button. */
   hypershiftTap?: boolean;
+  /** HyperShift 2 triggers, at most one per mouse (control ids). */
+  hypershift2Triggers?: ControlId[];
   /** Draw the mouse battery level as a badge on the tray icon. */
   showBatteryInTray?: boolean;
   /** Profile written into the mouse on exit; absent = the fallback profile,

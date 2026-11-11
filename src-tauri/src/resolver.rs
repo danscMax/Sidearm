@@ -273,7 +273,28 @@ pub fn resolve_input_preview_with_overrides(
     override_profile_id: Option<&str>,
     force_hypershift: bool,
 ) -> ResolvedInputPreview {
-    resolve_gesture_preview(config, encoded_key, exe, title, process_path, override_profile_id, force_hypershift, Gesture::Press)
+    let held = HeldLayers { hypershift: force_hypershift, hypershift2: false };
+    resolve_gesture_preview(config, encoded_key, exe, title, process_path, override_profile_id, held, Gesture::Press)
+}
+
+/// The HyperShift triggers of the pressing mouse that are held.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct HeldLayers {
+    pub hypershift: bool,
+    pub hypershift2: bool,
+}
+
+impl HeldLayers {
+    /// The layers a press tries, most specific first; the mapping's own layer
+    /// is the last resort. An empty "both" layer falls to HyperShift.
+    fn candidates(self) -> &'static [Layer] {
+        match (self.hypershift, self.hypershift2) {
+            (true, true) => &[Layer::HypershiftBoth, Layer::Hypershift],
+            (false, true) => &[Layer::Hypershift2],
+            (true, false) => &[Layer::Hypershift],
+            (false, false) => &[],
+        }
+    }
 }
 
 /// [`resolve_input_preview_with_overrides`] for one press pattern of the
@@ -286,7 +307,7 @@ pub fn resolve_gesture_preview(
     title: &str,
     process_path: Option<&str>,
     override_profile_id: Option<&str>,
-    force_hypershift: bool,
+    held: HeldLayers,
     gesture: Gesture,
 ) -> ResolvedInputPreview {
     let normalized_key = normalized_encoded_key(encoded_key);
@@ -363,27 +384,24 @@ pub fn resolve_gesture_preview(
     // is imposed by the trigger state, not derived from the encoded key. Falls
     // back to the mapping's own layer when the control has no enabled
     // hypershift-layer binding in the resolved profile.
-    let layer = if force_hypershift && mapping.layer != Layer::Hypershift {
-        let hypershift_layer_is_bound = profile_resolution
-            .resolved_profile_id
-            .as_deref()
-            .is_some_and(|profile_id| {
-                config.bindings.iter().any(|binding| {
-                    binding.enabled
-                        && binding.profile_id == profile_id
-                        && binding.layer == Layer::Hypershift
-                        && binding.control_id == mapping.control_id
-                        && Gesture::of(binding.trigger_mode) == gesture
-                })
-            });
-        if hypershift_layer_is_bound {
-            Layer::Hypershift
-        } else {
-            mapping.layer
-        }
-    } else {
-        mapping.layer
+    // A mapping of the HyperShift layer (an encoding the firmware sends while
+    // its own trigger is held) counts as that trigger held.
+    let held = HeldLayers { hypershift: held.hypershift || mapping.layer == Layer::Hypershift, ..held };
+    let bound = |layer: Layer| {
+        profile_resolution.resolved_profile_id.as_deref().is_some_and(|profile_id| {
+            config.bindings.iter().any(|binding| {
+                binding.enabled
+                    && binding.profile_id == profile_id
+                    && binding.layer == layer
+                    && binding.control_id == mapping.control_id
+                    && Gesture::of(binding.trigger_mode) == gesture
+            })
+        })
     };
+    let layer = held.candidates().iter().copied().find(|&layer| bound(layer)).unwrap_or(match mapping.layer {
+        Layer::Hypershift => Layer::Standard,
+        other => other,
+    });
     let binding = profile_resolution
         .resolved_profile_id
         .as_deref()
@@ -551,6 +569,17 @@ fn mapping_source_name(mapping: &EncoderMapping) -> &'static str {
     }
 }
 
+/// The control an encoded key belongs to (its encoder mapping), if exactly one.
+pub fn control_for_key(config: &AppConfig, encoded_key: &str) -> Option<String> {
+    let key = normalized_encoded_key(encoded_key);
+    let mut found = config
+        .encoder_mappings
+        .iter()
+        .filter(|mapping| normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&key));
+    let mapping = found.next()?;
+    found.next().is_none().then(|| mapping.control_id.as_str().to_owned())
+}
+
 fn normalized_encoded_key(raw: &str) -> String {
     crate::hotkeys::normalize_hotkey(raw).unwrap_or_else(|_| raw.trim().to_owned())
 }
@@ -714,6 +743,7 @@ mod tests {
                 onboarding_step: None,
                 hypershift_trigger: "mouse_right".into(),
                 hypershift_tap: false,
+                hypershift2_triggers: Vec::new(),
                 show_battery_in_tray: false,
                 offline_profile_id: None,
             },
@@ -785,6 +815,32 @@ mod tests {
     }
 
     #[test]
+    fn held_triggers_pick_the_most_specific_bound_layer() {
+        let mut config = test_config(vec![]);
+        let base = config.bindings[0].clone();
+        for layer in [Layer::Hypershift, Layer::Hypershift2] {
+            let mut binding = base.clone();
+            binding.id = format!("binding-{}", layer.as_str());
+            binding.layer = layer;
+            config.bindings.push(binding);
+        }
+        let layer_of = |config: &AppConfig, hypershift, hypershift2| {
+            resolve_gesture_preview(config, "F13", "chrome.exe", "Docs", None, None, HeldLayers { hypershift, hypershift2 }, Gesture::Press).layer
+        };
+        assert_eq!(layer_of(&config, false, false).as_deref(), Some("standard"));
+        assert_eq!(layer_of(&config, true, false).as_deref(), Some("hypershift"));
+        assert_eq!(layer_of(&config, false, true).as_deref(), Some("hypershift2"));
+        assert_eq!(layer_of(&config, true, true).as_deref(), Some("hypershift"), "an empty 'both' layer falls to HyperShift");
+        let mut both = base.clone();
+        both.id = "binding-both".into();
+        both.layer = Layer::HypershiftBoth;
+        config.bindings.push(both);
+        assert_eq!(layer_of(&config, true, true).as_deref(), Some("hypershiftBoth"));
+        config.bindings.retain(|binding| binding.layer != Layer::Hypershift2);
+        assert_eq!(layer_of(&config, false, true).as_deref(), Some("standard"), "an empty HyperShift 2 layer falls to standard");
+    }
+
+    #[test]
     fn each_press_pattern_resolves_its_own_binding() {
         let mut config = test_config(vec![]);
         let mut long = config.bindings[0].clone();
@@ -798,9 +854,9 @@ mod tests {
 
         let press = resolve_input_preview(&config, "F13", "chrome.exe", "Docs", None);
         assert_eq!(press.binding_id.as_deref(), Some("binding-default-standard-thumb-01"), "the plain press, not the first binding");
-        let held = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, false, Gesture::LongPress);
+        let held = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, HeldLayers::default(), Gesture::LongPress);
         assert_eq!(held.binding_id.as_deref(), Some("binding-long"));
-        let double = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, false, Gesture::DoublePress);
+        let double = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, HeldLayers::default(), Gesture::DoublePress);
         assert_eq!(double.status, ResolutionStatus::Unresolved);
     }
 
@@ -1095,6 +1151,7 @@ mod edge_proptests {
                 onboarding_step: None,
                 hypershift_trigger: "mouse_right".into(),
                 hypershift_tap: false,
+                hypershift2_triggers: Vec::new(),
                 show_battery_in_tray: false,
                 offline_profile_id: None,
             },

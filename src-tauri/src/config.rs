@@ -3896,6 +3896,23 @@ mod tests {
     }
 
     #[test]
+    fn the_schema_cannot_change_without_a_new_version() {
+        // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
+        // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
+        // `version` enum, then put the new fingerprint here.
+        const SCHEMA_FINGERPRINT: (i32, u64) = (6, 0x5e32_a1d9_f1f1_3cfc);
+        let hash = CONFIG_SCHEMA_JSON
+            .bytes()
+            .filter(|&byte| byte != b'\r')
+            .fold(0xcbf2_9ce4_8422_2325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3));
+        assert_eq!(
+            (SCHEMA_VERSION, hash),
+            SCHEMA_FINGERPRINT,
+            "the config schema changed: bump SCHEMA_VERSION (an older Sidearm then leaves a newer config alone) and record the new fingerprint {hash:#x}"
+        );
+    }
+
+    #[test]
     fn refuses_to_recover_a_newer_schema_config() {
         let temp_dir = tempdir().expect("temp dir");
         load_or_initialize_config(temp_dir.path()).expect("seed");

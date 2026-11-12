@@ -34,18 +34,7 @@ pub(crate) fn get_dpi_scale() -> f64 {
 /// the OSD window with the primary scale clipped the text. Falls back to the
 /// primary scale if the per-monitor query fails.
 pub(crate) fn get_cursor_monitor_dpi_scale() -> f64 {
-    unsafe {
-        let mut pt = std::mem::zeroed();
-        GetCursorPos(&mut pt);
-        let hmon = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
-        let mut dpi_x: u32 = 0;
-        let mut dpi_y: u32 = 0;
-        if GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == 0 && dpi_x > 0 {
-            dpi_x as f64 / 96.0
-        } else {
-            get_dpi_scale()
-        }
-    }
+    dpi_scale_at(cursor_position())
 }
 
 /// Measure text width in pixels using Win32 GDI with the specified font.
@@ -93,6 +82,53 @@ pub(crate) fn measure_text_width(
 
 /// Position the OSD window on the monitor where the cursor is.
 ///
+/// The cursor in physical screen coordinates.
+pub(crate) fn cursor_position() -> (i32, i32) {
+    unsafe {
+        let mut pt = std::mem::zeroed();
+        GetCursorPos(&mut pt);
+        (pt.x, pt.y)
+    }
+}
+
+/// Physical top-left for a popup of `width`×`height` at `point` (offset by
+/// `gap`), flipped/clamped so it stays inside that monitor's work area.
+pub(crate) fn position_near(point: (i32, i32), width: i32, height: i32, gap: i32) -> (i32, i32) {
+    unsafe {
+        let hmon = MonitorFromPoint(windows_sys::Win32::Foundation::POINT { x: point.0, y: point.1 }, MONITOR_DEFAULTTONEAREST);
+        let mut mi: MONITORINFO = std::mem::zeroed();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        GetMonitorInfoW(hmon, &mut mi);
+        let wa = mi.rcWork;
+        popup_origin(point, (width, height), gap, (wa.left, wa.top, wa.right, wa.bottom))
+    }
+}
+
+/// DPI scale of the monitor holding `point`.
+pub(crate) fn dpi_scale_at(point: (i32, i32)) -> f64 {
+    unsafe {
+        let hmon = MonitorFromPoint(windows_sys::Win32::Foundation::POINT { x: point.0, y: point.1 }, MONITOR_DEFAULTTONEAREST);
+        let (mut dpi_x, mut dpi_y) = (0u32, 0u32);
+        if GetDpiForMonitor(hmon, MDT_EFFECTIVE_DPI, &mut dpi_x, &mut dpi_y) == 0 && dpi_x > 0 {
+            dpi_x as f64 / 96.0
+        } else {
+            get_dpi_scale()
+        }
+    }
+}
+
+/// Below-right of the cursor; above/left of it when that would leave the
+/// work area; never outside it.
+fn popup_origin(cursor: (i32, i32), size: (i32, i32), gap: i32, work: (i32, i32, i32, i32)) -> (i32, i32) {
+    let (left, top, right, bottom) = work;
+    let axis = |at: i32, len: i32, lo: i32, hi: i32| {
+        let start = if at + gap + len <= hi { at + gap } else { at - gap - len };
+        start.min(hi - len).max(lo)
+    };
+    (axis(cursor.0, size.0, left, right), axis(cursor.1, size.1, top, bottom))
+}
+
+
 /// Returns physical (x, y) coordinates for the chosen corner, accounting
 /// for the monitor work area (excludes taskbar).
 pub(crate) fn position_osd_on_monitor(
@@ -118,5 +154,19 @@ pub(crate) fn position_osd_on_monitor(
                 wa.bottom - outer_height - margin,
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::popup_origin;
+
+    #[test]
+    fn a_popup_opens_below_right_of_the_cursor_and_flips_at_the_edges() {
+        let work = (0, 0, 1000, 800);
+        assert_eq!(popup_origin((100, 100), (200, 300), 8, work), (108, 108));
+        assert_eq!(popup_origin((950, 700), (200, 300), 8, work), (742, 392));
+        assert_eq!(popup_origin((10, 10), (2000, 900), 8, work), (0, 0), "bigger than the screen: pinned");
+        assert_eq!(popup_origin((-500, 100), (200, 300), 8, (-1920, 0, 0, 1080)), (-492, 108), "monitor left of the primary");
     }
 }

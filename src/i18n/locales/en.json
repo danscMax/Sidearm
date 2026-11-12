@@ -782,24 +782,48 @@
     "workingDir": "Working directory",
     "launchTarget": "Launch target",
     "menuHeader": "Menu items",
-    "addActionItem": "Add action",
-    "addSubmenu": "Add submenu",
-    "noActions": "No available actions for menu",
-    "noActionsBody": "Menu items must reference other actions. Create at least one more action.",
     "empty": "Select or create an assignment first.",
     "assignmentCount": "Assignments: {{count}}.",
-    "menuItemAction": "Action item",
-    "menuItemSubmenu": "Submenu",
-    "menuItemId": "Menu item ID",
     "menuItemLabel": "Label",
     "menuItemEnabled": "Enabled",
-    "menuItemActionRef": "Action reference",
-    "menuItemNested": "Nested items",
     "capabilityVerified": "Verified",
     "capabilityNeedsValidation": "Needs validation",
     "capabilityPartially": "Partially remappable",
     "capabilityReserved": "Reserved",
-    "copyLabel": "Copy"
+    "copyLabel": "Copy",
+    "menuNewPhrase": "New phrase",
+    "menuPhraseText": "Text it types",
+    "menuPhrasePlaceholder": "What should land in the window…",
+    "menuPhraseEnter": "Send right away (Enter)",
+    "menuPhraseLibrary": "From the library snippet “{{name}}”: editing changes it everywhere it is used. With Enter on, the phrase becomes its own copy.",
+    "menuPhraseShared": "The same phrase also runs on: {{places}}. Editing changes it there too.",
+    "menuOtherAction": "Action to run",
+    "menuMoveUp": "Move up",
+    "menuMoveDown": "Move down",
+    "menuNewBlock": "Block",
+    "menuBlock": "Block",
+    "menuNoBlock": "No block",
+    "menuBlockName": "Block name",
+    "menuBlockHint": "A block is a heading in the popup with its items under it. Button numbers run on through all blocks.",
+    "menuSubmenuHint": "A list opens as its own level in the popup; tilt the wheel left or press “‹” to come back.",
+    "menuUnnamed": "(no name)",
+    "menuKindPhrase": "Phrase",
+    "menuKindKeys": "Keys",
+    "menuKindOther": "Action",
+    "menuNewKeys": "Keys",
+    "menuNewList": "List",
+    "menuListName": "List name",
+    "menuFindAction": "Find an action…",
+    "menuNothingFound": "Nothing found",
+    "menuAdd": "Add to the menu",
+    "menuTemplates": "Templates",
+    "menuAddsTo": "New items go into “{{name}}”.",
+    "menuStartWith": "Start from a template — or add items with the bar on the left:",
+    "menuAddTemplate": "Add a template as a new block:",
+    "menuEmpty": "The menu is empty.",
+    "menuGroupAddHint": "Select it and use the bar on the left: new items go into “{{name}}”.",
+    "menuIncomplete": "Not saved yet — fill in: {{names}}.",
+    "menuIncompleteItem": "Not filled in"
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -887,7 +911,7 @@
     "searchPlaceholder": "Search action...",
     "keyLabel": "Key",
     "keyCapturing": "Press a key...",
-    "keyEmpty": "Not set",
+    "keyEmpty": "Click, then press the keys",
     "record": "Record",
     "recordKey": "Record key",
     "recordSignal": "Record signal",
@@ -1030,7 +1054,7 @@
     "stepDelay": "Delay (ms, max 30,000)",
     "stepRepeat": "Repeat (max 100)",
     "menuLabel": "Context menu",
-    "menuLiveHint": "A menu is not yet executed live on a physical press — it needs a popup picker. You can still build and save it.",
+    "menuLiveHint": "Opens at the cursor when you press its button. Side button N picks item N, the wheel moves the highlight and the wheel click takes it, tilt left goes back; the menu's own button, any other button or a click elsewhere closes it.",
     "defaultMenu": "Menu",
     "defaultDisabled": "Disabled",
     "defaultAction": "Action",
@@ -1577,7 +1601,7 @@
       "live": "Executed live `{{action}}` for `{{encoded_key}}`.",
       "mediaKeyPreview": "Will send media key `{{key}}`.",
       "mediaKeySent": "Sent media key `{{key}}`.",
-      "menuNotLive": "Menu actions do not run live yet: they need a popup to pick an item. All other action types are supported.",
+      "menuNotLive": "A menu opens from its mouse button, at the cursor; it cannot be run from the editor.",
       "menuPreview": "Will open a menu with {{items}} items ({{enabled}} enabled).",
       "mouseActionDone": "Performed mouse action `{{action}}`.",
       "mouseActionWithModifiers": "Performed mouse action `{{modifiers}}` + `{{action}}`.",
@@ -1656,6 +1680,10 @@
     },
     "system": {
       "restoringMouse": "Sidearm is restoring the mouse buttons"
+    },
+    "menu": {
+      "searchPlaceholder": "Search phrases…",
+      "noResults": "Nothing found"
     }
   },
   "newMouse": {
@@ -1685,5 +1713,64 @@
     "apply": "Copy ({{count}})",
     "done": "Assignments copied: {{count}}",
     "importDropped": "Not imported, no matching button on this mouse: {{count}}"
+  },
+  "menuTemplates": {
+    "agent": "Phrases for an AI agent",
+    "editing": "Text editing",
+    "windows": "Windows and tabs",
+    "symbols": "Symbols",
+    "library": "The whole phrase library",
+    "clarify": {
+      "label": "Clarify",
+      "text": "First ask the one question whose answer would change the decision the most. If you have enough context, state your assumption and go on."
+    },
+    "docs": {
+      "label": "Check the docs",
+      "text": "Check the installed version, the current code and the official documentation. If they disagree, show what exactly differs."
+    },
+    "continue": {
+      "label": "Continue",
+      "text": "continue"
+    },
+    "next": {
+      "label": "What next?",
+      "text": "Name the nearest open step, what it will give and what it needs to start."
+    },
+    "verify": {
+      "label": "Verify the result",
+      "text": "Reproduce the original problem, check the result through the normal entry point and give one fact that confirms the fix."
+    },
+    "handoff": {
+      "label": "Hand-off summary",
+      "text": "In five points: the goal, the decisions made, the files changed, the check results and the nearest open step."
+    },
+    "copy": "Copy",
+    "paste": "Paste",
+    "cut": "Cut",
+    "undo": "Undo",
+    "redo": "Redo",
+    "selectAll": "Select all",
+    "find": "Find",
+    "snapLeft": "Window to the left",
+    "snapRight": "Window to the right",
+    "maximize": "Maximize",
+    "switchWindow": "Switch window",
+    "nextTab": "Next tab",
+    "closeTab": "Close tab",
+    "desktop": "Show desktop",
+    "symbol": {
+      "emDash": "— em dash",
+      "enDash": "– en dash",
+      "quotes": "«» guillemets",
+      "ellipsis": "… ellipsis",
+      "numero": "№ numero",
+      "arrow": "→ arrow",
+      "bullet": "• bullet",
+      "times": "× multiplication sign",
+      "approx": "≈ approximately",
+      "plusMinus": "± plus-minus",
+      "degree": "° degree",
+      "ruble": "₽ rouble"
+    }
   }
 }

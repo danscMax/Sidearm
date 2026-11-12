@@ -159,7 +159,7 @@ export function AppSettings({
               }
               capturing={capturingShortcut}
               onToggle={() => setCapturingShortcut(!capturingShortcut)}
-              recordLabel={t("picker.record")}
+              captureOnFocus
             />
           </div>
         </SettingRow>

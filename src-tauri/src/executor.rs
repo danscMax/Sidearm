@@ -296,15 +296,14 @@ pub fn run_preview_action(
                 executed_at: timestamp_millis(),
             })
         }
-        // Only Menu remains without live execution (it needs a popup UI). Everything
-        // else — shortcuts, mouse, text, launch, media, profile switch, clipboard
-        // repair, disabled, sequences — is handled above.
+        // A menu opens a popup (`menu_popup`), which the capture path does before it
+        // gets here; only a direct run (the picker's Test) reaches this.
         _ => Err(execution_error(
             "unsupported_live_execution",
             "execution",
             crate::ui_text!(
                 "execution.menuNotLive",
-                "Menu actions do not run live yet: they need a popup to pick an item. All other action types are supported."
+                "A menu opens from its mouse button, at the cursor; it cannot be run from the editor."
             ),
             Some(preview.encoded_key.clone()),
             Some(action_id),

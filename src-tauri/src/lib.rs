@@ -14,6 +14,7 @@ mod hotkeys;
 mod input_synthesis;
 mod log_cleanup;
 #[cfg(target_os = "windows")]
+mod menu_popup;
 mod mouse_memory;
 #[cfg(target_os = "windows")]
 mod mouse_settings;
@@ -1975,6 +1976,59 @@ fn restart_capture_with(app: &AppHandle, still_wanted: impl Fn() -> bool, keep_m
     result.map(|()| true)
 }
 
+/// The menu popup's page: loaded and ready to draw.
+#[tauri::command]
+fn menu_ready(app: AppHandle) {
+    menu_popup::page_ready(&app);
+}
+
+/// The menu popup measured itself (CSS pixels) for the menu `generation`.
+#[tauri::command]
+fn menu_layout(app: AppHandle, generation: u64, width: f64, height: f64) {
+    menu_popup::page_layout(&app, generation, width, height);
+}
+
+/// The menu popup's search box changed.
+#[tauri::command]
+fn menu_search(app: AppHandle, query: String) {
+    menu_popup::search_from_window(&app, &query);
+}
+
+/// Enter in the menu popup.
+#[tauri::command]
+fn menu_confirm(app: AppHandle) {
+    std::thread::spawn(move || menu_popup::confirm_from_window(&app));
+}
+
+/// Esc in the menu popup.
+#[tauri::command]
+fn menu_close(app: AppHandle) {
+    menu_popup::close_from_window(&app);
+}
+
+/// A wheel tick over the menu popup (`down` = towards the user).
+#[tauri::command]
+fn menu_wheel(app: AppHandle, down: bool) {
+    menu_popup::wheel_from_window(&app, down);
+}
+
+/// A click on a menu item (index in the level shown).
+#[tauri::command]
+fn menu_pick(app: AppHandle, index: usize) {
+    // Off the IPC thread: the picked action may type text for a while.
+    std::thread::spawn(move || menu_popup::pick_from_window(&app, index));
+}
+
+#[tauri::command]
+fn menu_hover(app: AppHandle, index: usize) {
+    menu_popup::hover_from_window(&app, index);
+}
+
+#[tauri::command]
+fn menu_back(app: AppHandle) {
+    menu_popup::back_from_window(&app);
+}
+
 /// The frontend's translations of the `backend.*` keys (flat `area.name` →
 /// text) for the tray and the OSD; sent at start and on every language change.
 #[tauri::command]
@@ -3675,7 +3729,8 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_window_state::Builder::new().build())
+        // The popups place themselves at the cursor or a corner; only the main window is remembered.
+        .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["osd", menu_popup::WINDOW_LABEL]).build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -3789,26 +3844,30 @@ pub fn run() {
                 // mid-resize, or from a frame-dropped close-during-drag) would
                 // otherwise leave the user with an unusable title-bar-only
                 // window on next start.  Keep these in sync with tauri.conf.json.
-                const MIN_W: u32 = 480;
-                const MIN_H: u32 = 600;
-                if let Ok(size) = main_window.inner_size()
-                    && (size.width < MIN_W || size.height < MIN_H)
-                {
-                    let new_w = size.width.max(MIN_W);
-                    let new_h = size.height.max(MIN_H);
-                    log::warn!(
-                        "[window] restored main size {}x{} below minimum {}x{} — clamping to {}x{}",
-                        size.width,
-                        size.height,
-                        MIN_W,
-                        MIN_H,
-                        new_w,
-                        new_h,
-                    );
-                    let _ = main_window.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                        width: new_w,
-                        height: new_h,
-                    }));
+                // The plugin stores PHYSICAL pixels: a size saved on a 100 %
+                // monitor comes back less than half as big on a 225 % laptop
+                // screen (measured 2026-11-12: 1122x833 px = 499x370 logical).
+                // So compare in logical units, and below a usable size give the
+                // window its default size, kept inside the monitor's work area.
+                const USABLE_W: f64 = 900.0;
+                const USABLE_H: f64 = 640.0;
+                if let (Ok(size), Ok(scale)) = (main_window.inner_size(), main_window.scale_factor()) {
+                    let logical = size.to_logical::<f64>(scale);
+                    if logical.width < USABLE_W || logical.height < USABLE_H {
+                        let (mut w, mut h) = (1280.0_f64, 840.0_f64);
+                        if let Ok(Some(monitor)) = main_window.current_monitor() {
+                            let area = monitor.work_area().size.to_logical::<f64>(monitor.scale_factor());
+                            w = w.min(area.width * 0.92);
+                            h = h.min(area.height * 0.92);
+                        }
+                        log::warn!(
+                            "[window] restored main size {:.0}x{:.0} (logical, scale {scale}) is too small — resizing to {w:.0}x{h:.0}",
+                            logical.width,
+                            logical.height,
+                        );
+                        let _ = main_window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(w.max(480.0), h.max(600.0))));
+                        let _ = main_window.center();
+                    }
                 }
             }
 
@@ -4072,6 +4131,15 @@ pub fn run() {
         .manage(Arc::new(Mutex::new(RuntimeController::default())))
         .manage(Arc::new(Mutex::new(MacroRecorder::new())))
         .invoke_handler(tauri::generate_handler![
+            menu_ready,
+            menu_layout,
+            menu_pick,
+            menu_hover,
+            menu_wheel,
+            menu_search,
+            menu_confirm,
+            menu_close,
+            menu_back,
             export_verification_session,
             load_config,
             save_config,

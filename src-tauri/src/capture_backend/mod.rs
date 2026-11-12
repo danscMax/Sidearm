@@ -599,6 +599,14 @@ fn process_encoded_key_event(
     );
 
     let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
+    // An open menu owns the mouse's buttons: the press drives it, the app gets nothing.
+    if crate::menu_popup::is_open() {
+        if !event.is_repeat {
+            crate::menu_popup::handle_press(app, preview.control_id.as_deref());
+        }
+        flush_log_entries(runtime_store, log_entries);
+        return EventOutcome::Handled;
+    }
     if let Some(action) = native_wheel_scroll(&preview, own_window) {
         if !event.is_repeat
             && let Err(error) = crate::input_synthesis::send_mouse_action(
@@ -954,6 +962,14 @@ fn run_fire_and_forget(
     {
         crate::onboard_guard::note_device_used(app, &physical.device_id);
     }
+    // A menu opens its popup; the item picked there runs through `run_menu_item`.
+    if let Some(action) = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
+        && let crate::config::ActionPayload::Menu(payload) = &action.payload
+    {
+        flush_log_entries(runtime_store, log_entries);
+        crate::menu_popup::open(app, runtime_store, config, preview, &action.display_name, payload, is_fg_elevated);
+        return;
+    }
     // A test run against virtual mice resolves and reports, but sends nothing.
     let executed = if crate::fake_mode() {
         executor::execute_preview_action(config, preview)
@@ -1011,6 +1027,28 @@ fn run_fire_and_forget(
             emit_runtime_error(app, runtime_store, &error.event);
         }
     }
+}
+
+/// Run the item picked in a menu as if the menu's own press had resolved to it
+/// (same profile, window, control and layer).
+pub(crate) fn run_menu_item(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    config: &AppConfig,
+    menu_press: &resolver::ResolvedInputPreview,
+    action_id: &str,
+    is_fg_elevated: bool,
+) {
+    let Some(action) = config.actions.iter().find(|action| action.id == action_id) else {
+        log::warn!("[menu] item action `{action_id}` no longer exists");
+        return;
+    };
+    let mut preview = menu_press.clone();
+    preview.action_id = Some(action.id.clone());
+    preview.action_type = Some(action.action_type.as_str().into());
+    preview.action_pretty = Some(action.display_name.clone());
+    preview.trigger_mode = None;
+    run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), is_fg_elevated);
 }
 
 /// Emit the resolved-profile event and, when the active profile changed, show

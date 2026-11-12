@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #1a1f16;
+    --text: #e8eae4;
+    --muted: rgba(232, 234, 228, 0.74);
+    --dim: rgba(232, 234, 228, 0.45);
+    --accent: #9fca69;
+    --accent-soft: rgba(159, 202, 105, 0.16);
+    --line: rgba(159, 202, 105, 0.28);
+    --tip: #0c100a;
+    --tip-text: #eef2ea;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    background: transparent;
+    overflow: hidden;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: default;
+  }
+  /* Sized to its content; Rust sizes the window to what menu.js measures.
+     The list never changes shape under the pointer: what an item sends shows
+     in the tip beside it. */
+  .menu {
+    display: inline-flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px;
+    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    font-size: 13.5px;
+    color: var(--text);
+  }
+  .list {
+    display: flex;
+    flex-direction: column;
+    width: 236px;
+    padding: 4px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg);
+  }
+  .search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+    padding: 0 8px;
+    height: 30px;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--dim);
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    outline: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+  }
+  .search input::placeholder { color: var(--dim); }
+  .back {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-height: 30px;
+    margin-bottom: 2px;
+    padding: 0 8px 0 4px;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--accent);
+    font: 600 12.5px "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    text-align: left;
+    cursor: pointer;
+  }
+  .back:hover { background: rgba(255, 255, 255, 0.1); }
+  .back__arrow { width: 18px; font-size: 18px; line-height: 1; text-align: center; }
+  .group {
+    padding: 7px 8px 2px 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    opacity: 0.8;
+    white-space: nowrap;
+  }
+  .row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 26px;
+    padding: 2px 6px 2px 4px;
+    border-radius: 5px;
+    white-space: nowrap;
+  }
+  .key {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 19px;
+    padding: 0 3px;
+    border: 1px solid rgba(159, 202, 105, 0.38);
+    border-radius: 4px;
+    color: var(--accent);
+    font-size: 10.5px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .key--none { visibility: hidden; }
+  /* Past the 12 side buttons: picked by wheel, mouse or search. */
+  .key--extra { border-style: dashed; opacity: 0.55; }
+  .label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+  .mark { flex: none; color: var(--dim); }
+  .item--on { background: var(--accent-soft); }
+  .item--on .key { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+  .item--off { opacity: 0.4; }
+  .empty { padding: 10px 8px; color: var(--dim); }
+  /* The tip: what the highlighted item sends, beside its row. */
+  .side { position: relative; width: 272px; align-self: stretch; }
+  .tip {
+    position: absolute;
+    left: 0;
+    right: 0;
+    overflow: hidden;
+    padding: 8px 11px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--tip);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    color: var(--tip-text);
+    font-size: 12.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    transition: top 110ms ease-out;
+  }
+  .tip::before {
+    content: "";
+    position: absolute;
+    left: -7px;
+    top: 9px;
+    border: 6px solid transparent;
+    border-left: 0;
+    border-right-color: var(--line);
+  }
+  .tip--clipped {
+    -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+    mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  }
+  .tip--fresh { animation: reveal 140ms ease-out; }
+  @keyframes reveal {
+    from { opacity: 0.2; }
+    to { opacity: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="menu" id="menu"></div>
+<script src="/menu.js"></script>
+</body>
+</html>

@@ -19,7 +19,12 @@ const V2 = "razer-naga";
 const V3 = "razer-naga-v3";
 
 // Live-map signals: `live_overlay::USAGES[2 * control index + layer]`; the thumbs come first.
-const v3Usage = (thumb, layer) => 0x10 + 2 * (thumb - 1) + layer;
+// The V3's consumer usage per key button and layer (src-tauri/src/live_overlay.rs `USAGES`).
+const V3_USAGES = [
+  0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+  0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a,
+];
+const v3Usage = (thumb, layer) => V3_USAGES[2 * (thumb - 1) + layer];
 const v2Usage = v3Usage;
 // Mouse-hook button codes (`HYPER_TRIGGER_*` in capture_backend/windows.rs).
 const RIGHT = 2;
@@ -190,6 +195,19 @@ function addBindings(config) {
     config.actions.push({ id: actionId, type: "profileSwitch", displayName: "E2E switch", payload: { targetProfileId: "e2e-plain" } });
     config.bindings.push({ id: `${actionId}-binding`, profileId: profile.id, layer: "standard", controlId: "v3_thumb_06", label: "E2E switch", actionId, enabled: true });
   }
+  // A menu on HyperShift 2 + thumb 11: item 1 = S, item 2 = T.
+  for (const profile of config.profiles.filter((p) => p.id !== "e2e-plain")) {
+    const base = `e2e-${profile.id}-menu`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+    for (const key of ["S", "T"]) {
+      config.actions.push({ id: `${base}-${key.toLowerCase()}`, type: "shortcut", displayName: `E2E ${key}`, payload: { key, ctrl: false, shift: false, alt: false, win: false } });
+    }
+    config.actions.push({ id: base, type: "menu", displayName: "E2E menu", payload: { items: [
+      { kind: "action", id: `${base}-item-s`, label: "S", actionId: `${base}-s`, enabled: true },
+      { kind: "action", id: `${base}-item-t`, label: "T", actionId: `${base}-t`, enabled: true },
+    ] } });
+    config.bindings = config.bindings.filter((b) => !(b.profileId === profile.id && b.controlId === "v3_thumb_11" && b.layer === "hypershift2"));
+    config.bindings.push({ id: `${base}-binding`, profileId: profile.id, layer: "hypershift2", controlId: "v3_thumb_11", label: "E2E menu", actionId: base, enabled: true });
+  }
   // The default profile lives in V3 bank 1 (written at exit).
   const fallback = config.profiles.find((p) => p.id === config.settings.fallbackProfileId);
   fallback.deviceSlots = { ...(fallback.deviceSlots ?? {}), [V3]: 1 };
@@ -343,6 +361,31 @@ async function main() {
     await world.press(V3, v3Usage(4, 1)); // the ring button's firmware layer
     world.nativeButton(V3, RIGHT, false);
     check("right + ring + thumb → HS + HS2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_04", "hypershiftBoth"), 5000, mark));
+    // 5d. The menu popup: HyperShift 2 + thumb 11 opens it, thumb 2 picks item 2,
+    // and the press drives the menu instead of thumb 2's own action.
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(100);
+    await world.press(V3, v3Usage(11, 0));
+    world.nativeButton(V3, RIGHT, false);
+    check("HyperShift 2 + thumb 11 opens the menu", await world.waitFor(() => world.log(), /\[menu\] opened `E2E menu` \(2 items\)/, 5000, mark));
+    await sleep(300);
+    mark = world.log().length;
+    await world.press(V3, v3Usage(2, 0), 50);
+    check("thumb 2 picks item 2", await world.waitFor(() => world.log(), /\[menu\] picked `e2e-[a-z0-9-]+-menu-t`/, 5000, mark));
+    check("…which runs on the menu's press", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_11", "hypershift2"), 5000, mark));
+    await sleep(500);
+    check("…and thumb 2's own action does not run", !/control v3_thumb_02/.test(world.log().slice(mark)));
+    mark = world.log().length;
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(100);
+    await world.press(V3, v3Usage(11, 0));
+    world.nativeButton(V3, RIGHT, false);
+    await world.waitFor(() => world.log(), /\[menu\] opened/, 5000, mark);
+    mark = world.log().length;
+    await world.press(V3, v3Usage(11, 0));
+    check("the opening button closes the menu", await world.waitFor(() => world.log(), /\[menu\] closed/, 5000, mark));
+
     mark = world.log().length;
     await world.press(V3, v3Usage(6, 0));
     check("a profile without HyperShift 2 turns it off", await world.waitFor(() => world.log(), /HyperShift 2 trigger for this profile: 0/, 5000, mark));

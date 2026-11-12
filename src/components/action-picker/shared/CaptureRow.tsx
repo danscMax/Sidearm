@@ -1,7 +1,10 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 /** Read-only input paired with a Record/Stop toggle button. Shared by the
- *  shortcut-key and signal capture fields. The caller owns capture state. */
+ *  shortcut-key and signal capture fields. The caller owns capture state.
+ *  `captureOnFocus` (keyboard fields): clicking into the field starts the
+ *  capture and leaving it stops it — no Record button. */
 export function CaptureRow({
   value,
   placeholder,
@@ -9,6 +12,7 @@ export function CaptureRow({
   onToggle,
   recordLabel,
   ariaLabel,
+  captureOnFocus,
 }: {
   value: string;
   placeholder: string;
@@ -18,8 +22,25 @@ export function CaptureRow({
    *  Defaults to the generic "Record". */
   recordLabel?: string;
   ariaLabel: string;
+  captureOnFocus?: boolean;
 }) {
   const { t } = useTranslation();
+  // Focus and click arrive together on the first click: read the live state,
+  // not this render's, so the second one does not undo the first.
+  const live = useRef(capturing);
+  live.current = capturing;
+  const start = () => {
+    if (!live.current) {
+      live.current = true;
+      onToggle();
+    }
+  };
+  const stop = () => {
+    if (live.current) {
+      live.current = false;
+      onToggle();
+    }
+  };
   return (
     <div className="capture-row">
       <input
@@ -28,14 +49,19 @@ export function CaptureRow({
         readOnly
         value={value}
         placeholder={placeholder}
-        className={capturing ? "capture-active" : ""}
+        className={`${capturing ? "capture-active" : ""}${captureOnFocus ? " capture-row__input--click" : ""}`}
+        onFocus={captureOnFocus ? start : undefined}
+        onClick={captureOnFocus ? start : undefined}
+        onBlur={captureOnFocus ? stop : undefined}
       />
       {/* While capturing this is "Stop", NOT a second "Cancel" competing with
           the modal footer's, and it stays quiet — accent is reserved for
           confirming CTAs (UI-review V2). */}
-      <button type="button" className="action-button" aria-pressed={capturing} onClick={onToggle}>
-        {capturing ? t("picker.stopCapture") : (recordLabel ?? t("picker.record"))}
-      </button>
+      {captureOnFocus ? null : (
+        <button type="button" className="action-button" aria-pressed={capturing} onClick={onToggle}>
+          {capturing ? t("picker.stopCapture") : (recordLabel ?? t("picker.record"))}
+        </button>
+      )}
       {/* Announce the capture state to screen readers (UI-review A4). */}
       <span className="sr-only" role="status">
         {capturing ? placeholder : ""}

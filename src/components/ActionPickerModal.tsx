@@ -24,6 +24,7 @@ import {
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
+import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice } from "./shared";
 import {
   autoName,
@@ -254,13 +255,8 @@ export function ActionPickerModal({
     () => initial.triggerMode !== "press" || initial.throttleMs > 0 || initial.conditions.length > 0,
   );
 
-  const menuActionOptions = useMemo(
-    () =>
-      existingAction
-        ? config.actions.filter((a) => a.id !== existingAction.id)
-        : config.actions,
-    [config.actions, existingAction],
-  );
+  // Phrase texts and new phrase actions edited in the menu editor, written on Save.
+  const [menuEdits, setMenuEdits] = useState<MenuEdits>(NO_MENU_EDITS);
 
   // Signal capture: listen to runtime's encoded_key_received event
   useEffect(() => {
@@ -332,6 +328,7 @@ export function ActionPickerModal({
         : targetBinding.actionId;
     }
     nextConfig = upsertAction(nextConfig, nextAction);
+    if (effectiveCategory === "menu") nextConfig = applyMenuEdits(nextConfig, menuEdits, menuItemsDraft);
 
     // Opt-in: store this inline snippet in the reusable library AND link the
     // button to it (source: libraryRef), so later library edits reach the
@@ -422,7 +419,10 @@ export function ActionPickerModal({
   }
 
   const roleCategory = effectiveCategory === "native" || effectiveCategory === "hypershift" || effectiveCategory === "hypershift2";
-  const saveDisabled = roleCategory ? false : isSaveDisabled(effectiveCategory, drafts);
+  const saveDisabled = roleCategory
+    ? false
+    : isSaveDisabled(effectiveCategory, drafts)
+      || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [
     triggerModeDraft !== "press" ? t(TRIGGER_LABEL_KEYS[triggerModeDraft]) : null,
@@ -590,11 +590,13 @@ export function ActionPickerModal({
 
             {effectiveCategory === "menu" ? (
               <div className="editor-grid">
-                <Notice variant="warning">{t("picker.menuLiveHint")}</Notice>
                 <MenuItemsEditor
                   items={menuItemsDraft}
                   onChange={setMenuItemsDraft}
-                  availableActions={menuActionOptions}
+                  config={config}
+                  edits={menuEdits}
+                  onEditsChange={setMenuEdits}
+                  menuActionId={existingAction?.id}
                 />
               </div>
             ) : null}

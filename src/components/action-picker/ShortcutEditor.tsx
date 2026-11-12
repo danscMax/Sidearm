@@ -55,7 +55,7 @@ export function ShortcutEditor({
           placeholder={isCapturing ? t("picker.keyCapturing") : t("picker.keyEmpty")}
           capturing={isCapturing}
           onToggle={() => setIsCapturing(!isCapturing)}
-          recordLabel={t("picker.recordKey")}
+          captureOnFocus
         />
       </label>
       <ModifierRow

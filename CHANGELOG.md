@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Menu actions now work from the mouse: the button opens a compact dark popup at
+  the cursor. Type to search every phrase (submenus included); side button N picks
+  item N, the wheel or arrows move the highlight, Enter or the wheel click takes it,
+  tilt left leaves a submenu; Esc, a click elsewhere or the menu's own button closes
+  it. A tip beside the highlighted item shows what it will send. Top-level submenus
+  show as blocks with a heading. The focus returns to your window before the text
+  is typed.
+- The menu editor is a master–detail view: the menu as the popup shows it on the
+  left (blocks, button numbers), the selected item on the right — its name, the text
+  it types and whether Enter follows, its block, order. New phrases are created right
+  there; no internal ids are shown.
+
 ## [0.12.2] — 2026-11-11
 
 ### Fixed

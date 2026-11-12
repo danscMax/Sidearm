@@ -16,7 +16,7 @@
 //! list drawn now and a radial look to come would only differ in how
 //! `public/menu.js` draws [`View`].
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
@@ -33,6 +33,8 @@ use crate::{
 
 /// Items a side button can pick by number (the 12-button grid).
 const NUMBERED: usize = 12;
+/// Heading of the block of pinned items, shown first.
+const PINNED: &str = "★";
 pub(crate) const WINDOW_LABEL: &str = "menu";
 const EVENT_SHOW: &str = "menu-show";
 
@@ -70,6 +72,10 @@ pub(crate) struct Model {
     query: String,
     /// What each action sends, by action id (see [`action_detail`]).
     details: HashMap<String, String>,
+    /// The other menus, by name: a search also looks there.
+    others: Vec<(String, Vec<MenuItem>)>,
+    /// Ids of menu actions: a link to another menu is no search result there.
+    menu_ids: HashSet<String>,
 }
 
 /// One row of the level shown: the item and the block it sits in.
@@ -124,6 +130,10 @@ fn item_enabled(item: &MenuItem) -> bool {
     }
 }
 
+fn item_pinned(item: &MenuItem) -> bool {
+    matches!(item, MenuItem::Action { pinned: true, .. })
+}
+
 fn item_label(item: &MenuItem) -> &str {
     match item {
         MenuItem::Action { label, .. } | MenuItem::Submenu { label, .. } => label,
@@ -132,9 +142,33 @@ fn item_label(item: &MenuItem) -> &str {
 
 impl Model {
     pub(crate) fn new(items: Vec<MenuItem>, details: HashMap<String, String>) -> Self {
-        let mut model = Self { root: items, path: Vec::new(), highlight: 0, query: String::new(), details };
+        let mut model = Self {
+            root: items,
+            path: Vec::new(),
+            highlight: 0,
+            query: String::new(),
+            details,
+            others: Vec::new(),
+            menu_ids: HashSet::new(),
+        };
         model.highlight = model.first_enabled().unwrap_or(0);
         model
+    }
+
+    /// The other menus a search also looks in (their details must be in the
+    /// model's), and the ids of all menu actions.
+    pub(crate) fn with_others(mut self, others: Vec<(String, Vec<MenuItem>)>, menu_ids: HashSet<String>) -> Self {
+        self.others = others;
+        self.menu_ids = menu_ids;
+        self
+    }
+
+    /// The action of a row of the level shown.
+    pub(crate) fn action_at(&self, index: usize) -> Option<String> {
+        match self.walk().0.get(index)?.item {
+            MenuItem::Action { action_id, .. } => Some(action_id.clone()),
+            MenuItem::Submenu { .. } => None,
+        }
     }
 
     /// The name or the sent text contains the query — also when it was typed
@@ -155,27 +189,60 @@ impl Model {
     fn walk(&self) -> (Vec<Entry<'_>>, Vec<&str>) {
         let needle = self.query.trim().to_lowercase();
         if !needle.is_empty() {
-            let mut found = Vec::new();
-            fn search<'a>(model: &Model, items: &'a [MenuItem], group: Option<&'a str>, needle: &str, found: &mut Vec<Entry<'a>>) {
+            struct Search<'m, 'a> {
+                model: &'m Model,
+                needle: &'m str,
+                seen: HashSet<&'a str>,
+                found: Vec<Entry<'a>>,
+            }
+            // `menu`: another menu searched; its name is the group, its links are skipped.
+            fn search<'a>(state: &mut Search<'_, 'a>, items: &'a [MenuItem], group: Option<&'a str>, menu: Option<&'a str>) {
                 for item in items.iter().filter(|item| item_enabled(item)) {
                     match item {
-                        MenuItem::Submenu { label, items, .. } => search(model, items, Some(label), needle, found),
-                        _ if model.matches(item, needle) => found.push(Entry { item, group }),
+                        MenuItem::Submenu { label, items, .. } => search(state, items, menu.or(Some(label)), menu),
+                        MenuItem::Action { action_id, .. }
+                            if state.model.matches(item, state.needle)
+                                && !(menu.is_some() && state.model.menu_ids.contains(action_id))
+                                && state.seen.insert(action_id) =>
+                        {
+                            state.found.push(Entry { item, group });
+                        }
                         _ => {}
                     }
                 }
             }
-            search(self, &self.root, None, &needle, &mut found);
-            return (found, Vec::new());
+            let mut state = Search { model: self, needle: &needle, seen: HashSet::new(), found: Vec::new() };
+            search(&mut state, &self.root, None, None);
+            for (name, items) in &self.others {
+                search(&mut state, items, Some(name), Some(name));
+            }
+            return (state.found, Vec::new());
         }
+        // Pinned items first, in their own block, and only there.
         let mut level: Vec<Entry<'_>> = Vec::new();
+        fn pinned<'a>(items: &'a [MenuItem], level: &mut Vec<Entry<'a>>) {
+            for item in items.iter().filter(|item| item_enabled(item)) {
+                match item {
+                    MenuItem::Submenu { items, .. } => pinned(items, level),
+                    _ if item_pinned(item) => level.push(Entry { item, group: Some(PINNED) }),
+                    _ => {}
+                }
+            }
+        }
+        pinned(&self.root, &mut level);
         for item in &self.root {
             match item {
                 MenuItem::Submenu { label, items, enabled, .. } => {
                     if *enabled {
-                        level.extend(items.iter().map(|inner| Entry { item: inner, group: Some(label.as_str()) }));
+                        level.extend(
+                            items
+                                .iter()
+                                .filter(|inner| !item_pinned(inner))
+                                .map(|inner| Entry { item: inner, group: Some(label.as_str()) }),
+                        );
                     }
                 }
+                _ if item_pinned(item) => {}
                 _ => level.push(Entry { item, group: None }),
             }
         }
@@ -184,7 +251,7 @@ impl Model {
             match level.get(index).map(|entry| entry.item) {
                 Some(MenuItem::Submenu { label, items, .. }) => {
                     labels.push(label.as_str());
-                    level = items.iter().map(|item| Entry { item, group: None }).collect();
+                    level = items.iter().filter(|item| !item_pinned(item)).map(|item| Entry { item, group: None }).collect();
                 }
                 _ => return (Vec::new(), labels),
             }
@@ -409,8 +476,24 @@ pub(crate) fn open(
     is_fg_elevated: bool,
 ) {
     let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let menus: Vec<(&Action, &MenuActionPayload)> = config
+        .actions
+        .iter()
+        .filter_map(|action| match &action.payload {
+            ActionPayload::Menu(menu) => Some((action, menu)),
+            _ => None,
+        })
+        .collect();
+    let others: Vec<(String, Vec<MenuItem>)> = menus
+        .iter()
+        .filter(|(_, menu)| menu.items != payload.items)
+        .map(|(action, menu)| (action.display_name.clone(), menu.items.clone()))
+        .collect();
+    let mut all_items = payload.items.clone();
+    all_items.extend(others.iter().flat_map(|(_, items)| items.iter().cloned()));
+    let menu_ids = menus.iter().map(|(action, _)| action.id.clone()).collect();
     let menu = OpenMenu {
-        model: Model::new(payload.items.clone(), menu_details(config, &payload.items)),
+        model: Model::new(payload.items.clone(), menu_details(config, &all_items)).with_others(others, menu_ids),
         title: title.to_owned(),
         generation,
         opener_control: preview.control_id.clone(),
@@ -594,6 +677,8 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
             if mode == PickMode::Copy
                 && let Some(text) = full_text(&menu.config, &action_id)
             {
+                // What it would type: tokens filled in, the {cursor} marker gone.
+                let text = crate::input_synthesis::expand_snippet_tokens(&text).0;
                 if !crate::fake_mode()
                     && let Err(error) = crate::input_synthesis::clipboard_set_text(&text)
                 {
@@ -632,6 +717,13 @@ pub(crate) fn handle_press(app: &AppHandle, control_id: Option<&str>) {
 /// The page under the mouse: a click picks, a hover highlights.
 pub(crate) fn pick_from_window(app: &AppHandle, index: usize, mode: PickMode) {
     drive_as(app, mode, |model| model.apply(Input::Pick(index)));
+}
+
+/// The whole text of a row (no preview clipping), for the tip held on it.
+pub(crate) fn full_text_at(index: usize) -> Option<String> {
+    let guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
+    let menu = guard.as_ref()?;
+    full_text(&menu.config, &menu.model.action_at(index)?)
 }
 
 pub(crate) fn hover_from_window(app: &AppHandle, index: usize) {
@@ -889,7 +981,7 @@ mod tests {
     use super::*;
 
     fn action(id: &str, label: &str) -> MenuItem {
-        MenuItem::Action { id: id.into(), label: label.into(), action_id: format!("act-{id}"), enabled: true }
+        MenuItem::Action { id: id.into(), label: label.into(), action_id: format!("act-{id}"), enabled: true, pinned: false }
     }
 
     fn submenu(id: &str, label: &str, items: Vec<MenuItem>) -> MenuItem {
@@ -902,7 +994,7 @@ mod tests {
         Model::new(
             vec![
                 action("a", "Ask"),
-                MenuItem::Action { id: "off".into(), label: "Off".into(), action_id: "act-off".into(), enabled: false },
+                MenuItem::Action { id: "off".into(), label: "Off".into(), action_id: "act-off".into(), enabled: false, pinned: false },
                 submenu("s", "Check", vec![action("v", "Validate"), action("r", "Review"), submenu("m", "More", vec![action("x", "Deep")])]),
                 action("c", "Continue"),
             ],
@@ -912,6 +1004,36 @@ mod tests {
 
     fn labels(view: &View) -> Vec<&str> {
         view.items.iter().map(|item| item.label.as_str()).collect()
+    }
+
+    #[test]
+    fn pinned_items_come_first_in_their_own_block_and_only_there() {
+        let pinned = MenuItem::Action { id: "r".into(), label: "Review".into(), action_id: "act-r".into(), enabled: true, pinned: true };
+        let model = Model::new(vec![action("a", "Ask"), submenu("s", "Check", vec![action("v", "Validate"), pinned])], HashMap::new());
+        let view = model.view("Phrases", 1);
+        assert_eq!(labels(&view), ["Review", "Ask", "Validate"]);
+        assert_eq!(view.items[0].group.as_deref(), Some(PINNED));
+        assert_eq!(model.action_at(0).as_deref(), Some("act-r"));
+    }
+
+    #[test]
+    fn a_search_also_finds_other_menus_under_their_name_without_their_links() {
+        let mut model = sample().with_others(
+            vec![(
+                "Commands".into(),
+                vec![
+                    submenu("cc", "Claude", vec![action("model", "/model"), action("val2", "Validate twice")]),
+                    MenuItem::Action { id: "back".into(), label: "Validate menu".into(), action_id: "menu-1".into(), enabled: true, pinned: false },
+                ],
+            )],
+            HashSet::from(["menu-1".to_owned()]),
+        );
+        model.set_query("valid");
+        let view = model.view("Phrases", 1);
+        assert_eq!(labels(&view), ["Validate", "Validate twice"]);
+        assert_eq!(view.items[1].group.as_deref(), Some("Commands"));
+        model.set_query("ьщвуд"); // "model" typed in the Russian layout
+        assert_eq!(labels(&model.view("Phrases", 1)), ["/model"]);
     }
 
     #[test]

@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 8;
+const SCHEMA_VERSION: i32 = 9;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -284,6 +284,10 @@ pub struct Settings {
     /// (done by the UI when it saves; the runtime never reads it).
     #[serde(default)]
     pub sync_mice: bool,
+    /// Show the name of each action run in the OSD bubble (a check that the
+    /// right thing went out). Off by default.
+    #[serde(default)]
+    pub osd_actions: bool,
     /// Profile written into the mouse on exit for use without Sidearm;
     /// `None` = the fallback profile, [`OFFLINE_PROFILE_ACTIVE`] = the profile
     /// in effect at that moment (whichever window happened to be focused).
@@ -848,6 +852,9 @@ pub enum MenuItem {
         #[serde(alias = "actionRef")]
         action_id: String,
         enabled: bool,
+        /// Shown first, in the popup's ★ block (and only there).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        pinned: bool,
     },
     #[serde(rename_all = "camelCase")]
     Submenu {
@@ -1036,7 +1043,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=7) {
+    if matches!(config.version, 2..=8) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -2005,6 +2012,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             hypershift_tap: false,
             show_battery_in_tray: false,
             sync_mice: false,
+            osd_actions: false,
             offline_profile_id: None,
         },
         profiles: seed_profiles(),
@@ -3837,7 +3845,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (8, 0x0745_bc33_22ea_fe8e);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (9, 0xb7f4_c71e_ac34_625a);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -5178,7 +5186,7 @@ mod edge_proptests {
                     id: "item1".into(),
                     label: "Self".into(),
                     action_id: "m1".into(), // self-reference
-                    enabled: true,
+                    enabled: true, pinned: false,
                 }],
             }),
             display_name: "menu".into(),
@@ -5207,7 +5215,7 @@ mod edge_proptests {
                         id: "item-m1".into(),
                         label: "Go to m2".into(),
                         action_id: "m2".into(),
-                        enabled: true,
+                        enabled: true, pinned: false,
                     }],
                 }),
                 display_name: "m1".into(),
@@ -5222,7 +5230,7 @@ mod edge_proptests {
                         id: "item-m2".into(),
                         label: "Go to m1".into(),
                         action_id: "m1".into(), // cycle: m2 → m1
-                        enabled: true,
+                        enabled: true, pinned: false,
                     }],
                 }),
                 display_name: "m2".into(),

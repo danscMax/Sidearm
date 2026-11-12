@@ -1270,9 +1270,11 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
 }
 
 /// Expand snippet tokens at send time: `{date}` → today's date (YYYY-MM-DD),
-/// `{clipboard}` → the current clipboard text, `{cursor}` → nothing, but the
-/// caret is moved back to the marker after the send (see the second tuple
-/// element: Left-arrow presses to inject). `{{` / `}}` are literal braces; an
+/// `{clipboard}` → the current clipboard text, `{selection}` → the text
+/// selected in the window in front (copied with Ctrl+Insert, the clipboard put
+/// back), `{cursor}` (or `{|}`) → nothing, but the caret is moved back to the
+/// marker after the send (see the second tuple element: Left-arrow presses to
+/// inject). `{{` / `}}` are literal braces; an
 /// unknown `{token}` is left untouched. Backward-compatible: text without
 /// braces is returned unchanged.
 pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
@@ -1280,8 +1282,15 @@ pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
         return (text.to_string(), None);
     }
     let date = crate::backup::today_date_string();
+    // The selection first: copying it must not show up as `{clipboard}`.
+    let selection = text.contains("{selection}").then(selection_text_for_token).flatten();
     let clipboard = get_clipboard_text_for_token();
-    expand_tokens(text, &date, clipboard.as_deref())
+    expand_tokens_with(text, &date, clipboard.as_deref(), selection.as_deref())
+}
+
+#[cfg(test)]
+fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Option<usize>) {
+    expand_tokens_with(text, date, clipboard, None)
 }
 
 /// Pure token expander — dependencies injected so it is deterministic to test.
@@ -1290,7 +1299,7 @@ pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
 /// The first marker wins; any further `{cursor}` markers are stripped. Marker
 /// positions count only template tokens — a literal `{cursor}` arriving via
 /// `{clipboard}` content is pasted as text, never treated as a marker.
-fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Option<usize>) {
+fn expand_tokens_with(text: &str, date: &str, clipboard: Option<&str>, selection: Option<&str>) -> (String, Option<usize>) {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
     let mut out = String::with_capacity(text.len());
@@ -1310,7 +1319,8 @@ fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Op
                 match token.as_str() {
                     "date" => out.push_str(date),
                     "clipboard" => out.push_str(clipboard.unwrap_or("")),
-                    "cursor" => {
+                    "selection" => out.push_str(selection.unwrap_or("")),
+                    "cursor" | "|" => {
                         if cursor_at.is_none() {
                             cursor_at = Some(out.chars().count());
                         }
@@ -1379,6 +1389,45 @@ pub fn send_left_arrows(count: usize) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn get_clipboard_text_for_token() -> Option<String> {
     clipboard_get_text()
+}
+
+/// `{selection}`: Ctrl+Insert copies the selection of the window in front
+/// (not Ctrl+C: in a terminal with nothing selected that stops the program),
+/// the text is read, and the clipboard is put back as it was. `None` when no
+/// copy landed within 500 ms (nothing selected).
+#[cfg(target_os = "windows")]
+fn selection_text_for_token() -> Option<String> {
+    use std::{
+        thread,
+        time::{Duration, Instant},
+    };
+    use windows_sys::Win32::System::DataExchange::EmptyClipboard;
+    let saved = with_clipboard_open(clipboard_snapshot).ok();
+    let before = clipboard_sequence_number();
+    send_hotkey_string("Ctrl+Insert", &ALL_MODIFIERS).ok()?;
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while clipboard_sequence_number() == before {
+        if Instant::now() >= deadline {
+            log::info!("[input] {{selection}}: nothing was copied (no selection?)");
+            return None;
+        }
+        thread::sleep(Duration::from_millis(20));
+    }
+    // The app may write several formats one after another.
+    thread::sleep(Duration::from_millis(30));
+    let text = clipboard_get_text();
+    let _ = with_clipboard_open(|| {
+        unsafe { EmptyClipboard() };
+        if let Some(saved) = &saved {
+            write_clipboard_snapshot(saved);
+        }
+    });
+    text
+}
+
+#[cfg(not(target_os = "windows"))]
+fn selection_text_for_token() -> Option<String> {
+    None
 }
 
 #[cfg(target_os = "linux")]
@@ -2842,6 +2891,16 @@ mod tests {
             expand_snippet_tokens("no braces here"),
             ("no braces here".to_string(), None)
         );
+    }
+
+    #[test]
+    fn expand_tokens_selection_and_short_cursor_marker() {
+        assert_eq!(
+            expand_tokens_with("Fix: {selection}{|}!", "d", Some("clip"), Some("sel")),
+            ("Fix: sel!".to_string(), Some(1))
+        );
+        // Nothing selected: the token goes, the rest stays.
+        assert_eq!(expand_tokens_with("[{selection}]", "d", None, None), ("[]".to_string(), None));
     }
 
     #[test]

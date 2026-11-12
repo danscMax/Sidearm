@@ -341,6 +341,7 @@ mod tests {
                 hypershift_tap: false,
                 show_battery_in_tray: false,
                 sync_mice: false,
+                osd_actions: false,
                 offline_profile_id: None,
             },
             profiles: vec![
@@ -498,6 +499,7 @@ mod edge_proptests {
                 hypershift_tap: false,
                 show_battery_in_tray: false,
                 sync_mice: false,
+                osd_actions: false,
                 offline_profile_id: None,
             },
             profiles: vec![

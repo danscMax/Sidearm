@@ -18,6 +18,9 @@
   // The pointer's last screen position: a highlight follows the mouse only
   // when the mouse really moved, never because something changed under it.
   var lastPointer = null;
+  // After a moment on one phrase the tip shows its whole text (wider, scrollable).
+  var FULL_AFTER_MS = 600;
+  var fullTimer = null;
 
   function invoke(cmd, args) {
     return tauri.invoke(cmd, args || {}).catch(function () {});
@@ -91,6 +94,9 @@
   function showTip(index) {
     var item = view.items[index];
     var row = items[index];
+    clearTimeout(fullTimer);
+    root.classList.remove("menu--full");
+    tip.classList.remove("tip--full");
     if (!item || !row) { tip.style.visibility = "hidden"; return; }
     tip.style.visibility = "";
     tip.textContent = "";
@@ -109,6 +115,22 @@
     var rowTop = row.getBoundingClientRect().top - tip.parentNode.getBoundingClientRect().top;
     tip.style.top = Math.max(0, Math.min(rowTop - 4, room - tip.offsetHeight)) + "px";
     tip.classList.toggle("tip--clipped", tip.scrollHeight > tip.clientHeight + 1);
+    if (!item.submenu && item.detail) {
+      fullTimer = setTimeout(function () { showFull(index); }, FULL_AFTER_MS);
+    }
+  }
+
+  /** The whole text of the phrase still highlighted, in a wider, scrollable tip. */
+  function showFull(index) {
+    tauri.invoke("menu_full_text", { index: index }).then(function (text) {
+      if (highlight !== index || !text) return;
+      root.classList.add("menu--full");
+      tip.classList.add("tip--full");
+      tip.classList.remove("tip--clipped");
+      tip.textContent = text;
+      tip.style.maxHeight = tip.parentNode.clientHeight + "px";
+      tip.style.top = "0px";
+    }).catch(function () {});
   }
 
   var modes = null;
@@ -183,6 +205,10 @@
     else if (event.key === "Enter") invoke("menu_confirm");
     else if (event.key === "Escape") invoke("menu_close");
     else if (event.key === "Backspace" && search.value === "") invoke("menu_back");
+    // The whole text of a long phrase scrolls with PageUp / PageDown.
+    else if (event.key === "PageDown" || event.key === "PageUp") {
+      tip.scrollBy({ top: (event.key === "PageDown" ? 1 : -1) * tip.clientHeight * 0.8 });
+    }
     else handled = false;
     if (handled) event.preventDefault();
   }

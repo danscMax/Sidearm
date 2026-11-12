@@ -27,9 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   macros with text and menus.
 - Copying between mice can keep one menu for both ("One menu for both mice",
   off by default): editing it on one mouse changes it on the other.
+- Popup menu: pin an item (★ in the menu editor) and it comes first, in a ★
+  block; a search also finds phrases of the other menus, under the menu's name;
+  after a moment on a phrase its whole text shows, PageUp / PageDown scroll it.
+- `{selection}` in a phrase puts in the text selected in the window in front
+  (the clipboard is put back); `{|}` is a short `{cursor}`. Tokens now work in
+  macro text steps and in "copy only" too.
 - "Keep the mice alike" (in the same window, off by default): from then on an
   assignment changed on one mouse changes the same button on the other.
-  HyperShift 2 is repeated only on a mouse that has it. Config schema version 8.
+  HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
 - Copying between mice gave the copied menu the same phrases as the original,

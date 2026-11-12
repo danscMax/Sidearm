@@ -25,7 +25,8 @@
         5,
         6,
         7,
-        8
+        8,
+        9
       ]
     },
     "settings": {
@@ -286,6 +287,10 @@
         },
         "showBatteryInTray": {
           "type": "boolean"
+        },
+        "osdActions": {
+          "type": "boolean",
+          "description": "Show the name of each action run in the OSD bubble."
         },
         "syncMice": {
           "type": "boolean",
@@ -1145,6 +1150,10 @@
         },
         "enabled": {
           "type": "boolean"
+        },
+        "pinned": {
+          "type": "boolean",
+          "description": "Shown first, in the popup's pinned block (and only there)."
         }
       }
     },

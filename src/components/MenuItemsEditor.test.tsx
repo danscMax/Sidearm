@@ -35,6 +35,18 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: "Start" }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("pins an item to the top of the popup and unpins it", () => {
+    const onChange = vi.fn();
+    render(<MenuItemsEditor items={items} onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Закрепить|Pin/ }));
+    const pinned: MenuItem[] = onChange.mock.calls[0][0];
+    expect(pinned[0]).toMatchObject({ id: "i1", pinned: true });
+    cleanup();
+    render(<MenuItemsEditor items={pinned} onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Открепить|Unpin/ }));
+    expect(onChange.mock.calls[1][0][0]).not.toHaveProperty("pinned");
+  });
+
   it("adds a new phrase item with its own action, and a block holding one", () => {
     const onChange = vi.fn();
     const onEditsChange = vi.fn();

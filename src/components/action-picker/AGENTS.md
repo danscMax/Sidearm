@@ -15,7 +15,7 @@ The editors inside the "Assign action" modal — one per `ActionType` (shortcut,
 - The KEY capture is a DOM `onKeyDown` (`resolveKeyName`), so it also receives Sidearm's own injected VK 0xE8 (mask/hook-probe key) when the window is focused — capture ignores `"VK_232"` for this reason; keep that guard.
 - `dpiUp`/`dpiDown` are mouse actions with no keyboard modifiers. They use the resolved profile's stages; the picker test passes the edited profile ID explicitly.
 - Capture rows own their capture state via the parent; `CaptureRow` is presentational and requires a localized `ariaLabel`, forwarded to its readonly input. A changing capture placeholder must not change the field's accessible name.
-- A snippet's text is sent verbatim except `{date}`/`{clipboard}` tokens (`{{`/`}}` escape) expanded backend-side at send time.
+- A snippet's text (and a macro's text step, and a popup "copy only") is sent verbatim except the tokens expanded backend-side at send time (`input_synthesis::expand_snippet_tokens`): `{date}`, `{clipboard}`, `{selection}` (copied from the window in front with Ctrl+Insert — never Ctrl+C, which stops a terminal program — the clipboard put back), `{cursor}` or `{|}` (the caret goes back there); `{{`/`}}` escape. `TOKEN_RE`/`TOKENS` in `TextSnippetEditor.tsx` mirror that list.
 
 ## Work Guidance
 

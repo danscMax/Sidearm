@@ -82,6 +82,8 @@ export interface Settings {
   showBatteryInTray?: boolean;
   /** Repeat an assignment edit of one built-in mouse on the others (owner's two mice). */
   syncMice?: boolean;
+  /** Show the name of each action run in the OSD bubble. */
+  osdActions?: boolean;
   /** Profile written into the mouse on exit; absent = the fallback profile,
    *  `OFFLINE_PROFILE_ACTIVE` = the one in effect then. */
   offlineProfileId?: string;
@@ -225,6 +227,8 @@ export type MenuItem =
       label: string;
       actionId: string;
       enabled: boolean;
+      /** Shown first, in the popup's ★ block (and only there). */
+      pinned?: boolean;
     }
   | {
       kind: "submenu";

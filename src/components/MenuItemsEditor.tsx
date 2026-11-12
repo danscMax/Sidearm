@@ -300,6 +300,7 @@ export function MenuItemsEditor({ items, onChange, config, edits, onEditsChange,
           <span className="menu-ed__label">{item.label || t("inspector.menuUnnamed")}</span>
           {missing.has(item.id) ? <span className="menu-ed__missing" aria-label={t("inspector.menuIncompleteItem")} /> : null}
           {sendsEnter(item) && !item.label.includes("⏎") ? <span className="menu-ed__mark">⏎</span> : null}
+          {item.kind === "action" && item.pinned ? <span className="menu-ed__mark" aria-label={t("inspector.menuPinned")}>★</span> : null}
           {usage && item.kind === "action" ? (
             <span className={`menu-ed__uses${usage[item.actionId] ? "" : " menu-ed__uses--none"}`} title={t("inspector.menuUses")}>
               {usage[item.actionId] ?? 0}×
@@ -367,6 +368,16 @@ export function MenuItemsEditor({ items, onChange, config, edits, onEditsChange,
         <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={() => duplicate(item)}>
           ⧉ {t("common.duplicate")}
         </button>
+        {item.kind === "action" ? (
+          <button type="button" className="menu-ed__ghost" disabled={disabled} aria-pressed={!!item.pinned}
+            onClick={() => onChange(updateMenuItem(items, item.id, (current) => {
+              if (current.kind !== "action") return current;
+              const { pinned: _was, ...rest } = current;
+              return current.pinned ? rest : { ...rest, pinned: true };
+            }))}>
+            {item.pinned ? `☆ ${t("inspector.menuUnpin")}` : `★ ${t("inspector.menuPin")}`}
+          </button>
+        ) : null}
         {otherMenus.length > 0 ? (
           <SelectField
             ariaLabel={t("inspector.menuCopyTo")}

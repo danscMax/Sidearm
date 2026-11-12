@@ -645,8 +645,10 @@ fn run_live_sequence_action(
                 repeat,
             } => {
                 let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
+                // The same tokens a text snippet has ({date}, {selection}, {cursor}…).
+                let (value, cursor_back) = input_synthesis::expand_snippet_tokens(value);
                 for _ in 0..times {
-                    input_synthesis::send_text(value).map_err(|message| {
+                    input_synthesis::send_text(&value).map_err(|message| {
                         execution_error(
                             "execution_failed",
                             "execution",
@@ -661,6 +663,11 @@ fn run_live_sequence_action(
                             u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
                         ));
                     }
+                }
+                if let Some(back) = cursor_back.filter(|&back| back > 0)
+                    && let Err(message) = input_synthesis::send_left_arrows(back)
+                {
+                    log::warn!("[executor] sequence {{cursor}} repositioning failed: {message}");
                 }
             }
             SequenceStep::Send {
@@ -1638,7 +1645,7 @@ mod tests {
                 id: "item-1".into(),
                 label: "Copy".into(),
                 action_id: "action-default-standard-thumb-01".into(),
-                enabled: true,
+                enabled: true, pinned: false,
             }],
         });
 
@@ -1984,6 +1991,7 @@ mod edge_proptests {
                     label,
                     action_id,
                     enabled,
+                    pinned: false,
                 }
             }
         ),]
@@ -2111,7 +2119,7 @@ mod edge_proptests {
                     id: i.to_string(),
                     label: i.to_string(),
                     action_id: i.to_string(),
-                    enabled: false,
+                    enabled: false, pinned: false,
                 })
                 .collect();
             prop_assert_eq!(count_enabled_menu_items(&items), 0);
@@ -2135,13 +2143,13 @@ mod edge_proptests {
                     id: "a1".into(),
                     label: "A1".into(),
                     action_id: "r1".into(),
-                    enabled: true,
+                    enabled: true, pinned: false,
                 },
                 MenuItem::Action {
                     id: "a2".into(),
                     label: "A2".into(),
                     action_id: "r2".into(),
-                    enabled: true,
+                    enabled: true, pinned: false,
                 },
             ],
         }];
@@ -2159,7 +2167,7 @@ mod edge_proptests {
                 id: "a1".into(),
                 label: "A1".into(),
                 action_id: "r1".into(),
-                enabled: true,
+                enabled: true, pinned: false,
             }],
         }];
         assert_eq!(count_enabled_menu_items(&items), 1);

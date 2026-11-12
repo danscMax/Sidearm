@@ -5,12 +5,14 @@ import { HelpTip, Notice, SelectField, Toggle } from "../shared";
 
 type TextDraft = { text: string; pasteMode: PasteMode; snippetId?: string };
 
-// The three template tokens the backend expands at send time (see
-// input_synthesis::expand_snippet_tokens). Kept in sync with that Rust list.
-const TOKEN_RE = /\{(?:date|clipboard|cursor)\}/g;
+// The template tokens the backend expands at send time (see
+// input_synthesis::expand_snippet_tokens; `{|}` is a short `{cursor}`). Kept in
+// sync with that Rust list.
+const TOKEN_RE = /\{(?:date|clipboard|selection|cursor|\|)\}/g;
 const TOKENS: { token: string; descKey: string }[] = [
   { token: "{date}", descKey: "picker.tokenDateDesc" },
   { token: "{clipboard}", descKey: "picker.tokenClipboardDesc" },
+  { token: "{selection}", descKey: "picker.tokenSelectionDesc" },
   { token: "{cursor}", descKey: "picker.tokenCursorDesc" },
 ];
 

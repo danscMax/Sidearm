@@ -2123,6 +2123,12 @@ fn get_menu_usage() -> std::collections::BTreeMap<String, u64> {
     menu_usage::counts()
 }
 
+/// The whole text of a popup row: the tip shows it after a moment on the row.
+#[tauri::command]
+fn menu_full_text(index: usize) -> Option<String> {
+    menu_popup::full_text_at(index)
+}
+
 #[tauri::command]
 fn menu_hover(app: AppHandle, index: usize) {
     menu_popup::hover_from_window(&app, index);
@@ -4240,6 +4246,7 @@ pub fn run() {
             menu_layout,
             menu_pick,
             menu_hover,
+            menu_full_text,
             menu_wheel,
             menu_search,
             menu_confirm,

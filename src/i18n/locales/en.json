@@ -836,7 +836,10 @@
     "menuDragHint": "Drag an item to reorder it; onto a list or block to put it inside. Alt+arrows: ↑↓ order, ←→ level.",
     "menuSearchAll": "Search all menus",
     "menuAlsoIn": "Also in other menus: {{places}}",
-    "menuUses": "Picked from the popup so far"
+    "menuUses": "Picked from the popup so far",
+    "menuPin": "Pin to the top",
+    "menuUnpin": "Unpin",
+    "menuPinned": "Pinned: shown first in the popup"
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -937,7 +940,7 @@
     "tokenInsertHint": "Click inserts the token at the caret. Tokens are highlighted in the text.",
     "tokenDateDesc": "Inserts today's date in YYYY-MM-DD format.",
     "tokenClipboardDesc": "Inserts the current clipboard contents.",
-    "tokenCursorDesc": "The caret moves here after the text is typed.",
+    "tokenCursorDesc": "The caret goes here after the text is typed. Short form: {|}.",
     "longTextClipboardWarning": "Text longer than 100 characters is pasted through the clipboard temporarily so line breaks stay intact.",
     "launchTargetMode": "Launch target type",
     "launchMode": {
@@ -1077,7 +1080,8 @@
     "autoMacro": "Macro",
     "autoProfile": "Profile: {{name}}",
     "autoProfileFallback": "Profile",
-    "menuShared": "This menu is also on other buttons ({{count}}): editing it changes it there too. Choosing another kind of action changes this button only."
+    "menuShared": "This menu is also on other buttons ({{count}}): editing it changes it there too. Choosing another kind of action changes this button only.",
+    "tokenSelectionDesc": "Puts in the text selected in the window in front (copied with Ctrl+Insert, the clipboard is put back)."
   },
   "assignments": {
     "copyBinding": "Copy binding",

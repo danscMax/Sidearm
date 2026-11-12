@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
+- A right click in the Sidearm window showed the browser's own menu (Back,
+  Reload, Print); text fields keep their cut / copy / paste menu.
+- The shortcut-conflict banner names the buttons and press patterns, not the
+  action names (two "Alt + V" told nothing).
 - Copying between mice gave the copied menu the same phrases as the original,
   so editing a phrase changed both mice; the copy now has its own. HyperShift 2
   assignments are no longer copied to a mouse without that layer.

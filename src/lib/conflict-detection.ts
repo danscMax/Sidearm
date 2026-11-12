@@ -15,7 +15,7 @@ export interface ConflictGroup {
   deviceId: string | null;
   profileId: string;
   layer: Layer;
-  bindings: Array<{ bindingId: string; controlId: ControlId; label: string }>;
+  bindings: Array<{ bindingId: string; controlId: ControlId; label: string; triggerMode?: Binding["triggerMode"] }>;
 }
 
 /**
@@ -47,6 +47,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
       bindingId: binding.id,
       controlId: binding.controlId,
       label: binding.label,
+      triggerMode: binding.triggerMode,
     };
     if (existing) {
       existing.bindings.push(entry);

@@ -23,6 +23,7 @@ import {
   importProfile,
   placeDeviceHotspot,
   clearControl,
+  gestureOf,
   removeBindingsForControls,
   removeControl,
   removeDevice,
@@ -992,11 +993,17 @@ export function ProfilesWorkspace({
           <ul>
             {layerConflicts.map((g) => {
               const bindingIds = g.bindings.map((b) => b.bindingId);
+              // The buttons, not the action names: those are the same shortcut.
+              const where = (b: (typeof g.bindings)[number]) => {
+                const gesture = gestureOf(b.triggerMode);
+                const button = displayNameForControlId(b.controlId);
+                return gesture === "press" ? button : `${button} · ${t(`picker.${gesture === "longPress" ? "gestureLongPress" : gesture === "doublePress" ? "gestureDoublePress" : "gestureTriplePress"}`)}`;
+              };
               return (
                 <li key={`${g.layer}:${g.signature}`}>
                   {t("conflict.group", {
                     signature: g.signature,
-                    controls: g.bindings.map((b) => b.label).join(", "),
+                    controls: g.bindings.map(where).join(", "),
                   })}
                   <span className="profiles__conflict-actions">
                     {g.bindings.map((b) => (
@@ -1005,10 +1012,10 @@ export function ProfilesWorkspace({
                         type="button"
                         className="profiles__conflict-keep"
                         onClick={() =>
-                          handleKeepBinding(bindingIds, b.bindingId, b.label)
+                          handleKeepBinding(bindingIds, b.bindingId, where(b))
                         }
                       >
-                        {t("conflict.keepThis", { label: b.label })}
+                        {t("conflict.keepThis", { label: where(b) })}
                       </button>
                     ))}
                   </span>

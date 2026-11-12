@@ -18,7 +18,8 @@
   // The pointer's last screen position: a highlight follows the mouse only
   // when the mouse really moved, never because something changed under it.
   var lastPointer = null;
-  // After a moment on one phrase the tip shows its whole text (wider, scrollable).
+  // After a moment on one phrase the tip shows its whole text (same width,
+  // scrollable): the window must not change size, or it moves under the pointer.
   var FULL_AFTER_MS = 600;
   var fullTimer = null;
 
@@ -95,7 +96,6 @@
     var item = view.items[index];
     var row = items[index];
     clearTimeout(fullTimer);
-    root.classList.remove("menu--full");
     tip.classList.remove("tip--full");
     if (!item || !row) { tip.style.visibility = "hidden"; return; }
     tip.style.visibility = "";
@@ -120,16 +120,17 @@
     }
   }
 
-  /** The whole text of the phrase still highlighted, in a wider, scrollable tip. */
+  /** The whole text of the phrase still highlighted, when the tip cut it. */
   function showFull(index) {
+    if (!tip.classList.contains("tip--clipped") && !/…$/.test(view.items[index].detail || "")) return;
     tauri.invoke("menu_full_text", { index: index }).then(function (text) {
       if (highlight !== index || !text) return;
-      root.classList.add("menu--full");
       tip.classList.add("tip--full");
       tip.classList.remove("tip--clipped");
       tip.textContent = text;
-      tip.style.maxHeight = tip.parentNode.clientHeight + "px";
-      tip.style.top = "0px";
+      var room = tip.parentNode.clientHeight;
+      var rowTop = items[index].getBoundingClientRect().top - tip.parentNode.getBoundingClientRect().top;
+      tip.style.top = Math.max(0, Math.min(rowTop - 4, room - tip.offsetHeight)) + "px";
     }).catch(function () {});
   }
 

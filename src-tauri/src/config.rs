@@ -12,7 +12,7 @@ use std::{
 use tempfile::NamedTempFile;
 use thiserror::Error;
 
-const CONFIG_FILE_NAME: &str = "config.json";
+pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// Bumped on every schema change (a new field or enum value): an older Sidearm
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`

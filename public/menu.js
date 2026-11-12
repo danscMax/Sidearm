@@ -74,6 +74,13 @@
       row.appendChild(el("span", "label", item.label));
       if (item.submenu) row.appendChild(el("span", "mark", "›"));
       if (item.enabled) row.addEventListener("click", function () { invoke("menu_pick", { index: index }); });
+      // Right click on a phrase: how to use it — insert, insert + Enter, or only copy.
+      if (item.enabled && !item.submenu && item.detail) {
+        row.addEventListener("contextmenu", function (event) {
+          event.preventDefault();
+          showModes(index, event);
+        });
+      }
       rows.appendChild(row);
       items.push(row);
     });
@@ -86,7 +93,14 @@
     var row = items[index];
     if (!item || !row) { tip.style.visibility = "hidden"; return; }
     tip.style.visibility = "";
-    tip.textContent = item.detail || item.label;
+    tip.textContent = "";
+    tip.classList.toggle("tip--list", !!(item.children && item.children.length));
+    if (item.children && item.children.length) {
+      // A submenu: what it holds, one name per line.
+      item.children.forEach(function (name) { tip.appendChild(el("div", "tip__item", name)); });
+    } else {
+      tip.textContent = item.detail || item.label;
+    }
     tip.classList.remove("tip--fresh");
     void tip.offsetWidth;
     tip.classList.add("tip--fresh");
@@ -97,6 +111,31 @@
     tip.classList.toggle("tip--clipped", tip.scrollHeight > tip.clientHeight + 1);
   }
 
+  var modes = null;
+
+  function hideModes() {
+    if (modes) modes.remove();
+    modes = null;
+  }
+
+  /** The right-click choices, over the list at the pointer (kept inside the window). */
+  function showModes(index, event) {
+    hideModes();
+    if (!items[index] || !view.pickModes || !view.pickModes.length) return;
+    modes = el("div", "modes");
+    ["run", "enter", "copy"].forEach(function (mode, n) {
+      var button = el("button", "tip__mode", view.pickModes[n]);
+      button.addEventListener("click", function () { hideModes(); invoke("menu_pick", { index: index, mode: mode }); });
+      modes.appendChild(button);
+    });
+    root.appendChild(modes);
+    var box = root.getBoundingClientRect();
+    var x = Math.min(event.clientX - box.left, box.width - modes.offsetWidth - 4);
+    var y = Math.min(event.clientY - box.top, box.height - modes.offsetHeight - 4);
+    modes.style.left = Math.max(4, x) + "px";
+    modes.style.top = Math.max(4, y) + "px";
+  }
+
   function setHighlight(index) {
     if (index === highlight) return;
     if (items[highlight]) items[highlight].classList.remove("item--on");
@@ -105,9 +144,13 @@
     showTip(index);
   }
 
+  // Sent in physical pixels at the page's own scale, and again whenever the
+  // content or the scale changes (a new window moved onto another monitor).
   function layout() {
+    if (!view) return;
     var box = root.getBoundingClientRect();
-    var size = { generation: view.generation, width: Math.ceil(box.width), height: Math.ceil(box.height) };
+    var dpr = window.devicePixelRatio || 1;
+    var size = { generation: view.generation, width: Math.ceil(box.width * dpr), height: Math.ceil(box.height * dpr) };
     var key = JSON.stringify(size);
     if (key !== lastLayout) {
       lastLayout = key;
@@ -153,6 +196,15 @@
     if (index >= 0 && index !== highlight && !row.classList.contains("item--off")) {
       invoke("menu_hover", { index: index });
     }
+  });
+
+  window.addEventListener("resize", layout);
+  if (window.ResizeObserver) new ResizeObserver(layout).observe(root);
+  // Never the browser's own menu (back, reload, print…).
+  document.addEventListener("contextmenu", function (event) { event.preventDefault(); });
+  // A click outside the right-click choices puts the tip back.
+  document.addEventListener("mousedown", function (event) {
+    if (modes && !modes.contains(event.target)) hideModes();
   });
 
   // A wheel Sidearm does not capture still steps through the list.

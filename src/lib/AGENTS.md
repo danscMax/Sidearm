@@ -7,7 +7,10 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 ## Ownership
 
 - `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v5.schema.json`).
-- `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe.
+- `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe. A profile export carries the actions of its menus' items (import re-points them) and can leave out the owner's texts (`withoutTexts`: texts, macros with text, menus).
+- `binding-moves.ts` — a button's assignments as one slot (profile · layer · control, every press pattern): move, swap onto an occupied one, copy (`placeSlot`), copy a layer or a profile (`copyAssignments`, menus skipped), sidebar profile order (`reorderProfiles`), the profile comparison table (`compareProfiles`).
+- `menu-arrange.ts` — menu editor arranging: drop before/after/inside, level in/out, copies with fresh ids, search across menus, other menus using an action, prompts from a text file.
+- `config-check.ts` — per-profile problems shown above the buttons: an assignment or menu item pointing at a missing action or library text, Enter next to closing the window on one button.
 - `conflict-detection.ts` — shortcut conflicts within a device, profile, and layer, plus `bindingMatchesQuery` (label/shortcut/action-content search).
 - `dpi-stages.ts` — pure, model-limited DPI choices and manual-value application for the single sensitivity control. Displaying defaults does not persist them; explicit application preserves the five-stage limit and custom saved values.
 - `onboard-mapping.ts` also defines the mouse snapshot IPC: three nullable readings, status and per-field UiText warnings/details. A missing read is not zero and does not erase saved profile settings. `getDeviceReport(detail)` keeps absent/full compatible with the existing verification scan.

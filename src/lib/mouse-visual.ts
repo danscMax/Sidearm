@@ -6,6 +6,7 @@
 
 import i18n from "../i18n";
 import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
+import type { Slot } from "./binding-moves";
 import type { ControlSurfaceEntry } from "./constants";
 import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
@@ -38,7 +39,7 @@ export interface MouseVisualizationProps {
   executionHistory?: Map<string, ExecutionRecord[]>;
   throttledControlIds?: Set<string>;
   heatmapEnabled?: boolean;
-  onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
+  onDropBinding?: (targetControlId: ControlId, from: Slot, copy: boolean) => void;
 }
 
 /** Localized short labels for the trigger-mode badges that carry words. */
@@ -136,17 +137,27 @@ export function legendCellClass(flags: {
   );
 }
 
-/** Serialize a binding drag payload for `dataTransfer`. */
-export function buildBindingDragData(actionId: string): string {
-  return JSON.stringify({ type: "binding", actionId });
+/** The `dataTransfer` type of a dragged button assignment. Its presence (the
+ *  data itself is unreadable during dragover) tells drop targets such as the
+ *  layer pills and the sidebar profiles that a button is being dragged. */
+export const BINDING_DRAG_TYPE = "application/x-sidearm-binding";
+
+export function isBindingDrag(e: { dataTransfer: DataTransfer | null }): boolean {
+  return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes(BINDING_DRAG_TYPE);
 }
 
-/** Parse a binding drag payload; returns the actionId or null on any malformed input. */
-export function parseBindingDragData(raw: string): string | null {
+/** Serialize a dragged button (its slot) for `dataTransfer`. */
+export function buildBindingDragData(slot: Slot): string {
+  return JSON.stringify({ type: "binding", ...slot });
+}
+
+/** Parse a binding drag payload; returns the slot or null on any malformed input. */
+export function parseBindingDragData(raw: string): Slot | null {
   try {
-    const data = JSON.parse(raw) as { type?: string; actionId?: string };
-    if (data.type === "binding" && typeof data.actionId === "string") {
-      return data.actionId;
+    const data = JSON.parse(raw) as Partial<Slot> & { type?: string };
+    if (data.type === "binding" && typeof data.profileId === "string" && typeof data.layer === "string"
+      && typeof data.controlId === "string") {
+      return { profileId: data.profileId, layer: data.layer, controlId: data.controlId };
     }
   } catch {
     /* ignore malformed data */

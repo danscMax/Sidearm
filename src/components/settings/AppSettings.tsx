@@ -2,13 +2,9 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { changeLanguage } from "../../i18n";
-import { NATIVE_HYPERSHIFT_TRIGGERS } from "../../lib/config";
-import { displayNameForControlId } from "../../lib/labels";
-import { hasDevice, NAGA_V3_DEVICE_ID } from "../../lib/devices";
 import type {
   AppConfig,
   CommandError,
-  HypershiftTrigger,
   Settings,
 } from "../../lib/config";
 import {
@@ -17,7 +13,7 @@ import {
 } from "../../lib/action-picker-helpers";
 import { CaptureRow } from "../action-picker/shared/CaptureRow";
 import { PillTrack } from "../PillTrack";
-import { Notice, SelectField, SettingRow, Toggle } from "../shared";
+import { Notice, SettingRow, Toggle } from "../shared";
 import { useAutostartStatus } from "./useAutostartStatus";
 
 export interface AppSettingsProps {
@@ -36,8 +32,6 @@ export function AppSettings({
 }: AppSettingsProps) {
   const { t, i18n } = useTranslation();
   const osd = activeConfig.settings;
-  // The V3's trigger is a button of its own; the setting is the V2's.
-  const nagaV3 = hasDevice(activeConfig, NAGA_V3_DEVICE_ID);
   const {
     adminAutostart,
     autostartBusy,
@@ -164,20 +158,6 @@ export function AppSettings({
           </div>
         </SettingRow>
 
-        <SettingRow title={t("settings.deviceNameHeader")} hint={t("settings.deviceNameHelp")}>
-          <input
-            className="settings-text-input"
-            type="text"
-            value={osd.deviceName ?? ""}
-            placeholder={t("settings.deviceNamePlaceholder")}
-            onChange={(e) => {
-              const value = e.target.value;
-              updateSettings({ deviceName: value.trim() ? value : undefined });
-            }}
-            aria-label={t("settings.deviceNameHeader")}
-          />
-        </SettingRow>
-
         <SettingRow title={t("settings.languageHeader")}>
           <PillTrack
             items={[
@@ -191,21 +171,6 @@ export function AppSettings({
       </section>
 
       <section className="settings-section">
-        <SettingRow
-          title={t("settings.hypershiftHeader")}
-          hint={nagaV3 ? `${t("settings.hypershiftHelp")} ${t("settings.hypershiftV3Help")}` : t("settings.hypershiftHelp")}
-        >
-          <SelectField<HypershiftTrigger>
-            ariaLabel={t("settings.hypershiftTriggerLabel")}
-            value={osd.hypershiftTrigger ?? "mouse_right"}
-            options={[
-              ...NATIVE_HYPERSHIFT_TRIGGERS.map((value) => ({ value, label: displayNameForControlId(value) })),
-              { value: "none", label: t("settings.hypershiftOff") },
-            ]}
-            onChange={(trigger) => updateSettings({ hypershiftTrigger: trigger })}
-          />
-        </SettingRow>
-
         {/* Clipboard repair (OSC 52 mojibake workaround) */}
         <SettingRow title={t("settings.repairClipboardHeader")} hint={t("settings.repairClipboardHelp")}>
           <Toggle

@@ -15,6 +15,7 @@ mod input_synthesis;
 mod log_cleanup;
 #[cfg(target_os = "windows")]
 mod menu_popup;
+mod menu_usage;
 mod mouse_memory;
 #[cfg(target_os = "windows")]
 mod mouse_settings;
@@ -873,6 +874,54 @@ async fn import_profile(path: String) -> Result<String, CommandError> {
     read_user_json(path, "import_profile").await
 }
 
+/// One text file of a folder the menu editor imports phrases from.
+#[derive(serde::Serialize)]
+struct TextFile {
+    /// File name without its extension.
+    name: String,
+    text: String,
+}
+
+/// The `.txt` / `.md` files directly in a user-chosen folder, sorted by name,
+/// for the menu editor's "Add from folder". Their text is copied into the
+/// config; the folder is not referenced afterwards. Files over 1 MiB, files
+/// that are not UTF-8 and everything past the first 200 are skipped.
+#[tauri::command]
+async fn read_text_folder(path: String) -> Result<Vec<TextFile>, CommandError> {
+    const MAX_FILE: u64 = 1024 * 1024;
+    const MAX_FILES: usize = 200;
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = PathBuf::from(&path);
+        if !dir.is_dir() {
+            return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
+        }
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+            .map_err(|e| CommandError::internal(format!("Failed to read the folder: {e}")))?
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|file| {
+                file.is_file()
+                    && file
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        .is_some_and(|ext| ext.eq_ignore_ascii_case("txt") || ext.eq_ignore_ascii_case("md"))
+                    && file.metadata().is_ok_and(|meta| meta.len() <= MAX_FILE)
+            })
+            .collect();
+        files.sort();
+        Ok(files
+            .into_iter()
+            .take(MAX_FILES)
+            .filter_map(|file| {
+                let text = fs::read_to_string(&file).ok()?;
+                let name = file.file_stem()?.to_string_lossy().into_owned();
+                Some(TextFile { name, text })
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("read_text_folder task failed: {e}")))?
+}
+
 /// Export the snippet library to a user-chosen `.json` / `.md` / `.txt` file.
 /// Looser extension whitelist than profiles (still inert text only); the FE
 /// serializes the contents per chosen format.
@@ -965,6 +1014,55 @@ async fn export_verification_session(
 /// Record this process's view of the on-disk config fingerprint so a later
 /// `save_config` can detect a concurrent overwrite by another instance.
 /// Best-effort: re-resolves the config dir and stores `None` if unreadable.
+/// The UI is told to reload (`config_changed_externally`) and the running
+/// capture picks the file up: an edit by hand, a script or another machine's
+/// sync takes effect without restarting Sidearm. Our own saves are not news:
+/// they update [`ConfigStamp`] right after writing, and a change counts only
+/// once it has held for one more poll.
+const CONFIG_CHANGED_EVENT: &str = "config_changed_externally";
+
+fn spawn_config_watch(app: AppHandle, config_dir: PathBuf) {
+    let file = config_dir.join(config::CONFIG_FILE_NAME);
+    let spawned = std::thread::Builder::new().name("config-watch".into()).spawn(move || {
+        let modified = || fs::metadata(&file).and_then(|meta| meta.modified()).ok();
+        let mut last_modified = modified();
+        let mut candidate: Option<u64> = None;
+        let mut announced: Option<u64> = None;
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if SHUTTING_DOWN.load(Ordering::SeqCst) {
+                return;
+            }
+            let now = modified();
+            if now == last_modified && candidate.is_none() {
+                continue;
+            }
+            last_modified = now;
+            let stamp = config::config_file_stamp(&config_dir);
+            let known = *app.state::<ConfigStamp>().inner().lock().recover_poison();
+            if stamp.is_none() || stamp == known || stamp == announced {
+                candidate = None;
+                continue;
+            }
+            if candidate != stamp {
+                candidate = stamp;
+                continue;
+            }
+            candidate = None;
+            announced = stamp;
+            log::info!("[config] config.json changed outside Sidearm; reloading it");
+            let _ = app.emit(CONFIG_CHANGED_EVENT, ());
+            let running = app.state::<Arc<Mutex<RuntimeStore>>>().inner().lock().recover_poison().is_running();
+            if running && let Err(error) = restart_capture(&app, || true) {
+                log::warn!("[config] capture did not take the changed config: {error}");
+            }
+        }
+    });
+    if let Err(error) = spawned {
+        log::warn!("[config] could not watch config.json: {error}");
+    }
+}
+
 fn record_config_stamp(app: &AppHandle) {
     if let Ok(dir) = resolve_config_dir(app) {
         let stamp = config::config_file_stamp(&dir);
@@ -1982,7 +2080,7 @@ fn menu_ready(app: AppHandle) {
     menu_popup::page_ready(&app);
 }
 
-/// The menu popup measured itself (CSS pixels) for the menu `generation`.
+/// The menu popup measured itself (physical pixels) for the menu `generation`.
 #[tauri::command]
 fn menu_layout(app: AppHandle, generation: u64, width: f64, height: f64) {
     menu_popup::page_layout(&app, generation, width, height);
@@ -2014,9 +2112,15 @@ fn menu_wheel(app: AppHandle, down: bool) {
 
 /// A click on a menu item (index in the level shown).
 #[tauri::command]
-fn menu_pick(app: AppHandle, index: usize) {
+fn menu_pick(app: AppHandle, index: usize, mode: Option<menu_popup::PickMode>) {
     // Off the IPC thread: the picked action may type text for a while.
-    std::thread::spawn(move || menu_popup::pick_from_window(&app, index));
+    std::thread::spawn(move || menu_popup::pick_from_window(&app, index, mode.unwrap_or(menu_popup::PickMode::Run)));
+}
+
+/// How often each menu item (by action id) was picked from the popup.
+#[tauri::command]
+fn get_menu_usage() -> std::collections::BTreeMap<String, u64> {
+    menu_usage::counts()
 }
 
 #[tauri::command]
@@ -3788,6 +3892,7 @@ pub fn run() {
                 Ok(config_dir) => {
                     // Restores the mice should this Sidearm be killed with its helper.
                     mouse_restore::spawn_watchdog(&config_dir);
+                    spawn_config_watch(app.handle().clone(), config_dir.clone());
                     // Before the guard and the capture runtime read it.
                     let key_signals = config_dir.join(mouse_memory::KEY_SIGNALS_FILE).exists();
                     mouse_memory::set_consumer_signals(!key_signals);
@@ -4178,6 +4283,8 @@ pub fn run() {
             get_exe_icon,
             export_profile,
             import_profile,
+            read_text_folder,
+            get_menu_usage,
             export_snippets,
             import_device_image,
             read_device_image,

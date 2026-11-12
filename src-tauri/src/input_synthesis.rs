@@ -110,7 +110,21 @@ pub fn send_shortcut(
             .collect::<Vec<_>>(),
     );
 
-    if let Err(send_error) = send_keyboard_inputs(&plan) {
+    // The modifiers the plan pressed are released last; hold them a moment
+    // after the key. Released in the same batch, they read as up by the time
+    // the target handles the key: Windows Terminal (and with it Claude Code)
+    // checks the live key state and typed a bare "v" for a sent Alt+V.
+    let pressed = extract_pressed_modifiers(payload, &snapshot).len();
+    let split = if pressed > 0 && !payload.key.trim().is_empty() { plan.len() - pressed } else { plan.len() };
+    let (press, release) = plan.split_at(split);
+    let sent = send_keyboard_inputs(press).and_then(|()| {
+        if release.is_empty() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(MODIFIER_RELEASE_DELAY_MS));
+        send_keyboard_inputs(release)
+    });
+    if let Err(send_error) = sent {
         // Best-effort cleanup: a partial SendInput can leave the primary key OR
         // modifiers physically down. Release everything the plan could have
         // pressed (primary + pressed modifiers), not just modifiers.
@@ -141,6 +155,9 @@ pub fn send_shortcut(
 
     Ok(ShortcutDispatchReport { warnings })
 }
+
+/// How long a shortcut's own modifiers stay down after its key (see `send_shortcut`).
+const MODIFIER_RELEASE_DELAY_MS: u64 = 30;
 
 /// Determine which modifiers the shortcut would have pressed down (i.e., desired
 /// but not already active according to the snapshot).
@@ -250,16 +267,117 @@ fn with_clipboard_open<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     Err("OpenClipboard failed after 10 retries".into())
 }
 
-/// Lightweight clipboard-paste: save CF_UNICODETEXT → set text → Ctrl+V → restore.
+/// Whether a clipboard format's data is a plain memory block (HGLOBAL) that can
+/// be copied and put back. GDI-object formats hold a bitmap / metafile /
+/// palette handle instead — `GlobalLock` on those crashed Sidearm — and the
+/// private / GDI-object ranges belong to their owner; all are skipped. Windows
+/// re-synthesizes CF_BITMAP from a restored CF_DIB, so an image survives.
+#[cfg(any(target_os = "windows", test))]
+fn is_memory_clipboard_format(format: u32) -> bool {
+    const CF_BITMAP: u32 = 2;
+    const CF_METAFILEPICT: u32 = 3;
+    const CF_PALETTE: u32 = 9;
+    const CF_ENHMETAFILE: u32 = 14;
+    const CF_OWNERDISPLAY: u32 = 0x80;
+    const CF_DSPBITMAP: u32 = 0x82;
+    const CF_DSPMETAFILEPICT: u32 = 0x83;
+    const CF_DSPENHMETAFILE: u32 = 0x8e;
+    // CF_PRIVATEFIRST..CF_PRIVATELAST and CF_GDIOBJFIRST..CF_GDIOBJLAST.
+    const OWNER_RANGES: std::ops::RangeInclusive<u32> = 0x200..=0x3ff;
+    !matches!(
+        format,
+        CF_BITMAP | CF_METAFILEPICT | CF_PALETTE | CF_ENHMETAFILE | CF_OWNERDISPLAY | CF_DSPBITMAP | CF_DSPMETAFILEPICT
+            | CF_DSPENHMETAFILE
+    ) && !OWNER_RANGES.contains(&format)
+}
+
+/// Every memory-block format of the (already open) clipboard, copied.
+#[cfg(target_os = "windows")]
+fn clipboard_snapshot() -> Vec<(u32, Vec<u8>)> {
+    use windows_sys::Win32::System::{
+        DataExchange::{EnumClipboardFormats, GetClipboardData},
+        Memory::{GlobalLock, GlobalSize, GlobalUnlock},
+    };
+    /// A bigger clipboard (a huge image) is not copied: restoring it is not worth the memory.
+    const SNAPSHOT_LIMIT: usize = 256 * 1024 * 1024;
+    let mut saved = Vec::new();
+    let mut total = 0usize;
+    let mut format = 0u32;
+    loop {
+        format = unsafe { EnumClipboardFormats(format) };
+        if format == 0 {
+            break;
+        }
+        if !is_memory_clipboard_format(format) {
+            continue;
+        }
+        unsafe {
+            let handle = GetClipboardData(format);
+            if handle.is_null() {
+                continue;
+            }
+            let size = GlobalSize(handle);
+            if size == 0 {
+                continue;
+            }
+            total += size;
+            if total > SNAPSHOT_LIMIT {
+                log::warn!("[input] Clipboard content too large to keep while pasting ({total} bytes)");
+                return Vec::new();
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                continue;
+            }
+            saved.push((format, std::slice::from_raw_parts(locked as *const u8, size).to_vec()));
+            let _ = GlobalUnlock(handle);
+        }
+    }
+    saved
+}
+
+/// Puts a [`clipboard_snapshot`] into the (already open, emptied) clipboard.
+#[cfg(target_os = "windows")]
+fn write_clipboard_snapshot(saved: &[(u32, Vec<u8>)]) {
+    use windows_sys::Win32::{
+        Foundation::GlobalFree,
+        System::{
+            DataExchange::SetClipboardData,
+            Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
+        },
+    };
+    for (format, bytes) in saved {
+        unsafe {
+            let handle = GlobalAlloc(GMEM_MOVEABLE, bytes.len());
+            if handle.is_null() {
+                continue;
+            }
+            let locked = GlobalLock(handle);
+            if locked.is_null() {
+                let _ = GlobalFree(handle);
+                continue;
+            }
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), locked as *mut u8, bytes.len());
+            let _ = GlobalUnlock(handle);
+            // SetClipboardData takes ownership of the handle on success.
+            if SetClipboardData(*format, handle).is_null() {
+                let _ = GlobalFree(handle);
+            }
+        }
+    }
+}
+
+/// Lightweight clipboard-paste: snapshot the clipboard → set text → Ctrl+V → put
+/// the snapshot back.
 ///
-/// Intentionally does NOT call OleInitialize and only touches CF_UNICODETEXT.
-/// The full COM/OLE path (`clipboard::paste_text`) enumerated every clipboard
-/// format, calling `GlobalLock` on non-HGLOBAL handles (CF_BITMAP,
-/// CF_ENHMETAFILE) and loading shell extensions via OleInitialize — both of
-/// which caused unrecoverable access-violation crashes.
-///
-/// Trade-off: non-text clipboard content (images, files) is lost during the
-/// brief paste window.  The original text is restored after 150 ms.
+/// Intentionally does NOT call OleInitialize. The full COM/OLE path
+/// (`clipboard::paste_text`) called `GlobalLock` on non-HGLOBAL handles
+/// (CF_BITMAP, CF_ENHMETAFILE) and loaded shell extensions via OleInitialize —
+/// both caused unrecoverable access-violation crashes. The snapshot copies only
+/// memory-block formats ([`is_memory_clipboard_format`]): text, images (CF_DIB,
+/// CF_DIBV5), files (CF_HDROP), HTML / RTF and other registered formats — what
+/// a screenshot, a copied file or a copied web page puts there. Restored after
+/// 150 ms, kept out of Win+V history (it is already there).
 #[cfg(target_os = "windows")]
 fn paste_via_clipboard(text: &str) -> Result<(), String> {
     use std::{ptr, thread, time::Duration};
@@ -267,7 +385,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         Foundation::GlobalFree,
         System::{
             DataExchange::{
-                EmptyClipboard, GetClipboardData, GetClipboardSequenceNumber,
+                EmptyClipboard, GetClipboardSequenceNumber,
                 RegisterClipboardFormatW, SetClipboardData,
             },
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
@@ -276,28 +394,6 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
     };
 
     const RESTORE_DELAY: Duration = Duration::from_millis(150);
-
-    // --- helper: read CF_UNICODETEXT from an already-open clipboard ---
-    let read_text = || -> Option<String> {
-        unsafe {
-            let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
-            if handle.is_null() {
-                return None;
-            }
-            let locked = GlobalLock(handle);
-            if locked.is_null() {
-                return None;
-            }
-            let mut len = 0usize;
-            let wide = locked as *const u16;
-            while *wide.add(len) != 0 {
-                len += 1;
-            }
-            let t = String::from_utf16_lossy(std::slice::from_raw_parts(wide, len));
-            let _ = GlobalUnlock(handle);
-            Some(t)
-        }
-    };
 
     // --- helper: write CF_UNICODETEXT to an already-open, emptied clipboard ---
     let write_text = |t: &str| -> Result<(), String> {
@@ -360,16 +456,18 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         set_dword_format("ExcludeClipboardContentFromMonitorProcessing", 0);
     };
 
-    // --- helper: best-effort restore ---
-    let restore = |original: &str| {
+    // --- helper: best-effort restore (not a new Win+V entry: it is already there) ---
+    let restore = |saved: &[(u32, Vec<u8>)]| {
         let _ = with_clipboard_open(|| {
             unsafe { EmptyClipboard() };
-            let _ = write_text(original);
+            write_clipboard_snapshot(saved);
+            exclude_from_history();
         });
     };
 
-    // 1. Open clipboard and save current text
-    let saved_text = with_clipboard_open(read_text)?;
+    // 1. Open clipboard and keep what is there
+    let saved = with_clipboard_open(clipboard_snapshot)?;
+    let saved_clipboard = (!saved.is_empty()).then_some(saved);
 
     // 2. Stage our text
     let staged = with_clipboard_open(|| {
@@ -383,7 +481,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
     let seq = match staged {
         Ok(seq) => seq,
         Err(e) => {
-            if let Some(ref original) = saved_text {
+            if let Some(ref original) = saved_clipboard {
                 restore(original);
             }
             return Err(e);
@@ -392,7 +490,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
 
     // 3. Inject Ctrl+V (clears encoding modifiers first)
     if let Err(e) = send_hotkey_string("Ctrl+V", &ALL_MODIFIERS) {
-        if let Some(ref original) = saved_text {
+        if let Some(ref original) = saved_clipboard {
             restore(original);
         }
         return Err(format!("Failed to inject Ctrl+V: {e:?}"));
@@ -406,14 +504,12 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         log::debug!("[input] Clipboard changed externally, skipping restore");
         return Ok(());
     }
-    match saved_text {
+    match saved_clipboard {
         Some(ref original) => restore(original),
-        // The original clipboard held non-text (image, files, HTML) or was empty,
-        // so we can't restore it — but never leave our staged snippet behind.
+        // The clipboard was empty (or held only GDI-object formats, or was too
+        // big to keep): never leave our staged snippet behind.
         None => {
-            log::warn!(
-                "[input] Long snippet staged through the clipboard; original non-text content could not be preserved — clearing the staged text"
-            );
+            log::info!("[input] Snippet pasted through the clipboard; nothing to put back — clearing the staged text");
             let _ = with_clipboard_open(|| {
                 unsafe { EmptyClipboard() };
             });
@@ -644,7 +740,7 @@ fn clipboard_get_text() -> Option<String> {
 
 /// Replace the clipboard's text with `text` (CF_UNICODETEXT).
 #[cfg(target_os = "windows")]
-fn clipboard_set_text(text: &str) -> Result<(), String> {
+pub(crate) fn clipboard_set_text(text: &str) -> Result<(), String> {
     use std::ptr;
     use windows_sys::Win32::{
         Foundation::GlobalFree,
@@ -691,7 +787,7 @@ fn clipboard_get_text() -> Option<String> {
 }
 
 #[cfg(target_os = "linux")]
-fn clipboard_set_text(text: &str) -> Result<(), String> {
+pub(crate) fn clipboard_set_text(text: &str) -> Result<(), String> {
     let mut clipboard =
         arboard::Clipboard::new().map_err(|e| format!("Failed to open clipboard: {e}"))?;
     clipboard
@@ -705,7 +801,7 @@ fn clipboard_get_text() -> Option<String> {
 }
 
 #[cfg(not(any(target_os = "windows", target_os = "linux")))]
-fn clipboard_set_text(_text: &str) -> Result<(), String> {
+pub(crate) fn clipboard_set_text(_text: &str) -> Result<(), String> {
     Err("Clipboard set is not implemented for this platform".into())
 }
 
@@ -1106,10 +1202,11 @@ const CLIPBOARD_PASTE_THRESHOLD: usize = 100;
 /// `rapid-event-delay`.
 ///
 /// For text longer than [`CLIPBOARD_PASTE_THRESHOLD`] characters, attempts a
-/// lightweight clipboard-paste (save CF_UNICODETEXT → set → Ctrl+V → restore).
-/// Unlike the full COM/OLE clipboard module, this path does NOT call
-/// OleInitialize and only touches CF_UNICODETEXT, avoiding the shell-extension
-/// access-violation crashes that plagued the original implementation.
+/// lightweight clipboard-paste (snapshot the clipboard → set → Ctrl+V → put the
+/// snapshot back, see [`paste_via_clipboard`]). Unlike the full COM/OLE
+/// clipboard module, this path does NOT call OleInitialize and never locks a
+/// GDI-object format, avoiding the access-violation crashes that plagued the
+/// original implementation.
 pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
@@ -2682,6 +2779,48 @@ fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_memory_block_clipboard_formats_are_kept() {
+        use super::is_memory_clipboard_format as kept;
+        // Text, a screenshot's DIB / DIBV5, files, locale, a registered format (HTML, RTF…).
+        for format in [13, 1, 8, 17, 15, 16, 0xc0f0] {
+            assert!(kept(format), "{format:#x} should be kept");
+        }
+        // GDI objects and owner-defined ranges: never locked as memory.
+        for format in [2, 3, 9, 14, 0x80, 0x82, 0x83, 0x8e, 0x200, 0x2ff, 0x300, 0x3ff] {
+            assert!(!kept(format), "{format:#x} should be skipped");
+        }
+    }
+
+    /// Takes the real clipboard (and gives it back): run by hand,
+    /// `cargo test -- --ignored clipboard_snapshot_round_trips`.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "uses the real clipboard"]
+    fn clipboard_snapshot_round_trips_text_and_registered_formats() {
+        use windows_sys::Win32::System::DataExchange::{EmptyClipboard, RegisterClipboardFormatW};
+        let name: Vec<u16> = "SidearmTestFormat".encode_utf16().chain(Some(0)).collect();
+        let custom = unsafe { RegisterClipboardFormatW(name.as_ptr()) };
+        let text: Vec<u8> = "hello ".encode_utf16().flat_map(u16::to_le_bytes).collect();
+        let original = super::with_clipboard_open(super::clipboard_snapshot).expect("open");
+        let wanted = vec![(13u32, text), (custom, vec![1, 2, 3, 4])];
+        super::with_clipboard_open(|| {
+            unsafe { EmptyClipboard() };
+            super::write_clipboard_snapshot(&wanted);
+        })
+        .expect("open");
+        let read = super::with_clipboard_open(super::clipboard_snapshot).expect("open");
+        super::with_clipboard_open(|| {
+            unsafe { EmptyClipboard() };
+            super::write_clipboard_snapshot(&original);
+        })
+        .expect("open");
+        for (format, bytes) in &wanted {
+            let got = read.iter().find(|(f, _)| f == format).map(|(_, b)| b).expect("format back");
+            assert!(got.starts_with(bytes), "format {format:#x}: {got:?}");
+        }
+    }
+
     use super::*;
 
     #[test]

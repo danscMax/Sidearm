@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Drag and drop everywhere: a button onto another moves its assignments (onto an
+  occupied one: they swap; with Ctrl: a copy), over a layer pill to reach another
+  layer, onto a profile in the sidebar to copy it there. Sidebar profiles, menu
+  items (also into and out of lists, Alt+arrows from the keyboard) and macro steps
+  are reordered by dragging.
+- The button menu has "Swap with…"; the Buttons tab has "Copy assignments…" (a
+  layer or all layers into another layer or profile) and "Compare profiles".
+- Menu editor: duplicate an item, copy it to another menu, restore the last
+  deleted one, search every menu, see how often each item was picked and which
+  other menus use it, and add a whole folder of .txt / .md prompts (copied in).
+- Popup menu: right click on a phrase to insert it with Enter or only copy it;
+  search finds a phrase typed in the wrong keyboard layout.
+- A config.json edited outside Sidearm is picked up at once, no restart.
+- A banner names broken references (an assignment or menu item whose action or
+  library text is gone) and Enter next to closing the window on one button.
+- "Export without my texts": a profile for someone else, without your texts,
+  macros with text and menus.
+
+### Fixed
+- A shortcut sent from the mouse, like Alt+V, typed only the letter ("v" or "м")
+  in Windows Terminal and Claude Code: its modifier was released in the same
+  instant as the key. It is now held 30 ms longer.
+- An exported profile carried its menus without their items' actions; imported
+  elsewhere, such a menu did nothing.
+- The popup menu was sometimes cut off the first time it opened on a monitor
+  with another scale; it now measures itself in physical pixels and again after
+  a scale change. A right click there no longer shows the browser's own menu.
+- While a button is dragged, the button under the pointer no longer grows over
+  its neighbours.
+- Switching a phrase's Enter off removes the ⏎ from its name (and on adds it).
+
+### Changed
+- The HyperShift button and the old device name are no longer in Settings: the
+  button is set on the button itself, the name comes from the mouse.
+- The layer switch is above the mouse picture, the view switch right under it.
+- A long phrase is typed through the clipboard and then the clipboard is put back —
+  now with everything that was there, not only text: a screenshot, copied files, a
+  copied web page or Word text with its formatting. The restored copy does not show
+  up twice in the Win+V history.
+- The popup menu's tip for a nested list shows what it holds as a list, one name
+  per line, instead of one run-on line.
+
 ## [0.12.3] — 2026-11-12
 
 ### Added

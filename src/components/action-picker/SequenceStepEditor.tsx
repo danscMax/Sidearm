@@ -148,6 +148,13 @@ export function SequenceStepEditor({
     onChange(swapItems(steps, index, target));
   }
 
+  /** Drag a step onto another: it takes that place, the others shift. */
+  function dropStep(from: number, to: number) {
+    const move = <T,>(list: T[]) => { const next = [...list]; next.splice(to, 0, ...next.splice(from, 1)); return next; };
+    stepKeysRef.current = move(stepKeysRef.current);
+    onChange(move(steps));
+  }
+
   function updateStep(index: number, next: SequenceStep) {
     onChange(steps.map((s, i) => (i === index ? next : s)));
   }
@@ -238,6 +245,7 @@ export function SequenceStepEditor({
             canMoveDown={index < steps.length - 1}
             moveUpLabel={t("common.moveUp")}
             moveDownLabel={t("common.moveDown")}
+            reorder={{ index, onMove: dropStep }}
           >
               <SelectField
                 label={t("picker.stepType")}

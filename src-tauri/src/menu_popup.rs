@@ -87,9 +87,12 @@ pub(crate) struct ViewItem {
     pub number: Option<usize>,
     pub submenu: bool,
     pub enabled: bool,
-    /// What it sends (text, keys) or, for a submenu, what it holds.
+    /// What it sends (text, keys).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// For a submenu: the names of what it holds, drawn as a list in the tip.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<String>,
     /// The block heading it sits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -109,6 +112,8 @@ pub(crate) struct View {
     /// The search box's placeholder and the no-results line, in the UI language.
     pub placeholder: String,
     pub empty: String,
+    /// The right-click choices for a phrase: insert, insert + Enter, copy only.
+    pub pick_modes: Vec<String>,
     /// Bumps on every open, so the page knows a fresh popup needs a layout.
     pub generation: u64,
 }
@@ -132,10 +137,18 @@ impl Model {
         model
     }
 
+    /// The name or the sent text contains the query — also when it was typed
+    /// in the other keyboard layout ("ghbyz" finds "Принял", "руддщ" "hello"):
+    /// both sides compared as the keys pressed on a ЙЦУКЕН/QWERTY keyboard.
     fn matches(&self, item: &MenuItem, needle: &str) -> bool {
         let MenuItem::Action { label, action_id, .. } = item else { return false };
-        label.to_lowercase().contains(needle)
-            || self.details.get(action_id).is_some_and(|text| text.to_lowercase().contains(needle))
+        let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
+        let needle_keys = keys(needle);
+        let hit = |text: &str| {
+            let text = text.to_lowercase();
+            text.contains(needle) || keys(&text).contains(&needle_keys)
+        };
+        hit(label) || self.details.get(action_id).is_some_and(|text| hit(text))
     }
 
     /// The rows shown and the labels of the submenus opened to get there.
@@ -277,9 +290,11 @@ impl Model {
                     enabled: item_enabled(entry.item),
                     detail: match entry.item {
                         MenuItem::Action { action_id, .. } => self.details.get(action_id).cloned(),
-                        MenuItem::Submenu { items, .. } => {
-                            Some(clip(&items.iter().map(item_label).collect::<Vec<_>>().join(" · ")))
-                        }
+                        MenuItem::Submenu { .. } => None,
+                    },
+                    children: match entry.item {
+                        MenuItem::Submenu { items, .. } => items.iter().map(|item| item_label(item).to_owned()).collect(),
+                        MenuItem::Action { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
                 })
@@ -288,6 +303,7 @@ impl Model {
             query: self.query.clone(),
             placeholder: String::new(),
             empty: String::new(),
+            pick_modes: Vec::new(),
             generation,
         }
     }
@@ -421,6 +437,11 @@ fn view_of(menu: &OpenMenu) -> View {
     let mut view = menu.model.view(&menu.title, menu.generation);
     view.placeholder = crate::ui_text::native(&crate::ui_text!("menu.searchPlaceholder", "Search phrases…"));
     view.empty = crate::ui_text::native(&crate::ui_text!("menu.noResults", "Nothing found"));
+    view.pick_modes = vec![
+        crate::ui_text::native(&crate::ui_text!("menu.pickRun", "Insert")),
+        crate::ui_text::native(&crate::ui_text!("menu.pickEnter", "Insert and press Enter")),
+        crate::ui_text::native(&crate::ui_text!("menu.pickCopy", "Only copy to the clipboard")),
+    ];
     view
 }
 
@@ -507,8 +528,47 @@ fn close_and_return(app: &AppHandle, return_focus: bool) {
     }
 }
 
+/// How a picked item runs (the popup's right-click menu offers the others).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum PickMode {
+    /// As configured.
+    Run,
+    /// As configured, then Enter.
+    Enter,
+    /// Only put its text into the clipboard: nothing is typed.
+    Copy,
+}
+
+/// The whole text a phrase types (no preview clipping), for "copy only".
+fn full_text(config: &AppConfig, action_id: &str) -> Option<String> {
+    let action = config.actions.iter().find(|action| action.id == action_id)?;
+    match &action.payload {
+        ActionPayload::TextSnippet(TextSnippetPayload::Inline { text, .. }) => Some(text.clone()),
+        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id }) => {
+            config.snippet_library.iter().find(|snippet| &snippet.id == snippet_id).map(|snippet| snippet.text.clone())
+        }
+        ActionPayload::Sequence(payload) => {
+            let text: String = payload
+                .steps
+                .iter()
+                .filter_map(|step| match step {
+                    SequenceStep::Text { value, .. } => Some(value.as_str()),
+                    _ => None,
+                })
+                .collect();
+            (!text.is_empty()).then_some(text)
+        }
+        _ => None,
+    }
+}
+
 /// Feed one input; redraw, run or close as the model says.
 fn drive(app: &AppHandle, input: impl FnOnce(&mut Model) -> Step) {
+    drive_as(app, PickMode::Run, input);
+}
+
+fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> Step) {
     let mut guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
     let Some(menu) = guard.as_mut() else { return };
     match input(&mut menu.model) {
@@ -529,7 +589,18 @@ fn drive(app: &AppHandle, input: impl FnOnce(&mut Model) -> Step) {
             drop(guard);
             hide(app);
             platform::restore_foreground(menu.target_window);
-            log::info!("[menu] picked `{action_id}`");
+            log::info!("[menu] picked `{action_id}` ({mode:?})");
+            crate::menu_usage::count(&action_id);
+            if mode == PickMode::Copy
+                && let Some(text) = full_text(&menu.config, &action_id)
+            {
+                if !crate::fake_mode()
+                    && let Err(error) = crate::input_synthesis::clipboard_set_text(&text)
+                {
+                    log::warn!("[menu] could not copy `{action_id}`: {error}");
+                }
+                return;
+            }
             crate::capture_backend::run_menu_item(
                 app,
                 &menu.runtime_store,
@@ -538,6 +609,11 @@ fn drive(app: &AppHandle, input: impl FnOnce(&mut Model) -> Step) {
                 &action_id,
                 menu.is_fg_elevated,
             );
+            if mode == PickMode::Enter && !crate::fake_mode() {
+                // The same pause a phrase with Enter keeps before it.
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                let _ = crate::input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default());
+            }
         }
     }
 }
@@ -554,8 +630,8 @@ pub(crate) fn handle_press(app: &AppHandle, control_id: Option<&str>) {
 }
 
 /// The page under the mouse: a click picks, a hover highlights.
-pub(crate) fn pick_from_window(app: &AppHandle, index: usize) {
-    drive(app, |model| model.apply(Input::Pick(index)));
+pub(crate) fn pick_from_window(app: &AppHandle, index: usize, mode: PickMode) {
+    drive_as(app, mode, |model| model.apply(Input::Pick(index)));
 }
 
 pub(crate) fn hover_from_window(app: &AppHandle, index: usize) {
@@ -617,8 +693,12 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
         }
     };
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else { return };
+    // The page sends its size in physical pixels (its own devicePixelRatio):
+    // a fresh window still sitting on another monitor renders at that
+    // monitor's scale, and multiplying by the target's scale cut the menu off.
+    // The page measures again once the move changes its scale.
     let scale = platform::dpi_scale_at(anchor);
-    let (w, h) = ((width * scale).ceil() as i32, (height * scale).ceil() as i32);
+    let (w, h) = (width.ceil() as i32, height.ceil() as i32);
     let (x, y) = platform::position_near(anchor, w, h, (6.0 * scale).round() as i32);
     // Position first so a cross-monitor DPI change settles before sizing (see `show_osd`).
     let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
@@ -890,6 +970,8 @@ mod tests {
         assert!(model.view("Phrases", 1).items.is_empty(), "disabled items are not found");
         assert_eq!(model.apply(Input::Back), Step::Stay, "back clears the search first");
         assert_eq!(model.view("Phrases", 1).items.len(), 6);
+        model.set_query("Вуу");
+        assert_eq!(labels(&model.view("Phrases", 1)), ["Deep"], "typed in the Russian layout");
     }
 
     #[test]

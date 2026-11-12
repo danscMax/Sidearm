@@ -1813,17 +1813,36 @@ export function isValidProfileExport(raw: unknown): raw is ProfileExportData {
 }
 
 /** Extract a single profile with its bindings, actions, and app mappings into an export envelope. */
+/** An action that types the owner's own words: a text, a macro with text, a
+ *  menu (of phrases). "Export without my texts" leaves them and their buttons out. */
+function typesOwnText(action: Action): boolean {
+  if (action.type === "textSnippet" || action.type === "menu") return true;
+  return action.type === "sequence" && action.payload.steps.some((step) => step.type === "text");
+}
+
 export function extractProfileExport(
   config: AppConfig,
   profileId: string,
+  opts: { withoutTexts?: boolean } = {},
 ): ProfileExportData {
   const profile = config.profiles.find((p) => p.id === profileId);
   if (!profile) {
     throw new Error(`Profile not found: ${profileId}`);
   }
 
-  const bindings = config.bindings.filter((b) => b.profileId === profileId);
+  const byId = new Map(config.actions.map((action) => [action.id, action]));
+  const bindings = config.bindings.filter((b) => {
+    if (b.profileId !== profileId) return false;
+    const action = byId.get(b.actionId);
+    return !(opts.withoutTexts && action && typesOwnText(action));
+  });
+  // A menu's items run actions of their own: they travel with it, or the
+  // imported menu points at nothing.
   const actionRefs = new Set(bindings.map((b) => b.actionId));
+  const menus = [...actionRefs].map((id) => byId.get(id)).filter((action) => action?.type === "menu");
+  for (const menu of menus) {
+    if (menu?.type === "menu") collectMenuActionRefs(menu.payload.items, actionRefs);
+  }
   const actions = config.actions.filter((a) => actionRefs.has(a.id));
   const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
   const encoderMappings = config.encoderMappings.filter((e) =>
@@ -1960,6 +1979,14 @@ export function importProfile(
     }
     return { ...cloned, id };
   });
+  // Menu items follow their actions' new ids.
+  const remapItems = (items: MenuItem[]): MenuItem[] =>
+    items.map((item) => (item.kind === "submenu"
+      ? { ...item, items: remapItems(item.items) }
+      : { ...item, actionId: actionIdMap.get(item.actionId) ?? item.actionId }));
+  for (const action of newActions) {
+    if (action.type === "menu") action.payload = { ...action.payload, items: remapItems(action.payload.items) };
+  }
 
   const newBindings: Binding[] = remapBindings(data.bindings, newId, actionIdMap);
 

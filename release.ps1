@@ -93,7 +93,7 @@ Write-Ok "clean, branch $branch, $tag is new"
 # 4. Build.
 if (-not $SkipBuild) {
     Write-Step 4 6 "Portable build"
-    & pwsh -NoProfile -File (Join-Path $root 'build_portable.ps1') -NoOpen
+    & pwsh -NoProfile -File (Join-Path $root 'build_portable.ps1') -NoOpen -StrictAudit
     if ($LASTEXITCODE -ne 0) { Stop-Release "build_portable.ps1 failed ($LASTEXITCODE)." }
 }
 

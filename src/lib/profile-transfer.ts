@@ -36,8 +36,9 @@ export async function exportProfileToFile(
   profileId: string,
   profileName: string,
   dialogTitle: string,
+  opts: { withoutTexts?: boolean } = {},
 ): Promise<boolean> {
-  const data = extractProfileExport(config, profileId);
+  const data = extractProfileExport(config, profileId, opts);
   const json = JSON.stringify(data, null, 2);
   const filePath = await save({
     title: dialogTitle,

@@ -1,8 +1,12 @@
 import { startTransition, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppMapping, Profile } from "../lib/config";
+import type { Slot } from "../lib/binding-moves";
 import { sortAppMappings } from "../lib/helpers";
+import { BINDING_DRAG_TYPE, isBindingDrag, parseBindingDragData } from "../lib/mouse-visual";
 import { ExeIcon } from "./ExeIcon";
+
+const PROFILE_DRAG_TYPE = "application/x-sidearm-profile";
 
 /** App chips shown under the selected profile before "N more". */
 const SHOWN_APPS = 6;
@@ -36,7 +40,13 @@ export function SidebarProfiles({
   onRuleMenu,
   onAddRule,
   onToggleAllRules,
+  onDropBinding,
+  onMoveProfile,
 }: {
+  /** A button dragged from the mouse onto a profile: copy it there. */
+  onDropBinding: (profileId: string, from: Slot) => void;
+  /** A profile dragged onto another one: take its place in the list. */
+  onMoveProfile: (draggedId: string, targetId: string) => void;
   profiles: Profile[];
   appMappings: AppMapping[];
   effectiveProfileId: string | null;
@@ -59,6 +69,8 @@ export function SidebarProfiles({
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // The selected profile's app list folded away.
   const [collapsed, setCollapsed] = useState(false);
+  // The row a profile or a button is being dragged over.
+  const [dropId, setDropId] = useState<string | null>(null);
   return (
     <div className="sidebar-profiles">
       <ul className="sidebar-profiles__list">
@@ -81,8 +93,29 @@ export function SidebarProfiles({
             >
               <button
                 type="button"
-                className="sidebar-profiles__row"
+                className={`sidebar-profiles__row${dropId === profile.id ? " sidebar-profiles__row--drop" : ""}`}
                 aria-current={selected ? "true" : undefined}
+                draggable
+                onDragStart={(e) => {
+                  e.dataTransfer.effectAllowed = "move";
+                  e.dataTransfer.setData(PROFILE_DRAG_TYPE, profile.id);
+                }}
+                onDragOver={(e) => {
+                  const types = Array.from(e.dataTransfer.types);
+                  if (!isBindingDrag(e) && !types.includes(PROFILE_DRAG_TYPE)) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = isBindingDrag(e) ? "copy" : "move";
+                  if (dropId !== profile.id) setDropId(profile.id);
+                }}
+                onDragLeave={() => setDropId(null)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropId(null);
+                  const from = parseBindingDragData(e.dataTransfer.getData(BINDING_DRAG_TYPE));
+                  if (from) { onDropBinding(profile.id, from); return; }
+                  const dragged = e.dataTransfer.getData(PROFILE_DRAG_TYPE);
+                  if (dragged) onMoveProfile(dragged, profile.id);
+                }}
                 onClick={() => startTransition(() => onSelect(profile.id))}
                 onDoubleClick={(e) => {
                   e.preventDefault();

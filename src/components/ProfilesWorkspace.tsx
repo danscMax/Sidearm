@@ -36,6 +36,10 @@ import {
 } from "../lib/config-editing";
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
+import type { Slot } from "../lib/binding-moves";
+import { checkProfile } from "../lib/config-check";
+import { CopyAssignmentsModal } from "./CopyAssignmentsModal";
+import { CompareProfilesModal } from "./CompareProfilesModal";
 import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
 import { exportBindingToFile, importBindingFromFile } from "../lib/binding-transfer";
 import {
@@ -44,7 +48,7 @@ import {
   findShortcutConflicts,
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
-import { displayNameForControl, labelForLayer } from "../lib/labels";
+import { displayNameForControl, displayNameForControlId, labelForLayer } from "../lib/labels";
 import { defaultLayout, deviceLayers, deviceLayout } from "../lib/devices";
 import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
@@ -157,10 +161,12 @@ export function ProfilesWorkspace({
   mouseStates,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
-  const { heatmapEnabled, setHeatmapEnabled, handleDropBinding } = useMouseVisualPanel({
+  const { heatmapEnabled, setHeatmapEnabled, handleDropBinding, placeDragged } = useMouseVisualPanel({
     effectiveProfileId,
     selectedLayer,
+    activeConfig,
     updateDraft,
+    showToast,
   });
 
   // Mirror heatmap state into the ref useRuntime reads, so execution-count
@@ -379,6 +385,29 @@ export function ProfilesWorkspace({
   >(null);
   const [bindingSearch, setBindingSearch] = useState("");
   const [searchAllProfiles, setSearchAllProfiles] = useState(false);
+  // "Swap with…": the button whose assignments trade places with the next one clicked.
+  const [swapFrom, setSwapFrom] = useState<Slot | null>(null);
+  const [copyDialog, setCopyDialog] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
+
+  useEffect(() => {
+    if (!swapFrom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setSwapFrom(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [swapFrom]);
+
+  function selectControl(id: ControlId) {
+    if (swapFrom && effectiveProfileId) {
+      placeDragged(swapFrom, { profileId: effectiveProfileId, layer: selectedLayer, controlId: id }, false);
+      setSwapFrom(null);
+      return;
+    }
+    startTransition(() => {
+      setSelectedControlId(id);
+      setMultiSelectedControlIds(new Set());
+    });
+  }
 
   // Open the new-rule dialog when the command palette requests it, then ack
   // so a later remount (mode switch) doesn't reopen it.
@@ -423,6 +452,8 @@ export function ProfilesWorkspace({
       ),
     [activeConfig, activeDevice?.id, effectiveProfileId, selectedLayer],
   );
+
+  const profileIssues = effectiveProfileId ? checkProfile(activeConfig, effectiveProfileId) : [];
 
   // Conflict merge: keep one binding enabled, disable the rest of its group.
   const handleKeepBinding = (
@@ -940,6 +971,21 @@ export function ProfilesWorkspace({
         </div>
       ) : null}
 
+      {profileIssues.length > 0 ? (
+        <Notice variant="warning" className="profiles__conflict-banner">
+          <strong>{t("configCheck.banner", { count: profileIssues.length })}</strong>
+          <ul>
+            {profileIssues.map((issue, index) => (
+              <li key={index}>
+                {issue.kind === "enterNextToClose"
+                  ? t("configCheck.enterNextToClose", { button: displayNameForControlId(issue.binding.controlId), layer: labelForLayer(issue.binding.layer) })
+                  : t(`configCheck.${issue.kind}`, { where: issue.where })}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
+
       {layerConflicts.length > 0 ? (
         <Notice variant="warning" className="profiles__conflict-banner">
           <strong>{t("conflict.banner", { count: layerConflicts.length })}</strong>
@@ -971,6 +1017,15 @@ export function ProfilesWorkspace({
             })}
           </ul>
         </Notice>
+      ) : null}
+
+      {swapFrom ? (
+        <div className="profiles__bulk-bar" role="status">
+          <span className="profiles__bulk-count">{t("binding.swapPick")}</span>
+          <button type="button" className="action-button action-button--small" onClick={() => setSwapFrom(null)}>
+            {t("common.cancel")}
+          </button>
+        </div>
       ) : null}
 
       {/* ── Bulk actions for a multi-control selection ── */}
@@ -1032,12 +1087,7 @@ export function ProfilesWorkspace({
             multiSelectedControlIds={multiSelectedControlIds}
             matchedControlIds={matchedControlIds}
             conflictBindingIds={conflictIds}
-            onSelectControl={(id) => {
-              startTransition(() => {
-                setSelectedControlId(id);
-                setMultiSelectedControlIds(new Set());
-              });
-            }}
+            onSelectControl={selectControl}
             onToggleMultiSelect={(id) => {
               setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
             }}
@@ -1071,12 +1121,7 @@ export function ProfilesWorkspace({
             multiSelectedControlIds={multiSelectedControlIds}
             matchedControlIds={matchedControlIds}
             conflictBindingIds={conflictIds}
-            onSelectControl={(id) => {
-              startTransition(() => {
-                setSelectedControlId(id);
-                setMultiSelectedControlIds(new Set());
-              });
-            }}
+            onSelectControl={selectControl}
             onToggleMultiSelect={(id) => {
               setMultiSelectedControlIds((prev) => toggleInSet(prev, id));
             }}
@@ -1142,6 +1187,21 @@ export function ProfilesWorkspace({
           <button
             type="button"
             className="action-button action-button--small"
+            title={t("profile.exportWithoutTextsHint")}
+            onClick={async () => {
+              if (!activeConfig || !activeProfile) return;
+              try {
+                await exportProfileToFile(activeConfig, activeProfile.id, activeProfile.name, t("settings.exportDialogTitle"), { withoutTexts: true });
+              } catch {
+                showToast(t("settings.exportProfileError"), "warning");
+              }
+            }}
+          >
+            {t("profile.exportWithoutTexts")}
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--small"
             onClick={async () => {
               if (!activeConfig) return;
               try {
@@ -1175,8 +1235,30 @@ export function ProfilesWorkspace({
               {t("transfer.open")}
             </button>
           ) : null}
+          <button type="button" className="action-button action-button--small" onClick={() => setCopyDialog(true)}>
+            {t("copyLayer.open")}
+          </button>
+          {activeConfig.profiles.length > 1 ? (
+            <button type="button" className="action-button action-button--small" onClick={() => setCompareOpen(true)}>
+              {t("compare.open")}
+            </button>
+          ) : null}
         </div>
       ) : null}
+      {copyDialog && activeProfile ? (
+        <CopyAssignmentsModal
+          config={activeConfig}
+          profileId={activeProfile.id}
+          layer={selectedLayer}
+          onClose={() => setCopyDialog(false)}
+          onApply={(next, copied) => {
+            updateDraft(() => next);
+            setCopyDialog(false);
+            showToast(t("transfer.done", { count: copied }), "success");
+          }}
+        />
+      ) : null}
+      {compareOpen ? <CompareProfilesModal config={activeConfig} layer={selectedLayer} onClose={() => setCompareOpen(false)} /> : null}
         </>
       )}
       {showTransfer ? (
@@ -1343,6 +1425,13 @@ export function ProfilesWorkspace({
                 disabled: !binding,
                 onClick: () => {
                   if (binding) updateDraft((c) => duplicateBinding(c, binding.id, cid));
+                },
+              },
+              {
+                label: t("binding.swapWith"),
+                disabled: !binding || !effectiveProfileId,
+                onClick: () => {
+                  if (binding) setSwapFrom({ profileId: binding.profileId, layer: binding.layer, controlId: cid });
                 },
               },
               {

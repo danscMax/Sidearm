@@ -268,7 +268,7 @@ fn parse_vk_code(compact: &str) -> Option<u16> {
 /// Russian layout active, producing 'С' (Cyrillic) instead of 'C' (Latin) for
 /// Ctrl+C — this reverses that by physical key position.  The table is static
 /// and layout-independent, so it is safe to apply during validation.
-fn normalize_cyrillic_key(key: &str) -> String {
+pub(crate) fn normalize_cyrillic_key(key: &str) -> String {
     key.chars()
         .map(|ch| match ch {
             // Row 0: Ё → `

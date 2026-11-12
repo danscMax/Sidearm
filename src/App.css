@@ -658,7 +658,11 @@ select::checkmark {
   grid-template-columns: minmax(0, 200px) minmax(0, 1fr) minmax(0, 200px);
 }
 
-.naga-v3 .mouse-top-layout .mouse-visual {
+.naga-v3 /* The picture with the view switch right under it. */
+.mouse-top-center { display: flex; flex-direction: column; align-items: center; gap: 10px; min-width: 0; }
+.mouse-top-center .mouse-visual { width: 100%; }
+
+.mouse-top-layout .mouse-visual {
   max-height: none;
 }
 
@@ -1755,6 +1759,9 @@ input[type="radio"] {
   margin-left: var(--menu-depth-indent, 0);
 }
 
+/* A step card dragged by its header onto another one. */
+.compound-card__header--drag { cursor: grab; }
+.compound-card--drop { outline: 2px dashed var(--c-accent); outline-offset: 2px; }
 .compound-card__header {
   display: flex;
   flex-wrap: wrap;
@@ -1938,6 +1945,18 @@ input[type="radio"] {
 .menu-ed__action:hover { background: var(--c-card-bg); }
 .menu-ed__action--on { background: var(--c-menu-selected); }
 .menu-ed__note { color: var(--c-text-muted); font-size: var(--fs-caption); line-height: 1.45; }
+/* Drag to reorder: a line where the item lands, a frame when it goes inside. */
+.menu-ed__row--dragging { opacity: 0.4; }
+/* Picks from the popup; never picked = dim. */
+.menu-ed__uses { flex: none; color: var(--c-text-muted); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.menu-ed__uses--none { opacity: 0.45; }
+.menu-ed__drop--before { box-shadow: inset 0 2px 0 var(--c-accent); }
+.menu-ed__drop--after { box-shadow: inset 0 -2px 0 var(--c-accent); }
+.menu-ed__drop--inside { outline: 2px dashed var(--c-accent); outline-offset: -2px; }
+.menu-ed__row--elsewhere { cursor: default; color: var(--c-text-muted); }
+.menu-ed__row--elsewhere:hover { background: none; }
+.menu-ed__search { width: 100%; margin-bottom: 6px; }
+.menu-ed__link { padding: 0; border: 0; background: none; color: var(--c-accent); font: inherit; cursor: pointer; text-decoration: underline; }
 .menu-ed__note--warn { color: var(--c-danger); }
 .menu-ed__missing { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c-danger); }
 /* ── Top view: 3-column layout (labels | image | labels) ── */
@@ -2739,6 +2758,13 @@ input[type="radio"] {
   color: #fff;
 }
 
+/* While a button is dragged nothing grows: the neighbours stay reachable. */
+.binding-dragging .mouse-visual__hotspot:hover,
+.binding-dragging .mouse-visual__hotspot--hovered,
+.binding-dragging .mouse-visual__hotspot--selected:hover {
+  transform: translate(-50%, -50%);
+}
+
 .mouse-visual__hotspot--selected {
   background: rgba(var(--layer-rgb, 159, 202, 105), 0.55);
   border-color: var(--layer-accent, var(--c-accent));
@@ -3194,6 +3220,19 @@ code {
 .transfer-modal__body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .transfer-modal__summary { margin: 8px 0 0; color: var(--c-text); font-weight: 600; }
 .transfer-modal__list { margin: 6px 0 0; padding-left: 18px; font-size: 0.82rem; line-height: 1.6; color: var(--c-text-muted); }
+
+/* ── Compare profiles ── */
+.compare-modal { width: min(1000px, 94vw); }
+.compare-modal__scroll { max-height: 60vh; overflow: auto; border: 1px solid var(--c-border); border-radius: 8px; }
+.compare-modal__table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.compare-modal__table th,
+.compare-modal__table td { padding: 5px 9px; border-bottom: 1px solid var(--c-border); text-align: left; vertical-align: top; }
+.compare-modal__table thead th { position: sticky; top: 0; background: var(--c-surface); color: var(--c-text-muted); font-weight: 600; }
+.compare-modal__table tbody th { font-weight: 500; white-space: nowrap; }
+.compare-modal__row--diff th { color: var(--c-accent); }
+
+/* A profile row a button or another profile is dragged over. */
+.sidebar-profiles__row--drop { outline: 2px dashed var(--c-accent); outline-offset: -2px; }
 
 /* ── Presets modal ── */
 .presets-modal {

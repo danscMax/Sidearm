@@ -300,7 +300,12 @@
     "importInvalid": "Not a valid Sidearm binding file",
     "importConfirm": "Import \"{{action}}\" onto this button? Referenced snippets: {{snippets}}. Any existing binding on this button will be replaced.",
     "importConfirmLabel": "Import",
-    "transferMenuBlocked": "Menu bindings can't be exported or copied yet — their sub-actions aren't carried."
+    "transferMenuBlocked": "Menu bindings can't be exported or copied yet — their sub-actions aren't carried.",
+    "dragMoved": "Moved. Ctrl+Z undoes it; hold Ctrl while dropping to copy instead.",
+    "dragSwapped": "The two buttons traded places. Ctrl+Z undoes it.",
+    "dragCopied": "Copied. Ctrl+Z undoes it.",
+    "swapWith": "Swap with…",
+    "swapPick": "Click the button to swap with · Esc cancels"
   },
   "verification": {
     "pending": "Pending",
@@ -466,7 +471,9 @@
     "importSuffix": "imported",
     "stripAddApp": "+ App",
     "stripMore": "+{{count}} more",
-    "stripLess": "Show fewer"
+    "stripLess": "Show fewer",
+    "exportWithoutTexts": "Export without my texts",
+    "exportWithoutTextsHint": "For someone else: keys, mouse, launches and the rest go; texts, macros with text and menus of phrases stay here."
   },
   "newRule": {
     "title": "New rule",
@@ -536,18 +543,11 @@
     "rerunOnboarding": "Re-run onboarding",
     "onboardingHelp": "Open the setup wizard again to review hardware and configuration steps.",
     "deviceNameHeader": "Device name",
-    "deviceNameHelp": "Label shown under the brand in the sidebar. Leave empty to show \"Mouse not recognized\".",
-    "deviceNamePlaceholder": "e.g. Razer Naga V2 HyperSpeed",
-    "hypershiftHeader": "Hypershift",
-    "hypershiftHelp": "Button held down to switch the 12 thumb buttons to their Hypershift actions. While it is held, the right click is produced by the left button. Only buttons the mouse still reports to Windows can be used — if the mouse's own memory was rewritten to send a keystroke for a button, Windows never sees that button.",
-    "hypershiftTriggerLabel": "TRIGGER BUTTON",
-    "hypershiftV3Help": "The Naga V3 Pro has its own HyperShift button under the ring finger.",
     "hypershiftMouseRight": "Right",
     "hypershiftMouseLeft": "Left",
     "hypershiftWheelClick": "Wheel",
     "hypershiftMouse4": "Button 4",
     "hypershiftMouse5": "Button 5",
-    "hypershiftOff": "Off",
     "globalShortcutHeader": "Global shortcut",
     "globalShortcutHelp": "Shortcut that shows or hides the Sidearm window from any app. Leave empty for Ctrl+Alt+N.",
     "globalShortcutPlaceholder": "ctrl+alt+n",
@@ -823,7 +823,20 @@
     "menuEmpty": "The menu is empty.",
     "menuGroupAddHint": "Select it and use the bar on the left: new items go into “{{name}}”.",
     "menuIncomplete": "Not saved yet — fill in: {{names}}.",
-    "menuIncompleteItem": "Not filled in"
+    "menuIncompleteItem": "Not filled in",
+    "menuCopyTo": "Copy to menu…",
+    "menuCopied": "«{{name}}» copied to the end of «{{menu}}»; it is saved with this menu.",
+    "menuFolderTitle": "A folder with .txt / .md prompts",
+    "menuFromFolder": "From folder",
+    "menuFolderHint": "Every .txt / .md file of a folder becomes an item; the text is copied into Sidearm, the folder is not needed afterwards. A page with the prompt in a code block gives just the prompt.",
+    "menuFolderEmpty": "No .txt / .md text found in «{{name}}».",
+    "menuFolderAdded": "Added the list «{{name}}»: {{count}} items.",
+    "menuRemoved": "«{{name}}» deleted.",
+    "menuRestore": "Restore",
+    "menuDragHint": "Drag an item to reorder it; onto a list or block to put it inside. Alt+arrows: ↑↓ order, ←→ level.",
+    "menuSearchAll": "Search all menus",
+    "menuAlsoIn": "Also in other menus: {{places}}",
+    "menuUses": "Picked from the popup so far"
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -1129,7 +1142,8 @@
     "backupFailed": "Couldn't write a config backup — check the config folder's disk space and permissions. Your settings still saved.",
     "onboardWriteFailed": "The mouse did not take the new button signals ({{reason}}) — it may be asleep. Your settings are saved; Sidearm will retry on its own.",
     "undoAction": "Redo",
-    "openConfig": "Open folder"
+    "openConfig": "Open folder",
+    "configChangedOutside": "The settings file was changed outside Sidearm: loaded, the buttons already use it."
   },
   "instance": {
     "blocked": "Sidearm is already running — duplicate launch ignored"
@@ -1683,7 +1697,10 @@
     },
     "menu": {
       "searchPlaceholder": "Search phrases…",
-      "noResults": "Nothing found"
+      "noResults": "Nothing found",
+      "pickRun": "Insert",
+      "pickEnter": "Insert and press Enter",
+      "pickCopy": "Only copy to the clipboard"
     }
   },
   "newMouse": {
@@ -1772,5 +1789,30 @@
       "degree": "° degree",
       "ruble": "₽ rouble"
     }
+  },
+  "copyLayer": {
+    "open": "Copy assignments…",
+    "title": "Copy assignments",
+    "from": "From this profile's layer",
+    "allLayers": "All layers",
+    "toProfile": "Into profile",
+    "toLayer": "Into layer",
+    "sameLayer": "The same layer",
+    "summary": "Buttons to copy: {{copied}}; already assigned and kept: {{kept}}.",
+    "menusSkipped": "Menus are not copied ({{count}}): copy them one by one from the button's menu."
+  },
+  "compare": {
+    "open": "Compare profiles",
+    "title": "Compare profiles",
+    "layer": "Layer",
+    "onlyDiff": "Only buttons that differ",
+    "empty": "Nothing to compare on this layer.",
+    "button": "Button"
+  },
+  "configCheck": {
+    "banner": "This profile has {{count}} problem(s) to look at:",
+    "missingAction": "«{{where}}» points at an action that no longer exists — it does nothing.",
+    "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
+    "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one."
   }
 }

@@ -242,10 +242,12 @@ export function MouseVisualization({
   }
 
   const { top, combined, bottom } = layout;
+  // The view switch sits right under the picture; the layers lead, at the top.
+  const viewTabs = <ViewTabPills activeTab={view} onSelect={setActiveTab} views={layout.views} labels={layout.tabLabels} />;
   return (
     <div className={layout.bottom ? "mouse-visual-tabs naga-v3" : "mouse-visual-tabs"} data-layer={selectedLayer}>
       <div className="mouse-visual-tabs__nav">
-        <ViewTabPills activeTab={view} onSelect={setActiveTab} views={layout.views} labels={layout.tabLabels} />
+        <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} layers={layers} />
         {layout.schematic && <button
           type="button"
           className="view-mode-toggle view-mode-toggle--icon"
@@ -261,17 +263,20 @@ export function MouseVisualization({
         {view === "top" && (
           <div className="mouse-top-layout">
             {renderLabelColumn(top.left, top.hotspots, "left")}
-            <div className="mouse-visual mouse-visual--top">
-              <img
-                className="mouse-visual__img"
-                src="/assets/naga-top.webp"
-                alt={t("visualization.photoAltTop")}
-                draggable={false}
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
-              <div className="mouse-visual__overlay">
-                {renderHotspotButtons(top.hotspots)}
+            <div className="mouse-top-center">
+              <div className="mouse-visual mouse-visual--top">
+                <img
+                  className="mouse-visual__img"
+                  src="/assets/naga-top.webp"
+                  alt={t("visualization.photoAltTop")}
+                  draggable={false}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+                <div className="mouse-visual__overlay">
+                  {renderHotspotButtons(top.hotspots)}
+                </div>
               </div>
+              {viewTabs}
             </div>
             {renderLabelColumn(top.right, top.hotspots, "right")}
           </div>
@@ -292,22 +297,26 @@ export function MouseVisualization({
             </div>
             {layout.sideNote && <span className="panel__muted">{t(layout.sideNote)}</span>}
             {renderSideLegendGrid(sideViewHotspots)}
+            {viewTabs}
           </div>
         )}
         {view === "combined" && (
           <div className="mouse-top-layout">
             {renderLabelColumn(combined.left, combined.hotspots, "left")}
-            <div className="mouse-visual mouse-visual--combined">
-              <img
-                className="mouse-visual__img"
-                src="/assets/naga-combined.webp"
-                alt={t("visualization.photoAltCombined")}
-                draggable={false}
-                onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-              />
-              <div className="mouse-visual__overlay">
-                {renderHotspotButtons(combined.hotspots)}
+            <div className="mouse-top-center">
+              <div className="mouse-visual mouse-visual--combined">
+                <img
+                  className="mouse-visual__img"
+                  src="/assets/naga-combined.webp"
+                  alt={t("visualization.photoAltCombined")}
+                  draggable={false}
+                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                />
+                <div className="mouse-visual__overlay">
+                  {renderHotspotButtons(combined.hotspots)}
+                </div>
               </div>
+              {viewTabs}
             </div>
             {renderLabelColumn(combined.right, combined.hotspots, "right")}
           </div>
@@ -319,11 +328,10 @@ export function MouseVisualization({
               <div className="mouse-visual__overlay">{renderHotspotButtons(bottom.hotspots)}</div>
             </div>
             {renderLabelColumn(bottom.left, bottom.hotspots, "left")}
+            {viewTabs}
           </div>
         )}
       </div>
-
-      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} layers={layers} />
     </div>
   );
 }

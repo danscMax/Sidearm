@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { WorkspaceMode } from "../lib/constants";
 import { workspaceModeCopy } from "../lib/constants";
 import type { AppConfig, Profile } from "../lib/config";
+import { placeSlot, reorderProfiles, slotHasMenu } from "../lib/binding-moves";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
 import { ContextMenu } from "./ContextMenu";
 import { SidebarProfiles, type RecognizedApp } from "./SidebarProfiles";
@@ -52,7 +53,9 @@ export function Sidebar({
   onAddRule,
   onToggleAllRules,
   recognized,
+  showToast,
 }: {
+  showToast: (message: string, kind?: "info" | "success" | "warning") => void;
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
   profiles: Profile[];
@@ -93,7 +96,7 @@ export function Sidebar({
           <span>
             {t("app.name")} <span className="sidebar__version">v{__APP_VERSION__}</span>
           </span>
-          <strong>{selectedDeviceName ?? activeConfig?.settings?.deviceName ?? t("app.deviceFallback")}</strong>
+          <strong>{selectedDeviceName ?? t("app.deviceFallback")}</strong>
         </div>
       </div>
       {workspaceModeCopy.map((mode) => (
@@ -150,6 +153,16 @@ export function Sidebar({
           recognized={recognized}
           onAddRule={onAddRule}
           onToggleAllRules={onToggleAllRules}
+          onDropBinding={(profileId, from) => {
+            if (!activeConfig) return;
+            const to = { ...from, profileId };
+            const name = profiles.find((p) => p.id === profileId)?.name ?? profileId;
+            if (slotHasMenu(activeConfig, from)) { showToast(t("binding.transferMenuBlocked"), "warning"); return; }
+            if (placeSlot(activeConfig, from, to, "copy").outcome === "none") return;
+            updateDraft((c) => placeSlot(c, from, to, "copy").config);
+            showToast(t("assignments.copiedToProfile", { profile: name }), "success");
+          }}
+          onMoveProfile={(dragged, target) => updateDraft((c) => reorderProfiles(c, dragged, target))}
         />
         {runtimeStatus === "running" && profiles.some((p) => p.name === runtimeResolvedProfileName) ? (
           <p className="sidebar__profile-legend help-caption">

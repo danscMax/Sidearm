@@ -6,7 +6,8 @@
 import { useState } from "react";
 import type { Action, Binding, ControlId } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
-import { buildBindingDragData, HEAT_TINT, parseBindingDragData } from "../lib/mouse-visual";
+import type { Slot } from "../lib/binding-moves";
+import { BINDING_DRAG_TYPE, buildBindingDragData, HEAT_TINT, parseBindingDragData } from "../lib/mouse-visual";
 
 /** Event-handler bundle spread onto an interactive control (a `<button>` or SVG `<g>`). */
 interface ControlInteractionProps {
@@ -18,10 +19,25 @@ interface ControlInteractionProps {
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onDragStart: (e: React.DragEvent<Element>) => void;
+  onDragEnd: () => void;
   onDragOver: (e: React.DragEvent<Element>) => void;
   onDragEnter: (e: React.DragEvent<Element>) => void;
   onDragLeave: () => void;
   onDrop: (e: React.DragEvent<Element>) => void;
+}
+
+/** On `<body>` while a button is dragged: hotspots stop growing on hover. */
+const DRAGGING_CLASS = "binding-dragging";
+
+function stopDragging() {
+  document.body.classList.remove(DRAGGING_CLASS);
+}
+
+/** Cleared by the drag's end — or, should the dragged element be gone by
+ *  then and its `dragend` never come, by the first pointer move after it. */
+function startDragging() {
+  document.body.classList.add(DRAGGING_CLASS);
+  for (const type of ["dragend", "drop", "pointermove"]) document.addEventListener(type, stopDragging, { once: true });
 }
 
 export interface UseControlInteractionsParams {
@@ -36,7 +52,7 @@ export interface UseControlInteractionsParams {
     x: number,
     y: number,
   ) => void;
-  onDropBinding?: (targetControlId: ControlId, sourceActionId: string) => void;
+  onDropBinding?: (targetControlId: ControlId, from: Slot, copy: boolean) => void;
   executionCounts?: Map<string, number>;
   heatmapEnabled?: boolean;
 }
@@ -97,7 +113,7 @@ export function useControlInteractions({
           onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
         }
       },
-      onMouseEnter: () => setHoveredId(id),
+      onMouseEnter: () => { if (!document.body.classList.contains(DRAGGING_CLASS)) setHoveredId(id); },
       onMouseLeave: () => setHoveredId(null),
       onDragStart: (e) => {
         const entry = entryMap.get(id);
@@ -105,12 +121,19 @@ export function useControlInteractions({
           e.preventDefault();
           return;
         }
-        e.dataTransfer.effectAllowed = "copy";
-        e.dataTransfer.setData("application/json", buildBindingDragData(entry.action.id));
+        const { profileId, layer, controlId } = entry.binding;
+        // The hover enlargement would stay on the dragged button (no
+        // mouseleave fires during a drag) and cover its neighbours.
+        setHoveredId(null);
+        startDragging();
+        e.dataTransfer.effectAllowed = "copyMove";
+        e.dataTransfer.setData(BINDING_DRAG_TYPE, buildBindingDragData({ profileId, layer, controlId }));
       },
+      onDragEnd: stopDragging,
       onDragOver: (e) => {
         e.preventDefault();
-        e.dataTransfer.dropEffect = "copy";
+        // Plain drag moves (or swaps with an occupied button); Ctrl copies.
+        e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
       },
       onDragEnter: (e) => {
         e.preventDefault();
@@ -120,8 +143,8 @@ export function useControlInteractions({
       onDrop: (e) => {
         e.preventDefault();
         setDragOverId(null);
-        const actionId = parseBindingDragData(e.dataTransfer.getData("application/json"));
-        if (actionId != null) onDropBinding?.(id, actionId);
+        const from = parseBindingDragData(e.dataTransfer.getData(BINDING_DRAG_TYPE));
+        if (from != null) onDropBinding?.(id, from, e.ctrlKey);
       },
     };
     // Side-grid cells have never had a context menu — let callers opt out.

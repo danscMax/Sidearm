@@ -26,6 +26,7 @@
      The list never changes shape under the pointer: what an item sends shows
      in the tip beside it. */
   .menu {
+    position: relative;
     display: inline-flex;
     align-items: flex-start;
     gap: 8px;
@@ -156,6 +157,45 @@
   .tip--clipped {
     -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
     mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  }
+  .tip--list { padding: 6px 4px; white-space: normal; }
+  .tip__item {
+    padding: 2px 8px 2px 20px;
+    position: relative;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .tip__item::before {
+    content: "›";
+    position: absolute;
+    left: 8px;
+    color: var(--accent);
+  }
+  .tip__mode {
+    display: block;
+    width: 100%;
+    padding: 5px 10px;
+    border: 0;
+    border-radius: 6px;
+    background: none;
+    color: var(--tip-text);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .tip__mode:hover { background: var(--line); }
+  /* The right-click choices: over the list, at the pointer. */
+  .modes {
+    position: absolute;
+    z-index: 2;
+    min-width: 190px;
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    background: var(--tip);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    font-size: 12.5px;
   }
   .tip--fresh { animation: reveal 140ms ease-out; }
   @keyframes reveal {

@@ -4,7 +4,7 @@ import { describe, it, expect, vi } from "vitest";
 
 import type { Action, Binding, ControlId, PhysicalControl } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
-import { buildBindingDragData, HEAT_TINT } from "../lib/mouse-visual";
+import { BINDING_DRAG_TYPE, buildBindingDragData, HEAT_TINT } from "../lib/mouse-visual";
 import {
   useControlInteractions,
   type UseControlInteractionsParams,
@@ -12,11 +12,12 @@ import {
 
 const ASSIGNED: ControlId = "thumb_01";
 const UNASSIGNED: ControlId = "thumb_02";
+const SLOT = { profileId: "p1", layer: "standard" as const, controlId: ASSIGNED };
 
 function assignedEntry(): ControlSurfaceEntry {
   return {
     control: { id: ASSIGNED, defaultName: "Thumb 1" } as unknown as PhysicalControl,
-    binding: { id: "b1", enabled: true } as unknown as Binding,
+    binding: { id: "b1", enabled: true, profileId: "p1", layer: "standard", controlId: ASSIGNED } as unknown as Binding,
     action: { id: "a1", type: "shortcut", displayName: "Ctrl+C" } as unknown as Action,
     mapping: null,
     isSelected: false,
@@ -65,7 +66,7 @@ function makeDrag(data?: string) {
   const getData = vi.fn(() => data ?? "");
   const preventDefault = vi.fn();
   const dataTransfer = { setData, getData, effectAllowed: "", dropEffect: "" };
-  const event = { preventDefault, dataTransfer } as unknown as React.DragEvent<Element>;
+  const event = { preventDefault, dataTransfer, ctrlKey: false } as unknown as React.DragEvent<Element>;
   return { event, dataTransfer, setData, getData, preventDefault };
 }
 
@@ -115,8 +116,11 @@ describe("useControlInteractions — getInteractionProps", () => {
 
     const d1 = makeDrag();
     result.current.getInteractionProps(ASSIGNED).onDragStart(d1.event);
-    expect(d1.setData).toHaveBeenCalledWith("application/json", buildBindingDragData("a1"));
-    expect(d1.dataTransfer.effectAllowed).toBe("copy");
+    expect(d1.setData).toHaveBeenCalledWith(BINDING_DRAG_TYPE, buildBindingDragData(SLOT));
+    expect(d1.dataTransfer.effectAllowed).toBe("copyMove");
+    expect(document.body.classList.contains("binding-dragging")).toBe(true);
+    result.current.getInteractionProps(ASSIGNED).onDragEnd();
+    expect(document.body.classList.contains("binding-dragging")).toBe(false);
 
     const d2 = makeDrag();
     result.current.getInteractionProps(UNASSIGNED).onDragStart(d2.event);
@@ -129,9 +133,9 @@ describe("useControlInteractions — getInteractionProps", () => {
     const { result } = renderHook(() => useControlInteractions(params));
 
     act(() => {
-      result.current.getInteractionProps(UNASSIGNED).onDrop(makeDrag(buildBindingDragData("a1")).event);
+      result.current.getInteractionProps(UNASSIGNED).onDrop(makeDrag(buildBindingDragData(SLOT)).event);
     });
-    expect(params.onDropBinding).toHaveBeenCalledWith(UNASSIGNED, "a1");
+    expect(params.onDropBinding).toHaveBeenCalledWith(UNASSIGNED, SLOT, false);
 
     (params.onDropBinding as ReturnType<typeof vi.fn>).mockClear();
     act(() => {

@@ -43,6 +43,7 @@ import {
   normalizeCommandError,
   openConfigFolder,
   listenDragDrop,
+  listenConfigChangedExternally,
   listenElevatedForeground,
   listenMouseDefaultsSuspected,
   listenMouseBattery,
@@ -198,6 +199,21 @@ function App() {
       unlisten?.();
     };
   }, [setError]);
+
+  // config.json changed outside Sidearm: show what is on disk now.
+  const refreshConfigRef = useRef(refreshConfig);
+  useEffect(() => { refreshConfigRef.current = refreshConfig; }, [refreshConfig]);
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void listenConfigChangedExternally(() => {
+      void refreshConfigRef.current().then((ok) => { if (ok) showToast(t("toast.configChangedOutside"), "info"); });
+    }).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => { disposed = true; unlisten?.(); };
+  }, [showToast, t]);
 
   const handleUndoWithToast = useCallback(() => {
     if (undoStack.length === 0) return;
@@ -1111,6 +1127,7 @@ function App() {
     <TitleBar onReRunOnboarding={() => updateDraft((c) => ({ ...c, settings: { ...c.settings, onboardingCompleted: false } }))} />
     <main className="shell">
       <Sidebar
+        showToast={showToast}
         workspaceMode={workspaceMode}
         onSwitchMode={switchWorkspaceMode}
         profiles={profiles}

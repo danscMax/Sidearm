@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+
+const CARD_DRAG_TYPE = "application/x-sidearm-card";
 
 /** A titled card with a delete action and an `editor-grid` body. Shared by the
  *  conditions and sequence-step lists (`stack-list` of these). */
@@ -14,8 +16,11 @@ export function CompoundCard({
   canMoveDown = true,
   moveUpLabel,
   moveDownLabel,
+  reorder,
   children,
 }: {
+  /** Drag the header onto another card of the list to move this one there. */
+  reorder?: { index: number; onMove: (from: number, to: number) => void };
   title: ReactNode;
   meta?: ReactNode;
   removeLabel: string;
@@ -33,9 +38,35 @@ export function CompoundCard({
   children: ReactNode;
 }) {
   const showMove = onMoveUp != null || onMoveDown != null;
+  const [over, setOver] = useState(false);
+  const dropProps = reorder
+    ? {
+        onDragOver: (e: React.DragEvent) => {
+          if (!Array.from(e.dataTransfer.types).includes(CARD_DRAG_TYPE)) return;
+          e.preventDefault();
+          setOver(true);
+        },
+        onDragLeave: () => setOver(false),
+        onDrop: (e: React.DragEvent) => {
+          setOver(false);
+          const from = Number(e.dataTransfer.getData(CARD_DRAG_TYPE));
+          if (Number.isInteger(from) && from !== reorder.index) {
+            e.preventDefault();
+            reorder.onMove(from, reorder.index);
+          }
+        },
+      }
+    : {};
   return (
-    <div className="compound-card">
-      <div className="compound-card__header">
+    <div className={`compound-card${over ? " compound-card--drop" : ""}`} {...dropProps}>
+      <div
+        className={`compound-card__header${reorder ? " compound-card__header--drag" : ""}`}
+        draggable={reorder != null}
+        onDragStart={reorder ? (e) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData(CARD_DRAG_TYPE, String(reorder.index));
+        } : undefined}
+      >
         <div>
           <strong>{title}</strong>
           {meta != null ? <span className="compound-card__meta">{meta}</span> : null}

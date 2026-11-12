@@ -95,10 +95,15 @@ function referencedActionIds(items: MenuItem[]): Set<string> {
 }
 
 /** Write the edits into the config: every edited action that exists, every new
- *  one the menu still uses (a phrase added then removed leaves nothing). */
+ *  one the menu (or another edited menu) still uses — a phrase added then
+ *  removed leaves nothing. */
 export function applyMenuEdits(config: AppConfig, edits: MenuEdits, items: MenuItem[]): AppConfig {
   const known = new Set(config.actions.map((action) => action.id));
   const used = referencedActionIds(items);
+  // Items copied into another menu are kept by that menu's edited action.
+  for (const action of Object.values(edits.actions)) {
+    if (action.type === "menu") referencedActionIds(action.payload.items).forEach((id) => used.add(id));
+  }
   let next = config;
   for (const action of Object.values(edits.actions)) {
     if (known.has(action.id) || used.has(action.id)) next = upsertAction(next, action);

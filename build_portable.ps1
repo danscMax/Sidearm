@@ -27,7 +27,10 @@ param(
     [switch]$CleanCargo,
     [switch]$Verify,
     [switch]$SkipBuild,
-    [switch]$NoOpen
+    [switch]$NoOpen,
+    # A release: an npm audit that cannot reach the registry stops the build
+    # instead of continuing with a warning.
+    [switch]$StrictAudit
 )
 
 chcp 65001 | Out-Null
@@ -110,8 +113,31 @@ function Invoke-DependencyAudit {
     }
     & cargo audit --file src-tauri/Cargo.lock
     $cargoExit = $LASTEXITCODE
-    & npm audit --audit-level=high
-    $npmExit = $LASTEXITCODE
+    # npm's audit endpoint sometimes fails (ECONNRESET, "audit endpoint returned
+    # an error"): that is the registry, not a finding. Retry it; if it stays
+    # unreachable, a local build goes on with a warning, a release stops.
+    $npmExit = 0
+    $npmUnreachable = $false
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        $npmOutput = & npm audit --audit-level=high 2>&1 | ForEach-Object { "$_" }
+        $npmExit = $LASTEXITCODE
+        $npmOutput | ForEach-Object { Write-Host $_ }
+        $npmUnreachable = $npmExit -ne 0 -and (($npmOutput -join "`n") -match 'audit endpoint returned an error|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up')
+        if (-not $npmUnreachable) { break }
+        if ($attempt -lt 3) {
+            Write-Warn "npm audit could not reach the registry (attempt $attempt of 3); retrying in 10 s..."
+            Start-Sleep -Seconds 10
+        }
+    }
+    if ($npmUnreachable) {
+        if ($StrictAudit) {
+            Write-Fail "npm audit could not reach the registry after 3 attempts (release builds need it)"
+            Show-Notification -Title 'Sidearm Build FAILED' -Body 'npm audit could not reach the registry.' -IsError
+            exit 1
+        }
+        Write-Warn "npm audit could not reach the registry after 3 attempts: npm dependencies NOT audited this time"
+        $npmExit = 0
+    }
     if ($cargoExit -ne 0 -or $npmExit -ne 0) {
         Write-Fail "Dependency audit failed (cargo audit exit $cargoExit, npm audit exit $npmExit)"
         Show-Notification -Title 'Sidearm Build FAILED' -Body 'Dependency audit found vulnerabilities.' -IsError

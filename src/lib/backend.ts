@@ -74,6 +74,26 @@ export async function pickExecutablePath(opts: {
   return { path: selected, name };
 }
 
+/** How often each menu item (by action id) was picked from the popup. */
+export async function getMenuUsage(): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("get_menu_usage");
+}
+
+export interface TextFile {
+  /** File name without its extension. */
+  name: string;
+  text: string;
+}
+
+/** Pick a folder and read its .txt / .md files (copied in, never linked).
+ *  Null when the user cancels. */
+export async function pickTextFolder(title: string): Promise<{ folder: string; files: TextFile[] } | null> {
+  const selected = await open({ title, directory: true, multiple: false });
+  if (typeof selected !== "string") return null;
+  const files = await invoke<TextFile[]>("read_text_folder", { path: selected });
+  return { folder: selected.split(/[/\\]/).filter(Boolean).pop() ?? selected, files };
+}
+
 export async function loadConfig(): Promise<LoadConfigResponse> {
   return invoke<LoadConfigResponse>("load_config");
 }
@@ -592,6 +612,12 @@ export async function listenRuntimeErrorEvent(
   onPayload: (payload: RuntimeErrorEvent) => void,
 ): Promise<UnlistenFn> {
   return listenEvent(eventName, onPayload);
+}
+
+/** config.json was changed outside Sidearm (by hand, a script, a sync); the
+ *  running capture already took it, the UI should reload it. */
+export async function listenConfigChangedExternally(onChange: () => void): Promise<UnlistenFn> {
+  return listenEvent<null>("config_changed_externally", () => onChange());
 }
 
 /** OS file-drop onto the window. Wraps the raw `tauri://drag-drop` event so the

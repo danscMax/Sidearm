@@ -141,17 +141,18 @@ describe("legendCellClass", () => {
 });
 
 describe("binding drag payload", () => {
-  it("round-trips an actionId", () => {
-    expect(parseBindingDragData(buildBindingDragData("act-42"))).toBe("act-42");
+  const slot = { profileId: "p1", layer: "hypershift2" as const, controlId: "thumb_03" };
+  it("round-trips a slot", () => {
+    expect(parseBindingDragData(buildBindingDragData(slot))).toEqual(slot);
   });
   it("rejects a non-binding payload", () => {
-    expect(parseBindingDragData(JSON.stringify({ type: "other", actionId: "x" }))).toBeNull();
+    expect(parseBindingDragData(JSON.stringify({ ...slot, type: "other" }))).toBeNull();
   });
   it("rejects malformed JSON / empty input", () => {
     expect(parseBindingDragData("{not json")).toBeNull();
     expect(parseBindingDragData("")).toBeNull();
   });
-  it("rejects a binding payload without a string actionId", () => {
-    expect(parseBindingDragData(JSON.stringify({ type: "binding" }))).toBeNull();
+  it("rejects a binding payload without its slot", () => {
+    expect(parseBindingDragData(JSON.stringify({ type: "binding", actionId: "a" }))).toBeNull();
   });
 });

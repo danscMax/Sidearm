@@ -2,7 +2,7 @@ use jsonschema::Validator;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashSet,
     fs,
     hash::{Hash, Hasher},
     io::Write,
@@ -1599,21 +1599,8 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
         config.actions.iter().map(|action| (&action.id, "actions")),
         &mut errors,
     );
-    let actions_by_id: HashMap<&str, &Action> = config
-        .actions
-        .iter()
-        .map(|action| (action.id.as_str(), action))
-        .collect();
-
     for action in &config.actions {
-        validate_action(
-            action,
-            config,
-            &snippet_ids,
-            &action_ids,
-            &actions_by_id,
-            &mut errors,
-        );
+        validate_action(action, config, &snippet_ids, &action_ids, &mut errors);
     }
 
     let mut binding_keys = HashSet::new();
@@ -1790,12 +1777,11 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
     }
 }
 
-fn validate_action<'a>(
-    action: &'a Action,
+fn validate_action(
+    action: &Action,
     config: &AppConfig,
     snippet_ids: &HashSet<String>,
     action_ids: &HashSet<String>,
-    actions_by_id: &HashMap<&'a str, &'a Action>,
     errors: &mut Vec<String>,
 ) {
     match (&action.action_type, &action.payload) {
@@ -1861,13 +1847,7 @@ fn validate_action<'a>(
                     action.id
                 ));
             }
-            validate_menu_items(
-                &action.id,
-                &payload.items,
-                action_ids,
-                actions_by_id,
-                errors,
-            );
+            validate_menu_items(&action.id, &payload.items, action_ids, errors);
         }
         // MouseAction and MediaKey use typed enums — serde validates values at deserialization.
         (ActionType::MouseAction, ActionPayload::MouseAction(_)) => {}
@@ -1903,11 +1883,10 @@ fn validate_action<'a>(
     }
 }
 
-fn validate_menu_items<'a>(
+fn validate_menu_items(
     action_id: &str,
-    items: &'a [MenuItem],
+    items: &[MenuItem],
     action_ids: &HashSet<String>,
-    actions_by_id: &HashMap<&'a str, &'a Action>,
     errors: &mut Vec<String>,
 ) {
     let mut menu_item_ids = HashSet::new();
@@ -1928,6 +1907,12 @@ fn validate_menu_items<'a>(
                         "menu action `{action_id}` references missing action `{referenced_id}`."
                     ));
                 }
+                // An item that is another menu opens it in place of this one
+                // (it is not expanded inside), so menus may link to each other;
+                // only a link to the same menu is pointless.
+                if referenced_id == action_id {
+                    errors.push(format!("menu action `{action_id}` has an item that opens itself."));
+                }
             }
             MenuItem::Submenu { id, items, .. } => {
                 if !menu_item_ids.insert(id.clone()) {
@@ -1935,75 +1920,9 @@ fn validate_menu_items<'a>(
                         "menu action `{action_id}` contains duplicate menu item id `{id}`."
                     ));
                 }
-                validate_menu_items(action_id, items, action_ids, actions_by_id, errors);
+                validate_menu_items(action_id, items, action_ids, errors);
             }
         }
-    }
-
-    let mut visited = HashSet::new();
-    let mut stack = HashSet::new();
-    if has_menu_cycle(
-        action_id,
-        action_id,
-        actions_by_id,
-        &mut visited,
-        &mut stack,
-    ) {
-        errors.push(format!(
-            "menu action `{action_id}` contains a cyclic action reference."
-        ));
-    }
-}
-
-fn has_menu_cycle<'a>(
-    root_action_id: &str,
-    current_action_id: &'a str,
-    actions_by_id: &HashMap<&'a str, &'a Action>,
-    visited: &mut HashSet<&'a str>,
-    stack: &mut HashSet<&'a str>,
-) -> bool {
-    if !visited.insert(current_action_id) {
-        return stack.contains(current_action_id);
-    }
-
-    stack.insert(current_action_id);
-
-    let has_cycle = actions_by_id
-        .get(current_action_id)
-        .and_then(|action| match &action.payload {
-            ActionPayload::Menu(payload) => Some(payload),
-            _ => None,
-        })
-        .map(|payload| {
-            payload.items.iter().any(|item| {
-                menu_item_has_cycle(root_action_id, item, actions_by_id, visited, stack)
-            })
-        })
-        .unwrap_or(false);
-
-    stack.remove(current_action_id);
-    has_cycle
-}
-
-fn menu_item_has_cycle<'a>(
-    root_action_id: &str,
-    item: &'a MenuItem,
-    actions_by_id: &HashMap<&'a str, &'a Action>,
-    visited: &mut HashSet<&'a str>,
-    stack: &mut HashSet<&'a str>,
-) -> bool {
-    match item {
-        MenuItem::Action { action_id, .. } => {
-            if action_id == root_action_id {
-                return true;
-            }
-            actions_by_id.get(action_id.as_str()).is_some_and(|_| {
-                has_menu_cycle(root_action_id, action_id, actions_by_id, visited, stack)
-            })
-        }
-        MenuItem::Submenu { items, .. } => items.iter().any(|nested_item| {
-            menu_item_has_cycle(root_action_id, nested_item, actions_by_id, visited, stack)
-        }),
     }
 }
 
@@ -5246,9 +5165,7 @@ mod edge_proptests {
 
     // ─── Validation: menu cycles ─────────────────────────────────────────────
 
-    /// A menu action that directly references itself (via action_id == own id)
-    /// must be detected as a cycle.
-    /// NOTE: this is a SUSPECTED BUG test — see findings.
+    /// A menu whose item opens the same menu is rejected.
     #[test]
     fn validation_detects_menu_self_reference_cycle() {
         let mut cfg = minimal_valid_config();
@@ -5276,9 +5193,10 @@ mod edge_proptests {
         );
     }
 
-    /// Two menu actions that reference each other form an indirect cycle.
+    /// Two menus may link to each other: picking the link closes one menu and
+    /// opens the other, nothing is expanded inside.
     #[test]
-    fn validation_detects_menu_indirect_cycle() {
+    fn validation_accepts_menus_linking_each_other() {
         let mut cfg = minimal_valid_config();
         cfg.actions = vec![
             Action {
@@ -5312,9 +5230,7 @@ mod edge_proptests {
                 conditions: vec![],
             },
         ];
-        // Cycle should be detected for at least one of the two menus.
-        let result = validate_config(&cfg);
-        assert!(result.is_err(), "mutual menu cycle must be detected");
+        assert!(validate_config(&cfg).is_ok(), "menus linking each other are valid");
     }
 
     // ─── Validation: AppMapping title_includes edge cases ────────────────────

@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switching a phrase's Enter off removes the ⏎ from its name (and on adds it).
 
 ### Changed
+- A menu item may open another menu, also one that links back (two menus with
+  a link to each other); only a link to the same menu is refused.
 - The HyperShift button and the old device name are no longer in Settings: the
   button is set on the button itself, the name comes from the mouse.
 - The layer switch is above the mouse picture, the view switch right under it.

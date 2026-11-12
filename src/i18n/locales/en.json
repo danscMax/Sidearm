@@ -1076,7 +1076,8 @@
     "autoText": "Text",
     "autoMacro": "Macro",
     "autoProfile": "Profile: {{name}}",
-    "autoProfileFallback": "Profile"
+    "autoProfileFallback": "Profile",
+    "menuShared": "This menu is also on other buttons ({{count}}): editing it changes it there too. Choosing another kind of action changes this button only."
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1712,7 +1713,7 @@
   "transfer": {
     "open": "Copy from another mouse",
     "title": "Copy assignments between mice",
-    "lead": "Each assignment moves to the button in the same place on the other mouse. Every copy gets its own action, so editing one mouse later does not change the other.",
+    "lead": "Each assignment goes to the button in the same place on the other mouse. Each copy gets its own action, so editing one mouse leaves the other alone. HyperShift 2 assignments are left out for a mouse without that layer.",
     "from": "From",
     "to": "To",
     "scope": "Profiles",
@@ -1729,7 +1730,12 @@
     "reasonNoMatch": "the other mouse has no such button",
     "apply": "Copy ({{count}})",
     "done": "Assignments copied: {{count}}",
-    "importDropped": "Not imported, no matching button on this mouse: {{count}}"
+    "importDropped": "Not imported, no matching button on this mouse: {{count}}",
+    "shareMenus": "One menu for both mice",
+    "shareMenusHelp": "Menus are not copied: both mice open the same menu, and editing it on one changes it on the other. Off: each mouse gets its own copy.",
+    "reasonNoLayer": "the other mouse has no HyperShift 2 layer",
+    "syncMice": "Keep the mice alike",
+    "syncMiceHelp": "From now on, an assignment changed on one mouse changes the same button on the other (HyperShift 2 only where the mouse has it). Copy once first so they start alike. For your own mice; off by default."
   },
   "menuTemplates": {
     "agent": "Phrases for an AI agent",

@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 7;
+const SCHEMA_VERSION: i32 = 8;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -280,6 +280,10 @@ pub struct Settings {
     /// Draw the mouse battery level as a badge on the tray icon.
     #[serde(default)]
     pub show_battery_in_tray: bool,
+    /// An assignment edit on one built-in mouse is repeated on the others
+    /// (done by the UI when it saves; the runtime never reads it).
+    #[serde(default)]
+    pub sync_mice: bool,
     /// Profile written into the mouse on exit for use without Sidearm;
     /// `None` = the fallback profile, [`OFFLINE_PROFILE_ACTIVE`] = the profile
     /// in effect at that moment (whichever window happened to be focused).
@@ -1032,7 +1036,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=6) {
+    if matches!(config.version, 2..=7) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -2081,6 +2085,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             hypershift_trigger: default_hypershift_trigger(),
             hypershift_tap: false,
             show_battery_in_tray: false,
+            sync_mice: false,
             offline_profile_id: None,
         },
         profiles: seed_profiles(),
@@ -3913,7 +3918,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (7, 0xc323_3040_ca0a_77af);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (8, 0x0745_bc33_22ea_fe8e);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

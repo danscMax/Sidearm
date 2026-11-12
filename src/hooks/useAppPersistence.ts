@@ -11,6 +11,7 @@ import type {
   ValidationWarning,
 } from "../lib/config";
 import type { ViewState } from "../lib/constants";
+import { mirrorMouseEdit } from "../lib/device-transfer";
 
 const MAX_UNDO = 15;
 const AUTO_SAVE_DELAY_MS = 500;
@@ -285,7 +286,9 @@ export function useAppPersistence(
   ) {
     const current = workingConfig;
     if (!current) return;
-    const next = updateConfig(current);
+    // "Keep the mice alike": the edit is repeated on the other mouse here, so
+    // every editor gets it and undo takes back both.
+    const next = mirrorMouseEdit(current, updateConfig(current));
     // Coalesce a run of same-key edits into one undo step: only the first edit
     // of the run snapshots the pre-edit state; the rest reuse it.
     const coalesceKey = options?.coalesceKey ?? null;

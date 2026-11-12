@@ -6,7 +6,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 
 ## Ownership
 
-- `useAppPersistence.ts` — load/save/undo/redo, 500ms autosave, rollback on save failure, concurrent-instance reload, one-time backup-failure warning. After a save it writes the key-button signals into the mouse only when they changed since the last save of the session (the first save just records them; the backend guard keeps the mouse in line and retries) — rewriting every save failed whenever the mouse slept.
+- `useAppPersistence.ts` — load/save/undo/redo, 500ms autosave, rollback on save failure, concurrent-instance reload, one-time backup-failure warning. `updateDraft` passes every edit through `mirrorMouseEdit` (`settings.syncMice`), so the other mouse's copy is part of the same undo step. After a save it writes the key-button signals into the mouse only when they changed since the last save of the session (the first save just records them; the backend guard keeps the mouse in line and retries) — rewriting every save failed whenever the mouse slept.
 - `useRuntime.ts` — runtime status + push-based log/event stream (incremental; avoid full refetch).
 - `useListKeyboard.ts` — canonical Arrow/Home/End/Enter list navigation (palette, dropdown, context menu).
 - `useModalDismiss.ts` / `useDismissable.ts` — Escape + focus-trap + outside-click for modals/popovers.

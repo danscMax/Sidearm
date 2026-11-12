@@ -9,6 +9,7 @@ vi.mock("../lib/backend", () => ({
   getNativeModel: vi.fn().mockResolvedValue({ consumerSignals: false }),
   listNativeMice: vi.fn().mockResolvedValue([]),
   liveTestAction: vi.fn(), listenEncodedKeyEvent: vi.fn(), normalizeCommandError: vi.fn(),
+  getMenuUsage: vi.fn().mockResolvedValue({}),
 }));
 afterEach(cleanup);
 
@@ -121,6 +122,30 @@ describe("button role editor", () => {
     expect(result.bindings).toHaveLength(1);
     expect(result.bindings[0]!.actionId).toBe(result.actions[0]!.id);
     expect(result.bindings[0]!.enabled).toBe(true);
+  });
+
+  it("edits an action another button shares for this button alone, but keeps a shared menu shared", () => {
+    const config = makeConfig();
+    config.actions = [
+      { id: "back", type: "mouseAction", displayName: "Back", payload: { action: "mouseBack" } },
+      { id: "menu", type: "menu", displayName: "Menu", payload: { items: [{ kind: "action", id: "i1", label: "Back", actionId: "back", enabled: true }] } },
+    ];
+    const bind = (id: string, controlId: string, actionId: string) =>
+      ({ id, profileId: "p1", controlId, layer: "standard" as const, actionId, enabled: true, label: id });
+    config.bindings = [bind("b1", "mouse_4", "back"), bind("b2", "mouse_5", "back"), bind("m1", "thumb_01", "menu"), bind("m2", "thumb_02", "menu")];
+
+    const first = show("mouse_4", config, "b1");
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    save();
+    const forked = first.onSave.mock.calls[0]![0];
+    expect(forked.actions.find((a) => a.id === "back")).toEqual(config.actions[0]);
+    expect(forked.bindings.find((b) => b.id === "b1")!.actionId).not.toBe("back");
+    cleanup();
+
+    const second = show("thumb_01", config, "m1");
+    expect(screen.getByText(/стоит и на других кнопках \(1\)/)).toBeTruthy();
+    save();
+    expect(second.onSave.mock.calls[0]![0].bindings.find((b) => b.id === "m1")!.actionId).toBe("menu");
   });
 
   it("does not offer unsupported encoded buttons as modifier triggers", () => {

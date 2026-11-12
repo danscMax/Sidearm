@@ -5,7 +5,7 @@ import { applyDeviceTransfer, planDeviceTransfer, type TransferConflict } from "
 import { deviceLayout } from "../lib/devices";
 import { displayNameForControlId, labelForLayer } from "../lib/labels";
 import { PillTrack } from "./PillTrack";
-import { ModalFooter, ModalHeader, ModalShell, SelectField, SettingRow } from "./shared";
+import { ModalFooter, ModalHeader, ModalShell, SelectField, SettingRow, Toggle } from "./shared";
 
 interface DeviceTransferModalProps {
   config: AppConfig;
@@ -15,12 +15,14 @@ interface DeviceTransferModalProps {
   /** Start with every profile selected (a new mouse takes them all). */
   allProfiles?: boolean;
   onApply: (next: AppConfig, copied: number) => void;
+  /** Turns "keep the mice alike" on or off at once (`settings.syncMice`). */
+  onSyncChange: (on: boolean) => void;
   onClose: () => void;
 }
 
 /** Copies assignments from one built-in mouse to another, with a preview of
  *  what is copied and what is left out. */
-export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, allProfiles, onApply, onClose }: DeviceTransferModalProps) {
+export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, allProfiles, onApply, onSyncChange, onClose }: DeviceTransferModalProps) {
   const { t } = useTranslation();
   const ref = useRef<HTMLDivElement>(null);
   const mice = config.devices.filter((device) => device.builtin && deviceLayout(device.id));
@@ -28,11 +30,12 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
   const [from, setFrom] = useState(mice.find((device) => device.id !== to)?.id ?? "");
   const [scope, setScope] = useState<"profile" | "all">(activeProfileId && !allProfiles ? "profile" : "all");
   const [conflict, setConflict] = useState<TransferConflict>("keep");
+  const [shareMenus, setShareMenus] = useState(false);
 
   const profileIds = scope === "all" || !activeProfileId ? config.profiles.map((profile) => profile.id) : [activeProfileId];
   const plan = from && to && from !== to ? planDeviceTransfer(config, from, to, profileIds, conflict) : [];
   const copied = plan.filter((item) => item.outcome === "copy" || item.outcome === "replace");
-  const skipped = plan.filter((item) => item.outcome === "noMatch" || item.outcome === "occupied");
+  const skipped = plan.filter((item) => item.outcome === "noMatch" || item.outcome === "noLayer" || item.outcome === "occupied");
   const options = mice.map((device) => ({ value: device.id, label: device.name }));
   const profileName = (id: string) => config.profiles.find((profile) => profile.id === id)?.name ?? id;
 
@@ -69,6 +72,12 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
             onSelect={setConflict}
           />
         </SettingRow>
+        <SettingRow title={t("transfer.shareMenus")} hint={t("transfer.shareMenusHelp")}>
+          <Toggle checked={shareMenus} onChange={setShareMenus} ariaLabel={t("transfer.shareMenus")} />
+        </SettingRow>
+        <SettingRow title={t("transfer.syncMice")} hint={t("transfer.syncMiceHelp")}>
+          <Toggle checked={config.settings.syncMice ?? false} onChange={onSyncChange} ariaLabel={t("transfer.syncMice")} />
+        </SettingRow>
         <p role="status" className="transfer-modal__summary">
           {plan.length === 0 ? t("transfer.nothing") : t("transfer.summary", { copied: copied.length, skipped: skipped.length })}
         </p>
@@ -80,7 +89,7 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
                 <li key={binding.id}>
                   {binding.label || displayNameForControlId(binding.controlId)} · {displayNameForControlId(binding.controlId)} · {labelForLayer(binding.layer)}
                   {scope === "all" ? ` · ${profileName(binding.profileId)}` : ""}
-                  <span className="panel__muted"> — {t(outcome === "occupied" ? "transfer.reasonOccupied" : "transfer.reasonNoMatch")}</span>
+                  <span className="panel__muted"> — {t(outcome === "occupied" ? "transfer.reasonOccupied" : outcome === "noLayer" ? "transfer.reasonNoLayer" : "transfer.reasonNoMatch")}</span>
                 </li>
               ))}
             </ul>
@@ -90,7 +99,7 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
       <ModalFooter>
         <button type="button" className="action-button action-button--secondary" onClick={onClose}>{t("common.cancel")}</button>
         <button type="button" className="action-button" disabled={copied.length === 0}
-          onClick={() => onApply(applyDeviceTransfer(config, from, to, plan), copied.length)}>
+          onClick={() => onApply(applyDeviceTransfer(config, from, to, plan, { shareMenus }), copied.length)}>
           {t("transfer.apply", { count: copied.length })}
         </button>
       </ModalFooter>

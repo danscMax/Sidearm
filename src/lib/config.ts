@@ -80,6 +80,8 @@ export interface Settings {
   hypershiftTap?: boolean;
   /** Draw the mouse battery level as a badge on the tray icon. */
   showBatteryInTray?: boolean;
+  /** Repeat an assignment edit of one built-in mouse on the others (owner's two mice). */
+  syncMice?: boolean;
   /** Profile written into the mouse on exit; absent = the fallback profile,
    *  `OFFLINE_PROFILE_ACTIVE` = the one in effect then. */
   offlineProfileId?: string;

@@ -1268,6 +1268,10 @@ export function ProfilesWorkspace({
           activeProfileId={activeProfile?.id ?? null}
           allProfiles={transferAll}
           onClose={() => { setShowTransfer(false); setTransferAll(false); }}
+          onSyncChange={(on) => updateDraft((config) => {
+            const { syncMice: _old, ...settings } = config.settings;
+            return { ...config, settings: on ? { ...settings, syncMice: true } : settings };
+          })}
           onApply={(next, copied) => {
             updateDraft(() => next);
             setShowTransfer(false);

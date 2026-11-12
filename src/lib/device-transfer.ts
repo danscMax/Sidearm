@@ -1,14 +1,18 @@
-import type { Action, AppConfig, Binding, ControlId, Layer } from "./config";
-import { gestureOf, makeRandomId } from "./config-editing";
+import type { Action, AppConfig, Binding, ControlId, Layer, MenuItem } from "./config";
+import { computeReferencedActionIds, gestureOf, makeRandomId, rescueDroppedSnippets } from "./config-editing";
 import { deviceControlId, deviceLayout, layoutControlId } from "./devices";
+import { cloneMenuItem } from "./menu-arrange";
+import { NO_MENU_EDITS } from "./menu-phrase";
 
 /**
  * Copying assignments from one built-in mouse to another: a binding moves to
  * the control in the same place on the other mouse (the shared layout id,
  * `thumb_01` ↔ `v3_thumb_01`). The V2 config calls its wheel tilt
  * `mouse_4`/`mouse_5` (its factory function), the V3 `wheel_left`/`wheel_right`,
- * so those two pairs translate too. Each copy gets its own action,
- * so editing one mouse never changes the other.
+ * so those two pairs translate too. Each copy gets its own action (a menu
+ * also its own phrases), so editing one mouse never changes the other, unless
+ * `shareMenus` keeps one menu for both mice. A HyperShift 2 or HS + HS2
+ * binding is left out for a mouse without a HyperShift 2 button.
  */
 const EQUIVALENT: Readonly<Record<ControlId, ControlId>> = {
   mouse_4: "wheel_left",
@@ -24,7 +28,7 @@ export interface TransferItem {
   binding: Binding;
   /** Target control, when there is one. */
   target: ControlId | null;
-  outcome: "copy" | "replace" | "noMatch" | "occupied";
+  outcome: "copy" | "replace" | "noMatch" | "noLayer" | "occupied";
 }
 
 /** A control of `deviceId` an action can be put on (not a reserved placeholder). */
@@ -67,6 +71,9 @@ export function planDeviceTransfer(
       const target = translate(config, fromDevice, toDevice, binding.controlId);
       const partnerOk = !binding.chordPartner || translate(config, fromDevice, toDevice, binding.chordPartner) !== null;
       if (!target || !partnerOk) return { binding, target, outcome: "noMatch" as const };
+      if ((binding.layer === "hypershift2" || binding.layer === "hypershiftBoth") && !deviceLayout(toDevice)?.hypershift2Triggers?.length) {
+        return { binding, target, outcome: "noLayer" as const };
+      }
       if (occupant(config, binding.profileId, binding.layer, target, binding)) {
         return { binding, target, outcome: conflict === "replace" ? "replace" as const : "occupied" as const };
       }
@@ -75,7 +82,13 @@ export function planDeviceTransfer(
 }
 
 /** Applies a plan from {@link planDeviceTransfer}. */
-export function applyDeviceTransfer(config: AppConfig, fromDevice: string, toDevice: string, plan: readonly TransferItem[]): AppConfig {
+export function applyDeviceTransfer(
+  config: AppConfig,
+  fromDevice: string,
+  toDevice: string,
+  plan: readonly TransferItem[],
+  { shareMenus = false }: { shareMenus?: boolean } = {},
+): AppConfig {
   const moving = plan.filter((item) => item.target && (item.outcome === "copy" || item.outcome === "replace"));
   const replaced = new Set(
     moving
@@ -83,11 +96,23 @@ export function applyDeviceTransfer(config: AppConfig, fromDevice: string, toDev
       .map((item) => occupant(config, item.binding.profileId, item.binding.layer, item.target!, item.binding)?.id),
   );
   const clonedActions = new Map<string, Action>();
+  const menuPhrases: Action[] = [];
   const copies: Binding[] = moving.map(({ binding, target }) => {
     let action = clonedActions.get(binding.actionId);
     const source = config.actions.find((entry) => entry.id === binding.actionId);
-    if (!action && source) {
+    if (!action && source && !(shareMenus && source.type === "menu")) {
       action = { ...structuredClone(source), id: makeRandomId("action") };
+      if (action.type === "menu") {
+        // The menu's phrases are copied too, or editing one would change both.
+        let edits = NO_MENU_EDITS;
+        const items = action.payload.items.map((item) => {
+          const copy = cloneMenuItem(config, edits, item, []);
+          edits = copy.edits;
+          return copy.item;
+        });
+        action = { ...action, payload: { ...action.payload, items } };
+        menuPhrases.push(...Object.values(edits.actions));
+      }
       clonedActions.set(binding.actionId, action);
     }
     return {
@@ -108,6 +133,7 @@ export function applyDeviceTransfer(config: AppConfig, fromDevice: string, toDev
       ...config.actions.filter((action) => used.has(action.id)
         || !config.bindings.some((binding) => binding.actionId === action.id)),
       ...clonedActions.values(),
+      ...menuPhrases,
     ],
   };
 }
@@ -146,4 +172,97 @@ export function retargetImportedBindings(
     return [{ ...binding, controlId, chordPartner: chordPartner ?? undefined }];
   });
   return { config: { ...config, bindings }, dropped };
+}
+
+/* ── Keeping the mice alike (`Settings.syncMice`) ── */
+
+/** Whether a layer exists on a mouse: HyperShift 2 and HS + HS2 need a HyperShift 2 button. */
+function hasLayer(deviceId: string, layer: Layer): boolean {
+  return (layer !== "hypershift2" && layer !== "hypershiftBoth") || Boolean(deviceLayout(deviceId)?.hypershift2Triggers?.length);
+}
+
+/** The binding with its action and, for a menu, its items' actions: what the
+ *  button does. Two bindings with the same signature do the same thing. */
+function signature(binding: Binding, actions: ReadonlyMap<string, Action>): string {
+  const { id: _id, controlId: _control, chordPartner: _partner, actionId, ...rest } = binding;
+  const seen = new Set<string>();
+  const content = (id: string): unknown => {
+    const action = actions.get(id);
+    if (!action || seen.has(id)) return id;
+    seen.add(id);
+    const { id: _own, ...body } = action;
+    if (action.type !== "menu") return body;
+    const items = (list: MenuItem[]): unknown[] => list.map((item) =>
+      item.kind === "submenu" ? { ...item, items: items(item.items) } : { ...item, action: content(item.actionId) });
+    return { ...body, payload: { ...action.payload, items: items(action.payload.items) } };
+  };
+  return JSON.stringify([rest, content(actionId)]);
+}
+
+/** Bindings of one mouse by place: profile, layer, press pattern and the
+ *  layout id shared by both mice. */
+function slotsOf(config: AppConfig, deviceId: string, actions: ReadonlyMap<string, Action>): Map<string, { binding: Binding; sig: string }> {
+  const onMouse = new Set(config.physicalControls.filter((control) => control.deviceId === deviceId).map((control) => control.id));
+  const slots = new Map<string, { binding: Binding; sig: string }>();
+  for (const binding of config.bindings) {
+    if (!onMouse.has(binding.controlId)) continue;
+    const place = layoutControlId(binding.controlId);
+    const key = [binding.profileId, binding.layer, gestureOf(binding.triggerMode), EQUIVALENT[place] && place.startsWith("mouse_") ? EQUIVALENT[place] : place].join("|");
+    slots.set(key, { binding, sig: signature(binding, actions) });
+  }
+  return slots;
+}
+
+/**
+ * With `settings.syncMice` on, repeats an edit of one built-in mouse's
+ * assignments on the same place of the others: the other mouse's button gets
+ * the same action (shared, so a later edit in place reaches both), or loses
+ * its binding when it was removed. A place edited on both mice at once (a
+ * shared menu) is left as it is; a layer the other mouse lacks is skipped.
+ * Actions only the replaced bindings used are dropped (their texts kept).
+ */
+export function mirrorMouseEdit(previous: AppConfig, next: AppConfig): AppConfig {
+  if (!next.settings.syncMice) return next;
+  const mice = next.devices.filter((device) => device.builtin && deviceLayout(device.id)).map((device) => device.id);
+  if (mice.length < 2) return next;
+  const before = new Map(previous.actions.map((action) => [action.id, action]));
+  const after = new Map(next.actions.map((action) => [action.id, action]));
+  const old = new Map(mice.map((id) => [id, slotsOf(previous, id, before)]));
+  const now = new Map(mice.map((id) => [id, slotsOf(next, id, after)]));
+  const changed = new Map(mice.map((id) => {
+    const keys = new Set([...old.get(id)!.keys(), ...now.get(id)!.keys()]);
+    return [id, new Set([...keys].filter((key) => old.get(id)!.get(key)?.sig !== now.get(id)!.get(key)?.sig))];
+  }));
+
+  const removed = new Set<string>();
+  const added: Binding[] = [];
+  for (const from of mice) {
+    for (const key of changed.get(from)!) {
+      const source = now.get(from)!.get(key)?.binding;
+      const sourceControl = source?.controlId ?? old.get(from)!.get(key)!.binding.controlId;
+      for (const to of mice) {
+        if (to === from || changed.get(to)!.has(key)) continue;
+        const occupant = now.get(to)!.get(key)?.binding;
+        if (occupant) removed.add(occupant.id);
+        if (!source || !hasLayer(to, source.layer)) continue;
+        const target = translate(next, from, to, sourceControl);
+        const partner = source.chordPartner ? translate(next, from, to, source.chordPartner) : undefined;
+        if (!target || partner === null) continue;
+        added.push({ ...structuredClone(source), id: occupant?.id ?? makeRandomId("binding"), controlId: target, chordPartner: partner });
+      }
+    }
+  }
+  if (removed.size === 0 && added.length === 0) return next;
+
+  const bindings = [...next.bindings.filter((binding) => !removed.has(binding.id)), ...added];
+  const wasUsed = computeReferencedActionIds(next.actions, next.bindings);
+  const used = computeReferencedActionIds(next.actions, bindings);
+  const dropped = next.actions.filter((action) => wasUsed.has(action.id) && !used.has(action.id));
+  const kept = next.actions.filter((action) => !dropped.includes(action));
+  // A dropped text another action holds (or held before this edit: the other
+  // mouse's copy of the text just edited) is not "rescued" into the library.
+  const inline = (action: Action) => (action.type === "textSnippet" && action.payload.source === "inline" ? [action.payload.text] : []);
+  const texts = new Set([...kept, ...previous.actions.filter((action) => !dropped.some((gone) => gone.id === action.id))].flatMap(inline));
+  const orphanTexts = dropped.filter((action) => !(action.type === "textSnippet" && action.payload.source === "inline" && texts.has(action.payload.text)));
+  return { ...next, bindings, actions: kept, snippetLibrary: rescueDroppedSnippets(orphanTexts, next.snippetLibrary) };
 }

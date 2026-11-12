@@ -131,6 +131,10 @@ export function ActionPickerModal({
     ? config.actions.find((a) => a.id === binding.actionId) ?? null
     : null;
   const existingAction = isPlaceholderAction(savedAction) ? null : savedAction;
+  // Other buttons using this very action (one menu for both mice, say).
+  const sharedUses = existingAction && binding
+    ? config.bindings.filter((b) => b.actionId === existingAction.id && b.id !== binding.id).length
+    : 0;
 
   // Encoder signal state (user devices only — see isBuiltinControl)
   const builtinControl = controlId ? isBuiltinControl(config, controlId) : false;
@@ -321,6 +325,11 @@ export function ActionPickerModal({
     }
     if (!targetBinding) return null;
     const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
+    // An action other buttons use too is edited for this button alone, except a
+    // shared menu edited as a menu: keeping it one menu is why it is shared.
+    if (existingAction && sharedUses > 0 && !(existingAction.type === "menu" && nextAction.type === "menu")) {
+      nextAction.id = nextUniqueId(config.actions.map((a) => a.id), existingAction.id);
+    }
     // Reuse the new slot's action id so Save cannot leave an orphan placeholder.
     if (!existingAction) {
       nextAction.id = !binding && config.actions.some((a) => a.id === targetBinding.actionId)
@@ -590,6 +599,9 @@ export function ActionPickerModal({
 
             {effectiveCategory === "menu" ? (
               <div className="editor-grid">
+                {existingAction?.type === "menu" && sharedUses > 0 ? (
+                  <Notice variant="info">{t("picker.menuShared", { count: sharedUses })}</Notice>
+                ) : null}
                 <MenuItemsEditor
                   items={menuItemsDraft}
                   onChange={setMenuItemsDraft}

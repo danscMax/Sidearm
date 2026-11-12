@@ -1670,7 +1670,7 @@ export function collectMenuActionRefs(items: MenuItem[], refs: Set<string>): voi
 }
 
 /** Action ids reachable from `nextBindings`, directly or via nested menu refs. */
-function computeReferencedActionIds(actions: Action[], nextBindings: Binding[]): Set<string> {
+export function computeReferencedActionIds(actions: Action[], nextBindings: Binding[]): Set<string> {
   const referencedActionIds = new Set(nextBindings.map((b) => b.actionId));
   // Live iteration: collectMenuActionRefs may add ids that themselves point at
   // menu actions, and `for...of` over a Set visits entries added mid-iteration.
@@ -1686,7 +1686,7 @@ function computeReferencedActionIds(actions: Action[], nextBindings: Binding[]):
 /** Before discarding actions, preserve any inline text-snippet content in the
  *  snippet library so user-authored text is never silently lost when a binding
  *  is reassigned/removed or its profile deleted. Deduped by exact text. */
-function rescueDroppedSnippets(
+export function rescueDroppedSnippets(
   dropped: Action[],
   snippetLibrary: SnippetLibraryItem[],
 ): SnippetLibraryItem[] {

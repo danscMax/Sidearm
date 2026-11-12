@@ -25,8 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   library text is gone) and Enter next to closing the window on one button.
 - "Export without my texts": a profile for someone else, without your texts,
   macros with text and menus.
+- Copying between mice can keep one menu for both ("One menu for both mice",
+  off by default): editing it on one mouse changes it on the other.
+- "Keep the mice alike" (in the same window, off by default): from then on an
+  assignment changed on one mouse changes the same button on the other.
+  HyperShift 2 is repeated only on a mouse that has it. Config schema version 8.
 
 ### Fixed
+- Copying between mice gave the copied menu the same phrases as the original,
+  so editing a phrase changed both mice; the copy now has its own. HyperShift 2
+  assignments are no longer copied to a mouse without that layer.
+- Editing an action that another button also uses (one menu for two mice, an
+  older copy) changed both buttons; it now changes only the button edited,
+  except a shared menu edited as a menu, which says so.
 - A shortcut sent from the mouse, like Alt+V, typed only the letter ("v" or "м")
   in Windows Terminal and Claude Code: its modifier was released in the same
   instant as the key. It is now held 30 ms longer.

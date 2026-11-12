@@ -103,7 +103,13 @@
     tip.classList.toggle("tip--list", !!(item.children && item.children.length));
     if (item.children && item.children.length) {
       // A submenu: what it holds, one name per line.
-      item.children.forEach(function (name) { tip.appendChild(el("div", "tip__item", name)); });
+      // Each name is a button: it takes that item without opening the submenu first.
+      item.children.forEach(function (name, child) {
+        var entry = el("button", "tip__item", name);
+        entry.type = "button";
+        entry.addEventListener("click", function () { invoke("menu_pick_child", { index: index, child: child }); });
+        tip.appendChild(entry);
+      });
     } else {
       tip.textContent = item.detail || item.label;
     }

@@ -29,7 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   off by default): editing it on one mouse changes it on the other.
 - Popup menu: pin an item (★ in the menu editor) and it comes first, in a ★
   block; a search also finds phrases of the other menus, under the menu's name;
-  after a moment on a phrase its whole text shows, PageUp / PageDown scroll it.
+  after a moment on a phrase its whole text shows, PageUp / PageDown scroll it;
+  the names a submenu's tip lists can be clicked directly, without opening it.
 - `{selection}` in a phrase puts in the text selected in the window in front
   (the clipboard is put back); `{|}` is a short `{cursor}`. Tokens now work in
   macro text steps and in "copy only" too.

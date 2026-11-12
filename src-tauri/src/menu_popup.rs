@@ -293,6 +293,24 @@ impl Model {
         }
     }
 
+    /// A click on a name in a submenu's tip: open it and take that item, as
+    /// if the submenu had been opened first (the tip lists its level's rows).
+    pub(crate) fn pick_child(&mut self, index: usize, child: usize) -> Step {
+        let is_submenu = matches!(self.walk().0.get(index).map(|entry| entry.item), Some(MenuItem::Submenu { enabled: true, .. }));
+        if !is_submenu {
+            return Step::Stay;
+        }
+        self.path.push(index);
+        match self.take(child) {
+            Step::Stay if self.walk().0.get(child).is_some_and(|entry| !matches!(entry.item, MenuItem::Submenu { .. })) => {
+                // A disabled row: stay on the level it belongs to.
+                self.highlight = child;
+                Step::Stay
+            }
+            step => step,
+        }
+    }
+
     pub(crate) fn apply(&mut self, input: Input) -> Step {
         match input {
             Input::Pick(index) => self.take(index),
@@ -359,8 +377,11 @@ impl Model {
                         MenuItem::Action { action_id, .. } => self.details.get(action_id).cloned(),
                         MenuItem::Submenu { .. } => None,
                     },
+                    // The rows its level shows (pinned ones live in the ★ block).
                     children: match entry.item {
-                        MenuItem::Submenu { items, .. } => items.iter().map(|item| item_label(item).to_owned()).collect(),
+                        MenuItem::Submenu { items, .. } => {
+                            items.iter().filter(|item| !item_pinned(item)).map(|item| item_label(item).to_owned()).collect()
+                        }
                         MenuItem::Action { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
@@ -715,6 +736,10 @@ pub(crate) fn handle_press(app: &AppHandle, control_id: Option<&str>) {
 }
 
 /// The page under the mouse: a click picks, a hover highlights.
+pub(crate) fn pick_child_from_window(app: &AppHandle, index: usize, child: usize) {
+    drive(app, |model| model.pick_child(index, child));
+}
+
 pub(crate) fn pick_from_window(app: &AppHandle, index: usize, mode: PickMode) {
     drive_as(app, mode, |model| model.apply(Input::Pick(index)));
 }
@@ -1004,6 +1029,16 @@ mod tests {
 
     fn labels(view: &View) -> Vec<&str> {
         view.items.iter().map(|item| item.label.as_str()).collect()
+    }
+
+    #[test]
+    fn a_name_in_a_submenu_tip_is_taken_without_opening_the_submenu_first() {
+        let mut model = sample();
+        // "More" (row 4 of the top level) holds "Deep"; its tip lists it.
+        assert_eq!(model.view("Phrases", 1).items[4].children, ["Deep"]);
+        assert_eq!(model.pick_child(4, 0), Step::Run("act-x".into()));
+        // Not a submenu: nothing happens.
+        assert_eq!(sample().pick_child(0, 0), Step::Stay);
     }
 
     #[test]

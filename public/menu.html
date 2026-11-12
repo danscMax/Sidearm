@@ -161,12 +161,22 @@
   .tip--list { padding: 6px 4px; white-space: normal; }
   .tip--full { overflow-y: auto; transition: none; }
   .tip__item {
+    display: block;
+    width: 100%;
     padding: 2px 8px 2px 20px;
     position: relative;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    border: 0;
+    border-radius: 5px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
   }
+  .tip__item:hover { background: var(--accent-soft); }
   .tip__item::before {
     content: "›";
     position: absolute;

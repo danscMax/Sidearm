@@ -2123,6 +2123,12 @@ fn get_menu_usage() -> std::collections::BTreeMap<String, u64> {
     menu_usage::counts()
 }
 
+/// A click on a name in a submenu's tip: that item of the submenu at `index`.
+#[tauri::command]
+fn menu_pick_child(app: AppHandle, index: usize, child: usize) {
+    std::thread::spawn(move || menu_popup::pick_child_from_window(&app, index, child));
+}
+
 /// The whole text of a popup row: the tip shows it after a moment on the row.
 #[tauri::command]
 fn menu_full_text(index: usize) -> Option<String> {
@@ -4247,6 +4253,7 @@ pub fn run() {
             menu_pick,
             menu_hover,
             menu_full_text,
+            menu_pick_child,
             menu_wheel,
             menu_search,
             menu_confirm,

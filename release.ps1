@@ -30,7 +30,10 @@ param(
     [switch]$SkipBuild,
     [switch]$Publish,
     # Leave Sidearm.exe unsigned (no token at hand). A published release is always signed.
-    [switch]$NoSign
+    [switch]$NoSign,
+    # The publish confirmation, given up front (a run without a console: Read-Host
+    # cannot read piped input). Must equal -Version, like the typed answer.
+    [string]$ConfirmVersion
 )
 
 chcp 65001 | Out-Null
@@ -149,7 +152,7 @@ if (-not $Publish) {
 }
 
 # 7. Publish — an explicit confirmation, it is public and hard to undo.
-$answer = Read-Host "Publish $tag (tag, push $branch + tag, GitHub release)? Type the version to confirm"
+$answer = if ($ConfirmVersion) { $ConfirmVersion } else { Read-Host "Publish $tag (tag, push $branch + tag, GitHub release)? Type the version to confirm" }
 if ($answer -ne $Version) { Stop-Release "Not confirmed." }
 Push-Location $root
 try {

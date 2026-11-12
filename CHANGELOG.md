@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.3] — 2026-11-12
+
 ### Added
 - Menu actions now work from the mouse: the button opens a compact dark popup at
   the cursor. Type to search every phrase (submenus included); side button N picks
@@ -18,7 +20,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The menu editor is a master–detail view: the menu as the popup shows it on the
   left (blocks, button numbers), the selected item on the right — its name, the text
   it types and whether Enter follows, its block, order. New phrases are created right
-  there; no internal ids are shown.
+  there; no internal ids are shown. Items can also be keys (recorded in place) or
+  any other action, and ready templates start a menu: phrases for an AI agent, text
+  editing, windows and tabs, symbols, the phrase library. Save says what is missing.
+
+### Changed
+- `Sidearm.exe` is signed with the publisher's code signing certificate (GlobalSign).
+- Key fields start recording when you click into them; the "Record key" button is gone.
+- The "Assign action" dialog uses the room of the app window.
+
+### Fixed
+- On a high-DPI screen the main window could come back tiny (a size saved on another
+  monitor): the saved size is now checked in logical pixels and a too-small window
+  opens at its normal size.
 
 ## [0.12.2] — 2026-11-11
 

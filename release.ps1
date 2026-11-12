@@ -7,9 +7,13 @@
 #   2. CHANGELOG.md has a "## [x.y.z]" section -> the release notes
 #   3. The working tree is clean and the tag does not exist yet
 #   4. build_portable.ps1 (audit + build + assemble)
-#   5. plans\release\out\Sidearm-Portable-vX.Y.Z.zip from ..\portable without
+#   5. Authenticode-signs portable\Sidearm.exe with the GlobalSign code signing
+#      certificate on the Rutoken plugged into MiniPC (SweetWhisper's
+#      scripts\sign-windows.ps1, jsign over PKCS#11; over ssh: copy there, sign,
+#      copy back) and checks the signature is valid, timestamped and ours
+#   6. plans\release\out\Sidearm-Portable-vX.Y.Z.zip from ..\portable without
 #      data/ + SHA-256 (the folder is recreated, so only this release is there)
-#   6. -Publish only: asks to type the version, then tags, pushes the branch
+#   7. -Publish only: asks to type the version, then tags, pushes the branch
 #      and the tag, creates the GitHub release with the zip, deletes plans\release\out
 #
 # Usage:
@@ -24,7 +28,9 @@
 param(
     [Parameter(Mandatory)][ValidatePattern('^\d+\.\d+\.\d+$')][string]$Version,
     [switch]$SkipBuild,
-    [switch]$Publish
+    [switch]$Publish,
+    # Leave Sidearm.exe unsigned (no token at hand). A published release is always signed.
+    [switch]$NoSign
 )
 
 chcp 65001 | Out-Null
@@ -46,7 +52,7 @@ function Stop-Release([string]$Message) {
 }
 
 # 1. One version everywhere.
-Write-Step 1 5 "Version $Version in every manifest"
+Write-Step 1 6 "Version $Version in every manifest"
 # The lockfile's root package has an empty name: only a hashtable can hold it.
 $lock = Get-Content -LiteralPath "$root\package-lock.json" -Raw | ConvertFrom-Json -AsHashtable
 $found = [ordered]@{
@@ -65,14 +71,14 @@ if ($wrong) {
 Write-Ok "all six say $Version"
 
 # 2. Release notes from the CHANGELOG section.
-Write-Step 2 5 "CHANGELOG section [$Version]"
+Write-Step 2 6 "CHANGELOG section [$Version]"
 $changelog = Get-Content -LiteralPath "$root\CHANGELOG.md" -Raw
 $section = [regex]::Match($changelog, "(?ms)^## \[$([regex]::Escape($Version))\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)")
 if (-not $section.Success) { Stop-Release "CHANGELOG.md has no '## [$Version]' section (rename [Unreleased])." }
 $notes = $section.Groups[1].Value.Trim()
 
 # 3. Clean tree, new tag.
-Write-Step 3 5 "Git state"
+Write-Step 3 6 "Git state"
 Push-Location $root
 try {
     if (git status --porcelain --untracked-files=no) { Stop-Release "The working tree has uncommitted changes." }
@@ -83,13 +89,37 @@ Write-Ok "clean, branch $branch, $tag is new"
 
 # 4. Build.
 if (-not $SkipBuild) {
-    Write-Step 4 5 "Portable build"
+    Write-Step 4 6 "Portable build"
     & pwsh -NoProfile -File (Join-Path $root 'build_portable.ps1') -NoOpen
     if ($LASTEXITCODE -ne 0) { Stop-Release "build_portable.ps1 failed ($LASTEXITCODE)." }
 }
 
-# 5. Zip without the per-user data/ folder.
-Write-Step 5 5 "Zip"
+# 5. Code signing on MiniPC, where the token is.
+$exe = Join-Path $portable 'Sidearm.exe'
+$certFile = Join-Path (Split-Path (Split-Path $root -Parent) -Parent) 'SweetWhisper\app\src-tauri\codesign\sweetwhisper-codesign.cer'
+if ($NoSign -and $Publish) { Stop-Release "A published release is signed: drop -NoSign." }
+if (-not $NoSign) {
+    Write-Step 5 6 "Code signing (MiniPC token)"
+    if (-not (Test-Path -LiteralPath $exe)) { Stop-Release "No build in $portable." }
+    if (-not (Test-Path -LiteralPath $certFile)) { Stop-Release "Certificate file missing: $certFile" }
+    $thumbprint = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certFile).Thumbprint
+    $remoteExe = 'C:\Users\dansc\sidearm-sign\Sidearm.exe'
+    ssh -o BatchMode=yes minipc 'cmd /c if not exist C:\Users\dansc\sidearm-sign mkdir C:\Users\dansc\sidearm-sign' 2>$null
+    scp -o BatchMode=yes $exe 'minipc:C:/Users/dansc/sidearm-sign/Sidearm.exe' 2>$null
+    if ($LASTEXITCODE -ne 0) { Stop-Release "Could not copy Sidearm.exe to MiniPC." }
+    ssh -o BatchMode=yes minipc "powershell -NoProfile -ExecutionPolicy Bypass -File C:\Scripts\SweetWhisper\app\scripts\sign-windows.ps1 $remoteExe" 2>$null
+    if ($LASTEXITCODE -ne 0) { Stop-Release "Signing on MiniPC failed (token, PIN or jsign: run sign-windows.ps1 -Check there)." }
+    scp -o BatchMode=yes 'minipc:C:/Users/dansc/sidearm-sign/Sidearm.exe' $exe 2>$null
+    if ($LASTEXITCODE -ne 0) { Stop-Release "Could not copy the signed Sidearm.exe back." }
+    $sig = Get-AuthenticodeSignature -LiteralPath $exe
+    if ($sig.Status -ne 'Valid') { Stop-Release "Sidearm.exe signature is $($sig.Status)." }
+    if ($sig.SignerCertificate.Thumbprint -ne $thumbprint) { Stop-Release "Sidearm.exe is signed by $($sig.SignerCertificate.Subject), not our certificate." }
+    if (-not $sig.TimeStamperCertificate) { Stop-Release "Sidearm.exe signature has no timestamp." }
+    Write-Ok "signed: $($sig.SignerCertificate.Subject.Split(',')[0]), timestamped"
+}
+
+# 6. Zip without the per-user data/ folder.
+Write-Step 6 6 "Zip"
 if (-not (Test-Path -LiteralPath (Join-Path $portable 'Sidearm.exe'))) { Stop-Release "No build in $portable." }
 if (-not (Test-Path -LiteralPath (Join-Path $portable 'resources\MicrosoftEdgeWebview2Setup.exe'))) {
     Write-Warn "resources\MicrosoftEdgeWebview2Setup.exe is missing from the build (see build_portable.ps1)."
@@ -118,7 +148,7 @@ if (-not $Publish) {
     exit 0
 }
 
-# 6. Publish — an explicit confirmation, it is public and hard to undo.
+# 7. Publish — an explicit confirmation, it is public and hard to undo.
 $answer = Read-Host "Publish $tag (tag, push $branch + tag, GitHub release)? Type the version to confirm"
 if ($answer -ne $Version) { Stop-Release "Not confirmed." }
 Push-Location $root

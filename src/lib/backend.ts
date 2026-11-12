@@ -620,6 +620,17 @@ export async function listenConfigChangedExternally(onChange: () => void): Promi
   return listenEvent<null>("config_changed_externally", () => onChange());
 }
 
+/** Right click → Edit in the popup menu: open this item of this menu. */
+export interface MenuEditRequest {
+  menuActionId: string;
+  itemId: string;
+  profileId: string | null;
+}
+
+export async function listenMenuEditRequested(onRequest: (request: MenuEditRequest) => void): Promise<UnlistenFn> {
+  return listenEvent<MenuEditRequest>("menu_edit_requested", onRequest);
+}
+
 /** OS file-drop onto the window. Wraps the raw `tauri://drag-drop` event so the
  *  `@tauri-apps/api/event` import stays confined to this module (the single IPC
  *  home); callers receive just the dropped paths. */

@@ -9,6 +9,9 @@ import type { ControlInteractions } from "../../hooks/useControlInteractions";
 import { legendCellClass } from "../../lib/mouse-visual";
 import { HeatCount } from "./HeatCount";
 
+/** Marks of the other press patterns, the same as the trigger badges. */
+const GESTURE_MARK = { longPress: "⌛", doublePress: "2×", triplePress: "3×" } as const;
+
 interface LegendCellProps {
   entry: ControlSurfaceEntry;
   controlId: ControlId;
@@ -59,6 +62,11 @@ export function LegendCell({
     >
       <span className="btn-legend__badge">{badge}</span>
       <span className="btn-legend__label">{label}</span>
+      {entry.extras?.length ? (
+        <span className="btn-legend__extras" aria-hidden="true">
+          {entry.extras.map((extra) => <span key={extra.gesture} className="btn-legend__extra">{GESTURE_MARK[extra.gesture]}</span>)}
+        </span>
+      ) : null}
       <HeatCount
         controlId={controlId}
         executionCounts={executionCounts}

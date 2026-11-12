@@ -24,6 +24,8 @@ const MENU_DRAG_TYPE = "application/x-sidearm-menu-item";
 
 export interface MenuItemsEditorProps {
   items: MenuItem[];
+  /** The item selected on open (the popup's right click → Edit). */
+  initialSelectedId?: string;
   onChange: (items: MenuItem[]) => void;
   config: AppConfig;
   /** Phrase texts and new actions edited here, written on Save. */
@@ -101,9 +103,9 @@ function ActionList({ actions, value, onChange, disabled }: { actions: Action[];
  * right the selected item — a phrase (its text, Enter), keys (recorded here),
  * or another action; its block and order.
  */
-export function MenuItemsEditor({ items, onChange, config, edits, onEditsChange, menuActionId, disabled }: MenuItemsEditorProps) {
+export function MenuItemsEditor({ items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled }: MenuItemsEditorProps) {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState<string | null>(items[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? items[0]?.id ?? null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -392,7 +394,9 @@ export function MenuItemsEditor({ items, onChange, config, edits, onEditsChange,
             const after = removeMenuItem(items, item.id);
             setRemoved({ before: items, after, label: item.label });
             onChange(after);
-            setSelectedId(null);
+            // Stay where you were: the next item, else the one before, else its list.
+            const near = siblings[index + 1] ?? siblings[index - 1];
+            setSelectedId(near?.id ?? parentId);
           }}>✕ {t("common.delete")}</button>
       </div>
     );

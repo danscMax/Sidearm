@@ -82,6 +82,7 @@ export function ActionPickerModal({
   onApply,
   onSave,
   onCancel,
+  focusMenuItemId,
 }: {
   config: AppConfig;
   bindingId: string | null;
@@ -92,6 +93,8 @@ export function ActionPickerModal({
   selectedLayer?: Layer;
   /** Which press pattern of the control this edits (its own binding). */
   gesture?: Gesture;
+  /** A menu item to select in the menu editor on open. */
+  focusMenuItemId?: string;
   /** Shows the press-pattern tabs; picking one edits that pattern's binding. */
   onGestureChange?: (gesture: Gesture) => void;
   /** Applies a tab's edit without closing (on a tab switch). */
@@ -609,6 +612,7 @@ export function ActionPickerModal({
                   edits={menuEdits}
                   onEditsChange={setMenuEdits}
                   menuActionId={existingAction?.id}
+                  initialSelectedId={focusMenuItemId}
                 />
               </div>
             ) : null}

@@ -30,7 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Popup menu: pin an item (★ in the menu editor) and it comes first, in a ★
   block; a search also finds phrases of the other menus, under the menu's name;
   after a moment on a phrase its whole text shows, PageUp / PageDown scroll it;
-  the names a submenu's tip lists can be clicked directly, without opening it.
+  the names a submenu's tip lists can be clicked directly, without opening it;
+  right click → "Edit in Sidearm" (on a phrase or a list) opens that item in
+  the menu editor of its button.
+- The buttons beside the mouse picture mark their other press patterns
+  (⌛ hold, 2×, 3×), and the tooltip says what each does.
 - `{selection}` in a phrase puts in the text selected in the window in front
   (the clipboard is put back); `{|}` is a short `{cursor}`. Tokens now work in
   macro text steps and in "copy only" too.
@@ -39,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
+- Deleting an item inside a list in the menu editor jumped back to the top
+  level; the next item of that list is selected now.
+- The menu editor's list was narrow in a wide dialog; it takes half now, and
+  the item pane stays in view while a long list is scrolled.
 - A right click in the Sidearm window showed the browser's own menu (Back,
   Reload, Print); text fields keep their cut / copy / paste menu.
 - The shortcut-conflict banner names the buttons and press patterns, not the

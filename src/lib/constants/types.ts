@@ -28,6 +28,9 @@ export type ControlSurfaceEntry = {
   /** No assignment of its own on this layer: what a press plays instead,
    *  from the layer below (HyperShift layers fall back). */
   fallback?: { action: Action; layer: Layer } | null;
+  /** The other press patterns this control has on this layer (long, double,
+   *  triple press), each with its action: marked beside the label. */
+  extras?: { gesture: "longPress" | "doublePress" | "triplePress"; action: Action }[];
 };
 
 export type HotspotPosition = { left: number; top: number; label: string; size?: "sm" | "lg" };

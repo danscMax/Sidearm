@@ -44,6 +44,8 @@ import {
   openConfigFolder,
   listenDragDrop,
   listenConfigChangedExternally,
+  listenMenuEditRequested,
+  type MenuEditRequest,
   listenElevatedForeground,
   listenMouseDefaultsSuspected,
   listenMouseBattery,
@@ -77,6 +79,7 @@ import {
   duplicateProfile,
   findBinding,
   type Gesture,
+  GESTURES,
   gestureOf,
 } from "./lib/config-editing";
 import type {
@@ -97,6 +100,7 @@ import {
   sideViewHotspots,
   topViewHotspots,
   workspaceModeCopy,
+  type ControlSurfaceEntry,
   type WorkspaceMode,
 } from "./lib/constants";
 import {
@@ -565,6 +569,8 @@ function App() {
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
   // Which press pattern of the control the picker edits; each has its own binding.
   const [actionPickerGesture, setActionPickerGesture] = useState<Gesture>("press");
+  // The menu item the picker's menu editor opens on (popup: right click → Edit).
+  const [menuFocusItemId, setMenuFocusItemId] = useState<string | undefined>(undefined);
   const [confirmModal, setConfirmModal] = useState<ConfirmModalRequest | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shortcutHelpOpen, setShortcutHelpOpen] = useState(false);
@@ -740,6 +746,7 @@ function App() {
       } else if (actionPickerOpen) {
         setActionPickerOpen(false);
         setActionPickerBindingId(null);
+        setMenuFocusItemId(undefined);
       } else if (confirmModal) {
         setConfirmModal(null);
       } else if (error !== null) {
@@ -911,6 +918,39 @@ function App() {
   const effectiveProfileId =
     selectedProfileId ?? activeConfig?.settings.fallbackProfileId ?? null;
 
+  // The popup menu's right click → Edit: the button that opens that menu (in
+  // the profile it was opened from, if it is there), its picker, the item.
+  function openMenuItemEditor(request: MenuEditRequest) {
+    if (!activeConfig) return;
+    const uses = activeConfig.bindings.filter((binding) => binding.actionId === request.menuActionId);
+    const binding = uses.find((candidate) => candidate.profileId === request.profileId) ?? uses[0];
+    if (!binding) {
+      showToast(t("toast.menuEditNoButton"), "warning");
+      return;
+    }
+    const control = activeConfig.physicalControls.find((candidate) => candidate.id === binding.controlId);
+    setWorkspaceMode("profiles");
+    setSelectedProfileId(binding.profileId);
+    if (control) setActiveDeviceId(control.deviceId);
+    setSelectedLayer(binding.layer);
+    setSelectedControlId(binding.controlId);
+    setActionPickerGesture(gestureOf(binding.triggerMode));
+    setActionPickerBindingId(binding.id);
+    setMenuFocusItemId(request.itemId);
+    setActionPickerOpen(true);
+  }
+  const openMenuItemEditorRef = useRef(openMenuItemEditor);
+  useEffect(() => { openMenuItemEditorRef.current = openMenuItemEditor; });
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    void listenMenuEditRequested((request) => openMenuItemEditorRef.current(request)).then((fn) => {
+      if (disposed) fn();
+      else unlisten = fn;
+    });
+    return () => { disposed = true; unlisten?.(); };
+  }, []);
+
   // Keyboard-driven action picker (Enter on a selected control). Reuses the
   // same read-only opening hook the visualization uses.
   const handleOpenActionPicker = useActionPicker({
@@ -1038,6 +1078,18 @@ function App() {
       ),
     [activeConfig, effectiveProfileId, selectedLayer],
   );
+  // Long / double / triple presses of each control on this layer.
+  const extrasByControlId = useMemo(() => {
+    const extras = new Map<ControlId, NonNullable<ControlSurfaceEntry["extras"]>>();
+    for (const binding of activeConfig?.bindings ?? []) {
+      const gesture = gestureOf(binding.triggerMode);
+      const action = actionById.get(binding.actionId);
+      if (gesture === "press" || !binding.enabled || !action || binding.profileId !== effectiveProfileId || binding.layer !== selectedLayer) continue;
+      extras.set(binding.controlId, [...(extras.get(binding.controlId) ?? []), { gesture, action }]);
+    }
+    for (const list of extras.values()) list.sort((a, b) => GESTURES.indexOf(a.gesture) - GESTURES.indexOf(b.gesture));
+    return extras;
+  }, [activeConfig, actionById, effectiveProfileId, selectedLayer]);
   // What an empty control plays on a HyperShift layer: the most specific
   // layer below with an enabled plain press (as the resolver falls back).
   const fallbackFor = (controlId: ControlId): { action: Action; layer: Layer } | null => {
@@ -1109,10 +1161,11 @@ function App() {
                     || control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId)),
                 isHypershift2Trigger: control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId),
                 fallback: fallbackFor(control.id),
+                extras: extrasByControlId.get(control.id),
               };
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, extrasByControlId],
   );
 
   const isProfilesMode = workspaceMode === "profiles";
@@ -1311,7 +1364,8 @@ function App() {
       </div>
       {actionPickerOpen && activeConfig ? (
         <ActionPickerModal
-          key={actionPickerGesture}
+          key={`${actionPickerGesture}:${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
+          focusMenuItemId={menuFocusItemId}
           config={activeConfig}
           bindingId={
             actionPickerGesture === "press"
@@ -1337,12 +1391,14 @@ function App() {
               setActionPickerOpen(false);
               setActionPickerBindingId(null);
               setActionPickerGesture("press");
+              setMenuFocusItemId(undefined);
             });
           }}
           onCancel={() => {
             setActionPickerOpen(false);
             setActionPickerBindingId(null);
             setActionPickerGesture("press");
+            setMenuFocusItemId(undefined);
           }}
         />
       ) : null}

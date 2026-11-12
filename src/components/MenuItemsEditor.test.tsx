@@ -35,6 +35,20 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: "Start" }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("after deleting an item of a list, the next item of that list is selected", () => {
+    const onChange = vi.fn();
+    const nested: MenuItem[] = [{ kind: "submenu", id: "b", label: "Block", enabled: true, items: [
+      { kind: "submenu", id: "l", label: "List", enabled: true, items: [
+        { kind: "action", id: "one", label: "One", actionId: "a1", enabled: true },
+        { kind: "action", id: "two", label: "Two", actionId: "a1", enabled: true },
+      ] },
+    ] }];
+    const { rerender } = render(<MenuItemsEditor items={nested} initialSelectedId="one" onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Удалить|Delete/ }));
+    rerender(<MenuItemsEditor items={onChange.mock.calls[0][0]} initialSelectedId="one" onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Two/ }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("pins an item to the top of the popup and unpins it", () => {
     const onChange = vi.fn();
     render(<MenuItemsEditor items={items} onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);

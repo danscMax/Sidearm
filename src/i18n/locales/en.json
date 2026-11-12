@@ -1148,7 +1148,8 @@
     "onboardWriteFailed": "The mouse did not take the new button signals ({{reason}}) — it may be asleep. Your settings are saved; Sidearm will retry on its own.",
     "undoAction": "Redo",
     "openConfig": "Open folder",
-    "configChangedOutside": "The settings file was changed outside Sidearm: loaded, the buttons already use it."
+    "configChangedOutside": "The settings file was changed outside Sidearm: loaded, the buttons already use it.",
+    "menuEditNoButton": "This menu is on no button, so there is nothing to open it from."
   },
   "instance": {
     "blocked": "Sidearm is already running — duplicate launch ignored"
@@ -1705,7 +1706,8 @@
       "noResults": "Nothing found",
       "pickRun": "Insert",
       "pickEnter": "Insert and press Enter",
-      "pickCopy": "Only copy to the clipboard"
+      "pickCopy": "Only copy to the clipboard",
+      "pickEdit": "Edit in Sidearm"
     }
   },
   "newMouse": {

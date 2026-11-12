@@ -1781,10 +1781,13 @@ input[type="radio"] {
    popup (blocks, button numbers); the pane on the right edits one item. ── */
 .menu-ed {
   display: grid;
-  grid-template-columns: minmax(236px, 300px) minmax(0, 1fr);
+  /* The list takes half the dialog: long names fit, nested rows too. */
+  grid-template-columns: minmax(260px, 1fr) minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
+/* The item's pane stays in view while the dialog scrolls down a long list. */
+.menu-ed > .menu-ed__pane { position: sticky; top: 0; }
 
 .menu-ed__side { display: grid; gap: 8px; }
 
@@ -2093,6 +2096,17 @@ input[type="radio"] {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+/* Other press patterns of the button (hold ⌛, double 2×, triple 3×). */
+.btn-legend__extras { display: inline-flex; gap: 3px; margin-left: auto; flex-shrink: 0; }
+.btn-legend__extra {
+  padding: 0 4px;
+  border: 1px solid var(--c-border-hover);
+  border-radius: var(--radius-sm);
+  color: var(--c-text-muted);
+  font-size: var(--fs-body-sm);
+  line-height: 16px;
 }
 
 /* ── Tooltip on legend cells ── */

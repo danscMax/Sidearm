@@ -78,11 +78,12 @@
       row.appendChild(el("span", "label", item.label));
       if (item.submenu) row.appendChild(el("span", "mark", "›"));
       if (item.enabled) row.addEventListener("click", function () { invoke("menu_pick", { index: index }); });
-      // Right click on a phrase: how to use it — insert, insert + Enter, or only copy.
-      if (item.enabled && !item.submenu && item.detail) {
+      // Right click: on a phrase how to use it (insert, insert + Enter, only
+      // copy) or edit it; on a list only edit.
+      if (item.enabled && (item.submenu || item.detail)) {
         row.addEventListener("contextmenu", function (event) {
           event.preventDefault();
-          showModes(index, event);
+          showModes(index, event, item.submenu);
         });
       }
       rows.appendChild(row);
@@ -148,13 +149,17 @@
   }
 
   /** The right-click choices, over the list at the pointer (kept inside the window). */
-  function showModes(index, event) {
+  function showModes(index, event, listOnly) {
     hideModes();
-    if (!items[index] || !view.pickModes || !view.pickModes.length) return;
+    if (!items[index] || !view.pickModes || view.pickModes.length < 4) return;
     modes = el("div", "modes");
-    ["run", "enter", "copy"].forEach(function (mode, n) {
-      var button = el("button", "tip__mode", view.pickModes[n]);
-      button.addEventListener("click", function () { hideModes(); invoke("menu_pick", { index: index, mode: mode }); });
+    (listOnly ? ["edit"] : ["run", "enter", "copy", "edit"]).forEach(function (mode) {
+      var button = el("button", "tip__mode", view.pickModes[["run", "enter", "copy", "edit"].indexOf(mode)]);
+      button.addEventListener("click", function () {
+        hideModes();
+        if (mode === "edit") invoke("menu_edit", { index: index });
+        else invoke("menu_pick", { index: index, mode: mode });
+      });
       modes.appendChild(button);
     });
     root.appendChild(modes);

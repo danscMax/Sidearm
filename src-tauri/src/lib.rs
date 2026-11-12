@@ -644,6 +644,13 @@ fn bring_to_front(window: &tauri::WebviewWindow) {
     }
 }
 
+/// Brings the main window up (shown, restored, focused).
+pub(crate) fn bring_main_window_to_front(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        bring_to_front(&window);
+    }
+}
+
 /// Show/hide the main window. Shared by the tray left-click and the global
 /// shortcut so the toggle behaves identically from both entry points.
 fn toggle_main_window(app: &AppHandle) {
@@ -2121,6 +2128,12 @@ fn menu_pick(app: AppHandle, index: usize, mode: Option<menu_popup::PickMode>) {
 #[tauri::command]
 fn get_menu_usage() -> std::collections::BTreeMap<String, u64> {
     menu_usage::counts()
+}
+
+/// Right click → Edit on a popup row: open its item in the main window.
+#[tauri::command]
+fn menu_edit(app: AppHandle, index: usize) {
+    menu_popup::edit_from_window(&app, index);
 }
 
 /// A click on a name in a submenu's tip: that item of the submenu at `index`.
@@ -4254,6 +4267,7 @@ pub fn run() {
             menu_hover,
             menu_full_text,
             menu_pick_child,
+            menu_edit,
             menu_wheel,
             menu_search,
             menu_confirm,

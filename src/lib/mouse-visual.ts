@@ -116,7 +116,13 @@ export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string)
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   const catLabel = cat ? i18n.t(cat.label) : "";
-  return `${name}\n${catLabel}: ${entry.action.displayName}`;
+  return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}`;
+}
+
+/** Tooltip lines for the other press patterns: "Hold: Alt+V". */
+function extrasText(entry: ControlSurfaceEntry): string {
+  const key = { longPress: "picker.gestureLongPress", doublePress: "picker.gestureDoublePress", triplePress: "picker.gestureTriplePress" } as const;
+  return (entry.extras ?? []).map((extra) => `\n${i18n.t(key[extra.gesture])}: ${extra.action.displayName}`).join("");
 }
 
 /** className for a `btn-legend__cell` button. `dimmed`/`conflict` apply in photo mode only. */

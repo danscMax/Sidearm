@@ -72,16 +72,18 @@ pub(crate) struct Model {
     query: String,
     /// What each action sends, by action id (see [`action_detail`]).
     details: HashMap<String, String>,
-    /// The other menus, by name: a search also looks there.
-    others: Vec<(String, Vec<MenuItem>)>,
+    /// The other menus (action id, name, items): a search also looks there.
+    others: Vec<(String, String, Vec<MenuItem>)>,
     /// Ids of menu actions: a link to another menu is no search result there.
     menu_ids: HashSet<String>,
 }
 
-/// One row of the level shown: the item and the block it sits in.
+/// One row of the level shown: the item, the block it sits in, and for a
+/// search result from another menu that menu's action id.
 struct Entry<'a> {
     item: &'a MenuItem,
     group: Option<&'a str>,
+    menu: Option<&'a str>,
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -157,10 +159,20 @@ impl Model {
 
     /// The other menus a search also looks in (their details must be in the
     /// model's), and the ids of all menu actions.
-    pub(crate) fn with_others(mut self, others: Vec<(String, Vec<MenuItem>)>, menu_ids: HashSet<String>) -> Self {
+    pub(crate) fn with_others(mut self, others: Vec<(String, String, Vec<MenuItem>)>, menu_ids: HashSet<String>) -> Self {
         self.others = others;
         self.menu_ids = menu_ids;
         self
+    }
+
+    /// A row's menu item id and, for a result from another menu, that menu's id.
+    pub(crate) fn item_at(&self, index: usize) -> Option<(String, Option<String>)> {
+        let (level, _) = self.walk();
+        let entry = level.get(index)?;
+        let id = match entry.item {
+            MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } => id.clone(),
+        };
+        Some((id, entry.menu.map(str::to_owned)))
     }
 
     /// The action of a row of the level shown.
@@ -196,16 +208,23 @@ impl Model {
                 found: Vec<Entry<'a>>,
             }
             // `menu`: another menu searched; its name is the group, its links are skipped.
-            fn search<'a>(state: &mut Search<'_, 'a>, items: &'a [MenuItem], group: Option<&'a str>, menu: Option<&'a str>) {
+            fn search<'a>(
+                state: &mut Search<'_, 'a>,
+                items: &'a [MenuItem],
+                group: Option<&'a str>,
+                menu: Option<(&'a str, &'a str)>,
+            ) {
                 for item in items.iter().filter(|item| item_enabled(item)) {
                     match item {
-                        MenuItem::Submenu { label, items, .. } => search(state, items, menu.or(Some(label)), menu),
+                        MenuItem::Submenu { label, items, .. } => {
+                            search(state, items, menu.map(|(_, name)| name).or(Some(label)), menu)
+                        }
                         MenuItem::Action { action_id, .. }
                             if state.model.matches(item, state.needle)
                                 && !(menu.is_some() && state.model.menu_ids.contains(action_id))
                                 && state.seen.insert(action_id) =>
                         {
-                            state.found.push(Entry { item, group });
+                            state.found.push(Entry { item, group, menu: menu.map(|(id, _)| id) });
                         }
                         _ => {}
                     }
@@ -213,8 +232,8 @@ impl Model {
             }
             let mut state = Search { model: self, needle: &needle, seen: HashSet::new(), found: Vec::new() };
             search(&mut state, &self.root, None, None);
-            for (name, items) in &self.others {
-                search(&mut state, items, Some(name), Some(name));
+            for (id, name, items) in &self.others {
+                search(&mut state, items, Some(name), Some((id, name)));
             }
             return (state.found, Vec::new());
         }
@@ -224,7 +243,7 @@ impl Model {
             for item in items.iter().filter(|item| item_enabled(item)) {
                 match item {
                     MenuItem::Submenu { items, .. } => pinned(items, level),
-                    _ if item_pinned(item) => level.push(Entry { item, group: Some(PINNED) }),
+                    _ if item_pinned(item) => level.push(Entry { item, group: Some(PINNED), menu: None }),
                     _ => {}
                 }
             }
@@ -238,12 +257,12 @@ impl Model {
                             items
                                 .iter()
                                 .filter(|inner| !item_pinned(inner))
-                                .map(|inner| Entry { item: inner, group: Some(label.as_str()) }),
+                                .map(|inner| Entry { item: inner, group: Some(label.as_str()), menu: None }),
                         );
                     }
                 }
                 _ if item_pinned(item) => {}
-                _ => level.push(Entry { item, group: None }),
+                _ => level.push(Entry { item, group: None, menu: None }),
             }
         }
         let mut labels = Vec::new();
@@ -251,7 +270,7 @@ impl Model {
             match level.get(index).map(|entry| entry.item) {
                 Some(MenuItem::Submenu { label, items, .. }) => {
                     labels.push(label.as_str());
-                    level = items.iter().filter(|item| !item_pinned(item)).map(|item| Entry { item, group: None }).collect();
+                    level = items.iter().filter(|item| !item_pinned(item)).map(|item| Entry { item, group: None, menu: None }).collect();
                 }
                 _ => return (Vec::new(), labels),
             }
@@ -505,13 +524,13 @@ pub(crate) fn open(
             _ => None,
         })
         .collect();
-    let others: Vec<(String, Vec<MenuItem>)> = menus
+    let others: Vec<(String, String, Vec<MenuItem>)> = menus
         .iter()
         .filter(|(_, menu)| menu.items != payload.items)
-        .map(|(action, menu)| (action.display_name.clone(), menu.items.clone()))
+        .map(|(action, menu)| (action.id.clone(), action.display_name.clone(), menu.items.clone()))
         .collect();
     let mut all_items = payload.items.clone();
-    all_items.extend(others.iter().flat_map(|(_, items)| items.iter().cloned()));
+    all_items.extend(others.iter().flat_map(|(_, _, items)| items.iter().cloned()));
     let menu_ids = menus.iter().map(|(action, _)| action.id.clone()).collect();
     let menu = OpenMenu {
         model: Model::new(payload.items.clone(), menu_details(config, &all_items)).with_others(others, menu_ids),
@@ -545,6 +564,7 @@ fn view_of(menu: &OpenMenu) -> View {
         crate::ui_text::native(&crate::ui_text!("menu.pickRun", "Insert")),
         crate::ui_text::native(&crate::ui_text!("menu.pickEnter", "Insert and press Enter")),
         crate::ui_text::native(&crate::ui_text!("menu.pickCopy", "Only copy to the clipboard")),
+        crate::ui_text::native(&crate::ui_text!("menu.pickEdit", "Edit in Sidearm")),
     ];
     view
 }
@@ -736,6 +756,38 @@ pub(crate) fn handle_press(app: &AppHandle, control_id: Option<&str>) {
 }
 
 /// The page under the mouse: a click picks, a hover highlights.
+/// The main window is asked to edit this menu item (`menu_edit_requested`).
+pub(crate) const EDIT_EVENT: &str = "menu_edit_requested";
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct EditRequest {
+    /// The menu action the item belongs to.
+    pub menu_action_id: String,
+    pub item_id: String,
+    /// The profile of the press that opened the menu (its binding is preferred).
+    pub profile_id: Option<String>,
+}
+
+/// Right click → Edit: close the menu, bring Sidearm up, ask it to open the
+/// row's item in its menu editor.
+pub(crate) fn edit_from_window(app: &AppHandle, index: usize) {
+    let request = {
+        let mut guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
+        let Some(menu) = guard.as_ref() else { return };
+        let Some((item_id, other)) = menu.model.item_at(index) else { return };
+        let Some(menu_action_id) = other.or_else(|| menu.preview.action_id.clone()) else { return };
+        let request = EditRequest { menu_action_id, item_id, profile_id: menu.preview.resolved_profile_id.clone() };
+        *guard = None;
+        request
+    };
+    IS_OPEN.store(false, Ordering::Release);
+    hide(app);
+    log::info!("[menu] edit `{}` in `{}`", request.item_id, request.menu_action_id);
+    crate::bring_main_window_to_front(app);
+    let _ = app.emit_to("main", EDIT_EVENT, &request);
+}
+
 pub(crate) fn pick_child_from_window(app: &AppHandle, index: usize, child: usize) {
     drive(app, |model| model.pick_child(index, child));
 }
@@ -1055,6 +1107,7 @@ mod tests {
     fn a_search_also_finds_other_menus_under_their_name_without_their_links() {
         let mut model = sample().with_others(
             vec![(
+                "menu-2".into(),
                 "Commands".into(),
                 vec![
                     submenu("cc", "Claude", vec![action("model", "/model"), action("val2", "Validate twice")]),

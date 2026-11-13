@@ -724,6 +724,12 @@ fn describe_unrepairable(s: &str) -> String {
     }
 }
 
+/// The units before the first NUL, or all of them when the block has none.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn utf16_until_nul(units: &[u16]) -> &[u16] {
+    units.iter().position(|&unit| unit == 0).map_or(units, |end| &units[..end])
+}
+
 /// Read the clipboard's Unicode text (best-effort); `None` if empty/non-text.
 #[cfg(target_os = "windows")]
 fn clipboard_get_text() -> Option<String> {
@@ -741,12 +747,13 @@ fn clipboard_get_text() -> Option<String> {
             if locked.is_null() {
                 None
             } else {
-                let wide = locked as *const u16;
-                let mut len = 0usize;
-                while *wide.add(len) != 0 {
-                    len += 1;
-                }
-                let t = String::from_utf16_lossy(std::slice::from_raw_parts(wide, len));
+                // Another process wrote this block: never read past its size,
+                // a missing NUL terminator must not walk off the allocation.
+                let units = std::slice::from_raw_parts(
+                    locked as *const u16,
+                    windows_sys::Win32::System::Memory::GlobalSize(handle) / 2,
+                );
+                let t = String::from_utf16_lossy(utf16_until_nul(units));
                 let _ = GlobalUnlock(handle);
                 Some(t)
             }
@@ -1105,12 +1112,8 @@ fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
                 if locked.is_null() {
                     None
                 } else {
-                    let wide = locked as *const u16;
-                    let mut len = 0usize;
-                    while len < 16_384 && *wide.add(len) != 0 {
-                        len += 1;
-                    }
-                    let units = std::slice::from_raw_parts(wide, len);
+                    let all = std::slice::from_raw_parts(locked as *const u16, GlobalSize(handle) / 2);
+                    let units = utf16_until_nul(&all[..all.len().min(16_384)]);
                     let preview = String::from_utf16_lossy(units)
                         .chars()
                         .take(40)
@@ -1124,7 +1127,7 @@ fn clipboard_diagnostic_snapshot(tag: &str, seq_before: u32) {
                         .collect::<Vec<_>>()
                         .join(" ");
                     let _ = GlobalUnlock(handle);
-                    Some((len, preview, hex))
+                    Some((units.len(), preview, hex))
                 }
             }
         };
@@ -2942,6 +2945,14 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn clipboard_text_stops_at_nul_or_at_the_block_end() {
+        assert_eq!(utf16_until_nul(&[0x41, 0x42, 0, 0x43]), &[0x41, 0x42]);
+        // A block without a terminator ends at its size, never past it.
+        assert_eq!(utf16_until_nul(&[0x41, 0x42]), &[0x41, 0x42]);
+        assert!(utf16_until_nul(&[]).is_empty());
+    }
 
     #[test]
     fn expand_tokens_replaces_date_and_clipboard() {

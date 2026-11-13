@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
-import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
+import { MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
@@ -37,7 +37,7 @@ import {
   type PickerDrafts,
 } from "../lib/action-picker-helpers";
 import type { TriggerMode } from "../lib/config";
-import { MAX_SEQUENCE_STEPS, SequenceStepEditor } from "./action-picker/SequenceStepEditor";
+import { SequenceStepEditor } from "./action-picker/SequenceStepEditor";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { MouseActionEditor } from "./action-picker/MouseActionEditor";
 import { TextSnippetEditor } from "./action-picker/TextSnippetEditor";

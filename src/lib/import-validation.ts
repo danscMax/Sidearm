@@ -1,5 +1,5 @@
 import configSchema from "../../schemas/config.v5.schema.json";
-import type { Action, MenuItem, SnippetLibraryItem } from "./config";
+import { MAX_SEQUENCE_STEPS, type Action, type MenuItem, type SnippetLibraryItem } from "./config";
 
 interface Schema {
   $ref?: string;
@@ -111,7 +111,7 @@ export function validActionReferences(actions: Action[], snippets: SnippetLibrar
     if (action.type === "launch") return !!action.payload.target.trim();
     if (action.type === "profileSwitch") return !!action.payload.targetProfileId.trim()
       && (!profileIds || profileIds.has(action.payload.targetProfileId));
-    if (action.type === "sequence") return action.payload.steps.length <= 200 && action.payload.steps.every((step) =>
+    if (action.type === "sequence") return action.payload.steps.length <= MAX_SEQUENCE_STEPS && action.payload.steps.every((step) =>
       step.delayMs === undefined || step.delayMs <= 0xFFFFFFFF);
     return true;
   });

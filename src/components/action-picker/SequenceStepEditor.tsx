@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { SequenceStep } from "../../lib/config";
+import { MAX_SEQUENCE_STEPS, type SequenceStep } from "../../lib/config";
 import { Notice, SelectField } from "../shared";
 import {
   coerceSequenceStepType,
@@ -23,8 +23,6 @@ import { ExecutablePathField } from "../ExecutablePathField";
 import { DirectoryPathField } from "../DirectoryPathField";
 import { CompoundCard } from "./shared/CompoundCard";
 import { acquireKeyRecording } from "./shared/key-recording";
-
-export const MAX_SEQUENCE_STEPS = 200;
 
 // The backend recorder is shared by editor instances, including pending teardown.
 let recordingCleanup: Promise<unknown> = Promise.resolve();

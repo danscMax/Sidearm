@@ -466,6 +466,27 @@ describe("createVerificationSession", () => {
 });
 
 describe("activeVerificationStep", () => {
+  it.each(["matched", "skipped"] as const)("keeps observations of a %s step until explicitly reopened", (result) => {
+    const observed = captureVerificationObservation(createTestSession(), createEncodedKeyEvent({ receivedAt: 2000 }));
+    const finished = finalizeVerificationStep(observed, result, null, null);
+    const viewed = navigateToVerificationStep(finished, 0);
+    expect(captureVerificationObservation(viewed, createEncodedKeyEvent({ encodedKey: "F14", receivedAt: 3000 }))).toEqual(viewed);
+    const reopened = reopenVerificationStep(viewed, 0);
+    expect(captureVerificationObservation(reopened, createEncodedKeyEvent({ encodedKey: "F14", receivedAt: Date.now() + 1 })).steps[0].observedEncodedKey).toBe("F14");
+  });
+
+  it.each(["suggest", "finalize"] as const)("ignores a foreign manual preview when asked to %s", (operation) => {
+    const session = createTestSession({}, [{ observedEncodedKey: "F13", observedAt: 2000,
+      resolutionStatus: "resolved", resolvedControlId: "thumb_01", resolvedLayer: "standard" }]);
+    const foreign = createResolvedPreview({ encodedKey: "F14", controlId: "mouse_4", layer: "hypershift" });
+    if (operation === "suggest") {
+      expect(suggestedVerificationStepResult(session.steps[0], "thumb_01", "standard", foreign)).toBe("matched");
+    } else {
+      expect(finalizeVerificationStep(session, "matched", null, foreign).steps[0]).toMatchObject({
+        observedEncodedKey: "F13", resolvedControlId: "thumb_01", resolvedLayer: "standard",
+      });
+    }
+  });
   it("returns step at activeStepIndex", () => {
     const session = createTestSession({ activeStepIndex: 1 });
     const step = activeVerificationStep(session);
@@ -676,7 +697,7 @@ describe("finalizeVerificationStep", () => {
   });
 
   it("captures resolution info from preview", () => {
-    const session = createTestSession({ activeStepIndex: 0 });
+    const session = captureVerificationObservation(createTestSession({ activeStepIndex: 0 }), createEncodedKeyEvent());
     const preview = createResolvedPreview({
       status: "resolved",
       controlId: "thumb_01",

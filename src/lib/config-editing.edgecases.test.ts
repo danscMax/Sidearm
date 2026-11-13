@@ -1431,7 +1431,7 @@ describe("import validators reject malformed-but-shaped files (R4)", () => {
     expect(isValidSnippetLibraryExport({ snippets: [42] })).toBe(false);
     expect(
       isValidSnippetLibraryExport({
-        snippets: [{ id: "a", name: "n", text: "t", pasteMode: "type", tags: [] }],
+        snippets: [{ id: "a", name: "n", text: "t", pasteMode: "sendText", tags: [] }],
       }),
     ).toBe(true);
   });
@@ -1446,7 +1446,7 @@ describe("import validators reject malformed-but-shaped files (R4)", () => {
   it("isValidProfileExport rejects a shaped-but-empty profile", () => {
     expect(isValidProfileExport({ profile: {}, bindings: [], actions: [] })).toBe(false);
     expect(
-      isValidProfileExport({ profile: { id: "p", name: "P" }, bindings: [], actions: [] }),
+      isValidProfileExport({ profile: { id: "p", name: "P", enabled: true, priority: 0 }, bindings: [], actions: [] }),
     ).toBe(true);
   });
 });

@@ -177,7 +177,7 @@ export function captureVerificationObservation(
   event: EncodedKeyEvent,
 ): VerificationSession {
   const step = activeVerificationStep(session);
-  if (!step?.startedAt || event.receivedAt < step.startedAt) {
+  if (!step?.startedAt || step.result !== "pending" || event.receivedAt < step.startedAt) {
     return session;
   }
   // Only the initial key-DOWN is the observation. Bindings fire on key-down, and
@@ -228,14 +228,12 @@ export function finalizeVerificationStep(
   preview: ResolvedInputPreview | null,
   notes?: string,
 ): VerificationSession {
-  const nextSession = updateStep(session, session.activeStepIndex, (step) => ({
+  const correlated = preview ? captureVerificationResolution(session, preview) : session;
+  const nextSession = updateStep(correlated, session.activeStepIndex, (step) => ({
     ...step,
     result,
     activeExe: capture && !capture.ignored ? capture.exe : step.activeExe,
     activeWindowTitle: capture && !capture.ignored ? capture.title : step.activeWindowTitle,
-    resolutionStatus: preview?.status ?? step.resolutionStatus,
-    resolvedControlId: preview?.controlId ?? step.resolvedControlId,
-    resolvedLayer: preview?.layer ?? step.resolvedLayer,
     notes: notes ?? step.notes,
   }));
 
@@ -307,9 +305,9 @@ export function suggestedVerificationStepResult(
     return "noSignal";
   }
 
-  // Use live resolution preview if available, otherwise fall back to step's stored values
-  const resolvedControlId = livePreview?.controlId ?? step.resolvedControlId ?? null;
-  const resolvedLayer = livePreview?.layer ?? step.resolvedLayer ?? null;
+  const preview = step.result === "pending" && livePreview?.encodedKey === step.observedEncodedKey ? livePreview : null;
+  const resolvedControlId = preview ? preview.controlId : step.resolvedControlId;
+  const resolvedLayer = preview ? preview.layer : step.resolvedLayer;
 
   if (
     step.configuredEncodedKey &&

@@ -18,6 +18,7 @@ import type {
 } from "./config";
 import { clampPriority, uniqueStrings } from "./helpers";
 import { defaultPayloadFor } from "./action-helpers";
+import { isRecord, uniqueIds, validActionReferences, validConfigPart } from "./import-validation";
 
 const PLACEHOLDER_ACTION_NOTE =
   "Created from the shell editor. Replace this placeholder before using it in runtime.";
@@ -71,7 +72,7 @@ export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
   const binding = config.bindings.find((b) => b.id === bindingId);
   if (!binding) return config;
   const nextBindings = config.bindings.filter((b) => b.id !== bindingId);
-  const actionStillReferenced = nextBindings.some((b) => b.actionId === binding.actionId);
+  const actionStillReferenced = computeReferencedActionIds(config.actions, nextBindings).has(binding.actionId);
   if (actionStillReferenced) {
     return { ...config, bindings: nextBindings };
   }
@@ -439,18 +440,10 @@ export interface SnippetLibraryExportData {
   snippets: SnippetLibraryItem[];
 }
 
-/** Structural guard for a parsed snippet-library export envelope. Every entry
- *  must be a well-formed object with string id/name/text — a shape-only check
- *  (just `Array.isArray`) lets `{snippets:[null]}` through and crashes the merge. */
+/** Validate every snippet against the config schema before it reaches the draft. */
 export function isValidSnippetLibraryExport(raw: unknown): raw is SnippetLibraryExportData {
-  if (typeof raw !== "object" || raw === null) return false;
-  const snippets = (raw as Record<string, unknown>).snippets;
-  if (!Array.isArray(snippets)) return false;
-  return snippets.every((entry) => {
-    if (typeof entry !== "object" || entry === null) return false;
-    const e = entry as Record<string, unknown>;
-    return typeof e.id === "string" && typeof e.name === "string" && typeof e.text === "string";
-  });
+  return isRecord(raw) && Array.isArray(raw.snippets)
+    && raw.snippets.every((entry) => validConfigPart("snippetLibraryItem", entry));
 }
 
 /** Remove EXACT duplicate snippets (same name + text + paste mode), keeping the
@@ -494,24 +487,27 @@ export function mergeSnippetLibrary(
   incoming: SnippetLibraryItem[],
 ): AppConfig {
   const existingIds = new Set(config.snippetLibrary.map((s) => s.id));
+  const byId = new Map(config.snippetLibrary.map((snippet) => [snippet.id, snippet]));
   const added: SnippetLibraryItem[] = [];
   for (const snippet of incoming) {
     // Defense-in-depth: the validator already rejects malformed entries, but
     // never dereference a non-object entry here (avoids `null.text` crashes).
     if (typeof snippet !== "object" || snippet === null) continue;
     if (!snippet.text?.trim()) continue;
-    const local = config.snippetLibrary.find((s) => s.id === snippet.id);
+    const local = byId.get(snippet.id);
     if (local && local.text === snippet.text && local.pasteMode === snippet.pasteMode) continue;
     const id = local ? nextUniqueId(existingIds, makeSnippetId(snippet.name)) : snippet.id;
     existingIds.add(id);
-    added.push({
+    const entry: SnippetLibraryItem = {
       id,
       name: snippet.name,
       text: snippet.text,
       pasteMode: snippet.pasteMode,
       tags: uniqueStrings(snippet.tags ?? []),
       ...(snippet.notes ? { notes: snippet.notes } : {}),
-    });
+    };
+    added.push(entry);
+    byId.set(id, entry);
   }
   return { ...config, snippetLibrary: [...config.snippetLibrary, ...added] };
 }
@@ -1406,33 +1402,15 @@ export function buildBindingExport(config: AppConfig, bindingId: string): Bindin
   };
 }
 
-/** Structural guard for a parsed single-binding export envelope.
- *
- * This is a trust boundary — the file is user-supplied (hand-edited or stale).
- * A shallow "is an object" check let an empty/partial action or binding through,
- * which then either threw on `action.payload.*` or produced a schema-invalid
- * binding (missing required `label`) that silently broke the next save. So we
- * require the fields `applyBindingImport` actually reads or that survive to the
- * saved record. Per-type payload correctness is left to the schema validator on
- * save (the final backstop); this just rejects the realistic malformed files. */
+/** Validate payloads and references before import; target-slot fields are replaced. */
 export function isValidBindingExport(raw: unknown): raw is BindingExportData {
-  if (typeof raw !== "object" || raw === null) return false;
-  const r = raw as Record<string, unknown>;
-  if (r.kind !== "binding" || !Array.isArray(r.referencedSnippets)) return false;
-
-  const action = r.action as Record<string, unknown> | null;
-  if (typeof action !== "object" || action === null) return false;
-  if (typeof action.type !== "string") return false;
-  if (typeof action.displayName !== "string") return false;
-  if (typeof action.payload !== "object" || action.payload === null) return false;
-
-  const binding = r.binding as Record<string, unknown> | null;
-  if (typeof binding !== "object" || binding === null) return false;
-  // `label` survives import unchanged and is schema-required; id/controlId/etc.
-  // are overwritten by the target slot, so they need not be present here.
-  if (typeof binding.label !== "string") return false;
-
-  return true;
+  if (!isRecord(raw) || raw.kind !== "binding" || !isRecord(raw.action) || !isRecord(raw.binding)) return false;
+  if (!Array.isArray(raw.referencedSnippets) || !raw.referencedSnippets.every((s) => validConfigPart("snippetLibraryItem", s))) return false;
+  const action = { ...raw.action, id: "imported-action" };
+  if (!validConfigPart("action", action) || !validConfigPart("binding", { ...raw.binding,
+    id: "imported-binding", profileId: "imported-profile", layer: "standard", controlId: "imported-control", actionId: action.id, enabled: true,
+  })) return false;
+  return validActionReferences([action as Action], raw.referencedSnippets as SnippetLibraryItem[]);
 }
 
 /** Apply an imported binding to a target slot: clone the action with a fresh id,
@@ -1475,7 +1453,7 @@ export function applyBindingImport(
   );
   const newBinding: Binding = {
     ...data.binding,
-    id: makeBindingId(targetProfileId, targetLayer, targetControlId),
+    id: nextUniqueId(filteredBindings.map((b) => b.id), makeBindingId(targetProfileId, targetLayer, targetControlId)),
     profileId: targetProfileId,
     layer: targetLayer,
     controlId: targetControlId,
@@ -1523,7 +1501,7 @@ export function copyBindingBetweenProfiles(
   );
   const newBinding: Binding = {
     ...binding,
-    id: makeBindingId(targetProfileId, targetLayer, targetControlId),
+    id: nextUniqueId(filteredBindings.map((b) => b.id), makeBindingId(targetProfileId, targetLayer, targetControlId)),
     profileId: targetProfileId,
     layer: targetLayer,
     controlId: targetControlId,
@@ -1801,22 +1779,19 @@ export interface ProfileExportData {
   snippetLibrary?: SnippetLibraryItem[];
 }
 
-/** Structural validation for a parsed profile-export envelope. Guards against
- *  importing the wrong JSON shape. `profile` must be an object with string
- *  id/name — `importProfile` derives ids from `profile.name`, so a shaped-but-
- *  malformed `{profile:{}}` would otherwise throw mid-merge. */
+/** Schema validation plus export-local reference integrity, before state changes. */
 export function isValidProfileExport(raw: unknown): raw is ProfileExportData {
-  if (typeof raw !== "object" || raw === null) return false;
-  const d = raw as Record<string, unknown>;
-  const profile = d.profile as Record<string, unknown> | null;
-  return (
-    typeof profile === "object" &&
-    profile !== null &&
-    typeof profile.id === "string" &&
-    typeof profile.name === "string" &&
-    Array.isArray(d.bindings) &&
-    Array.isArray(d.actions)
-  );
+  if (!isRecord(raw) || !validConfigPart("profile", raw.profile)) return false;
+  for (const [key, definition] of [["bindings", "binding"], ["actions", "action"], ["appMappings", "appMapping"],
+    ["encoderMappings", "encoderMapping"], ["snippetLibrary", "snippetLibraryItem"]]) {
+    const entries = raw[key];
+    if (entries === undefined && key !== "bindings" && key !== "actions") continue;
+    if (!Array.isArray(entries) || !entries.every((entry) => validConfigPart(definition, entry))) return false;
+    if (key !== "encoderMappings" && !uniqueIds(entries as { id: string }[])) return false;
+  }
+  const data = raw as unknown as ProfileExportData;
+  return data.bindings.every((binding) => typeof binding.actionId === "string" && data.actions.some((action) => action.id === binding.actionId))
+    && validActionReferences(data.actions, data.snippetLibrary ?? []);
 }
 
 /** Extract a single profile with its bindings, actions, and app mappings into an export envelope. */
@@ -1845,11 +1820,7 @@ export function extractProfileExport(
   });
   // A menu's items run actions of their own: they travel with it, or the
   // imported menu points at nothing.
-  const actionRefs = new Set(bindings.map((b) => b.actionId));
-  const menus = [...actionRefs].map((id) => byId.get(id)).filter((action) => action?.type === "menu");
-  for (const menu of menus) {
-    if (menu?.type === "menu") collectMenuActionRefs(menu.payload.items, actionRefs);
-  }
+  const actionRefs = computeReferencedActionIds(config.actions, bindings);
   const actions = config.actions.filter((a) => actionRefs.has(a.id));
   const appMappings = config.appMappings.filter((m) => m.profileId === profileId);
   const encoderMappings = config.encoderMappings.filter((e) =>
@@ -2021,7 +1992,7 @@ export function importProfile(
     encoderMappings: [
       ...config.encoderMappings,
       ...(data.encoderMappings ?? []).filter(
-        (e) => !config.encoderMappings.some(
+        (e) => config.physicalControls.some((control) => control.id === e.controlId) && !config.encoderMappings.some(
           (existing) => existing.controlId === e.controlId && existing.layer === e.layer,
         ),
       ),

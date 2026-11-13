@@ -130,18 +130,17 @@ export function applyDeviceTransfer(
       actionId: action?.id ?? binding.actionId,
     };
   });
-  const bindings = config.bindings.filter((binding) => !replaced.has(binding.id));
-  const used = new Set(bindings.map((binding) => binding.actionId));
+  const bindings = [...config.bindings.filter((binding) => !replaced.has(binding.id)), ...copies];
+  const actions = [...config.actions, ...clonedActions.values(), ...menuPhrases];
+  const used = computeReferencedActionIds(actions, bindings);
+  const dropped = config.actions.filter((action) => !used.has(action.id)
+    && config.bindings.some((binding) => binding.actionId === action.id));
+  const droppedIds = new Set(dropped.map((action) => action.id));
   return {
     ...config,
-    bindings: [...bindings, ...copies],
-    // An action only the replaced bindings used goes with them.
-    actions: [
-      ...config.actions.filter((action) => used.has(action.id)
-        || !config.bindings.some((binding) => binding.actionId === action.id)),
-      ...clonedActions.values(),
-      ...menuPhrases,
-    ],
+    bindings,
+    actions: actions.filter((action) => !droppedIds.has(action.id)),
+    snippetLibrary: rescueDroppedSnippets(dropped, config.snippetLibrary),
   };
 }
 
@@ -217,7 +216,8 @@ export function retargetImportedBindings(
     }
     return [{ ...binding, controlId, chordPartner: chordPartner ?? undefined }];
   });
-  return { config: { ...config, bindings }, dropped };
+  const encoderMappings = config.encoderMappings.filter((mapping) => known(mapping.controlId));
+  return { config: { ...config, bindings, encoderMappings }, dropped };
 }
 
 /* ── Keeping the mice alike (`Settings.syncMice`) ── */

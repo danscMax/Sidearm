@@ -163,7 +163,7 @@ describe("single-binding transfer round-trip", () => {
     expect(
       isValidBindingExport({
         kind: "binding",
-        action: { type: "shortcut", displayName: "Paste", payload: { key: "V", ctrl: true } },
+        action: { type: "shortcut", displayName: "Paste", payload: { key: "V", ctrl: true, shift: false, alt: false, win: false } },
         binding: { label: "Paste", controlId: "thumb_01", actionId: "action-1", enabled: true },
         referencedSnippets: [],
       }),

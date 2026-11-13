@@ -69,6 +69,20 @@ function config(actions: Action[], bindings: Binding[]): AppConfig {
 }
 
 describe("shortcutSignature", () => {
+  it.each([["C", "С"], ["[", "Х"], ["Enter", "Return"], ["Esc", "Escape"], ["PageUp", "pg_up"], ["A", "VK_65"]])(
+    "groups backend-equivalent keys %s and %s", (first, second) => {
+      const cfg = makeConfig({ actions: [shortcutAction("a", first), shortcutAction("b", second)],
+        bindings: [binding("b1", "p1", "standard", "thumb_01", "a"), binding("b2", "p1", "standard", "mouse_4", "b")] });
+      expect(findShortcutConflicts(cfg)).toHaveLength(1);
+    });
+
+  it("keeps legacy accepted conflicts after canonicalizing aliases", () => {
+    const cfg = makeConfig({ actions: [shortcutAction("a", "Return"), shortcutAction("b", "Return")],
+      bindings: [binding("b1", "p1", "standard", "thumb_01", "a"), binding("b2", "p1", "standard", "mouse_4", "b")] });
+    cfg.settings.acceptedConflicts = ["p1|standard|razer-naga|RETURN|press"];
+    expect(shortcutSignature({ key: "Return", ctrl: false, shift: false, alt: false, win: false })).toBe("ENTER");
+    expect(findShortcutConflicts(cfg)).toEqual([]);
+  });
   it("uppercases the key", () => {
     expect(
       shortcutSignature({ key: "a", ctrl: true, shift: false, alt: false, win: false }),

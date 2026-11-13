@@ -10,6 +10,7 @@ import type {
   TextSnippetPayload,
 } from "./config";
 import { gestureOf, type Gesture } from "./config-editing";
+import { canonicalPrimaryKey } from "./key-names";
 
 export interface ConflictGroup {
   /** The group's identity (`conflictKey`), kept in `settings.acceptedConflicts` to keep it. */
@@ -38,7 +39,14 @@ function conflictKey(profileId: string, layer: Layer, deviceId: string | null, s
  * actions are idiosyncratic and don't conflict in the traditional sense.
  */
 export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
-  const accepted = new Set(config.settings.acceptedConflicts ?? []);
+  const accepted = new Set((config.settings.acceptedConflicts ?? []).map((key) => {
+    const parts = key.split("|");
+    if (parts.length !== 5) return key;
+    const signature = parts[3];
+    const primary = signature.lastIndexOf("+") + 1;
+    parts[3] = signature.slice(0, primary) + canonicalPrimaryKey(signature.slice(primary));
+    return parts.join("|");
+  }));
   const actionsById = new Map<string, Action>();
   for (const a of config.actions) actionsById.set(a.id, a);
   const devicesByControlId = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
@@ -92,14 +100,14 @@ export function conflictingBindingIds(config: AppConfig): Set<string> {
 
 /** Canonical signature for a shortcut: modifiers (sorted) + key (upper-case). */
 export function shortcutSignature(payload: ShortcutActionPayload): string {
-  const key = (payload.key ?? "").trim();
+  const key = canonicalPrimaryKey(payload.key ?? "");
   if (!key) return "";
   const mods: string[] = [];
   if (payload.ctrl) mods.push("Ctrl");
   if (payload.shift) mods.push("Shift");
   if (payload.alt) mods.push("Alt");
   if (payload.win) mods.push("Win");
-  return `${mods.join("+")}${mods.length ? "+" : ""}${key.toUpperCase()}`;
+  return `${mods.join("+")}${mods.length ? "+" : ""}${key}`;
 }
 
 /**

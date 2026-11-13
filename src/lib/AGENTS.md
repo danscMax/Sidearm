@@ -8,6 +8,8 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 - `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v5.schema.json`).
 - `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe. A profile export carries the actions of its menus' items (import re-points them) and can leave out the owner's texts (`withoutTexts`: texts, macros with text, menus).
+- `import-validation.ts` — export guards reuse the config schema definitions for nested payloads and export-local references. Its schema keyword subset fails closed on additions; it does not replace backend validation of the complete config.
+- `key-names.ts` — layout-independent primary-key aliases and VK codes, mirroring Rust `hotkeys::parse_primary_key`; shared by conflict signatures (including legacy accepted conflicts) and firmware eligibility.
 - `binding-moves.ts` — a button's assignments as one slot (profile · layer · control, every press pattern): move, swap onto an occupied one, copy (`placeSlot`), copy a layer or a profile (`copyAssignments`, menus skipped), sidebar profile order (`reorderProfiles`), the profile comparison table (`compareProfiles`).
 - `menu-arrange.ts` — menu editor arranging: drop before/after/inside, level in/out, copies with fresh ids, search across menus, other menus using an action (`otherMenuUses`) and other buttons using it (`bindingUses`, one line per place, the other mouse's twin folded in), prompts from a text file.
 - `press-stats.ts` — statistics from the daily press log (`get_press_log`): periods (`sumDays`, local dates), most pressed places with the period before, never pressed ones, keystrokes saved, HyperShift actions worth a hold (`holdHints`), heat per control and layer (`layerHeat`), menu items not picked (`unpickedItems`).
@@ -26,6 +28,9 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 - Config edits are pure `(config) => config` functions — no side effects, no I/O. This keeps them idempotent under React strict mode and unit-testable.
 - Validate untrusted import files at the boundary (`isValid*Export`) before mutating; never dereference an unvalidated entry.
+- Binding removal and replacement preserve actions reachable through linked menus (`computeReferencedActionIds`); profile exports carry that full closure, including cycles. Imported encoder mappings must name controls present on this computer; retargeting keeps the target mouse's signals.
+- A phrase editor accepts only a single text or the canonical text / 80 ms pause / Enter sequence, without other timing or repeats. Picker saves preserve real action notes, excluding placeholder notes.
+- Verification observations only update pending steps; previews must match the observed encoded key before changing recommendations or finalized resolution.
 - `ActionPayload` is a discriminated union keyed by `type` — handle every variant; use `assertNever` for exhaustiveness.
 
 ## Work Guidance

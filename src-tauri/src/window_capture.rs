@@ -38,7 +38,8 @@ pub fn capture_active_window_with_resolution(
 }
 
 /// `ignore_reason` of a capture whose foreground window is Sidearm's own; the
-/// dispatch path matches on it to keep button presses from firing there.
+/// dispatch path matches on it (the fallback profile; nothing runs while a
+/// shortcut is recorded there).
 pub const OWN_WINDOW_REASON: &str = "Foreground window belongs to the Studio process.";
 
 /// [`capture_active_window_with_resolution`] threaded with the manual profile override

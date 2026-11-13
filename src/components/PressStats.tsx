@@ -18,7 +18,7 @@ interface PressStatsProps {
   onAddHold: (place: PlaceCount) => void;
 }
 
-/** The mouse's "Statistics" tab: presses of this computer over a week or a month. */
+/** The mouse's "Statistics" tab: presses over a week or a month (every computer's log, added up). */
 export function PressStats({ config, deviceId, profileId, onAddHold }: PressStatsProps) {
   const { t } = useTranslation();
   const [log, setLog] = useState<PressLog | null>(null);

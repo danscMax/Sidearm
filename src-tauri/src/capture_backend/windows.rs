@@ -5072,7 +5072,9 @@ fn run_foreground_watcher(
                 };
                 if title_only && same_profile() {
                     // Nothing to tell anyone; the window's new title is still remembered.
-                    if let Ok(mut store) = ctx.runtime_store.lock() {
+                    if !capture_result.ignored
+                        && let Ok(mut store) = ctx.runtime_store.lock()
+                    {
                         store.set_last_foreground_window(capture_result.clone());
                     }
                     return;

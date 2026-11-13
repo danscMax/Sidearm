@@ -715,6 +715,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
             platform::restore_foreground(menu.target_window);
             log::info!("[menu] picked `{action_id}` ({mode:?})");
             crate::menu_usage::count(&action_id);
+            crate::press_log::count(None, &action_id);
             if mode == PickMode::Copy
                 && let Some(text) = full_text(&menu.config, &action_id)
             {

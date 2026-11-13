@@ -165,7 +165,7 @@ export function ProfilesWorkspace({
   mouseStates,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
-  // With the heat map on: this computer's presses of the last 7 days on the
+  // With the heat map on: the press log's last 7 days (every computer's) on the
   // layer shown (the press log), read again after every press.
   const [pressLog, setPressLog] = useState<PressLog | null>(null);
   const { heatmapEnabled, setHeatmapEnabled, handleDropBinding, placeDragged } = useMouseVisualPanel({

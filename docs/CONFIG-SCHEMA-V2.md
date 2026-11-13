@@ -320,7 +320,7 @@ The application must validate rules that JSON Schema does not express well by it
 - `profileId`, `actionRef`, `snippetId`, and `controlId` references must resolve
 - no duplicate `Binding(profileId, controlId, layer)` combinations
 - no duplicate `EncoderMapping(controlId, layer)` combinations
-- menu graphs must not contain cycles
+- a menu item must not open its own menu (menus may link to each other: picking a link opens the other menu in place of this one)
 - a disabled profile should not be the effective fallback profile
 - `appMappings` with identical effective precedence should emit warnings
 

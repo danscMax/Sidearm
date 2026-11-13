@@ -256,7 +256,9 @@ export async function setKeyRecording(on: boolean): Promise<void> {
 
 /** Saves the printable layout page and opens it in the browser; false when cancelled. */
 export async function exportLayoutHtml(title: string, contents: string): Promise<boolean> {
-  const path = await save({ title, defaultPath: `sidearm-layout-${new Date().toISOString().slice(0, 10)}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+  const now = new Date();
+  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const path = await save({ title, defaultPath: `sidearm-layout-${day}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
   if (!path) return false;
   await invoke<void>("export_layout_html", { path, contents });
   return true;

@@ -637,10 +637,10 @@ fn run_live_sequence_action(
     let mut typed_text = false;
     let mut warnings = Vec::new();
     for step in &payload.steps {
-        // No window in front for an instant (0) is no other window.
+        // No window in front for an instant (0), at the start or now, proves nothing.
         if skips_enter(step, only_text_so_far && typed_text, || {
             let now = foreground_window();
-            now != 0 && now != start_window
+            start_window != 0 && now != 0 && now != start_window
         }) {
             log::warn!("[executor] sequence Enter skipped: the window in front changed while the text was typed");
             warnings.push(crate::ui_text!(

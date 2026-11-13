@@ -356,7 +356,7 @@ fn fire_gestures(
             continue;
         }
         log::info!("[capture] {gesture:?} of {}", context.encoded_key);
-        run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), context.is_fg_elevated);
+        run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), context.is_fg_elevated, false);
     }
 }
 
@@ -896,6 +896,7 @@ fn process_encoded_key_event(
                 &preview,
                 log_entries,
                 is_fg_elevated,
+                false,
             );
         }
     } else {
@@ -906,6 +907,7 @@ fn process_encoded_key_event(
             &preview,
             log_entries,
             is_fg_elevated,
+            false,
         );
     }
 
@@ -962,6 +964,8 @@ fn run_fire_and_forget(
     preview: &resolver::ResolvedInputPreview,
     mut log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
     is_fg_elevated: bool,
+    // A popup menu's pick: its press was counted when the menu opened.
+    menu_pick: bool,
 ) {
     // Name the control and the layer: "the wrong action fired" is otherwise
     // indistinguishable from "the right control fired the right action" in the
@@ -983,7 +987,7 @@ fn run_fire_and_forget(
         && let crate::config::ActionPayload::Menu(payload) = &action.payload
     {
         flush_log_entries(runtime_store, log_entries);
-        count_press(config, preview, &action.id);
+        count_press(config, preview, &action.id, true);
         crate::menu_popup::open(app, runtime_store, config, preview, &action.display_name, payload, is_fg_elevated);
         return;
     }
@@ -1033,7 +1037,7 @@ fn run_fire_and_forget(
                 follow_manual_profile(&p.target_profile_id);
             }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
-            count_press(config, preview, &execution.action_id);
+            count_press(config, preview, &execution.action_id, !menu_pick);
             // What went out, in the OSD (`Settings.osdActions`): not for clicks
             // and scrolls, and briefer than a profile switch.
             if config.settings.osd_actions && execution.action_type != "mouseAction" && !crate::fake_mode() {
@@ -1059,7 +1063,7 @@ fn run_fire_and_forget(
 /// Counts a run in the daily press log: its place (profile, layer, control and
 /// the binding's press pattern) and its action. Wheel scrolling (zoom too: a
 /// scroll with Ctrl) is left out: they fire per notch and would bury every button.
-fn count_press(config: &AppConfig, preview: &resolver::ResolvedInputPreview, action_id: &str) {
+fn count_press(config: &AppConfig, preview: &resolver::ResolvedInputPreview, action_id: &str, place: bool) {
     let scrolls = config.actions.iter().find(|action| action.id == action_id).is_some_and(|action| {
         matches!(&action.payload, crate::config::ActionPayload::MouseAction(mouse) if matches!(mouse.action,
             crate::config::MouseActionKind::ScrollUp | crate::config::MouseActionKind::ScrollDown
@@ -1083,7 +1087,8 @@ fn count_press(config: &AppConfig, preview: &resolver::ResolvedInputPreview, act
             config::Gesture::DoublePress => "doublePress",
             config::Gesture::TriplePress => "triplePress",
         });
-    crate::press_log::count(&crate::press_log::slot_key(profile, layer, control, gesture), action_id);
+    let slot = crate::press_log::slot_key(profile, layer, control, gesture);
+    crate::press_log::count(place.then_some(slot.as_str()), action_id);
 }
 
 /// Longest the OSD names an action run (`Settings.osdActions`).
@@ -1106,7 +1111,7 @@ pub(crate) fn run_menu_item(
     preview.action_type = Some(action.action_type.as_str().into());
     preview.action_pretty = Some(action.display_name.clone());
     preview.trigger_mode = None;
-    run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), is_fg_elevated);
+    run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), is_fg_elevated, true);
 }
 
 /// Emit the resolved-profile event and, when the active profile changed, show

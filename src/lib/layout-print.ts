@@ -59,7 +59,7 @@ export function layoutHtml(config: AppConfig, made: Date): string {
   }
   const title = i18n.t("print.title");
   return `<!doctype html>
-<html lang="${i18n.language}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<html lang="${escape(i18n.language)}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escape(title)}</title>
 <style>
   :root { --text: #1d2318; --muted: #6a7363; --line: #d9dfd2; --accent: #4f7a1e; --soft: #f3f6ef; }

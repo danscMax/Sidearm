@@ -227,7 +227,7 @@ Rules:
 ### `menu`
 
 - resolve nested items lazily at display time or dispatch time
-- reject cyclic graphs at validation time
+- a menu item that is another menu opens it in place of the current one (links may go both ways; only a link to the same menu is rejected)
 
 ### `disabled`
 

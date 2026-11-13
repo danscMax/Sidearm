@@ -87,14 +87,17 @@ pub(crate) fn slot_key(profile: &str, layer: &str, control: &str, gesture: &str)
     format!("{profile}|{layer}|{control}|{gesture}")
 }
 
-/// Count one action run on one place. Fake mode counts nothing.
-pub(crate) fn count(slot: &str, action_id: &str) {
+/// Count one action run, and the place it was pressed on (`None`: a menu
+/// pick, whose press was counted when the menu opened). Fake mode counts nothing.
+pub(crate) fn count(slot: Option<&str>, action_id: &str) {
     if crate::fake_mode() {
         return;
     }
     let mut pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let day = pending.log.entry(crate::backup::local_date_string()).or_default();
-    *day.slots.entry(slot.to_owned()).or_default() += 1;
+    if let Some(slot) = slot {
+        *day.slots.entry(slot.to_owned()).or_default() += 1;
+    }
     *day.actions.entry(action_id.to_owned()).or_default() += 1;
     if pending.last_flush.is_none_or(|at| at.elapsed() >= FLUSH_EVERY) {
         write_out(&mut pending);

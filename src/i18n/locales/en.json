@@ -850,7 +850,7 @@
     "menuUnpin": "Unpin",
     "menuPinned": "Pinned: shown first in the popup",
     "menuUnpicked": "Not picked for 30 days",
-    "menuUnpickedHint": "Items of this menu nobody picked in the last 30 days on this computer: candidates to remove or move down.",
+    "menuUnpickedHint": "Items of this menu nobody picked in the last 30 days: candidates to remove or move down.",
     "menuUnpickedNone": "Every item was picked in the last 30 days."
   },
   "properties": {

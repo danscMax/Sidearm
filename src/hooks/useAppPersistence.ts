@@ -99,6 +99,7 @@ export function useAppPersistence(
   // Last updateDraft coalesce key — consecutive edits with the same key share one
   // undo step instead of one-per-keystroke (see UpdateDraftOptions.coalesceKey).
   const lastCoalesceKeyRef = useRef<string | null>(null);
+  const configRevisionRef = useRef(0);
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
@@ -182,6 +183,7 @@ export function useAppPersistence(
 
     try {
       const result = await saveConfig(config);
+      configRevisionRef.current += 1;
       lastPersistedConfigRef.current = result.config;
       startTransition(() => {
         setSnapshot({
@@ -208,6 +210,15 @@ export function useAppPersistence(
       // instead of clobbering them. Prevents the concurrent-instance data loss.
       if (normalized.code === "config_changed_on_disk") {
         await refreshConfig();
+        return;
+      }
+      if (normalized.code === "runtime_reload_failed") {
+        // The file was committed before capture failed. Keep that base even
+        // if rereading fails, and never describe this as a save rollback.
+        lastPersistedConfigRef.current = config;
+        setWorkingConfig(config);
+        await refreshConfig();
+        setError((current) => current ?? normalized);
         return;
       }
       const rollbackTarget = lastPersistedConfigRef.current;
@@ -260,6 +271,7 @@ export function useAppPersistence(
   }
 
   async function refreshConfig(): Promise<boolean> {
+    const revision = ++configRevisionRef.current;
     // Cancel any pending auto-save
     clearTimeout(saveTimerRef.current);
     saveQueueRef.current = null;
@@ -269,6 +281,7 @@ export function useAppPersistence(
 
     try {
       const result = await loadConfig();
+      if (revision !== configRevisionRef.current) return false;
       lastPersistedConfigRef.current = result.config;
       // Undo steps belong to the config they were taken on: replaying one onto
       // a reloaded config (restore, import, another instance's write) would
@@ -286,6 +299,7 @@ export function useAppPersistence(
       await writeOnboardMapping(result.config);
       return true;
     } catch (unknownError) {
+      if (revision !== configRevisionRef.current) return false;
       startTransition(() => {
         setError(normalizeCommandError(unknownError));
         setViewState("error");
@@ -300,6 +314,7 @@ export function useAppPersistence(
   ) {
     const current = workingConfig;
     if (!current) return;
+    configRevisionRef.current += 1;
     // "Keep the mice alike": the edit is repeated on the other mouse here, so
     // every editor gets it and undo takes back both.
     const next = mirrorMouseEdit(current, updateConfig(current));
@@ -320,6 +335,8 @@ export function useAppPersistence(
 
   function handleUndo() {
     if (undoStack.length === 0) return;
+    configRevisionRef.current += 1;
+    setViewState("ready");
     lastCoalesceKeyRef.current = null;
     const previous = undoStack[undoStack.length - 1];
     const current = workingConfig;
@@ -333,6 +350,8 @@ export function useAppPersistence(
 
   function handleRedo() {
     if (redoStack.length === 0) return;
+    configRevisionRef.current += 1;
+    setViewState("ready");
     lastCoalesceKeyRef.current = null;
     const next = redoStack[redoStack.length - 1];
     const current = workingConfig;

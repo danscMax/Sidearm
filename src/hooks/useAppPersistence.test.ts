@@ -1,4 +1,4 @@
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import type {
@@ -87,6 +87,7 @@ describe("useAppPersistence", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.useRealTimers();
   });
 
@@ -94,6 +95,55 @@ describe("useAppPersistence", () => {
   // Config loading
   // =========================================================================
   describe("config loading", () => {
+    it("ignores a reload response overtaken by a saved edit", async () => {
+      const result = await renderReady();
+      let resolveLoad!: (response: LoadConfigResponse) => void;
+      mockedLoadConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve; }));
+      let reload!: Promise<boolean>;
+      act(() => { reload = result.current.refreshConfig(); });
+      mockedSaveConfig.mockResolvedValue({ ...saveResponse, config: altConfig });
+      await act(async () => {
+        result.current.updateDraft(() => altConfig, { immediate: true });
+      });
+      await act(async () => {
+        resolveLoad(loadResponse);
+        expect(await reload).toBe(false);
+      });
+      expect(result.current.workingConfig).toEqual(altConfig);
+      expect(result.current.snapshot?.config).toEqual(altConfig);
+      expect(result.current.undoStack).toHaveLength(1);
+      expect(result.current.viewState).toBe("ready");
+    });
+
+    it("accepts only the newest overlapping reload", async () => {
+      const result = await renderReady();
+      let resolveLoad!: (response: LoadConfigResponse) => void;
+      mockedLoadConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve; }));
+      let older!: Promise<boolean>;
+      act(() => { older = result.current.refreshConfig(); });
+      mockedLoadConfig.mockResolvedValue({ ...loadResponse, config: altConfig });
+      await act(async () => { await result.current.refreshConfig(); });
+      await act(async () => {
+        resolveLoad(loadResponse);
+        expect(await older).toBe(false);
+      });
+      expect(result.current.workingConfig).toEqual(altConfig);
+    });
+
+    it("ignores a stale reload failure after a newer reload succeeds", async () => {
+      const result = await renderReady();
+      let rejectLoad!: (error: unknown) => void;
+      mockedLoadConfig.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectLoad = reject; }));
+      let older!: Promise<boolean>;
+      act(() => { older = result.current.refreshConfig(); });
+      await act(async () => { await result.current.refreshConfig(); });
+      await act(async () => {
+        rejectLoad("old failure");
+        await older;
+      });
+      expect(result.current.error).toBeNull();
+      expect(result.current.viewState).toBe("ready");
+    });
     it("initial viewState is 'idle'", () => {
       const { result } = renderHook(() => useAppPersistence());
       expect(result.current.viewState).toBe("idle");
@@ -647,6 +697,52 @@ describe("useAppPersistence", () => {
   // Error handling
   // =========================================================================
   describe("error handling", () => {
+    it("reloads the committed config on runtime_reload_failed without a rollback toast", async () => {
+      const onFailed = vi.fn();
+      const onSaved = vi.fn();
+      mockedLoadConfig.mockResolvedValue(loadResponse);
+      const { result } = renderHook(() => useAppPersistence(onSaved, onFailed));
+      await act(async () => { await result.current.refreshConfig(); });
+      const failure = { code: "runtime_reload_failed", message: "Capture restart failed" };
+      mockedSaveConfig.mockRejectedValue(failure);
+      mockedLoadConfig.mockResolvedValue({ ...loadResponse, config: altConfig });
+      await act(async () => {
+        result.current.updateDraft(() => altConfig, { immediate: true });
+      });
+      expect(mockedLoadConfig).toHaveBeenCalledTimes(2);
+      expect(result.current.workingConfig).toEqual(altConfig);
+      expect(result.current.snapshot?.config).toEqual(altConfig);
+      expect(result.current.error).toEqual(failure);
+      expect(onFailed).not.toHaveBeenCalled();
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+
+    it("keeps the committed draft if the post-commit reload also fails", async () => {
+      const result = await renderReady();
+      mockedSaveConfig.mockRejectedValue({ code: "runtime_reload_failed", message: "Capture restart failed" });
+      mockedLoadConfig.mockRejectedValue({ code: "io_error", message: "Cannot reload" });
+      await act(async () => {
+        result.current.updateDraft(() => altConfig, { immediate: true });
+      });
+      expect(result.current.workingConfig).toEqual(altConfig);
+      expect(result.current.error?.code).toBe("io_error");
+    });
+
+    it("retains the runtime error when a newer edit supersedes its recovery reload", async () => {
+      const result = await renderReady();
+      const failure = { code: "runtime_reload_failed", message: "Capture restart failed" };
+      let resolveLoad!: (response: LoadConfigResponse) => void;
+      mockedSaveConfig.mockRejectedValueOnce(failure);
+      mockedLoadConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve; }));
+      await act(async () => {
+        result.current.updateDraft(() => altConfig, { immediate: true });
+      });
+      const newer = { ...altConfig, profiles: [] };
+      act(() => { result.current.updateDraft(() => newer); });
+      await act(async () => { resolveLoad({ ...loadResponse, config: altConfig }); });
+      expect(result.current.workingConfig).toEqual(newer);
+      expect(result.current.error).toEqual(failure);
+    });
     it("sets error on load failure", async () => {
       mockedLoadConfig.mockRejectedValue({
         code: "io_error",

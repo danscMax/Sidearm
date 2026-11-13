@@ -1,8 +1,9 @@
 import type React from "react";
-import { renderHook, act } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { useEffect, useRef, useState } from "react";
+import { renderHook, act, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-import type { AppConfig, CommandError } from "../lib/config";
+import type { AppConfig, CommandError, ControlId } from "../lib/config";
 import type {
   EncodedKeyEvent,
   ResolvedInputPreview,
@@ -86,13 +87,13 @@ const testConfig: AppConfig = {
   snippetLibrary: [],
 } as AppConfig;
 
-const encodedKeyEvent: EncodedKeyEvent = {
+const encodedKeyEvent = (): EncodedKeyEvent => ({
   encodedKey: "F13",
   backend: "windows-hotkey",
-  receivedAt: Date.now() + 1000,
+  receivedAt: Date.now(),
   isRepeat: false,
   isKeyUp: false,
-};
+});
 
 const resolutionPreview: ResolvedInputPreview = {
   status: "resolved",
@@ -113,6 +114,7 @@ function makeDeps(overrides: Record<string, unknown> = {}) {
   return {
     activeConfig: testConfig,
     effectiveProfileId: "p1",
+    effectiveDeviceId: "razer-naga",
     selectedLayer: "standard" as const,
     selectedControlId: "thumb_01" as const,
     setSelectedLayer: vi.fn(),
@@ -154,6 +156,51 @@ async function renderWithSession(overrides: Record<string, unknown> = {}) {
 describe("useVerification", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  it("captures a fresh event even when the worker clock advances before session start", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 10_000);
+    const { result } = await renderWithSession();
+    act(() => { result.current.onEncodedKeyEvent(encodedKeyEvent()); });
+    expect(result.current.currentVerificationStep?.observedEncodedKey).toBe("F13");
+  });
+
+  it("settles on the selected device while a verification step belongs to another device", async () => {
+    const config = {
+      ...testConfig,
+      physicalControls: testConfig.physicalControls.map((control, i) => ({
+        ...control, deviceId: i === 0 ? "razer-naga" : "other-mouse",
+      })),
+    };
+    const { result } = renderHook(() => {
+      const [device, setDevice] = useState("razer-naga");
+      const [control, setControl] = useState<ControlId | null>("thumb_01");
+      const updates = useRef(0);
+      const setSelectedControlId: React.Dispatch<React.SetStateAction<ControlId | null>> = (next) => {
+        updates.current += 1;
+        if (updates.current < 10) setControl(next);
+      };
+      // The App selection invariant must agree with verification's effect.
+      useEffect(() => {
+        if (!config.physicalControls.some((c) => c.id === control && c.deviceId === device)) {
+          setSelectedControlId(config.physicalControls.find((c) => c.deviceId === device)?.id ?? null);
+        }
+      }, [device, control]);
+      const verification = useVerification(makeDeps({
+        activeConfig: config, effectiveDeviceId: device, selectedControlId: control, setSelectedControlId,
+      }));
+      return { ...verification, device, control, setDevice, updates };
+    });
+    await act(async () => { await result.current.handleStartVerificationSession(); });
+    act(() => { result.current.setDevice("other-mouse"); });
+    expect(result.current.updates.current).toBeLessThan(10);
+    expect(result.current.control).toBe("thumb_02");
+    expect(result.current.currentVerificationStep?.controlId).toBe("thumb_01");
   });
 
   // =========================================================================
@@ -268,7 +315,7 @@ describe("useVerification", () => {
 
       // Capture an observation first
       act(() => {
-        result.current.onEncodedKeyEvent(encodedKeyEvent);
+        result.current.onEncodedKeyEvent(encodedKeyEvent());
       });
       expect(
         result.current.verificationSession!.steps[0].observedEncodedKey,
@@ -430,14 +477,15 @@ describe("useVerification", () => {
   describe("event integration", () => {
     it("onEncodedKeyEvent captures observation on active step", async () => {
       const { result } = await renderWithSession();
+      const event = encodedKeyEvent();
 
       act(() => {
-        result.current.onEncodedKeyEvent(encodedKeyEvent);
+        result.current.onEncodedKeyEvent(event);
       });
 
       const step = result.current.verificationSession!.steps[0];
       expect(step.observedEncodedKey).toBe("F13");
-      expect(step.observedAt).toBe(encodedKeyEvent.receivedAt);
+      expect(step.observedAt).toBe(event.receivedAt);
       expect(step.observedBackend).toBe("windows-hotkey");
     });
 
@@ -445,7 +493,7 @@ describe("useVerification", () => {
       const { result } = renderVerification();
 
       act(() => {
-        result.current.onEncodedKeyEvent(encodedKeyEvent);
+        result.current.onEncodedKeyEvent(encodedKeyEvent());
       });
 
       expect(result.current.verificationSession).toBeNull();
@@ -457,7 +505,7 @@ describe("useVerification", () => {
       // Audit F014: a resolution is only attributed to the step it correlates
       // with, so the step must have observed the matching key-down first.
       act(() => {
-        result.current.onEncodedKeyEvent(encodedKeyEvent);
+        result.current.onEncodedKeyEvent(encodedKeyEvent());
       });
       act(() => {
         result.current.onControlResolutionEvent(resolutionPreview);
@@ -475,7 +523,7 @@ describe("useVerification", () => {
       const { result } = await renderWithSession();
 
       act(() => {
-        result.current.onEncodedKeyEvent(encodedKeyEvent); // observes "F13"
+        result.current.onEncodedKeyEvent(encodedKeyEvent()); // observes "F13"
       });
       act(() => {
         result.current.onControlResolutionEvent({
@@ -552,7 +600,7 @@ describe("useVerification", () => {
 
       // Capture observation matching the expected key
       act(() => {
-        result.current.onEncodedKeyEvent(encodedKeyEvent);
+        result.current.onEncodedKeyEvent(encodedKeyEvent());
       });
 
       expect(result.current.suggestedSessionResult).toBe("matched");

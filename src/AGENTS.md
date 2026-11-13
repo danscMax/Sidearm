@@ -17,6 +17,8 @@ The React 19 + TypeScript UI. Renders the mouse visualization, action editors, p
 - Every user-facing string is an i18next key present in both locales (see `i18n/AGENTS.md`).
 - Backend calls go through `lib/backend.ts` wrappers, never raw `invoke`. Surface failures via `setError`/`showToast`; never swallow a user-relevant error. `setError` opens `ErrorModal` whenever an error is set (not only on a failed config load).
 - Razer takeover events are owned by the consolidated `SynapseNotice` card, not separate root toasts; preserve its unchecked-by-default startup opt-in and explicit physical verification step.
+- Root event effects release registrations that resolve after cleanup; deferred mouse-status visibility callbacks and snapshots must also stop after cleanup.
+- Root workspace shortcuts are blocked while the presets dialog is open. Stored Undo-toast actions invoke the current redo handler.
 
 ## Work Guidance
 

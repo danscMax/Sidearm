@@ -83,7 +83,7 @@
       if (item.enabled && (item.submenu || item.detail)) {
         row.addEventListener("contextmenu", function (event) {
           event.preventDefault();
-          showModes(index, event, item.submenu);
+          showModes(index, event, !item.text);
         });
       }
       rows.appendChild(row);
@@ -112,7 +112,7 @@
         // The same right-click choices as on a row of the list.
         entry.addEventListener("contextmenu", function (event) {
           event.preventDefault();
-          showModes(index, event, false, child);
+          showModes(index, event, !(item.textChildren && item.textChildren[child]), child);
         });
         tip.appendChild(entry);
       });
@@ -184,7 +184,10 @@
     if (index === highlight) return;
     if (items[highlight]) items[highlight].classList.remove("item--on");
     highlight = index;
-    if (items[index]) items[index].classList.add("item--on");
+    if (items[index]) {
+      items[index].classList.add("item--on");
+      items[index].scrollIntoView({ block: "nearest" });
+    }
     showTip(index);
   }
 
@@ -192,8 +195,13 @@
   // content or the scale changes (a new window moved onto another monitor).
   function layout() {
     if (!view) return;
-    var box = root.getBoundingClientRect();
     var dpr = window.devicePixelRatio || 1;
+    root.style.setProperty("--menu-max-height", view.maxHeight / dpr + "px");
+    if (items[highlight]) {
+      items[highlight].scrollIntoView({ block: "nearest" });
+      showTip(highlight);
+    }
+    var box = root.getBoundingClientRect();
     var size = { generation: view.generation, width: Math.ceil(box.width * dpr), height: Math.ceil(box.height * dpr) };
     var key = JSON.stringify(size);
     if (key !== lastLayout) {
@@ -210,9 +218,10 @@
       search.placeholder = view.placeholder;
     }
     if (search.value !== view.query) search.value = view.query;
-    var key = view.generation + "|" + view.title + "|" + view.query + "|" + view.items.length;
+    var key = JSON.stringify([view.generation, view.title, view.parent, view.query, view.items]);
     if (key !== levelKey) {
       levelKey = key;
+      hideModes();
       buildRows();
       layout();
     }

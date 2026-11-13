@@ -72,6 +72,8 @@ pub(crate) struct Model {
     query: String,
     /// What each action sends, by action id (see [`action_detail`]).
     details: HashMap<String, String>,
+    /// Actions with text that Copy and Enter can use (a shortcut also has a detail).
+    text_actions: HashSet<String>,
     /// The other menus (action id, name, items): a search also looks there.
     others: Vec<(String, String, Vec<MenuItem>)>,
     /// Ids of menu actions: a link to another menu is no search result there.
@@ -98,9 +100,11 @@ pub(crate) struct ViewItem {
     /// What it sends (text, keys).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    pub text: bool,
     /// For a submenu: the names of what it holds, drawn as a list in the tip.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
+    pub text_children: Vec<bool>,
     /// The block heading it sits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -124,6 +128,8 @@ pub(crate) struct View {
     pub pick_modes: Vec<String>,
     /// Bumps on every open, so the page knows a fresh popup needs a layout.
     pub generation: u64,
+    /// Available physical height on the opening cursor's monitor, excluding the taskbar.
+    pub max_height: u32,
 }
 
 fn item_enabled(item: &MenuItem) -> bool {
@@ -150,6 +156,7 @@ impl Model {
             highlight: 0,
             query: String::new(),
             details,
+            text_actions: HashSet::new(),
             others: Vec::new(),
             menu_ids: HashSet::new(),
         };
@@ -405,14 +412,21 @@ impl Model {
                     submenu: matches!(entry.item, MenuItem::Submenu { .. }),
                     enabled: item_enabled(entry.item),
                     detail: match entry.item {
-                        MenuItem::Action { action_id, .. } => self.details.get(action_id).cloned(),
+                        MenuItem::Action { action_id, .. } => self.details.get(action_id).map(|text| clip(text)),
                         MenuItem::Submenu { .. } => None,
                     },
+                    text: matches!(entry.item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id)),
                     // The rows its level shows (pinned ones live in the ★ block).
                     children: match entry.item {
                         MenuItem::Submenu { items, .. } => {
                             items.iter().filter(|item| !item_pinned(item)).map(|item| item_label(item).to_owned()).collect()
                         }
+                        MenuItem::Action { .. } => Vec::new(),
+                    },
+                    text_children: match entry.item {
+                        MenuItem::Submenu { items, .. } => items.iter().filter(|item| !item_pinned(item)).map(|item| {
+                            matches!(item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id))
+                        }).collect(),
                         MenuItem::Action { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
@@ -424,6 +438,7 @@ impl Model {
             empty: String::new(),
             pick_modes: Vec::new(),
             generation,
+            max_height: u32::MAX,
         }
     }
 }
@@ -464,7 +479,7 @@ pub(crate) fn action_detail(config: &AppConfig, action: &Action) -> Option<Strin
         }
         _ => return None,
     };
-    (!text.trim().is_empty()).then(|| clip(&text))
+    (!text.trim().is_empty()).then(|| text.trim().to_owned())
 }
 
 /// The input a press of `control_id` means while the menu is open.
@@ -505,6 +520,7 @@ struct OpenMenu {
     target_window: isize,
     /// The popup's physical anchor (the cursor at open).
     anchor: (i32, i32),
+    max_height: u32,
 }
 
 static OPEN: Mutex<Option<OpenMenu>> = Mutex::new(None);
@@ -548,8 +564,14 @@ pub(crate) fn open(
     let mut all_items = payload.items.clone();
     all_items.extend(others.iter().flat_map(|(_, _, items)| items.iter().cloned()));
     let menu_ids = menus.iter().map(|(action, _)| action.id.clone()).collect();
+    let mut model = Model::new(payload.items.clone(), menu_details(config, &all_items)).with_others(others, menu_ids);
+    model.text_actions = config.actions.iter().filter(|action| full_text(config, &action.id).is_some()).map(|action| action.id.clone()).collect();
+    let anchor = platform::cursor_position();
+    let max_height = app.monitor_from_point(f64::from(anchor.0), f64::from(anchor.1)).ok().flatten()
+        .or_else(|| app.primary_monitor().ok().flatten())
+        .map_or(600, |monitor| monitor.work_area().size.height);
     let menu = OpenMenu {
-        model: Model::new(payload.items.clone(), menu_details(config, &all_items)).with_others(others, menu_ids),
+        model,
         title: title.to_owned(),
         generation,
         opener_control: preview.control_id.clone(),
@@ -558,7 +580,8 @@ pub(crate) fn open(
         runtime_store: runtime_store.clone(),
         is_fg_elevated,
         target_window: platform::foreground_window(),
-        anchor: platform::cursor_position(),
+        anchor,
+        max_height,
     };
     let view = view_of(&menu);
     let anchor = menu.anchor;
@@ -575,6 +598,7 @@ pub(crate) fn open(
 /// The open menu's [`View`], with the page's texts in the UI language.
 fn view_of(menu: &OpenMenu) -> View {
     let mut view = menu.model.view(&menu.title, menu.generation);
+    view.max_height = menu.max_height;
     view.placeholder = crate::ui_text::native(&crate::ui_text!("menu.searchPlaceholder", "Search phrases…"));
     view.empty = crate::ui_text::native(&crate::ui_text!("menu.noResults", "Nothing found"));
     view.pick_modes = vec![
@@ -715,6 +739,27 @@ fn full_text(config: &AppConfig, action_id: &str) -> Option<String> {
     }
 }
 
+fn copy_pick(config: &AppConfig, action_id: &str, mode: PickMode, copy: impl FnOnce(String)) -> bool {
+    if mode != PickMode::Copy {
+        return false;
+    }
+    match full_text(config, action_id) {
+        Some(text) => copy(text),
+        None => log::warn!("[menu] Copy skipped: `{action_id}` has no text"),
+    }
+    true
+}
+
+fn finish_pick(mode: PickMode, succeeded: bool, enter: impl FnOnce()) {
+    if mode == PickMode::Enter && succeeded {
+        enter();
+    }
+}
+
+fn layout_height(height: f64, max_height: u32) -> u32 {
+    height.ceil().max(1.0).min(f64::from(max_height.max(1))) as u32
+}
+
 /// Feed one input; redraw, run or close as the model says.
 fn drive(app: &AppHandle, input: impl FnOnce(&mut Model) -> Step) {
     drive_as(app, PickMode::Run, input);
@@ -743,9 +788,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
             platform::restore_foreground(menu.target_window);
             log::info!("[menu] picked `{action_id}` ({mode:?})");
             crate::menu_usage::count(&action_id);
-            if mode == PickMode::Copy
-                && let Some(text) = full_text(&menu.config, &action_id)
-            {
+            if copy_pick(&menu.config, &action_id, mode, |text| {
                 crate::press_log::count(None, &action_id);
                 // What it would type: tokens filled in, the {cursor} marker gone.
                 let text = crate::input_synthesis::expand_snippet_tokens(&text).0;
@@ -754,8 +797,10 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
                 {
                     log::warn!("[menu] could not copy `{action_id}`: {error}");
                 }
+            }) {
                 return;
             }
+            let target_window = menu.target_window;
             crate::capture_backend::run_menu_item(
                 app,
                 &menu.runtime_store,
@@ -763,17 +808,19 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
                 &menu.preview,
                 &action_id,
                 menu.is_fg_elevated,
+                move |succeeded| finish_pick(mode, succeeded, || {
+                    if !crate::fake_mode() {
+                        // The same pause a phrase with Enter keeps before it.
+                        std::thread::sleep(std::time::Duration::from_millis(80));
+                        // Not into another window that came up meanwhile: it would submit there.
+                        if target_window == 0 || platform::foreground_window() == target_window {
+                            let _ = crate::input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default());
+                        } else {
+                            log::warn!("[menu] Enter skipped: the window in front changed while the text was typed");
+                        }
+                    }
+                }),
             );
-            if mode == PickMode::Enter && !crate::fake_mode() {
-                // The same pause a phrase with Enter keeps before it.
-                std::thread::sleep(std::time::Duration::from_millis(80));
-                // Not into another window that came up meanwhile: it would submit there.
-                if menu.target_window == 0 || platform::foreground_window() == menu.target_window {
-                    let _ = crate::input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default());
-                } else {
-                    log::warn!("[menu] Enter skipped: the window in front changed while the text was typed");
-                }
-            }
         }
     }
 }
@@ -889,13 +936,13 @@ pub(crate) fn page_ready(app: &AppHandle) {
     }
 }
 
-/// The page measured itself (CSS pixels): size it and put it at the cursor.
+/// The page measured itself in physical pixels: size it and put it at the cursor.
 /// Once per level: the page keeps its size while the highlight moves.
 pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: f64) {
-    let anchor = {
+    let (anchor, max_height) = {
         let guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
         match guard.as_ref() {
-            Some(menu) if menu.generation == generation => menu.anchor,
+            Some(menu) if menu.generation == generation => (menu.anchor, menu.max_height),
             _ => return, // A late layout of a menu already closed.
         }
     };
@@ -926,7 +973,7 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
         return;
     }
     SHOWN.store(generation, Ordering::Release);
-    let (w, h) = (width.ceil() as i32, height.ceil() as i32);
+    let (w, h) = (width.ceil() as i32, layout_height(height, max_height) as i32);
     let (x, y) = platform::position_near(anchor, w, h, (6.0 * scale).round() as i32);
     // Position first so a cross-monitor DPI change settles before sizing (see `show_osd`).
     let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
@@ -1310,7 +1357,7 @@ mod tests {
             paste_mode: PasteMode::SendText,
             tags: Vec::new(),
         }));
-        assert_eq!(action_detail(&config, &long).map(|text| text.chars().count()), Some(DETAIL_CHARS + 1), "clipped with …");
+        assert_eq!(action_detail(&config, &long).map(|text| clip(&text).chars().count()), Some(DETAIL_CHARS + 1), "clipped with …");
     }
 
     #[test]
@@ -1320,5 +1367,69 @@ mod tests {
         assert_eq!(view.items[0].number, Some(1));
         assert_eq!(view.items[11].number, Some(12));
         assert_eq!(view.items[12].number, Some(13), "numbered on, past the side buttons too");
+    }
+
+    #[test]
+    fn copy_of_non_text_never_falls_through_to_execution() {
+        let mut config = crate::config::default_seed_config();
+        let mut action = config.actions[0].clone();
+        action.id = "no-text".into();
+        for payload in [
+            ActionPayload::Shortcut(crate::config::ShortcutActionPayload { key: "W".into(), ctrl: true, shift: false, alt: false, win: false, raw: None }),
+            ActionPayload::Sequence(crate::config::SequenceActionPayload { steps: vec![SequenceStep::Send { value: "Enter".into(), delay_ms: None, repeat: None }] }),
+        ] {
+            action.payload = payload;
+            config.actions.push(action.clone());
+            let mut ran = false;
+            if !copy_pick(&config, &action.id, PickMode::Copy, |_| panic!("no text to copy")) { ran = true; }
+            assert!(!ran, "Copy must consume the pick even without text");
+            config.actions.pop();
+        }
+        assert!(copy_pick(&config, "missing-action", PickMode::Copy, |_| panic!("missing action")));
+    }
+
+    #[test]
+    fn extra_enter_requires_successful_execution() {
+        let mut enters = 0;
+        finish_pick(PickMode::Enter, false, || enters += 1);
+        assert_eq!(enters, 0, "failure before text must not submit existing input");
+        finish_pick(PickMode::Enter, true, || enters += 1);
+        assert_eq!(enters, 1);
+        finish_pick(PickMode::Run, true, || enters += 1);
+        finish_pick(PickMode::Copy, true, || enters += 1);
+        assert_eq!(enters, 1);
+    }
+
+    #[test]
+    fn popup_height_is_bounded_by_the_physical_work_area() {
+        assert_eq!(layout_height(2200.0, 1040), 1040);
+        assert_eq!(layout_height(4950.0, 1040), 1040, "225 percent DPI");
+        assert_eq!(layout_height(500.2, 1040), 501);
+        assert_eq!(layout_height(-10.0, 1040), 1);
+    }
+
+    #[test]
+    fn search_finds_text_beyond_the_preview_for_all_text_sources() {
+        use crate::config::{PasteMode, SequenceActionPayload, SnippetLibraryItem};
+        let mut config = crate::config::default_seed_config();
+        let text = format!("{}suffix-needle", "я".repeat(650));
+        config.snippet_library.push(SnippetLibraryItem { id: "long-lib".into(), name: "Library".into(), text: text.clone(), paste_mode: PasteMode::SendText, tags: Vec::new(), notes: None });
+        for (index, payload) in [
+            ActionPayload::TextSnippet(TextSnippetPayload::Inline { text: text.clone(), paste_mode: PasteMode::SendText, tags: Vec::new() }),
+            ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id: "long-lib".into() }),
+            ActionPayload::Sequence(SequenceActionPayload { steps: vec![SequenceStep::Text { value: text.clone(), delay_ms: None, repeat: None }] }),
+        ].into_iter().enumerate() {
+            let id = format!("act-long-{index}");
+            let mut action = config.actions[0].clone();
+            action.id = id;
+            action.payload = payload;
+            config.actions.push(action);
+        }
+        let items: Vec<_> = (0..3).map(|i| action(&format!("long-{i}"), "Neutral")).collect();
+        let mut model = Model::new(items.clone(), menu_details(&config, &items));
+        model.set_query("suffix-needle");
+        let view = model.view("Menu", 1);
+        assert_eq!(view.items.len(), 3);
+        assert!(view.items.iter().all(|item| item.detail.as_ref().is_some_and(|text| text.chars().count() == DETAIL_CHARS + 1)));
     }
 }

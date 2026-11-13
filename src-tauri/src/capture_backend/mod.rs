@@ -1209,17 +1209,73 @@ pub(crate) fn run_menu_item(
     menu_press: &resolver::ResolvedInputPreview,
     action_id: &str,
     is_fg_elevated: bool,
+    completed: impl FnOnce(bool) + Send + 'static,
 ) {
     let Some(action) = config.actions.iter().find(|action| action.id == action_id) else {
         log::warn!("[menu] item action `{action_id}` no longer exists");
+        completed(false);
         return;
     };
+    let is_sequence = matches!(action.payload, config::ActionPayload::Sequence(_));
+    let (app, store, config, menu_press, action) = (app.clone(), runtime_store.clone(), config.clone(), menu_press.clone(), action.clone());
+    let queued = executor::live_sequence_generation();
+    let run = move || {
+        if is_sequence && executor::live_sequence_generation() != queued {
+            log::info!("[menu] Queued item `{}` cancelled before it started", action.id);
+            completed(false);
+            return;
+        }
+        // The popup has returned focus; recheck the selected action, retaining the opening profile/control/layer.
+        let context = if action.conditions.is_empty() { None } else {
+            window_capture::capture_active_window_with_resolution(&config, "Sidearm", None).ok()
+        };
+        let preview = menu_item_preview(&menu_press, &action, context.as_ref().map(|window| (window.exe.as_str(), window.title.as_str())));
+        if preview.status != resolver::ResolutionStatus::Resolved {
+            flush_log_entries(&store, vec![("resolution", crate::ui_text!(
+                "capture.signalConditionUnmet", "Signal `{key}` resolved, but the action's conditions are not met: {reason}",
+                key = &preview.encoded_key, reason = &action.display_name
+            ), false)]);
+            completed(false);
+            return;
+        }
+        if matches!(action.payload, config::ActionPayload::Menu(_)) {
+            run_fire_and_forget(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true);
+            completed(false); // Opening another menu has not inserted text.
+            return;
+        }
+        log::info!(
+            "[capture] Dispatching action for {} (control {}, layer {})",
+            preview.encoded_key,
+            preview.control_id.as_deref().unwrap_or("?"),
+            preview.layer.as_deref().unwrap_or("?")
+        );
+        let executed = if crate::fake_mode() {
+            executor::execute_preview_action(&config, &preview)
+        } else {
+            executor::run_preview_action(&config, &preview)
+        };
+        let succeeded = executed.is_ok();
+        report_execution(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true, executed);
+        completed(succeeded);
+    };
+    if is_sequence && !crate::fake_mode() {
+        submit_sequence(Box::new(run));
+    } else {
+        run();
+    }
+}
+
+fn menu_item_preview(menu_press: &resolver::ResolvedInputPreview, action: &config::Action, context: Option<(&str, &str)>) -> resolver::ResolvedInputPreview {
     let mut preview = menu_press.clone();
     preview.action_id = Some(action.id.clone());
     preview.action_type = Some(action.action_type.as_str().into());
     preview.action_pretty = Some(action.display_name.clone());
     preview.trigger_mode = None;
-    run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), is_fg_elevated, true);
+    if !action.conditions.is_empty() && !context.is_some_and(|(exe, title)| executor::evaluate_conditions(&action.conditions, exe, title)) {
+        preview.status = resolver::ResolutionStatus::ConditionUnmet;
+        preview.reason = action.display_name.clone();
+    }
+    preview
 }
 
 /// Emit the resolved-profile event and, when the active profile changed, show
@@ -1338,6 +1394,26 @@ fn emit_runtime_error(
 mod dispatch_regression_tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn menu_item_checks_its_own_exe_and_title_conditions() {
+        let config = config::default_seed_config();
+        let key = &config.encoder_mappings[0].encoded_key;
+        let press = resolver::resolve_input_preview(&config, key, "notepad.exe", "Notes", None);
+        let mut action = config.actions[0].clone();
+        action.conditions = vec![config::ActionCondition::ExeEquals { value: "excel.exe".into() }, config::ActionCondition::WindowTitleContains { value: "Budget".into() }];
+        for context in [None, Some(("notepad.exe", "Budget")), Some(("excel.exe", "Notes"))] {
+            let preview = menu_item_preview(&press, &action, context);
+            assert_eq!(preview.status, resolver::ResolutionStatus::ConditionUnmet);
+            assert!(executor::execute_preview_action(&config, &preview).is_err());
+        }
+        let preview = menu_item_preview(&press, &action, Some(("EXCEL.EXE", "Annual Budget")));
+        assert_eq!(preview.status, resolver::ResolutionStatus::Resolved);
+        assert_eq!(preview.control_id, press.control_id);
+        assert_eq!(preview.resolved_profile_id, press.resolved_profile_id);
+        action.conditions.clear();
+        assert_eq!(menu_item_preview(&press, &action, None).status, resolver::ResolutionStatus::Resolved);
+    }
 
     #[test]
     fn capture_mode_cancels_pending_gestures_but_allows_hold_releases() {

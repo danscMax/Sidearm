@@ -4929,14 +4929,14 @@ fn run_foreground_watcher(
         if !WATCH_TITLES.with(Cell::get) {
             return;
         }
-        let old = TITLE_HOOK.with(|hook| hook.replace(0));
-        if old != 0 {
-            unsafe { UnhookWinEvent(old as _) };
-        }
         let mut pid = 0u32;
         unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut pid) };
         if pid == 0 {
-            return;
+            return; // no window in front for a moment: keep the hook there is
+        }
+        let old = TITLE_HOOK.with(|hook| hook.replace(0));
+        if old != 0 {
+            unsafe { UnhookWinEvent(old as _) };
         }
         let hook = unsafe {
             SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, std::ptr::null_mut(), Some(title_callback), pid, 0, 0)
@@ -5045,6 +5045,10 @@ fn run_foreground_watcher(
                     })
                 };
                 if title_only && same_profile() {
+                    // Nothing to tell anyone; the window's new title is still remembered.
+                    if let Ok(mut store) = ctx.runtime_store.lock() {
+                        store.set_last_foreground_window(capture_result.clone());
+                    }
                     return;
                 }
 

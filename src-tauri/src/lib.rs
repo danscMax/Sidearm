@@ -1575,7 +1575,7 @@ async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<Stri
             return Err(CommandError::new("io_error", "No config.json to export — save the app at least once first.", None));
         }
         press_log::flush();
-        let base = format!("Sidearm-layout-{}", backup::today_date_string());
+        let base = format!("Sidearm-layout-{}", backup::local_date_string());
         let folder = (1..100)
             .map(|n| parent.join(if n == 1 { base.clone() } else { format!("{base}-{n}") }))
             .find(|candidate| !candidate.exists())

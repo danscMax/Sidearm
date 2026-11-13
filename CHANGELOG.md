@@ -66,6 +66,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
+- `{date}` in a phrase was the UTC date (yesterday between midnight and the
+  UTC offset); it is the local date now, as are the press log's days.
 - Deleting an item inside a list in the menu editor jumped back to the top
   level; the next item of that list is selected now.
 - The menu editor's list was narrow in a wide dialog; it takes half now, and

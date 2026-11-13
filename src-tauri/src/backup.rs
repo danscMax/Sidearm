@@ -265,6 +265,21 @@ fn entry_meta(path: &Path) -> Option<(u64, u128)> {
     Some((bytes, ms))
 }
 
+/// Today in local time (YYYY-MM-DD): the day the user sees ({date}, the press
+/// log, an export's folder name). Backups keep their UTC stamps.
+pub(crate) fn local_date_string() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let mut time = windows_sys::Win32::Foundation::SYSTEMTIME::default();
+        unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut time) };
+        format!("{:04}-{:02}-{:02}", time.wYear, time.wMonth, time.wDay)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        today_date_string()
+    }
+}
+
 pub(crate) fn today_date_string() -> String {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

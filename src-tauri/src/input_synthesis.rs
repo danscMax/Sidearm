@@ -1281,7 +1281,7 @@ pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
     if !text.contains('{') && !text.contains('}') {
         return (text.to_string(), None);
     }
-    let date = crate::backup::today_date_string();
+    let date = crate::backup::local_date_string();
     // The selection first: copying it must not show up as `{clipboard}`.
     let selection = text.contains("{selection}").then(selection_text_for_token).flatten();
     let clipboard = text.contains("{clipboard}").then(get_clipboard_text_for_token).flatten();
@@ -1291,8 +1291,11 @@ pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
 /// Whether a text holds one of the tokens (a macro's text is typed verbatim
 /// otherwise, `{{` included).
 pub fn has_snippet_token(text: &str) -> bool {
-    ["{date}", "{clipboard}", "{selection}", "{cursor}", "{|}"].iter().any(|token| text.contains(token))
+    SNIPPET_TOKENS.iter().any(|token| text.contains(&format!("{{{token}}}")))
 }
+
+/// Every token `expand_tokens_with` replaces (a test keeps the two in step).
+const SNIPPET_TOKENS: [&str; 5] = ["date", "clipboard", "selection", "cursor", "|"];
 
 #[cfg(test)]
 fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Option<usize>) {
@@ -2911,6 +2914,12 @@ mod tests {
         assert_eq!(expand_tokens_with("[{selection}]", "d", None, None), ("[]".to_string(), None));
         // A macro's text without a token is typed as it is, `{{` included.
         assert!(!has_snippet_token("{{name}} and {json: 1}"));
+        // Every listed token is one the expander replaces (none left verbatim).
+        for token in SNIPPET_TOKENS {
+            let text = format!("[{{{token}}}]");
+            assert!(has_snippet_token(&text));
+            assert!(!expand_tokens_with(&text, "d", Some("c"), Some("s")).0.contains('{'), "{token} is not expanded");
+        }
         assert!(has_snippet_token("at {|} here") && has_snippet_token("{date}"));
     }
 

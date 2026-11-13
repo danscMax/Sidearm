@@ -31,10 +31,9 @@ pub enum NormalizedEvent {
     },
 }
 
-/// Walk normalized macro events, pairing key-down with the next key-up so the
-/// sequence emits discrete `Send` steps (Sidearm's sequence primitive is full
-/// keystrokes, not individual down/up events). Held modifiers are folded into
-/// the emitted key string. Overlapping non-modifier holds cannot be expressed
+/// Emit a discrete `Send` at each non-modifier key-down, using the modifiers
+/// held at that point. Key-up only releases the tracked hold (Sidearm's sequence
+/// primitive is full keystrokes). Overlapping non-modifier holds cannot be expressed
 /// as discrete keystrokes, so they are flattened with a `macro_hold_flattened`
 /// warning.
 pub fn build(
@@ -44,7 +43,7 @@ pub fn build(
 ) -> Vec<ParsedSequenceStep> {
     let mut steps: Vec<ParsedSequenceStep> = Vec::new();
     let mut mods = ModifierFlags::default();
-    let mut pending_down: Option<(u16, bool)> = None;
+    let mut held = std::collections::HashSet::new();
     // Each kind of warning once per macro: an untrusted export with thousands of
     // events (and a long macro name) must not multiply into thousands of copies.
     let mut warned = WarnedKinds::default();
@@ -73,15 +72,9 @@ pub fn build(
                 if is_down {
                     if let Some(canon) = makecode::modifier_canonical(makecode, is_extended) {
                         set_modifier(&mut mods, canon, true);
-                    } else if pending_down.is_none() {
-                        pending_down = Some((makecode, is_extended));
                     } else {
-                        // Overlapping non-modifier downs — emit the first and warn
-                        // that simultaneous holds fire as independent keystrokes.
-                        let (prev_code, prev_ext) = pending_down.take().unwrap();
-                        emit_send(&mut steps, prev_code, prev_ext, mods, macro_name, warnings, &mut warned);
-                        pending_down = Some((makecode, is_extended));
-                        if !std::mem::replace(&mut warned.hold_flattened, true) {
+                        if !held.is_empty() && !std::mem::replace(&mut warned.hold_flattened, true)
+                        {
                             warnings.push(ImportWarning::new(
                                 "macro_hold_flattened",
                                 format!(
@@ -89,19 +82,24 @@ pub fn build(
                                 ),
                             ));
                         }
+                        held.insert((makecode, is_extended));
+                        emit_send(
+                            &mut steps,
+                            makecode,
+                            is_extended,
+                            mods,
+                            macro_name,
+                            warnings,
+                            &mut warned,
+                        );
                     }
                 } else if let Some(canon) = makecode::modifier_canonical(makecode, is_extended) {
                     set_modifier(&mut mods, canon, false);
-                } else if let Some((code, ext)) = pending_down.take() {
-                    emit_send(&mut steps, code, ext, mods, macro_name, warnings, &mut warned);
+                } else {
+                    held.remove(&(makecode, is_extended));
                 }
             }
         }
-    }
-
-    // Emit any pending key if the macro ended with a dangling down.
-    if let Some((code, ext)) = pending_down {
-        emit_send(&mut steps, code, ext, mods, macro_name, warnings, &mut warned);
     }
 
     steps
@@ -162,6 +160,59 @@ mod edge_proptests {
     use super::*;
     use proptest::prelude::*;
 
+    #[test]
+    fn key_down_keeps_its_modifiers_when_ctrl_is_released_first() {
+        let key = |makecode, is_down| NormalizedEvent::Key {
+            makecode,
+            is_extended: false,
+            is_down,
+        };
+        let steps = build(
+            &[
+                key(0x1D, true),
+                key(0x1E, true),
+                key(0x1D, false),
+                key(0x1E, false),
+            ],
+            "m",
+            &mut Vec::new(),
+        );
+        assert_eq!(
+            serde_json::to_value(steps).unwrap(),
+            serde_json::json!([
+                {"kind": "send", "value": "Ctrl+A"}
+            ])
+        );
+    }
+
+    #[test]
+    fn key_down_precedes_its_inter_event_delay() {
+        let key = |makecode, is_down| NormalizedEvent::Key {
+            makecode,
+            is_extended: false,
+            is_down,
+        };
+        let steps = build(
+            &[
+                key(0x1E, true),
+                NormalizedEvent::Delay(100),
+                key(0x1E, false),
+                key(0x30, true),
+                key(0x30, false),
+            ],
+            "m",
+            &mut Vec::new(),
+        );
+        assert_eq!(
+            serde_json::to_value(steps).unwrap(),
+            serde_json::json!([
+                {"kind": "send", "value": "A"},
+                {"kind": "sleep", "delay_ms": 100},
+                {"kind": "send", "value": "B"}
+            ])
+        );
+    }
+
     // -----------------------------------------------------------------------
     // Boundary: empty event list → empty steps
     // -----------------------------------------------------------------------
@@ -216,8 +267,10 @@ mod edge_proptests {
         ];
         let mut w = Vec::new();
         let steps = build(&events, "m", &mut w);
-        // The pending key must be flushed at end-of-stream.
-        assert!(!steps.is_empty(), "dangling down must be flushed");
+        assert!(
+            !steps.is_empty(),
+            "a key-down must be emitted without waiting for key-up"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -386,7 +439,7 @@ mod edge_proptests {
             let _ = build(&events, "prop-test", &mut w);
         }
 
-        // Invariant: output length ≤ number of input events + 1 (pending flush).
+        // Invariant: output length is bounded by the number of input events.
         // Uses parallel vectors to avoid requiring Debug/Clone on NormalizedEvent.
         #[test]
         fn prop_output_bounded_by_input(
@@ -421,8 +474,7 @@ mod edge_proptests {
             let mut w = Vec::new();
             let steps = build(&events, "bound-test", &mut w);
             // Each step is either a Send (from a key event) or a Sleep (from a Delay).
-            // Upper bound: one step per input event + 1 for the pending-down flush.
-            assert!(steps.len() <= n_key + n_delay + 1);
+            assert!(steps.len() <= n_key + n_delay);
         }
     }
 

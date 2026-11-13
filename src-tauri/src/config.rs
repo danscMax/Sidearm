@@ -1476,7 +1476,7 @@ pub fn collect_schema_errors(value: &Value) -> Vec<String> {
     }
 }
 
-fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigStoreError> {
+pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigStoreError> {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 

@@ -6,9 +6,12 @@
 //! GUID — but whose macro lives in the sibling folder — can still be
 //! resolved end-to-end.
 
+use std::io::Read;
 use std::path::Path;
 
-use super::format_v3::{MAX_ENTRY_UNCOMPRESSED, MAX_ZIP_ENTRIES};
+use super::format_v3::{
+    MAX_ENTRY_UNCOMPRESSED, MAX_IMPORTED_MACRO_STEPS, MAX_TOTAL_UNCOMPRESSED, MAX_ZIP_ENTRIES,
+};
 use super::macro_steps::{self, NormalizedEvent};
 use super::types::{ImportWarning, ParsedMacro, ParsedSequenceStep};
 
@@ -18,6 +21,33 @@ const MAX_XML_MACRO_BYTES: u64 = MAX_ENTRY_UNCOMPRESSED;
 /// Maximum number of `.xml` macro files processed from a sibling folder,
 /// reusing the v3 ZIP entry-count limit.
 const MAX_XML_MACRO_FILES: usize = MAX_ZIP_ENTRIES;
+
+/// One budget for every sibling folder read during an enrichment operation.
+pub(super) struct MacroFolderBudget {
+    bytes_left: u64,
+    steps_left: usize,
+    warned: bool,
+}
+
+impl Default for MacroFolderBudget {
+    fn default() -> Self {
+        Self {
+            bytes_left: MAX_TOTAL_UNCOMPRESSED,
+            steps_left: MAX_IMPORTED_MACRO_STEPS,
+            warned: false,
+        }
+    }
+}
+
+impl MacroFolderBudget {
+    pub(super) fn warn_exhausted(&mut self, warnings: &mut Vec<ImportWarning>) {
+        if !std::mem::replace(&mut self.warned, true) {
+            warnings.push(ImportWarning::new("macro_xml_budget_exceeded", crate::ui_text::native(&crate::ui_text!(
+                "synapse.macroFolderBudgetExceeded", "Some sibling XML macros were skipped because the import size limit was reached."
+            ))));
+        }
+    }
+}
 
 /// Collects one element's text across quick-xml events. Since quick-xml 0.38
 /// entity and char references (`&amp;`, `&#x41F;`) arrive as separate
@@ -274,9 +304,10 @@ fn build_steps(
 }
 
 /// Collect all `.xml` macro files under `dir` (one level) into a Vec.
-pub fn parse_macros_in_dir(
+pub(super) fn parse_macros_in_dir(
     dir: &Path,
     warnings: &mut Vec<ImportWarning>,
+    budget: &mut MacroFolderBudget,
 ) -> std::io::Result<Vec<ParsedMacro>> {
     let mut out: Vec<ParsedMacro> = Vec::new();
     if !dir.is_dir() {
@@ -301,6 +332,10 @@ pub fn parse_macros_in_dir(
             != Some(true)
         {
             continue;
+        }
+        if budget.bytes_left == 0 || budget.steps_left == 0 {
+            budget.warn_exhausted(warnings);
+            break;
         }
         xml_seen += 1;
         if xml_seen > MAX_XML_MACRO_FILES {
@@ -331,7 +366,20 @@ pub fn parse_macros_in_dir(
             .and_then(|s| s.to_str())
             .unwrap_or("macro")
             .to_string();
-        let raw = match std::fs::read_to_string(&path) {
+        // Count actual bytes, including invalid UTF-8 and partial failed reads.
+        let limit = MAX_XML_MACRO_BYTES.min(budget.bytes_left);
+        let mut bytes = Vec::new();
+        let read_result = std::fs::File::open(&path)
+            .and_then(|file| file.take(limit + 1).read_to_end(&mut bytes));
+        budget.bytes_left = budget.bytes_left.saturating_sub(bytes.len() as u64);
+        if bytes.len() as u64 > limit {
+            budget.warn_exhausted(warnings);
+            break;
+        }
+        let raw = match read_result.and_then(|_| {
+            String::from_utf8(bytes)
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        }) {
             Ok(r) => r,
             Err(e) => {
                 warnings.push(ImportWarning::new(
@@ -342,7 +390,15 @@ pub fn parse_macros_in_dir(
             }
         };
         match parse_macro_xml_str(&raw, name.clone(), warnings) {
-            Ok(m) => out.push(m),
+            Ok(m) => {
+                let Some(left) = budget.steps_left.checked_sub(m.steps.len()) else {
+                    budget.steps_left = 0;
+                    budget.warn_exhausted(warnings);
+                    break;
+                };
+                budget.steps_left = left;
+                out.push(m);
+            }
             Err(e) => {
                 warnings.push(ImportWarning::new(
                     "macro_xml_parse_failed",
@@ -357,6 +413,70 @@ pub fn parse_macros_in_dir(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_bytes_are_bounded_across_reads_and_directories() {
+        let root = tempfile::tempdir().unwrap();
+        let xml = "<Macro><Guid>m</Guid><MacroEvents><MacroEvent><Type>0</Type><Delay>1</Delay></MacroEvent></MacroEvents></Macro>";
+        let mut budget = MacroFolderBudget {
+            bytes_left: xml.len() as u64 * 2,
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        for index in 0..3 {
+            let dir = root.path().join(index.to_string());
+            std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("macro.xml"), xml).unwrap();
+            let macros = parse_macros_in_dir(&dir, &mut warnings, &mut budget).unwrap();
+            assert_eq!(macros.len(), usize::from(index < 2));
+        }
+        assert_eq!(budget.bytes_left, 0);
+        assert_eq!(
+            warnings
+                .iter()
+                .filter(|w| w.code == "macro_xml_budget_exceeded")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn folder_reader_caps_actual_bytes_and_charges_invalid_utf8() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("bad.xml"), [0xFF; 12]).unwrap();
+        let mut budget = MacroFolderBudget {
+            bytes_left: 10,
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        assert!(
+            parse_macros_in_dir(dir.path(), &mut warnings, &mut budget)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(budget.bytes_left, 0);
+        assert!(
+            warnings
+                .iter()
+                .any(|w| w.code == "macro_xml_budget_exceeded")
+        );
+
+        let mut budget = MacroFolderBudget {
+            bytes_left: 20,
+            ..Default::default()
+        };
+        let mut warnings = Vec::new();
+        assert!(
+            parse_macros_in_dir(dir.path(), &mut warnings, &mut budget)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            budget.bytes_left, 8,
+            "invalid UTF-8 still consumes the byte budget"
+        );
+        assert!(warnings.iter().any(|w| w.code == "macro_xml_io_error"));
+    }
 
     const SCREENSHOT: &str = r#"<Macro>
    <Name>ScreenShot</Name>
@@ -553,7 +673,9 @@ mod tests {
         drop(f);
 
         let mut warnings = Vec::new();
-        let macros = parse_macros_in_dir(dir.path(), &mut warnings).expect("read dir");
+        let macros =
+            parse_macros_in_dir(dir.path(), &mut warnings, &mut MacroFolderBudget::default())
+                .expect("read dir");
 
         // The good macro parsed; the oversized one was skipped, not read.
         assert_eq!(macros.len(), 1, "only the in-budget macro should parse");

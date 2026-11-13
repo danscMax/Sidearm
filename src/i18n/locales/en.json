@@ -1680,6 +1680,8 @@
       "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched."
     },
     "synapse": {
+      "entryReadFailed": "Could not read `{{path}}`: {{error}}",
+      "macroFolderBudgetExceeded": "Some sibling XML macros were skipped because the import size limit was reached.",
       "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",
       "runtimeStopped": "Start Sidearm capture and retry.",
       "unverifiedMouse": "This mouse model is not verified for Sidearm's native setup. Synapse was left running.",

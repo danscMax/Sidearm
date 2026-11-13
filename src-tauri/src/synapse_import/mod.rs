@@ -52,11 +52,19 @@ pub fn parse_synapse_source(path: &Path) -> Result<ParsedSynapseProfiles, Synaps
 
     // Default to v4 JSON for anything else (covers `{`, BOM, whitespace…).
     let mut parsed = parse_synapse_v4_file(path)?;
-    enrich_with_sibling_xml_macros(&mut parsed, path);
+    enrich_with_sibling_xml_macros(
+        &mut parsed,
+        path,
+        format_v3::MAX_TOTAL_UNCOMPRESSED as usize,
+    );
     Ok(parsed)
 }
 
-fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Path) {
+fn enrich_with_sibling_xml_macros(
+    parsed: &mut ParsedSynapseProfiles,
+    path: &Path,
+    macro_byte_budget: usize,
+) {
     let Some(parent) = path.parent() else { return };
     let candidates = [
         parent.join("Макросы"),
@@ -107,13 +115,15 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
         .collect();
 
     // Also bound the copies retained across profiles, including embedded V4 macros.
-    let mut copy_budget = parsed
-        .profiles
-        .iter()
-        .flat_map(|p| &p.macros)
-        .fold(format_v3::MAX_IMPORTED_MACRO_STEPS, |left, m| {
-            left.saturating_sub(m.steps.len())
-        });
+    let (mut copy_budget, mut byte_budget) = parsed.profiles.iter().flat_map(|p| &p.macros).fold(
+        (format_v3::MAX_IMPORTED_MACRO_STEPS, macro_byte_budget),
+        |(steps, bytes), m| {
+            (
+                steps.saturating_sub(m.steps.len()),
+                bytes.saturating_sub(macro_copy_bytes(m)),
+            )
+        },
+    );
     let mut unresolved = std::collections::HashSet::new();
     // For each profile, resolve any bindings that referenced missing macros.
     for profile in &mut parsed.profiles {
@@ -128,12 +138,16 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
         }
         for guid in inject {
             if let Some(m) = by_guid.get(&guid) {
-                let Some(left) = copy_budget.checked_sub(m.steps.len()) else {
+                let Some((steps_left, bytes_left)) = copy_budget
+                    .checked_sub(m.steps.len())
+                    .zip(byte_budget.checked_sub(macro_copy_bytes(m)))
+                else {
                     unresolved.insert(guid);
                     folder_budget.warn_exhausted(&mut extra_warnings);
                     continue;
                 };
-                copy_budget = left;
+                copy_budget = steps_left;
+                byte_budget = bytes_left;
                 profile.macros.push(m.clone());
             }
         }
@@ -146,6 +160,26 @@ fn enrich_with_sibling_xml_macros(parsed: &mut ParsedSynapseProfiles, path: &Pat
         by_guid.keys().filter(|guid| !unresolved.contains(*guid)),
     );
     parsed.warnings.extend(extra_warnings);
+}
+
+/// Count owned macro data before cloning; even a zero-step macro can have a large name.
+fn macro_copy_bytes(m: &ParsedMacro) -> usize {
+    let ParsedMacro {
+        synapse_guid,
+        name,
+        steps,
+    } = m;
+    let bytes = std::mem::size_of::<ParsedMacro>()
+        .saturating_add(synapse_guid.len())
+        .saturating_add(name.len());
+    steps.iter().fold(bytes, |bytes, step| {
+        bytes
+            .saturating_add(std::mem::size_of::<ParsedSequenceStep>())
+            .saturating_add(match step {
+                ParsedSequenceStep::Send { value } => value.len(),
+                ParsedSequenceStep::Sleep { .. } => 0,
+            })
+    })
 }
 
 /// Remove `macro_reference_missing` warnings whose message references one of the
@@ -205,7 +239,11 @@ mod enrich_tests {
                 action: ParsedAction::Sequence { macro_guid: guid },
             });
         }
-        enrich_with_sibling_xml_macros(&mut parsed, &dir.path().join("export.synapse4"));
+        enrich_with_sibling_xml_macros(
+            &mut parsed,
+            &dir.path().join("export.synapse4"),
+            format_v3::MAX_TOTAL_UNCOMPRESSED as usize,
+        );
         let steps: usize = parsed
             .profiles
             .iter()
@@ -255,7 +293,11 @@ mod enrich_tests {
             profiles: vec![profile.clone(), profile],
             warnings: vec![warn("macro_reference_missing", "Macro `m` is missing.")],
         };
-        enrich_with_sibling_xml_macros(&mut parsed, &dir.path().join("export.synapse4"));
+        enrich_with_sibling_xml_macros(
+            &mut parsed,
+            &dir.path().join("export.synapse4"),
+            format_v3::MAX_TOTAL_UNCOMPRESSED as usize,
+        );
         assert_eq!(
             parsed
                 .profiles
@@ -276,6 +318,194 @@ mod enrich_tests {
                 .iter()
                 .any(|w| w.code == "macro_xml_budget_exceeded")
         );
+    }
+
+    #[test]
+    fn sibling_macro_byte_budget_bounds_long_names_with_zero_or_one_step() {
+        for step_count in [0, 1] {
+            let dir = tempfile::tempdir().unwrap();
+            let folder = dir.path().join("Macros");
+            std::fs::create_dir(&folder).unwrap();
+            let name = "Long macro name-".repeat(256);
+            let guid = format!("large-{}", "g".repeat(512));
+            let event = "<MacroEvent><Type>0</Type><Delay>1</Delay></MacroEvent>";
+            std::fs::write(
+                folder.join("large.xml"),
+                format!(
+                    "<Macro><Guid>{guid}</Guid><Name>{name}</Name><MacroEvents>{}</MacroEvents></Macro>",
+                    event.repeat(step_count)
+                ),
+            )
+            .unwrap();
+            std::fs::write(
+                folder.join("good.xml"),
+                "<Macro><Guid>good-macro</Guid><Name>Good</Name></Macro>",
+            )
+            .unwrap();
+            let mut parsed = ParsedSynapseProfiles {
+                source_kind: SourceKind::SynapseV4,
+                source_path: "test".into(),
+                profiles: (0..4)
+                    .map(|index| ParsedProfile {
+                        synapse_guid: format!("p{index}"),
+                        name: format!("P{index}"),
+                        macros: vec![],
+                        bindings: vec![ParsedBinding {
+                            control_id: "thumb_01".into(),
+                            layer: "standard".into(),
+                            source_input_id: String::new(),
+                            label: "Macro".into(),
+                            action: ParsedAction::Sequence {
+                                macro_guid: if index < 3 {
+                                    guid.clone()
+                                } else {
+                                    "good-macro".into()
+                                },
+                            },
+                        }],
+                    })
+                    .collect(),
+                warnings: vec![
+                    warn(
+                        "macro_reference_missing",
+                        &format!("Macro `{guid}` is missing."),
+                    ),
+                    warn("macro_reference_missing", "Macro `good-macro` is missing."),
+                    warn(
+                        "macro_reference_missing",
+                        "Macro `absent-macro` is missing.",
+                    ),
+                ],
+            };
+            let large_bytes = std::mem::size_of::<ParsedMacro>()
+                + name.len()
+                + guid.len()
+                + step_count * std::mem::size_of::<ParsedSequenceStep>();
+            let good_bytes = std::mem::size_of::<ParsedMacro>() + "Good".len() + "good-macro".len();
+            enrich_with_sibling_xml_macros(
+                &mut parsed,
+                &dir.path().join("export.synapse4"),
+                large_bytes + good_bytes,
+            );
+            assert_eq!(
+                parsed
+                    .profiles
+                    .iter()
+                    .map(|p| p.macros.len())
+                    .collect::<Vec<_>>(),
+                [1, 0, 0, 1],
+                "only one long-name copy and the later small macro fit ({step_count} steps)"
+            );
+            assert_eq!(parsed.profiles[0].macros[0].name, name);
+            assert_eq!(parsed.profiles[0].macros[0].steps.len(), step_count);
+            assert_eq!(parsed.profiles[3].macros[0].synapse_guid, "good-macro");
+            assert_eq!(
+                parsed
+                    .warnings
+                    .iter()
+                    .filter(|w| w.code == "macro_xml_budget_exceeded")
+                    .count(),
+                1
+            );
+            let missing: Vec<_> = parsed
+                .warnings
+                .iter()
+                .filter(|w| w.code == "macro_reference_missing")
+                .map(|w| w.message.as_str())
+                .collect();
+            assert_eq!(
+                missing,
+                [
+                    format!("Macro `{guid}` is missing."),
+                    "Macro `absent-macro` is missing.".into()
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn sibling_macro_byte_budget_counts_embedded_strings_and_send_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("Macros");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(
+            folder.join("sibling.xml"),
+            "<Macro><Guid>sibling</Guid><Name>Sibling</Name><MacroEvents><MacroEvent><Type>0</Type><Delay>1</Delay></MacroEvent></MacroEvents></Macro>",
+        )
+        .unwrap();
+        let embedded = ParsedMacro {
+            synapse_guid: format!("embedded-{}", "g".repeat(512)),
+            name: "Embedded ".repeat(128),
+            steps: vec![ParsedSequenceStep::Send {
+                value: "Ctrl+".repeat(128),
+            }],
+        };
+        let embedded_bytes = std::mem::size_of::<ParsedMacro>()
+            + embedded.synapse_guid.len()
+            + embedded.name.len()
+            + std::mem::size_of::<ParsedSequenceStep>()
+            + "Ctrl+".len() * 128;
+        let sibling_bytes = std::mem::size_of::<ParsedMacro>()
+            + "sibling".len()
+            + "Sibling".len()
+            + std::mem::size_of::<ParsedSequenceStep>();
+        for (budget, fits) in [
+            (embedded_bytes - 1, false),
+            (embedded_bytes + sibling_bytes - 1, false),
+            (embedded_bytes + sibling_bytes, true),
+        ] {
+            let mut parsed = ParsedSynapseProfiles {
+                source_kind: SourceKind::SynapseV4,
+                source_path: "test".into(),
+                profiles: vec![ParsedProfile {
+                    synapse_guid: "p".into(),
+                    name: "P".into(),
+                    macros: vec![embedded.clone()],
+                    bindings: vec![ParsedBinding {
+                        control_id: "thumb_01".into(),
+                        layer: "standard".into(),
+                        source_input_id: String::new(),
+                        label: "Macro".into(),
+                        action: ParsedAction::Sequence {
+                            macro_guid: "sibling".into(),
+                        },
+                    }],
+                }],
+                warnings: vec![warn(
+                    "macro_reference_missing",
+                    "Macro `sibling` is missing.",
+                )],
+            };
+            enrich_with_sibling_xml_macros(
+                &mut parsed,
+                &dir.path().join("export.synapse4"),
+                budget,
+            );
+            assert_eq!(
+                parsed.profiles[0].macros.len(),
+                1 + usize::from(fits),
+                "budget {budget}"
+            );
+            assert_eq!(parsed.profiles[0].macros[0].name, embedded.name);
+            assert_eq!(
+                serde_json::to_value(&parsed.profiles[0].macros[0]).unwrap(),
+                serde_json::to_value(&embedded).unwrap()
+            );
+            assert_eq!(
+                parsed
+                    .warnings
+                    .iter()
+                    .any(|w| w.code == "macro_xml_budget_exceeded"),
+                !fits
+            );
+            assert_eq!(
+                parsed
+                    .warnings
+                    .iter()
+                    .any(|w| w.code == "macro_reference_missing"),
+                !fits
+            );
+        }
     }
 
     fn warn(code: &str, message: &str) -> ImportWarning {

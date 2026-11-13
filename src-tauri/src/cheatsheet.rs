@@ -34,11 +34,6 @@ impl SheetLifecycle {
         self.generation
     }
 
-    pub(crate) fn cancel(&mut self, hide: impl FnOnce()) {
-        self.begin();
-        hide();
-    }
-
     pub(crate) fn draw(&mut self, generation: u64, show: impl FnOnce()) {
         if self.generation == generation {
             self.drawn = Some(generation);
@@ -46,9 +41,21 @@ impl SheetLifecycle {
         }
     }
 
+    /// The current hold's sheet is drawn: the window may be up.
+    fn showing(&self) -> bool {
+        self.drawn == Some(self.generation)
+    }
+
     pub(crate) fn layout(&self, show: impl FnOnce()) {
-        if self.drawn == Some(self.generation) {
+        if self.showing() {
             show();
+        }
+    }
+
+    /// The hide a cancel queued: skipped when a newer hold drew its sheet meanwhile.
+    pub(crate) fn settle_hidden(&self, hide: impl FnOnce()) {
+        if !self.showing() {
+            hide();
         }
     }
 }
@@ -132,7 +139,13 @@ pub(crate) fn trigger_held(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeSto
 
 /// A button was pressed while the trigger is held: the sheet goes (or never comes).
 pub(crate) fn cancel(app: &AppHandle) {
-    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancel(|| hide(app));
+    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).begin();
+    // A window call off the main thread waits for it, and `page_layout` (a sync
+    // command, on the main thread) waits for the lock: hide there, never under the lock.
+    let handle = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).settle_hidden(|| hide(&handle));
+    });
 }
 
 fn show(app: &AppHandle, generation: u64, sheet: Sheet) {
@@ -253,8 +266,9 @@ mod tests {
         lifecycle.layout(|| visible.set(true));
         assert!(visible.get());
         lifecycle.pending = Some((old_timer, Sheet { title: String::new(), cells: Vec::new() }));
-        // The same cancellation used by CaptureBackendHandle::stop, with only the window sink replaced.
-        lifecycle.cancel(|| visible.set(false));
+        // The same steps `cancel` takes: the state now, the hide later on the main thread.
+        lifecycle.begin();
+        lifecycle.settle_hidden(|| visible.set(false));
         assert!(!visible.get());
         assert!(lifecycle.pending.is_none());
         lifecycle.draw(old_timer, || panic!("late timer emitted a stale sheet"));
@@ -263,6 +277,17 @@ mod tests {
         lifecycle.draw(fresh, || {});
         lifecycle.layout(|| visible.set(true));
         assert!(visible.get(), "a subsequent capture session can still show its sheet");
+    }
+
+    #[test]
+    fn a_queued_hide_spares_a_newer_drawn_sheet() {
+        let mut lifecycle = SheetLifecycle::default();
+        let old = lifecycle.begin();
+        lifecycle.draw(old, || {});
+        lifecycle.begin(); // cancel: its hide waits for the main thread
+        let fresh = lifecycle.begin();
+        lifecycle.draw(fresh, || {});
+        lifecycle.settle_hidden(|| panic!("the stale hide took the new hold's sheet"));
     }
 
     #[test]

@@ -5423,7 +5423,10 @@ mod helper_modifier_state_tests {
                 sheet.draw(timer, || {});
                 sheet.layout(|| visible.set(true));
             }
-            finish_helper_capture(&died, || held.clear(), || sheet.cancel(|| visible.set(false)));
+            finish_helper_capture(&died, || held.clear(), || {
+                sheet.begin();
+                sheet.settle_hidden(|| visible.set(false));
+            });
             assert!(died.load(Ordering::SeqCst));
             assert!(held.is_empty());
             assert!(!visible.get(), "a visible sheet is hidden at EOF");

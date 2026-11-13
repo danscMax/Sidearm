@@ -70,7 +70,7 @@ The Rust backend: low-level keyboard capture, Razer-encoding detection, action e
 - `write_record` compares the meaningful raw record bytes before skipping a write and after writing, including record length and the turbo period. Live poll-rate and DPI restoration are independent attempts; a failed poll-rate read still allows DPI restoration.
 - Battery cache pruning uses every present model before selecting silent mice for a light poll. Keep the independent `last_battery_scan` while an offline-profile restore is pending.
 - Menu views retain full action text for search and clip only the rendered detail. `View.maxHeight` is the opening monitor's physical work-area height; the page converts it by its current DPR, scrolls the rows, and keeps the highlight visible. `ViewItem.text` / `textChildren` enable text-only pick modes for rows and tip children; Copy without text is always consumed without execution.
-- Cheat-sheet cancellation, pending page readiness, timer draws and native shows share one lifecycle lock: cancellation clears pending/drawn state before hiding, so stale timer/layout callbacks cannot reopen it.
+- Cheat-sheet cancellation, pending page readiness, timer draws and native shows share one lifecycle lock: cancellation clears pending/drawn state at once, so stale timer/layout callbacks cannot reopen it. Never make a window call (`hwnd()`, show/hide, size) under that lock off the main thread: Tauri waits for the main thread there, and `cheatsheet_layout` (sync, on the main thread) waits for the lock. The hide runs via `run_on_main_thread` and is skipped when a newer hold drew meanwhile.
 
 ## Verification
 

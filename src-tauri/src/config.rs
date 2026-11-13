@@ -1103,7 +1103,13 @@ pub fn load_or_initialize_config(
 
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
-    if config_path.exists() {
+    // A missing config.json with backups beside it is a lost file (a recovery
+    // whose write failed after the quarantine, a sync, a manual delete), not a
+    // first run: recover it like an unreadable one instead of seeding defaults.
+    let primary_missing = !config_path.exists();
+    if primary_missing {
+        log::warn!("[config] config.json is missing; looking for a usable backup before seeding defaults");
+    } else {
         match load_and_validate(&config_path) {
             Ok((config, warnings)) => {
                 // Mark the current config as last-known-good *after* it has loaded
@@ -1134,47 +1140,54 @@ pub fn load_or_initialize_config(
                 log::error!(
                     "[config] config.json failed to load ({primary_err}); attempting recovery from last-known-good / rolling backups"
                 );
-
-                if let Some((config, mut warnings, source)) =
-                    recover_config_from_backups(config_dir)
-                {
-                    // Preserve the unreadable bytes, then adopt + persist the recovered config.
-                    quarantine_corrupt_config(&config_path);
-                    if let Err(err) = write_config_to_path(config_dir, &config) {
-                        log::warn!("[config] Failed to persist recovered config: {err}");
-                    }
-                    if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
-                        log::warn!(
-                            "[config] Failed to update last-known-good marker after recovery: {err}"
-                        );
-                    }
-                    let source_name = source
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("a backup")
-                        .to_string();
-                    log::warn!("[config] Recovered config from {source_name}");
-                    warnings.push(ValidationWarning {
-                        code: "config_recovered_from_backup".to_string(),
-                        message: format!(
-                            "config.json could not be read and was restored from {source_name}. The unreadable file was kept alongside it."
-                        ),
-                        path: None,
-                        severity: ValidationSeverity::Warning,
-                    });
-                    return Ok(LoadConfigResponse {
-                        config,
-                        warnings,
-                        path: path_string(&config_path),
-                        created_default: false,
-                    });
-                }
-
-                // No usable backup: preserve the corrupt file, then seed defaults.
-                quarantine_corrupt_config(&config_path);
-                log::error!("[config] No valid backup found; seeding a default config");
             }
         }
+    }
+
+    if let Some((config, mut warnings, source)) = recover_config_from_backups(config_dir) {
+        // Preserve the unreadable bytes, then adopt + persist the recovered config.
+        // A failed write is survivable: config.json is then missing, and the
+        // next load recovers from the same backups again.
+        if !primary_missing {
+            quarantine_corrupt_config(&config_path);
+        }
+        if let Err(err) = write_config_to_path(config_dir, &config) {
+            log::warn!("[config] Failed to persist recovered config: {err}");
+        }
+        if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
+            log::warn!("[config] Failed to update last-known-good marker after recovery: {err}");
+        }
+        let source_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("a backup")
+            .to_string();
+        log::warn!("[config] Recovered config from {source_name}");
+        let message = if primary_missing {
+            format!("config.json was missing and was restored from {source_name}.")
+        } else {
+            format!(
+                "config.json could not be read and was restored from {source_name}. The unreadable file was kept alongside it."
+            )
+        };
+        warnings.push(ValidationWarning {
+            code: "config_recovered_from_backup".to_string(),
+            message,
+            path: None,
+            severity: ValidationSeverity::Warning,
+        });
+        return Ok(LoadConfigResponse {
+            config,
+            warnings,
+            path: path_string(&config_path),
+            created_default: false,
+        });
+    }
+
+    if !primary_missing {
+        // No usable backup: preserve the corrupt file, then seed defaults.
+        quarantine_corrupt_config(&config_path);
+        log::error!("[config] No valid backup found; seeding a default config");
     }
 
     let mut config = default_seed_config();
@@ -3848,6 +3861,22 @@ mod tests {
                 .any(|warning| warning.code == "config_recovered_from_backup"),
             "recovery should surface a warning"
         );
+    }
+
+    #[test]
+    fn recovers_from_backup_when_config_is_missing() {
+        let temp_dir = tempdir().expect("temp dir");
+        load_or_initialize_config(temp_dir.path()).expect("seed");
+        load_or_initialize_config(temp_dir.path()).expect("reload");
+        let config_path = temp_dir.path().join("config.json");
+        // A recovery whose write failed after the quarantine leaves no config.json.
+        fs::remove_file(&config_path).expect("remove primary");
+
+        let recovered = load_or_initialize_config(temp_dir.path()).expect("recovery");
+        assert!(!recovered.created_default, "a missing config with backups must not be reseeded");
+        assert!(config_path.is_file(), "config.json written back from the backup");
+        assert!(!has_quarantine_file(temp_dir.path()), "nothing to quarantine");
+        assert!(recovered.warnings.iter().any(|warning| warning.code == "config_recovered_from_backup"));
     }
 
     #[test]

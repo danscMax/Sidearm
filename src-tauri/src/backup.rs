@@ -51,16 +51,18 @@ pub fn rotate_rolling_backups(config_dir: &Path) -> io::Result<Option<PathBuf>> 
         return Ok(None);
     }
 
+    // A failed step stops the rotation before `.bak.1` is overwritten: the
+    // caller reports `backupFailed` instead of silently losing a backup.
     let oldest = config_dir.join(format!("{BACKUP_PREFIX}{MAX_ROLLING_BACKUPS}"));
     if oldest.exists() {
-        let _ = fs::remove_file(&oldest);
+        fs::remove_file(&oldest)?;
     }
 
     for slot in (1..MAX_ROLLING_BACKUPS).rev() {
         let src = config_dir.join(format!("{BACKUP_PREFIX}{slot}"));
         let dst = config_dir.join(format!("{BACKUP_PREFIX}{}", slot + 1));
         if src.exists() {
-            let _ = fs::rename(&src, &dst);
+            fs::rename(&src, &dst)?;
         }
     }
 

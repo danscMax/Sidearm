@@ -2,15 +2,9 @@
 
 use serde::Serialize;
 
-use crate::config::SequenceStep;
+use crate::config::{MAX_SEQUENCE_STEPS, SequenceStep};
 
 const MAX_STEP_DELAY_MS: u32 = 30_000;
-
-/// Hard cap on recorded steps.  The frontend enforces the same limit and shows
-/// a live count badge, but a Rust-side cap is a safety net: if the UI cap is
-/// bypassed or broken, a stuck recorder could otherwise grow `steps` until
-/// process OOM. Same defence-in-depth pattern as the v0.1.15 log channel cap.
-const MAX_RECORDED_STEPS: usize = 1000;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -68,7 +62,7 @@ impl MacroRecorder {
     }
 
     /// Record a keystroke. The `key` is a formatted string like "Ctrl+C" or "F13".
-    /// Silently drops events once `MAX_RECORDED_STEPS` is reached so a runaway
+    /// Silently drops events once `MAX_SEQUENCE_STEPS` is reached so a runaway
     /// recording can't grow unboundedly (defence-in-depth alongside the UI cap).
     pub fn record_keystroke(&mut self, key: String, now: u64) {
         if let Some(RecorderState::Recording {
@@ -77,7 +71,7 @@ impl MacroRecorder {
             ..
         }) = &mut self.state
         {
-            if steps.len() >= MAX_RECORDED_STEPS {
+            if steps.len() >= MAX_SEQUENCE_STEPS {
                 return;
             }
             steps.push(RecordedEvent {
@@ -147,6 +141,26 @@ fn convert_to_sequence_steps(events: &[RecordedEvent]) -> Vec<SequenceStep> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_at_and_beyond_save_limit_is_saveable() {
+        use crate::config::{Action, ActionPayload, ActionType, SequenceActionPayload};
+        for count in [200, 201, 1000] {
+            let mut recorder = MacroRecorder::new();
+            recorder.start(0).unwrap();
+            for i in 0..count { recorder.record_keystroke("A".into(), i); }
+            let recording = recorder.stop(count).unwrap();
+            assert_eq!(recording.steps.len(), 200, "recorded {count} inputs");
+            let mut config = crate::config::default_seed_config();
+            config.actions.push(Action {
+                id: "recorded-sequence".into(), action_type: ActionType::Sequence,
+                display_name: "Recorded".into(), notes: None, conditions: Vec::new(),
+                payload: ActionPayload::Sequence(SequenceActionPayload { steps: recording.steps }),
+            });
+            let dir = tempfile::tempdir().unwrap();
+            crate::config::save_config(dir.path(), config, None).unwrap();
+        }
+    }
 
     #[test]
     fn starts_and_stops_recording() {
@@ -331,7 +345,7 @@ mod edge_proptests {
     // -----------------------------------------------------------------------
 
     proptest! {
-        /// Recording N keystrokes (0 ≤ N ≤ 1001) must produce min(N, MAX_RECORDED_STEPS) steps.
+        /// Recording N keystrokes must produce min(N, MAX_SEQUENCE_STEPS) steps.
         /// This is the primary cap invariant: the Rust-side hard cap must never be exceeded.
         #[test]
         fn prop_max_steps_cap_never_exceeded(
@@ -344,14 +358,14 @@ mod edge_proptests {
             }
             let recording = recorder.stop(count as u64 * 10 + 1).unwrap();
             prop_assert!(
-                recording.steps.len() <= MAX_RECORDED_STEPS,
-                "steps.len()={} must be ≤ MAX_RECORDED_STEPS={}",
-                recording.steps.len(), MAX_RECORDED_STEPS
+                recording.steps.len() <= MAX_SEQUENCE_STEPS,
+                "steps.len()={} must be ≤ MAX_SEQUENCE_STEPS={}",
+                recording.steps.len(), MAX_SEQUENCE_STEPS
             );
-            let expected_len = count.min(MAX_RECORDED_STEPS);
+            let expected_len = count.min(MAX_SEQUENCE_STEPS);
             prop_assert_eq!(
                 recording.steps.len(), expected_len,
-                "expected exactly min({}, {}) steps", count, MAX_RECORDED_STEPS
+                "expected exactly min({}, {}) steps", count, MAX_SEQUENCE_STEPS
             );
         }
 
@@ -515,19 +529,19 @@ mod edge_proptests {
             }
         }
 
-        /// At the exact cap boundary (MAX_RECORDED_STEPS keystrokes followed
+        /// At the exact cap boundary (MAX_SEQUENCE_STEPS keystrokes followed
         /// by one more) the extra keystroke must be silently dropped.
         #[test]
         fn prop_cap_at_boundary_exact(extra in 0usize..=10usize) {
             let mut recorder = MacroRecorder::new();
             recorder.start(0).unwrap();
-            for i in 0u64..(MAX_RECORDED_STEPS + extra) as u64 {
+            for i in 0u64..(MAX_SEQUENCE_STEPS + extra) as u64 {
                 recorder.record_keystroke(format!("K{i}"), i);
             }
             let recording = recorder.stop(10_000_000).unwrap();
             prop_assert_eq!(
-                recording.steps.len(), MAX_RECORDED_STEPS,
-                "steps must be capped at exactly MAX_RECORDED_STEPS={}", MAX_RECORDED_STEPS
+                recording.steps.len(), MAX_SEQUENCE_STEPS,
+                "steps must be capped at exactly MAX_SEQUENCE_STEPS={}", MAX_SEQUENCE_STEPS
             );
         }
     }

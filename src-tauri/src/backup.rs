@@ -67,7 +67,7 @@ pub fn rotate_rolling_backups(config_dir: &Path) -> io::Result<Option<PathBuf>> 
     }
 
     let bak1 = config_dir.join(format!("{BACKUP_PREFIX}1"));
-    fs::copy(&config_path, &bak1)?;
+    copy_backup(&config_path, &bak1)?;
     Ok(Some(bak1))
 }
 
@@ -80,11 +80,11 @@ pub fn mark_last_known_good(config_dir: &Path) -> io::Result<()> {
         return Ok(());
     }
     let lkg = config_dir.join(LAST_KNOWN_GOOD_FILE);
-    fs::copy(&config_path, &lkg)?;
+    copy_backup(&config_path, &lkg)?;
     Ok(())
 }
 
-/// Write today's snapshot if not present, then prune the snapshots dir to
+/// Write today's snapshot if missing or incomplete JSON, then prune the snapshots dir to
 /// keep the 14 newest by date. Best-effort: IO errors bubble up but the
 /// caller typically logs and moves on.
 pub fn write_daily_snapshot_and_prune(config_dir: &Path) -> io::Result<()> {
@@ -98,12 +98,24 @@ pub fn write_daily_snapshot_and_prune(config_dir: &Path) -> io::Result<()> {
 
     let today = today_date_string();
     let today_snapshot = snapshots_dir.join(format!("{today}.json"));
-    if !today_snapshot.exists() {
-        fs::copy(&config_path, &today_snapshot)?;
+    let complete = match fs::read(&today_snapshot) {
+        Ok(bytes) => serde_json::from_slice::<serde_json::Value>(&bytes).is_ok(),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
+    if !complete {
+        copy_backup(&config_path, &today_snapshot)?;
     }
 
     prune_snapshots(&snapshots_dir, MAX_SNAPSHOTS)?;
     Ok(())
+}
+
+fn copy_backup(src: &Path, dst: &Path) -> io::Result<()> {
+    crate::config::persist_atomically(dst, |file| {
+        io::copy(&mut fs::File::open(src)?, file)?;
+        Ok(())
+    })
 }
 
 /// True if `stem` is exactly `YYYY-MM-DD`. Valid date stems sort chronologically
@@ -325,6 +337,38 @@ mod tests {
     }
 
     #[test]
+    fn daily_snapshot_repairs_an_incomplete_json_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        write_config(temp.path(), r#"{"version":11}"#);
+        let snapshots = temp.path().join(SNAPSHOTS_DIR_NAME);
+        fs::create_dir(&snapshots).unwrap();
+        let today = snapshots.join(format!("{}.json", today_date_string()));
+        fs::write(&today, br#"{"ver"#).unwrap();
+        write_daily_snapshot_and_prune(temp.path()).unwrap();
+        assert_eq!(fs::read_to_string(today).unwrap(), r#"{"version":11}"#);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn last_known_good_cannot_be_overwritten_before_atomic_commit() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_READ, FILE_SHARE_WRITE};
+        let temp = tempfile::tempdir().unwrap();
+        write_config(temp.path(), "old");
+        mark_last_known_good(temp.path()).unwrap();
+        write_config(temp.path(), "new");
+        let path = temp.path().join(LAST_KNOWN_GOOD_FILE);
+        let held = fs::OpenOptions::new().read(true)
+            .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE).open(&path).unwrap();
+        let result = mark_last_known_good(temp.path());
+        drop(held);
+        assert!(result.is_err(), "a backup replacement requires an atomic rename");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "old");
+        mark_last_known_good(temp.path()).unwrap();
+        assert_eq!(fs::read_to_string(path).unwrap(), "new");
+    }
+
+    #[test]
     fn rotate_creates_bak1_on_first_rotation() {
         let temp = tempfile::tempdir().expect("tempdir");
         write_config(temp.path(), "v1");
@@ -373,9 +417,9 @@ mod tests {
     #[test]
     fn daily_snapshot_is_idempotent_within_day() {
         let temp = tempfile::tempdir().expect("tempdir");
-        write_config(temp.path(), "day-a");
+        write_config(temp.path(), r#""day-a""#);
         write_daily_snapshot_and_prune(temp.path()).expect("snap1");
-        write_config(temp.path(), "day-b");
+        write_config(temp.path(), r#""day-b""#);
         write_daily_snapshot_and_prune(temp.path()).expect("snap2");
 
         let snapshots_dir = temp.path().join(SNAPSHOTS_DIR_NAME);
@@ -385,7 +429,7 @@ mod tests {
             .collect();
         assert_eq!(entries.len(), 1, "one snapshot per day");
         let contents = fs::read_to_string(entries[0].path()).unwrap();
-        assert_eq!(contents, "day-a", "snapshot uses first save of day");
+        assert_eq!(contents, r#""day-a""#, "snapshot uses first save of day");
     }
 
     #[test]

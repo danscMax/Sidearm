@@ -1092,11 +1092,8 @@ fn spawn_config_watch(app: AppHandle, config_dir: PathBuf) {
     }
 }
 
-fn record_config_stamp(app: &AppHandle) {
-    if let Ok(dir) = resolve_config_dir(app) {
-        let stamp = config::config_file_stamp(&dir);
-        *app.state::<ConfigStamp>().inner().lock().recover_poison() = stamp;
-    }
+fn record_config_stamp(app: &AppHandle, stamp: Option<u64>) {
+    *app.state::<ConfigStamp>().inner().lock().recover_poison() = stamp;
 }
 
 // ── Device images (universal-device support) ────────────────────────────────
@@ -1254,14 +1251,13 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
     let config_dir = resolve_config_dir(&app)?;
     let response =
         tauri::async_runtime::spawn_blocking(move || {
-            #[cfg(target_os = "windows")]
-            let stamp = config::config_file_stamp(&config_dir);
             let mut response = load_or_initialize_config(&config_dir)?;
             #[cfg(target_os = "windows")]
             if mouse_memory::live_overlay::configure(&mut response.config, &mouse_memory::present_models()) {
-                let migrated = config::save_config(&config_dir, response.config, stamp)?;
+                let migrated = config::save_config(&config_dir, response.config, response.stamp)?;
                 response.config = migrated.config;
                 response.warnings.extend(migrated.warnings);
+                response.stamp = migrated.stamp;
             }
             Ok::<_, config::ConfigStoreError>(response)
         })
@@ -1274,7 +1270,7 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
         .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
     // Remember what we just loaded so save_config can guard against clobbering
     // a newer config written by a concurrent instance.
-    record_config_stamp(&app);
+    record_config_stamp(&app, response.stamp);
 
     Ok(response)
 }
@@ -1309,7 +1305,7 @@ async fn save_config(
     app.state::<MinimizeToTray>()
         .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
     // We just wrote the file — adopt its new fingerprint as our baseline.
-    record_config_stamp(&app);
+    record_config_stamp(&app, result.stamp);
 
     let is_running = {
         let store = runtime_store.lock().recover_poison();
@@ -1499,7 +1495,7 @@ async fn restore_config_from_backup(
         .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
     // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
     // the next save_config does not falsely report a concurrent change.
-    record_config_stamp(&app);
+    record_config_stamp(&app, response.stamp);
 
     let is_running = {
         let store = runtime_store.lock().recover_poison();
@@ -1718,16 +1714,15 @@ async fn import_full_config_apply(
         move || -> Result<SaveConfigResponse, CommandError> {
             ensure_full_config_import_size(&validated)?;
             let imported = read_and_migrate_config_file(&validated).map_err(CommandError::from)?;
-            let final_config = match mode {
-                ImportMode::Replace => imported,
+            let (final_config, expected_stamp) = match mode {
+                ImportMode::Replace => (imported, None),
                 ImportMode::Merge => {
                     let base = load_or_initialize_config(&config_dir_for_task)
-                        .map_err(CommandError::from)?
-                        .config;
-                    merge_configs_by_id(base, imported)
+                        .map_err(CommandError::from)?;
+                    (merge_configs_by_id(base.config, imported), base.stamp)
                 }
             };
-            save_config_to_store(&config_dir_for_task, final_config, None)
+            save_config_to_store(&config_dir_for_task, final_config, expected_stamp)
                 .map_err(CommandError::from)
         },
     )
@@ -1738,7 +1733,7 @@ async fn import_full_config_apply(
         .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
     // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
     // the next save_config does not falsely report a concurrent change.
-    record_config_stamp(&app);
+    record_config_stamp(&app, result.stamp);
 
     let is_running = {
         let store = runtime_store.lock().recover_poison();

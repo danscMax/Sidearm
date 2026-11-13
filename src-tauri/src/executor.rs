@@ -12,6 +12,34 @@ const MAX_STEP_DELAY_MS: u64 = 30_000;
 /// Upper bound on how many times a single Send/Text sequence step may repeat.
 const MAX_STEP_REPEAT: u32 = 100;
 
+/// Bumped to stop the live sequence that runs and drop the queued ones: the
+/// capture stopped, or the profile was switched by hand.
+static SEQUENCE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+pub fn cancel_live_sequences() {
+    SEQUENCE_GENERATION.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+}
+
+pub fn live_sequence_generation() -> u64 {
+    SEQUENCE_GENERATION.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Waits `ms`, waking early when the sequence started under `started` was
+/// cancelled. `false` = cancelled.
+fn pause(ms: u64, started: u64) -> bool {
+    let deadline = std::time::Instant::now() + Duration::from_millis(ms);
+    loop {
+        if live_sequence_generation() != started {
+            return false;
+        }
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() {
+            return true;
+        }
+        thread::sleep(left.min(Duration::from_millis(25)));
+    }
+}
+
 use crate::{
     config::{
         Action, ActionCondition, ActionPayload, ActionType, AppConfig, MediaKeyKind, MenuItem,
@@ -636,7 +664,27 @@ fn run_live_sequence_action(
     let mut only_text_so_far = true;
     let mut typed_text = false;
     let mut warnings = Vec::new();
+    // A cancel (capture stopped, profile switched by hand) ends the sequence
+    // between two inputs or inside a pause — never in the middle of a shortcut.
+    let started = live_sequence_generation();
+    let cancelled = || {
+        execution_error(
+            "execution_cancelled",
+            "execution",
+            crate::ui_text!(
+                "execution.sequenceCancelled",
+                "The sequence was stopped: capture stopped or the profile was switched."
+            ),
+            Some(preview.encoded_key.clone()),
+            action_id.clone(),
+        )
+    };
+    let check = || if live_sequence_generation() == started { Ok(()) } else { Err(cancelled()) };
+    let wait = |delay_ms: u32| {
+        if pause(u64::from(delay_ms).min(MAX_STEP_DELAY_MS), started) { Ok(()) } else { Err(cancelled()) }
+    };
     for step in &payload.steps {
+        check()?;
         // No window in front for an instant (0), at the start or now, proves nothing.
         if skips_enter(step, only_text_so_far && typed_text, || {
             let now = foreground_window();
@@ -654,11 +702,7 @@ fn run_live_sequence_action(
         }
         typed_text |= matches!(step, SequenceStep::Text { .. });
         match step {
-            SequenceStep::Sleep { delay_ms } => {
-                thread::sleep(Duration::from_millis(
-                    u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
-                ));
-            }
+            SequenceStep::Sleep { delay_ms } => wait(*delay_ms)?,
             SequenceStep::Launch {
                 value,
                 args,
@@ -676,9 +720,7 @@ fn run_live_sequence_action(
                 )?;
                 launched_processes.push(process_id);
                 if let Some(delay_ms) = delay_ms {
-                    thread::sleep(Duration::from_millis(
-                        u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
-                    ));
+                    wait(*delay_ms)?;
                 }
             }
             SequenceStep::Text {
@@ -695,6 +737,7 @@ fn run_live_sequence_action(
                     (value.clone(), None)
                 };
                 for _ in 0..times {
+                    check()?;
                     input_synthesis::send_text(&value).map_err(|message| {
                         execution_error(
                             "execution_failed",
@@ -706,9 +749,7 @@ fn run_live_sequence_action(
                     })?;
                     injected_input_steps += 1;
                     if let Some(delay_ms) = delay_ms {
-                        thread::sleep(Duration::from_millis(
-                            u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
-                        ));
+                        wait(*delay_ms)?;
                     }
                 }
                 if let Some(back) = cursor_back.filter(|&back| back > 0)
@@ -724,6 +765,7 @@ fn run_live_sequence_action(
             } => {
                 let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
                 for _ in 0..times {
+                    check()?;
                     input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(
                         |message| {
                             execution_error(
@@ -737,9 +779,7 @@ fn run_live_sequence_action(
                     )?;
                     injected_input_steps += 1;
                     if let Some(delay_ms) = delay_ms {
-                        thread::sleep(Duration::from_millis(
-                            u64::from(*delay_ms).min(MAX_STEP_DELAY_MS),
-                        ));
+                        wait(*delay_ms)?;
                     }
                 }
             }
@@ -1609,6 +1649,28 @@ mod tests {
         assert_eq!(missing.event.message.key, Some("execution.dpiProfileMissing"));
         let no_stages = live_test_action(&config, &action, Some(&config.profiles[0].id)).expect_err("stages required");
         assert_eq!(no_stages.event.message.key, Some("execution.dpiStagesMissing"));
+    }
+
+    #[test]
+    fn a_cancel_ends_a_live_sequence_inside_its_pause() {
+        let config = default_seed_config();
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
+        let payload = crate::config::SequenceActionPayload { steps: vec![SequenceStep::Sleep { delay_ms: 10_000 }] };
+        let action = Action {
+            id: "test-seq".into(), action_type: ActionType::Sequence,
+            payload: ActionPayload::Sequence(payload.clone()), display_name: "Wait".into(),
+            notes: None, conditions: Vec::new(),
+        };
+        let canceller = thread::spawn(|| {
+            thread::sleep(Duration::from_millis(50));
+            cancel_live_sequences();
+        });
+        let started = std::time::Instant::now();
+        let error = run_live_sequence_action(&action, &preview, &payload, Some(action.id.clone()))
+            .expect_err("cancelled");
+        canceller.join().unwrap();
+        assert_eq!(error.code, "execution_cancelled");
+        assert!(started.elapsed() < Duration::from_secs(2), "the 10 s pause must end at the cancel");
     }
 
     #[test]

@@ -167,6 +167,8 @@ impl RuntimeController {
     }
 
     pub fn stop(&mut self) -> Result<(), String> {
+        // A macro must not keep typing after the capture stopped.
+        executor::cancel_live_sequences();
         #[cfg(target_os = "windows")]
         if let Some(backend) = self.backend.take() {
             backend.stop()?;
@@ -962,7 +964,7 @@ fn run_fire_and_forget(
     runtime_store: &Arc<Mutex<RuntimeStore>>,
     config: &AppConfig,
     preview: &resolver::ResolvedInputPreview,
-    mut log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
+    log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
     is_fg_elevated: bool,
     // A popup menu's pick: its press was counted when the menu opened.
     menu_pick: bool,
@@ -991,12 +993,77 @@ fn run_fire_and_forget(
         crate::menu_popup::open(app, runtime_store, config, preview, &action.display_name, payload, is_fg_elevated);
         return;
     }
+    // A live sequence (pauses up to 30 s a step) runs on the sequence thread, so
+    // the capture worker is free for the next press — and its release — at once.
+    let is_sequence = config.actions.iter().any(|a| {
+        Some(a.id.as_str()) == preview.action_id.as_deref()
+            && matches!(a.payload, crate::config::ActionPayload::Sequence(_))
+    });
+    if is_sequence && !crate::fake_mode() {
+        let (app, store, config, preview) = (app.clone(), runtime_store.clone(), config.clone(), preview.clone());
+        let entries: Vec<(String, crate::ui_text::UiText, bool)> =
+            log_entries.into_iter().map(|(category, text, error)| (category.to_owned(), text, error)).collect();
+        let queued = executor::live_sequence_generation();
+        submit_sequence(Box::new(move || {
+            let log_entries = entries.iter().map(|(c, t, e)| (c.as_str(), t.clone(), *e)).collect();
+            if executor::live_sequence_generation() != queued {
+                log::info!("[capture] Queued sequence for {} dropped: cancelled before it started", preview.encoded_key);
+                flush_log_entries(&store, log_entries);
+                return;
+            }
+            let executed = executor::run_preview_action(&config, &preview);
+            report_execution(&app, &store, &config, &preview, log_entries, is_fg_elevated, menu_pick, executed);
+        }));
+        return;
+    }
     // A test run against virtual mice resolves and reports, but sends nothing.
     let executed = if crate::fake_mode() {
         executor::execute_preview_action(config, preview)
     } else {
         executor::run_preview_action(config, preview)
     };
+    report_execution(app, runtime_store, config, preview, log_entries, is_fg_elevated, menu_pick, executed);
+}
+
+/// Live sequences run on one thread, one after another (a second waits for the
+/// first). Bounded: a full queue drops the press instead of piling up.
+fn submit_sequence(job: Box<dyn FnOnce() + Send>) {
+    type Job = Box<dyn FnOnce() + Send>;
+    static RUNNER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<Job>>> = std::sync::OnceLock::new();
+    let runner = RUNNER.get_or_init(|| {
+        let (sender, receiver) = std::sync::mpsc::sync_channel::<Job>(SEQUENCE_QUEUE);
+        std::thread::Builder::new()
+            .name("sequence-runner".into())
+            .spawn(move || receiver.into_iter().for_each(|job| job()))
+            .inspect_err(|error| log::error!("[capture] sequence thread not started: {error}"))
+            .ok()
+            .map(|_| sender)
+    });
+    match runner {
+        Some(sender) => {
+            if let Err(error) = sender.try_send(job) {
+                log::warn!("[capture] Sequence press dropped: {error}");
+            }
+        }
+        None => log::error!("[capture] Sequence press dropped: no sequence thread"),
+    }
+}
+
+/// Presses of sequences that may wait behind the one running.
+const SEQUENCE_QUEUE: usize = 8;
+
+/// Logs, emits and shows what an action run did (or why it failed).
+#[allow(clippy::too_many_arguments)]
+fn report_execution(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    config: &AppConfig,
+    preview: &resolver::ResolvedInputPreview,
+    mut log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
+    is_fg_elevated: bool,
+    menu_pick: bool,
+    executed: Result<executor::ActionExecutionEvent, executor::ExecutorError>,
+) {
     match executed {
         Ok(mut execution) => {
             if is_fg_elevated {
@@ -1045,6 +1112,12 @@ fn run_fire_and_forget(
                 settings.osd_duration_ms = settings.osd_duration_ms.min(ACTION_OSD_MS);
                 crate::show_osd(app, "", &execution.action_pretty, &settings);
             }
+        }
+        // Stopped on purpose (capture stopped, profile switched by hand): a note, not a failure.
+        Err(error) if error.code == "execution_cancelled" => {
+            log::info!("[capture] Sequence for {} cancelled", preview.encoded_key);
+            log_entries.push(("execution", error.event.message.clone(), true));
+            flush_log_entries(runtime_store, log_entries);
         }
         Err(error) => {
             log::error!(

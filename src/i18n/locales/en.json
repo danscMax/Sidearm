@@ -1676,7 +1676,8 @@
       "dpiStagesMissing": "Set DPI stages for this profile first: the mouse card → Performance.",
       "dpiFailed": "Could not change DPI: {{detail}}",
       "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected.",
-      "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed."
+      "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed.",
+      "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched."
     },
     "synapse": {
       "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",

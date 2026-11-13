@@ -170,6 +170,10 @@ impl RuntimeStore {
 
     /// Set (or clear with `None`) the manual profile override. Sticky until changed.
     pub fn set_manual_profile_override(&mut self, profile_id: Option<String>) {
+        // A profile switched by hand stops the macro of the old one.
+        if self.manual_profile_override != profile_id {
+            crate::executor::cancel_live_sequences();
+        }
         self.manual_profile_override = profile_id;
     }
 

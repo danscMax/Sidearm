@@ -33,10 +33,19 @@ This record documents the implemented boundary; it introduces no runtime change.
   commands include `HS2:<code>` for profile trigger changes. Helper stdout sends
   encoded-key lines with release/repeat and `HS:`/`H2:`/`M<index>:` stamps,
   reader status and diagnostics. Stderr is copied into the parent log.
-- Normal stop closes stdin, ends the helper pump, unhooks and releases state;
-  the parent waits and kills a helper that does not stop. Unexpected helper EOF
-  schedules bounded capture restart (1/5/30 seconds, generation-checked); repeated
-  death or failed restart stops capture and exposes `helperLost`.
+- Normal stop marks the helper as stopping, sends `EXIT`, then closes stdin.
+  The helper ends its pump, unhooks and releases state; the parent waits up to
+  five seconds and kills a helper that does not stop. Stdin EOF without `EXIT`
+  is treated as parent death and starts the restorer when a config directory
+  is available.
+- Unexpected helper stdout EOF releases held input and schedules bounded capture
+  restart (1/5/30 seconds within ten minutes, generation-checked). A fourth death
+  within that window records a warning and sets `helperLost`; this give-up path
+  does not stop the runtime or live-map sessions. Restart errors or a replacement
+  backend without a helper also record the warning and set `helperLost`.
+  Separately, an error returned by controller restart/reload in
+  `restart_capture_with` marks the runtime stopped and emits `runtime_stopped`;
+  errors before that controller call do not take this stopped-state path.
 - When its parent dies, the helper starts the same executable in
   `--restore-live-maps` mode. Restoring live maps and a sleeping mouse's queued
   offline profile has its own mutex/lifecycle and may outlive the app.

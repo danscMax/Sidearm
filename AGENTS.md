@@ -110,7 +110,7 @@ Run before declaring a code change done:
 - Dev runs (`dev.ps1` → `npm run tauri dev`) use the portable app's data: debug builds read `SIDEARM_DATA_DIR` (`paths.rs`), which `dev.ps1` sets to `..\portable\data`, so a test run drives the mice with the one real config. Close the portable Sidearm first (both hold `Local\Sidearm-app`).
 - Whole-app check with virtual V2/V3 mice: `npm run e2e` (Windows; runs beside a running Sidearm, touches no real mouse; see `src-tauri/AGENTS.md`). Run it after any change to mouse, capture, exit or restore logic, before asking the owner to test on hardware; `npm run e2e -- --layout <config.json>` presses every V3 thumb assignment of a real config copy.
 - The desktop UI cannot be rendered headlessly here — visual and screen-reader changes need a manual pass in the running app.
-- Tool regression checks: `node --test tools/e2e/run.test.mjs tools/licenses.test.mjs`. E2E fake-state edits hold the same OS file lock as Rust for the entire read/modify/write; dispatch assertions match one completed execution's action/profile/control/layer/key. `--layout` rejects an empty applicable assignment set before build/start.
+- Tool regression checks: `node --test tools/e2e/run.test.mjs tools/licenses.test.mjs tools/workflows.test.mjs`. E2E fake-state edits hold the same OS file lock as Rust for the entire read/modify/write; dispatch assertions match one completed execution's action/profile/control/layer/key. `--layout` rejects an empty applicable assignment set before build/start. The workflow test checks the independently verified rust-cache commit pin offline.
 
 ## User Preferences
 

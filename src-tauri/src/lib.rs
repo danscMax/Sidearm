@@ -1946,7 +1946,7 @@ async fn import_synapse_into_config(
     tauri::async_runtime::spawn_blocking(
         move || -> Result<synapse_import::ImportedConfig, CommandError> {
             let result = synapse_import::apply_parsed_into_config(base, parsed, &options);
-            // Schema-validate to guarantee the merged config is loadable.
+            // Apply the same schema and semantic checks as save before reporting success.
             let value = serde_json::to_value(&result.config)
                 .map_err(|e| CommandError::internal(format!("serialize failed: {e}")))?;
             let schema_errors = config::collect_schema_errors(&value);
@@ -1957,11 +1957,38 @@ async fn import_synapse_into_config(
                     Some(schema_errors),
                 ));
             }
+            config::validate_config(&result.config).map_err(CommandError::from)?;
             Ok(result)
         },
     )
     .await
     .map_err(|e| CommandError::internal(format!("import_synapse_into_config task failed: {e}")))?
+}
+
+#[cfg(test)]
+mod synapse_import_tests {
+    use super::*;
+
+    #[test]
+    fn synapse_import_rejects_schema_valid_dangling_profile_references() {
+        let mut base = config::default_seed_config();
+        base.settings.fallback_profile_id = "missing-profile".into();
+        let parsed = synapse_import::ParsedSynapseProfiles {
+            source_kind: synapse_import::SourceKind::SynapseV4,
+            source_path: "test".into(),
+            profiles: vec![],
+            warnings: vec![],
+        };
+        let result = tauri::async_runtime::block_on(import_synapse_into_config(
+            parsed,
+            Default::default(),
+            base,
+        ));
+        assert!(
+            result.is_err(),
+            "IPC must reject a result that save would reject"
+        );
+    }
 }
 
 // ============================================================================

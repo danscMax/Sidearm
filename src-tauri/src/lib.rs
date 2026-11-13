@@ -3885,12 +3885,6 @@ pub fn run() {
         unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir) };
     }
 
-    // Best-effort removal of pre-rebrand orphan directories
-    // (com.nagaworkflowstudio.app / .desktop) from %APPDATA% and
-    // %LOCALAPPDATA%.  Done unconditionally — by v0.1.14 the rebrand is two
-    // years old and any user still on a Naga-era install would have already
-    // run a Sidearm release that copied their config over.
-    let legacy_freed = cleanup_pre_rebrand_orphans();
 
     // Push-based debug log: RuntimeStore::push_log sends each new entry on
     // `log_tx`; a worker thread re-emits it as a single `debug_log_appended`
@@ -3977,6 +3971,10 @@ pub fn run() {
         .setup(move |app| {
             // One-time migration from old "com.nagaworkflowstudio.desktop" config dir.
             migrate_old_config(app.handle());
+            // Best-effort removal of pre-rebrand orphan directories
+            // (com.nagaworkflowstudio.app / .desktop) from %APPDATA% and
+            // %LOCALAPPDATA% — after the migration above, which reads one of them.
+            let legacy_freed = cleanup_pre_rebrand_orphans();
 
             log::info!(
                 "[log-retention] sweep: deleted {deleted}, kept {kept} \

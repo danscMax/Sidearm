@@ -21,6 +21,11 @@ use std::{
 use tauri::AppHandle;
 
 use super::{CAPTURE_BACKEND_NAME, EncodedKeyEvent, process_encoded_key_event};
+use super::linux_state::{
+    CaptureAccess, CaptureEvent, keyboard_capture_access, session_input,
+    KEY_F13, KEY_F24, KEY_LEFTCTRL, KEY_RIGHTCTRL, KEY_LEFTSHIFT, KEY_RIGHTSHIFT,
+    KEY_LEFTALT, KEY_RIGHTALT, KEY_LEFTMETA, KEY_RIGHTMETA,
+};
 use crate::{
     config::AppConfig,
     runtime::{self, RuntimeStore},
@@ -28,7 +33,6 @@ use crate::{
 };
 
 /// evdev key codes for F13-F24 (KEY_F13 through KEY_F24).
-const KEY_F13: u16 = 183;
 const KEY_F14: u16 = 184;
 const KEY_F15: u16 = 185;
 const KEY_F16: u16 = 186;
@@ -39,17 +43,6 @@ const KEY_F20: u16 = 190;
 const KEY_F21: u16 = 191;
 const KEY_F22: u16 = 192;
 const KEY_F23: u16 = 193;
-const KEY_F24: u16 = 194;
-
-/// evdev key codes for modifier keys.
-const KEY_LEFTCTRL: u16 = 29;
-const KEY_RIGHTCTRL: u16 = 97;
-const KEY_LEFTSHIFT: u16 = 42;
-const KEY_RIGHTSHIFT: u16 = 54;
-const KEY_LEFTALT: u16 = 56;
-const KEY_RIGHTALT: u16 = 100;
-const KEY_LEFTMETA: u16 = 125;
-const KEY_RIGHTMETA: u16 = 126;
 
 /// evdev event type for key events (EV_KEY).
 const EV_KEY: u16 = 1;
@@ -155,8 +148,10 @@ fn find_razer_naga_devices() -> Vec<std::path::PathBuf> {
     // evdev::enumerate() returns (PathBuf, Device) tuples
     for (path, device) in evdev::enumerate() {
         let name = device.name().unwrap_or_default().to_ascii_lowercase();
-        if name.contains("razer") && name.contains("naga") {
-            result.push(path);
+        if name.contains("razer") && name.contains("naga")
+            && let Some(access) = capture_access(&device)
+        {
+            result.push((path, access));
         }
     }
 
@@ -164,13 +159,21 @@ fn find_razer_naga_devices() -> Vec<std::path::PathBuf> {
     if result.is_empty() {
         for (path, device) in evdev::enumerate() {
             let name = device.name().unwrap_or_default().to_ascii_lowercase();
-            if name.contains("razer") {
-                result.push(path);
+            if name.contains("razer") && let Some(access) = capture_access(&device) {
+                result.push((path, access));
             }
         }
     }
 
-    result
+    result.sort_by_key(|(_, access)| *access == CaptureAccess::Shared);
+    result.into_iter().map(|(path, _)| path).collect()
+}
+
+fn capture_access(device: &evdev::Device) -> Option<CaptureAccess> {
+    keyboard_capture_access(
+        device.supported_keys().into_iter().flat_map(|keys| keys.iter().map(|key| key.0)),
+        device.supported_relative_axes().is_some() || device.supported_absolute_axes().is_some(),
+    )
 }
 
 impl CaptureBackendHandle {
@@ -184,7 +187,7 @@ impl CaptureBackendHandle {
 
         // Bounded keyboard event channel — see Windows backend for rationale.
         const CAPTURE_EVENT_CAPACITY: usize = 10_000;
-        let (event_tx, event_rx) = mpsc::sync_channel::<EncodedKeyEvent>(CAPTURE_EVENT_CAPACITY);
+        let (event_tx, event_rx) = mpsc::sync_channel::<CaptureEvent>(CAPTURE_EVENT_CAPACITY);
 
         // --- Worker thread: processes EncodedKeyEvents (same pattern as Windows) ---
         let worker_app = app.clone();
@@ -212,7 +215,8 @@ impl CaptureBackendHandle {
                 // EventOutcome is only consumed by the Windows stale-hold sweep;
                 // the evdev backend has no such sweep, so ignore it here.
                 if let Some(event) = received {
-                    let _ = process_encoded_key_event(
+                    if let Some(event) = session_input(event, &mut held_actions, &mut gestures, crate::input_synthesis::send_shortcut_hold_up) {
+                        let _ = process_encoded_key_event(
                         &worker_app,
                         &worker_runtime_store,
                         &worker_config,
@@ -220,7 +224,8 @@ impl CaptureBackendHandle {
                         event,
                         &mut held_actions,
                         &mut gestures,
-                    );
+                        );
+                    }
                 }
                 // The clock goes after the event (see the Windows worker).
                 super::fire_due_gestures(&worker_app, &worker_runtime_store, &worker_config, &mut gestures);
@@ -297,7 +302,7 @@ impl CaptureBackendHandle {
 /// Finds Razer Naga devices, opens them, and reads key events in a loop.
 /// When F13-F24 are detected (with optional modifier tracking), sends
 /// EncodedKeyEvent through the channel.
-fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender<EncodedKeyEvent>) {
+fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender<CaptureEvent>) {
     // Audit F032: iterate instead of recursing on hotplug/disconnect. The old
     // `return run_evdev_capture_loop(...)` tail-calls are not guaranteed to be
     // tail-call-optimized by rustc, so a device that repeatedly reconnects would
@@ -345,6 +350,10 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
                 return;
             }
         };
+        let Some(access) = capture_access(&device) else {
+            log::warn!("[capture] evdev capabilities changed before open; rediscovering devices");
+            continue 'capture;
+        };
 
         // Audit F002: open the device non-blocking so fetch_events() returns WouldBlock
         // when idle instead of parking the thread until the next event. Without this,
@@ -366,7 +375,9 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
         // Attempt to grab the device exclusively so other applications don't
         // see the F13-F24 keys. Non-fatal if grab fails (requires root or
         // appropriate udev rules).
-        match device.grab() {
+        if access == CaptureAccess::Shared {
+            log::warn!("[capture] Mixed evdev interface: reading without a grab to preserve native input; encoding keys may reach other applications.");
+        } else { match device.grab() {
             Ok(()) => {
                 log::info!("[capture] Grabbed evdev device exclusively.");
             }
@@ -376,7 +387,7 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
                  F-key events may be seen by other applications."
                 );
             }
-        }
+        } }
 
         let mut modifier_state = ModifierState::default();
 
@@ -461,7 +472,7 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
                 // try_send: drop on full bounded channel rather than block evdev reader.
                 // Distinguish between "queue full" (drop event, keep capturing) and
                 // "receiver dropped" (real shutdown, break the loop).
-                match event_tx.try_send(event) {
+                match event_tx.try_send(CaptureEvent::Input(event)) {
                     Ok(()) => {}
                     Err(std::sync::mpsc::TrySendError::Full(_)) => continue,
                     Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
@@ -473,6 +484,11 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
         let _ = device.ungrab();
 
         if device_lost {
+            // Teardown is ordered after queued downs and must not be dropped.
+            // This is the evdev reader, never a low-level hook callback.
+            if event_tx.send(CaptureEvent::SessionLost).is_err() {
+                return;
+            }
             // Device disconnected — restart hotplug polling to reconnect.
             continue 'capture;
         }

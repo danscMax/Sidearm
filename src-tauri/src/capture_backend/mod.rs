@@ -42,6 +42,8 @@ fn should_notify_elevated(last: &mut Option<String>, exe: &str) -> bool {
 }
 
 mod gestures;
+#[cfg(any(target_os = "linux", test))]
+mod linux_state;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -266,6 +268,7 @@ pub(super) enum EventOutcome {
 #[derive(Clone)]
 struct GestureContext {
     encoded_key: String,
+    hwnd: String,
     exe: String,
     title: String,
     process_path: Option<String>,
@@ -276,6 +279,49 @@ struct GestureContext {
 }
 
 type PendingGestures = gestures::Gestures<GestureContext>;
+
+fn suppresses_event<T: Clone>(gestures: &mut gestures::Gestures<T>, suppressed: bool, key_up: bool) -> bool {
+    if suppressed {
+        gestures.clear();
+    }
+    suppressed && !key_up
+}
+
+fn replay_native_wheel(
+    action: config::MouseActionKind,
+    repeat: bool,
+    fake: bool,
+    send: impl FnOnce(config::MouseActionKind) -> Result<(), String>,
+) -> Result<(), String> {
+    if !repeat && !fake { send(action) } else { Ok(()) }
+}
+
+fn gesture_target_is_current(
+    payload: Option<&config::ActionPayload>,
+    start_window: &str,
+    current_window: Option<&str>,
+) -> bool {
+    use config::{ActionPayload, MouseActionKind, SequenceStep};
+    let sends_input = match payload {
+        Some(ActionPayload::Shortcut(_) | ActionPayload::TextSnippet(_) | ActionPayload::MediaKey(_)) => true,
+        Some(ActionPayload::MouseAction(mouse)) => !matches!(mouse.action, MouseActionKind::DpiUp | MouseActionKind::DpiDown),
+        Some(ActionPayload::Sequence(sequence)) => sequence.steps.iter().any(|step| matches!(step, SequenceStep::Send { .. } | SequenceStep::Text { .. })),
+        Some(ActionPayload::Launch(_) | ActionPayload::Menu(_) | ActionPayload::ProfileSwitch(_)
+            | ActionPayload::Disabled(_) | ActionPayload::RepairClipboard(_)) | None => false,
+    };
+    !sends_input || (!start_window.is_empty() && current_window == Some(start_window))
+}
+
+fn check_binding_throttle(
+    config: &AppConfig,
+    preview: &resolver::ResolvedInputPreview,
+    store: &mut RuntimeStore,
+    now: u64,
+) -> Option<u64> {
+    let id = preview.binding_id.as_deref()?;
+    let ms = config.bindings.iter().find(|binding| binding.id == id)?.throttle_ms.unwrap_or(0);
+    store.check_execution_throttle(id, ms, now)
+}
 
 /// A shortcut of modifiers alone: it is always held down (push-to-talk).
 fn holds_modifiers_only(config: &AppConfig, preview: &resolver::ResolvedInputPreview) -> bool {
@@ -320,6 +366,9 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
 
 /// Dispatches what the clock settled (long presses, closed tap windows).
 fn fire_due_gestures(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: &AppConfig, gestures: &mut PendingGestures) {
+    if suppresses_event(gestures, SUPPRESS_EXECUTION.load(Ordering::Relaxed), false) {
+        return;
+    }
     let fired = gestures.tick(std::time::Instant::now());
     if !fired.is_empty() {
         fire_gestures(app, runtime_store, config, fired);
@@ -334,6 +383,9 @@ fn fire_gestures(
     fired: Vec<(GestureContext, config::Gesture)>,
 ) {
     for (context, gesture) in fired {
+        if SUPPRESS_EXECUTION.load(Ordering::Relaxed) {
+            return;
+        }
         let preview = resolver::resolve_gesture_preview(
             config,
             &context.encoded_key,
@@ -353,7 +405,13 @@ fn fire_gestures(
             .iter()
             .find(|action| Some(action.id.as_str()) == preview.action_id.as_deref())
             .map(|action| &action.payload);
-        if context.own_window && !can_execute_in_own_window(payload, key_recording()) {
+        let current = window_capture::capture_active_window_with_resolution(config, "", None).ok();
+        if !crate::fake_mode() && !gesture_target_is_current(payload, &context.hwnd, current.as_ref().map(|window| window.hwnd.as_str())) {
+            log::info!("[capture] {gesture:?} of {} cancelled: foreground window changed", context.encoded_key);
+            continue;
+        }
+        let own_window = current.as_ref().map_or(context.own_window, |window| window.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON));
+        if own_window && !can_execute_in_own_window(payload, key_recording()) {
             log::info!("[capture] {gesture:?} of {} not dispatched: own window", context.encoded_key);
             continue;
         }
@@ -403,7 +461,7 @@ fn process_encoded_key_event(
     // Live-capture/test mode: the UI just observed the raw key above; do NOT
     // resolve, execute, or inject it. Lets the onboarding hardware test light
     // up buttons without firing their real actions (search/delete/etc.).
-    if SUPPRESS_EXECUTION.load(Ordering::Relaxed) {
+    if suppresses_event(gestures, SUPPRESS_EXECUTION.load(Ordering::Relaxed), event.is_key_up) {
         log::info!("[capture] Not dispatched {}: live-capture mode", event.encoded_key);
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
@@ -610,11 +668,12 @@ fn process_encoded_key_event(
         return EventOutcome::Handled;
     }
     if let Some(action) = native_wheel_scroll(&preview, own_window) {
-        if !event.is_repeat
-            && let Err(error) = crate::input_synthesis::send_mouse_action(
+        if let Err(error) = replay_native_wheel(action, event.is_repeat, crate::fake_mode(), |action| {
+            crate::input_synthesis::send_mouse_action(
                 &config::MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false },
                 &hotkeys::HotkeyModifiers::default(),
-            )
+            ).map(|_| ())
+        })
         {
             log::warn!("[capture] Native V3 scroll failed: {error}");
         }
@@ -624,6 +683,7 @@ fn process_encoded_key_event(
 
     let context = || GestureContext {
         encoded_key: event.encoded_key.clone(),
+        hwnd: capture_result.hwnd.clone(),
         exe: exe.to_owned(),
         title: title.to_owned(),
         process_path: process_path.map(str::to_owned),
@@ -737,46 +797,6 @@ fn process_encoded_key_event(
     let is_hold_shortcut = !crate::fake_mode()
         && preview.action_type.as_deref() == Some("shortcut")
         && (preview.trigger_mode == Some(config::TriggerMode::Hold) || is_modifier_only_shortcut);
-
-    // Per-binding throttle (tap/press paths only). Hold shortcuts press once and
-    // stay down, so throttling them is meaningless and would break PTT holds.
-    if !is_hold_shortcut && let Some(binding_id) = preview.binding_id.as_deref() {
-        let throttle_ms = config
-            .bindings
-            .iter()
-            .find(|b| b.id == binding_id)
-            .and_then(|b| b.throttle_ms)
-            .unwrap_or(0);
-        if throttle_ms > 0 {
-            let now = runtime::timestamp_millis();
-            let remaining = runtime_store
-                .lock()
-                .ok()
-                .and_then(|mut store| store.check_execution_throttle(binding_id, throttle_ms, now));
-            if let Some(remaining_ms) = remaining {
-                log_entries.push((
-                    "execution",
-                    crate::ui_text!(
-                        "capture.throttled",
-                        "[throttle] `{key}` skipped — {ms} ms left.",
-                        key = &preview.encoded_key,
-                        ms = remaining_ms
-                    ),
-                    false,
-                ));
-                flush_log_entries(runtime_store, log_entries);
-                let _ = app.emit(
-                    EVENT_THROTTLE_BLOCKED,
-                    &ThrottleBlockedEvent {
-                        control_id: preview.control_id.clone(),
-                        binding_id: Some(binding_id.to_string()),
-                        remaining_ms,
-                    },
-                );
-                return EventOutcome::Handled;
-            }
-        }
-    }
 
     if is_hold_shortcut {
         log::info!(
@@ -964,11 +984,26 @@ fn run_fire_and_forget(
     runtime_store: &Arc<Mutex<RuntimeStore>>,
     config: &AppConfig,
     preview: &resolver::ResolvedInputPreview,
-    log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
+    mut log_entries: Vec<(&str, crate::ui_text::UiText, bool)>,
     is_fg_elevated: bool,
     // A popup menu's pick: its press was counted when the menu opened.
     menu_pick: bool,
 ) {
+    // All tap paths, including settled gestures. Holds never reach this path;
+    // a menu pick belongs to the opening press and must not consume its throttle twice.
+    if !menu_pick && let Some(remaining_ms) = runtime_store.lock().ok().and_then(|mut store| {
+        check_binding_throttle(config, preview, &mut store, runtime::timestamp_millis())
+    }) {
+        log_entries.push(("execution", crate::ui_text!(
+            "capture.throttled", "[throttle] `{key}` skipped — {ms} ms left.",
+            key = &preview.encoded_key, ms = remaining_ms
+        ), false));
+        flush_log_entries(runtime_store, log_entries);
+        let _ = app.emit(EVENT_THROTTLE_BLOCKED, &ThrottleBlockedEvent {
+            control_id: preview.control_id.clone(), binding_id: preview.binding_id.clone(), remaining_ms,
+        });
+        return;
+    }
     // Name the control and the layer: "the wrong action fired" is otherwise
     // indistinguishable from "the right control fired the right action" in the
     // log, and the two layers of one control hold different actions.
@@ -1297,6 +1332,91 @@ fn emit_runtime_error(
     }
 
     let _ = app.emit(EVENT_RUNTIME_ERROR, event);
+}
+
+#[cfg(test)]
+mod dispatch_regression_tests {
+    use super::*;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn capture_mode_cancels_pending_gestures_but_allows_hold_releases() {
+        let now = Instant::now();
+        let mut gestures = gestures::Gestures::default();
+        gestures.press("F13", gestures::Patterns { long: true, ..Default::default() }, (), now);
+        assert!(suppresses_event(&mut gestures, true, false));
+        assert!(!suppresses_event(&mut gestures, true, true), "an existing hold must see its key-up");
+        assert!(gestures.release("F13", now + Duration::from_millis(100)).is_empty());
+        assert!(gestures.tick(now + Duration::from_secs(1)).is_empty());
+        assert!(gestures.next_deadline().is_none());
+    }
+
+    #[test]
+    fn fake_native_wheel_never_reaches_the_input_sink() {
+        let mut sent = Vec::new();
+        replay_native_wheel(config::MouseActionKind::ScrollDown, false, true, |action| { sent.push(action); Ok(()) }).unwrap();
+        assert!(sent.is_empty());
+        replay_native_wheel(config::MouseActionKind::ScrollDown, false, false, |action| { sent.push(action); Ok(()) }).unwrap();
+        assert_eq!(sent, [config::MouseActionKind::ScrollDown]);
+        replay_native_wheel(config::MouseActionKind::ScrollUp, true, false, |_| panic!("repeats are no scroll")).unwrap();
+        assert_eq!(replay_native_wheel(config::MouseActionKind::ScrollUp, false, false, |_| Err("input failed".into())), Err("input failed".into()));
+    }
+
+    #[test]
+    fn delayed_input_is_cancelled_when_its_foreground_window_changes() {
+        let shortcut = config::ActionPayload::Shortcut(config::ShortcutActionPayload {
+            key: "W".into(), ctrl: true, shift: false, alt: false, win: false, raw: None,
+        });
+        assert!(!gesture_target_is_current(Some(&shortcut), "0xA", Some("0xB")));
+        assert!(!gesture_target_is_current(Some(&shortcut), "0xA", None));
+        assert!(gesture_target_is_current(Some(&shortcut), "0xA", Some("0xA")));
+        let launch = config::ActionPayload::Launch(config::LaunchActionPayload {
+            target: "notepad.exe".into(), args: Vec::new(), working_dir: None,
+        });
+        assert!(gesture_target_is_current(Some(&launch), "0xA", Some("0xB")));
+        assert!(!gesture_target_is_current(Some(&shortcut), "", Some("")));
+        let sequence = config::ActionPayload::Sequence(config::SequenceActionPayload {
+            steps: vec![config::SequenceStep::Sleep { delay_ms: 100 }, config::SequenceStep::Text { value: "text".into(), delay_ms: None, repeat: None }],
+        });
+        assert!(!gesture_target_is_current(Some(&sequence), "0xA", Some("0xB")));
+        for kind in [config::MouseActionKind::LeftClick, config::MouseActionKind::DpiUp] {
+            let payload = config::ActionPayload::MouseAction(config::MouseActionPayload {
+                action: kind, ctrl: false, shift: false, alt: false, win: false,
+            });
+            assert_eq!(gesture_target_is_current(Some(&payload), "0xA", Some("0xB")), kind == config::MouseActionKind::DpiUp);
+        }
+    }
+
+    #[test]
+    fn short_presses_with_a_long_pattern_obey_binding_throttle() {
+        let mut config = config::default_seed_config();
+        let key = config.encoder_mappings.first().unwrap().encoded_key.clone();
+        let first_preview = resolver::resolve_input_preview(&config, &key, "notepad.exe", "Test", None);
+        let id = first_preview.binding_id.as_deref().unwrap();
+        let binding = config.bindings.iter_mut().find(|binding| binding.id == id).unwrap();
+        binding.throttle_ms = Some(1000);
+        let mut long_binding = binding.clone();
+        long_binding.id = "long-throttle-regression".into();
+        long_binding.trigger_mode = Some(config::TriggerMode::LongPress);
+        config.bindings.push(long_binding);
+        let enabled_patterns = gesture_patterns(&config, &first_preview, resolver::HeldLayers::default());
+        assert!(enabled_patterns.long);
+        let mut store = RuntimeStore::default();
+        let mut patterns = gestures::Gestures::default();
+        let now = Instant::now();
+        let mut ran = 0;
+        for ms in [0, 200] {
+            let at = now + Duration::from_millis(ms);
+            patterns.press(&key, enabled_patterns, (), at);
+            for (_, gesture) in patterns.release(&key, at + Duration::from_millis(50)) {
+                let preview = resolver::resolve_gesture_preview(&config, &key, "notepad.exe", "Test", None, None, resolver::HeldLayers::default(), gesture);
+                if check_binding_throttle(&config, &preview, &mut store, 1000 + ms).is_none() {
+                    ran += 1;
+                }
+            }
+        }
+        assert_eq!(ran, 1);
+    }
 }
 
 #[cfg(test)]

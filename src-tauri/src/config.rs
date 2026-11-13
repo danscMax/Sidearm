@@ -17,7 +17,8 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 11;
+const SCHEMA_VERSION: i32 = 12;
+pub const MAX_SEQUENCE_STEPS: usize = 200;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -77,6 +78,9 @@ pub struct LoadConfigResponse {
     pub warnings: Vec<ValidationWarning>,
     pub path: String,
     pub created_default: bool,
+    /// Fingerprint captured under the store lock, before another writer can commit.
+    #[serde(skip)]
+    pub(crate) stamp: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -92,6 +96,8 @@ pub struct SaveConfigResponse {
     /// the backup safety net isn't being written.
     #[serde(default)]
     pub backup_failed: bool,
+    #[serde(skip)]
+    pub(crate) stamp: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1044,14 +1050,14 @@ pub fn builtin_naga_device() -> Device {
     }
 }
 
-/// Migrate supported v2..=v5 configs to the current version without changing profile assignments.
+/// Migrate supported older configs to the current version without changing profile assignments.
 /// V2 gains the built-in Naga device. Controls without a `deviceId` were tagged
 /// `razer-naga` by the serde default.
 fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=10) {
+    if matches!(config.version, 2..=11) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -1096,14 +1102,31 @@ fn migrate_paste_mode(config: &mut AppConfig) {
     }
 }
 
+/// A plain file name that stays inside the folder it is joined to: no
+/// separators, no `..`, and no `:` — `E:name` is relative to drive E's current
+/// directory and `name:stream` an alternate data stream on Windows.
+pub fn is_bare_file_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    !name.trim().is_empty()
+        && !name.contains(['/', '\\', ':'])
+        && matches!(components.next(), Some(std::path::Component::Normal(part)) if part == name)
+        && components.next().is_none()
+}
+
 pub fn load_or_initialize_config(
     config_dir: &Path,
 ) -> Result<LoadConfigResponse, ConfigStoreError> {
-    fs::create_dir_all(config_dir).map_err(|error| io_error(Some(config_dir), error))?;
+    let _transaction = lock_config_store(config_dir)?;
 
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
-    if config_path.exists() {
+    // A missing config.json with backups beside it is a lost file (a recovery
+    // whose write failed after the quarantine, a sync, a manual delete), not a
+    // first run: recover it like an unreadable one instead of seeding defaults.
+    let primary_missing = !config_path.try_exists().map_err(|error| io_error(Some(&config_path), error))?;
+    if primary_missing {
+        log::warn!("[config] config.json is missing; looking for a usable backup before seeding defaults");
+    } else {
         match load_and_validate(&config_path) {
             Ok((config, warnings)) => {
                 // Mark the current config as last-known-good *after* it has loaded
@@ -1117,9 +1140,14 @@ pub fn load_or_initialize_config(
                     warnings,
                     path: path_string(&config_path),
                     created_default: false,
+                    stamp: config_file_stamp(config_dir),
                 });
             }
             Err(primary_err) => {
+                // Only content errors prove corruption; a read failure must leave the file intact.
+                if !matches!(primary_err, ConfigStoreError::Parse { .. } | ConfigStoreError::SchemaViolation { .. } | ConfigStoreError::InvalidConfig { .. }) {
+                    return Err(primary_err);
+                }
                 // Never quarantine/recover a config written by a NEWER Sidearm:
                 // recovering to an older backup would silently destroy data the
                 // newer version added. Fail the load with the file left intact so
@@ -1134,47 +1162,55 @@ pub fn load_or_initialize_config(
                 log::error!(
                     "[config] config.json failed to load ({primary_err}); attempting recovery from last-known-good / rolling backups"
                 );
-
-                if let Some((config, mut warnings, source)) =
-                    recover_config_from_backups(config_dir)
-                {
-                    // Preserve the unreadable bytes, then adopt + persist the recovered config.
-                    quarantine_corrupt_config(&config_path);
-                    if let Err(err) = write_config_to_path(config_dir, &config) {
-                        log::warn!("[config] Failed to persist recovered config: {err}");
-                    }
-                    if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
-                        log::warn!(
-                            "[config] Failed to update last-known-good marker after recovery: {err}"
-                        );
-                    }
-                    let source_name = source
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .unwrap_or("a backup")
-                        .to_string();
-                    log::warn!("[config] Recovered config from {source_name}");
-                    warnings.push(ValidationWarning {
-                        code: "config_recovered_from_backup".to_string(),
-                        message: format!(
-                            "config.json could not be read and was restored from {source_name}. The unreadable file was kept alongside it."
-                        ),
-                        path: None,
-                        severity: ValidationSeverity::Warning,
-                    });
-                    return Ok(LoadConfigResponse {
-                        config,
-                        warnings,
-                        path: path_string(&config_path),
-                        created_default: false,
-                    });
-                }
-
-                // No usable backup: preserve the corrupt file, then seed defaults.
-                quarantine_corrupt_config(&config_path);
-                log::error!("[config] No valid backup found; seeding a default config");
             }
         }
+    }
+
+    if let Some((config, mut warnings, source)) = recover_config_from_backups(config_dir) {
+        // Preserve the unreadable bytes, then adopt + persist the recovered config.
+        // A failed write is survivable: config.json is then missing, and the
+        // next load recovers from the same backups again.
+        if !primary_missing {
+            quarantine_corrupt_config(&config_path);
+        }
+        if let Err(err) = write_config_to_path(config_dir, &config) {
+            log::warn!("[config] Failed to persist recovered config: {err}");
+        }
+        if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
+            log::warn!("[config] Failed to update last-known-good marker after recovery: {err}");
+        }
+        let source_name = source
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("a backup")
+            .to_string();
+        log::warn!("[config] Recovered config from {source_name}");
+        let message = if primary_missing {
+            format!("config.json was missing and was restored from {source_name}.")
+        } else {
+            format!(
+                "config.json could not be read and was restored from {source_name}. The unreadable file was kept alongside it."
+            )
+        };
+        warnings.push(ValidationWarning {
+            code: "config_recovered_from_backup".to_string(),
+            message,
+            path: None,
+            severity: ValidationSeverity::Warning,
+        });
+        return Ok(LoadConfigResponse {
+            config,
+            warnings,
+            path: path_string(&config_path),
+            created_default: false,
+            stamp: config_file_stamp(config_dir),
+        });
+    }
+
+    if !primary_missing {
+        // No usable backup: preserve the corrupt file, then seed defaults.
+        quarantine_corrupt_config(&config_path);
+        log::error!("[config] No valid backup found; seeding a default config");
     }
 
     let mut config = default_seed_config();
@@ -1187,6 +1223,7 @@ pub fn load_or_initialize_config(
         warnings,
         path: path_string(&config_path),
         created_default: true,
+        stamp: config_file_stamp(config_dir),
     })
 }
 
@@ -1257,7 +1294,7 @@ fn recover_config_from_backups(
 /// A cheap content fingerprint of the on-disk `config.json`, used to detect
 /// concurrent modification by another Sidearm instance before a blind
 /// overwrite. Returns `None` when the file is absent or unreadable (treated as
-/// "no conflict": the writer simply creates it).
+/// a conflict when a guarded save expected a readable file).
 // ponytail: DefaultHasher (non-crypto) is enough for change-detection — a hash
 // collision merely misses one guard (degrades to the old overwrite behavior),
 // it can never corrupt. Swap for an on-disk version field only if collisions
@@ -1267,6 +1304,17 @@ pub fn config_file_stamp(config_dir: &Path) -> Option<u64> {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut hasher);
     Some(hasher.finish())
+}
+
+/// Serialize cooperating readers/writers across threads and processes. Keep the
+/// lock file in place: deleting it could give two writers different lock objects.
+fn lock_config_store(config_dir: &Path) -> Result<fs::File, ConfigStoreError> {
+    fs::create_dir_all(config_dir).map_err(|error| io_error(Some(config_dir), error))?;
+    let path = config_dir.join("config.lock");
+    let lock = fs::OpenOptions::new().read(true).write(true).create(true).truncate(false)
+        .open(&path).map_err(|error| io_error(Some(&path), error))?;
+    lock.lock().map_err(|error| io_error(Some(&path), error))?;
+    Ok(lock)
 }
 
 /// Persist `config` to `config_dir`. When `expected_stamp` is `Some`, the save
@@ -1280,7 +1328,7 @@ pub fn save_config(
     mut config: AppConfig,
     expected_stamp: Option<u64>,
 ) -> Result<SaveConfigResponse, ConfigStoreError> {
-    fs::create_dir_all(config_dir).map_err(|error| io_error(Some(config_dir), error))?;
+    let _transaction = lock_config_store(config_dir)?;
     // An imported pre-v5 profile still carries the flat fields.
     migrate_mouse_settings(&mut config);
     let schema_value = serde_json::to_value(&config)
@@ -1288,12 +1336,10 @@ pub fn save_config(
     validate_config_schema_value(&schema_value)?;
     let warnings = validate_config(&config)?;
 
-    // Concurrency guard: refuse to overwrite if another instance changed the
-    // file since the caller loaded it. Checked as late as possible (right
-    // before the write) to keep the race window minimal; `None` opts out.
+    // The directory lock covers the stamp check, backups, commit and returned baseline.
+    // External editors that ignore the lock can still race the atomic rename.
     if let Some(expected) = expected_stamp
-        && let Some(current) = config_file_stamp(config_dir)
-        && current != expected
+        && config_file_stamp(config_dir) != Some(expected)
     {
         return Err(ConfigStoreError::ConcurrentModification);
     }
@@ -1310,12 +1356,16 @@ pub fn save_config(
         path: path_string(&config_path),
         backup_path: backup_path.map(|path| path_string(&path)),
         backup_failed,
+        stamp: config_file_stamp(config_dir),
     })
 }
 
 fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreError> {
-    let raw =
-        fs::read_to_string(config_path).map_err(|error| io_error(Some(config_path), error))?;
+    let bytes = fs::read(config_path).map_err(|error| io_error(Some(config_path), error))?;
+    let raw = String::from_utf8(bytes).map_err(|error| ConfigStoreError::Parse {
+        path: path_string(config_path),
+        message: format!("Config JSON is not UTF-8: {error}"),
+    })?;
     let raw_value: Value = serde_json::from_str(&raw).map_err(|error| ConfigStoreError::Parse {
         path: path_string(config_path),
         message: format!("Failed to parse config JSON: {error}"),
@@ -1452,7 +1502,7 @@ pub fn collect_schema_errors(value: &Value) -> Vec<String> {
     }
 }
 
-fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigStoreError> {
+pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigStoreError> {
     let mut errors = Vec::new();
     let mut warnings = Vec::new();
 
@@ -1534,7 +1584,7 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
         // The image is a bare file name resolved inside app-data; reject
         // anything that could escape that directory.
         if let Some(image) = &device.image
-            && (image.trim().is_empty() || image.contains(['/', '\\']) || image.contains(".."))
+            && !is_bare_file_name(image)
         {
             errors.push(format!(
                 "device `{}` image must be a bare file name, got `{image}`.",
@@ -1833,7 +1883,6 @@ fn validate_action(
             // (MAX_STEP_DELAY_MS) and repeat (MAX_STEP_REPEAT); this bounds the
             // multiplier those clamps sit inside. 200 steps * 30s max each is
             // already a pathological upper bound no legitimate macro approaches.
-            const MAX_SEQUENCE_STEPS: usize = 200;
             if payload.steps.is_empty() {
                 errors.push(format!(
                     "action `{}` sequence must contain at least one step.",
@@ -3644,7 +3693,7 @@ mod tests {
     /// Device image must be a bare file name (it is resolved inside app-data).
     #[test]
     fn validation_rejects_path_traversal_device_image() {
-        for bad in ["../../evil.png", "sub/dir.png", "..\\evil.png", "  "] {
+        for bad in ["../../evil.png", "sub/dir.png", "..\\evil.png", "  ", "..", "E:notes.txt", "a.png:stream"] {
             let mut config = default_seed_config();
             config.devices[0].image = Some(bad.to_string());
             assert!(
@@ -3851,11 +3900,27 @@ mod tests {
     }
 
     #[test]
+    fn recovers_from_backup_when_config_is_missing() {
+        let temp_dir = tempdir().expect("temp dir");
+        load_or_initialize_config(temp_dir.path()).expect("seed");
+        load_or_initialize_config(temp_dir.path()).expect("reload");
+        let config_path = temp_dir.path().join("config.json");
+        // A recovery whose write failed after the quarantine leaves no config.json.
+        fs::remove_file(&config_path).expect("remove primary");
+
+        let recovered = load_or_initialize_config(temp_dir.path()).expect("recovery");
+        assert!(!recovered.created_default, "a missing config with backups must not be reseeded");
+        assert!(config_path.is_file(), "config.json written back from the backup");
+        assert!(!has_quarantine_file(temp_dir.path()), "nothing to quarantine");
+        assert!(recovered.warnings.iter().any(|warning| warning.code == "config_recovered_from_backup"));
+    }
+
+    #[test]
     fn the_schema_cannot_change_without_a_new_version() {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (11, 0xca3d_b86c_e89d_c0be);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x3f53_dfbd_ffca_1976);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -4024,6 +4089,129 @@ mod tests {
         let stamp = config_file_stamp(temp_dir.path()).expect("stamp exists");
         // Matching stamp → no concurrent change → save proceeds.
         save_config(temp_dir.path(), first.config, Some(stamp)).expect("save should succeed");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn read_locked_primary_is_not_quarantined_or_recovered() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_WRITE};
+
+        let dir = tempdir().unwrap();
+        let loaded = load_or_initialize_config(dir.path()).unwrap();
+        load_or_initialize_config(dir.path()).unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        let before = fs::read(&path).unwrap();
+        let held = fs::OpenOptions::new().write(true)
+            .share_mode(FILE_SHARE_WRITE | FILE_SHARE_DELETE).open(&path).unwrap();
+        let result = load_or_initialize_config(dir.path());
+        drop(held);
+        assert!(matches!(result, Err(ConfigStoreError::Io { .. })), "{result:?}");
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert!(!has_quarantine_file(dir.path()));
+        assert_eq!(load_or_initialize_config(dir.path()).unwrap().config, loaded.config);
+    }
+
+    #[test]
+    fn invalid_utf8_primary_is_recovered_as_corrupt_content() {
+        let dir = tempdir().unwrap();
+        let first = load_or_initialize_config(dir.path()).unwrap();
+        load_or_initialize_config(dir.path()).unwrap();
+        fs::write(dir.path().join(CONFIG_FILE_NAME), [0xff, 0xfe]).unwrap();
+        let recovered = load_or_initialize_config(dir.path()).unwrap();
+        assert_eq!(recovered.config, first.config);
+        assert!(has_quarantine_file(dir.path()));
+        assert!(recovered.warnings.iter().any(|w| w.code == "config_recovered_from_backup"));
+    }
+
+    #[test]
+    fn returned_stamps_belong_to_the_loaded_or_saved_content() {
+        let dir = tempdir().unwrap();
+        let first = load_or_initialize_config(dir.path()).unwrap();
+        assert_eq!(first.stamp, config_file_stamp(dir.path()));
+        assert!(serde_json::to_value(&first).unwrap().get("stamp").is_none());
+        let mut edited = first.config.clone();
+        edited.profiles[0].name = "Changed".into();
+        let saved = save_config(dir.path(), edited, first.stamp).unwrap();
+        assert_eq!(saved.stamp, config_file_stamp(dir.path()));
+        assert_ne!(saved.stamp, first.stamp);
+        assert!(serde_json::to_value(&saved).unwrap().get("stamp").is_none());
+        assert!(matches!(save_config(dir.path(), first.config, first.stamp), Err(ConfigStoreError::ConcurrentModification)));
+        fs::remove_file(dir.path().join(CONFIG_FILE_NAME)).unwrap();
+        assert!(matches!(save_config(dir.path(), saved.config, saved.stamp), Err(ConfigStoreError::ConcurrentModification)));
+    }
+
+    #[test]
+    fn v11_config_migrates_without_changing_assignments() {
+        let dir = tempdir().unwrap();
+        let mut legacy = default_seed_config();
+        legacy.version = 11;
+        fs::write(dir.path().join(CONFIG_FILE_NAME), serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let loaded = load_or_initialize_config(dir.path()).unwrap();
+        legacy.version = 12;
+        assert_eq!(loaded.config, legacy);
+    }
+
+    #[test]
+    fn guarded_save_waits_for_directory_transaction_before_checking_stamp() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempdir().unwrap();
+        let original = load_or_initialize_config(dir.path()).unwrap().config;
+        let stamp = config_file_stamp(dir.path()).unwrap();
+        let lock = fs::OpenOptions::new().read(true).write(true).create(true)
+            .truncate(false).open(dir.path().join("config.lock")).unwrap();
+        lock.lock().unwrap();
+        let path = dir.path().to_path_buf();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (done_tx, done_rx) = mpsc::channel();
+        let mut restored = original.clone();
+        restored.profiles[0].name = "Restored".into();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            done_tx.send(save_config(&path, original, Some(stamp))).unwrap();
+        });
+        started_rx.recv().unwrap();
+        let early = done_rx.recv_timeout(Duration::from_millis(150));
+        fs::write(dir.path().join(CONFIG_FILE_NAME), serde_json::to_vec_pretty(&restored).unwrap()).unwrap();
+        drop(lock);
+        worker.join().unwrap();
+        assert!(matches!(early, Err(mpsc::RecvTimeoutError::Timeout)), "save escaped the transaction: {early:?}");
+        assert!(matches!(done_rx.recv().unwrap(), Err(ConfigStoreError::ConcurrentModification)));
+        assert_eq!(load_or_initialize_config(dir.path()).unwrap().config, restored);
+    }
+
+    #[test]
+    fn schema_rejects_numbers_outside_persisted_rust_ranges() {
+        let base = serde_json::to_value(default_seed_config()).unwrap();
+        for pointer in ["/profiles/0/priority", "/appMappings/0/priority"] {
+            for (number, accepted) in [(-2_147_483_649_i64, false), (-2_147_483_648, true), (2_147_483_647, true), (2_147_483_648, false)] {
+                let mut raw = base.clone();
+                *raw.pointer_mut(pointer).unwrap() = number.into();
+                assert_eq!(validate_config_schema_value(&raw).is_ok(), accepted, "{pointer}={number}");
+                if accepted { serde_json::from_value::<AppConfig>(raw).unwrap(); }
+            }
+        }
+        for number in [0_u64, 4_294_967_295, 4_294_967_296] {
+            let mut raw = base.clone();
+            raw["settings"]["onboardingStep"] = number.into();
+            assert_eq!(validate_config_schema_value(&raw).is_ok(), number <= 4_294_967_295, "onboardingStep={number}");
+            if number <= 4_294_967_295 { serde_json::from_value::<AppConfig>(raw).unwrap(); }
+            for step in [
+                serde_json::json!({"type":"send", "value":"A", "delayMs":number}),
+                serde_json::json!({"type":"text", "value":"text", "delayMs":number}),
+                serde_json::json!({"type":"sleep", "delayMs":number}),
+                serde_json::json!({"type":"launch", "value":"app.exe", "delayMs":number}),
+            ] {
+                let mut raw = base.clone();
+                raw["actions"].as_array_mut().unwrap().push(serde_json::json!({
+                    "id":"range-test", "type":"sequence", "displayName":"Range test", "payload":{"steps":[step]}
+                }));
+                assert_eq!(validate_config_schema_value(&raw).is_ok(), number <= 4_294_967_295, "delayMs={number}");
+                if number <= 4_294_967_295 { serde_json::from_value::<AppConfig>(raw).unwrap(); }
+            }
+        }
     }
 
     #[test]

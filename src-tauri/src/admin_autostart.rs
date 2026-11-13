@@ -59,9 +59,11 @@ pub struct AdminAutostartStatus {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum RegisteredTask {
     /// Created by this version: verifier script + pinned (file, SHA-256) list.
+    /// `outdated`: an older verifier script (e.g. one calling cmdlets) — re-register.
     Pinned {
         path: String,
         manifest: Vec<(String, String)>,
+        outdated: bool,
     },
     /// Created by an older version: starts the exe directly, no pin.
     Legacy { path: String },
@@ -89,9 +91,9 @@ pub fn query() -> AdminAutostartStatus {
     let needs_reconfirm = match &registered {
         None => false,
         Some(RegisteredTask::Legacy { .. }) => true,
-        Some(RegisteredTask::Pinned { path, manifest }) => {
+        Some(RegisteredTask::Pinned { path, manifest, outdated }) => {
             paths_equal(Path::new(path), Path::new(&current_exe))
-                && current_pin_manifest(Path::new(&current_exe)).as_ref() != Ok(manifest)
+                && (*outdated || current_pin_manifest(Path::new(&current_exe)).as_ref() != Ok(manifest))
         }
     };
     AdminAutostartStatus {
@@ -306,21 +308,26 @@ fn verifier_script(exe_path: &str, manifest: &[(String, String)], start: bool) -
         .map(|(name, hash)| format!("{}='{hash}'", ps_quote(name)))
         .collect::<Vec<_>>()
         .join(";");
+    // .NET calls only, no cmdlet: a cmdlet loads its module from PSModulePath,
+    // whose per-user folder comes first and is writable without admin rights —
+    // a module planted there would run elevated before any pin is checked.
     let action = if start {
         // Wait until the loader has mapped the exe and its static DLLs before
         // the finally block releases the pinned files.
         format!(
-            "$p=Start-Process -FilePath {} -WorkingDirectory $d -PassThru;try{{[void]$p.WaitForInputIdle(15000)}}catch{{}}",
+            "$i=[Diagnostics.ProcessStartInfo]::new({});$i.WorkingDirectory=$d;$p=[Diagnostics.Process]::Start($i);try{{[void]$p.WaitForInputIdle(15000)}}catch{{}}",
             ps_quote(exe_path)
         )
     } else {
-        "Write-Output MATCH".to_owned()
+        "'MATCH'".to_owned()
     };
     format!(
         "$d={};$e={};$m=@{{{pins}}};$hs=@();try{{\
-         $n=@(Get-ChildItem -LiteralPath $d -File -Force|Where-Object Extension -eq '.dll'|ForEach-Object Name)+$e;\
-         if(@(Compare-Object @($n|Sort-Object) @(@($m.Keys)|Sort-Object)).Count -ne 0){{exit 2}};\
-         foreach($k in @($m.Keys)){{$s=[IO.File]::Open((Join-Path $d $k),'Open','Read','Read');$hs+=$s;\
+         $n=[Collections.Generic.List[string]]::new();$n.Add($e);\
+         foreach($f in [IO.Directory]::GetFiles($d)){{if([IO.Path]::GetExtension($f) -eq '.dll'){{$n.Add([IO.Path]::GetFileName($f))}}}};\
+         $a=$n.ToArray();$b=[string[]]@($m.Keys);[Array]::Sort($a,[StringComparer]::OrdinalIgnoreCase);[Array]::Sort($b,[StringComparer]::OrdinalIgnoreCase);\
+         if([string]::Join('|',$a) -ne [string]::Join('|',$b)){{exit 2}};\
+         foreach($k in $b){{$s=[IO.File]::Open([IO.Path]::Combine($d,$k),'Open','Read','Read');$hs+=$s;\
          $h=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($s)).Replace('-','');\
          if($h -ne $m[$k]){{exit 2}}}};\
          {action}}}finally{{foreach($s in $hs){{$s.Dispose()}}}}",
@@ -451,14 +458,13 @@ fn parse_registered_task(xml: &str) -> Option<RegisteredTask> {
     if let Some(arguments) = element_text(xml, "Arguments") {
         let script = xml_unescape(arguments);
         if let Some(caps) = HEADER.captures(&script) {
-            let manifest = PAIR
+            let manifest: Vec<(String, String)> = PAIR
                 .captures_iter(&caps[3])
                 .map(|pair| (unquote(&pair[1]), pair[2].to_owned()))
                 .collect();
-            return Some(RegisteredTask::Pinned {
-                path: format!("{}{}", unquote(&caps[1]), unquote(&caps[2])),
-                manifest,
-            });
+            let path = format!("{}{}", unquote(&caps[1]), unquote(&caps[2]));
+            let outdated = script != task_arguments(&path, &manifest, true);
+            return Some(RegisteredTask::Pinned { path, manifest, outdated });
         }
     }
     extract_command_from_xml(xml).map(|path| RegisteredTask::Legacy { path })
@@ -749,9 +755,13 @@ mod tests {
             parse_registered_task(&xml),
             Some(RegisteredTask::Pinned {
                 path: path.to_string(),
-                manifest,
+                manifest: manifest.clone(),
+                outdated: false,
             })
         );
+        // A task an older version registered (its verifier called cmdlets) asks for a re-confirm.
+        let old = xml.replace("[IO.Directory]::GetFiles($d)", "Get-ChildItem -LiteralPath $d");
+        assert!(matches!(parse_registered_task(&old), Some(RegisteredTask::Pinned { outdated: true, .. })));
     }
 
     #[test]
@@ -769,9 +779,13 @@ mod tests {
     #[test]
     fn verifier_refuses_before_starting_and_releases_in_finally() {
         let script = verifier_script(r"C:\Sidearm\Sidearm.exe", &test_manifest(), true);
-        let start = script.find("Start-Process").expect("starts the exe");
+        let start = script.find("[Diagnostics.Process]::Start(").expect("starts the exe");
         let first_exit = script.find("exit 2").expect("has a refusal exit");
-        assert!(first_exit < start, "refusal must come before Start-Process");
+        assert!(first_exit < start, "refusal must come before the start");
+        // A cmdlet would load its module from the user-writable PSModulePath.
+        for cmdlet in ["Get-", "Start-", "Join-", "Write-", "New-", "-Object", "Sort-", "Compare-"] {
+            assert!(!script.contains(cmdlet), "the elevated verifier must not call a cmdlet ({cmdlet})");
+        }
         let finally = script.find("finally{").expect("has finally");
         assert!(finally > start);
         assert!(script[finally..].contains("Dispose()"));

@@ -159,7 +159,7 @@ struct KeyEvent {
     #[serde(rename = "Makecode", deserialize_with = "deserialize_lax_u16")]
     makecode: u16,
     /// `State` may be null in some exports; default to 0 (key-down).
-    #[serde(default, rename = "State", deserialize_with = "deserialize_lax_u8")]
+    #[serde(default, rename = "State", deserialize_with = "deserialize_key_state")]
     state: u8,
     #[serde(default, rename = "IsExtended")]
     is_extended: Option<bool>,
@@ -181,7 +181,7 @@ struct MouseEventRaw {
 
 // ----- Lax deserializers ----------------------------------------------------
 // Razer Synapse occasionally stringifies numeric fields or sets them to null.
-// These helpers accept all common shapes and fall back to sensible defaults.
+// Accept numeric strings, but never turn invalid integers into different keys.
 
 fn deserialize_lax_f64<'de, D>(d: D) -> Result<Option<f64>, D::Error>
 where
@@ -201,12 +201,24 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = serde_json::Value::deserialize(d)?;
-    Ok(match value {
-        serde_json::Value::Null => 0,
-        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) as u8,
-        serde_json::Value::String(s) => s.parse::<u8>().unwrap_or(0),
-        _ => 0,
-    })
+    match value {
+        serde_json::Value::Null => Some(0),
+        serde_json::Value::Number(n) => n.as_u64().and_then(|n| u8::try_from(n).ok()),
+        serde_json::Value::String(s) => s.parse::<u8>().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| serde::de::Error::custom("Expected an integer in 0..=255"))
+}
+
+fn deserialize_key_state<'de, D>(d: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let state = deserialize_lax_u8(d)?;
+    if state > 3 {
+        return Err(serde::de::Error::custom("Key State must be in 0..=3"));
+    }
+    Ok(state)
 }
 
 fn deserialize_lax_u16<'de, D>(d: D) -> Result<u16, D::Error>
@@ -214,12 +226,12 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = serde_json::Value::deserialize(d)?;
-    Ok(match value {
-        serde_json::Value::Null => 0,
-        serde_json::Value::Number(n) => n.as_u64().unwrap_or(0) as u16,
-        serde_json::Value::String(s) => s.parse::<u16>().unwrap_or(0),
-        _ => 0,
-    })
+    match value {
+        serde_json::Value::Number(n) => n.as_u64().and_then(|n| u16::try_from(n).ok()),
+        serde_json::Value::String(s) => s.parse::<u16>().ok(),
+        _ => None,
+    }
+    .ok_or_else(|| serde::de::Error::custom("Expected an integer in 0..=65535"))
 }
 
 // ============================================================================
@@ -633,13 +645,14 @@ fn decode_macro(
 
 /// Normalize v4 macro events into the shared [`macro_steps`] builder. Mouse
 /// events and UI markers are format-specific and handled here; key/delay events
-/// are forwarded for the common down/up pairing.
+/// are forwarded for common key-down emission and modifier folding.
 fn build_macro_steps(
     macro_name: &str,
     events: &[MacroEvent],
     warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedSequenceStep> {
     let mut normalized: Vec<NormalizedEvent> = Vec::new();
+    let mut mouse_warned = false;
     for ev in events {
         match event_type(&ev.ty) {
             EventType::Delay => {
@@ -663,15 +676,15 @@ fn build_macro_steps(
             }
             EventType::MouseEvent => {
                 // Mouse events in macros are rare and Sidearm's sequence model
-                // doesn't express them natively — warn and skip.
-                warnings.push(
-                    ImportWarning::new(
+                // doesn't express them natively — warn (once per macro) and skip.
+                if !std::mem::replace(&mut mouse_warned, true) {
+                    warnings.push(ImportWarning::new(
                         "macro_mouse_event_skipped",
                         format!(
                             "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only."
                         ),
-                    ),
-                );
+                    ));
+                }
             }
             EventType::ActionBar => {
                 // UI marker inside the exported macro — not a runtime event.
@@ -1116,13 +1129,11 @@ mod edge_proptests {
 
     // -----------------------------------------------------------------------
     // Overflow: KeyEvent.Makecode as a huge JSON number (deserialize_lax_u16)
-    //           should truncate, not panic.
+    //           must reject the macro rather than wrap to another scancode.
     // -----------------------------------------------------------------------
 
     #[test]
-    fn overflow_makecode_huge_number_truncates() {
-        // deserialize_lax_u16 calls n.as_u64().unwrap_or(0) as u16 — large values
-        // wrap/truncate, never panic.
+    fn overflow_makecode_huge_number_is_rejected() {
         let macro_inner = r#"{"guid":"m","macroEvents":[
             {"Type":1,"KeyEvent":{"Makecode":99999999,"State":0}},
             {"Type":1,"KeyEvent":{"Makecode":99999999,"State":1}}
@@ -1131,7 +1142,55 @@ mod edge_proptests {
             r#"{{"profiles":[],"macros":[{{"name":"M","payload":"{}","hash":""}}]}}"#,
             b64(macro_inner)
         );
-        let _ = parse_synapse_v4_str(&outer, "t".into());
+        let parsed = parse_synapse_v4_str(&outer, "t".into()).unwrap();
+        assert!(
+            parsed
+                .warnings
+                .iter()
+                .any(|w| w.code == "macro_decode_failed")
+        );
+    }
+
+    #[test]
+    fn invalid_key_numbers_do_not_become_executable_keys() {
+        for (field, values) in [
+            (
+                "Makecode",
+                vec![
+                    serde_json::json!(65566),
+                    serde_json::json!("65566"),
+                    serde_json::json!(-1),
+                    serde_json::json!(30.5),
+                    serde_json::json!(true),
+                    serde_json::Value::Null,
+                ],
+            ),
+            (
+                "State",
+                vec![
+                    serde_json::json!(256),
+                    serde_json::json!("256"),
+                    serde_json::json!(4),
+                    serde_json::json!(-1),
+                    serde_json::json!(0.5),
+                    serde_json::json!(false),
+                    serde_json::json!("bad"),
+                ],
+            ),
+        ] {
+            for value in values {
+                let mut key = serde_json::json!({"Makecode": 30, "State": 0});
+                key[field] = value.clone();
+                let payload =
+                    serde_json::json!({"guid": "m", "macroEvents": [{"Type": 1, "KeyEvent": key}]})
+                        .to_string();
+                let result = decode_macro("M", &b64(&payload), &mut Vec::new());
+                assert!(
+                    result.is_err(),
+                    "invalid {field}={value} must reject the macro"
+                );
+            }
+        }
     }
 
     // -----------------------------------------------------------------------

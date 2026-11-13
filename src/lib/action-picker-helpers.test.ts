@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { TFunction } from "i18next";
 import type { Binding, Profile } from "./config";
 import { makeAction } from "./test-fixtures";
+import { primaryKeyCode } from "./key-names";
 import {
   autoName,
   buildAction,
@@ -83,6 +84,15 @@ describe("resolveKeyName", () => {
     return { key: "", code: "", keyCode: 0, ...partial } as KeyboardEvent;
   }
 
+  it.each([
+    ["!", "Digit1", "1"], ["+", "Equal", "="], ["_", "Minus", "-"],
+    ["{", "BracketLeft", "["], ["?", "Slash", "/"], ["Ё", "Backquote", "`"],
+  ])("captures %s as an unmodified primary key", (key, code, expected) => {
+    const primary = normalizeKeyName(resolveKeyName(ev({ key, code, shiftKey: true, ctrlKey: true })));
+    expect(primary).toBe(expected);
+    expect(primaryKeyCode(primary)).not.toBeNull();
+  });
+
   it("returns event.key when present and identified", () => {
     expect(resolveKeyName(ev({ key: "A" }))).toBe("A");
   });
@@ -156,6 +166,19 @@ describe("autoName", () => {
 });
 
 describe("buildAction", () => {
+  it("drops the placeholder note when assigning a real action", () => {
+    const placeholder = makeAction({ type: "disabled", payload: {},
+      notes: "Created from the shell editor. Replace this placeholder before using it in runtime." });
+    expect(buildAction({ effectiveCategory: "shortcut", existingAction: placeholder, drafts: makeDrafts(), t, profiles }).notes).toBeUndefined();
+  });
+  it.each(["shortcut", "sequence"] as const)("preserves notes when renaming a %s", (type) => {
+    const existing = makeAction(type === "shortcut"
+      ? { type, payload: { key: "C", ctrl: true, shift: false, alt: false, win: false }, notes: "Keep this note" }
+      : { type, payload: { steps: [{ type: "text", value: "hello" }] }, notes: "Keep this note" });
+    const drafts = createInitialDrafts(existing, null, profiles);
+    expect(buildAction({ effectiveCategory: type, existingAction: existing, drafts: { ...drafts, name: "Renamed" }, t, profiles }).notes)
+      .toBe(existing.notes);
+  });
   it("preserves the existing action id and uses the explicit name", () => {
     const existing = makeAction({ type: "shortcut", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } });
     const action = buildAction({

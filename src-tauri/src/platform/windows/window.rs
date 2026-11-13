@@ -88,20 +88,27 @@ pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
                     return Err(format!("Failed to open foreground process {pid}."));
                 }
 
-                let process_path = {
-                    let mut path_buffer = vec![0u16; 260];
-                    let mut path_length = path_buffer.len() as u32;
-                    let success = QueryFullProcessImageNameW(
+                let process_path = match query_process_image_path(|buffer| {
+                    let mut length = buffer.len() as u32;
+                    if QueryFullProcessImageNameW(
                         process_handle,
                         0,
-                        path_buffer.as_mut_ptr(),
-                        &mut path_length,
-                    );
-                    if success == 0 {
-                        CloseHandle(process_handle);
-                        return Err("Failed to resolve the foreground process path.".into());
+                        buffer.as_mut_ptr(),
+                        &mut length,
+                    ) == 0
+                    {
+                        Err(std::io::Error::last_os_error())
+                    } else {
+                        Ok(length as usize)
                     }
-                    String::from_utf16_lossy(&path_buffer[..path_length as usize])
+                }) {
+                    Ok(path) => path,
+                    Err(error) => {
+                        CloseHandle(process_handle);
+                        return Err(format!(
+                            "Failed to resolve the foreground process path: {error}"
+                        ));
+                    }
                 };
 
                 let is_elevated = is_process_elevated(process_handle);
@@ -136,6 +143,34 @@ pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
             captured_at: timestamp_millis(),
             is_elevated,
         })
+    }
+}
+
+fn query_process_image_path(
+    mut query: impl FnMut(&mut [u16]) -> Result<usize, std::io::Error>,
+) -> Result<String, std::io::Error> {
+    use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+    const MAX_PATH_UNITS: usize = 32_768;
+    let mut buffer = vec![0u16; 260];
+    loop {
+        match query(&mut buffer) {
+            Ok(length) if length < buffer.len() => {
+                return Ok(String::from_utf16_lossy(&buffer[..length]));
+            }
+            Ok(_) => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    "Invalid process path length",
+                ));
+            }
+            Err(error)
+                if error.raw_os_error() == Some(ERROR_INSUFFICIENT_BUFFER as i32)
+                    && buffer.len() < MAX_PATH_UNITS =>
+            {
+                buffer.resize((buffer.len() * 2).min(MAX_PATH_UNITS), 0);
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 
@@ -206,6 +241,57 @@ pub(crate) fn is_foreground_fullscreen() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p05_process_image_path_grows_for_long_utf16_paths() {
+        use windows_sys::Win32::Foundation::ERROR_INSUFFICIENT_BUFFER;
+        for path in [
+            r"C:\App\app.exe".to_string(),
+            format!(r"C:\{}\app.exe", "folder\\".repeat(90)),
+            "a".repeat(32_767),
+        ] {
+            let units: Vec<_> = path.encode_utf16().collect();
+            let actual = query_process_image_path(|buffer| {
+                if buffer.len() <= units.len() {
+                    return Err(std::io::Error::from_raw_os_error(
+                        ERROR_INSUFFICIENT_BUFFER as i32,
+                    ));
+                }
+                buffer[..units.len()].copy_from_slice(&units);
+                Ok(units.len())
+            })
+            .unwrap();
+            assert_eq!(actual, path);
+        }
+    }
+
+    #[test]
+    fn p05_process_image_path_preserves_errors_and_bounds_growth() {
+        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER};
+        let mut calls = 0;
+        let error = query_process_image_path(|_| {
+            calls += 1;
+            Err(std::io::Error::from_raw_os_error(
+                ERROR_ACCESS_DENIED as i32,
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED as i32));
+        assert_eq!(calls, 1);
+        let mut sizes = Vec::new();
+        assert!(
+            query_process_image_path(|buffer| {
+                sizes.push(buffer.len());
+                Err(std::io::Error::from_raw_os_error(
+                    ERROR_INSUFFICIENT_BUFFER as i32,
+                ))
+            })
+            .is_err()
+        );
+        assert_eq!(sizes.last(), Some(&32_768));
+        assert_eq!(sizes.len(), 8);
+        assert!(query_process_image_path(|buffer| Ok(buffer.len())).is_err());
+    }
 
     #[test]
     fn process_info_cache_matches_only_same_hwnd_and_pid() {

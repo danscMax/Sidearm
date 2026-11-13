@@ -214,6 +214,9 @@ export type SequenceStep =
       delayMs?: number;
     };
 
+/** Most steps one sequence may hold: editor, recorder and imports (Rust `config::MAX_SEQUENCE_STEPS`). */
+export const MAX_SEQUENCE_STEPS = 200;
+
 export interface SequenceActionPayload {
   steps: SequenceStep[];
 }

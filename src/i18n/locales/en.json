@@ -482,7 +482,8 @@
     "exe": "Executable file",
     "browseTitle": "Select executable file",
     "browseFilter": "Programs",
-    "dropzone": "Drop .exe or shortcut here",
+    "dropzone": "Drop an .exe here",
+    "exeOnly": "Choose the program's .exe file, or capture its running window. Shortcuts cannot identify a process.",
     "divider": "or",
     "captureCountdown": "Switch to window... {{countdown}}",
     "captureButton": "Capture active window",
@@ -1079,6 +1080,8 @@
     "sequenceSteps": "Sequence steps",
     "stopRecording": "Stop recording",
     "recordMacro": "Record",
+    "sequenceStepLimit": "A sequence can contain at most {{max}} steps.",
+    "sequenceEmpty": "Add at least one step before saving or testing.",
     "addSend": "Send",
     "addText": "Text",
     "addSleep": "Delay",
@@ -1145,6 +1148,7 @@
     "empty": "Select a textSnippet action to edit the snippet library."
   },
   "snippetLibrary": {
+    "textRequired": "Enter snippet text before it can be saved.",
     "newSnippetName": "New snippet",
     "newSnippetText": "New text",
     "copyName": "{{name}} (copy)",
@@ -1302,6 +1306,7 @@
     "unmappable": "Not importable",
     "submit": "Import {{profiles}} profile(s) ({{bindings}} bindings)",
     "submitting": "Importing…",
+    "configChanged": "Settings changed during import. The import was not applied. Try again.",
     "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros",
     "strategy": {
       "legend": "Merge strategy",
@@ -1585,6 +1590,9 @@
     "slotKeep": "Leave as is"
   },
   "backend": {
+    "synapseImport": {
+      "macroTooLong": "Skipped macro `{{name}}`: {{count}} steps exceeds the maximum of {{limit}}."
+    },
     "admin": {
       "relaunchFailed": "Could not restart with administrator rights.",
       "elevationCancelled": "Elevation was cancelled in the UAC prompt.",
@@ -1676,9 +1684,12 @@
       "dpiStagesMissing": "Set DPI stages for this profile first: the mouse card → Performance.",
       "dpiFailed": "Could not change DPI: {{detail}}",
       "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected.",
-      "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed."
+      "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed.",
+      "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched."
     },
     "synapse": {
+      "entryReadFailed": "Could not read `{{path}}`: {{error}}",
+      "macroFolderBudgetExceeded": "Some sibling XML macros were skipped because the import size limit was reached.",
       "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",
       "runtimeStopped": "Start Sidearm capture and retry.",
       "unverifiedMouse": "This mouse model is not verified for Sidearm's native setup. Synapse was left running.",

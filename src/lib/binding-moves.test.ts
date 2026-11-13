@@ -48,6 +48,7 @@ describe("placeSlot", () => {
     expect(outcome).toBe("copied");
     const copied = slotBindings(config, slot("thumb_01", { profileId: "p2" }));
     expect(copied.map((b) => b.triggerMode ?? "press").sort()).toEqual(["longPress", "press"]);
+    expect(new Set(config.bindings.map((b) => b.id)).size).toBe(config.bindings.length);
     expect(copied.every((b) => !["a", "c"].includes(b.actionId))).toBe(true);
     expect(actionsAt(config, slot("thumb_01"))).toEqual(["a", "c"]);
   });

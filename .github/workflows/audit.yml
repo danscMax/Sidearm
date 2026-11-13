@@ -7,12 +7,13 @@ jobs:
   rust-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       # Prebuilt binary instead of `cargo install cargo-audit`, which compiled from
       # source (~3 min) on every run.
-      - uses: taiki-e/install-action@v2
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2
         with:
-          tool: cargo-audit
+          tool: cargo-audit@0.22.2
+          fallback: none
       # Accepted advisories (with their reachability rationale) live in
       # .cargo/audit.toml, which cargo-audit reads from the repo root; the release
       # script build_portable.ps1 runs the same check against the same list.
@@ -20,8 +21,8 @@ jobs:
   npm-audit:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with: { node-version: '22' }
       # --omit=dev: audit only deps shipped in the app (the webview runtime). Build-only
       # tooling (vite/vitest/knip) lives in devDependencies; its advisories (e.g. the

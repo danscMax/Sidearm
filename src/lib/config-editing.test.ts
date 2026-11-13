@@ -2786,6 +2786,7 @@ describe("importProfile", () => {
 
   it("preserves encoderMappings from the imported profile (regression: C3)", () => {
     const config = createMinimalConfig();
+    config.physicalControls = [makePhysicalControl({ id: "thumb_05" })];
     const exportData = makeExportData({
       encoderMappings: [
         makeEncoderMapping({

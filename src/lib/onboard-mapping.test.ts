@@ -83,6 +83,14 @@ describe("playsWithoutSidearm", () => {
   const text = { id: "a", type: "textSnippet", displayName: "T", payload: { source: "inline", text: "hi", pasteMode: "sendText", tags: [] } } as Action;
   const click = (action: string, ctrl = false) => ({ id: "a", type: "mouseAction", displayName: "M", payload: { action, ctrl } }) as Action;
 
+  it.each(["NumLock", "VK_144", "VK_232", "!", "unknown", "F25"])("requires a firmware-supported primary key: %s", (key) => {
+    expect(playsWithoutSidearm(binding(), { ...shortcut, type: "shortcut", payload: { key, ctrl: true, shift: false, alt: false, win: false } })).toBe(false);
+  });
+
+  it.each(["C", "С", "Return", "F24", "VK_96", "Minus", ""])("keeps firmware keys and modifier-only shortcuts: %s", (key) => {
+    expect(playsWithoutSidearm(binding(), { ...shortcut, type: "shortcut", payload: { key, ctrl: true, shift: false, alt: false, win: false } })).toBe(true);
+  });
+
   it("is a plain press of a shortcut or a plain click or scroll", () => {
     expect(playsWithoutSidearm(binding(), shortcut)).toBe(true);
     expect(playsWithoutSidearm(binding(), click("scrollDown"))).toBe(true);

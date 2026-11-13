@@ -259,8 +259,11 @@ if ($Clean) {
     Write-Host "  Cleaning build artifacts..." -ForegroundColor Yellow
     if (Test-Path -LiteralPath $PORTABLE_DIR) {
         Stop-AppProcessIfRunning
-        Remove-Item -Recurse -Force -LiteralPath $PORTABLE_DIR
-        Write-Ok "Removed $PORTABLE_DIR"
+        # ./data is the user's config (dev runs use it too) -- never part of "build artifacts".
+        Get-ChildItem -LiteralPath $PORTABLE_DIR -Force |
+            Where-Object { $_.Name -ne 'data' } |
+            Remove-Item -Recurse -Force
+        Write-Ok "Removed build artifacts from $PORTABLE_DIR (kept ./data)"
     } else {
         Write-Info "Nothing to clean"
     }
@@ -291,6 +294,13 @@ if ($Verify) {
 # Step 1: Build Tauri application
 # ============================================================================
 $totalSteps = 3
+
+# -Verify checks the existing package only: no audit, no build, no assembly.
+# (The block below is deliberately not re-indented; it ends before Step 3.)
+if ($Verify) {
+    $totalSteps = 1
+    $stepNum = 0
+} else {
 
 # Every mode that produces a package (incl. -SkipBuild) passes the audit first.
 Invoke-DependencyAudit
@@ -451,6 +461,10 @@ New-Item -ItemType Directory -Path $PORTABLE_DIR -Force | Out-Null
 Copy-Item -LiteralPath $TAURI_EXE -Destination (Join-Path $PORTABLE_DIR $EXE_NAME)
 Write-Ok "$EXE_NAME"
 
+# Runtime licenses are regenerated after package cleanup; missing texts fail assembly.
+& node (Join-Path $PROJECT_ROOT 'tools/licenses.mjs') (Join-Path $PORTABLE_DIR 'THIRD-PARTY-NOTICES.txt')
+if ($LASTEXITCODE -ne 0) { throw 'Runtime license notice generation failed.' }
+
 # --- Portable mode marker ---
 # Presence of this empty file next to the exe tells Sidearm to store its
 # config, logs, and snapshots in ./data/ instead of %APPDATA%.
@@ -501,6 +515,8 @@ $installBatContent = "@echo off`r`necho Installing Microsoft Edge WebView2 Runti
 [System.IO.File]::WriteAllText($installBat, $installBatContent, [System.Text.Encoding]::ASCII)
 Write-Ok "resources/install-webview2.bat"
 
+} # end of the non -Verify block (audit, build, assembly)
+
 # ============================================================================
 # Step 3: Verification
 # ============================================================================
@@ -517,6 +533,15 @@ if (Test-Path -LiteralPath $portableExe) {
     Write-Ok "$EXE_NAME (${exeSize} MB)"
 } else {
     Write-Fail "$EXE_NAME not found!"
+    $errors++
+}
+
+# Check runtime license notices
+$notices = Join-Path $PORTABLE_DIR 'THIRD-PARTY-NOTICES.txt'
+if ((Test-Path -LiteralPath $notices) -and (Get-Item -LiteralPath $notices).Length -gt 0) {
+    Write-Ok 'THIRD-PARTY-NOTICES.txt'
+} else {
+    Write-Fail 'THIRD-PARTY-NOTICES.txt missing or empty'
     $errors++
 }
 

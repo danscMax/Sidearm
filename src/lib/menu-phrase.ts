@@ -24,11 +24,13 @@ export function phraseOf(action: Action, library: SnippetLibraryItem[]): Phrase 
     return { text: payload.text, enter: false };
   }
   if (action.type === "sequence") {
-    const steps = action.payload.steps.filter((step) => step.type !== "sleep");
-    const [first, second, ...rest] = steps;
-    if (rest.length > 0 || first?.type !== "text") return null;
-    if (!second) return { text: first.value, enter: false };
-    return second.type === "send" && second.value.toLowerCase() === "enter" ? { text: first.value, enter: true } : null;
+    const [first, pause, enter, ...rest] = action.payload.steps;
+    if (first?.type !== "text" || (first.repeat ?? 1) !== 1 || (first.delayMs ?? 0) !== 0) return null;
+    if (!pause) return { text: first.value, enter: false };
+    return rest.length === 0 && pause.type === "sleep" && pause.delayMs === ENTER_DELAY_MS
+      && enter?.type === "send" && enter.value.toLowerCase() === "enter"
+      && (enter.repeat ?? 1) === 1 && (enter.delayMs ?? 0) === 0
+      ? { text: first.value, enter: true } : null;
   }
   return null;
 }

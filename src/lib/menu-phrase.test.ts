@@ -12,6 +12,15 @@ function config(actions: Action[]): AppConfig {
 }
 
 describe("phraseOf", () => {
+  it.each([
+    [{ type: "text", value: "abc", repeat: 3 }, { type: "sleep", delayMs: 5000 }, { type: "send", value: "Enter", repeat: 2 }],
+    [{ type: "sleep", delayMs: 80 }, { type: "text", value: "abc" }],
+    [{ type: "text", value: "abc", delayMs: 100 }],
+    [{ type: "text", value: "abc" }, { type: "send", value: "Enter", delayMs: 100 }],
+    [{ type: "text", value: "abc" }, { type: "sleep", delayMs: 5000 }, { type: "send", value: "Enter" }],
+  ] satisfies import("./config").SequenceStep[][])("leaves a macro with timing or repeats in the macro editor (%j)", (...steps) => {
+    expect(phraseOf({ id: "m", displayName: "Macro", type: "sequence", payload: { steps } }, [])).toBeNull();
+  });
   it("reads inline, library and text+Enter actions", () => {
     expect(phraseOf(inline("a", "hi"), library)).toEqual({ text: "hi", enter: false });
     expect(phraseOf({ id: "b", displayName: "b", type: "textSnippet", payload: { source: "libraryRef", snippetId: "lib-1" } }, library))

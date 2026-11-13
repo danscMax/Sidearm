@@ -133,8 +133,8 @@ export function MenuItemsEditor({
   const [dragId, setDragId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; place: DropPlace } | null>(null);
   const [query, setQuery] = useState("");
-  // The last deletion, offered back while nothing else changed since.
-  const [removed, setRemoved] = useState<{ before: MenuItem[]; after: MenuItem[]; label: string } | null>(null);
+  // The last removal, offered back while neither draft changed since.
+  const [removed, setRemoved] = useState<{ before: MenuItem[]; after: MenuItem[]; editsBefore: MenuEdits; editsAfter: MenuEdits; label: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The item's menu (right click or ⋯); `to`: the menus to copy or move it to.
   const [ctx, setCtx] = useState<{ x: number; y: number; id: string; to?: "copy" | "move" } | null>(null);
@@ -464,9 +464,9 @@ export function MenuItemsEditor({
     }));
   }
 
-  function remove(item: MenuItem, after = removeMenuItem(items, item.id)) {
+  function remove(item: MenuItem, after = removeMenuItem(items, item.id), editsAfter = edits) {
     const { parentId, siblings, index } = placeOf(item);
-    setRemoved({ before: items, after, label: item.label });
+    setRemoved({ before: items, after, editsBefore: edits, editsAfter, label: item.label });
     onChange(after);
     // Stay where you were: the next item, else the one before, else its list.
     const near = siblings[index + 1] ?? siblings[index - 1];
@@ -484,8 +484,9 @@ export function MenuItemsEditor({
       return current.kind === "submenu" ? { ...current, id, items: current.items.map(fresh) } : { ...current, id };
     };
     const target: Action = { ...menu, payload: { ...menu.payload, items: [...menu.payload.items, fresh(item)] } };
-    onEditsChange({ ...edits, actions: { ...edits.actions, [menuId]: target } });
-    remove(item);
+    const nextEdits = { ...edits, actions: { ...edits.actions, [menuId]: target } };
+    onEditsChange(nextEdits);
+    remove(item, undefined, nextEdits);
     setNotice(t("inspector.menuMoved", { name: item.label, menu: menu.displayName }));
   }
 
@@ -739,10 +740,10 @@ export function MenuItemsEditor({
               )}
             </div>
           ) : renderList()}
-          {removed && removed.after === items ? (
+          {removed && removed.after === items && removed.editsAfter === edits ? (
             <p className="menu-ed__note">
               {t("inspector.menuRemoved", { name: removed.label })}{" "}
-              <button type="button" className="menu-ed__link" onClick={() => { onChange(removed.before); setRemoved(null); }}>
+              <button type="button" className="menu-ed__link" onClick={() => { onChange(removed.before); onEditsChange(removed.editsBefore); setRemoved(null); setNotice(null); }}>
                 {t("inspector.menuRestore")}
               </button>
             </p>

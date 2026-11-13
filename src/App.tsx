@@ -186,6 +186,7 @@ function App() {
   // Tauri v2 file-drop event; looks like a hint the user wants to import a Synapse file.
   useEffect(() => {
     let unlisten: (() => void) | null = null;
+    let disposed = false;
     void listenDragDrop(async (paths) => {
       if (!hasBuiltinDeviceRef.current) return;
       const path = paths[0];
@@ -194,14 +195,16 @@ function App() {
       if (!lower.endsWith(".synapse4") && !lower.endsWith(".synapse3")) return;
       try {
         const parsed = await parseSynapseSource(path);
-        setSynapseParsed(parsed);
+        if (!disposed) setSynapseParsed(parsed);
       } catch (unknownError) {
-        setError(normalizeCommandError(unknownError));
+        if (!disposed) setError(normalizeCommandError(unknownError));
       }
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
     return () => {
+      disposed = true;
       unlisten?.();
     };
   }, [setError]);
@@ -247,17 +250,19 @@ function App() {
     return () => { disposed = true; unlisten?.(); };
   }, [showToast, t]);
 
-  const handleUndoWithToast = useCallback(() => {
+  function handleUndoWithToast() {
     if (undoStack.length === 0) return;
     handleUndo();
-    showToast(t("toast.undone"), "info", { label: t("toast.undoAction"), onClick: () => { handleRedoWithToast(); } });
-  }, [undoStack.length, handleUndo, showToast, t]);
+    showToast(t("toast.undone"), "info", { label: t("toast.undoAction"), onClick: () => { redoWithToastRef.current(); } });
+  }
 
-  const handleRedoWithToast = useCallback(() => {
+  function handleRedoWithToast() {
     if (redoStack.length === 0) return;
     handleRedo();
     showToast(t("toast.redone"), "info");
-  }, [redoStack.length, handleRedo, showToast, t]);
+  }
+  const redoWithToastRef = useRef(handleRedoWithToast);
+  useEffect(() => { redoWithToastRef.current = handleRedoWithToast; });
 
   useEffect(() => {
     let cancelled = false;
@@ -291,12 +296,14 @@ function App() {
   // a duplicate launch was ignored. The Diagnostics log line comes from Rust.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenSingleInstanceBlocked(() => {
       showToast(t("instance.blocked"), "info");
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [showToast, t]);
 
   // Capture helper detected the mouse typing factory digits instead of the
@@ -306,13 +313,15 @@ function App() {
   // add one if users keep missing the toast while the window is closed.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenMouseDefaultsSuspected(() => {
       if (!hasBuiltinDeviceRef.current) return;
       showToast(t("mouseDefaults.suspected"), "warning");
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [showToast, t]);
 
   // Mouse-path states feed the mouse's Performance tab; notices (kept by the backend until
@@ -320,14 +329,17 @@ function App() {
   const [mouseStates, setMouseStates] = useState<MouseStatusKind[]>([]);
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     // A window started hidden in the tray would show a toast nobody sees: the
     // backend keeps the notices until a visible window takes them.
     const takeNotices = (initial: boolean) => {
+      if (disposed) return;
       if (document.hidden) {
-        document.addEventListener("visibilitychange", () => takeNotices(initial), { once: true });
+        document.addEventListener("visibilitychange", initial ? takeInitialNotices : takeLaterNotices, { once: true });
         return;
       }
       void getMouseStatus().then((events) => {
+        if (disposed) return;
         for (const { kind } of events) {
           if (!MOUSE_STATUS_NOTICES.includes(kind)) continue;
           if (kind === "offlineNotStored") {
@@ -335,6 +347,7 @@ function App() {
             continue;
           }
           void getNativeModel().then(({ consumerSignals }) => {
+            if (disposed) return;
             if (!consumerSignals) {
               showToast(t("mouse.noticeSignalsKeys"), "success");
               return;
@@ -354,6 +367,8 @@ function App() {
         }
       });
     };
+    function takeInitialNotices() { takeNotices(true); }
+    function takeLaterNotices() { takeNotices(false); }
     // Listen first, then take the snapshot: a change in between is not lost.
     void listenMouseStatus(({ kind, active }) => {
       if (MOUSE_STATUS_NOTICES.includes(kind)) {
@@ -370,22 +385,30 @@ function App() {
         });
       }
     }).then((fn) => {
+      if (disposed) { fn(); return; }
       unlisten = fn;
       takeNotices(true);
     });
-    return () => unlisten?.();
+    return () => {
+      disposed = true;
+      unlisten?.();
+      document.removeEventListener("visibilitychange", takeInitialNotices);
+      document.removeEventListener("visibilitychange", takeLaterNotices);
+    };
   }, [showToast, t]);
 
   // Low mouse battery: the guard flags one reading per discharge (it also shows
   // the OSD bubble and updates the tray tooltip, which work with the window hidden).
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenMouseBattery(({ model, percent, low }) => {
       if (low) showToast(t("mouse.batteryLow", { model, percent }), "warning");
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [showToast, t]);
 
   // The foreground app runs elevated, so Windows (UIPI) drops our input there.
@@ -394,6 +417,7 @@ function App() {
   // tray → toast unseen); upgrade to tauri-plugin-notification if it's missed.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenElevatedForeground(({ exe }) => {
       showToast(t("elevation.foregroundBlocked", { exe }), "warning", {
         label: t("elevation.relaunchAction"),
@@ -402,9 +426,10 @@ function App() {
         },
       });
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [showToast, t]);
 
   // After an update the admin logon task's hash pin no longer matches, so it
@@ -434,25 +459,29 @@ function App() {
   // Tray switched the active profile — mirror the selection into the UI.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenTrayProfileChanged((profileId) => {
       setSelectedProfileId(profileId);
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, []);
 
   // Tray "Create rule for active window" — switch to Profiles and open the
   // prefilled create-rule dialog.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenQuickRuleStart((capture) => {
       switchWorkspaceMode("profiles");
       setQuickRuleCapture(capture);
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [switchWorkspaceMode]);
 
   // A mouse plugged in while Sidearm runs: loading the config adds its device
@@ -479,12 +508,14 @@ function App() {
   // tell the user instead of failing silently.
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let disposed = false;
     void listenQuickRuleFailed(() => {
       showToast(t("quickRule.failed"), "warning");
     }).then((fn) => {
-      unlisten = fn;
+      if (disposed) fn();
+      else unlisten = fn;
     });
-    return () => unlisten?.();
+    return () => { disposed = true; unlisten?.(); };
   }, [showToast, t]);
 
   // First-run onboarding: show the full-screen wizard until the user completes
@@ -732,6 +763,7 @@ function App() {
       commandPaletteOpen ||
       shortcutHelpOpen ||
       actionPickerOpen ||
+      presetsOpen ||
       !!confirmModal ||
       showMigrationDialog ||
       showOnboarding ||
@@ -775,6 +807,8 @@ function App() {
         setActionPickerOpen(false);
         setActionPickerBindingId(null);
         setMenuFocusItemId(undefined);
+      } else if (presetsOpen) {
+        setPresetsOpen(false);
       } else if (confirmModal) {
         setConfirmModal(null);
       } else if (error !== null) {
@@ -996,6 +1030,7 @@ function App() {
   const verification = useVerification({
     activeConfig,
     effectiveProfileId,
+    effectiveDeviceId,
     selectedLayer,
     selectedControlId,
     setSelectedLayer,
@@ -1477,6 +1512,7 @@ function App() {
         <SynapseImportModal
           parsed={synapseParsed}
           activeConfig={activeConfig}
+          getConfigRevision={persistence.getConfigRevision}
           onImported={(next, summary) => {
             updateDraft(() => next, { immediate: true });
             setSynapseParsed(null);

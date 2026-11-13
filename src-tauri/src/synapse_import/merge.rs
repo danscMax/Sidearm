@@ -1,18 +1,17 @@
 //! Apply `ParsedSynapseProfiles` into an existing `AppConfig`.
 //!
-//! Slice 1 implements append-only merge: every imported profile gets a fresh
-//! schema-valid ID and is added alongside existing profiles. Name collisions
-//! get a `(imported)` suffix, matching the existing `importProfile` convention
-//! on the frontend.
+//! Append profiles with fresh IDs, or replace the first same-named profile
+//! while preserving its identity and incoming references. Appended name
+//! collisions get the UI's imported suffix.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::config::{
     Action, ActionPayload, ActionType, AppConfig, AppMapping, Binding, ControlId, EncoderMapping,
-    Layer, MouseActionKind, MouseActionPayload, PasteMode, PhysicalControl, Profile,
+    Layer, MenuItem, MouseActionKind, MouseActionPayload, PasteMode, PhysicalControl, Profile,
     SequenceActionPayload, SequenceStep, ShortcutActionPayload, SnippetLibraryItem,
-    TextSnippetPayload,
+    TextSnippetPayload, MAX_SEQUENCE_STEPS,
 };
 
 use super::types::{
@@ -45,15 +44,23 @@ pub fn apply_parsed_into_config(
             summary.skipped += 1;
             continue;
         }
-        if options.merge_strategy == MergeStrategy::ReplaceByName {
-            remove_profile_by_name(&mut config, &profile.name, &mut warnings);
-        }
-        match append_profile(&mut config, profile, &mut warnings, &options.name_suffix) {
-            Ok(ProfileAddition { bindings, actions }) => {
+        let replaced_id = if options.merge_strategy == MergeStrategy::ReplaceByName {
+            remove_profile_by_name(&mut config, &profile.name, &mut warnings)
+        } else {
+            None
+        };
+        match append_profile(
+            &mut config,
+            profile,
+            &mut warnings,
+            &options.name_suffix,
+            replaced_id,
+        ) {
+            Ok(ProfileAddition { bindings, actions, macros }) => {
                 summary.profiles_added += 1;
                 summary.bindings_added += bindings;
                 summary.actions_added += actions;
-                summary.macros_added += profile.macros.len();
+                summary.macros_added += macros;
             }
             Err(err) => {
                 warnings.push(
@@ -77,6 +84,7 @@ pub fn apply_parsed_into_config(
 struct ProfileAddition {
     bindings: usize,
     actions: usize,
+    macros: usize,
 }
 
 fn append_profile(
@@ -84,9 +92,10 @@ fn append_profile(
     parsed: &ParsedProfile,
     warnings: &mut Vec<ImportWarning>,
     name_suffix: &str,
+    replaced_id: Option<String>,
 ) -> Result<ProfileAddition, String> {
     // Build a fresh Profile with a schema-valid ID and a unique human name.
-    let new_profile_id = make_random_id("profile");
+    let new_profile_id = replaced_id.unwrap_or_else(|| make_random_id("profile"));
     let new_name = unique_profile_name(&parsed.name, &config.profiles, name_suffix);
 
     // saturating_add so a pathological existing priority near i32::MAX (e.g. a
@@ -116,10 +125,11 @@ fn append_profile(
 
     for m in &parsed.macros {
         let action_id = make_random_id("action");
-        let action = build_sequence_action(&action_id, m, warnings);
+        let Some(action) = build_sequence_action(&action_id, m, warnings) else { continue; };
         macro_action_ids.insert(m.synapse_guid.clone(), action_id);
         new_actions.push(action);
     }
+    let added_macros = new_actions.len();
 
     // Bindings + per-binding actions.
     let mut new_bindings: Vec<Binding> = Vec::new();
@@ -218,6 +228,7 @@ fn append_profile(
     Ok(ProfileAddition {
         bindings: added_bindings,
         actions: added_actions,
+        macros: added_macros,
     })
 }
 
@@ -338,8 +349,18 @@ fn build_action_from_parsed(
 fn build_sequence_action(
     action_id: &str,
     parsed: &ParsedMacro,
-    _warnings: &mut Vec<ImportWarning>,
-) -> Action {
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<Action> {
+    if parsed.steps.len() > MAX_SEQUENCE_STEPS {
+        let message = crate::ui_text!(
+            "synapseImport.macroTooLong",
+            "Skipped macro `{name}`: {count} steps exceeds the maximum of {limit}.",
+            name = &parsed.name, count = parsed.steps.len(), limit = MAX_SEQUENCE_STEPS
+        );
+        warnings.push(ImportWarning::new("macro_sequence_too_long", crate::ui_text::native(&message))
+            .with_context(parsed.name.clone()));
+        return None;
+    }
     let steps: Vec<SequenceStep> = parsed
         .steps
         .iter()
@@ -362,7 +383,7 @@ fn build_sequence_action(
         steps
     };
 
-    Action {
+    Some(Action {
         id: action_id.to_string(),
         action_type: ActionType::Sequence,
         payload: ActionPayload::Sequence(SequenceActionPayload { steps }),
@@ -372,7 +393,7 @@ fn build_sequence_action(
             parsed.name
         )),
         conditions: Vec::new(),
-    }
+    })
 }
 
 // ============================================================================
@@ -388,16 +409,18 @@ fn build_sequence_action(
 /// profile would let importing one profile named e.g. "Default" wipe several
 /// unrelated user profiles (and their bindings/macros). So we replace at most
 /// ONE (the first match) and warn when the name was ambiguous.
-fn remove_profile_by_name(config: &mut AppConfig, name: &str, warnings: &mut Vec<ImportWarning>) {
+fn remove_profile_by_name(
+    config: &mut AppConfig,
+    name: &str,
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<String> {
     let matching_ids: Vec<String> = config
         .profiles
         .iter()
         .filter(|p| p.name == name)
         .map(|p| p.id.clone())
         .collect();
-    let Some(target_id) = matching_ids.first().cloned() else {
-        return;
-    };
+    let target_id = matching_ids.first().cloned()?;
     if matching_ids.len() > 1 {
         warnings.push(
             ImportWarning::new(
@@ -422,18 +445,38 @@ fn remove_profile_by_name(config: &mut AppConfig, name: &str, warnings: &mut Vec
     config.bindings.retain(|b| b.profile_id != target_id);
     config.app_mappings.retain(|m| m.profile_id != target_id);
 
-    // An action can be referenced by multiple bindings (e.g. macros shared
-    // within a profile). Only drop actions whose *remaining* bindings are
-    // all gone — play it safe and keep actions if any other binding still
-    // refers to them.
-    let still_referenced: std::collections::HashSet<String> = config
+    // Menu items (including nested/disabled ones) also own their referenced actions.
+    let mut still_referenced: std::collections::HashSet<String> = config
         .bindings
         .iter()
         .map(|b| b.action_id.clone())
         .collect();
+    let mut items: Vec<&MenuItem> = config
+        .actions
+        .iter()
+        .filter_map(|action| {
+            if let ActionPayload::Menu(menu) = &action.payload {
+                Some(&menu.items)
+            } else {
+                None
+            }
+        })
+        .flatten()
+        .collect();
+    while let Some(item) = items.pop() {
+        match item {
+            MenuItem::Action { action_id, .. } => {
+                still_referenced.insert(action_id.clone());
+            }
+            MenuItem::Submenu {
+                items: children, ..
+            } => items.extend(children),
+        }
+    }
     config
         .actions
         .retain(|a| !dropped_action_ids.contains(&a.id) || still_referenced.contains(&a.id));
+    Some(target_id)
 }
 
 fn unique_profile_name(base: &str, existing: &[Profile], suffix: &str) -> String {
@@ -511,6 +554,69 @@ mod tests {
     use super::*;
     use crate::synapse_import::types::{ParsedAction, ParsedBinding, ParsedProfile};
 
+    #[test]
+    fn replacement_preserves_profile_and_nested_menu_references() {
+        let mut base = crate::config::default_seed_config();
+        let old_id = base.settings.fallback_profile_id.clone();
+        let old_name = base
+            .profiles
+            .iter()
+            .find(|p| p.id == old_id)
+            .unwrap()
+            .name
+            .clone();
+        base.settings.offline_profile_id = Some(old_id.clone());
+        let binding_index = base
+            .bindings
+            .iter()
+            .position(|b| b.profile_id == old_id)
+            .unwrap();
+        let mut shared_action = base
+            .actions
+            .iter()
+            .find(|a| a.id == base.bindings[binding_index].action_id)
+            .unwrap()
+            .clone();
+        let shared_id = "shared-with-menu".to_string();
+        shared_action.id = shared_id.clone();
+        base.actions.push(shared_action);
+        base.bindings[binding_index].action_id = shared_id.clone();
+        base.actions.extend([
+            serde_json::from_value(serde_json::json!({"id":"external-switch", "type":"profileSwitch", "pretty":"Switch", "payload":{"targetProfileId":old_id}})).unwrap(),
+            serde_json::from_value(serde_json::json!({"id":"external-menu", "type":"menu", "pretty":"Menu", "payload":{"items":[{"kind":"submenu", "id":"sub", "label":"Sub", "enabled":true, "items":[{"kind":"action", "id":"item", "label":"Shared", "actionId":shared_id, "enabled":true}]}]}})).unwrap(),
+        ]);
+        let parsed = ParsedSynapseProfiles {
+            source_kind: super::super::types::SourceKind::SynapseV4,
+            source_path: "test".into(),
+            warnings: vec![],
+            profiles: vec![ParsedProfile {
+                synapse_guid: "p".into(),
+                name: old_name,
+                bindings: vec![],
+                macros: vec![],
+            }],
+        };
+        let result = apply_parsed_into_config(
+            base,
+            parsed,
+            &ImportOptions {
+                merge_strategy: MergeStrategy::ReplaceByName,
+                ..Default::default()
+            },
+        );
+        assert!(
+            result.config.profiles.iter().any(|p| p.id == old_id),
+            "replacement must keep the profile identity"
+        );
+        assert!(
+            result.config.actions.iter().any(|a| a.id == shared_id),
+            "nested menu still owns the action"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        crate::config::save_config(dir.path(), result.config, None)
+            .expect("replaced config must pass save validation");
+    }
+
     fn empty_config() -> AppConfig {
         serde_json::from_str(
             r#"{
@@ -577,6 +683,37 @@ mod tests {
         assert_eq!(result.summary.profiles_added, 1);
         assert_eq!(result.summary.bindings_added, 1);
         assert_eq!(result.summary.actions_added, 1);
+    }
+
+    #[test]
+    fn import_sequence_limit_keeps_valid_macros_and_skips_oversized_ones() {
+        for count in [200, 201] {
+            let parsed = ParsedSynapseProfiles {
+                source_kind: super::super::types::SourceKind::SynapseV4,
+                source_path: "test".into(), warnings: Vec::new(),
+                profiles: vec![ParsedProfile {
+                synapse_guid: "g".into(), name: "Imported".into(),
+                bindings: vec![ParsedBinding {
+                    control_id: "thumb_01".into(), layer: "standard".into(),
+                    source_input_id: "KEY_1".into(), label: "Macro".into(),
+                    action: ParsedAction::Sequence { macro_guid: "m".into() },
+                }, ParsedBinding {
+                    control_id: "thumb_02".into(), layer: "standard".into(),
+                    source_input_id: "KEY_2".into(), label: "Shortcut".into(),
+                    action: ParsedAction::Shortcut { key: "B".into(), ctrl: false, shift: false, alt: false, win: false },
+                }],
+                macros: vec![ParsedMacro {
+                    synapse_guid: "m".into(), name: "Boundary".into(),
+                    steps: vec![ParsedSequenceStep::Send { value: "A".into() }; count],
+                }],
+            }]};
+            let result = apply_parsed_into_config(crate::config::default_seed_config(), parsed, &ImportOptions::default());
+            assert_eq!(result.summary.bindings_added, if count == 200 { 2 } else { 1 });
+            assert_eq!(result.summary.macros_added, usize::from(count == 200));
+            assert_eq!(result.warnings.iter().any(|w| w.code == "macro_sequence_too_long"), count == 201);
+            let dir = tempfile::tempdir().unwrap();
+            crate::config::save_config(dir.path(), result.config, None).unwrap();
+        }
     }
 
     #[test]
@@ -714,8 +851,8 @@ mod tests {
             .filter(|p| p.name == "Gaming")
             .collect();
         assert_eq!(gaming.len(), 1);
-        // Old profile, action, binding are gone
-        assert!(!result.config.profiles.iter().any(|p| p.id == "old-gaming"));
+        // Profile identity survives; its old action and binding are gone.
+        assert!(result.config.profiles.iter().any(|p| p.id == "old-gaming"));
         assert!(!result.config.bindings.iter().any(|b| b.id == "b-old"));
         assert!(!result.config.actions.iter().any(|a| a.id == "a-old"));
         // New binding + action present
@@ -761,9 +898,8 @@ mod tests {
                 name_suffix: String::new(),
             },
         );
-        // Exactly ONE same-named profile was removed (the first match); the
-        // unrelated duplicate survived.
-        assert!(!result.config.profiles.iter().any(|p| p.id == "gaming-a"));
+        // The first match keeps its identity; the unrelated duplicate survives.
+        assert!(result.config.profiles.iter().any(|p| p.id == "gaming-a"));
         assert!(result.config.profiles.iter().any(|p| p.id == "gaming-b"));
         // The ambiguity was surfaced as a warning.
         assert!(
@@ -1068,7 +1204,7 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Overflow: macro with 10 000 steps → no panic, all steps are converted
+    // Overflow: oversized macros are skipped without affecting valid imports.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1102,9 +1238,9 @@ mod edge_proptests {
             }],
         }]);
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
-        // The macro action must be created; binding links to it.
-        assert_eq!(result.config.bindings.len(), 1);
-        assert_eq!(result.summary.macros_added, 1);
+        assert!(result.config.bindings.is_empty());
+        assert_eq!(result.summary.macros_added, 0);
+        assert!(result.warnings.iter().any(|w| w.code == "macro_sequence_too_long"));
     }
 
     // -----------------------------------------------------------------------

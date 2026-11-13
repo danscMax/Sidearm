@@ -1,6 +1,6 @@
 import * as fc from "fast-check";
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { renderHook, act, cleanup } from "@testing-library/react";
 
 // Mock @tauri-apps/plugin-log (useLogPanel attaches a logger on mount).
 vi.mock("@tauri-apps/plugin-log", () => ({
@@ -9,6 +9,8 @@ vi.mock("@tauri-apps/plugin-log", () => ({
   warn: vi.fn(() => Promise.resolve()),
   info: vi.fn(() => Promise.resolve()),
 }));
+
+afterEach(cleanup);
 
 // ---------------------------------------------------------------------------
 // useLogPanel ring buffer (PBT) — migrated from the former edge-cases.test.ts

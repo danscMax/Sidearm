@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { loadConfig, normalizeCommandError, saveConfig, verifyOnboardMapping } from "../lib/backend";
 import { onboardBindings } from "../lib/onboard-mapping";
@@ -51,6 +51,7 @@ export interface AppPersistence {
   activePath: string;
 
   // Functions
+  getConfigRevision: () => number | null;
   refreshConfig: () => Promise<boolean>;
   refreshAfterSave: () => Promise<boolean>;
   updateDraft: (
@@ -74,11 +75,13 @@ export function useAppPersistence(
   const [error, setError] = useState<CommandError | null>(null);
   const [undoStack, setUndoStack] = useState<AppConfig[]>([]);
   const [redoStack, setRedoStack] = useState<AppConfig[]>([]);
+  const [committedReloadRevision, setCommittedReloadRevision] = useState(0);
 
   // Auto-save refs
   const saveQueueRef = useRef<AppConfig | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isSavingRef = useRef(false);
+  const saveRequestRef = useRef<Promise<SaveConfigResponse> | null>(null);
   const disposedRef = useRef(false);
   /** The key-button signals last sent to the mouse (`null` = none this session). */
   const onboardSentRef = useRef<string | null>(null);
@@ -99,6 +102,18 @@ export function useAppPersistence(
   // Last updateDraft coalesce key — consecutive edits with the same key share one
   // undo step instead of one-per-keystroke (see UpdateDraftOptions.coalesceKey).
   const lastCoalesceKeyRef = useRef<string | null>(null);
+  // Reload bookkeeping. `reload` counts reload starts (async imports capture it
+  // through getConfigRevision); `apply` also moves on every local edit, undo and
+  // redo, so only the newest reload may apply what it read; `pending`/`awaiting`
+  // block imports until a reload has finished and React committed its result.
+  const revisionRef = useRef<{ reload: number; apply: number; pending: number; awaiting: number | null }>({
+    reload: 0, apply: 0, pending: 0, awaiting: null,
+  });
+
+  // A local edit can supersede the loaded config, but not this reload's commit marker.
+  useLayoutEffect(() => {
+    if (revisionRef.current.awaiting === committedReloadRevision) revisionRef.current.awaiting = null;
+  }, [committedReloadRevision]);
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
@@ -181,7 +196,8 @@ export function useAppPersistence(
     setViewState("saving");
 
     try {
-      const result = await saveConfig(config);
+      saveRequestRef.current = saveConfig(config);
+      const result = await saveRequestRef.current;
       lastPersistedConfigRef.current = result.config;
       startTransition(() => {
         setSnapshot({
@@ -210,7 +226,24 @@ export function useAppPersistence(
         await refreshConfig();
         return;
       }
+      if (normalized.code === "runtime_reload_failed") {
+        // The file was committed before capture failed. Keep that base even
+        // if rereading fails, and never describe this as a save rollback.
+        lastPersistedConfigRef.current = config;
+        setWorkingConfig(config);
+        await refreshConfig();
+        setError((current) => current ?? normalized);
+        return;
+      }
       const rollbackTarget = lastPersistedConfigRef.current;
+      if (rollbackTarget) {
+        // A newer draft queued during this save builds on the rejected one; the
+        // UI is rolled back below, so saving it later would persist edits the
+        // user no longer sees.
+        clearTimeout(saveTimerRef.current);
+        saveQueueRef.current = null;
+        lastCoalesceKeyRef.current = null;
+      }
       startTransition(() => {
         setError(normalized);
         setViewState("error");
@@ -224,6 +257,7 @@ export function useAppPersistence(
       });
       onAutoSaveFailedRef.current?.(normalized.message);
     } finally {
+      saveRequestRef.current = null;
       isSavingRef.current = false;
       // If new changes queued during this save, drain them. On teardown
       // (unmount / window close) flush immediately rather than via a timer:
@@ -252,6 +286,11 @@ export function useAppPersistence(
   }
 
   async function refreshConfig(): Promise<boolean> {
+    const revisions = revisionRef.current;
+    const reloadRevision = ++revisions.reload;
+    const applyRevision = ++revisions.apply;
+    revisions.pending += 1;
+    const superseded = () => applyRevision !== revisions.apply;
     // Cancel any pending auto-save
     clearTimeout(saveTimerRef.current);
     saveQueueRef.current = null;
@@ -260,11 +299,25 @@ export function useAppPersistence(
     setError(null);
 
     try {
+      if (saveRequestRef.current) {
+        // Read after the pending write; flushSave owns its error/recovery path.
+        await saveRequestRef.current.catch(() => {});
+        if (superseded()) return false;
+      }
       const result = await loadConfig();
+      if (superseded()) return false;
+      revisions.awaiting = reloadRevision;
       lastPersistedConfigRef.current = result.config;
+      // Undo steps belong to the config they were taken on: replaying one onto
+      // a reloaded config (restore, import, another instance's write) would
+      // save the old config over it.
+      lastCoalesceKeyRef.current = null;
       startTransition(() => {
+        setUndoStack([]);
+        setRedoStack([]);
         setSnapshot(result);
         setWorkingConfig(result.config);
+        setCommittedReloadRevision(reloadRevision);
         setLastSave(null);
         setError(null);
         setViewState("ready");
@@ -272,12 +325,20 @@ export function useAppPersistence(
       await writeOnboardMapping(result.config);
       return true;
     } catch (unknownError) {
+      if (superseded()) return false;
       startTransition(() => {
         setError(normalizeCommandError(unknownError));
         setViewState("error");
       });
       return false;
+    } finally {
+      revisions.pending -= 1;
     }
+  }
+
+  function getConfigRevision(): number | null {
+    const { reload, pending, awaiting } = revisionRef.current;
+    return pending > 0 || awaiting !== null ? null : reload;
   }
 
   function updateDraft(
@@ -286,6 +347,7 @@ export function useAppPersistence(
   ) {
     const current = workingConfig;
     if (!current) return;
+    revisionRef.current.apply += 1;
     // "Keep the mice alike": the edit is repeated on the other mouse here, so
     // every editor gets it and undo takes back both.
     const next = mirrorMouseEdit(current, updateConfig(current));
@@ -306,6 +368,8 @@ export function useAppPersistence(
 
   function handleUndo() {
     if (undoStack.length === 0) return;
+    revisionRef.current.apply += 1;
+    setViewState("ready");
     lastCoalesceKeyRef.current = null;
     const previous = undoStack[undoStack.length - 1];
     const current = workingConfig;
@@ -319,6 +383,8 @@ export function useAppPersistence(
 
   function handleRedo() {
     if (redoStack.length === 0) return;
+    revisionRef.current.apply += 1;
+    setViewState("ready");
     lastCoalesceKeyRef.current = null;
     const next = redoStack[redoStack.length - 1];
     const current = workingConfig;
@@ -342,6 +408,7 @@ export function useAppPersistence(
     activeConfig,
     activeWarnings,
     activePath,
+    getConfigRevision,
     refreshConfig,
     refreshAfterSave,
     updateDraft,

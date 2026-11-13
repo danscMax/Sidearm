@@ -239,6 +239,7 @@ fn run(
     // everything.
     let mut wait = Duration::ZERO;
     let mut last_full: Option<Instant> = None;
+    let mut last_battery_scan: Option<Instant> = None;
     let mut suspect = true;
     let mut unreadable_since: Option<Instant> = None;
     loop {
@@ -305,6 +306,13 @@ fn run(
                     .is_ok()
             };
             if !restored {
+                // The mouse holding the offline profile may sleep for hours; the
+                // other mice's batteries (tray badge, tooltip) must not wait for it.
+                let due = last_battery_scan.is_none_or(|at| at.elapsed() >= FULL_SCAN_EVERY);
+                poll_batteries(app, config_dir, !due);
+                if due {
+                    last_battery_scan = Some(Instant::now());
+                }
                 wait = FAST_POLL;
                 continue;
             }
@@ -334,6 +342,9 @@ fn run(
             last_full = Some(Instant::now());
         }
         poll_batteries(app, config_dir, !full);
+        if full {
+            last_battery_scan = last_full;
+        }
         // `Absent` stays suspect: a mouse plugged back in gets a full scan.
         suspect = !matches!(verdict, Verdict::Clean(_) | Verdict::ModeOnly | Verdict::ReadOnly);
         if full {
@@ -509,17 +520,7 @@ fn poll_batteries(app: &AppHandle, config_dir: &Path, only_silent: bool) {
         return;
     }
     let Some(config) = read_config(config_dir) else { return };
-    let mut present = crate::mouse_memory::present_models();
-    silent().retain(|name| present.iter().any(|model| model.name == *name));
-    if only_silent {
-        present.retain(|model| silent().contains(&model.name));
-    }
-    let unplugged = {
-        let mut batteries = batteries();
-        let before = batteries.len();
-        batteries.retain(|(kept, _)| present.iter().any(|model| model.name == kept.name));
-        batteries.len() != before
-    };
+    let (present, unplugged) = battery_poll_models(crate::mouse_memory::present_models(), &mut silent(), &mut batteries(), only_silent);
     if unplugged {
         crate::rebuild_tray_menu_from_config(app, &config);
     }
@@ -543,6 +544,21 @@ fn poll_batteries(app: &AppHandle, config_dir: &Path, only_silent: bool) {
             }
         }
     }
+}
+
+fn battery_poll_models(
+    mut present: Vec<&'static NativeModel>,
+    silent: &mut Vec<&'static str>,
+    cached: &mut Vec<(&'static NativeModel, u8)>,
+    only_silent: bool,
+) -> (Vec<&'static NativeModel>, bool) {
+    silent.retain(|name| present.iter().any(|model| model.name == *name));
+    let before = cached.len();
+    cached.retain(|(kept, _)| present.iter().any(|model| model.name == kept.name));
+    if only_silent {
+        present.retain(|model| silent.contains(&model.name));
+    }
+    (present, cached.len() != before)
 }
 
 /// Publishes a battery reading: remembers it, refreshes the tray (tooltip and
@@ -725,6 +741,22 @@ fn takeover_message(event: &TakeoverEvent) -> crate::ui_text::UiText {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn r07_03_silent_poll_keeps_healthy_connected_batteries() {
+        use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
+        let mut cached = vec![(&NAGA_V2_HYPERSPEED, 30), (&NAGA_V3_PRO, 90)];
+        let mut silent = vec![NAGA_V2_HYPERSPEED.name];
+        let (asked, unplugged) = battery_poll_models(vec![&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO], &mut silent, &mut cached, true);
+        assert_eq!(asked.iter().map(|m| m.name).collect::<Vec<_>>(), vec![NAGA_V2_HYPERSPEED.name]);
+        assert!(!unplugged);
+        assert_eq!(cached.iter().map(|(m, p)| (m.name, *p)).collect::<Vec<_>>(), vec![(NAGA_V2_HYPERSPEED.name, 30), (NAGA_V3_PRO.name, 90)]);
+        let (asked, unplugged) = battery_poll_models(vec![&NAGA_V3_PRO], &mut silent, &mut cached, true);
+        assert!(asked.is_empty());
+        assert!(silent.is_empty());
+        assert!(unplugged);
+        assert_eq!(cached.iter().map(|(m, p)| (m.name, *p)).collect::<Vec<_>>(), vec![(NAGA_V3_PRO.name, 90)]);
+    }
 
     #[test]
     fn the_tray_badge_follows_the_mouse_in_use() {

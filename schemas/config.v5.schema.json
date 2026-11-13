@@ -28,7 +28,8 @@
         8,
         9,
         10,
-        11
+        11,
+        12
       ]
     },
     "settings": {
@@ -84,6 +85,16 @@
     }
   },
   "$defs": {
+    "int32": {
+      "type": "integer",
+      "minimum": -2147483648,
+      "maximum": 2147483647
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
     "nonEmptyString": {
       "type": "string",
       "minLength": 1
@@ -266,8 +277,7 @@
           "description": "Whether the first-run onboarding wizard has been completed or skipped."
         },
         "onboardingStep": {
-          "type": "integer",
-          "minimum": 0,
+          "$ref": "#/$defs/uint32",
           "description": "Resume point (visible step index) for the onboarding wizard; omitted means start from the beginning."
         },
         "hypershiftTrigger": {
@@ -340,7 +350,7 @@
           "type": "boolean"
         },
         "priority": {
-          "type": "integer"
+          "$ref": "#/$defs/int32"
         },
         "mouseDpi": {
           "type": "integer",
@@ -518,7 +528,7 @@
           "type": "boolean"
         },
         "priority": {
-          "type": "integer",
+          "$ref": "#/$defs/int32",
           "default": 0
         }
       }
@@ -998,8 +1008,7 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "delayMs": {
-          "type": "integer",
-          "minimum": 0
+          "$ref": "#/$defs/uint32"
         },
         "repeat": {
           "type": "integer",
@@ -1023,8 +1032,7 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "delayMs": {
-          "type": "integer",
-          "minimum": 0
+          "$ref": "#/$defs/uint32"
         },
         "repeat": {
           "type": "integer",
@@ -1045,8 +1053,7 @@
           "const": "sleep"
         },
         "delayMs": {
-          "type": "integer",
-          "minimum": 0
+          "$ref": "#/$defs/uint32"
         }
       }
     },
@@ -1074,8 +1081,7 @@
           "type": "string"
         },
         "delayMs": {
-          "type": "integer",
-          "minimum": 0
+          "$ref": "#/$defs/uint32"
         }
       }
     },

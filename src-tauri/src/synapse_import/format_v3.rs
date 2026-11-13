@@ -62,7 +62,13 @@ pub enum SynapseV3Error {
 /// while rejecting decompression bombs before any entry is read into memory.
 pub(crate) const MAX_ZIP_ENTRIES: usize = 4096;
 pub(crate) const MAX_ENTRY_UNCOMPRESSED: u64 = 16 * 1024 * 1024; // 16 MiB per entry
-const MAX_TOTAL_UNCOMPRESSED: u64 = 128 * 1024 * 1024; // 128 MiB total
+pub(super) const MAX_TOTAL_UNCOMPRESSED: u64 = 128 * 1024 * 1024; // 128 MiB total
+/// Profiles taken from one archive (the V4 parser's limit too).
+const MAX_V3_PROFILES: usize = 64;
+/// Macro steps copied into all profiles together: each profile gets its own
+/// copy of the macros it uses, so one big macro shared by many profiles would
+/// multiply past the ZIP budget, which only counts the archive's bytes.
+pub(super) const MAX_IMPORTED_MACRO_STEPS: usize = 200_000;
 
 /// Validate the archive's declared shape (entry count + per-entry and total
 /// uncompressed sizes) before reading any entry. Pure and testable; the live
@@ -130,7 +136,24 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
     let mut macros_by_guid: HashMap<String, ParsedMacro> = HashMap::new();
     for name in &names {
         if name.starts_with("Macros/") && name.ends_with(".xml") {
-            let raw = read_file(&mut archive, name)?;
+            let raw = match read_file(&mut archive, name) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    warnings.push(
+                        ImportWarning::new(
+                            "v3_macro_read_failed",
+                            crate::ui_text::native(&crate::ui_text!(
+                                "synapse.entryReadFailed",
+                                "Could not read `{path}`: {error}",
+                                path = name,
+                                error = error
+                            )),
+                        )
+                        .with_context(name.clone()),
+                    );
+                    continue;
+                }
+            };
             // Route the in-ZIP macro through the shared, depth-aware XML parser
             // (`macro_xml::parse_macro_xml_str`) so v3 ZIP macros honor `<Number>`
             // (seconds) delays and reject empty/guidless bodies — the same
@@ -164,9 +187,34 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
 
     // 2. Profiles — one XML per profile with guid + name.
     let mut profiles: Vec<ParsedProfile> = Vec::new();
+    let mut step_budget = MAX_IMPORTED_MACRO_STEPS;
     for name in &names {
         if name.starts_with("Profiles/") && name.ends_with(".xml") {
-            let raw = read_file(&mut archive, name)?;
+            if profiles.len() >= MAX_V3_PROFILES {
+                warnings.push(ImportWarning::new(
+                    "v3_too_many_profiles",
+                    format!("The export has more than {MAX_V3_PROFILES} profiles; the rest were skipped."),
+                ));
+                break;
+            }
+            let raw = match read_file(&mut archive, name) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    warnings.push(
+                        ImportWarning::new(
+                            "v3_profile_read_failed",
+                            crate::ui_text::native(&crate::ui_text!(
+                                "synapse.entryReadFailed",
+                                "Could not read `{path}`: {error}",
+                                path = name,
+                                error = error
+                            )),
+                        )
+                        .with_context(name.clone()),
+                    );
+                    continue;
+                }
+            };
             match parse_v3_profile_meta(&raw) {
                 Ok((guid, pname)) => {
                     let bindings = collect_profile_bindings(
@@ -177,7 +225,8 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
                         &pname,
                         &mut warnings,
                     );
-                    let referenced_macros = collect_referenced_macros(&bindings, &macros_by_guid);
+                    let referenced_macros =
+                        collect_referenced_macros(&bindings, &macros_by_guid, &mut step_budget, &mut warnings);
                     profiles.push(ParsedProfile {
                         synapse_guid: guid,
                         name: pname,
@@ -261,6 +310,8 @@ fn collect_profile_bindings<R: Read + std::io::Seek>(
 fn collect_referenced_macros(
     bindings: &[ParsedBinding],
     macros_by_guid: &HashMap<String, ParsedMacro>,
+    step_budget: &mut usize,
+    warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedMacro> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<ParsedMacro> = Vec::new();
@@ -269,6 +320,15 @@ fn collect_referenced_macros(
             && seen.insert(macro_guid.clone())
             && let Some(m) = macros_by_guid.get(macro_guid)
         {
+            // Checked before the copy is made, so the budget bounds memory.
+            let Some(left) = step_budget.checked_sub(m.steps.len()) else {
+                warnings.push(ImportWarning::new(
+                    "v3_macro_budget_exceeded",
+                    format!("Macro `{}` was skipped: the export's macros are too large to import together.", m.name),
+                ));
+                continue;
+            };
+            *step_budget = left;
             out.push(m.clone());
         }
     }
@@ -674,6 +734,41 @@ fn read_file<R: Read + std::io::Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreadable_macro_and_profile_entries_leave_good_profiles_importable() {
+        use std::io::{Cursor, Write};
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, bytes) in [
+            (
+                "Profiles/good.xml",
+                b"<Profile><ProfileId>p</ProfileId><Name>Good</Name></Profile>".as_slice(),
+            ),
+            ("Features/p/mapping.xml", MAPPING_SAMPLE.as_bytes()),
+            ("Macros/bad.xml", &[0xFF]),
+            ("Profiles/bad.xml", &[0xFF]),
+        ] {
+            zip.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            zip.write_all(bytes).unwrap();
+        }
+        let parsed =
+            parse_synapse_v3_reader(zip.finish().unwrap(), "test".into()).expect("partial import");
+        assert_eq!(parsed.profiles.len(), 1);
+        assert_eq!(parsed.profiles[0].name, "Good");
+        assert_eq!(parsed.profiles[0].bindings.len(), 3);
+        for (code, path) in [
+            ("v3_macro_read_failed", "Macros/bad.xml"),
+            ("v3_profile_read_failed", "Profiles/bad.xml"),
+        ] {
+            assert!(
+                parsed
+                    .warnings
+                    .iter()
+                    .any(|w| w.code == code && w.context.as_deref() == Some(path))
+            );
+        }
+    }
 
     const MAPPING_SAMPLE: &str = r#"<?xml version="1.0"?>
 <Mappings>

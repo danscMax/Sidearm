@@ -75,6 +75,7 @@ export function LaunchEditor({
           <div className="field">
             <span className="field__label">{t("picker.launchArgsLabel")}</span>
             <ChipEditor
+              literalValues
               values={draft.args}
               onChange={(vals) => onChange({ ...draft, args: vals })}
               placeholder={t("picker.launchArgsPlaceholder")}

@@ -1,4 +1,5 @@
-import type { RefObject } from "react";
+import { useState, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 
 import { pickExecutablePath } from "../lib/backend";
 
@@ -58,6 +59,8 @@ export function ExeMatchField({
   pickRunningTooltip,
   showProcessPath,
 }: ExeMatchFieldProps) {
+  const { t } = useTranslation();
+  const [invalidFile, setInvalidFile] = useState(false);
   return (
     <div className="field">
       <span className="field__label">{label}</span>
@@ -86,9 +89,12 @@ export function ExeMatchField({
               const pick = await pickExecutablePath({
                 title: browseTitle,
                 filterName: browseFilter,
-                extensions: ["exe", "lnk"],
+                extensions: ["exe"],
               });
               if (pick) {
+                const valid = pick.name.toLowerCase().endsWith(".exe");
+                setInvalidFile(!valid);
+                if (!valid) return;
                 onChange(pick.name, pick.path);
               }
             } catch {
@@ -110,6 +116,7 @@ export function ExeMatchField({
           </button>
         ) : null}
       </div>
+      {invalidFile ? <p role="alert" className="panel__muted">{t("newRule.exeOnly")}</p> : null}
       {showProcessPath && processPath ? (
         <p
           className="field__description field__description--mono"

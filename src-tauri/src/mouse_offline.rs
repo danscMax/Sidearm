@@ -23,7 +23,7 @@ use crate::mouse_memory::{
 
 /// Present in the config folder while the mouse holds the offline profile.
 pub const OFFLINE_MARKER_FILE: &str = "mouse-offline-written";
-/// Left by an exit that could not store the offline profile (the mouse slept):
+/// Left by an exit that could not finish storing the offline profile:
 /// the next start tells the user why the buttons did nothing without Sidearm.
 pub const OFFLINE_FAILED_FILE: &str = "mouse-offline-failed";
 
@@ -212,10 +212,10 @@ pub(crate) fn restore_live_speed(device: &VendorDevice, config: &AppConfig, prof
     let own = config.profiles.iter().find(|p| p.id == profile_id).and_then(|p| p.mouse_for(model.device_id));
     let original = crate::mouse_speed::originals(model.device_id);
     let poll = own.and_then(|own| own.mouse_poll_rate_hz).filter(|hz| model.poll_code_for_hz(*hz).is_some());
-    let poll_result = match poll.or(original.poll_rate_hz) {
+    let poll_result = (|| match poll.or(original.poll_rate_hz) {
         Some(hz) if device.poll_rate_hz()? != hz => device.set_poll_rate_hz(hz),
         _ => Ok(()),
-    };
+    })();
     let dpi = own.and_then(|own| own.mouse_dpi).map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max));
     let dpi_result = match dpi.or(original.dpi) {
         Some(dpi) if dpi_too && device.dpi()? != dpi => device.set_dpi(dpi, false),
@@ -230,8 +230,39 @@ pub(crate) fn restore_live_speed(device: &VendorDevice, config: &AppConfig, prof
 /// because it slept leaves [`OFFLINE_FAILED_FILE`] instead (the profile on its
 /// first line, then the device id of each such mouse), which the next start
 /// reports and the restore process retries ([`retry_offline_profile`]).
+/// A stalled exit worker leaves the target device ids pending, even if a
+/// receiver is temporarily absent when the restore process first retries.
 pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &Path) {
-    write_offline_to(config, profile_id, config_dir, None);
+    let (worker_config, profile, dir) = (config.clone(), profile_id.to_owned(), config_dir.to_owned());
+    write_offline_bounded(config, config_dir, profile_id, std::time::Duration::from_secs(30), move |targets| {
+        write_offline_to(&worker_config, &profile, &dir, Some(&targets));
+    });
+}
+
+fn write_offline_bounded(config: &AppConfig, config_dir: &Path, profile_id: &str, timeout: std::time::Duration, work: impl FnOnce(Vec<String>) + Send + 'static) -> bool {
+    let targets: Vec<_> = crate::mouse_memory::present_models().into_iter()
+        .filter(|model| model.verified && (model.transport == Transport::Onboard || crate::mouse_memory::live_overlay::configured(config, model)))
+        .map(|model| model.device_id.to_owned())
+        .collect();
+    // Queue before touching HID: neither a held device lock nor a driver call
+    // may keep the app alive and prevent its restore process from taking over.
+    write_marker(&config_dir.join(OFFLINE_FAILED_FILE), &std::iter::once(profile_id.to_owned()).chain(targets.iter().cloned()).collect::<Vec<_>>().join("\n"));
+    let (done, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::Builder::new().name("mouse-offline".into()).spawn(move || {
+        work(targets);
+        let _ = done.send(());
+    });
+    if let Err(error) = worker {
+        log::warn!("[mouse-offline] exit worker not started; restore pending: {error}");
+        return false;
+    }
+    // Do not join: a detached worker ends with the process, releasing its HID
+    // handle and lock before the existing restorer can open the receiver.
+    if receiver.recv_timeout(timeout).is_err() {
+        log::warn!("[mouse-offline] exit write did not finish; restore pending");
+        return false;
+    }
+    true
 }
 
 /// Writes the profile [`OFFLINE_FAILED_FILE`] names into the mice it names,
@@ -338,7 +369,7 @@ fn write_onboard_offline_on(device: &VendorDevice, config: &AppConfig, profile_i
     }
     if failed == records.len() && !records.is_empty() {
         log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
-        return Some(device.model().device_id.to_owned());
+        return asleep.then(|| device.model().device_id.to_owned());
     }
     write_marker(&config_dir.join(OFFLINE_MARKER_FILE), profile_id);
     log::info!(
@@ -601,5 +632,158 @@ mod tests {
         restore_live_speed(&device, &config, &profile, true).unwrap();
         crate::mouse_speed::forget_originals("razer-naga", true, true);
         assert_eq!(fake::with(|mouse| (mouse.poll_code, mouse.dpi[&0x00])), (0x01, 800));
+    }
+
+    #[test]
+    fn r07_04_all_record_refusals_are_not_queued_as_sleep() {
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
+        for command in [0x8c, 0x0c] {
+            for asleep in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let (device, _fake) = fake_v2();
+                fake::with(|mouse| {
+                    if asleep { mouse.asleep_for.push((0x02, command)); }
+                    else { mouse.refused.push((0x02, command)); }
+                });
+                let pending = write_onboard_offline_on(&device, &config, &profile, dir.path());
+                assert_eq!(pending.as_deref(), asleep.then_some("razer-naga"), "command {command:#04x}, asleep {asleep}");
+                assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
+                drop(device);
+                fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
+                write_marker(&dir.path().join(OFFLINE_FAILED_FILE), &format!("{profile}\nrazer-naga"));
+                assert_eq!(retry_offline_profile(&config, dir.path()), !asleep);
+                assert_eq!(dir.path().join(OFFLINE_FAILED_FILE).exists(), asleep, "only sleep keeps queued work");
+            }
+        }
+    }
+
+    #[test]
+    fn r07_05_poll_read_failure_still_restores_original_dpi() {
+        let (config, profile) = empty_profile();
+        let (device, _fake) = fake_v2();
+        fake::with(|mouse| {
+            mouse.refused.push((0x00, 0x85));
+            mouse.dpi.insert(0, 1600);
+        });
+        crate::mouse_speed::remember("razer-naga", crate::mouse_speed::Originals { dpi: Some(800), poll_rate_hz: Some(1000) });
+        let result = restore_live_speed(&device, &config, &profile, true);
+        crate::mouse_speed::forget_originals("razer-naga", true, true);
+        assert!(result.unwrap_err().contains("command 0x00/0x85"));
+        assert_eq!(fake::with(|mouse| mouse.dpi[&0]), 800);
+    }
+
+    #[test]
+    fn r07_01_exit_does_not_wait_for_a_held_device_lock() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+        let (done_tx, done_rx) = channel();
+        let (written_tx, written_rx) = channel();
+        let path = dir.path().to_owned();
+        let caller = std::thread::spawn(move || {
+            let _discovery = fake::install(FakeMouse::default());
+            fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
+            let finished = write_offline_bounded(&empty_profile().0, &path, "offline-profile", Duration::from_millis(30), move |_| {
+                let _fake = fake::install(FakeMouse::default());
+                let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+                device.battery_percent().unwrap();
+                written_tx.send(()).unwrap();
+            });
+            done_tx.send(finished).unwrap();
+        });
+        let result = done_rx.recv_timeout(Duration::from_secs(1));
+        let pending = std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE));
+        drop(device);
+        caller.join().unwrap();
+        written_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(result, Ok(false), "the exit must return before the device lock is released");
+        assert_eq!(pending.unwrap(), "offline-profile\nrazer-naga");
+    }
+
+    #[test]
+    fn r07_01_exit_does_not_wait_for_a_stalled_hid_worker() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let (release_tx, release_rx) = channel();
+        let (started_tx, started_rx) = channel();
+        let (written_tx, written_rx) = channel();
+        let path = dir.path().to_owned();
+        let (done_tx, done_rx) = channel();
+        let caller = std::thread::spawn(move || {
+            let _discovery = fake::install(FakeMouse::default());
+            fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
+            let finished = write_offline_bounded(&empty_profile().0, &path, "offline-profile", Duration::from_millis(30), move |_| {
+                let _fake = fake::install(FakeMouse::default());
+                let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+                started_tx.send(()).unwrap();
+                // A feature call that does not return until the driver recovers.
+                release_rx.recv().unwrap();
+                device.battery_percent().unwrap();
+                written_tx.send(()).unwrap();
+            });
+            done_tx.send(finished).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let result = done_rx.recv_timeout(Duration::from_secs(1));
+        let pending = std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE));
+        release_tx.send(()).unwrap();
+        caller.join().unwrap();
+        written_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(result, Ok(false));
+        assert_eq!(pending.unwrap(), "offline-profile\nrazer-naga");
+    }
+
+    #[test]
+    fn r07_01_timeout_retry_keeps_an_absent_receiver_until_the_profile_is_stored() {
+        use std::sync::mpsc::channel;
+        use std::time::Duration;
+        let dir = tempfile::tempdir().unwrap();
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
+        let _fake = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
+        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
+        let (release_tx, release_rx) = channel();
+        let (ended_tx, ended_rx) = channel();
+        let finished = write_offline_bounded(&config, dir.path(), &profile, Duration::from_millis(30), move |_| {
+            // Model a worker stopped with its process before it could write.
+            release_rx.recv().unwrap();
+            ended_tx.send(()).unwrap();
+        });
+        release_tx.send(()).unwrap();
+        ended_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(!finished, "the exit handed unfinished work to the restorer");
+        assert!(dir.path().join(OFFLINE_FAILED_FILE).exists());
+
+        fake::set_present_models(vec![]);
+        assert!(!retry_offline_profile(&config, dir.path()), "an absent receiver must remain pending");
+        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE)).unwrap(), format!("{profile}\nrazer-naga"));
+        assert!(fake::with(|mouse| mouse.writes.is_empty()));
+        assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
+
+        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
+        assert!(retry_offline_profile(&config, dir.path()));
+        assert_eq!(fake::with(|mouse| mouse.records[&(1, 0x40, 0)]), [0x02, 0x02, 0x01, 0x17, 0, 0, 0]);
+        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_MARKER_FILE)).unwrap(), profile);
+        assert!(!dir.path().join(OFFLINE_FAILED_FILE).exists());
+    }
+
+    #[test]
+    fn r07_01_worker_keeps_the_exit_targets_if_discovery_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut config, profile) = empty_profile();
+        config.devices.retain(|device| device.id != "razer-naga-v3");
+        let _fake = fake::install(FakeMouse::default());
+        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO, &crate::device_catalog::NAGA_X]);
+        let (worker_config, worker_profile, path) = (config.clone(), profile.clone(), dir.path().to_owned());
+        assert!(write_offline_bounded(&config, dir.path(), &profile, std::time::Duration::from_secs(5), move |targets| {
+            let _fake = fake::install(FakeMouse::default());
+            fake::set_present_models(vec![]);
+            write_offline_to(&worker_config, &worker_profile, &path, Some(&targets));
+        }));
+        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE)).unwrap(), format!("{profile}\nrazer-naga"));
+        assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
     }
 }

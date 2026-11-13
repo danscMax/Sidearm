@@ -11,6 +11,7 @@
 #      certificate on the Rutoken plugged into MiniPC (SweetWhisper's
 #      scripts\sign-windows.ps1, jsign over PKCS#11; over ssh: copy there, sign,
 #      copy back) and checks the signature is valid, timestamped and ours
+#      Both embedded versions must match -Version before signing and zipping.
 #   6. plans\release\out\Sidearm-Portable-vX.Y.Z.zip from ..\portable without
 #      data/ + SHA-256 (the folder is recreated, so only this release is there)
 #   7. -Publish only: asks to type the version, then tags, pushes the branch
@@ -52,6 +53,14 @@ $notesFile = Join-Path $outDir "release-notes-$tag.md"
 function Stop-Release([string]$Message) {
     Write-Fail $Message
     exit 1
+}
+
+function Assert-ReleaseExecutableVersion([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { Stop-Release "No build in $portable." }
+    $info = (Get-Item -LiteralPath $Path).VersionInfo
+    if ($info.ProductVersion -ne $Version -or $info.FileVersion -ne $Version) {
+        Stop-Release "Sidearm.exe version mismatch: ProductVersion '$($info.ProductVersion)', FileVersion '$($info.FileVersion)'; expected '$Version'. Rebuild the portable package."
+    }
 }
 
 # 1. One version everywhere.
@@ -99,11 +108,11 @@ if (-not $SkipBuild) {
 
 # 5. Code signing on MiniPC, where the token is.
 $exe = Join-Path $portable 'Sidearm.exe'
+Assert-ReleaseExecutableVersion $exe
 $certFile = Join-Path (Split-Path (Split-Path $root -Parent) -Parent) 'SweetWhisper\app\src-tauri\codesign\sweetwhisper-codesign.cer'
 if ($NoSign -and $Publish) { Stop-Release "A published release is signed: drop -NoSign." }
 if (-not $NoSign) {
     Write-Step 5 6 "Code signing (MiniPC token)"
-    if (-not (Test-Path -LiteralPath $exe)) { Stop-Release "No build in $portable." }
     if (-not (Test-Path -LiteralPath $certFile)) { Stop-Release "Certificate file missing: $certFile" }
     $thumbprint = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certFile).Thumbprint
     $remoteExe = 'C:\Users\dansc\sidearm-sign\Sidearm.exe'
@@ -123,7 +132,7 @@ if (-not $NoSign) {
 
 # 6. Zip without the per-user data/ folder.
 Write-Step 6 6 "Zip"
-if (-not (Test-Path -LiteralPath (Join-Path $portable 'Sidearm.exe'))) { Stop-Release "No build in $portable." }
+Assert-ReleaseExecutableVersion $exe
 if (-not (Test-Path -LiteralPath (Join-Path $portable 'resources\MicrosoftEdgeWebview2Setup.exe'))) {
     Write-Warn "resources\MicrosoftEdgeWebview2Setup.exe is missing from the build (see build_portable.ps1)."
 }

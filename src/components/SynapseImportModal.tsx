@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { AppConfig, CommandError } from "../lib/config";
@@ -19,6 +19,8 @@ import { ModalFooter, ModalHeader, ModalShell } from "./shared";
 export interface SynapseImportModalProps {
   parsed: ParsedSynapseProfiles;
   activeConfig: AppConfig;
+  /** Null while an external reload is pending; changes before React commits it. */
+  getConfigRevision?: () => number | null;
   onImported: (next: AppConfig, summary: ImportSummary) => void;
   onCancel: () => void;
   setError: (error: CommandError | null) => void;
@@ -27,12 +29,14 @@ export interface SynapseImportModalProps {
 export function SynapseImportModal({
   parsed,
   activeConfig,
+  getConfigRevision,
   onImported,
   onCancel,
   setError,
 }: SynapseImportModalProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
+  const latestConfigRef = useRef(activeConfig);
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(parsed.profiles.map((p) => p.synapseGuid)),
   );
@@ -44,14 +48,14 @@ export function SynapseImportModal({
     containerRef.current?.focus();
   }, []);
 
+  useLayoutEffect(() => {
+    latestConfigRef.current = activeConfig;
+  }, [activeConfig]);
+
   const selectedCount = selected.size;
-  const totalBindings = useMemo(
-    () =>
-      parsed.profiles
-        .filter((p) => selected.has(p.synapseGuid))
-        .reduce((n, p) => n + p.bindings.length, 0),
-    [parsed.profiles, selected],
-  );
+  const totalBindings = parsed.profiles
+    .filter((p) => selected.has(p.synapseGuid))
+    .reduce((n, p) => n + p.bindings.length, 0);
 
   function toggleProfile(guid: string) {
     setSelected((prev) => toggleInSet(prev, guid));
@@ -63,6 +67,11 @@ export function SynapseImportModal({
 
   async function handleSubmit() {
     if (submitting || selectedCount === 0) return;
+    const revision = getConfigRevision?.();
+    if (revision === null) {
+      setError({ code: "config_changed_on_disk", message: t("synapseImport.configChanged") });
+      return;
+    }
     setSubmitting(true);
     try {
       const result = await importSynapseIntoConfig(
@@ -74,6 +83,10 @@ export function SynapseImportModal({
         },
         activeConfig,
       );
+      if (latestConfigRef.current !== activeConfig || getConfigRevision?.() !== revision) {
+        setError({ code: "config_changed_on_disk", message: t("synapseImport.configChanged") });
+        return;
+      }
       onImported(result.config, result.summary);
     } catch (unknownError) {
       setError(normalizeCommandError(unknownError));

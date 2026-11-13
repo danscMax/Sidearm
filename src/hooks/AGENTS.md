@@ -18,6 +18,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 
 - Reuse these hooks instead of re-implementing keyboard/modal/list behaviour in components.
 - Callbacks passed from parents are stored in refs so a new closure each render is safe.
+- `useAppPersistence.getConfigRevision()` invalidates synchronously at every reload start and returns `null` while any reload is pending or its loaded config awaits React commit. Async config merges must capture and recheck that revision before applying their result.
 
 ## Work Guidance
 

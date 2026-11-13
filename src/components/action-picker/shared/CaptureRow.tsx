@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { setKeyRecording } from "../../../lib/backend";
+import { acquireKeyRecording } from "./key-recording";
 
 /** Read-only input paired with a Record/Stop toggle button. Shared by the
  *  shortcut-key and signal capture fields. The caller owns capture state.
@@ -34,8 +34,9 @@ export function CaptureRow({
   // not close it, so any combination (closing ones too) can be recorded.
   useEffect(() => {
     if (!capturing) return;
-    void setKeyRecording(true).catch(() => {});
-    return () => { void setKeyRecording(false).catch(() => {}); };
+    const lease = acquireKeyRecording();
+    void lease.ready.catch(() => {});
+    return () => { void lease.release().catch(() => {}); };
   }, [capturing]);
   const start = () => {
     if (!live.current) {

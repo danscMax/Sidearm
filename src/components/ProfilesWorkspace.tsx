@@ -19,7 +19,6 @@ import {
   keepBindingDisableOthers,
   copyBindingFromLayer,
   createAppMapping,
-  createAppMappingFromCapture,
   deleteAppMapping,
   duplicateBinding,
   findDuplicateAppMapping,
@@ -27,6 +26,7 @@ import {
   placeDeviceHotspot,
   clearControl,
   makeRandomId,
+  nextUniqueId,
   removeBindingsForControls,
   removeControl,
   removeDevice,
@@ -518,6 +518,7 @@ export function ProfilesWorkspace({
         const control = controlsById.get(b.controlId);
         return {
           binding: b,
+          deviceId: control?.deviceId,
           profileName: profilesById.get(b.profileId)?.name ?? b.profileId,
           controlName: control ? displayNameForControl(control, "raw") : b.controlId,
         };
@@ -996,6 +997,7 @@ export function ProfilesWorkspace({
                     type="button"
                     className="profiles__search-result"
                     onClick={() => {
+                      if (r.deviceId) onSelectDevice(r.deviceId);
                       setSelectedProfileId(r.binding.profileId);
                       onSelectLayer(r.binding.layer);
                       startTransition(() => setSelectedControlId(r.binding.controlId));
@@ -1397,12 +1399,13 @@ export function ProfilesWorkspace({
 
       {/* ── Rule context menu ── */}
       {ruleCtxMenu ? (() => {
-        const targetMapping = selectedAppMappings.find((m) => m.id === ruleCtxMenu.mappingId);
+        const targetMapping = activeConfig.appMappings.find((m) => m.id === ruleCtxMenu.mappingId);
         if (!targetMapping) return null;
-        const targetIdx = selectedAppMappings.findIndex((m) => m.id === targetMapping.id);
-        const moveUpTarget = targetIdx > 0 ? selectedAppMappings[targetIdx - 1] : null;
+        const ownerMappings = sortAppMappings(activeConfig.appMappings.filter((m) => m.profileId === targetMapping.profileId));
+        const targetIdx = ownerMappings.findIndex((m) => m.id === targetMapping.id);
+        const moveUpTarget = targetIdx > 0 ? ownerMappings[targetIdx - 1] : null;
         const moveDownTarget =
-          targetIdx < selectedAppMappings.length - 1 ? selectedAppMappings[targetIdx + 1] : null;
+          targetIdx < ownerMappings.length - 1 ? ownerMappings[targetIdx + 1] : null;
         return (
           <ContextMenu
             x={ruleCtxMenu.x}
@@ -1411,24 +1414,19 @@ export function ProfilesWorkspace({
             items={[
               {
                 label: t("common.edit"),
-                onClick: () => setEditingMappingId(targetMapping.id),
+                onClick: () => {
+                  setSelectedProfileId(targetMapping.profileId);
+                  setEditingMappingId(targetMapping.id);
+                },
               },
               {
                 label: t("common.duplicate"),
                 onClick: () => {
-                  if (!activeProfile) return;
+                  setSelectedProfileId(targetMapping.profileId);
                   let newId: string | null = null;
                   updateDraft((config) => {
-                    const result = createAppMappingFromCapture(
-                      config,
-                      activeProfile.id,
-                      targetMapping.priority,
-                      targetMapping.exe,
-                      (targetMapping.titleIncludes ?? [])[0] ?? "",
-                      !!(targetMapping.titleIncludes && targetMapping.titleIncludes.length > 0),
-                    );
-                    newId = result.newMappingId;
-                    return result.config;
+                    newId = nextUniqueId(config.appMappings.map((mapping) => mapping.id), targetMapping.id);
+                    return { ...config, appMappings: [...config.appMappings, { ...targetMapping, id: newId }] };
                   });
                   if (newId) {
                     startTransition(() => setEditingMappingId(newId));

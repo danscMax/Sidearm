@@ -1,17 +1,20 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ActionPickerModal } from "./ActionPickerModal";
 import { makeConfig } from "../lib/test-fixtures";
 import type { AppConfig } from "../lib/config";
 import { ensurePlaceholderBinding, makeActionId, makeBindingId } from "../lib/config-editing";
+import * as backend from "../lib/backend";
+import i18n from "../i18n";
 
 vi.mock("../lib/backend", () => ({
   getNativeModel: vi.fn().mockResolvedValue({ consumerSignals: false }),
   listNativeMice: vi.fn().mockResolvedValue([]),
-  liveTestAction: vi.fn(), listenEncodedKeyEvent: vi.fn(), normalizeCommandError: vi.fn(),
+  liveTestAction: vi.fn().mockResolvedValue({ summary: "Test", warnings: [] }),
+  listenEncodedKeyEvent: vi.fn(), normalizeCommandError: vi.fn((error) => ({ message: String(error) })),
   getMenuUsage: vi.fn().mockResolvedValue({}),
 }));
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
 
 function show(controlId = "mouse_4", config = makeConfig(), bindingId: string | null = null) {
   const onSave = vi.fn<(config: AppConfig) => void>();
@@ -153,6 +156,60 @@ describe("button role editor", () => {
     fireEvent.click(screen.getByRole("button", { name: /Клавиатура/ }));
     expect(screen.queryByRole("button", { name: /HyperShift · удержание/ })).toBeNull();
     expect(screen.queryByText(/удержание которой Sidearm умеет считывать/)).toBeNull();
+  });
+
+  it("forks a button's action when only a nested menu item also references it", () => {
+    const config = makeConfig();
+    config.actions = [
+      { id: "back", type: "mouseAction", displayName: "Back", payload: { action: "mouseBack" } },
+      { id: "menu", type: "menu", displayName: "Menu", payload: { items: [{ kind: "submenu", id: "sub", label: "Sub", enabled: true, items: [{ kind: "action", id: "item", label: "Back", actionId: "back", enabled: false }] }] } },
+    ];
+    config.bindings = [{ id: "binding", profileId: "p1", controlId: "mouse_4", layer: "standard", actionId: "back", enabled: true, label: "Back" }];
+    const { onSave } = show("mouse_4", config, "binding");
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.actions.find((action) => action.id === "back")).toEqual(config.actions[0]);
+    expect(result.actions.find((action) => action.id === "menu")).toEqual(config.actions[1]);
+    expect(result.bindings[0].actionId).not.toBe("back");
+    expect(result.actions.find((action) => action.id === result.bindings[0].actionId)?.type).toBe("disabled");
+  });
+});
+
+describe("picker operation lifetime", () => {
+  it("saves a 200-step sequence at the valid boundary", () => {
+    const config = makeConfig();
+    const steps = Array.from({ length: 200 }, () => ({ type: "send" as const, value: "A" }));
+    config.actions = [{ id: "macro", type: "sequence", displayName: "Macro", payload: { steps } }];
+    config.bindings = [{ id: "binding", profileId: "p1", controlId: "mouse_4", layer: "standard", actionId: "macro", enabled: true, label: "Macro" }];
+    const { onSave } = show("mouse_4", config, "binding");
+    const saveButton = screen.getByText(i18n.t("common.save"), { selector: "button" }) as HTMLButtonElement;
+    expect(saveButton.disabled).toBe(false);
+    fireEvent.click(saveButton);
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onSave.mock.calls[0][0].actions.find((action) => action.id === "macro")).toMatchObject({ type: "sequence", payload: { steps } });
+  });
+
+  it("cancels a pending Test countdown when the picker unmounts", async () => {
+    vi.useFakeTimers();
+    show();
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.test") }));
+    cleanup();
+    await act(() => vi.runAllTimersAsync());
+    expect(backend.liveTestAction).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 201])("keeps a %i-step sequence draft open instead of saving or testing it", (count) => {
+    const config = makeConfig();
+    config.actions = [{ id: "macro", type: "sequence", displayName: "Macro", payload: { steps: Array.from({ length: count }, () => ({ type: "send" as const, value: "A" })) } }];
+    config.bindings = [{ id: "binding", profileId: "p1", controlId: "mouse_4", layer: "standard", actionId: "macro", enabled: true, label: "Macro" }];
+    const { onSave } = show("mouse_4", config, "binding");
+    expect((screen.getByText(i18n.t("common.save"), { selector: "button" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByText(i18n.t("picker.test"), { selector: "button" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(i18n.t(count === 0 ? "picker.sequenceEmpty" : "picker.sequenceStepLimit", { max: 200 }))).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter", ctrlKey: true });
+    expect(onSave).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,4 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { loadConfig, normalizeCommandError, saveConfig, verifyOnboardMapping } from "../lib/backend";
 import { onboardBindings } from "../lib/onboard-mapping";
@@ -51,6 +51,7 @@ export interface AppPersistence {
   activePath: string;
 
   // Functions
+  getConfigRevision: () => number | null;
   refreshConfig: () => Promise<boolean>;
   refreshAfterSave: () => Promise<boolean>;
   updateDraft: (
@@ -99,6 +100,14 @@ export function useAppPersistence(
   // Last updateDraft coalesce key — consecutive edits with the same key share one
   // undo step instead of one-per-keystroke (see UpdateDraftOptions.coalesceKey).
   const lastCoalesceKeyRef = useRef<string | null>(null);
+  const revisionRef = useRef<{ revision: number; pending: number; awaiting: AppConfig | null }>({
+    revision: 0, pending: 0, awaiting: null,
+  });
+
+  // Check every commit because a reload may reuse the current config object.
+  useLayoutEffect(() => {
+    if (revisionRef.current.awaiting === workingConfig) revisionRef.current.awaiting = null;
+  });
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
@@ -260,6 +269,8 @@ export function useAppPersistence(
   }
 
   async function refreshConfig(): Promise<boolean> {
+    revisionRef.current.revision += 1;
+    revisionRef.current.pending += 1;
     // Cancel any pending auto-save
     clearTimeout(saveTimerRef.current);
     saveQueueRef.current = null;
@@ -269,6 +280,7 @@ export function useAppPersistence(
 
     try {
       const result = await loadConfig();
+      revisionRef.current.awaiting = result.config;
       lastPersistedConfigRef.current = result.config;
       // Undo steps belong to the config they were taken on: replaying one onto
       // a reloaded config (restore, import, another instance's write) would
@@ -291,7 +303,14 @@ export function useAppPersistence(
         setViewState("error");
       });
       return false;
+    } finally {
+      revisionRef.current.pending -= 1;
     }
+  }
+
+  function getConfigRevision(): number | null {
+    const { revision, pending, awaiting } = revisionRef.current;
+    return pending > 0 || awaiting !== null ? null : revision;
   }
 
   function updateDraft(
@@ -356,6 +375,7 @@ export function useAppPersistence(
     activeConfig,
     activeWarnings,
     activePath,
+    getConfigRevision,
     refreshConfig,
     refreshAfterSave,
     updateDraft,

@@ -65,8 +65,9 @@ export function useAutostartStatus(
     } else {
       try {
         await disableAutostart();
-      } catch {
-        // already disabled; tauri-plugin-autostart raises if state matches.
+      } catch (disableError) {
+        // A failed write is successful only if the OS confirms the entry is gone.
+        if (await isAutostartEnabled().catch(() => true)) throw disableError;
       }
       setRegularAutostart(false);
       updateDraft((c) => ({ ...c, settings: { ...c.settings, startWithWindows: false } }));

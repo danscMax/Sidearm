@@ -40,6 +40,7 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
   const skipped = plan.filter((item) => item.outcome === "noMatch" || item.outcome === "noLayer" || item.outcome === "occupied");
   const options = mice.map((device) => ({ value: device.id, label: device.name }));
   const holdOffers = from && to && from !== to ? planHoldsFromHypershift2(config, from, to, profileIds) : [];
+  const selectedHolds = holdOffers.filter((offer) => chosenHolds.has(offer.binding.id));
   const toggleHold = (id: string) => setChosenHolds((current) => {
     const next = new Set(current);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -104,9 +105,9 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
                 </li>
               ))}
             </ul>
-            <button type="button" className="action-button action-button--secondary" disabled={chosenHolds.size === 0}
-              onClick={() => onApply(applyHoldOffers(config, holdOffers.filter((offer) => chosenHolds.has(offer.binding.id))), chosenHolds.size)}>
-              {t("transfer.holdsApply", { count: chosenHolds.size })}
+            <button type="button" className="action-button action-button--secondary" disabled={selectedHolds.length === 0}
+              onClick={() => onApply(applyHoldOffers(config, selectedHolds), selectedHolds.length)}>
+              {t("transfer.holdsApply", { count: selectedHolds.length })}
             </button>
           </details>
         ) : null}

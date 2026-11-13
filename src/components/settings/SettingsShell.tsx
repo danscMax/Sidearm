@@ -172,6 +172,7 @@ export function SettingsShell({
             setConfirmModal={setConfirmModal}
             showToast={showToast}
             selectedSnippetId={deepLink?.tab === "snippets" ? deepLink.snippetId : undefined}
+            selectedSnippetNonce={deepLink?.nonce}
           />
         ) : null}
 

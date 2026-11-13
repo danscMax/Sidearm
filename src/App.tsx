@@ -69,7 +69,8 @@ import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels
 import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
-import { isBuiltinControl } from "./lib/onboard-mapping";
+import { isBuiltinControl, offlineProfileId, playsWithoutSidearm } from "./lib/onboard-mapping";
+import { describeConfigChange } from "./lib/config-diff";
 import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
 import type { ParsedSynapseProfiles } from "./lib/synapse-import";
@@ -84,6 +85,7 @@ import {
 } from "./lib/config-editing";
 import type {
   Action,
+  AppConfig,
   Binding,
   ControlId,
   EncoderMapping,
@@ -204,14 +206,37 @@ function App() {
     };
   }, [setError]);
 
-  // config.json changed outside Sidearm: show what is on disk now.
+  // config.json changed outside Sidearm (another computer, a script): show
+  // what is on disk now, and say what changed once the new config is in.
   const refreshConfigRef = useRef(refreshConfig);
   useEffect(() => { refreshConfigRef.current = refreshConfig; }, [refreshConfig]);
+  const latestConfigRef = useRef(activeConfig);
+  useEffect(() => { latestConfigRef.current = activeConfig; }, [activeConfig]);
+  const changedFromRef = useRef<AppConfig | null>(null);
+  useEffect(() => {
+    const previous = changedFromRef.current;
+    if (!previous || !activeConfig || activeConfig === previous) return;
+    changedFromRef.current = null;
+    const { places, menus } = describeConfigChange(previous, activeConfig);
+    const all = [...places, ...menus.map((name) => t("toast.changedMenu", { name }))];
+    showToast(
+      all.length === 0
+        ? t("toast.configChangedOutside")
+        : t("toast.configChangedOutsideWhat", {
+            list: all.slice(0, 4).join("; ") + (all.length > 4 ? ` ${t("picker.alsoUsedMore", { count: all.length - 4 })}` : ""),
+          }),
+      "info",
+    );
+  }, [activeConfig, showToast, t]);
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     let disposed = false;
     void listenConfigChangedExternally(() => {
-      void refreshConfigRef.current().then((ok) => { if (ok) showToast(t("toast.configChangedOutside"), "info"); });
+      // Set before the reload: the new config may arrive before it resolves.
+      changedFromRef.current = latestConfigRef.current;
+      void refreshConfigRef.current().then((ok) => {
+        if (!ok) changedFromRef.current = null;
+      });
     }).then((fn) => {
       if (disposed) fn();
       else unlisten = fn;
@@ -1134,6 +1159,9 @@ function App() {
     setMultiSelectedControlIds(new Set());
   }
 
+  // The profile written into the mice at exit, on a layer the mouse keeps.
+  const offlineHere = !!activeConfig && offlineProfileId(activeConfig) === effectiveProfileId
+    && (selectedLayer === "standard" || selectedLayer === "hypershift");
   const familySections = useMemo(
     () =>
       controlFamilyOrder.map((family) => ({
@@ -1162,10 +1190,12 @@ function App() {
                 isHypershift2Trigger: control.id === hypershift2ControlId(activeConfig, effectiveProfileId, control.deviceId),
                 fallback: fallbackFor(control.id),
                 extras: extrasByControlId.get(control.id),
+                sidearmOnly: offlineHere && isBuiltinControl(activeConfig, control.id) && binding !== null
+                  && binding.enabled && !playsWithoutSidearm(binding, actionById.get(binding.actionId)),
               };
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, extrasByControlId],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, extrasByControlId, offlineHere],
   );
 
   const isProfilesMode = workspaceMode === "profiles";

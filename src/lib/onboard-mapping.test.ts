@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import type { EncoderMapping } from "./config";
-import { isBuiltinControl, onboardBindings } from "./onboard-mapping";
+import type { Action, Binding, EncoderMapping } from "./config";
+import { isBuiltinControl, offlineProfileId, onboardBindings, playsWithoutSidearm } from "./onboard-mapping";
 import { makeConfig } from "./test-fixtures";
 
 function mapping(
@@ -73,5 +73,29 @@ describe("isBuiltinControl", () => {
     expect(isBuiltinControl(config, "thumb_01")).toBe(true);
     expect(isBuiltinControl(config, "pad-b1")).toBe(false);
     expect(isBuiltinControl(config, "missing")).toBe(false);
+  });
+});
+
+describe("playsWithoutSidearm", () => {
+  const binding = (extra: Partial<Binding> = {}): Binding =>
+    ({ id: "b", profileId: "p1", layer: "standard", controlId: "thumb_01", label: "b", actionId: "a", enabled: true, ...extra });
+  const shortcut = { id: "a", type: "shortcut", displayName: "A", payload: { key: "A", ctrl: true, shift: false, alt: false, win: false } } as Action;
+  const text = { id: "a", type: "textSnippet", displayName: "T", payload: { source: "inline", text: "hi", pasteMode: "sendText", tags: [] } } as Action;
+  const click = (action: string, ctrl = false) => ({ id: "a", type: "mouseAction", displayName: "M", payload: { action, ctrl } }) as Action;
+
+  it("is a plain press of a shortcut or a plain click or scroll", () => {
+    expect(playsWithoutSidearm(binding(), shortcut)).toBe(true);
+    expect(playsWithoutSidearm(binding(), click("scrollDown"))).toBe(true);
+    expect(playsWithoutSidearm(binding(), click("leftClick", true))).toBe(false);
+    expect(playsWithoutSidearm(binding(), text)).toBe(false);
+    expect(playsWithoutSidearm(binding({ triggerMode: "longPress" }), shortcut)).toBe(false);
+    expect(playsWithoutSidearm(binding({ triggerMode: "chord" }), shortcut)).toBe(false);
+  });
+
+  it("knows the profile written at exit", () => {
+    const config = makeConfig();
+    expect(offlineProfileId(config)).toBe(config.settings.fallbackProfileId);
+    config.settings.offlineProfileId = "@active";
+    expect(offlineProfileId(config)).toBeNull();
   });
 });

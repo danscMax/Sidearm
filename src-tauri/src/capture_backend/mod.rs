@@ -1016,6 +1016,7 @@ fn run_fire_and_forget(
                 follow_manual_profile(&p.target_profile_id);
             }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
+            count_press(config, preview, &execution.action_id);
             // What went out, in the OSD (`Settings.osdActions`): not for clicks
             // and scrolls, and briefer than a profile switch.
             if config.settings.osd_actions && execution.action_type != "mouseAction" && !crate::fake_mode() {
@@ -1038,6 +1039,36 @@ fn run_fire_and_forget(
 
 /// Run the item picked in a menu as if the menu's own press had resolved to it
 /// (same profile, window, control and layer).
+/// Counts a run in the daily press log: its place (profile, layer, control and
+/// the binding's press pattern) and its action. Wheel scrolling (zoom too: a
+/// scroll with Ctrl) is left out: they fire per notch and would bury every button.
+fn count_press(config: &AppConfig, preview: &resolver::ResolvedInputPreview, action_id: &str) {
+    let scrolls = config.actions.iter().find(|action| action.id == action_id).is_some_and(|action| {
+        matches!(&action.payload, crate::config::ActionPayload::MouseAction(mouse) if matches!(mouse.action,
+            crate::config::MouseActionKind::ScrollUp | crate::config::MouseActionKind::ScrollDown
+                | crate::config::MouseActionKind::ScrollLeft | crate::config::MouseActionKind::ScrollRight))
+    });
+    let (Some(profile), Some(layer), Some(control)) =
+        (preview.resolved_profile_id.as_deref(), preview.layer.as_deref(), preview.control_id.as_deref())
+    else {
+        return;
+    };
+    if scrolls {
+        return;
+    }
+    let gesture = preview
+        .binding_id
+        .as_deref()
+        .and_then(|id| config.bindings.iter().find(|binding| binding.id == id))
+        .map_or("press", |binding| match config::Gesture::of(binding.trigger_mode) {
+            config::Gesture::Press => "press",
+            config::Gesture::LongPress => "longPress",
+            config::Gesture::DoublePress => "doublePress",
+            config::Gesture::TriplePress => "triplePress",
+        });
+    crate::press_log::count(&crate::press_log::slot_key(profile, layer, control, gesture), action_id);
+}
+
 /// Longest the OSD names an action run (`Settings.osdActions`).
 const ACTION_OSD_MS: u32 = 1200;
 

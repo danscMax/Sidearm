@@ -7,7 +7,8 @@ import { layerCopy, type FamilySection, type ViewState } from "../lib/constants"
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
 import { open } from "@tauri-apps/plugin-dialog";
-import { deleteDeviceImage, importDeviceImage } from "../lib/backend";
+import { deleteDeviceImage, getPressLog, importDeviceImage } from "../lib/backend";
+import { layerHeat, sumDays, type PressLog } from "../lib/press-stats";
 import {
   addLearnedControl,
   applyBindingImport,
@@ -23,6 +24,7 @@ import {
   importProfile,
   placeDeviceHotspot,
   clearControl,
+  makeRandomId,
   removeBindingsForControls,
   removeControl,
   removeDevice,
@@ -56,6 +58,7 @@ import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
 import { DeviceCards } from "./DeviceCards";
 import { MouseWorkspace } from "./MouseWorkspace";
+import { PressStats } from "./PressStats";
 import { PillTrack } from "./PillTrack";
 import { GenericDeviceView } from "./GenericDeviceView";
 import { MouseVisualization } from "./MouseVisualization";
@@ -161,6 +164,9 @@ export function ProfilesWorkspace({
   mouseStates,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
+  // With the heat map on: this computer's presses of the last 7 days on the
+  // layer shown (the press log), read again after every press.
+  const [pressLog, setPressLog] = useState<PressLog | null>(null);
   const { heatmapEnabled, setHeatmapEnabled, handleDropBinding, placeDragged } = useMouseVisualPanel({
     effectiveProfileId,
     selectedLayer,
@@ -174,6 +180,15 @@ export function ProfilesWorkspace({
   useEffect(() => {
     if (heatmapEnabledRef) heatmapEnabledRef.current = heatmapEnabled;
   }, [heatmapEnabled, heatmapEnabledRef]);
+  useEffect(() => {
+    if (!heatmapEnabled) return;
+    let live = true;
+    getPressLog().then((log) => { if (live) setPressLog(log); }).catch(() => {});
+    return () => { live = false; };
+  }, [heatmapEnabled, executionCounts]);
+  const heatCounts = heatmapEnabled && pressLog && effectiveProfileId
+    ? layerHeat(sumDays(pressLog, 7, new Date()), effectiveProfileId, selectedLayer)
+    : executionCounts;
 
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
@@ -204,7 +219,7 @@ export function ProfilesWorkspace({
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferAll, setTransferAll] = useState(false);
   // A built-in mouse has three tabs: its buttons, its performance, its memory.
-  const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory">("buttons");
+  const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory" | "stats">("buttons");
   // Bumped after a write from the Performance tab so the mouse cards re-read.
   const [cardsToken, setCardsToken] = useState(0);
   const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
@@ -870,6 +885,7 @@ export function ProfilesWorkspace({
             { key: "buttons", label: t("device.tabButtons") },
             { key: "performance", label: t("device.tabPerformance") },
             { key: "memory", label: t("device.tabMemory") },
+            { key: "stats", label: t("device.tabStats") },
           ]}
           active={mouseTab}
           onSelect={setDeviceTab}
@@ -877,7 +893,20 @@ export function ProfilesWorkspace({
         </div>
       ) : null}
 
-      {mouseTab !== "buttons" && activeDevice ? (
+      {mouseTab === "stats" && activeDevice ? (
+        <PressStats
+          key={activeDevice.id}
+          config={activeConfig}
+          deviceId={activeDevice.id}
+          profileId={effectiveProfileId}
+          onAddHold={({ binding }) => updateDraft((config) => upsertBinding(config, {
+            ...binding,
+            id: makeRandomId("binding"),
+            layer: "standard",
+            triggerMode: "longPress",
+          }))}
+        />
+      ) : (mouseTab === "performance" || mouseTab === "memory") && activeDevice ? (
         <MouseWorkspace
           key={activeDevice.id}
           activeConfig={activeConfig}
@@ -1113,7 +1142,7 @@ export function ProfilesWorkspace({
               setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
             }
             onSelectLayer={onSelectLayer}
-            executionCounts={executionCounts}
+            executionCounts={heatCounts}
             executionHistory={executionHistory}
             throttledControlIds={throttledControlIds}
             heatmapEnabled={heatmapEnabled}
@@ -1148,7 +1177,7 @@ export function ProfilesWorkspace({
             }
             onSelectLayer={onSelectLayer}
             layers={deviceLayers(activeConfig, effectiveProfileId, activeDevice?.id, selectedLayer)}
-            executionCounts={executionCounts}
+            executionCounts={heatCounts}
             executionHistory={executionHistory}
             throttledControlIds={throttledControlIds}
             heatmapEnabled={heatmapEnabled}
@@ -1275,7 +1304,7 @@ export function ProfilesWorkspace({
           }}
         />
       ) : null}
-      {compareOpen ? <CompareProfilesModal config={activeConfig} layer={selectedLayer} onClose={() => setCompareOpen(false)} /> : null}
+      {compareOpen ? <CompareProfilesModal config={activeConfig} layer={selectedLayer} profileId={effectiveProfileId} onClose={() => setCompareOpen(false)} /> : null}
         </>
       )}
       {showTransfer ? (

@@ -3,7 +3,8 @@
 // take them all together, so a hidden long or double press never stays behind.
 
 import type { AppConfig, Binding, ControlId, Layer } from "./config";
-import { copyBindingBetweenProfiles, makeBindingId, nextUniqueId, removeBinding } from "./config-editing";
+import { copyBindingBetweenProfiles, gestureOf, makeBindingId, nextUniqueId, removeBinding } from "./config-editing";
+import { sharedPlace } from "./device-transfer";
 
 export interface Slot {
   profileId: string;
@@ -80,6 +81,33 @@ export function compareProfiles(
         .join(" · "),
     );
     return { controlId, cells, differs: new Set(cells).size > 1 };
+  });
+}
+
+/** One row per button place of `layer` that a profile assigns on any of the
+ *  mice: what each mouse has there (all press patterns, hold / 2× / 3× marked)
+ *  and whether they differ. A mouse without the layer shows nothing. */
+export function compareMice(
+  config: AppConfig,
+  layer: Layer,
+  profileId: string,
+  deviceIds: string[],
+): { place: ControlId; cells: string[]; differs: boolean }[] {
+  const deviceOf = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
+  const MARK = { press: "", longPress: " ⌛", doublePress: " 2×", triplePress: " 3×" } as const;
+  const rows = new Map<ControlId, string[][]>();
+  for (const binding of config.bindings) {
+    const device = deviceOf.get(binding.controlId);
+    const column = device ? deviceIds.indexOf(device) : -1;
+    if (column < 0 || !binding.enabled || binding.profileId !== profileId || binding.layer !== layer) continue;
+    const place = sharedPlace(binding.controlId);
+    const cells = rows.get(place) ?? deviceIds.map(() => []);
+    cells[column]!.push(`${binding.label}${MARK[gestureOf(binding.triggerMode)]}`);
+    rows.set(place, cells);
+  }
+  return [...rows.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([place, cells]) => {
+    const texts = cells.map((labels) => labels.sort().join(" · "));
+    return { place, cells: texts, differs: new Set(texts).size > 1 };
   });
 }
 

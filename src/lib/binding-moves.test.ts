@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Action, AppConfig, Binding } from "./config";
-import { copyAssignments, placeSlot, reorderProfiles, slotBindings, type Slot } from "./binding-moves";
+import { compareMice, copyAssignments, placeSlot, reorderProfiles, slotBindings, type Slot } from "./binding-moves";
 import { makeAction, makeConfig } from "./test-fixtures";
 
 const key = (id: string, keyName: string): Action =>
@@ -89,5 +89,22 @@ describe("copyAssignments", () => {
     base.bindings.push(bind("menu", "thumb_02", "m"));
     const result = copyAssignments(base, { profileId: "p1", layer: "all" }, { profileId: "p2", layer: "same" }, true);
     expect([result.copied, result.menus]).toEqual([2, 1]);
+  });
+});
+
+describe("compareMice", () => {
+  it("puts both mice's buttons of one place in a row and marks the rows that differ", () => {
+    const config = setup();
+    config.devices.push({ id: "razer-naga-v3", name: "V3", builtin: true });
+    config.physicalControls.push(
+      { id: "v3_thumb_01", deviceId: "razer-naga-v3", family: "thumbGrid", defaultName: "1", remappable: true, capabilityStatus: "verified" },
+      { id: "v3_wheel_left", deviceId: "razer-naga-v3", family: "topPanel", defaultName: "<", remappable: true, capabilityStatus: "verified" },
+    );
+    config.bindings.push(bind("v1", "v3_thumb_01", "a"), bind("v1-long", "v3_thumb_01", "c", { triggerMode: "longPress" }), bind("v2", "v3_wheel_left", "a"));
+    const rows = compareMice(config, "standard", "p1", ["razer-naga", "razer-naga-v3"]);
+    expect(rows).toEqual([
+      { place: "thumb_01", cells: ["a", "c ⌛"].map(() => "a · c ⌛"), differs: false },
+      { place: "wheel_left", cells: ["b", "a"], differs: true },
+    ]);
   });
 });

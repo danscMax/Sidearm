@@ -240,6 +240,24 @@ export async function exportFullConfig(targetPath: string): Promise<string> {
   return invoke<string>("export_full_config", { targetPath });
 }
 
+/** The whole layout (config, pick and press counters, device photos) into a
+ *  new folder inside the one chosen; null when the dialog was cancelled. */
+export async function exportLayoutFolder(title: string): Promise<string | null> {
+  const targetDir = await open({ title, directory: true, multiple: false });
+  if (typeof targetDir !== "string") return null;
+  return invoke<string>("export_layout_folder", { targetDir });
+}
+
+/** Daily press counters, by date: places ("profile|layer|control|gesture") and actions. */
+export interface PressDay {
+  slots: Record<string, number>;
+  actions: Record<string, number>;
+}
+
+export async function getPressLog(): Promise<Record<string, PressDay>> {
+  return invoke<Record<string, PressDay>>("get_press_log");
+}
+
 export async function importFullConfigPreview(
   sourcePath: string,
 ): Promise<ImportPreview> {

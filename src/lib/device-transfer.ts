@@ -21,6 +21,13 @@ const EQUIVALENT: Readonly<Record<ControlId, ControlId>> = {
   wheel_right: "mouse_5",
 };
 
+/** The place of a control shared by every built-in mouse: its layout id, the
+ *  V2's side buttons under the V3's tilt names (`mouse_4` → `wheel_left`). */
+export function sharedPlace(controlId: ControlId): ControlId {
+  const place = layoutControlId(controlId);
+  return place.startsWith("mouse_") && EQUIVALENT[place] ? EQUIVALENT[place]! : place;
+}
+
 /** What to do when the target control already has a binding there. */
 export type TransferConflict = "keep" | "replace";
 
@@ -206,8 +213,7 @@ function slotsOf(config: AppConfig, deviceId: string, actions: ReadonlyMap<strin
   const slots = new Map<string, { binding: Binding; sig: string }>();
   for (const binding of config.bindings) {
     if (!onMouse.has(binding.controlId)) continue;
-    const place = layoutControlId(binding.controlId);
-    const key = [binding.profileId, binding.layer, gestureOf(binding.triggerMode), EQUIVALENT[place] && place.startsWith("mouse_") ? EQUIVALENT[place] : place].join("|");
+    const key = [binding.profileId, binding.layer, gestureOf(binding.triggerMode), sharedPlace(binding.controlId)].join("|");
     slots.set(key, { binding, sig: signature(binding, actions) });
   }
   return slots;

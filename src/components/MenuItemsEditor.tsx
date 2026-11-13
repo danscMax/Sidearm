@@ -12,7 +12,8 @@ import { addTemplate, menuTemplates, type MenuTemplate } from "../lib/menu-templ
 import {
   cloneMenuItem, indentMenuItem, otherMenuUses, outdentMenuItem, placeMenuItem, promptsFromFile, searchMenus, type DropPlace,
 } from "../lib/menu-arrange";
-import { getMenuUsage, pickTextFolder } from "../lib/backend";
+import { getMenuUsage, getPressLog, pickTextFolder } from "../lib/backend";
+import { sumDays, unpickedItems, type PressLog } from "../lib/press-stats";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { PillTrack } from "./PillTrack";
 import { HelpTip, SelectField, Toggle } from "./shared";
@@ -103,6 +104,18 @@ function ActionList({ actions, value, onChange, disabled }: { actions: Action[];
  * right the selected item — a phrase (its text, Enter), keys (recorded here),
  * or another action; its block and order.
  */
+/** The labels from the menu's top level down to item `id`. */
+function pathTo(items: MenuItem[], id: string, path: string[] = []): string[] {
+  for (const item of items) {
+    if (item.id === id) return [...path, item.label];
+    if (item.kind === "submenu") {
+      const inner = pathTo(item.items, id, [...path, item.label]);
+      if (inner.length) return inner;
+    }
+  }
+  return [];
+}
+
 export function MenuItemsEditor({ items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled }: MenuItemsEditorProps) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? items[0]?.id ?? null);
@@ -126,6 +139,18 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
   const otherActions = actions.filter((action) => action.id !== menuActionId && action.type !== "disabled");
   const otherMenus = otherActions.filter((action) => action.type === "menu");
   const hits = searchMenus(config, edits, query, { menuId: menuActionId, items });
+  // "Not picked for 30 days": this menu's items whose action never ran (press log).
+  const [unpickedOnly, setUnpickedOnly] = useState(false);
+  const [pressLog, setPressLog] = useState<PressLog | null>(null);
+  useEffect(() => {
+    if (!unpickedOnly || pressLog) return;
+    let live = true;
+    getPressLog().then((log) => { if (live) setPressLog(log); }).catch(() => {});
+    return () => { live = false; };
+  }, [unpickedOnly, pressLog]);
+  const unpicked = unpickedOnly && pressLog
+    ? unpickedItems(items, sumDays(pressLog, 30, new Date()), new Map(actions.map((action) => [action.id, action])))
+    : null;
   const actionById = new Map(actions.map((action) => [action.id, action]));
   const profileName = new Map(config.profiles.map((profile) => [profile.id, profile.name]));
   const numbers = numbering(items);
@@ -568,7 +593,21 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
         <div className="menu-ed__side">
           <input className="input menu-ed__search" type="search" value={query} placeholder={t("inspector.menuSearchAll")}
             aria-label={t("inspector.menuSearchAll")} onChange={(event) => setQuery(event.target.value)} />
-          {query.trim() ? (
+          <button type="button" className={`menu-ed__ghost${unpickedOnly ? " menu-ed__ghost--on" : ""}`} aria-pressed={unpickedOnly}
+            onClick={() => setUnpickedOnly(!unpickedOnly)} title={t("inspector.menuUnpickedHint")}>
+            {t("inspector.menuUnpicked")}
+          </button>
+          {unpicked ? (
+            <div className="menu-ed__list" role="list">
+              {unpicked.size === 0 ? <p className="menu-ed__note">{t("inspector.menuUnpickedNone")}</p> : null}
+              {[...unpicked].map((id) => (
+                <button key={id} type="button" className="menu-ed__row" role="listitem"
+                  onClick={() => { setSelectedId(id); setUnpickedOnly(false); }}>
+                  <span className="menu-ed__label">{pathTo(items, id).join(" › ")}</span>
+                </button>
+              ))}
+            </div>
+          ) : query.trim() ? (
             <div className="menu-ed__list" role="list">
               {hits.length === 0 ? <p className="menu-ed__note">{t("inspector.menuNothingFound")}</p> : null}
               {hits.map((hit) =>

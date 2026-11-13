@@ -62,6 +62,7 @@ export function LegendCell({
     >
       <span className="btn-legend__badge">{badge}</span>
       <span className="btn-legend__label">{label}</span>
+      {entry.sidearmOnly ? <span className="btn-legend__extra btn-legend__extra--live" aria-hidden="true">S</span> : null}
       {entry.extras?.length ? (
         <span className="btn-legend__extras" aria-hidden="true">
           {entry.extras.map((extra) => <span key={extra.gesture} className="btn-legend__extra">{GESTURE_MARK[extra.gesture]}</span>)}

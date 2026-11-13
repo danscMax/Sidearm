@@ -44,6 +44,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   menu items); the profile check names the same text, macro or menu on
   several buttons of one mouse; a search that finds nothing in this profile
   says how much it found in the others.
+- A Statistics tab per mouse: what is pressed most (and versus the period
+  before), what never, how many keystrokes the mouse saved, HyperShift actions
+  worth a hold (one click puts them there). Counted per day on this computer
+  in press-log.json, never in the config. The heat map shows the last 7 days on
+  the layer shown; the menu editor lists items not picked for 30 days.
+- Compare profiles has a Mice mode (one profile, V2 beside V3). Buttons the
+  mouse cannot store for use without Sidearm are marked S in the profile it
+  keeps. "Export the whole layout" saves the settings, counters and photos
+  into one folder. A config changed outside Sidearm says what changed.
 - The buttons beside the mouse picture mark their other press patterns
   (⌛ hold, 2×, 3×), and the tooltip says what each does.
 - `{selection}` in a phrase puts in the text selected in the window in front

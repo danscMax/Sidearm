@@ -6,11 +6,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-const FILE: &str = "menu-usage.json";
+pub(crate) const FILE_NAME: &str = "menu-usage.json";
 static LOCK: Mutex<()> = Mutex::new(());
 
 fn file() -> PathBuf {
-    crate::paths::AppPaths::resolve().config_dir.join(FILE)
+    crate::paths::AppPaths::resolve().config_dir.join(FILE_NAME)
 }
 
 fn read(path: &Path) -> BTreeMap<String, u64> {

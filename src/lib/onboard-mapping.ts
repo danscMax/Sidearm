@@ -1,4 +1,27 @@
-import type { AppConfig, ControlId } from "./config";
+import { OFFLINE_PROFILE_ACTIVE, type Action, type AppConfig, type Binding, type ControlId } from "./config";
+import { gestureOf } from "./config-editing";
+
+/** Mouse actions the firmware plays itself (Rust `mouse_offline::onboard_action`). */
+const FIRMWARE_MOUSE = new Set(["leftClick", "rightClick", "middleClick", "mouseBack", "mouseForward", "scrollUp", "scrollDown"]);
+
+/**
+ * Whether the mouse plays this binding from its own memory, without Sidearm
+ * (mirrors Rust `mouse_offline::binding_action` / `onboard_action`): a plain
+ * press — no chord — of a shortcut or of a plain mouse button or scroll. Text,
+ * macros, menus, launches and long / double / triple presses need Sidearm.
+ */
+export function playsWithoutSidearm(binding: Binding, action: Action | null | undefined): boolean {
+  if (!action || gestureOf(binding.triggerMode) !== "press" || binding.triggerMode === "chord") return false;
+  if (action.type === "shortcut") return true;
+  return action.type === "mouseAction" && FIRMWARE_MOUSE.has(action.payload.action)
+    && !(action.payload.ctrl || action.payload.shift || action.payload.alt || action.payload.win);
+}
+
+/** The profile written into the mice at exit; null when it follows the window. */
+export function offlineProfileId(config: AppConfig): string | null {
+  const id = config.settings.offlineProfileId ?? config.settings.fallbackProfileId;
+  return id === OFFLINE_PROFILE_ACTIVE ? null : id;
+}
 
 /**
  * One thumb binding the mouse can hold in its own memory. The backend owns the

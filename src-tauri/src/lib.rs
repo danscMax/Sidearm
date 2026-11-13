@@ -16,6 +16,7 @@ mod log_cleanup;
 #[cfg(target_os = "windows")]
 mod menu_popup;
 mod menu_usage;
+mod press_log;
 mod mouse_memory;
 #[cfg(target_os = "windows")]
 mod mouse_settings;
@@ -1531,6 +1532,58 @@ async fn restore_config_from_backup(
 
 #[tauri::command]
 async fn export_full_config(app: AppHandle, target_path: String) -> Result<String, CommandError> {
+    export_full_config_to(app, target_path).await
+}
+
+/// Files next to the config that belong to the layout but never to the config
+/// (they change on every pick or press): exported with it.
+const LAYOUT_SIDE_FILES: [&str; 2] = [menu_usage::FILE_NAME, press_log::FILE_NAME];
+
+/// The whole layout into a new folder `Sidearm-layout-<date>` inside `target_dir`:
+/// config.json, the pick and press counters, the device photos. Returns the folder.
+#[tauri::command]
+async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<String, CommandError> {
+    let config_dir = resolve_config_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
+        let parent = PathBuf::from(&target_dir);
+        if !parent.is_dir() {
+            return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
+        }
+        let source = config_dir.join("config.json");
+        if !source.is_file() {
+            return Err(CommandError::new("io_error", "No config.json to export — save the app at least once first.", None));
+        }
+        let base = format!("Sidearm-layout-{}", backup::today_date_string());
+        let folder = (1..100)
+            .map(|n| parent.join(if n == 1 { base.clone() } else { format!("{base}-{n}") }))
+            .find(|candidate| !candidate.exists())
+            .ok_or_else(|| CommandError::internal("No free folder name for the export.".to_string()))?;
+        let fail = |e: std::io::Error| CommandError::internal(format!("Failed to export the layout: {e}"));
+        fs::create_dir_all(&folder).map_err(fail)?;
+        atomic_copy_file(&source, &folder.join("config.json")).map_err(fail)?;
+        for name in LAYOUT_SIDE_FILES {
+            let file = config_dir.join(name);
+            if file.is_file() {
+                fs::copy(&file, folder.join(name)).map_err(fail)?;
+            }
+        }
+        let images = config_dir.join(DEVICE_IMAGE_DIR);
+        if images.is_dir() {
+            let target = folder.join(DEVICE_IMAGE_DIR);
+            fs::create_dir_all(&target).map_err(fail)?;
+            for entry in fs::read_dir(&images).map_err(fail)?.flatten() {
+                if entry.path().is_file() {
+                    fs::copy(entry.path(), target.join(entry.file_name())).map_err(fail)?;
+                }
+            }
+        }
+        Ok(folder.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("export task failed: {e}")))?
+}
+
+async fn export_full_config_to(app: AppHandle, target_path: String) -> Result<String, CommandError> {
     let validated = validate_user_json_path(&target_path)?;
     let config_dir = resolve_config_dir(&app)?;
     let source = config_dir.join("config.json");
@@ -2122,6 +2175,12 @@ fn menu_wheel(app: AppHandle, down: bool) {
 fn menu_pick(app: AppHandle, index: usize, mode: Option<menu_popup::PickMode>) {
     // Off the IPC thread: the picked action may type text for a while.
     std::thread::spawn(move || menu_popup::pick_from_window(&app, index, mode.unwrap_or(menu_popup::PickMode::Run)));
+}
+
+/// Daily press counters (`press_log`): the statistics view reads them.
+#[tauri::command]
+fn get_press_log() -> press_log::Log {
+    press_log::snapshot()
 }
 
 /// How often each menu item (by action id) was picked from the popup.
@@ -4268,6 +4327,8 @@ pub fn run() {
             menu_full_text,
             menu_pick_child,
             menu_edit,
+            export_layout_folder,
+            get_press_log,
             menu_wheel,
             menu_search,
             menu_confirm,
@@ -4343,6 +4404,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 log::info!("[system] Clean shutdown.");
+                press_log::flush();
                 shutdown_mouse(app);
                 remove_crash_sentinel(app);
             }

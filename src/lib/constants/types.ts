@@ -31,6 +31,9 @@ export type ControlSurfaceEntry = {
   /** The other press patterns this control has on this layer (long, double,
    *  triple press), each with its action: marked beside the label. */
   extras?: { gesture: "longPress" | "doublePress" | "triplePress"; action: Action }[];
+  /** In the profile written into the mouse: its plain press is not stored
+   *  there (text, macro, menu…), so without Sidearm the button does not do it. */
+  sidearmOnly?: boolean;
 };
 
 export type HotspotPosition = { left: number; top: number; label: string; size?: "sm" | "lg" };

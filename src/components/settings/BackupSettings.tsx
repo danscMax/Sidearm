@@ -5,6 +5,7 @@ import type { CommandError, ImportMode } from "../../lib/config";
 import type { ConfirmModalRequest } from "../ConfirmModal";
 import {
   exportFullConfig,
+  exportLayoutFolder,
   importFullConfigApply,
   importFullConfigPreview,
   normalizeCommandError,
@@ -35,6 +36,7 @@ export function BackupSettings({
 }: BackupSettingsProps) {
   const { t } = useTranslation();
   const [synapseLoading, setSynapseLoading] = useState(false);
+  const [layoutExported, setLayoutExported] = useState<string | null>(null);
 
   return (
     <>
@@ -66,6 +68,21 @@ export function BackupSettings({
             }}
           >
             {t("settings.exportConfig")}
+          </button>
+          <button
+            type="button"
+            className="action-button action-button--secondary"
+            title={t("settings.exportLayoutHelp")}
+            onClick={async () => {
+              try {
+                const folder = await exportLayoutFolder(t("settings.exportLayoutTitle"));
+                if (folder) setLayoutExported(folder);
+              } catch (unknownError) {
+                setError(normalizeCommandError(unknownError));
+              }
+            }}
+          >
+            {t("settings.exportLayout")}
           </button>
           <button
             type="button"
@@ -175,6 +192,9 @@ export function BackupSettings({
           </button>
           ) : null}
         </div>
+        {layoutExported ? (
+          <p className="panel__muted help-sm" role="status">{t("settings.exportLayoutDone", { folder: layoutExported })}</p>
+        ) : null}
       </section>
 
       {/* Local backups */}

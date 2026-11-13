@@ -116,7 +116,8 @@ export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string)
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   const catLabel = cat ? i18n.t(cat.label) : "";
-  return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}`;
+  const live = entry.sidearmOnly ? `\n${i18n.t("mouseVisual.sidearmOnly")}` : "";
+  return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}${live}`;
 }
 
 /** Tooltip lines for the other press patterns: "Hold: Alt+V". */

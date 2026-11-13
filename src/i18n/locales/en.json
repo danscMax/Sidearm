@@ -451,7 +451,7 @@
     "heatmapOff": "Heatmap: off",
     "heatmapEnable": "Enable heatmap",
     "heatmapDisable": "Disable heatmap",
-    "heatmapTooltip": "Brighter button = more frequent presses",
+    "heatmapTooltip": "Brighter button = pressed more on this layer in the last 7 days",
     "searchPlaceholder": "Search bindings…",
     "searchMeta": "Found: {{count}}",
     "searchAllProfiles": "All profiles",
@@ -636,7 +636,11 @@
     "tabBackup": "Backups",
     "tabAdvanced": "Advanced",
     "osdActions": "Show what each button sent",
-    "osdActionsHelp": "The bubble names the action after every press (Alt + V, /compact ⏎) for up to 1.2 s. Clicks and scrolling are not shown."
+    "osdActionsHelp": "The bubble names the action after every press (Alt + V, /compact ⏎) for up to 1.2 s. Clicks and scrolling are not shown.",
+    "exportLayout": "Export the whole layout…",
+    "exportLayoutTitle": "Folder for the layout export",
+    "exportLayoutHelp": "A new folder with the settings, the menu-pick and press counters and the mouse photos: everything to set Sidearm up again.",
+    "exportLayoutDone": "Saved to {{folder}}"
   },
   "conflict": {
     "banner_one": "{{count}} shortcut conflict on this layer",
@@ -842,7 +846,10 @@
     "menuUses": "Picked from the popup so far",
     "menuPin": "Pin to the top",
     "menuUnpin": "Unpin",
-    "menuPinned": "Pinned: shown first in the popup"
+    "menuPinned": "Pinned: shown first in the popup",
+    "menuUnpicked": "Not picked for 30 days",
+    "menuUnpickedHint": "Items of this menu nobody picked in the last 30 days on this computer: candidates to remove or move down.",
+    "menuUnpickedNone": "Every item was picked in the last 30 days."
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -1154,7 +1161,9 @@
     "undoAction": "Redo",
     "openConfig": "Open folder",
     "configChangedOutside": "The settings file was changed outside Sidearm: loaded, the buttons already use it.",
-    "menuEditNoButton": "This menu is on no button, so there is nothing to open it from."
+    "menuEditNoButton": "This menu is on no button, so there is nothing to open it from.",
+    "configChangedOutsideWhat": "Settings changed outside Sidearm (another computer?), already in use: {{list}}",
+    "changedMenu": "menu \"{{name}}\""
   },
   "instance": {
     "blocked": "Sidearm is already running — duplicate launch ignored"
@@ -1257,7 +1266,8 @@
     "tabPerformance": "Performance",
     "tabMemory": "Mouse memory",
     "reading": "reading…",
-    "noAnswer": "not answering — move it"
+    "noAnswer": "not answering — move it",
+    "tabStats": "Statistics"
   },
   "synapseImport": {
     "button": "Import from Razer Synapse…",
@@ -1825,7 +1835,11 @@
     "layer": "Layer",
     "onlyDiff": "Only buttons that differ",
     "empty": "Nothing to compare on this layer.",
-    "button": "Button"
+    "button": "Button",
+    "mode": "Compare",
+    "modeProfiles": "Profiles",
+    "modeMice": "Mice",
+    "profile": "Profile"
   },
   "configCheck": {
     "banner": "This profile has {{count}} problem(s) to look at:",
@@ -1833,5 +1847,24 @@
     "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
     "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one.",
     "duplicate": "\"{{name}}\" is on several buttons ({{layer}}): {{buttons}}. A leftover? One may go."
+  },
+  "mouseVisual": {
+    "sidearmOnly": "S: works only while Sidearm runs (not stored in the mouse)"
+  },
+  "stats": {
+    "loading": "Reading the press log…",
+    "failed": "The press log could not be read.",
+    "week": "7 days",
+    "month": "30 days",
+    "summary": "{{presses}} presses · about {{saved}} keystrokes saved",
+    "hintsTitle": "Worth a hold",
+    "hintsHelp": "Pressed often on HyperShift, and the button's hold is free: a hold spares holding HyperShift. The HyperShift press stays.",
+    "addHold": "Put on the hold",
+    "topTitle": "Pressed most",
+    "nothingYet": "No presses counted in this period yet.",
+    "new": "new",
+    "unusedTitle": "Never pressed ({{count}})",
+    "unusedHelp": "Assignments of this profile on this mouse with no press in the period: free for something used.",
+    "localOnly": "Counted on this computer only; wheel scrolling is left out."
   }
 }

@@ -591,6 +591,26 @@ fn run_live_launch_action(
 /// automatic rollback. Additionally, the studio only surfaces the PID of the *last*
 /// launched process in the returned event; earlier PIDs are recorded in warnings but
 /// not tracked for lifecycle management.
+/// Whether a sequence step is the Enter of a phrase (only text and pauses
+/// before it) while another window came to the front: it is not sent.
+fn skips_enter(step: &SequenceStep, only_text_so_far: bool, window_changed: impl FnOnce() -> bool) -> bool {
+    matches!(step, SequenceStep::Send { value, .. } if value.eq_ignore_ascii_case("enter"))
+        && only_text_so_far
+        && window_changed()
+}
+
+/// The window in front (raw HWND; 0 off Windows), to notice a change.
+fn foreground_window() -> isize {
+    #[cfg(target_os = "windows")]
+    {
+        unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() as isize }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        0
+    }
+}
+
 fn run_live_sequence_action(
     action: &Action,
     preview: &ResolvedInputPreview,
@@ -610,7 +630,23 @@ fn run_live_sequence_action(
     let encoding_mods = crate::hotkeys::extract_encoding_modifiers(&preview.encoded_key);
     let mut launched_processes = Vec::new();
     let mut injected_input_steps = 0usize;
+    // A phrase with Enter (text, a pause, Enter): its Enter is not sent when
+    // another window came to the front meanwhile — it would submit there.
+    let start_window = foreground_window();
+    let mut only_text_so_far = true;
+    let mut warnings = Vec::new();
     for step in &payload.steps {
+        if skips_enter(step, only_text_so_far, || foreground_window() != start_window) {
+            log::warn!("[executor] sequence Enter skipped: the window in front changed while the text was typed");
+            warnings.push(crate::ui_text!(
+                "execution.enterSkippedWindowChanged",
+                "Enter was not sent: another window came to the front while the text was typed."
+            ));
+            continue;
+        }
+        if matches!(step, SequenceStep::Launch { .. } | SequenceStep::Send { .. }) {
+            only_text_so_far = false;
+        }
         match step {
             SequenceStep::Sleep { delay_ms } => {
                 thread::sleep(Duration::from_millis(
@@ -707,7 +743,6 @@ fn run_live_sequence_action(
         ExecutionOutcome::Noop
     };
 
-    let mut warnings = Vec::new();
     if launched_processes.len() > 1 {
         warnings.push(crate::ui_text!(
             "execution.sequenceMultiplePids",
@@ -1535,6 +1570,16 @@ fn execution_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_phrase_enter_is_skipped_only_when_the_window_changed() {
+        let enter = SequenceStep::Send { value: "Enter".into(), delay_ms: None, repeat: None };
+        let tab = SequenceStep::Send { value: "Tab".into(), delay_ms: None, repeat: None };
+        assert!(skips_enter(&enter, true, || true));
+        assert!(!skips_enter(&enter, true, || false), "same window: Enter goes");
+        assert!(!skips_enter(&enter, false, || true), "after a launch or a key: a macro may switch windows");
+        assert!(!skips_enter(&tab, true, || true), "only Enter is held back");
+    }
     use crate::{
         config::{ActionCondition, default_seed_config},
         resolver::{ResolutionStatus, resolve_input_preview},

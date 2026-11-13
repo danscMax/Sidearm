@@ -633,7 +633,9 @@
     "tabProfiles": "Manage profiles",
     "tabSnippets": "Library",
     "tabBackup": "Backups",
-    "tabAdvanced": "Advanced"
+    "tabAdvanced": "Advanced",
+    "osdActions": "Show what each button sent",
+    "osdActionsHelp": "The bubble names the action after every press (Alt + V, /compact ⏎) for up to 1.2 s. Clicks and scrolling are not shown."
   },
   "conflict": {
     "banner_one": "{{count}} shortcut conflict on this layer",
@@ -1042,7 +1044,7 @@
     "gestureDoublePress": "Double",
     "gestureTriplePress": "Triple",
     "gestureAssigned": "assigned",
-    "gestureHelp": "Each way of pressing the button has its own action. With a hold or double press on the button, the plain press fires on release. HyperShift on Hold: a quick press stays a plain click. Without Sidearm (from the mouse memory) only the plain press works.",
+    "gestureHelp": "Each way to press the button has its own action. With a hold on the button, the plain press fires on release; with a double or triple press, 0.3 s after the last release (it waits for another tap). HyperShift on \"Hold\": a quick press stays a normal click. Without Sidearm (from the mouse's memory) only the plain press works.",
     "chordExplainer": "Press both buttons together to fire the action. Both must be set to Chord mode.",
     "sideButtonsOneAtATime": "The Naga reports its side and top buttons one at a time: pressing a second one counts as releasing the first, which ends a hold.",
     "chordWarnNoPartnerBinding": "The partner button has no chord binding on this layer yet — configure one on that button too.",
@@ -1641,7 +1643,8 @@
       "dpiProfileMissing": "Select a profile before testing DPI controls.",
       "dpiStagesMissing": "Set DPI stages for this profile first: the mouse card → Performance.",
       "dpiFailed": "Could not change DPI: {{detail}}",
-      "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected."
+      "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected.",
+      "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed."
     },
     "synapse": {
       "recoveryFailed": "Could not finish setup. Wake the mouse, finish any Razer update, close Synapse and retry. Details are in the diagnostics log.",

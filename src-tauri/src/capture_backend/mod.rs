@@ -1016,6 +1016,13 @@ fn run_fire_and_forget(
                 follow_manual_profile(&p.target_profile_id);
             }
             let _ = app.emit(EVENT_ACTION_EXECUTED, &execution);
+            // What went out, in the OSD (`Settings.osdActions`): not for clicks
+            // and scrolls, and briefer than a profile switch.
+            if config.settings.osd_actions && execution.action_type != "mouseAction" && !crate::fake_mode() {
+                let mut settings = config.settings.clone();
+                settings.osd_duration_ms = settings.osd_duration_ms.min(ACTION_OSD_MS);
+                crate::show_osd(app, "", &execution.action_pretty, &settings);
+            }
         }
         Err(error) => {
             log::error!(
@@ -1031,6 +1038,9 @@ fn run_fire_and_forget(
 
 /// Run the item picked in a menu as if the menu's own press had resolved to it
 /// (same profile, window, control and layer).
+/// Longest the OSD names an action run (`Settings.osdActions`).
+const ACTION_OSD_MS: u32 = 1200;
+
 pub(crate) fn run_menu_item(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,

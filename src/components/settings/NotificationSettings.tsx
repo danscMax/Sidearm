@@ -79,6 +79,14 @@ export function NotificationSettings({
         </div>
 
         <div>
+          <SettingRow title={t("settings.osdActions")} hint={t("settings.osdActionsHelp")}>
+            <Toggle
+              checked={osd.osdActions ?? false}
+              onChange={(checked) => updateSettings({ osdActions: checked })}
+              ariaLabel={t("settings.osdActions")}
+            />
+          </SettingRow>
+
           <SettingRow title={t("settings.osdDuration")}>
             <PillTrack
               items={[1000, 1500, 2000, 3000, 5000].map((ms) => ({

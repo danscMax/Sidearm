@@ -33,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the names a submenu's tip lists can be clicked directly, without opening it;
   right click → "Edit in Sidearm" (on a phrase or a list) opens that item in
   the menu editor of its button.
+- "Show what each button sent" (Settings → OSD, off by default): the bubble
+  names the action after every press, briefly; clicks and scrolling are not
+  shown.
+- A phrase with Enter does not press Enter when another window came to the
+  front while it was typed (it would submit there).
+- `npm run e2e -- --layout <config.json>`: every side-button assignment of a
+  real config, pressed on virtual mice.
 - The buttons beside the mouse picture mark their other press patterns
   (⌛ hold, 2×, 3×), and the tooltip says what each does.
 - `{selection}` in a phrase puts in the text selected in the window in front

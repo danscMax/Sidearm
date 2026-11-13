@@ -1,5 +1,7 @@
 // End-to-end scenarios against the real app with virtual mice (the `fake-mice`
 // build): no USB, nothing sent to the desktop. `npm run e2e` (Windows).
+// `npm run e2e -- --layout <config.json>` instead presses every V3 side-button
+// assignment of a copy of a real config (see `layoutMain`).
 //
 // Each virtual mouse is a JSON file (`<mice>/<device id>.json`, see
 // `mouse_memory::fake`), its buttons a named pipe the app's reader opens
@@ -458,7 +460,86 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((error) => {
+/** Press patterns a binding answers on (`config::Gesture`): hold and chord are plain presses. */
+const gestureOf = (mode) => (mode === "longPress" || mode === "doublePress" || mode === "triplePress" ? mode : "press");
+
+/** Presses a V3 key button the way a gesture needs. */
+async function pressAs(world, usage, gesture) {
+  if (gesture === "longPress") return world.press(V3, usage, 450);
+  const taps = gesture === "doublePress" ? 2 : gesture === "triplePress" ? 3 : 1;
+  for (let tap = 0; tap < taps; tap += 1) await world.press(V3, usage, 50);
+}
+
+/**
+ * `--layout <config.json>`: a copy of a real config on the virtual mice. Each
+ * profile with V3 side-button assignments becomes the fallback (app rules off,
+ * so the foreground window does not matter) and every enabled assignment of
+ * its V3 thumbs on the standard and HyperShift layers is pressed in its own
+ * press pattern: it must dispatch on that control and layer, a menu must open
+ * (and is closed by its button again). Profile switches are skipped (they
+ * would change the profile under the next presses).
+ */
+async function layoutMain(file) {
+  if (process.platform !== "win32") throw new Error("Windows only");
+  const source = JSON.parse(fs.readFileSync(file, "utf8"));
+  build();
+  const world = new World();
+  console.log(`Run folder: ${world.root}\nLayout: ${file}`);
+  const actions = new Map(source.actions.map((action) => [action.id, action]));
+  try {
+    world.plug(V2, v2State());
+    world.plug(V3, v3State());
+    world.openPipes(V2, V3);
+    world.start();
+    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000);
+    await world.quit();
+    for (const profile of source.profiles) {
+      const bindings = source.bindings
+        .filter((b) => b.enabled && b.profileId === profile.id && /^v3_thumb_\d+$/.test(b.controlId)
+          && (b.layer === "standard" || b.layer === "hypershift"))
+        .sort((a, b) => a.controlId.localeCompare(b.controlId) || a.layer.localeCompare(b.layer));
+      if (bindings.length === 0) continue;
+      const config = structuredClone(source);
+      config.appMappings = [];
+      config.settings.fallbackProfileId = profile.id;
+      world.writeConfig(config);
+      let mark = world.log().length;
+      world.start();
+      check(`${profile.name}: live map written`,
+        await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000, mark));
+      await sleep(1500);
+      for (const binding of bindings) {
+        const action = actions.get(binding.actionId);
+        const gesture = gestureOf(binding.triggerMode);
+        const name = `${profile.name} · ${binding.controlId.replace("v3_", "")} · ${binding.layer} · ${gesture} → ${binding.label}`;
+        if (!action || action.type === "profileSwitch" || action.type === "disabled") continue;
+        const usage = v3Usage(Number(binding.controlId.slice("v3_thumb_".length)), binding.layer === "standard" ? 0 : 1);
+        mark = world.log().length;
+        await pressAs(world, usage, gesture);
+        if (action.type === "menu") {
+          check(name, await world.waitFor(() => world.log(), /\[menu\] opened/, 4000, mark));
+          await sleep(400);
+          await world.press(V3, usage, 50); // the opening button closes it
+          await world.waitFor(() => world.log(), /\[menu\] closed/, 3000, mark);
+        } else {
+          check(name, await world.waitFor(() => world.log(), (t) => dispatched(t, binding.controlId, binding.layer), 4000, mark));
+        }
+        // Past the multi-press window, so the next press starts fresh.
+        await sleep(400);
+      }
+      await world.quit();
+    }
+  } finally {
+    world.cleanup();
+  }
+  const passed = results.filter((r) => r.ok).length;
+  console.log(`\n${passed}/${results.length} passed${failed ? ` — FAILED. Logs: ${world.data}\\logs` : "."}`);
+  if (!failed) fs.rmSync(world.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  process.exit(failed ? 1 : 0);
+}
+
+const layoutArg = process.argv.indexOf("--layout");
+(layoutArg >= 0 ? layoutMain(process.argv[layoutArg + 1]) : main()).catch((error) => {
   console.error(error);
   process.exit(1);
 });

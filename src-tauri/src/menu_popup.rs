@@ -738,7 +738,12 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
             if mode == PickMode::Enter && !crate::fake_mode() {
                 // The same pause a phrase with Enter keeps before it.
                 std::thread::sleep(std::time::Duration::from_millis(80));
-                let _ = crate::input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default());
+                // Not into another window that came up meanwhile: it would submit there.
+                if platform::foreground_window() == menu.target_window {
+                    let _ = crate::input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default());
+                } else {
+                    log::warn!("[menu] Enter skipped: the window in front changed while the text was typed");
+                }
             }
         }
     }

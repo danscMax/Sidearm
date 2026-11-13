@@ -1891,7 +1891,38 @@ input[type="radio"] {
 
 /* Quiet text buttons: the add bar under the list and the item tools. */
 .menu-ed__bar { display: flex; flex-wrap: wrap; gap: 2px 4px; }
-.menu-ed__tools { display: flex; flex-wrap: wrap; gap: 4px; }
+/* The selected item's tools: one row of square icon buttons (name in the tooltip),
+   grouped move · edit · delete; ⋯ opens the same menu as a right click on the row. */
+.menu-ed__tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-alt);
+  width: max-content;
+}
+.menu-ed__tools-gap { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--c-card-border); }
+.menu-ed__tool {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 30px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--c-text);
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.menu-ed__tool:hover:not(:disabled) { background: var(--c-card-bg); color: var(--c-accent); }
+.menu-ed__tool:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
+.menu-ed__tool:disabled { opacity: 0.35; cursor: default; }
+.menu-ed__tool--on { color: var(--c-accent); }
+.menu-ed__tool--danger { color: var(--c-danger); }
+.menu-ed__tool--danger:hover:not(:disabled) { color: var(--c-danger); background: color-mix(in srgb, var(--c-danger) 14%, transparent); }
 .menu-ed__ghost {
   padding: 4px 8px;
   border: 0;

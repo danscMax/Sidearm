@@ -109,6 +109,11 @@
         var entry = el("button", "tip__item", name);
         entry.type = "button";
         entry.addEventListener("click", function () { invoke("menu_pick_child", { index: index, child: child }); });
+        // The same right-click choices as on a row of the list.
+        entry.addEventListener("contextmenu", function (event) {
+          event.preventDefault();
+          showModes(index, event, false, child);
+        });
         tip.appendChild(entry);
       });
     } else {
@@ -150,16 +155,19 @@
     modes = null;
   }
 
-  /** The right-click choices, over the list at the pointer (kept inside the window). */
-  function showModes(index, event, listOnly) {
+  /** The right-click choices, over the list at the pointer (kept inside the window);
+   *  `child`: a name in the tip of the submenu at `index`. */
+  function showModes(index, event, listOnly, child) {
     hideModes();
     if (!items[index] || !view.pickModes || view.pickModes.length < 4) return;
     modes = el("div", "modes");
+    var inTip = child != null;
     (listOnly ? ["edit"] : ["run", "enter", "copy", "edit"]).forEach(function (mode) {
       var button = el("button", "tip__mode", view.pickModes[["run", "enter", "copy", "edit"].indexOf(mode)]);
       button.addEventListener("click", function () {
         hideModes();
-        if (mode === "edit") invoke("menu_edit", { index: index });
+        if (mode === "edit") invoke("menu_edit", inTip ? { index: index, child: child } : { index: index });
+        else if (inTip) invoke("menu_pick_child", { index: index, child: child, mode: mode });
         else invoke("menu_pick", { index: index, mode: mode });
       });
       modes.appendChild(button);

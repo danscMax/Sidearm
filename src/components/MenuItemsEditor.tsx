@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Action, AppConfig, MenuItem } from "../lib/config";
 import { nextUniqueId } from "../lib/config-editing";
@@ -16,6 +16,7 @@ import { getMenuUsage, getPressLog, pickTextFolder } from "../lib/backend";
 import { sumDays, unpickedItems, type PressLog } from "../lib/press-stats";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { PillTrack } from "./PillTrack";
+import { ContextMenu, type ContextMenuProps } from "./ContextMenu";
 import { HelpTip, SelectField, Toggle } from "./shared";
 
 /** Items a side button picks by number in the popup. */
@@ -127,6 +128,16 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
   // The last deletion, offered back while nothing else changed since.
   const [removed, setRemoved] = useState<{ before: MenuItem[]; after: MenuItem[]; label: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The item's menu (right click or ⋯); `to`: the menus to copy or move it to.
+  const [ctx, setCtx] = useState<{ x: number; y: number; id: string; to?: "copy" | "move" } | null>(null);
+  // "Copy to menu…" swaps the menu's items: the close that follows its click must not shut it.
+  const keepCtx = useRef(false);
+  const ctxItem = ctx ? findItem(items, ctx.id) : undefined;
+  const openCtx = (event: React.MouseEvent, item: MenuItem) => {
+    event.preventDefault();
+    setSelectedId(item.id);
+    setCtx({ x: event.clientX, y: event.clientY, id: item.id });
+  };
   // Picks per action id from the popup, to see what is used and what is not.
   const [usage, setUsage] = useState<Record<string, number> | null>(null);
   useEffect(() => {
@@ -321,6 +332,7 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
           aria-pressed={on}
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
           onClick={() => setSelectedId(item.id)}
+          onContextMenu={(event) => openCtx(event, item)}
           {...arrange}
         >
           <span className={`menu-ed__key${number <= NUMBERED ? "" : " menu-ed__key--extra"}`}>{number}</span>
@@ -356,6 +368,7 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
                 aria-pressed={selected?.id === item.id}
                 aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
                 onClick={() => setSelectedId(item.id)}
+                onContextMenu={(event) => openCtx(event, item)}
                 {...arrange}
               >
                 {item.label || t("inspector.menuUnnamed")}
@@ -382,49 +395,98 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
   }
 
   function renderTools(item: MenuItem) {
+    const { siblings, index } = placeOf(item);
+    const tool = (icon: string, label: string, onClick: (event: React.MouseEvent<HTMLButtonElement>) => void, off = false, extra = "") => (
+      <button type="button" className={`menu-ed__tool${extra}`} disabled={disabled || off} title={label} aria-label={label} onClick={onClick}>
+        {icon}
+      </button>
+    );
+    return (
+      <div className="menu-ed__tools" role="toolbar" aria-label={t("inspector.menuItemTools")}>
+        {tool("↑", t("inspector.menuMoveUp"), () => onChange(moveMenuItem(items, item.id, -1)), index <= 0)}
+        {tool("↓", t("inspector.menuMoveDown"), () => onChange(moveMenuItem(items, item.id, 1)), index >= siblings.length - 1)}
+        <span className="menu-ed__tools-gap" />
+        {tool("⧉", t("common.duplicate"), () => duplicate(item))}
+        {item.kind === "action"
+          ? tool(item.pinned ? "★" : "☆", item.pinned ? t("inspector.menuUnpin") : t("inspector.menuPin"), () => togglePin(item), false, item.pinned ? " menu-ed__tool--on" : "")
+          : null}
+        {tool("⋯", t("inspector.menuMore"), (event) => {
+          const box = event.currentTarget.getBoundingClientRect();
+          setCtx({ x: box.left, y: box.bottom + 4, id: item.id });
+        })}
+        <span className="menu-ed__tools-gap" />
+        {tool("✕", t("common.delete"), () => remove(item), false, " menu-ed__tool--danger")}
+      </div>
+    );
+  }
+
+  /** Where an item sits: its parent list and its place in it. */
+  function placeOf(item: MenuItem) {
     const parentId = parentOf(items, item.id) ?? null;
     const parent = parentId ? findItem(items, parentId) : undefined;
     const siblings = parent?.kind === "submenu" ? parent.items : items;
-    const index = siblings.findIndex((sibling) => sibling.id === item.id);
-    return (
-      <div className="menu-ed__tools">
-        <button type="button" className="menu-ed__ghost" disabled={disabled || index <= 0}
-          onClick={() => onChange(moveMenuItem(items, item.id, -1))}>↑ {t("inspector.menuMoveUp")}</button>
-        <button type="button" className="menu-ed__ghost" disabled={disabled || index >= siblings.length - 1}
-          onClick={() => onChange(moveMenuItem(items, item.id, 1))}>↓ {t("inspector.menuMoveDown")}</button>
-        <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={() => duplicate(item)}>
-          ⧉ {t("common.duplicate")}
-        </button>
-        {item.kind === "action" ? (
-          <button type="button" className="menu-ed__ghost" disabled={disabled} aria-pressed={!!item.pinned}
-            onClick={() => onChange(updateMenuItem(items, item.id, (current) => {
-              if (current.kind !== "action") return current;
-              const { pinned: _was, ...rest } = current;
-              return current.pinned ? rest : { ...rest, pinned: true };
-            }))}>
-            {item.pinned ? `☆ ${t("inspector.menuUnpin")}` : `★ ${t("inspector.menuPin")}`}
-          </button>
-        ) : null}
-        {otherMenus.length > 0 ? (
-          <SelectField
-            ariaLabel={t("inspector.menuCopyTo")}
-            value=""
-            disabled={disabled}
-            options={[{ value: "", label: t("inspector.menuCopyTo") }, ...otherMenus.map((menu) => ({ value: menu.id, label: menu.displayName }))]}
-            onChange={(menuId) => { if (menuId) copyToMenu(item, menuId); }}
-          />
-        ) : null}
-        <button type="button" className="menu-ed__ghost menu-ed__ghost--danger" disabled={disabled}
-          onClick={() => {
-            const after = removeMenuItem(items, item.id);
-            setRemoved({ before: items, after, label: item.label });
-            onChange(after);
-            // Stay where you were: the next item, else the one before, else its list.
-            const near = siblings[index + 1] ?? siblings[index - 1];
-            setSelectedId(near?.id ?? parentId);
-          }}>✕ {t("common.delete")}</button>
-      </div>
-    );
+    return { parentId, siblings, index: siblings.findIndex((sibling) => sibling.id === item.id) };
+  }
+
+  function togglePin(item: MenuItem) {
+    onChange(updateMenuItem(items, item.id, (current) => {
+      if (current.kind !== "action") return current;
+      const { pinned: _was, ...rest } = current;
+      return current.pinned ? rest : { ...rest, pinned: true };
+    }));
+  }
+
+  function remove(item: MenuItem, after = removeMenuItem(items, item.id)) {
+    const { parentId, siblings, index } = placeOf(item);
+    setRemoved({ before: items, after, label: item.label });
+    onChange(after);
+    // Stay where you were: the next item, else the one before, else its list.
+    const near = siblings[index + 1] ?? siblings[index - 1];
+    setSelectedId(near?.id ?? parentId);
+  }
+
+  /** The item itself (same actions, the same phrases) at the end of another menu. */
+  function moveToMenu(item: MenuItem, menuId: string) {
+    const menu = actions.find((action) => action.id === menuId);
+    if (menu?.type !== "menu") return;
+    const ids = new Set(collectMenuItemIds(menu.payload.items));
+    const fresh = (current: MenuItem): MenuItem => {
+      const id = ids.has(current.id) ? nextUniqueId(ids, current.id) : current.id;
+      ids.add(id);
+      return current.kind === "submenu" ? { ...current, id, items: current.items.map(fresh) } : { ...current, id };
+    };
+    const target: Action = { ...menu, payload: { ...menu.payload, items: [...menu.payload.items, fresh(item)] } };
+    onEditsChange({ ...edits, actions: { ...edits.actions, [menuId]: target } });
+    remove(item);
+    setNotice(t("inspector.menuMoved", { name: item.label, menu: menu.displayName }));
+  }
+
+  /** Right click on a row, or ⋯: the item's actions, or the menus to copy / move it to. */
+  function contextItems(item: MenuItem, to: "copy" | "move" | undefined): ContextMenuProps["items"] {
+    if (to) {
+      return [
+        // What the list below does, as its heading.
+        { label: t(to === "copy" ? "inspector.menuCopyTo" : "inspector.menuMoveTo"), disabled: true, onClick: () => {} },
+        null,
+        ...otherMenus.map((menu) => ({
+          label: menu.displayName,
+          onClick: () => (to === "copy" ? copyToMenu(item, menu.id) : moveToMenu(item, menu.id)),
+        })),
+      ];
+    }
+    const { siblings, index } = placeOf(item);
+    const next = (target: "copy" | "move") => () => { keepCtx.current = true; setCtx((open) => (open ? { ...open, to: target } : open)); };
+    return [
+      { label: `↑ ${t("inspector.menuMoveUp")}`, disabled: index <= 0, onClick: () => onChange(moveMenuItem(items, item.id, -1)) },
+      { label: `↓ ${t("inspector.menuMoveDown")}`, disabled: index >= siblings.length - 1, onClick: () => onChange(moveMenuItem(items, item.id, 1)) },
+      { label: `⧉ ${t("common.duplicate")}`, onClick: () => duplicate(item) },
+      item.kind === "action" ? { label: item.pinned ? `☆ ${t("inspector.menuUnpin")}` : `★ ${t("inspector.menuPin")}`, onClick: () => togglePin(item) } : null,
+      null,
+      { label: t("inspector.menuCopyTo"), disabled: otherMenus.length === 0, onClick: next("copy") },
+      { label: t("inspector.menuMoveTo"), disabled: otherMenus.length === 0, onClick: next("move") },
+      null,
+      { label: `✕ ${t("common.delete")}`, danger: true, onClick: () => remove(item) },
+    ];
   }
 
   function duplicate(item: MenuItem) {
@@ -663,6 +725,18 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
           renderPane(selected)
         ) : null}
       </div>
+      {ctxItem && ctx ? (
+        <ContextMenu
+          key={ctx.to ?? "item"}
+          x={ctx.x}
+          y={ctx.y}
+          items={contextItems(ctxItem, ctx.to)}
+          onClose={() => {
+            if (keepCtx.current) keepCtx.current = false;
+            else setCtx(null);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

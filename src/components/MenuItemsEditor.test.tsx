@@ -49,6 +49,19 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: /Two/ }).getAttribute("aria-pressed")).toBe("true");
   });
 
+  it("right click on a row moves the item, with its own action, to another menu", () => {
+    const other: Action = { id: "m2", displayName: "Commands", type: "menu", payload: { items: [] } };
+    const withMenu = { ...config, actions: [phrase, other] } as AppConfig;
+    const onChange = vi.fn();
+    const onEditsChange = vi.fn();
+    render(<MenuItemsEditor items={items} menuActionId="m1" onChange={onChange} config={withMenu} edits={NO_MENU_EDITS} onEditsChange={onEditsChange} />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /1\s*Hi/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Переместить в меню|Move to menu/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Commands" }));
+    expect(onEditsChange.mock.calls.at(-1)![0].actions.m2.payload.items).toEqual(items);
+    expect(onChange.mock.calls.at(-1)![0]).toEqual([]);
+  });
+
   it("pins an item to the top of the popup and unpins it", () => {
     const onChange = vi.fn();
     render(<MenuItemsEditor items={items} onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);

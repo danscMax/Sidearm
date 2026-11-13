@@ -853,7 +853,11 @@
     "menuPinned": "Pinned: shown first in the popup",
     "menuUnpicked": "Not picked for 30 days",
     "menuUnpickedHint": "Items of this menu nobody picked in the last 30 days: candidates to remove or move down.",
-    "menuUnpickedNone": "Every item was picked in the last 30 days."
+    "menuUnpickedNone": "Every item was picked in the last 30 days.",
+    "menuMoveTo": "Move to menu…",
+    "menuMoved": "“{{name}}” moved to the end of the “{{menu}}” menu; saved with this menu.",
+    "menuMore": "More: copy or move to another menu…",
+    "menuItemTools": "Item actions"
   },
   "properties": {
     "empty": "Select a button to see properties",

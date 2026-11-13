@@ -2232,16 +2232,20 @@ fn set_key_recording(on: bool) {
     capture_backend::set_key_recording(on);
 }
 
-/// Right click → Edit on a popup row: open its item in the main window.
+/// Right click → Edit on a popup row, or on a name in a submenu's tip
+/// (`child`): open that item in the main window.
 #[tauri::command]
-fn menu_edit(app: AppHandle, index: usize) {
-    menu_popup::edit_from_window(&app, index);
+fn menu_edit(app: AppHandle, index: usize, child: Option<usize>) {
+    menu_popup::edit_from_window(&app, index, child);
 }
 
-/// A click on a name in a submenu's tip: that item of the submenu at `index`.
+/// A click (or a right-click choice, `mode`) on a name in a submenu's tip:
+/// that item of the submenu at `index`.
 #[tauri::command]
-fn menu_pick_child(app: AppHandle, index: usize, child: usize) {
-    std::thread::spawn(move || menu_popup::pick_child_from_window(&app, index, child));
+fn menu_pick_child(app: AppHandle, index: usize, child: usize, mode: Option<menu_popup::PickMode>) {
+    std::thread::spawn(move || {
+        menu_popup::pick_child_from_window(&app, index, child, mode.unwrap_or(menu_popup::PickMode::Run));
+    });
 }
 
 /// The whole text of a popup row: the tip shows it after a moment on the row.

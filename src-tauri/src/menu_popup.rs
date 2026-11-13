@@ -175,6 +175,18 @@ impl Model {
         Some((id, entry.menu.map(str::to_owned)))
     }
 
+    /// `item_at` of a row inside the submenu at `index` of the level shown
+    /// (a name in its tip), without opening it.
+    pub(crate) fn child_item_at(&mut self, index: usize, child: usize) -> Option<(String, Option<String>)> {
+        if !matches!(self.walk().0.get(index)?.item, MenuItem::Submenu { .. }) {
+            return None;
+        }
+        self.path.push(index);
+        let found = self.item_at(child);
+        self.path.pop();
+        found
+    }
+
     /// The action of a row of the level shown.
     pub(crate) fn action_at(&self, index: usize) -> Option<String> {
         match self.walk().0.get(index)?.item {
@@ -793,11 +805,15 @@ pub(crate) struct EditRequest {
 
 /// Right click → Edit: close the menu, bring Sidearm up, ask it to open the
 /// row's item in its menu editor.
-pub(crate) fn edit_from_window(app: &AppHandle, index: usize) {
+pub(crate) fn edit_from_window(app: &AppHandle, index: usize, child: Option<usize>) {
     let request = {
         let mut guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
-        let Some(menu) = guard.as_ref() else { return };
-        let Some((item_id, other)) = menu.model.item_at(index) else { return };
+        let Some(menu) = guard.as_mut() else { return };
+        let found = match child {
+            Some(child) => menu.model.child_item_at(index, child),
+            None => menu.model.item_at(index),
+        };
+        let Some((item_id, other)) = found else { return };
         let Some(menu_action_id) = other.or_else(|| menu.preview.action_id.clone()) else { return };
         let request = EditRequest { menu_action_id, item_id, profile_id: menu.preview.resolved_profile_id.clone() };
         *guard = None;
@@ -810,8 +826,8 @@ pub(crate) fn edit_from_window(app: &AppHandle, index: usize) {
     let _ = app.emit_to("main", EDIT_EVENT, &request);
 }
 
-pub(crate) fn pick_child_from_window(app: &AppHandle, index: usize, child: usize) {
-    drive(app, |model| model.pick_child(index, child));
+pub(crate) fn pick_child_from_window(app: &AppHandle, index: usize, child: usize, mode: PickMode) {
+    drive_as(app, mode, |model| model.pick_child(index, child));
 }
 
 pub(crate) fn pick_from_window(app: &AppHandle, index: usize, mode: PickMode) {
@@ -1148,6 +1164,12 @@ mod tests {
         assert_eq!(model.pick_child(4, 0), Step::Run("act-x".into()));
         // Not a submenu: nothing happens.
         assert_eq!(sample().pick_child(0, 0), Step::Stay);
+        // Right click → Edit on that name finds its item and leaves the level as it was.
+        let mut model = sample();
+        let (id, other) = model.child_item_at(4, 0).expect("the child's item");
+        assert_eq!((id.as_str(), other), ("x", None));
+        assert_eq!(labels(&model.view("Phrases", 1)), labels(&sample().view("Phrases", 1)));
+        assert_eq!(model.child_item_at(0, 0), None);
     }
 
     #[test]

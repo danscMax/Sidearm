@@ -502,6 +502,10 @@ pub(crate) fn fake_quit_file() -> Option<std::path::PathBuf> {
 /// list changes mid-read during a plug burst), the last answer stands: a
 /// failed read must not look like every mouse unplugged.
 pub fn present_models() -> Vec<&'static NativeModel> {
+    #[cfg(test)]
+    if let Some(models) = fake::present_models() {
+        return models;
+    }
     static LAST: Mutex<Vec<&'static NativeModel>> = Mutex::new(Vec::new());
     let mut last = LAST.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     match present_hid_paths() {
@@ -601,6 +605,12 @@ impl VendorDevice {
     /// Opens the first catalog model accepted by `wanted`. `Err` carries the
     /// last model's failure, or [`NOT_CONNECTED`].
     fn open_first_model(wanted: impl Fn(&NativeModel) -> bool) -> Result<Self, String> {
+        #[cfg(test)]
+        if let Some(models) = fake::present_models() {
+            return models.into_iter().find(|model| wanted(model))
+                .map(|model| Self::test_handle(model, model.pids[0], ""))
+                .ok_or_else(|| NOT_CONNECTED.to_string());
+        }
         // A model that is simply not plugged in is not worth reporting; an
         // interface that exists but does not open is.
         let mut last_error = NOT_CONNECTED.to_string();
@@ -1443,6 +1453,19 @@ pub(crate) mod fake {
 
     thread_local! {
         static FAKE: RefCell<Option<FakeMouse>> = const { RefCell::new(None) };
+        #[cfg(test)]
+        static PRESENT: RefCell<Option<Vec<&'static NativeModel>>> = const { RefCell::new(None) };
+    }
+
+    /// Overrides discovery on this test thread, including an unplugged receiver.
+    #[cfg(test)]
+    pub(crate) fn set_present_models(models: Vec<&'static NativeModel>) {
+        PRESENT.with(|cell| *cell.borrow_mut() = Some(models));
+    }
+
+    #[cfg(test)]
+    pub(super) fn present_models() -> Option<Vec<&'static NativeModel>> {
+        PRESENT.with(|cell| cell.borrow().clone())
     }
 
     #[cfg(test)]
@@ -1460,6 +1483,7 @@ pub(crate) mod fake {
     impl Drop for Installed {
         fn drop(&mut self) {
             FAKE.with(|cell| *cell.borrow_mut() = None);
+            PRESENT.with(|cell| *cell.borrow_mut() = None);
         }
     }
 

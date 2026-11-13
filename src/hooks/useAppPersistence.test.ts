@@ -95,6 +95,95 @@ describe("useAppPersistence", () => {
   // Config loading
   // =========================================================================
   describe("config loading", () => {
+    it("accepts a reload after an earlier save completes and preserves it in the next edit", async () => {
+      const result = await renderReady();
+      const savedA = makeConfig({ profiles: [{ ...baseConfig.profiles[0], name: "saved A" }] });
+      const externalB = makeConfig({ profiles: [{ ...baseConfig.profiles[0], name: "external B" }] });
+      let resolveSave!: (response: SaveConfigResponse) => void;
+      mockedSaveConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+      act(() => { result.current.updateDraft(() => savedA, { immediate: true }); });
+
+      let resolveLoad!: (response: LoadConfigResponse) => void;
+      mockedLoadConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveLoad = resolve; }));
+      let reload!: Promise<boolean>;
+      act(() => { reload = result.current.refreshConfig(); });
+      await act(async () => { resolveSave({ ...saveResponse, config: savedA }); });
+      await act(async () => {
+        resolveLoad({ ...loadResponse, config: externalB });
+        expect(await reload).toBe(true);
+      });
+      expect(result.current.workingConfig).toEqual(externalB);
+      expect(result.current.snapshot?.config).toEqual(externalB);
+      expect(result.current.undoStack).toHaveLength(0);
+      expect(result.current.viewState).toBe("ready");
+
+      mockedSaveConfig.mockImplementationOnce(async (config) => ({ ...saveResponse, config }));
+      await act(async () => {
+        result.current.updateDraft((config) => ({
+          ...config, settings: { ...config.settings, debugLogging: true },
+        }), { immediate: true });
+      });
+      expect(mockedSaveConfig).toHaveBeenNthCalledWith(2, {
+        ...externalB, settings: { ...externalB.settings, debugLogging: true },
+      });
+      expect(result.current.snapshot?.config.profiles[0].name).toBe("external B");
+    });
+
+    it("waits for an in-flight save before reading disk for a reload", async () => {
+      const result = await renderReady();
+      let resolveSave!: (response: SaveConfigResponse) => void;
+      mockedSaveConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+      act(() => { result.current.updateDraft(() => altConfig, { immediate: true }); });
+      mockedLoadConfig.mockResolvedValue({ ...loadResponse, config: altConfig });
+      let reload!: Promise<boolean>;
+      act(() => { reload = result.current.refreshConfig(); });
+      expect(mockedLoadConfig).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        resolveSave({ ...saveResponse, config: altConfig });
+        expect(await reload).toBe(true);
+      });
+      expect(mockedLoadConfig).toHaveBeenCalledTimes(2);
+      expect(result.current.workingConfig).toEqual(altConfig);
+    });
+
+    it("ignores a reload superseded by an edit while waiting for an earlier save", async () => {
+      const result = await renderReady();
+      let resolveSave!: (response: SaveConfigResponse) => void;
+      mockedSaveConfig.mockImplementationOnce(() => new Promise((resolve) => { resolveSave = resolve; }));
+      act(() => { result.current.updateDraft(() => altConfig, { immediate: true }); });
+      let reload!: Promise<boolean>;
+      act(() => { reload = result.current.refreshConfig(); });
+      const newer = { ...altConfig, settings: { ...altConfig.settings, debugLogging: true } };
+      act(() => { result.current.updateDraft(() => newer); });
+      await act(async () => {
+        resolveSave({ ...saveResponse, config: altConfig });
+        expect(await reload).toBe(false);
+      });
+      expect(mockedLoadConfig).toHaveBeenCalledTimes(1);
+      expect(result.current.workingConfig).toEqual(newer);
+      await act(async () => { vi.advanceTimersByTime(100); });
+      expect(mockedSaveConfig).toHaveBeenNthCalledWith(2, newer);
+    });
+
+    it("reloads after an in-flight save fails without waiting on its own recovery", async () => {
+      const result = await renderReady();
+      let rejectSave!: (error: unknown) => void;
+      mockedSaveConfig.mockImplementationOnce(() => new Promise((_resolve, reject) => { rejectSave = reject; }));
+      act(() => { result.current.updateDraft(() => altConfig, { immediate: true }); });
+      let reload!: Promise<boolean>;
+      act(() => { reload = result.current.refreshConfig(); });
+      const external = makeConfig({ profiles: [] });
+      mockedLoadConfig.mockResolvedValue({ ...loadResponse, config: external });
+      await act(async () => {
+        rejectSave({ code: "config_changed_on_disk", message: "External change" });
+        expect(await reload).toBe(false);
+      });
+      expect(mockedLoadConfig).toHaveBeenCalledTimes(2);
+      expect(result.current.workingConfig).toEqual(external);
+      expect(result.current.viewState).toBe("ready");
+      expect(result.current.error).toBeNull();
+    });
+
     it("ignores a reload response overtaken by a saved edit", async () => {
       const result = await renderReady();
       let resolveLoad!: (response: LoadConfigResponse) => void;

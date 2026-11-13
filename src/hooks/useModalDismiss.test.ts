@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, cleanup } from "@testing-library/react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useModalDismiss } from "./useModalDismiss";
 
@@ -16,6 +16,7 @@ function makeContainer(): HTMLDivElement {
 }
 
 afterEach(() => {
+  cleanup();
   document.body.replaceChildren();
 });
 

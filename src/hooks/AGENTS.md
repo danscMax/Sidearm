@@ -13,7 +13,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 - `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle.
 - `useLogPanel.ts`, `useMouseVisualPanel.ts`, `useActionPicker.ts`, `useVerification.ts`.
 - `useActionPicker` only opens a valid control's editor and selects its existing binding, if any. It must never create a placeholder or invoke persistence; the modal owns local drafts until Save.
-- `useAppPersistence` accepts a reload only while its revision is current; newer reloads, edits, undo/redo, and completed saves supersede it. Reload clears undo/redo. A rejected save drops dependent queued edits; `runtime_reload_failed` means the file was committed, so reload it and surface the runtime error without a rollback notification.
+- `useAppPersistence` waits for an already-running save request before reading disk for a reload; completing that older save does not invalidate the reload. Only the current reload revision can apply; newer reloads, edits, and undo/redo supersede it, including while it waits for a save. Reload clears undo/redo. A rejected save drops dependent queued edits; `runtime_reload_failed` means the file was committed, so reload it and surface the runtime error without a rollback notification.
 - `useVerification` synchronizes selection only when the active step belongs to `effectiveDeviceId`; choosing another device pauses selection sync and preserves the session.
 
 ## Local Contracts
@@ -24,7 +24,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 ## Work Guidance
 
 - Hooks with logic have `*.test.ts` (`useListKeyboard`, `useAppPersistence`, `useRuntime`, `useLogPanel`, etc.).
-- Hook tests explicitly call Testing Library `cleanup` after each test (before restoring fake timers). Verification event fixtures take their timestamp when emitted, never at module import.
+- Every hook suite that mounts React roots registers Testing Library `cleanup` after each test (before restoring fake timers or removing DOM containers). Verification event fixtures take their timestamp when emitted, never at module import.
 - `App.test.tsx` exercises root orchestration with mocked IPC and workspace boundaries; keep real persistence, runtime, verification, modal, toolbar, and toast behavior.
 
 ## Verification

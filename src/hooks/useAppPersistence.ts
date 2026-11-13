@@ -79,6 +79,7 @@ export function useAppPersistence(
   const saveQueueRef = useRef<AppConfig | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const isSavingRef = useRef(false);
+  const saveRequestRef = useRef<Promise<SaveConfigResponse> | null>(null);
   const disposedRef = useRef(false);
   /** The key-button signals last sent to the mouse (`null` = none this session). */
   const onboardSentRef = useRef<string | null>(null);
@@ -182,8 +183,8 @@ export function useAppPersistence(
     setViewState("saving");
 
     try {
-      const result = await saveConfig(config);
-      configRevisionRef.current += 1;
+      saveRequestRef.current = saveConfig(config);
+      const result = await saveRequestRef.current;
       lastPersistedConfigRef.current = result.config;
       startTransition(() => {
         setSnapshot({
@@ -243,6 +244,7 @@ export function useAppPersistence(
       });
       onAutoSaveFailedRef.current?.(normalized.message);
     } finally {
+      saveRequestRef.current = null;
       isSavingRef.current = false;
       // If new changes queued during this save, drain them. On teardown
       // (unmount / window close) flush immediately rather than via a timer:
@@ -280,6 +282,11 @@ export function useAppPersistence(
     setError(null);
 
     try {
+      if (saveRequestRef.current) {
+        // Read after the pending write; flushSave owns its error/recovery path.
+        await saveRequestRef.current.catch(() => {});
+        if (revision !== configRevisionRef.current) return false;
+      }
       const result = await loadConfig();
       if (revision !== configRevisionRef.current) return false;
       lastPersistedConfigRef.current = result.config;

@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { renderHook, act, cleanup } from "@testing-library/react";
 import { attachLogger } from "@tauri-apps/plugin-log";
 import { useLogPanel } from "./useLogPanel";
 
@@ -11,7 +11,29 @@ vi.mock("@tauri-apps/plugin-log", () => ({
   info: vi.fn(() => Promise.resolve()),
 }));
 
+afterEach(cleanup);
+
 describe("useLogPanel", () => {
+  describe("test isolation", () => {
+    const listeners = new Set<Parameters<typeof attachLogger>[0]>();
+
+    it.each([1, 2])("isolates logger subscriptions between test cases (%s)", async (run) => {
+      expect(listeners.size).toBe(0);
+      vi.mocked(attachLogger).mockImplementationOnce(async (listener) => {
+        listeners.add(listener);
+        return () => { listeners.delete(listener); };
+      });
+      const { result } = renderHook(() => useLogPanel());
+      await act(async () => { await Promise.resolve(); });
+      act(() => {
+        for (const listener of listeners) listener({ level: 3, message: `run-${run}` });
+      });
+      expect(listeners.size).toBe(1);
+      expect(result.current.logs.map((entry) => entry.message)).toEqual([`run-${run}`]);
+      // Leave the root mounted: suite teardown must detach it before the next case.
+    });
+  });
+
   it("starts with empty logs", () => {
     const { result } = renderHook(() => useLogPanel());
     expect(result.current.logs).toEqual([]);

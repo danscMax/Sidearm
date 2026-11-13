@@ -1,8 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { renderHook, cleanup } from "@testing-library/react";
 import type { AppConfig, Binding, ControlId } from "../lib/config";
 import { makeConfig } from "../lib/test-fixtures";
 import { useActionPicker } from "./useActionPicker";
+
+afterEach(cleanup);
 
 function makeDeps(config: AppConfig = makeConfig()) {
   return {

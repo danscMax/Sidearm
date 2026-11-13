@@ -1,6 +1,6 @@
 import type React from "react";
-import { renderHook, act } from "@testing-library/react";
-import { describe, it, expect, vi } from "vitest";
+import { renderHook, act, cleanup } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 import type { Action, Binding, ControlId, PhysicalControl } from "../lib/config";
 import type { ControlSurfaceEntry } from "../lib/constants";
@@ -9,6 +9,8 @@ import {
   useControlInteractions,
   type UseControlInteractionsParams,
 } from "./useControlInteractions";
+
+afterEach(cleanup);
 
 const ASSIGNED: ControlId = "thumb_01";
 const UNASSIGNED: ControlId = "thumb_02";

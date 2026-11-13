@@ -66,14 +66,25 @@ impl HeldKeyOwners {
         {
             if let Some((_, count)) = self.0.iter_mut().find(|(owned, _)| owned == key) {
                 *count += 1;
-                plan.retain(|input| {
-                    *input
-                        != KeyboardInputSpec::VirtualKey {
-                            code: key.code,
-                            extended: key.extended,
-                            key_up: false,
-                        }
-                });
+                // Owners survive text/emergency key-ups; the live snapshot decides
+                // whether their modifier still needs a fresh key-down.
+                let still_down = match key.code {
+                    VK_LCONTROL => snapshot.ctrl,
+                    VK_LSHIFT => snapshot.shift,
+                    VK_LMENU => snapshot.alt,
+                    VK_LWIN => snapshot.win,
+                    _ => true,
+                };
+                if still_down {
+                    plan.retain(|input| {
+                        *input
+                            != KeyboardInputSpec::VirtualKey {
+                                code: key.code,
+                                extended: key.extended,
+                                key_up: false,
+                            }
+                    });
+                }
             } else {
                 self.0.push((*key, 1));
             }
@@ -191,17 +202,11 @@ pub fn send_shortcut(
     // and the Remote Desktop client re-syncs Alt as up before forwarding a V
     // that came in the same batch as the Alt.
     let pressed = if payload.key.trim().is_empty() { 0 } else { extract_pressed_modifiers(payload, &snapshot).len() };
-    let sent = send_keyboard_steps(&split_shortcut_plan(&plan, pressed), MODIFIER_STEP_DELAY_MS);
-    if let Err(send_error) = sent {
-        // Best-effort cleanup: a partial SendInput can leave the primary key OR
-        // modifiers physically down. Release everything the plan could have
-        // pressed (primary + pressed modifiers), not just modifiers.
-        let cleanup = build_shortcut_cleanup_inputs(payload, &snapshot);
-        if !cleanup.is_empty() {
-            let _ = send_keyboard_inputs(&cleanup);
-        }
-        return Err(send_error);
-    }
+    send_keyboard_steps(
+        &split_shortcut_plan(&plan, pressed),
+        MODIFIER_STEP_DELAY_MS,
+        || build_shortcut_cleanup_inputs(payload, &snapshot),
+    )?;
 
     // Post-copy clipboard snapshot for the opt-in diagnostic — no-op unless enabled
     // and the shortcut is a copy/cut combo. Best-effort: reads, never writes.
@@ -237,16 +242,76 @@ fn split_shortcut_plan(plan: &[KeyboardInputSpec], pressed: usize) -> [&[Keyboar
 }
 
 /// Send each non-empty step as its own batch, `delay_ms` apart.
-fn send_keyboard_steps(steps: &[&[KeyboardInputSpec]], delay_ms: u64) -> Result<(), String> {
+fn send_keyboard_steps(
+    steps: &[&[KeyboardInputSpec]],
+    delay_ms: u64,
+    cleanup: impl FnOnce() -> Vec<KeyboardInputSpec>,
+) -> Result<(), String> {
+    send_keyboard_steps_with(
+        steps,
+        delay_ms,
+        validate_keyboard_inputs,
+        send_keyboard_inputs,
+        cleanup,
+    )
+}
+
+fn validate_keyboard_inputs(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        validate_linux_keyboard_inputs(inputs, |code| vk_to_evdev_key(code).is_some())
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = inputs;
+        Ok(())
+    }
+}
+
+fn send_keyboard_steps_with(
+    steps: &[&[KeyboardInputSpec]],
+    delay_ms: u64,
+    validate: impl Fn(&[KeyboardInputSpec]) -> Result<(), String>,
+    mut send: impl FnMut(&[KeyboardInputSpec]) -> Result<(), String>,
+    cleanup: impl FnOnce() -> Vec<KeyboardInputSpec>,
+) -> Result<(), String> {
+    if let Err(error) = steps.iter().try_for_each(|step| validate(step)) {
+        // A hold has already registered its claims, but no input was emitted.
+        cleanup();
+        return Err(error);
+    }
     let mut first = true;
     for step in steps.iter().filter(|step| !step.is_empty()) {
         if !first {
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
         }
         first = false;
-        send_keyboard_inputs(step)?;
+        if let Err(error) = send(step) {
+            return match send_keyboard_cleanup_with(&cleanup(), validate, send) {
+                Ok(()) => Err(error),
+                Err(cleanup_error) => Err(format!("{error} Cleanup failed: {cleanup_error}")),
+            };
+        }
     }
     Ok(())
+}
+
+fn send_keyboard_cleanup_with(
+    inputs: &[KeyboardInputSpec],
+    validate: impl Fn(&[KeyboardInputSpec]) -> Result<(), String>,
+    mut send: impl FnMut(&[KeyboardInputSpec]) -> Result<(), String>,
+) -> Result<(), String> {
+    // An unsupported primary must not prevent releasing supported modifiers.
+    let supported: Vec<_> = inputs
+        .iter()
+        .filter(|input| validate(std::slice::from_ref(input)).is_ok())
+        .copied()
+        .collect();
+    if supported.is_empty() {
+        Ok(())
+    } else {
+        send(&supported)
+    }
 }
 
 /// Determine which modifiers the shortcut would have pressed down (i.e., desired
@@ -374,6 +439,29 @@ fn with_clipboard_unchanged<G, T>(
     Ok((sequence() == expected).then(update))
 }
 
+#[cfg(any(target_os = "windows", test))]
+fn paste_staged_clipboard_with<G, S>(
+    mut open: impl FnMut() -> Result<G, String>,
+    stage: impl FnOnce() -> Result<S, String>,
+    is_staged: impl FnOnce() -> bool,
+    sequence: impl FnOnce() -> u32,
+    paste: impl FnOnce() -> Result<(), String>,
+    restore: impl FnOnce(u32, &S),
+) -> Result<(), String> {
+    let saved = {
+        let _guard = open()?;
+        stage()?
+    };
+    // Close can advance the sequence. Reopen and prove the staged identity
+    // before associating that version with our write; a newer copy stays intact.
+    let expected = open().ok().and_then(|_guard| is_staged().then(sequence));
+    let result = paste();
+    if let Some(expected) = expected {
+        restore(expected, &saved);
+    }
+    result
+}
+
 /// Whether a clipboard format's data is a plain memory block (HGLOBAL) that can
 /// be copied and put back. GDI-object formats hold a bitmap / metafile /
 /// palette handle instead — `GlobalLock` on those crashed Sidearm — and the
@@ -492,7 +580,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         Foundation::GlobalFree,
         System::{
             DataExchange::{
-                EmptyClipboard, GetClipboardSequenceNumber,
+                EmptyClipboard,
                 RegisterClipboardFormatW, SetClipboardData,
             },
             Memory::{GMEM_MOVEABLE, GlobalAlloc, GlobalLock, GlobalUnlock},
@@ -502,8 +590,28 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
 
     const RESTORE_DELAY: Duration = Duration::from_millis(150);
 
-    // --- helper: write CF_UNICODETEXT to an already-open, emptied clipboard ---
-    let write_text = |t: &str| -> Result<(), String> {
+    // Each paste has its own identity even when another app copies identical text.
+    static NEXT_STAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let token = format!(
+        "{}:{}:{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        NEXT_STAGE.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let format_name: Vec<u16> = "Sidearm.StagedPaste"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let stage_format = unsafe { RegisterClipboardFormatW(format_name.as_ptr()) };
+    if stage_format == 0 {
+        return Err("Failed to register clipboard staging format".into());
+    }
+
+    // Write UTF-16 text to an already-open clipboard, including the private token.
+    let write_text = |format: u32, t: &str| -> Result<(), String> {
         unsafe {
             let encoded: Vec<u16> = t.encode_utf16().chain(std::iter::once(0)).collect();
             let byte_len = encoded.len() * std::mem::size_of::<u16>();
@@ -520,7 +628,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
             ptr::copy_nonoverlapping(encoded.as_ptr() as *const u8, locked as *mut u8, byte_len);
             let _ = GlobalUnlock(handle);
 
-            if SetClipboardData(u32::from(CF_UNICODETEXT), handle).is_null() {
+            if SetClipboardData(format, handle).is_null() {
                 let _ = GlobalFree(handle);
                 return Err("SetClipboardData failed".into());
             }
@@ -572,37 +680,32 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         });
     };
 
-    // Snapshot and stage under one lock, so a copy between them cannot be lost.
-    let saved = with_clipboard_open(|| {
-        let saved = clipboard_snapshot();
-        unsafe { EmptyClipboard() };
-        if let Err(error) = write_text(text) {
+    paste_staged_clipboard_with(
+        open_clipboard,
+        || {
+            let saved = clipboard_snapshot();
             unsafe { EmptyClipboard() };
-            write_clipboard_snapshot(&saved);
+            if let Err(error) = write_text(u32::from(CF_UNICODETEXT), text)
+                .and_then(|()| write_text(stage_format, &token))
+            {
+                unsafe { EmptyClipboard() };
+                write_clipboard_snapshot(&saved);
+                exclude_from_history();
+                return Err(error);
+            }
             exclude_from_history();
-            return Err(error);
-        }
-        exclude_from_history();
-        Ok(saved)
-    })??;
-    // The sequence number moves again when the clipboard is closed (measured
-    // 2026-11-13: +3 at CloseClipboard), so it is read after closing; read
-    // inside, the restore below always saw a change and left the phrase there.
-    let seq = unsafe { GetClipboardSequenceNumber() };
-
-    // 3. Inject Ctrl+V (clears encoding modifiers first)
-    if let Err(e) = send_hotkey_string("Ctrl+V", &ALL_MODIFIERS) {
-        restore(seq, &saved);
-        return Err(format!("Failed to inject Ctrl+V: {e:?}"));
-    }
-
-    // 4. Wait for target app to consume the paste
-    thread::sleep(RESTORE_DELAY);
-
-    // An empty snapshot clears our staged text, under the same version guard.
-    restore(seq, &saved);
-
-    Ok(())
+            Ok(saved)
+        },
+        || clipboard_get_text_format_open(stage_format).as_deref() == Some(token.as_str()),
+        clipboard_sequence_number,
+        || {
+            send_hotkey_string("Ctrl+V", &ALL_MODIFIERS)
+                .map_err(|e| format!("Failed to inject Ctrl+V: {e:?}"))?;
+            thread::sleep(RESTORE_DELAY);
+            Ok(())
+        },
+        |seq, saved| restore(seq, saved),
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -807,13 +910,17 @@ fn clipboard_get_text() -> Option<String> {
 /// Read Unicode text while the caller holds the clipboard lock.
 #[cfg(target_os = "windows")]
 fn clipboard_get_text_open() -> Option<String> {
+    clipboard_get_text_format_open(u32::from(windows_sys::Win32::System::Ole::CF_UNICODETEXT))
+}
+
+#[cfg(target_os = "windows")]
+fn clipboard_get_text_format_open(format: u32) -> Option<String> {
     use windows_sys::Win32::System::{
         DataExchange::GetClipboardData,
         Memory::{GlobalLock, GlobalUnlock},
-        Ole::CF_UNICODETEXT,
     };
     unsafe {
-        let handle = GetClipboardData(u32::from(CF_UNICODETEXT));
+        let handle = GetClipboardData(format);
         if handle.is_null() {
             None
         } else {
@@ -1585,12 +1692,7 @@ pub fn send_shortcut_hold_down(
         modifier_count
     });
 
-    if let Err(send_error) = send_keyboard_steps(&[down, key], MODIFIER_STEP_DELAY_MS) {
-        // Best-effort cleanup: release what we pressed
-        let cleanup = owners.plan_up(&held);
-        let _ = send_keyboard_inputs(&cleanup);
-        return Err(send_error);
-    }
+    send_keyboard_steps(&[down, key], MODIFIER_STEP_DELAY_MS, || owners.plan_up(&held))?;
 
     Ok(held)
 }
@@ -1756,6 +1858,14 @@ fn plan_shortcut_hold_down_inputs(
     payload: &ShortcutActionPayload,
     snapshot: &ModifierSnapshot,
 ) -> Result<(Vec<KeyboardInputSpec>, HeldShortcutState), String> {
+    plan_shortcut_hold_down_for_platform(payload, snapshot, cfg!(target_os = "windows"))
+}
+
+fn plan_shortcut_hold_down_for_platform(
+    payload: &ShortcutActionPayload,
+    snapshot: &ModifierSnapshot,
+    mask_alt_win: bool,
+) -> Result<(Vec<KeyboardInputSpec>, HeldShortcutState), String> {
     let primary_key = if !payload.key.trim().is_empty() {
         let pk = parse_primary_key(&payload.key)?;
         if is_modifier_vk(pk.code) {
@@ -1786,7 +1896,7 @@ fn plan_shortcut_hold_down_inputs(
 
     if let Some(pk) = primary_key {
         push_virtual_key_down(&mut inputs, pk);
-    } else if payload.alt || payload.win {
+    } else if mask_alt_win && (payload.alt || payload.win) {
         // Modifier-only shortcut with Alt or Win: inject the mask key
         // (VK 0xE8, down+up) so Windows sees a non-modifier event between
         // modifier-down and the eventual modifier-up.  Without this the
@@ -3733,7 +3843,7 @@ mod tests {
             raw: None,
         };
 
-        let (inputs, held) = plan_shortcut_hold_down_inputs(
+        let (inputs, held) = plan_shortcut_hold_down_for_platform(
             &payload,
             &ModifierSnapshot {
                 ctrl: false,
@@ -3741,6 +3851,7 @@ mod tests {
                 alt: false,
                 win: false,
             },
+            true,
         )
         .unwrap();
 
@@ -3793,7 +3904,7 @@ mod tests {
         };
 
         let (inputs, held) =
-            plan_shortcut_hold_down_inputs(&payload, &ModifierSnapshot::default()).unwrap();
+            plan_shortcut_hold_down_for_platform(&payload, &ModifierSnapshot::default(), true).unwrap();
 
         assert!(held.primary_key.is_none());
         assert_eq!(held.pressed_modifier_vks.len(), 2, "Win + Shift injected");
@@ -4224,6 +4335,298 @@ mod p05_regressions {
                 == 0x41)
             .is_ok()
         );
+    }
+
+    fn staged_paste_case(original: &str, concurrent: Option<&str>, paste_fails: bool) {
+        struct Guard<'a> {
+            locked: &'a Cell<bool>,
+            sequence: &'a Cell<u32>,
+            contents: &'a RefCell<String>,
+            marker: &'a Cell<bool>,
+            stage_closed: &'a Cell<bool>,
+            concurrent: Option<&'a str>,
+        }
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                self.locked.set(false);
+                if !self.stage_closed.replace(true) {
+                    // Closing a write changes the version independently of SetClipboardData.
+                    self.sequence.set(self.sequence.get() + 3);
+                    if let Some(copy) = self.concurrent {
+                        *self.contents.borrow_mut() = copy.into();
+                        self.marker.set(false);
+                        self.sequence.set(self.sequence.get() + 1);
+                    }
+                }
+            }
+        }
+        let locked = Cell::new(false);
+        let sequence = Cell::new(10);
+        let contents = RefCell::new(original.to_string());
+        let marker = Cell::new(false);
+        let stage_closed = Cell::new(false);
+        let result = paste_staged_clipboard_with(
+            || {
+                assert!(!locked.replace(true));
+                Ok(Guard {
+                    locked: &locked,
+                    sequence: &sequence,
+                    contents: &contents,
+                    marker: &marker,
+                    stage_closed: &stage_closed,
+                    concurrent,
+                })
+            },
+            || {
+                assert!(locked.get());
+                let saved = contents.borrow().clone();
+                *contents.borrow_mut() = "staged snippet".into();
+                marker.set(true);
+                sequence.set(11);
+                Ok(saved)
+            },
+            || {
+                assert!(locked.get(), "staging identity must be checked under lock");
+                marker.get()
+            },
+            || sequence.get(),
+            || {
+                if paste_fails {
+                    Err("Ctrl+V failed".into())
+                } else {
+                    Ok(())
+                }
+            },
+            |expected, saved| {
+                with_clipboard_unchanged(
+                    expected,
+                    || {
+                        locked.set(true);
+                        Ok(ClipboardLock(&locked))
+                    },
+                    || sequence.get(),
+                    || *contents.borrow_mut() = saved.clone(),
+                )
+                .unwrap();
+            },
+        );
+        assert_eq!(&*contents.borrow(), concurrent.unwrap_or(original));
+        assert_eq!(result.is_err(), paste_fails);
+        assert!(!locked.get());
+    }
+
+    #[test]
+    fn p05_r2_paste_preserves_copy_between_stage_close_and_expected_version() {
+        for original in ["original copy", ""] {
+            for paste_fails in [false, true] {
+                for copy in ["new user copy", "staged snippet"] {
+                    staged_paste_case(original, Some(copy), paste_fails);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn p05_r2_paste_restores_own_stage_after_close_version_change_and_paste_error() {
+        for original in ["original copy", ""] {
+            for paste_fails in [false, true] {
+                staged_paste_case(original, None, paste_fails);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn p05_r2_hold_reasserts_ctrl_after_text_clear_and_emergency_release() {
+        fn emit(down: &mut std::collections::HashSet<u16>, inputs: &[KeyboardInputSpec]) {
+            for input in inputs {
+                if let KeyboardInputSpec::VirtualKey { code, key_up, .. } = input {
+                    if *key_up {
+                        down.remove(code);
+                    } else {
+                        down.insert(*code);
+                    }
+                }
+            }
+        }
+        for emergency in [false, true] {
+            for reverse in [false, true] {
+                let mut owners = HeldKeyOwners::default();
+                let mut down = std::collections::HashSet::new();
+                let (plan, a) = owners
+                    .plan_down(&ctrl_hold(""), &ModifierSnapshot::default())
+                    .unwrap();
+                emit(&mut down, &plan);
+                let clear = if emergency {
+                    build_release_all_modifier_inputs()
+                } else {
+                    modifier_release_inputs(&ALL_MODIFIERS, |code| code == VK_LCONTROL)
+                };
+                emit(&mut down, &clear);
+                assert!(down.is_empty());
+                let snapshot = ModifierSnapshot {
+                    ctrl: down.contains(&VK_LCONTROL),
+                    ..Default::default()
+                };
+                let (plan, b) = owners.plan_down(&ctrl_hold("B"), &snapshot).unwrap();
+                assert_eq!(plan, vec![event(VK_LCONTROL, false), event(0x42, false)]);
+                emit(&mut down, &plan);
+                let (first, last) = if reverse { (&b, &a) } else { (&a, &b) };
+                emit(&mut down, &owners.plan_up(first));
+                assert!(
+                    down.contains(&VK_LCONTROL),
+                    "the surviving hold still owns Ctrl"
+                );
+                emit(&mut down, &owners.plan_up(last));
+                assert!(down.is_empty(), "every injected key must be released");
+                assert!(owners.0.is_empty());
+            }
+        }
+    }
+
+    fn linux_test_validate(inputs: &[KeyboardInputSpec]) -> Result<(), String> {
+        validate_linux_keyboard_inputs(inputs, |code| {
+            matches!(code, VK_LCONTROL | VK_LMENU | VK_LWIN | 0x41 | 0x42)
+        })
+    }
+
+    #[test]
+    fn p05_r2_linux_shortcut_and_hold_validate_every_step_before_emit() {
+        for hold in [false, true] {
+            let payload = ctrl_hold("VK_175");
+            let mut owners = HeldKeyOwners::default();
+            let mut emitted = Vec::new();
+            let result = if hold {
+                let (plan, held) = owners
+                    .plan_down(&payload, &ModifierSnapshot::default())
+                    .unwrap();
+                let (mods, key) = plan.split_at(1);
+                send_keyboard_steps_with(
+                    &[mods, key],
+                    0,
+                    linux_test_validate,
+                    |batch| {
+                        linux_test_validate(batch)?;
+                        emitted.extend_from_slice(batch);
+                        Ok(())
+                    },
+                    || owners.plan_up(&held),
+                )
+            } else {
+                let (plan, _) =
+                    plan_shortcut_inputs(&payload, &ModifierSnapshot::default()).unwrap();
+                send_keyboard_steps_with(
+                    &split_shortcut_plan(&plan, 1),
+                    0,
+                    linux_test_validate,
+                    |batch| {
+                        linux_test_validate(batch)?;
+                        emitted.extend_from_slice(batch);
+                        Ok(())
+                    },
+                    || build_shortcut_cleanup_inputs(&payload, &ModifierSnapshot::default()),
+                )
+            };
+            assert!(result.unwrap_err().contains("0xAF"));
+            assert!(
+                emitted.is_empty(),
+                "an unsupported primary must not leave Ctrl down"
+            );
+            assert!(
+                owners.0.is_empty(),
+                "rejected hold must roll back its claims"
+            );
+        }
+    }
+
+    #[test]
+    fn p05_r2_linux_cleanup_releases_supported_keys_despite_unsupported_primary() {
+        let mut emitted = Vec::new();
+        send_keyboard_cleanup_with(
+            &[event(0xAF, true), event(VK_LCONTROL, true)],
+            linux_test_validate,
+            |batch| {
+                linux_test_validate(batch)?;
+                emitted.extend_from_slice(batch);
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(emitted, vec![event(VK_LCONTROL, true)]);
+    }
+
+    #[test]
+    fn p05_r2_linux_dispatch_failure_releases_a_partially_emitted_key_and_modifiers() {
+        let payload = ctrl_hold("A");
+        let (plan, _) = plan_shortcut_inputs(&payload, &ModifierSnapshot::default()).unwrap();
+        let mut emitted = Vec::new();
+        let mut calls = 0;
+        let error = send_keyboard_steps_with(
+            &split_shortcut_plan(&plan, 1),
+            0,
+            linux_test_validate,
+            |batch| {
+                linux_test_validate(batch)?;
+                calls += 1;
+                if calls == 2 {
+                    emitted.push(batch[0]);
+                    return Err("partial primary emit".into());
+                }
+                emitted.extend_from_slice(batch);
+                Ok(())
+            },
+            || build_shortcut_cleanup_inputs(&payload, &ModifierSnapshot::default()),
+        )
+        .unwrap_err();
+        assert!(error.contains("partial primary emit"));
+        assert_eq!(
+            emitted,
+            vec![
+                event(VK_LCONTROL, false),
+                event(0x41, false),
+                event(0x41, true),
+                event(VK_LCONTROL, true)
+            ]
+        );
+    }
+
+    #[test]
+    fn p05_r2_linux_alt_and_win_only_holds_dispatch_without_windows_mask() {
+        for (alt, win, code) in [(true, false, VK_LMENU), (false, true, VK_LWIN)] {
+            let payload = ShortcutActionPayload {
+                ctrl: false,
+                alt,
+                win,
+                ..ctrl_hold("")
+            };
+            let (plan, held) =
+                plan_shortcut_hold_down_for_platform(&payload, &ModifierSnapshot::default(), false)
+                    .unwrap();
+            let mut emitted = Vec::new();
+            send_keyboard_steps_with(
+                &[&plan],
+                0,
+                linux_test_validate,
+                |batch| {
+                    linux_test_validate(batch)?;
+                    emitted.extend_from_slice(batch);
+                    Ok(())
+                },
+                || plan_shortcut_hold_up_inputs(&held),
+            )
+            .unwrap();
+            send_keyboard_cleanup_with(
+                &plan_shortcut_hold_up_inputs(&held),
+                linux_test_validate,
+                |batch| {
+                    linux_test_validate(batch)?;
+                    emitted.extend_from_slice(batch);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(emitted, vec![event(code, false), event(code, true)]);
+        }
     }
 }
 

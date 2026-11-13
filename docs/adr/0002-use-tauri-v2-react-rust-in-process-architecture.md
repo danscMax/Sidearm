@@ -3,6 +3,10 @@
 - Status: Accepted
 - Date: 2026-03-07
 
+Capture-process boundary superseded by [ADR-0006](0006-isolate-windows-capture-in-a-helper-process.md).
+The stack and main-process domain/runtime ownership below remain accepted;
+the single-process capture description records the iteration 1 decision.
+
 ## Context
 
 The target system is a Windows desktop application for configuring and executing context-aware actions for a Razer Naga V2 HyperSpeed. The application needs:

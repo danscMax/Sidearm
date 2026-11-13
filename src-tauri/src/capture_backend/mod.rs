@@ -991,6 +991,19 @@ fn run_fire_and_forget(
         flush_log_entries(runtime_store, log_entries);
         count_press(config, preview, &action.id, !menu_pick);
         crate::menu_popup::open(app, runtime_store, config, preview, &action.display_name, payload, is_fg_elevated);
+        if crate::fake_mode() {
+            log::info!(
+                "[capture] E2E execution {}",
+                serde_json::json!({
+                    "encodedKey": preview.encoded_key,
+                    "controlId": preview.control_id,
+                    "layer": preview.layer,
+                    "actionId": action.id,
+                    "profileId": preview.resolved_profile_id,
+                    "outcome": "menuOpened",
+                })
+            );
+        }
         return;
     }
     // A live sequence (pauses up to 30 s a step) runs on the sequence thread, so
@@ -1077,6 +1090,19 @@ fn report_execution(
                 execution.encoded_key,
                 execution.outcome
             );
+            if crate::fake_mode() {
+                log::info!(
+                    "[capture] E2E execution {}",
+                    serde_json::json!({
+                        "encodedKey": execution.encoded_key,
+                        "controlId": preview.control_id,
+                        "layer": preview.layer,
+                        "actionId": execution.action_id,
+                        "profileId": execution.resolved_profile_id,
+                        "outcome": execution.outcome,
+                    })
+                );
+            }
             log_entries.push((
                 "execution",
                 crate::ui_text!(

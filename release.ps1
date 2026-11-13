@@ -123,6 +123,10 @@ if (-not $NoSign) {
 
 # 6. Zip without the per-user data/ folder.
 Write-Step 6 6 "Zip"
+$notices = Join-Path $portable 'THIRD-PARTY-NOTICES.txt'
+if (-not (Test-Path -LiteralPath $notices) -or (Get-Item -LiteralPath $notices).Length -eq 0) {
+    Stop-Release 'THIRD-PARTY-NOTICES.txt is missing or empty; rebuild the portable package.'
+}
 if (-not (Test-Path -LiteralPath (Join-Path $portable 'Sidearm.exe'))) { Stop-Release "No build in $portable." }
 if (-not (Test-Path -LiteralPath (Join-Path $portable 'resources\MicrosoftEdgeWebview2Setup.exe'))) {
     Write-Warn "resources\MicrosoftEdgeWebview2Setup.exe is missing from the build (see build_portable.ps1)."

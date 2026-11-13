@@ -97,6 +97,7 @@ Windows-first desktop app that remaps a programmable mouse (Razer Naga) and keyb
 - Adding an `ActionType` touches many mirrored sites — see `src/components/action-picker/AGENTS.md`.
 - `CONTEXT.md` defines button identity, profile assignment, and the global HyperShift role; keep the role distinct from an executable action.
 - Fix root causes, not symptoms. Reuse existing shared primitives/helpers before adding new ones.
+- Portable packages include `THIRD-PARTY-NOTICES.txt` (Sidearm plus locked Windows npm/Rust runtime licenses). `tools/licenses.mjs` generates it offline from installed packages/Cargo metadata, excluding build/dev-only and proc-macro crates; version-specific missing upstream texts live in `tools/license-supplements.json`. Missing license text fails assembly; package verification and release ZIP creation require the notice file.
 
 ## Verification
 
@@ -109,6 +110,7 @@ Run before declaring a code change done:
 - Dev runs (`dev.ps1` → `npm run tauri dev`) use the portable app's data: debug builds read `SIDEARM_DATA_DIR` (`paths.rs`), which `dev.ps1` sets to `..\portable\data`, so a test run drives the mice with the one real config. Close the portable Sidearm first (both hold `Local\Sidearm-app`).
 - Whole-app check with virtual V2/V3 mice: `npm run e2e` (Windows; runs beside a running Sidearm, touches no real mouse; see `src-tauri/AGENTS.md`). Run it after any change to mouse, capture, exit or restore logic, before asking the owner to test on hardware; `npm run e2e -- --layout <config.json>` presses every V3 thumb assignment of a real config copy.
 - The desktop UI cannot be rendered headlessly here — visual and screen-reader changes need a manual pass in the running app.
+- Tool regression checks: `node --test tools/e2e/run.test.mjs tools/licenses.test.mjs`. E2E fake-state edits hold the same OS file lock as Rust for the entire read/modify/write; dispatch assertions match one completed execution's action/profile/control/layer/key. `--layout` rejects an empty applicable assignment set before build/start.
 
 ## User Preferences
 

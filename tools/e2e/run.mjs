@@ -72,14 +72,45 @@ class World {
     return JSON.parse(fs.readFileSync(path.join(this.mice, `${device}.json`), "utf8"));
   }
 
-  edit(device, change) {
-    const lock = path.join(this.mice, `${device}.lock`);
-    // The app holds the lock only for one exchange; a plain rewrite is fine
-    // between exchanges for these coarse switches.
-    const state = this.mouse(device);
-    change(state);
-    fs.writeFileSync(path.join(this.mice, `${device}.json`), JSON.stringify(state, null, 2));
-    return lock;
+  async edit(device, change) {
+    // FileStream.Lock and Rust File::lock both lock byte 0 via Win32 file locks.
+    const script = `
+      $ErrorActionPreference = 'Stop'
+      $lock = [IO.File]::Open($env:SIDEARM_E2E_LOCK, 'OpenOrCreate', 'ReadWrite', 'ReadWrite')
+      try {
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        while ($true) {
+          try { $lock.Lock(0, 1); break } catch [IO.IOException] {
+            if ([DateTime]::UtcNow -ge $deadline) { throw }
+            Start-Sleep -Milliseconds 10
+          }
+        }
+        [Console]::Out.WriteLine('locked')
+        [Console]::Out.Flush()
+        [Console]::In.ReadLine() | Out-Null
+      } finally { $lock.Dispose() }
+    `;
+    const helper = spawn("pwsh", ["-NoProfile", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], {
+      env: { ...this.env, SIDEARM_E2E_LOCK: path.join(this.mice, `${device}.lock`) }, windowsHide: true,
+    });
+    let errors = "";
+    helper.stderr.on("data", (chunk) => { errors += chunk; });
+    const closed = new Promise((resolve) => helper.on("close", resolve));
+    try {
+      await new Promise((resolve, reject) => {
+        helper.on("error", reject);
+        helper.on("close", () => reject(new Error(`Mouse lock helper exited: ${errors}`)));
+        helper.stdout.once("data", () => resolve());
+      });
+      const state = this.mouse(device);
+      await change(state);
+      const file = path.join(this.mice, `${device}.json`);
+      fs.writeFileSync(`${file}.node.tmp`, JSON.stringify(state, null, 2));
+      fs.renameSync(`${file}.node.tmp`, file);
+    } finally {
+      helper.stdin.end();
+      await closed;
+    }
   }
 
   /** A pipe server per mouse; the app's reader connects (and reconnects). */
@@ -187,7 +218,8 @@ const bankRecords = (state, bank) => state.records.filter(([b]) => b === bank);
 /** Assignments the scenarios press: a press and a hold on thumb 1, a press and a
  *  double press on thumb 2, a standard and a HyperShift press on thumb 3. */
 function addBindings(config) {
-  // Every profile: which one applies follows the foreground window.
+  config.appMappings = [];
+  // Keep fixture actions in every profile; no app rules can override the fallback.
   for (const profile of config.profiles.map((p) => p.id)) addProfileBindings(config, profile);
   for (const profile of config.profiles) profile.hypershift2Triggers = ["v3_mouse_right"];
   // A profile without HyperShift 2, reached by thumb 6 (ProfileSwitch).
@@ -251,9 +283,30 @@ const gestureFired = (gesture) => (text) =>
     && !line.includes("not dispatched")
     && (lines[index + 1] ?? "").includes("Dispatching action"));
 
-const dispatched = (text, control, layer, key) =>
-  new RegExp(`Dispatching action for [^\\n]* \\(control ${control}, layer ${layer}\\)[\\s\\S]*?Action complete[^\\n]*Simulated`).test(text)
-  && (!key || text.includes(`E2E ${key}`) || true);
+const dispatched = (text, expected) => text.split(/\r?\n/).some((line) => {
+  const marker = "[capture] E2E execution ";
+  const offset = line.indexOf(marker);
+  if (offset < 0) return false;
+  try {
+    const execution = JSON.parse(line.slice(offset + marker.length));
+    return execution.outcome === (expected.outcome ?? "simulated")
+      && Object.entries(expected).every(([key, value]) => execution[key] === value);
+  } catch {
+    return false;
+  }
+});
+
+function layoutPlan(source) {
+  const actions = new Map(source.actions.map((action) => [action.id, action]));
+  const plan = source.profiles.map((profile) => ({
+    profile,
+    bindings: source.bindings.filter((b) => b.enabled && b.profileId === profile.id
+      && /^v3_thumb_\d+$/.test(b.controlId) && ["standard", "hypershift"].includes(b.layer)
+      && actions.has(b.actionId) && !["profileSwitch", "disabled"].includes(actions.get(b.actionId).type)),
+  })).filter(({ bindings }) => bindings.length > 0);
+  if (plan.length === 0) throw new Error("No testable V3 thumb assignments on standard/HyperShift layers (missing, disabled and profile-switch actions are skipped).");
+  return plan;
+}
 
 async function main() {
   if (process.platform !== "win32") throw new Error("Windows only");
@@ -270,7 +323,16 @@ async function main() {
     check("first start seeds a config", await world.waitFor(() => (fs.existsSync(path.join(world.data, "config.json")) ? "x" : ""), /x/));
     await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000);
     check("first start quits on request", await world.quit());
-    world.writeConfig(addBindings(world.config()));
+    const config = addBindings(world.config());
+    world.writeConfig(config);
+    const profileId = config.settings.fallbackProfileId;
+    const expectedAction = (controlId, layer, key) => {
+      const prefix = `e2e-${profileId}-`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+      const action = config.actions.find((a) => a.id.startsWith(prefix) && a.displayName === `E2E ${key}`);
+      // Consumer signals use the standard key; HS/H2 stamps carry the layer.
+      const mapping = config.encoderMappings.find((m) => m.controlId === controlId && m.layer === "standard");
+      return { controlId, layer, encodedKey: mapping.encodedKey, actionId: action.id, profileId };
+    };
 
     // 1. Start: live maps in both mice.
     let mark = world.log().length;
@@ -285,30 +347,30 @@ async function main() {
     // 2. A plain press dispatches its action (simulated).
     mark = world.log().length;
     await world.press(V3, v3Usage(3, 0));
-    check("press → standard action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_03", "standard"), 5000, mark));
+    check("press → standard action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_03", "standard", "L")), 5000, mark));
 
     // 3. HyperShift (the V3 firmware sends layer 1's signal).
     mark = world.log().length;
     await world.press(V3, v3Usage(3, 1));
-    check("HyperShift press → hypershift action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_03", "hypershift"), 5000, mark));
+    check("HyperShift press → hypershift action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_03", "hypershift", "K")), 5000, mark));
 
     // 4. Press patterns.
     mark = world.log().length;
     await world.press(V3, v3Usage(1, 0), 80);
-    check("short press of a button with a hold → Press", await world.waitFor(() => world.log(), gestureFired("Press"), 3000, mark));
+    check("short press of a button with a hold → Press", await world.waitFor(() => world.log(), (t) => gestureFired("Press")(t) && dispatched(t, expectedAction("v3_thumb_01", "standard", "F")), 3000, mark));
     mark = world.log().length;
     await world.press(V3, v3Usage(1, 0), 450);
-    check("held press → LongPress", await world.waitFor(() => world.log(), gestureFired("LongPress"), 3000, mark));
+    check("held press → LongPress", await world.waitFor(() => world.log(), (t) => gestureFired("LongPress")(t) && dispatched(t, expectedAction("v3_thumb_01", "standard", "G")), 3000, mark));
     mark = world.log().length;
     await world.press(V3, v3Usage(2, 0), 50);
     await world.press(V3, v3Usage(2, 0), 50);
-    check("two quick taps → DoublePress", await world.waitFor(() => world.log(), gestureFired("DoublePress"), 3000, mark));
+    check("two quick taps → DoublePress", await world.waitFor(() => world.log(), (t) => gestureFired("DoublePress")(t) && dispatched(t, expectedAction("v3_thumb_02", "standard", "H")), 3000, mark));
 
     // 5. The profile button reloads the live map from another bank: the session
     // repairs it — but only once the held button is let go.
     mark = world.log().length;
     world.report(V3, v3Usage(5, 0)); // held
-    world.edit(V3, (state) => {
+    await world.edit(V3, (state) => {
       // What the profile button does: another bank's records in the live map.
       state.activeBank = 2;
       const record = state.records.find(([bank, button, layer]) => bank === 0 && button === 0x41 && layer === 0);
@@ -341,7 +403,7 @@ async function main() {
     await sleep(100);
     await world.press(V3, v3Usage(4, 0));
     world.nativeButton(V3, RIGHT, false);
-    check("right held + thumb → HyperShift 2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_04", "hypershift2"), 5000, mark));
+    check("right held + thumb → HyperShift 2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_04", "hypershift2", "N")), 5000, mark));
     await sleep(500);
     check("…and the used trigger does not click", !/HyperShift 2 click/.test(world.log().slice(mark)));
     // Thumb 3 has standard and HyperShift actions but none on HyperShift 2:
@@ -363,7 +425,7 @@ async function main() {
     await sleep(100);
     await world.press(V3, v3Usage(4, 1)); // the ring button's firmware layer
     world.nativeButton(V3, RIGHT, false);
-    check("right + ring + thumb → HS + HS2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_04", "hypershiftBoth"), 5000, mark));
+    check("right + ring + thumb → HS + HS2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_04", "hypershiftBoth", "O")), 5000, mark));
     // 5d. The menu popup: HyperShift 2 + thumb 11 opens it, thumb 2 picks item 2,
     // and the press drives the menu instead of thumb 2's own action.
     mark = world.log().length;
@@ -376,7 +438,7 @@ async function main() {
     mark = world.log().length;
     await world.press(V3, v3Usage(2, 0), 50);
     check("thumb 2 picks item 2", await world.waitFor(() => world.log(), /\[menu\] picked `e2e-[a-z0-9-]+-menu-t`/, 5000, mark));
-    check("…which runs on the menu's press", await world.waitFor(() => world.log(), (t) => dispatched(t, "v3_thumb_11", "hypershift2"), 5000, mark));
+    check("…which runs on the menu's press", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_11", "hypershift2", "T")), 5000, mark));
     await sleep(500);
     check("…and thumb 2's own action does not run", !/control v3_thumb_02/.test(world.log().slice(mark)));
     mark = world.log().length;
@@ -420,11 +482,11 @@ async function main() {
     world.start();
     await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, world.log().length - 1);
     await sleep(1500);
-    world.edit(V2, (state) => { state.asleep = true; });
+    await world.edit(V2, (state) => { state.asleep = true; });
     mark = world.restoreLog().length;
     await world.quit();
     check("asleep mouse queued", fs.existsSync(path.join(world.data, "mouse-offline-failed")));
-    world.edit(V2, (state) => { state.asleep = false; });
+    await world.edit(V2, (state) => { state.asleep = false; });
     check("queued profile written after waking", await world.waitFor(() => (fs.existsSync(path.join(world.data, "mouse-offline-failed")) ? "" : "gone"), /gone/, 30000));
 
     // 9. Started while the last exit still waits on a sleeping mouse: the new
@@ -435,7 +497,7 @@ async function main() {
     await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, world.log().length - 1);
     await sleep(1500);
     // As slow to not answer as a real sleeping mouse: the exit takes seconds.
-    world.edit(V2, (state) => { state.asleep = true; state.asleepDelayMs = 300; });
+    await world.edit(V2, (state) => { state.asleep = true; state.asleepDelayMs = 300; });
     mark = world.log().length;
     fs.writeFileSync(path.join(world.mice, "quit"), "");
     check("exit waits on the sleeping mouse", await world.waitFor(() => world.log(), /V2 HyperSpeed recovery pending until next start/, 30000, mark));
@@ -443,7 +505,7 @@ async function main() {
     mark = world.log().length;
     world.start();
     check("a Sidearm started during an exit starts capture", await world.waitFor(() => world.log(), /Capture started/, 90000, mark));
-    world.edit(V2, (state) => { state.asleep = false; state.asleepDelayMs = 0; });
+    await world.edit(V2, (state) => { state.asleep = false; state.asleepDelayMs = 0; });
     check("…and writes its live maps", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 40000, mark));
     await world.quit();
   } finally {
@@ -483,10 +545,12 @@ async function pressAs(world, usage, gesture) {
 async function layoutMain(file) {
   if (process.platform !== "win32") throw new Error("Windows only");
   const source = JSON.parse(fs.readFileSync(file, "utf8"));
+  const plan = layoutPlan(source);
   build();
   const world = new World();
   console.log(`Run folder: ${world.root}\nLayout: ${file}`);
   const actions = new Map(source.actions.map((action) => [action.id, action]));
+  let tested = 0;
   try {
     world.plug(V2, v2State());
     world.plug(V3, v3State());
@@ -494,12 +558,8 @@ async function layoutMain(file) {
     world.start();
     await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000);
     await world.quit();
-    for (const profile of source.profiles) {
-      const bindings = source.bindings
-        .filter((b) => b.enabled && b.profileId === profile.id && /^v3_thumb_\d+$/.test(b.controlId)
-          && (b.layer === "standard" || b.layer === "hypershift"))
-        .sort((a, b) => a.controlId.localeCompare(b.controlId) || a.layer.localeCompare(b.layer));
-      if (bindings.length === 0) continue;
+    for (const { profile, bindings } of plan) {
+      bindings.sort((a, b) => a.controlId.localeCompare(b.controlId) || a.layer.localeCompare(b.layer));
       const config = structuredClone(source);
       config.appMappings = [];
       config.settings.fallbackProfileId = profile.id;
@@ -513,18 +573,23 @@ async function layoutMain(file) {
         const action = actions.get(binding.actionId);
         const gesture = gestureOf(binding.triggerMode);
         const name = `${profile.name} · ${binding.controlId.replace("v3_", "")} · ${binding.layer} · ${gesture} → ${binding.label}`;
-        if (!action || action.type === "profileSwitch" || action.type === "disabled") continue;
         const usage = v3Usage(Number(binding.controlId.slice("v3_thumb_".length)), binding.layer === "standard" ? 0 : 1);
+        const mapping = config.encoderMappings.find((m) => m.controlId === binding.controlId && m.layer === "standard");
+        const expected = {
+          controlId: binding.controlId, layer: binding.layer, encodedKey: mapping.encodedKey,
+          actionId: binding.actionId, profileId: profile.id,
+        };
         mark = world.log().length;
         await pressAs(world, usage, gesture);
         if (action.type === "menu") {
-          check(name, await world.waitFor(() => world.log(), /\[menu\] opened/, 4000, mark));
+          check(name, await world.waitFor(() => world.log(), (t) => dispatched(t, { ...expected, outcome: "menuOpened" }), 4000, mark));
           await sleep(400);
           await world.press(V3, usage, 50); // the opening button closes it
-          await world.waitFor(() => world.log(), /\[menu\] closed/, 3000, mark);
+          check(`${name}: menu closed`, await world.waitFor(() => world.log(), /\[menu\] closed/, 3000, mark));
         } else {
-          check(name, await world.waitFor(() => world.log(), (t) => dispatched(t, binding.controlId, binding.layer), 4000, mark));
+          check(name, await world.waitFor(() => world.log(), (t) => dispatched(t, expected), 4000, mark));
         }
+        tested += 1;
         // Past the multi-press window, so the next press starts fresh.
         await sleep(400);
       }
@@ -533,14 +598,19 @@ async function layoutMain(file) {
   } finally {
     world.cleanup();
   }
+  check("layout exercised at least one assignment", tested > 0);
   const passed = results.filter((r) => r.ok).length;
   console.log(`\n${passed}/${results.length} passed${failed ? ` — FAILED. Logs: ${world.data}\\logs` : "."}`);
   if (!failed) fs.rmSync(world.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
   process.exit(failed ? 1 : 0);
 }
 
-const layoutArg = process.argv.indexOf("--layout");
-(layoutArg >= 0 ? layoutMain(process.argv[layoutArg + 1]) : main()).catch((error) => {
-  console.error(error);
-  process.exit(1);
-});
+export { World, dispatched, layoutPlan };
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const layoutArg = process.argv.indexOf("--layout");
+  (layoutArg >= 0 ? layoutMain(process.argv[layoutArg + 1]) : main()).catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
+}

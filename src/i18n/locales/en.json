@@ -857,7 +857,15 @@
     "menuMoveTo": "Move to menu…",
     "menuMoved": "“{{name}}” moved to the end of the “{{menu}}” menu; saved with this menu.",
     "menuMore": "More: copy or move to another menu…",
-    "menuItemTools": "Item actions"
+    "menuItemTools": "Item actions",
+    "menuName": "Menu name (shown on the button)",
+    "menuAddButton": "Add",
+    "menuFold": "Fold “{{name}}”",
+    "menuUnfold": "Unfold “{{name}}”",
+    "menuChipLibrary": "Library: {{name}}",
+    "menuChipPlaces": "Also on: {{places}}",
+    "menuChipMenus": "Also in: {{places}}",
+    "menuSharedChip": "Shared · {{count}} more button(s)"
   },
   "properties": {
     "empty": "Select a button to see properties",

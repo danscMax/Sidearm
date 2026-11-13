@@ -1798,6 +1798,85 @@ input[type="radio"] {
 .menu-ed__side { display: grid; gap: 8px; }
 .menu-ed__side > .menu-ed__list { max-height: 100cqh; }
 
+/* Layout (owner's pick #1, 2026-11-13): the menu's line on top (name, search,
+   filter, "+ Add ▾", "?"), under it the tree and the item's inspector, both
+   the full height left in the dialog, each scrolling on its own. */
+.menu-ed-root { display: flex; flex-direction: column; gap: 12px; height: 100cqh; min-height: 320px; }
+.menu-ed__top { display: flex; gap: 8px; align-items: center; }
+.menu-ed__menu-name { width: 220px; font-weight: 600; }
+.menu-ed__top .menu-ed__search { flex: 1; min-width: 140px; }
+.menu-ed__chip-btn,
+.menu-ed__chip {
+  flex: none;
+  max-width: 260px;
+  overflow: hidden;
+  padding: 4px 10px;
+  border: 1px solid var(--c-card-border);
+  border-radius: 999px;
+  background: var(--c-surface-alt);
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.menu-ed__chip-btn { cursor: pointer; }
+.menu-ed__chip-btn:hover { color: var(--c-text); }
+.menu-ed__chip-btn--on { border-color: var(--c-accent); color: var(--c-accent); }
+.menu-ed__chip--accent { border-color: var(--c-border-hover); color: var(--c-accent); }
+.menu-ed__add-btn { flex: none; white-space: nowrap; }
+.menu-ed-root > .menu-ed {
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(0, 1.1fr);
+  align-items: stretch;
+}
+.menu-ed-root .menu-ed__side { display: flex; flex-direction: column; min-height: 0; }
+.menu-ed-root .menu-ed__side > .menu-ed__list { flex: 1; min-height: 0; max-height: none; align-content: start; }
+.menu-ed-root .menu-ed > .menu-ed__pane {
+  position: static;
+  max-height: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.menu-ed__pane-head { display: flex; gap: 8px; align-items: center; }
+.menu-ed__pane-name { flex: 1; min-width: 0; font-weight: 600; }
+.menu-ed__pane-title { flex: 1; }
+.menu-ed__pane-head .menu-ed__tools { padding: 0; border: 0; background: none; }
+.menu-ed__pane-row { display: flex; gap: 8px 18px; align-items: center; flex-wrap: wrap; }
+.menu-ed__pane-row > .pill-track,
+.menu-ed__pane-row > .menu-ed__note { margin-right: auto; }
+.menu-ed__switch { display: inline-flex; gap: 8px; align-items: center; color: var(--c-text-muted); font-size: var(--fs-caption); font-weight: 600; }
+.menu-ed-root .menu-ed__text { flex: 1; min-height: 160px; resize: none; }
+.menu-ed__chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.menu-ed__chips:empty { display: none; }
+.menu-ed__block-select { margin: 0; }
+.menu-ed__block-select select { padding-block: 4px; font-size: var(--fs-caption); }
+/* Blocks in the tree fold (▾ / ▸) and show how many items they hold. */
+.menu-ed__group-line { display: flex; align-items: center; gap: 2px; margin-top: 4px; }
+.menu-ed__group-line .menu-ed__group { display: flex; flex: 1; min-width: 0; margin-top: 0; }
+.menu-ed__fold {
+  flex: none;
+  width: 20px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--c-text-muted);
+  cursor: pointer;
+}
+.menu-ed__fold:hover { color: var(--c-accent); background: var(--c-card-bg); }
+.menu-ed__count { margin-left: auto; color: var(--c-text-muted); font-weight: 600; letter-spacing: 0; }
+
+/* The menu editor's dialog: the categories become a rail of their icons
+   (names in the tooltip), the category heading goes — the editor gets the room. */
+.action-picker--tall .action-picker__categories { min-width: 0; width: 60px; padding: 8px 6px; align-items: center; }
+.action-picker--tall .action-picker__search,
+.action-picker--tall .action-picker__cat-label,
+.action-picker--tall .action-picker__no-results,
+.action-picker--tall .action-picker__cat-head { display: none; }
+.action-picker--tall .action-picker__cat-btn { justify-content: center; padding: 6px; }
+
 .menu-ed__list {
   display: grid;
   gap: 1px;

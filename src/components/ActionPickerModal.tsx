@@ -606,20 +606,19 @@ export function ActionPickerModal({
             ) : null}
 
             {effectiveCategory === "menu" ? (
-              <div className="editor-grid">
-                {existingAction?.type === "menu" && sharedUses > 0 ? (
-                  <Notice variant="info">{t("picker.menuShared", { count: sharedUses })}</Notice>
-                ) : null}
-                <MenuItemsEditor
-                  items={menuItemsDraft}
-                  onChange={setMenuItemsDraft}
-                  config={config}
-                  edits={menuEdits}
-                  onEditsChange={setMenuEdits}
-                  menuActionId={existingAction?.id}
-                  initialSelectedId={focusMenuItemId}
-                />
-              </div>
+              <MenuItemsEditor
+                items={menuItemsDraft}
+                onChange={setMenuItemsDraft}
+                config={config}
+                edits={menuEdits}
+                onEditsChange={setMenuEdits}
+                menuActionId={existingAction?.id}
+                initialSelectedId={focusMenuItemId}
+                name={nameDraft}
+                namePlaceholder={autoName("menu", drafts, t, config.profiles)}
+                onNameChange={setNameDraft}
+                sharedUses={existingAction?.type === "menu" ? sharedUses : 0}
+              />
             ) : null}
 
             {effectiveCategory === "mediaKey" ? (
@@ -656,7 +655,8 @@ export function ActionPickerModal({
               />
             ) : null}
 
-            {!roleCategory ? <label className="field mt-12">
+            {/* The menu editor has the name in its own top bar. */}
+            {!roleCategory && effectiveCategory !== "menu" ? <label className="field mt-12">
               <span className="field__label">
                 {t("picker.nameLabel")}
                 <HelpTip text={t("picker.nameHelp")} />

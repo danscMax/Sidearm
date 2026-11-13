@@ -67,6 +67,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assignment changed on one mouse changes the same button on the other.
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
+### Changed
+- The menu editor is laid out anew: the categories shrink to a rail of icons,
+  the menu has one top line (name, search, filter, "+ Add ▾", "?"), the items
+  are a tree whose blocks fold and show their count, and the item's inspector
+  has the name, the on/off switch and icon tools on one line and the text at
+  full height. A right click on an item (or its ⋯) copies or moves it to another
+  menu, and in the popup a right click on a name inside a submenu offers insert,
+  insert + Enter, copy or edit for that item.
+
 ### Fixed
 - The same shortcut on two buttons is no longer a conflict when the press
   patterns differ (Ctrl+V on a press of one button and a hold of another): it is

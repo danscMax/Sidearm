@@ -32,7 +32,8 @@ describe("MenuItemsEditor", () => {
     const two = screen.getByRole("button", { name: /2\s*Two/ });
     fireEvent.click(two);
     expect(two.getAttribute("aria-pressed")).toBe("true");
-    expect(screen.getByRole("button", { name: "Start" }).getAttribute("aria-pressed")).toBe("false");
+    // A block's line: its name and how many items it holds.
+    expect(screen.getByRole("button", { name: /^Start\s*1$/ }).getAttribute("aria-pressed")).toBe("false");
   });
 
   it("after deleting an item of a list, the next item of that list is selected", () => {
@@ -78,13 +79,17 @@ describe("MenuItemsEditor", () => {
     const onChange = vi.fn();
     const onEditsChange = vi.fn();
     render(<MenuItemsEditor items={items} onChange={onChange} config={config} edits={NO_MENU_EDITS} onEditsChange={onEditsChange} />);
-    fireEvent.click(screen.getByRole("button", { name: /\+ (Фраза|Phrase)/ }));
+    const add = (name: RegExp) => {
+      fireEvent.click(screen.getByRole("button", { name: /\+ (Добавить|Add)/ }));
+      fireEvent.click(screen.getByRole("menuitem", { name }));
+    };
+    add(/\+ (Фраза|Phrase)/);
     const next: MenuItem[] = onChange.mock.calls[0][0];
     const added = next[1];
     expect(added.kind).toBe("action");
     const actionId = added.kind === "action" ? added.actionId : "";
     expect(onEditsChange.mock.calls[0][0].actions[actionId]).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /\+ (Блок|Block)/ }));
+    add(/\+ (Блок|Block)/);
     const withBlock: MenuItem[] = onChange.mock.calls[1][0];
     expect(withBlock[1]).toMatchObject({ kind: "submenu" });
   });

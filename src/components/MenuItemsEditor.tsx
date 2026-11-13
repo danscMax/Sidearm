@@ -36,6 +36,12 @@ export interface MenuItemsEditorProps {
   /** The menu's own action: never offered as one of its items. */
   menuActionId?: string;
   disabled?: boolean;
+  /** The menu's name, edited in the editor's top bar (the picker's name field). */
+  name?: string;
+  namePlaceholder?: string;
+  onNameChange?: (name: string) => void;
+  /** How many other buttons open this same menu: a chip in the top bar. */
+  sharedUses?: number;
 }
 
 /** The button number of each item as the popup shows it: the top level and
@@ -117,7 +123,9 @@ function pathTo(items: MenuItem[], id: string, path: string[] = []): string[] {
   return [];
 }
 
-export function MenuItemsEditor({ items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled }: MenuItemsEditorProps) {
+export function MenuItemsEditor({
+  items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled, name, namePlaceholder, onNameChange, sharedUses,
+}: MenuItemsEditorProps) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? items[0]?.id ?? null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -132,6 +140,15 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
   const [ctx, setCtx] = useState<{ x: number; y: number; id: string; to?: "copy" | "move" } | null>(null);
   // "Copy to menu…" swaps the menu's items: the close that follows its click must not shut it.
   const keepCtx = useRef(false);
+  // "+ Add ▾" in the top bar: where its menu opens.
+  const [addAt, setAddAt] = useState<{ x: number; y: number } | null>(null);
+  // Blocks folded in the tree (this session only).
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  const toggleFold = (id: string) => setFolded((current) => {
+    const next = new Set(current);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
   const ctxItem = ctx ? findItem(items, ctx.id) : undefined;
   const openCtx = (event: React.MouseEvent, item: MenuItem) => {
     event.preventDefault();
@@ -362,18 +379,27 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
           const { dropClass, ...arrange } = arrangeProps(item);
           return (
             <div key={item.id} className="menu-ed__block">
-              <button
-                type="button"
-                className={`menu-ed__group${selected?.id === item.id ? " menu-ed__group--on" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dropClass}`}
-                aria-pressed={selected?.id === item.id}
-                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
-                onClick={() => setSelectedId(item.id)}
-                onContextMenu={(event) => openCtx(event, item)}
-                {...arrange}
-              >
-                {item.label || t("inspector.menuUnnamed")}
-              </button>
-              {item.items.map((inner) => renderRow(inner, false))}
+              <div className="menu-ed__group-line">
+                <button type="button" className="menu-ed__fold" aria-expanded={!folded.has(item.id)}
+                  aria-label={t(folded.has(item.id) ? "inspector.menuUnfold" : "inspector.menuFold", { name: item.label })}
+                  onClick={() => toggleFold(item.id)}>
+                  {folded.has(item.id) ? "▸" : "▾"}
+                </button>
+                <button
+                  type="button"
+                  className={`menu-ed__group${selected?.id === item.id ? " menu-ed__group--on" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dropClass}`}
+                  aria-pressed={selected?.id === item.id}
+                  aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+                  onClick={() => setSelectedId(item.id)}
+                  onContextMenu={(event) => openCtx(event, item)}
+                  {...arrange}
+                >
+                  <span className="menu-ed__label">{item.label || t("inspector.menuUnnamed")}</span>
+                  <span className="menu-ed__count">{item.items.length}</span>
+                </button>
+              </div>
+              {/* A folded block still shows its selected item. */}
+              {item.items.filter((inner) => !folded.has(item.id) || selected?.id === inner.id).map((inner) => renderRow(inner, false))}
             </div>
           );
         })}
@@ -543,21 +569,17 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
     const parentId = parentOf(items, item.id) ?? null;
     const isBlock = item.kind === "submenu" && parentId === null;
     const nameLabel = isBlock ? t("inspector.menuBlockName") : item.kind === "submenu" ? t("inspector.menuListName") : t("inspector.menuItemLabel");
+    // Name, on/off and the tools on one line; what it does under it.
     const head = (
-      <div className="menu-ed__head">
-        <label className="field menu-ed__name">
-          <span className="field__label">
-            {nameLabel}
-            {item.kind === "submenu" ? <HelpTip text={isBlock ? t("inspector.menuBlockHint") : t("inspector.menuSubmenuHint")} /> : null}
-          </span>
-          <input className="input" type="text" value={item.label} disabled={disabled} aria-label={nameLabel}
-            onChange={(event) => rename(event.target.value)} />
-        </label>
-        <div className="menu-ed__enabled">
-          <span className="field__label">{t("inspector.menuItemEnabled")}</span>
+      <div className="menu-ed__pane-head">
+        <input className="input menu-ed__pane-name" type="text" value={item.label} disabled={disabled} aria-label={nameLabel}
+          placeholder={nameLabel} onChange={(event) => rename(event.target.value)} />
+        {item.kind === "submenu" ? <HelpTip text={isBlock ? t("inspector.menuBlockHint") : t("inspector.menuSubmenuHint")} /> : null}
+        <span className="menu-ed__switch" title={t("inspector.menuItemEnabled")}>
           <Toggle checked={item.enabled} disabled={disabled} ariaLabel={t("inspector.menuItemEnabled")}
-            onChange={(enabled) => onChange(updateMenuItem(items, item.id, (current) => ({ ...current, enabled })))} />
-        </div>
+            onChange={(on) => onChange(updateMenuItem(items, item.id, (current) => ({ ...current, enabled: on })))} />
+        </span>
+        {renderTools(item)}
       </div>
     );
     if (item.kind === "submenu") {
@@ -565,7 +587,6 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
         <div className="menu-ed__pane">
           {head}
           <p className="menu-ed__note">{t("inspector.menuGroupAddHint", { name: item.label })}</p>
-          {renderTools(item)}
         </div>
       );
     }
@@ -575,28 +596,23 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
     const places = placesOf(item.actionId);
     const elsewhere = otherMenuUses(config, edits, item.actionId, menuActionId);
     const inBlock = parentId && blocks.some((block) => block.id === parentId) ? parentId : NO_BLOCK;
+    const libraryName = phrase?.snippetId ? library.find((snippet) => snippet.id === phrase.snippetId)?.name ?? "" : null;
     return (
       <div className="menu-ed__pane">
         {head}
-        <PillTrack<ItemKind>
-          active={kind}
-          items={[
-            { key: "phrase", label: t("inspector.menuKindPhrase") },
-            { key: "keys", label: t("inspector.menuKindKeys") },
-            { key: "other", label: t("inspector.menuKindOther") },
-          ]}
-          onSelect={(next) => setKind(item, next)}
-        />
-        {kind === "phrase" && action && phrase ? (
-          <>
-            <label className="field">
-              <span className="field__label">{t("inspector.menuPhraseText")}</span>
-              <textarea className="input menu-ed__text" rows={6} value={phrase.text} disabled={disabled}
-                aria-label={t("inspector.menuPhraseText")} placeholder={t("inspector.menuPhrasePlaceholder")}
-                onChange={(event) => setPhrase(action, event.target.value, phrase.enter)} />
-            </label>
-            <div className="menu-ed__enabled">
-              <span className="field__label">{t("inspector.menuPhraseEnter")}</span>
+        <div className="menu-ed__pane-row">
+          <PillTrack<ItemKind>
+            active={kind}
+            items={[
+              { key: "phrase", label: t("inspector.menuKindPhrase") },
+              { key: "keys", label: t("inspector.menuKindKeys") },
+              { key: "other", label: t("inspector.menuKindOther") },
+            ]}
+            onSelect={(next) => setKind(item, next)}
+          />
+          {kind === "phrase" && action && phrase ? (
+            <label className="menu-ed__switch">
+              {t("inspector.menuPhraseEnter")}
               <Toggle checked={phrase.enter} disabled={disabled} ariaLabel={t("inspector.menuPhraseEnter")}
                 onChange={(enter) => {
                   setPhrase(action, phrase.text, enter);
@@ -605,8 +621,13 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
                   const label = enter ? `${bare} ⏎` : bare;
                   if (label !== item.label) onChange(updateMenuItem(items, item.id, (current) => ({ ...current, label })));
                 }} />
-            </div>
-          </>
+            </label>
+          ) : null}
+        </div>
+        {kind === "phrase" && action && phrase ? (
+          <textarea className="input menu-ed__text" value={phrase.text} disabled={disabled}
+            aria-label={t("inspector.menuPhraseText")} placeholder={t("inspector.menuPhrasePlaceholder")}
+            onChange={(event) => setPhrase(action, event.target.value, phrase.enter)} />
         ) : null}
         {kind === "keys" && action?.type === "shortcut" ? (
           <ShortcutEditor
@@ -624,21 +645,34 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
             onChange={(actionId) => onChange(updateMenuItem(items, item.id, (current) => (current.kind === "action" ? { ...current, actionId } : current)))}
           />
         ) : null}
-        {blocks.length > 0 && (parentId === null || blocks.some((block) => block.id === parentId)) ? (
-          <SelectField
-            label={t("inspector.menuBlock")}
-            value={inBlock}
-            disabled={disabled}
-            options={[{ value: NO_BLOCK, label: t("inspector.menuNoBlock") }, ...blocks.map((block) => ({ value: block.id, label: block.label }))]}
-            onChange={(blockId) => onChange(moveMenuItemTo(items, item.id, blockId === NO_BLOCK ? null : blockId))}
-          />
-        ) : null}
-        {renderTools(item)}
-        {phrase?.snippetId ? (
-          <p className="menu-ed__note">{t("inspector.menuPhraseLibrary", { name: library.find((snippet) => snippet.id === phrase.snippetId)?.name ?? "" })}</p>
-        ) : null}
-        {places.length > 0 ? <p className="menu-ed__note">{t("inspector.menuPhraseShared", { places: places.join("; ") })}</p> : null}
-        {elsewhere.length > 0 ? <p className="menu-ed__note">{t("inspector.menuAlsoIn", { places: elsewhere.join("; ") })}</p> : null}
+        {/* Where else it lives, and its block: one line of chips under the content. */}
+        <div className="menu-ed__chips">
+          {libraryName != null ? (
+            <span className="menu-ed__chip menu-ed__chip--accent" title={t("inspector.menuPhraseLibrary", { name: libraryName })}>
+              {t("inspector.menuChipLibrary", { name: libraryName })}
+            </span>
+          ) : null}
+          {places.length > 0 ? (
+            <span className="menu-ed__chip" title={t("inspector.menuPhraseShared", { places: places.join("; ") })}>
+              {t("inspector.menuChipPlaces", { places: places.join("; ") })}
+            </span>
+          ) : null}
+          {elsewhere.length > 0 ? (
+            <span className="menu-ed__chip" title={t("inspector.menuAlsoIn", { places: elsewhere.join("; ") })}>
+              {t("inspector.menuChipMenus", { places: elsewhere.join("; ") })}
+            </span>
+          ) : null}
+          {blocks.length > 0 && (parentId === null || blocks.some((block) => block.id === parentId)) ? (
+            <SelectField
+              ariaLabel={t("inspector.menuBlock")}
+              className="menu-ed__block-select"
+              value={inBlock}
+              disabled={disabled}
+              options={[{ value: NO_BLOCK, label: t("inspector.menuNoBlock") }, ...blocks.map((block) => ({ value: block.id, label: `${t("inspector.menuBlock")}: ${block.label}` }))]}
+              onChange={(blockId) => onChange(moveMenuItemTo(items, item.id, blockId === NO_BLOCK ? null : blockId))}
+            />
+          ) : null}
+        </div>
       </div>
     );
   }
@@ -646,19 +680,33 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
   const target = targetParent();
   const targetName = target ? findItem(items, target)?.label : null;
   return (
-    <div className="field">
-      <span className="field__label">
-        {t("inspector.menuHeader")}
-        <HelpTip text={t("picker.menuLiveHint")} />
-      </span>
+    <div className="menu-ed-root">
+      {/* The menu's own line: its name, search, filter, add — and the how-to in "?". */}
+      <div className="menu-ed__top">
+        {onNameChange ? (
+          <input className="input menu-ed__menu-name" type="text" value={name ?? ""} placeholder={namePlaceholder}
+            aria-label={t("inspector.menuName")} title={t("inspector.menuName")} onChange={(event) => onNameChange(event.target.value)} />
+        ) : null}
+        <input className="input menu-ed__search" type="search" value={query} placeholder={t("inspector.menuSearchAll")}
+          aria-label={t("inspector.menuSearchAll")} onChange={(event) => setQuery(event.target.value)} />
+        <button type="button" className={`menu-ed__chip-btn${unpickedOnly ? " menu-ed__chip-btn--on" : ""}`} aria-pressed={unpickedOnly}
+          onClick={() => setUnpickedOnly(!unpickedOnly)} title={t("inspector.menuUnpickedHint")}>
+          {t("inspector.menuUnpicked")}
+        </button>
+        {sharedUses ? (
+          <span className="menu-ed__chip" title={t("picker.menuShared", { count: sharedUses })}>{t("inspector.menuSharedChip", { count: sharedUses })}</span>
+        ) : null}
+        <button type="button" className="action-button action-button--accent menu-ed__add-btn" disabled={disabled} aria-haspopup="menu"
+          onClick={(event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+            setAddAt({ x: box.right - 200, y: box.bottom + 4 });
+          }}>
+          + {t("inspector.menuAddButton")} ▾
+        </button>
+        <HelpTip text={[t("picker.menuLiveHint"), t("inspector.menuDragHint"), targetName ? t("inspector.menuAddsTo", { name: targetName }) : ""].filter(Boolean).join(" ")} />
+      </div>
       <div className="menu-ed">
         <div className="menu-ed__side">
-          <input className="input menu-ed__search" type="search" value={query} placeholder={t("inspector.menuSearchAll")}
-            aria-label={t("inspector.menuSearchAll")} onChange={(event) => setQuery(event.target.value)} />
-          <button type="button" className={`menu-ed__ghost${unpickedOnly ? " menu-ed__ghost--on" : ""}`} aria-pressed={unpickedOnly}
-            onClick={() => setUnpickedOnly(!unpickedOnly)} title={t("inspector.menuUnpickedHint")}>
-            {t("inspector.menuUnpicked")}
-          </button>
           {unpicked ? (
             <div className="menu-ed__list" role="list">
               {unpicked.size === 0 ? <p className="menu-ed__note">{t("inspector.menuUnpickedNone")}</p> : null}
@@ -687,16 +735,6 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
               )}
             </div>
           ) : renderList()}
-          <div className="menu-ed__bar" role="toolbar" aria-label={t("inspector.menuAdd")}>
-            <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={addPhrase}>+ {t("inspector.menuKindPhrase")}</button>
-            <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={addKeys}>+ {t("inspector.menuKindKeys")}</button>
-            <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={() => addGroup(false)}>+ {t("inspector.menuNewBlock")}</button>
-            <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={() => addGroup(true)}>+ {t("inspector.menuNewList")}</button>
-            <button type="button" className={`menu-ed__ghost${templatesOpen ? " menu-ed__ghost--on" : ""}`} disabled={disabled}
-              aria-expanded={templatesOpen} onClick={() => setTemplatesOpen(!templatesOpen)}>{t("inspector.menuTemplates")}</button>
-            <button type="button" className="menu-ed__ghost" disabled={disabled} onClick={() => void addFromFolder()}
-              title={t("inspector.menuFolderHint")}>+ {t("inspector.menuFromFolder")}</button>
-          </div>
           {removed && removed.after === items ? (
             <p className="menu-ed__note">
               {t("inspector.menuRemoved", { name: removed.label })}{" "}
@@ -706,8 +744,6 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
             </p>
           ) : null}
           {notice ? <p className="menu-ed__note" role="status">{notice}</p> : null}
-          <p className="menu-ed__note">{t("inspector.menuDragHint")}</p>
-          {targetName ? <p className="menu-ed__note">{t("inspector.menuAddsTo", { name: targetName })}</p> : null}
           {missing.size > 0 ? (
             <p className="menu-ed__note menu-ed__note--warn">
               {t("inspector.menuIncomplete", {
@@ -718,13 +754,35 @@ export function MenuItemsEditor({ items, initialSelectedId, onChange, config, ed
         </div>
         {items.length === 0 || templatesOpen ? (
           <div className="menu-ed__pane">
-            <span className="field__label">{items.length === 0 ? t("inspector.menuStartWith") : t("inspector.menuAddTemplate")}</span>
+            <div className="menu-ed__pane-head">
+              <span className="field__label menu-ed__pane-title">{items.length === 0 ? t("inspector.menuStartWith") : t("inspector.menuAddTemplate")}</span>
+              {items.length > 0 ? (
+                <button type="button" className="menu-ed__tool" aria-label={t("common.close")} title={t("common.close")} onClick={() => setTemplatesOpen(false)}>✕</button>
+              ) : null}
+            </div>
             {renderTemplates()}
           </div>
         ) : selected ? (
           renderPane(selected)
         ) : null}
       </div>
+      {addAt ? (
+        <ContextMenu
+          x={addAt.x}
+          y={addAt.y}
+          onClose={() => setAddAt(null)}
+          items={[
+            { label: `+ ${t("inspector.menuKindPhrase")}`, onClick: addPhrase },
+            { label: `+ ${t("inspector.menuKindKeys")}`, onClick: addKeys },
+            null,
+            { label: `+ ${t("inspector.menuNewBlock")}`, onClick: () => addGroup(false) },
+            { label: `+ ${t("inspector.menuNewList")}`, onClick: () => addGroup(true) },
+            null,
+            { label: t("inspector.menuTemplates"), onClick: () => setTemplatesOpen(true) },
+            { label: `+ ${t("inspector.menuFromFolder")}`, onClick: () => void addFromFolder() },
+          ]}
+        />
+      ) : null}
       {ctxItem && ctx ? (
         <ContextMenu
           key={ctx.to ?? "item"}

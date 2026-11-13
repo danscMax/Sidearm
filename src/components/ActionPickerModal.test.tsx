@@ -143,7 +143,7 @@ describe("button role editor", () => {
     cleanup();
 
     const second = show("thumb_01", config, "m1");
-    expect(screen.getByText(/стоит и на других кнопках \(1\)/)).toBeTruthy();
+    expect(screen.getByTitle(/стоит и на других кнопках \(1\)/).textContent).toMatch(/ещё кнопок: 1/);
     save();
     expect(second.onSave.mock.calls[0]![0].bindings.find((b) => b.id === "m1")!.actionId).toBe("menu");
   });

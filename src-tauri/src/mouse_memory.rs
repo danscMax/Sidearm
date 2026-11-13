@@ -966,12 +966,13 @@ impl VendorDevice {
     /// again: every exit and every retry of a sleeping mouse would wear it.
     pub fn write_record(&self, button_id: u8, layer: u8, action: OnboardAction) -> Result<(), String> {
         self.require_verified()?;
-        if action.matches(&self.read_button_at(button_id, layer)?) {
+        let wanted = action.bytes();
+        if self.read_block(ONBOARD_PROFILE, button_id, layer)?[..wanted.len()] == wanted {
             return Ok(());
         }
-        self.set_block(ONBOARD_PROFILE, button_id, layer, &action.bytes())?;
-        let held = self.read_button_at(button_id, layer)?;
-        if action.matches(&held) {
+        self.set_block(ONBOARD_PROFILE, button_id, layer, &wanted)?;
+        let held = self.read_block(ONBOARD_PROFILE, button_id, layer)?;
+        if held[..wanted.len()] == wanted {
             Ok(())
         } else {
             Err(format!("button {button_id:#04x} layer {layer} did not read back as {action:?}"))
@@ -1548,9 +1549,19 @@ pub(crate) mod fake {
     /// The slot path (`write_button`): a `SET_REPORT` stores the payload under
     /// its slot, a `GET_REPORT` of that slot returns it.
     pub(super) fn set_slot(model: &NativeModel, payload: &[u8; PAYLOAD_LEN]) -> bool {
-        let stored = FAKE.with(|cell| cell.borrow_mut().as_mut().map(|mouse| mouse.slots.insert(payload[0], payload.to_vec())).is_some());
+        let store = |mouse: &mut FakeMouse| {
+            mouse.slots.insert(payload[1], payload.to_vec());
+            if payload[5..9] == RECORD_MARKER {
+                let mut record = [0; 7];
+                record.copy_from_slice(&payload[11..18]);
+                let key = (payload[8], payload[9], payload[10]);
+                mouse.records.insert(key, record);
+                mouse.writes.push(key);
+            }
+        };
+        let stored = FAKE.with(|cell| cell.borrow_mut().as_mut().map(store).is_some());
         #[cfg(feature = "fake-mice")]
-        let stored = stored || files::with(model, |mouse| mouse.slots.insert(payload[0], payload.to_vec())).is_some();
+        let stored = stored || files::with(model, store).is_some();
         let _ = model;
         stored
     }
@@ -1659,6 +1670,81 @@ mod tests {
         let held = ButtonRecord { category: 0x0d, modifier: 0x04, usage: 0x3d };
         assert!(tap.matches(&held));
         assert!(!OnboardAction::Key { modifier: 0x04, usage: 0x3d }.matches(&held));
+    }
+
+    #[test]
+    fn r07_02_key_tap_replaces_a_short_period_and_malformed_length() {
+        let model = &crate::device_catalog::NAGA_V2_HYPERSPEED;
+        let _fake = fake::install(fake::FakeMouse::default());
+        let device = VendorDevice::test_handle(model, model.pids[0], "");
+        for old in [[0x0d, 0x04, 0x04, 0x3d, 0x00, 0x64, 0], [0x0d, 0x02, 0x04, 0x3d, 0x27, 0x10, 0]] {
+            fake::with(|mouse| mouse.records.insert((1, 0x40, 0), old));
+            device.write_record(0x40, 0, OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }).unwrap();
+            assert_eq!(device.read_block(1, 0x40, 0).unwrap(), [0x0d, 0x04, 0x04, 0x3d, 0x27, 0x10, 0]);
+        }
+        assert_eq!(fake::with(|mouse| mouse.writes.len()), 2);
+        device.write_record(0x40, 0, OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }).unwrap();
+        assert_eq!(fake::with(|mouse| mouse.writes.len()), 2, "correct records are not rewritten");
+    }
+
+    #[test]
+    fn r07_06_keyboard_slots_round_trip_into_command_records() {
+        let model = &crate::device_catalog::NAGA_V2_HYPERSPEED;
+        let _fake = fake::install(fake::FakeMouse::default());
+        let device = VendorDevice::test_handle(model, model.pids[0], "");
+        for &(button, slot) in model.slots {
+            device.write_button(button, 0x68, 0x04).unwrap();
+            assert_eq!(fake::with(|mouse| mouse.slots[&slot][1]), slot);
+            let held = device.read_button(button).unwrap();
+            assert_eq!((held.category, held.modifier, held.usage), (0x02, 0x04, 0x68));
+        }
+        assert_eq!(fake::with(|mouse| mouse.slots.len()), model.slots.len());
+    }
+
+    #[test]
+    fn r07_07_hardware_snapshot_restores_records_on_unwind() {
+        let model = &crate::device_catalog::NAGA_V2_HYPERSPEED;
+        let _fake = fake::install(fake::FakeMouse::default());
+        let device = VendorDevice::test_handle(model, model.pids[0], "");
+        fake::with(|mouse| {
+            for button in [0x40, 0x41] {
+                for layer in [0, 1] {
+                    mouse.records.insert((1, button, layer), [2, 2, 0, 4, 0, 0, 0]);
+                }
+            }
+        });
+        let result = std::panic::catch_unwind(|| {
+            let _saved = snapshot(&device, &[binding("thumb_01", "F13"), binding("thumb_02", "F14")]);
+            device.write_record(0x40, 0, OnboardAction::Consumer(0x10)).unwrap();
+            fake::with(|mouse| mouse.odd_once.insert((1, 0x41, 1), [2, 2, 0, 5, 0, 0, 0]));
+            assert_eq!(device.read_button_at(0x41, 1).unwrap().usage, 4, "injected read-back failure");
+        });
+        assert!(result.is_err());
+        for button in [0x40, 0x41] {
+            for layer in [0, 1] {
+                assert_eq!(device.read_block(1, button, layer).unwrap(), [2, 2, 0, 4, 0, 0, 0]);
+            }
+        }
+    }
+
+    #[test]
+    fn r07_07_rollback_continues_after_a_failure_and_keeps_its_snapshot() {
+        let model = &crate::device_catalog::NAGA_V2_HYPERSPEED;
+        let _fake = fake::install(fake::FakeMouse::default());
+        let device = VendorDevice::test_handle(model, model.pids[0], "");
+        let mut saved = snapshot(&device, &[binding("thumb_01", "F13"), binding("thumb_02", "F14")]);
+        let backup = saved.backup.clone();
+        device.write_record(0x40, 0, OnboardAction::Consumer(0x10)).unwrap();
+        device.write_record(0x41, 0, OnboardAction::Consumer(0x11)).unwrap();
+        fake::with(|mouse| mouse.odd_once.insert((1, 0x40, 0), [0xff; 7]));
+        assert!(saved.restore().unwrap_err().contains("button 0x40/0"));
+        assert_eq!(device.read_block(1, 0x41, 0).unwrap(), [0; 7], "later records must still be restored");
+        let recovery: serde_json::Value = serde_json::from_slice(&std::fs::read(&backup).unwrap()).unwrap();
+        assert_eq!(recovery["records"].as_array().unwrap().len(), 4);
+        assert_eq!(recovery["model"], model.name);
+        assert_eq!(fake::with(|mouse| mouse.writes.clone()), vec![(1, 0x40, 0), (1, 0x41, 0), (1, 0x40, 0), (1, 0x40, 1), (1, 0x41, 0), (1, 0x41, 1)]);
+        drop(saved);
+        assert!(!backup.exists(), "successful cleanup removes the recovery file");
     }
 
     /// Alt+F4 as Synapse stores it: a plain record with the standard mask.
@@ -1801,10 +1887,47 @@ mod tests {
         assert!(!record_matches(&written, &stale));
     }
 
-    /// Raw records (layers 0 and 1) of `bindings`' buttons, for [`put_back`]:
-    /// the hardware tests write the mouse's memory and must leave it as found.
-    fn snapshot(device: &VendorDevice, bindings: &[OnboardBinding]) -> Vec<[u8; 10]> {
-        bindings
+    struct SavedRecords<'a> {
+        device: &'a VendorDevice,
+        records: Vec<[u8; 10]>,
+        backup: std::path::PathBuf,
+        restored: bool,
+    }
+
+    impl SavedRecords<'_> {
+        fn restore(&mut self) -> Result<(), String> {
+            let mut failures = Vec::new();
+            for record in &self.records {
+                let result = self.device.command(CLASS_BUTTON, CMD_SET_BUTTON, record).and_then(|_| {
+                    let held = self.device.read_block(record[0], record[1], record[2])?;
+                    if held == record[3..] { Ok(()) }
+                    else { Err(format!("button {:#04x}/{} did not read back", record[1], record[2])) }
+                });
+                if let Err(error) = result {
+                    failures.push(format!("button {:#04x}/{}: {error}", record[1], record[2]));
+                }
+            }
+            if !failures.is_empty() {
+                return Err(failures.join("; "));
+            }
+            std::fs::remove_file(&self.backup).map_err(|error| error.to_string())?;
+            self.restored = true;
+            Ok(())
+        }
+    }
+
+    impl Drop for SavedRecords<'_> {
+        fn drop(&mut self) {
+            if !self.restored && let Err(error) = self.restore() {
+                eprintln!("mouse rollback incomplete: {error}; recovery snapshot: {}", self.backup.display());
+            }
+        }
+    }
+
+    /// Snapshot both layers before a hardware test writes anything. The guard
+    /// rolls back during unwind; failed cleanup keeps a durable recovery file.
+    fn snapshot<'a>(device: &'a VendorDevice, bindings: &[OnboardBinding]) -> SavedRecords<'a> {
+        let records: Vec<[u8; 10]> = bindings
             .iter()
             .filter_map(|b| device.model().button_id_for(&b.control_id))
             .flat_map(|id| {
@@ -1817,15 +1940,23 @@ mod tests {
                     record
                 })
             })
-            .collect()
+            .collect();
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("plans/mouse-hardware-recovery");
+        std::fs::create_dir_all(&dir).expect("recovery directory created before writes");
+        let mut backup = tempfile::Builder::new().prefix("mouse-").suffix(".json").tempfile_in(dir).expect("recovery snapshot created before writes");
+        serde_json::to_writer_pretty(backup.as_file_mut(), &serde_json::json!({
+            "model": device.model().name, "pid": device.pid, "path": device.path, "records": records,
+        })).expect("recovery snapshot written before writes");
+        backup.as_file().sync_all().expect("recovery snapshot flushed before writes");
+        let (file, backup) = backup.keep().expect("recovery snapshot kept before writes");
+        drop(file);
+        SavedRecords { device, records, backup, restored: false }
     }
 
     /// Writes snapshot records back: the `SET` arguments have the `GET` reply's
     /// layout (profile, button, layer, category, length, value…).
-    fn put_back(device: &VendorDevice, records: &[[u8; 10]]) {
-        for record in records {
-            device.command(CLASS_BUTTON, CMD_SET_BUTTON, record).expect("record written back");
-        }
+    fn put_back(saved: &mut SavedRecords<'_>) {
+        saved.restore().expect("every record written back and verified");
     }
 
     /// Hardware only — **writes the mouse's memory**, then puts it back: writes
@@ -1839,7 +1970,7 @@ mod tests {
         let device = VendorDevice::open_connected().expect("connect a catalog mouse");
         assert!(device.model().consumer.is_some(), "{} has no consumer signals", device.model().name);
         let bindings: Vec<OnboardBinding> = key_bindings(device.model());
-        let saved = snapshot(&device, &bindings);
+        let mut saved = snapshot(&device, &bindings);
         for b in &bindings {
             let (button_id, action) = target_in_mode(device.model(), b, true).unwrap();
             device.write_target(button_id, action).unwrap_or_else(|e| panic!("{}: {e}", b.control_id));
@@ -1849,7 +1980,7 @@ mod tests {
         for b in &bindings {
             assert_eq!(device.holds_other_signal(&bindings, &b.control_id), Ok(false), "{}", b.control_id);
         }
-        put_back(&device, &saved);
+        put_back(&mut saved);
         let paths = consumer_collection_paths(device.model()).expect("consumer collection in the registry");
         let opened = paths.iter().find(|path| std::fs::File::open(path).is_ok());
         println!("consumer collection: {opened:?} of {paths:?}");
@@ -1896,7 +2027,7 @@ mod tests {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
         let device = VendorDevice::open_connected().expect("connect a catalog mouse");
         let bindings: Vec<OnboardBinding> = (1..=8).map(|i| binding(&format!("thumb_{i:02}"), "F24")).collect();
-        let saved = snapshot(&device, &bindings);
+        let mut saved = snapshot(&device, &bindings);
         for (index, b) in bindings.iter().enumerate() {
             let button_id = device.model().button_id_for(&b.control_id).unwrap();
             // The command path, as the offline profile writes it.
@@ -1908,7 +2039,6 @@ mod tests {
             println!("thumb {}: modifier {modifier:#04x}", index + 1);
             device.write_record(button_id, 0, OnboardAction::Key { modifier, usage: USAGE_F13 + 11 }).unwrap();
         }
-        drop(device);
         println!("press thumbs 1..8 now, one at a time");
         let watched = [
             ("LCtrl", 0xA2), ("LShift", 0xA0), ("LAlt", 0xA4), ("LWin", 0x5B),
@@ -1926,8 +2056,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        let device = VendorDevice::open_connected().expect("reopen");
-        put_back(&device, &saved);
+        put_back(&mut saved);
         println!("records put back");
     }
 
@@ -1941,7 +2070,7 @@ mod tests {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
         let device = VendorDevice::open_connected().expect("connect a catalog mouse");
         let bindings: Vec<OnboardBinding> = (1..=4).map(|i| binding(&format!("thumb_{i:02}"), "F24")).collect();
-        let saved = snapshot(&device, &bindings);
+        let mut saved = snapshot(&device, &bindings);
         // `SIDEARM_PROBE_TURBO=1`: TurboModeKey (`0d`, period 10 s) records
         // with the left modifiers instead.
         let turbo: [&[u8]; 4] = [&[0x0d, 0x04, 0x04, 0x73, 0x27, 0x10], &[0x0d, 0x04, 0x02, 0x73, 0x27, 0x10], &[0x0d, 0x04, 0x06, 0x73, 0x27, 0x10], &[0x0d, 0x04, 0x05, 0x73, 0x27, 0x10]];
@@ -1956,7 +2085,6 @@ mod tests {
             let held = device.raw_button_record(id, 0);
             println!("{}: wrote {record:02x?} -> {written:?}, reads {held:02x?}", b.control_id);
         }
-        drop(device);
         println!("press thumbs 1..4 now");
         let watched = [("LCtrl", 0xA2), ("LShift", 0xA0), ("LAlt", 0xA4), ("RShift", 0xA1), ("RAlt", 0xA5), ("F24", 0x87)];
         let mut held = [false; 6];
@@ -1971,8 +2099,7 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        let device = VendorDevice::open_connected().expect("reopen");
-        put_back(&device, &saved);
+        put_back(&mut saved);
         println!("records put back");
     }
 
@@ -2036,12 +2163,12 @@ mod tests {
     fn writes_the_captured_mapping_into_the_live_device() {
         let device = VendorDevice::open_connected().expect("connect a catalog mouse");
         let bindings = key_bindings(device.model());
-        let saved = snapshot(&device, &bindings);
+        let mut saved = snapshot(&device, &bindings);
         set_consumer_signals(false);
         let written = device.apply_bindings(&bindings);
         let report = device.verify(&bindings);
         set_consumer_signals(true);
-        put_back(&device, &saved);
+        put_back(&mut saved);
         written.expect("the mouse must echo every button write");
         let report = report.expect("the mouse must confirm the bindings it stores");
         assert!(report.failed.is_empty(), "no binding may fail to confirm: {:?}", report.failed);

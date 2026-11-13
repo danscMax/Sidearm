@@ -1786,10 +1786,17 @@ input[type="radio"] {
   gap: 14px;
   align-items: start;
 }
-/* The item's pane stays in view while the dialog scrolls down a long list. */
-.menu-ed > .menu-ed__pane { position: sticky; top: 0; }
-
+/* The list and the item pane are each at most the dialog pane's visible height
+   (`cqh` of .action-picker__editor, its content box): a long list fits the
+   view whole and scrolls itself; the item pane stays beside it. */
+.menu-ed > .menu-ed__pane {
+  position: sticky;
+  top: 0;
+  max-height: 100cqh;
+  overflow-y: auto;
+}
 .menu-ed__side { display: grid; gap: 8px; }
+.menu-ed__side > .menu-ed__list { max-height: 100cqh; }
 
 .menu-ed__list {
   display: grid;
@@ -3656,6 +3663,10 @@ code {
   padding: 16px 20px;
   overflow-y: auto;
 }
+/* The menu editor takes the dialog's full height; the pane's height is then
+   its columns' limit (`cqh`). */
+.modal.action-picker--tall { height: 92vh; }
+.action-picker--tall .action-picker__editor { container-type: size; }
 
 /* Category heading: icon badge + name + one-line description. */
 .action-picker__cat-head {
@@ -6526,6 +6537,31 @@ input[type="search"]::-webkit-search-decoration {
 }
 .toast__action:hover {
   background: rgba(159, 202, 105, 0.12);
+}
+.toast__close {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin: -4px -8px 0 0;
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--c-text-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+.toast__close:hover { color: var(--c-text); }
+/* With an action: the message and × on the first line, the action under them. */
+.toast--with-action:not(.toast--recovery) { flex-wrap: wrap; }
+.toast--with-action:not(.toast--recovery) .toast__message { flex: 1 1 calc(100% - 40px); }
+.toast--with-action:not(.toast--recovery) .toast__close { order: 1; }
+.toast--with-action:not(.toast--recovery) .toast__action { order: 2; }
+.toast--recovery .toast__close { align-self: flex-end; order: -1; margin: -4px -8px -6px 0; }
+/* A dialog's buttons sit bottom-right: while one is open, toasts go bottom-left. */
+body:has(.modal-backdrop) .toast-stack {
+  right: auto;
+  left: 20px;
+  align-items: flex-start;
 }
 /* Toast accent colors derive from the app's semantic tokens (--c-ok / --c-warning
    / notice-info) so toast severity matches every other warning/ok/info surface. */

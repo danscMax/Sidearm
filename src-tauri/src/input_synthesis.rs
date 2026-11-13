@@ -110,20 +110,14 @@ pub fn send_shortcut(
             .collect::<Vec<_>>(),
     );
 
-    // The modifiers the plan pressed are released last; hold them a moment
-    // after the key. Released in the same batch, they read as up by the time
-    // the target handles the key: Windows Terminal (and with it Claude Code)
-    // checks the live key state and typed a bare "v" for a sent Alt+V.
-    let pressed = extract_pressed_modifiers(payload, &snapshot).len();
-    let split = if pressed > 0 && !payload.key.trim().is_empty() { plan.len() - pressed } else { plan.len() };
-    let (press, release) = plan.split_at(split);
-    let sent = send_keyboard_inputs(press).and_then(|()| {
-        if release.is_empty() {
-            return Ok(());
-        }
-        std::thread::sleep(std::time::Duration::from_millis(MODIFIER_RELEASE_DELAY_MS));
-        send_keyboard_inputs(release)
-    });
+    // The plan is [modifiers down, key down+up, modifiers up]; each part goes
+    // out a moment after the one before. Sent in one batch, the key outruns the
+    // modifiers: Windows Terminal (and with it Claude Code) reads the live key
+    // state and typed a bare "v" for an Alt+V whose Alt was already released,
+    // and the Remote Desktop client re-syncs Alt as up before forwarding a V
+    // that came in the same batch as the Alt.
+    let pressed = if payload.key.trim().is_empty() { 0 } else { extract_pressed_modifiers(payload, &snapshot).len() };
+    let sent = send_keyboard_steps(&split_shortcut_plan(&plan, pressed), MODIFIER_STEP_DELAY_MS);
     if let Err(send_error) = sent {
         // Best-effort cleanup: a partial SendInput can leave the primary key OR
         // modifiers physically down. Release everything the plan could have
@@ -156,8 +150,30 @@ pub fn send_shortcut(
     Ok(ShortcutDispatchReport { warnings })
 }
 
-/// How long a shortcut's own modifiers stay down after its key (see `send_shortcut`).
-const MODIFIER_RELEASE_DELAY_MS: u64 = 30;
+/// The pause around a shortcut's key: after its own modifiers go down and
+/// before they go up (see `send_shortcut`).
+const MODIFIER_STEP_DELAY_MS: u64 = 30;
+
+/// A shortcut plan's three steps: its `pressed` modifiers down, the key down+up,
+/// the modifiers up (`pressed` 0: the whole plan is one step).
+fn split_shortcut_plan(plan: &[KeyboardInputSpec], pressed: usize) -> [&[KeyboardInputSpec]; 3] {
+    let (down, rest) = plan.split_at(pressed);
+    let (key, up) = rest.split_at(rest.len() - pressed);
+    [down, key, up]
+}
+
+/// Send each non-empty step as its own batch, `delay_ms` apart.
+fn send_keyboard_steps(steps: &[&[KeyboardInputSpec]], delay_ms: u64) -> Result<(), String> {
+    let mut first = true;
+    for step in steps.iter().filter(|step| !step.is_empty()) {
+        if !first {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
+        first = false;
+        send_keyboard_inputs(step)?;
+    }
+    Ok(())
+}
 
 /// Determine which modifiers the shortcut would have pressed down (i.e., desired
 /// but not already active according to the snapshot).
@@ -1464,8 +1480,10 @@ pub fn send_shortcut_hold_down(
     clear_modifiers(encoding_mods)?;
     let snapshot = current_modifier_snapshot()?;
     let (plan, held) = plan_shortcut_hold_down_inputs(payload, &snapshot)?;
+    // [modifiers down, key down]: the key a moment later, as in `send_shortcut`.
+    let (down, key) = plan.split_at(if payload.key.trim().is_empty() { plan.len() } else { held.pressed_modifier_vks.len() });
 
-    if let Err(send_error) = send_keyboard_inputs(&plan) {
+    if let Err(send_error) = send_keyboard_steps(&[down, key], MODIFIER_STEP_DELAY_MS) {
         // Best-effort cleanup: release what we pressed
         let cleanup = plan_shortcut_hold_up_inputs(&held);
         let _ = send_keyboard_inputs(&cleanup);
@@ -3341,6 +3359,29 @@ mod tests {
                 key_up: true
             }]
         );
+    }
+
+    /// Alt+V goes out as [Alt down] [V down, V up] [Alt up]: a batch holding the
+    /// Alt and the V made the Remote Desktop client forward Alt as up before V.
+    #[test]
+    fn splits_a_shortcut_into_modifiers_key_and_release() {
+        let payload = ShortcutActionPayload {
+            key: "V".into(),
+            ctrl: false,
+            shift: false,
+            alt: true,
+            win: false,
+            raw: Some("Alt+V".into()),
+        };
+        let (plan, _) = plan_shortcut_inputs(&payload, &ModifierSnapshot::default()).unwrap();
+        let alt = |key_up| KeyboardInputSpec::VirtualKey { code: VK_LMENU, extended: false, key_up };
+        let [down, key, up] = split_shortcut_plan(&plan, 1);
+        assert_eq!(down, [alt(false)]);
+        assert_eq!(key.len(), 2);
+        assert!(matches!(key, [KeyboardInputSpec::VirtualKey { key_up: false, .. }, KeyboardInputSpec::VirtualKey { key_up: true, .. }]));
+        assert_eq!(up, [alt(true)]);
+        // Nothing pressed (a modifier-only shortcut): one step.
+        assert_eq!(split_shortcut_plan(&plan, 0), [&[][..], &plan[..], &[][..]]);
     }
 
     #[test]

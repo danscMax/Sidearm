@@ -1,4 +1,5 @@
 import { useEffect, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 
 type ToastKind = "info" | "success" | "warning";
 type ToastAction = { label: string; onClick: () => void };
@@ -23,6 +24,7 @@ function toastDuration(kind: ToastKind | undefined, hasAction: boolean): number 
 }
 
 export function Toast({ toast, onDismiss, children }: ToastProps) {
+  const { t } = useTranslation();
   const durationMs = toast ? toastDuration(toast.kind, !!toast.action) : 3500;
 
   useEffect(() => {
@@ -53,6 +55,10 @@ export function Toast({ toast, onDismiss, children }: ToastProps) {
           {toast.action.label}
         </button>
       )}
+      {/* A toast with an action never times out: it must be closable by hand. */}
+      <button type="button" className="toast__close" aria-label={t("common.close")} title={t("common.close")} onClick={onDismiss}>
+        ×
+      </button>
     </div>
   );
 }

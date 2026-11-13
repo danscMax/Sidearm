@@ -456,7 +456,7 @@ export function ActionPickerModal({
   return (
     <ModalShell
       onClose={onCancel}
-      className="modal action-picker"
+      className={`modal action-picker${effectiveCategory === "menu" ? " action-picker--tall" : ""}`}
       dialogRef={modalRef}
       ariaLabelledby="action-picker-title"
       escapeEnabled={!isCapturing && !isCapturingSignal}

@@ -68,6 +68,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
+- A shortcut sent into a Remote Desktop window lost its modifier: Alt+V from a
+  mouse button arrived on the remote PC as Alt, then V without Alt (a bare "v").
+  A shortcut's modifiers now go down a moment before its key.
+- A notice with a button (for example "restart as administrator") could not be
+  closed and covered the dialog's Save button: every notice has × now, and while
+  a dialog is open notices show at the bottom left.
+- The menu editor's list is as tall as the dialog lets it be and scrolls on its
+  own, instead of running past the visible part of the dialog.
 - After a long phrase (typed through the clipboard) the clipboard kept the
   phrase instead of what was copied before: the change check read the
   clipboard's sequence number before closing it, and closing moves it. Checked

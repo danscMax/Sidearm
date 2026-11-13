@@ -1,5 +1,5 @@
 import type React from "react";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, cleanup } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import type { CommandError } from "../lib/config";
@@ -8,6 +8,7 @@ import type {
   RuntimeStateSummary,
   WindowCaptureResult,
   ResolvedInputPreview,
+  ThrottleBlockedEvent,
 } from "../lib/runtime";
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,7 @@ vi.mock("../lib/backend", () => ({
   listenActionExecutionEvent: vi.fn().mockResolvedValue(() => {}),
   listenRuntimeErrorEvent: vi.fn().mockResolvedValue(() => {}),
   listenDebugLogAppendedEvent: vi.fn().mockResolvedValue(() => {}),
+  listenThrottleBlocked: vi.fn().mockResolvedValue(() => {}),
 }));
 
 // Import AFTER vi.mock so the mock is in place
@@ -50,6 +52,12 @@ import {
   getDebugLog,
   listenWindowResolutionEvent,
   listenRuntimeEvent,
+  listenEncodedKeyEvent,
+  listenControlResolutionEvent,
+  listenActionExecutionEvent,
+  listenRuntimeErrorEvent,
+  listenDebugLogAppendedEvent,
+  listenThrottleBlocked,
 } from "../lib/backend";
 
 const mockedStartRuntime = vi.mocked(startRuntime);
@@ -142,7 +150,51 @@ describe("useRuntime", () => {
   });
 
   afterEach(() => {
+    cleanup();
+    expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
+  });
+
+  it("attaches every runtime listener without setup errors and releases them on cleanup", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const unlisten = vi.fn();
+    for (const listen of [listenRuntimeEvent, listenWindowResolutionEvent, listenEncodedKeyEvent,
+      listenControlResolutionEvent, listenActionExecutionEvent, listenRuntimeErrorEvent,
+      listenDebugLogAppendedEvent, listenThrottleBlocked]) {
+      vi.mocked(listen).mockResolvedValue(unlisten);
+    }
+    try {
+      renderHook(() => useRuntime({ setError }));
+      await act(async () => {});
+      expect(error).not.toHaveBeenCalled();
+      cleanup();
+      expect(unlisten).toHaveBeenCalledTimes(10);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("receives throttle events after setup and leaves their timer for teardown to cancel", async () => {
+    let emit!: (event: ThrottleBlockedEvent) => void;
+    vi.mocked(listenThrottleBlocked).mockImplementationOnce(async (callback) => {
+      emit = callback;
+      return () => {};
+    });
+    const { result } = renderHook(() => useRuntime({ setError }));
+    await flushDebounce();
+    act(() => { emit({ controlId: "thumb_01", remainingMs: 1000 }); });
+    expect(result.current.throttledControlIds.has("thumb_01")).toBe(true);
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("releases every runtime listener when setup finishes after unmount", async () => {
+    let attach!: (unlisten: () => void) => void;
+    const lateUnlisten = vi.fn();
+    vi.mocked(listenThrottleBlocked).mockImplementationOnce(() => new Promise((resolve) => { attach = resolve; }));
+    const { unmount } = renderHook(() => useRuntime({ setError }));
+    unmount();
+    await act(async () => { attach(lateUnlisten); });
+    expect(lateUnlisten).toHaveBeenCalledOnce();
   });
 
   // =========================================================================

@@ -70,6 +70,7 @@ export interface VerificationControl {
 export function useVerification(deps: {
   activeConfig: AppConfig | null;
   effectiveProfileId: string | null;
+  effectiveDeviceId: string | null;
   selectedLayer: Layer;
   selectedControlId: ControlId | null;
   setSelectedLayer: React.Dispatch<React.SetStateAction<Layer>>;
@@ -85,6 +86,7 @@ export function useVerification(deps: {
   const {
     activeConfig,
     effectiveProfileId,
+    effectiveDeviceId,
     selectedLayer,
     selectedControlId,
     setSelectedLayer,
@@ -110,8 +112,9 @@ export function useVerification(deps: {
       return;
     }
 
-    // Guard: only sync if the step's control still exists in the config
-    if (!activeConfig.physicalControls.some((c) => c.id === activeStep.controlId)) {
+    // Pause selection sync on another device so App's device invariant wins.
+    if (!activeConfig.physicalControls.some((c) =>
+      c.id === activeStep.controlId && c.deviceId === effectiveDeviceId)) {
       return;
     }
 
@@ -126,7 +129,7 @@ export function useVerification(deps: {
         setSelectedControlId(activeStep.controlId);
       });
     }
-  }, [selectedControlId, selectedLayer, verificationSession, activeConfig]);
+  }, [selectedControlId, selectedLayer, verificationSession, activeConfig, effectiveDeviceId]);
 
   // --- Derived values ---
 

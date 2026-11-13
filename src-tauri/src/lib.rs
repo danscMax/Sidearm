@@ -61,7 +61,7 @@ use std::{
 };
 
 /// Managed state: cached `minimize_to_tray` setting for the close handler.
-/// Updated by `load_config` and `save_config`; read by `CloseRequested`.
+/// Updated when a config snapshot is accepted; read by `CloseRequested`.
 /// Initial value `false` (window closes) until config is loaded.
 type MinimizeToTray = Arc<AtomicBool>;
 
@@ -1095,11 +1095,31 @@ fn apply_config_shortcut(config: &AppConfig, apply: impl FnOnce(&str)) {
     apply(desired);
 }
 
-fn accept_config(app: &AppHandle, config: &AppConfig, stamp: Option<u64>) {
-    app.state::<MinimizeToTray>().store(config.settings.minimize_to_tray, Ordering::Relaxed);
+trait ConfigSettings: Sync {
+    fn minimize_to_tray(&self) -> &AtomicBool;
+    fn config_stamp(&self) -> &Mutex<Option<u64>>;
+    fn register_global_shortcut(&self, desired: &str);
+}
+
+impl ConfigSettings for AppHandle {
+    fn minimize_to_tray(&self) -> &AtomicBool {
+        self.state::<MinimizeToTray>().inner()
+    }
+
+    fn config_stamp(&self) -> &Mutex<Option<u64>> {
+        self.state::<ConfigStamp>().inner()
+    }
+
+    fn register_global_shortcut(&self, desired: &str) {
+        apply_global_shortcut(self, desired);
+    }
+}
+
+fn accept_config(app: &impl ConfigSettings, config: &AppConfig, stamp: Option<u64>) {
+    app.minimize_to_tray().store(config.settings.minimize_to_tray, Ordering::Relaxed);
     // The baseline belongs to this snapshot, even if disk changed before publication.
-    *app.state::<ConfigStamp>().inner().lock().recover_poison() = stamp;
-    apply_config_shortcut(config, |desired| apply_global_shortcut(app, desired));
+    *app.config_stamp().lock().recover_poison() = stamp;
+    apply_config_shortcut(config, |desired| app.register_global_shortcut(desired));
 }
 
 /// Serialize backend changes through their public status update; never hold the
@@ -1441,6 +1461,20 @@ async fn restore_config_from_backup(
     backup_path: String,
 ) -> Result<LoadConfigResponse, CommandError> {
     let config_dir = resolve_config_dir(&app)?;
+    let response = restore_config_from_backup_impl(&app, config_dir, backup_path).await?;
+
+    reload_active_config(&app, &runtime_store, &runtime_controller, &response.config, response.warnings.len(), false)?;
+
+    rebuild_tray_menu_from_config(&app, &response.config);
+
+    Ok(response)
+}
+
+async fn restore_config_from_backup_impl(
+    app: &impl ConfigSettings,
+    config_dir: PathBuf,
+    backup_path: String,
+) -> Result<LoadConfigResponse, CommandError> {
     let backup_pb = PathBuf::from(&backup_path);
     match backup::check_backup_location(&config_dir, &backup_pb) {
         backup::BackupLocationCheck::Inside => {}
@@ -1472,11 +1506,7 @@ async fn restore_config_from_backup(
     .await
     .map_err(|e| CommandError::internal(format!("restore task failed: {e}")))??;
 
-    accept_config(&app, &response.config, response.stamp);
-
-    reload_active_config(&app, &runtime_store, &runtime_controller, &response.config, response.warnings.len(), false)?;
-
-    rebuild_tray_menu_from_config(&app, &response.config);
+    accept_config(app, &response.config, response.stamp);
 
     Ok(response)
 }
@@ -1637,8 +1667,23 @@ async fn import_full_config_apply(
     source_path: String,
     mode: ImportMode,
 ) -> Result<SaveConfigResponse, CommandError> {
-    let validated = validate_user_file_path(&source_path)?;
     let config_dir = resolve_config_dir(&app)?;
+    let result = import_full_config_apply_impl(&app, config_dir, source_path, mode).await?;
+
+    reload_active_config(&app, &runtime_store, &runtime_controller, &result.config, result.warnings.len(), false)?;
+
+    rebuild_tray_menu_from_config(&app, &result.config);
+
+    Ok(result)
+}
+
+async fn import_full_config_apply_impl(
+    app: &impl ConfigSettings,
+    config_dir: PathBuf,
+    source_path: String,
+    mode: ImportMode,
+) -> Result<SaveConfigResponse, CommandError> {
+    let validated = validate_user_file_path(&source_path)?;
     let config_dir_for_task = config_dir.clone();
 
     let result = tauri::async_runtime::spawn_blocking(
@@ -1661,11 +1706,7 @@ async fn import_full_config_apply(
     .await
     .map_err(|e| CommandError::internal(format!("import apply task failed: {e}")))??;
 
-    accept_config(&app, &result.config, result.stamp);
-
-    reload_active_config(&app, &runtime_store, &runtime_controller, &result.config, result.warnings.len(), false)?;
-
-    rebuild_tray_menu_from_config(&app, &result.config);
+    accept_config(app, &result.config, result.stamp);
 
     Ok(result)
 }
@@ -4374,31 +4415,96 @@ mod tests {
         assert!(!store.lock().unwrap().is_running());
     }
 
-    #[test]
-    fn import_applies_the_incoming_global_shortcut() {
+    #[derive(Default)]
+    struct TestConfigSettings {
+        minimize: AtomicBool,
+        stamp: Mutex<Option<u64>>,
+        registrations: Mutex<Vec<String>>,
+    }
+
+    impl ConfigSettings for TestConfigSettings {
+        fn minimize_to_tray(&self) -> &AtomicBool {
+            &self.minimize
+        }
+
+        fn config_stamp(&self) -> &Mutex<Option<u64>> {
+            &self.stamp
+        }
+
+        fn register_global_shortcut(&self, desired: &str) {
+            self.registrations.lock().unwrap().push(desired.to_owned());
+        }
+    }
+
+    fn check_import_global_shortcut(mode: ImportMode) {
         let dir = temp_home();
-        let mut incoming = config::default_seed_config();
-        incoming.settings.global_shortcut = Some("  ctrl+shift+f9  ".into());
-        let merged = merge_configs_by_id(config::default_seed_config(), incoming);
-        let saved = save_config_to_store(dir.path(), merged, None).unwrap();
-        let mut desired = None;
-        apply_config_shortcut(&saved.config, |shortcut| desired = Some(shortcut.to_owned()));
-        assert_eq!(desired.as_deref(), Some("ctrl+shift+f9"));
+        for (shortcut, expected) in [
+            (Some("  ctrl+shift+f9  "), "ctrl+shift+f9"),
+            (None, "ctrl+alt+n"),
+            (Some(" \t "), "ctrl+alt+n"),
+        ] {
+            let mut base = config::default_seed_config();
+            base.settings.global_shortcut = Some("ctrl+alt+f8".into());
+            let mut base_only = base.profiles[0].clone();
+            base_only.id = "base-only".into();
+            base.profiles.push(base_only);
+            save_config_to_store(dir.path(), base, None).unwrap();
+
+            let mut incoming = config::default_seed_config();
+            incoming.settings.global_shortcut = shortcut.map(str::to_owned);
+            incoming.settings.minimize_to_tray = true;
+            let path = dir.path().join("import.json");
+            fs::write(&path, serde_json::to_vec(&incoming).unwrap()).unwrap();
+            let settings = TestConfigSettings::default();
+
+            let result = tauri::async_runtime::block_on(import_full_config_apply_impl(
+                &settings, dir.path().to_owned(), path.to_string_lossy().into_owned(), mode,
+            )).unwrap();
+
+            assert_eq!(*settings.registrations.lock().unwrap(), [expected]);
+            assert!(settings.minimize.load(Ordering::Relaxed));
+            assert_eq!(*settings.stamp.lock().unwrap(), config::config_file_stamp(dir.path()));
+            assert_eq!(result.config.profiles.iter().any(|p| p.id == "base-only"), matches!(mode, ImportMode::Merge));
+        }
+    }
+
+    #[test]
+    fn import_replace_applies_the_incoming_global_shortcut() {
+        check_import_global_shortcut(ImportMode::Replace);
+    }
+
+    #[test]
+    fn import_merge_applies_the_incoming_global_shortcut() {
+        check_import_global_shortcut(ImportMode::Merge);
     }
 
     #[test]
     fn restore_applies_the_backed_up_global_shortcut() {
         let dir = temp_home();
-        let mut backup = config::default_seed_config();
-        backup.settings.global_shortcut = Some("ctrl+shift+f10".into());
-        let path = dir.path().join("backup.json");
-        fs::write(&path, serde_json::to_vec(&backup).unwrap()).unwrap();
-        let restored = read_and_migrate_config_file(&path).unwrap();
-        save_config_to_store(dir.path(), restored, None).unwrap();
-        let loaded = load_or_initialize_config(dir.path()).unwrap();
-        let mut desired = None;
-        apply_config_shortcut(&loaded.config, |shortcut| desired = Some(shortcut.to_owned()));
-        assert_eq!(desired.as_deref(), Some("ctrl+shift+f10"));
+        for (shortcut, expected) in [
+            (Some("  ctrl+shift+f10  "), "ctrl+shift+f10"),
+            (None, "ctrl+alt+n"),
+            (Some(" \t "), "ctrl+alt+n"),
+        ] {
+            let mut base = config::default_seed_config();
+            base.settings.global_shortcut = Some("ctrl+alt+f8".into());
+            save_config_to_store(dir.path(), base, None).unwrap();
+
+            let mut backup = config::default_seed_config();
+            backup.settings.global_shortcut = shortcut.map(str::to_owned);
+            backup.settings.minimize_to_tray = true;
+            let path = dir.path().join("backup.json");
+            fs::write(&path, serde_json::to_vec(&backup).unwrap()).unwrap();
+            let settings = TestConfigSettings::default();
+
+            tauri::async_runtime::block_on(restore_config_from_backup_impl(
+                &settings, dir.path().to_owned(), path.to_string_lossy().into_owned(),
+            )).unwrap();
+
+            assert_eq!(*settings.registrations.lock().unwrap(), [expected]);
+            assert!(settings.minimize.load(Ordering::Relaxed));
+            assert_eq!(*settings.stamp.lock().unwrap(), config::config_file_stamp(dir.path()));
+        }
     }
 
     #[test]

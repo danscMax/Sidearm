@@ -116,14 +116,15 @@ fn flush_periodically(mut next_tick: impl FnMut() -> bool, mut write: impl FnMut
 /// Write what gathered (periodically, on export and at exit).
 pub(crate) fn flush() {
     let mut pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    write_out(&mut pending, &crate::machine_files::own(&dir(), STEM));
+    write_out(&mut pending, || crate::machine_files::own(&dir(), STEM));
 }
 
-fn write_out(pending: &mut Log, path: &Path) {
+fn write_out(pending: &mut Log, resolve_path: impl FnOnce() -> PathBuf) {
     if pending.is_empty() {
         return;
     }
-    let mut log = match read(path, true) {
+    let path = resolve_path();
+    let mut log = match read(&path, true) {
         Ok(log) => log,
         Err(error) => {
             log::warn!("[press-log] could not read the log, kept in memory: {error}");
@@ -135,7 +136,7 @@ fn write_out(pending: &mut Log, path: &Path) {
     let written = serde_json::to_vec(&log)
         .map_err(|error| error.to_string())
         .and_then(|bytes| std::fs::write(&temp, bytes).map_err(|error| error.to_string()))
-        .and_then(|()| std::fs::rename(&temp, path).map_err(|error| error.to_string()));
+        .and_then(|()| std::fs::rename(&temp, &path).map_err(|error| error.to_string()));
     match written {
         Ok(()) => pending.clear(),
         Err(error) => log::warn!("[press-log] could not write: {error}"),
@@ -168,7 +169,7 @@ mod tests {
         flush_periodically(|| {
             elapsed += FLUSH_EVERY;
             elapsed <= FLUSH_EVERY * 2
-        }, || write_out(&mut pending, &path));
+        }, || write_out(&mut pending, || path.clone()));
         assert!(pending.is_empty());
         assert_eq!(read(&path, false).unwrap()["2026-11-13"].actions["action"], 1);
     }
@@ -180,10 +181,49 @@ mod tests {
         let mut pending = Log::from([("2026-11-13".into(), Day {
             slots: BTreeMap::new(), actions: BTreeMap::from([("action".into(), 1)]),
         })]);
-        write_out(&mut pending, &path);
+        write_out(&mut pending, || path.clone());
         assert!(!pending.is_empty());
         std::fs::create_dir(path.parent().unwrap()).unwrap();
-        write_out(&mut pending, &path);
+        write_out(&mut pending, || path.clone());
+        assert!(pending.is_empty());
+        assert_eq!(read(&path, false).unwrap()["2026-11-13"].actions["action"], 1);
+    }
+
+    #[test]
+    fn empty_timer_ticks_do_not_resolve_the_log_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("press-log-test.json");
+        let mut pending = Log::new();
+        let mut ticks = 0;
+        let mut resolutions = 0;
+        flush_periodically(|| {
+            ticks += 1;
+            ticks <= 3
+        }, || write_out(&mut pending, || {
+            resolutions += 1;
+            path.clone()
+        }));
+        assert_eq!(resolutions, 0, "an idle timer must not probe the data directory");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn only_pending_timer_ticks_resolve_the_log_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("press-log-test.json");
+        let mut pending = Log::from([("2026-11-13".into(), Day {
+            slots: BTreeMap::new(), actions: BTreeMap::from([("action".into(), 1)]),
+        })]);
+        let mut ticks = 0;
+        let mut resolutions = 0;
+        flush_periodically(|| {
+            ticks += 1;
+            ticks <= 3
+        }, || write_out(&mut pending, || {
+            resolutions += 1;
+            path.clone()
+        }));
+        assert_eq!(resolutions, 1, "ticks after the successful flush must stay idle");
         assert!(pending.is_empty());
         assert_eq!(read(&path, false).unwrap()["2026-11-13"].actions["action"], 1);
     }

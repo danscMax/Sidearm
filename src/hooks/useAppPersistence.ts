@@ -75,6 +75,7 @@ export function useAppPersistence(
   const [error, setError] = useState<CommandError | null>(null);
   const [undoStack, setUndoStack] = useState<AppConfig[]>([]);
   const [redoStack, setRedoStack] = useState<AppConfig[]>([]);
+  const [committedReloadRevision, setCommittedReloadRevision] = useState(0);
 
   // Auto-save refs
   const saveQueueRef = useRef<AppConfig | null>(null);
@@ -100,14 +101,14 @@ export function useAppPersistence(
   // Last updateDraft coalesce key — consecutive edits with the same key share one
   // undo step instead of one-per-keystroke (see UpdateDraftOptions.coalesceKey).
   const lastCoalesceKeyRef = useRef<string | null>(null);
-  const revisionRef = useRef<{ revision: number; pending: number; awaiting: AppConfig | null }>({
+  const revisionRef = useRef<{ revision: number; pending: number; awaiting: number | null }>({
     revision: 0, pending: 0, awaiting: null,
   });
 
-  // Check every commit because a reload may reuse the current config object.
+  // A local edit can supersede the loaded config, but not this reload's commit marker.
   useLayoutEffect(() => {
-    if (revisionRef.current.awaiting === workingConfig) revisionRef.current.awaiting = null;
-  });
+    if (revisionRef.current.awaiting === committedReloadRevision) revisionRef.current.awaiting = null;
+  }, [committedReloadRevision]);
 
   const activeConfig = workingConfig;
   const activeWarnings = lastSave?.warnings ?? snapshot?.warnings ?? [];
@@ -270,6 +271,7 @@ export function useAppPersistence(
 
   async function refreshConfig(): Promise<boolean> {
     revisionRef.current.revision += 1;
+    const reloadRevision = revisionRef.current.revision;
     revisionRef.current.pending += 1;
     // Cancel any pending auto-save
     clearTimeout(saveTimerRef.current);
@@ -280,7 +282,7 @@ export function useAppPersistence(
 
     try {
       const result = await loadConfig();
-      revisionRef.current.awaiting = result.config;
+      revisionRef.current.awaiting = reloadRevision;
       lastPersistedConfigRef.current = result.config;
       // Undo steps belong to the config they were taken on: replaying one onto
       // a reloaded config (restore, import, another instance's write) would
@@ -291,6 +293,7 @@ export function useAppPersistence(
         setRedoStack([]);
         setSnapshot(result);
         setWorkingConfig(result.config);
+        setCommittedReloadRevision(reloadRevision);
         setLastSave(null);
         setError(null);
         setViewState("ready");

@@ -1,19 +1,22 @@
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadConfig } from "../lib/backend";
+import { importSynapseIntoConfig, loadConfig, saveConfig } from "../lib/backend";
 import type { AppConfig, LoadConfigResponse } from "../lib/config";
 import { makeConfig } from "../lib/test-fixtures";
 import { useAppPersistence } from "../hooks/useAppPersistence";
+import type { ParsedSynapseProfiles } from "../lib/synapse-import";
+import { SynapseImportModal } from "./SynapseImportModal";
 
 vi.mock("../lib/backend", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/backend")>(),
   loadConfig: vi.fn(),
   saveConfig: vi.fn(),
   verifyOnboardMapping: vi.fn(),
+  importSynapseIntoConfig: vi.fn(),
 }));
 
 beforeEach(() => { vi.resetAllMocks(); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
 function response(config: AppConfig): LoadConfigResponse {
   return { config, warnings: [], path: "E:\\test\\config.json", createdDefault: false };
@@ -66,6 +69,39 @@ describe("config revision for asynchronous imports", () => {
     });
     expect(result.current.activeConfig).toBe(next);
     expect(getRevision?.()).toBe(2);
+  });
+
+  it("allows a new import after a local edit supersedes reload before commit and autosaves", async () => {
+    vi.useFakeTimers();
+    const { result, base } = await ready();
+    const getRevision = result.current.getConfigRevision;
+    const loaded = makeConfig({ profiles: [{ ...base.profiles[0], name: "B" }] });
+    vi.mocked(loadConfig).mockResolvedValueOnce(response(loaded));
+    vi.mocked(saveConfig).mockImplementation(async (config) => ({ config, warnings: [], path: "E:\\test\\config.json" }));
+    await act(async () => {
+      await result.current.refreshConfig();
+      result.current.updateDraft((config) => ({ ...config, profiles: [{ ...config.profiles[0], name: "C" }] }));
+      expect(getRevision()).toBeNull();
+    });
+    expect(result.current.activeConfig!.profiles[0].name).toBe("C");
+    await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    const current = result.current.activeConfig!;
+    expect(result.current.lastSave?.config).toBe(current);
+    expect(getRevision()).toBe(2);
+    const parsed: ParsedSynapseProfiles = {
+      sourceKind: "synapseV4", sourcePath: "profiles", warnings: [],
+      profiles: [{ synapseGuid: "s1", name: "Imported", bindings: [], macros: [] }],
+    };
+    const summary = { profilesAdded: 1, bindingsAdded: 0, actionsAdded: 0, macrosAdded: 0, skipped: 0 };
+    vi.mocked(importSynapseIntoConfig).mockResolvedValueOnce({ config: current, summary, warnings: [] });
+    const onImported = vi.fn();
+    const setError = vi.fn();
+    render(<SynapseImportModal parsed={parsed} activeConfig={current} getConfigRevision={getRevision}
+      onImported={onImported} setError={setError} onCancel={vi.fn()} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Import.*1|Импорт.*1/i })));
+    expect(importSynapseIntoConfig).toHaveBeenCalledWith(parsed, expect.anything(), current);
+    expect(onImported).toHaveBeenCalledWith(current, summary);
+    expect(setError).not.toHaveBeenCalled();
   });
 
   it.each(["success", "failure"])("keeps a later reload pending after the earlier reload's %s", async (outcome) => {

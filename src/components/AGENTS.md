@@ -33,7 +33,7 @@ All React components: mouse visualization, modals (action picker, app-mapping, c
 - Launch arguments use ChipEditor's `literalValues`: preserve order, repeated values, commas and whitespace; filter/tag callers keep normalized unique values. App-rule executable selection accepts actual `.exe` files only; unresolved shortcuts are rejected with localized feedback.
 - Snippet text may be locally empty while editing, but only nonblank text reaches config autosave. A snippet deep link is consumed once per request nonce. A failed autostart disable counts as success only after the OS confirms it is disabled.
 - Synapse import results are applied only to the config snapshot and external-change revision they were requested for; a pending external reload blocks starting an import. Closing the action picker cancels a pending Test countdown before IPC execution.
-- Rule duplication preserves all matching fields and enabled state. Global rule menus operate on the rule's owning profile; assignment search selects the result's device as well as its profile and layer. Restoring a cross-menu move restores both drafts and is offered only while both snapshots remain current.
+- Rule duplication preserves all matching fields and enabled state. Global rule menus operate on the rule's owning profile; assignment search batches the result's device, control, profile and layer selection at the same update priority, so the device-reset fallback cannot overwrite the found control. Restoring a cross-menu move restores both drafts and is offered only while both snapshots remain current.
 
 ## Work Guidance
 

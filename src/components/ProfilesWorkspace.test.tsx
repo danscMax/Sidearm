@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { startTransition, useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import type { AppConfig, AppMapping } from "../lib/config";
+import type { AppConfig, AppMapping, Layer } from "../lib/config";
 import { NAGA_V3_DEVICE_ID } from "../lib/devices";
+import { resolveInitialControlId } from "../lib/helpers";
 import { makeAction, makeConfig } from "../lib/test-fixtures";
 import { ProfilesWorkspace, type ProfilesWorkspaceProps } from "./ProfilesWorkspace";
 
@@ -13,7 +15,7 @@ vi.mock("./AppMappingModal", () => ({ AppMappingModal: () => null }));
 beforeEach(async () => { await i18n.changeLanguage("en"); });
 afterEach(cleanup);
 
-function show(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
+function workspaceProps(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
   const props: ProfilesWorkspaceProps = {
     activeConfig: config, activeProfile: config.profiles[0], effectiveProfileId: "p1",
     addRuleSignal: false, onAddRuleHandled: vi.fn(), transferSignal: false, onTransferHandled: vi.fn(),
@@ -27,6 +29,11 @@ function show(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
     setMultiSelectedControlIds: vi.fn(), setActionPickerBindingId: vi.fn(), setActionPickerOpen: vi.fn(),
     showToast: vi.fn(), runtimeProfileId: "p1", mouseStates: [], ...extra,
   };
+  return props;
+}
+
+function show(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
+  const props = workspaceProps(config, extra);
   render(<ProfilesWorkspace {...props} />);
   return props;
 }
@@ -60,6 +67,56 @@ it("selects the result's device before selecting its control in all-profile sear
   expect(props.onSelectLayer).toHaveBeenCalledWith("hypershift");
   expect(props.setSelectedControlId).toHaveBeenCalledWith("v3_thumb_01");
   expect(vi.mocked(props.onSelectDevice).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(props.setSelectedControlId).mock.invocationCallOrder[0]);
+});
+
+it.each(["thumb_02", "v3_thumb_02"])("keeps the final search selection on %s with the App fallback effect", (controlId) => {
+  const config = makeConfig({
+    actions: [makeAction({ type: "mouseAction", payload: { action: "mouseBack" } })],
+    bindings: [{ id: "b1", profileId: "p2", layer: "hypershift", controlId, actionId: "a1", enabled: true, label: "Find this" }],
+  });
+  const v2 = config.devices[0].id;
+  config.devices.push({ id: NAGA_V3_DEVICE_ID, name: "V3", builtin: true });
+  for (const [id, deviceId] of [["thumb_02", v2], ["v3_thumb_01", NAGA_V3_DEVICE_ID], ["v3_thumb_02", NAGA_V3_DEVICE_ID]]) {
+    config.physicalControls.push({ ...config.physicalControls[1], id, deviceId });
+  }
+  const props = workspaceProps(config);
+  function Parent() {
+    const [activeDeviceId, setActiveDeviceId] = useState(v2);
+    const [selectedControlId, setSelectedControlId] = useState<string | null>("thumb_01");
+    const [selectedProfileId, setSelectedProfileId] = useState<string | null>("p1");
+    const [selectedLayer, setSelectedLayer] = useState<Layer>("standard");
+    const [multiSelectedControlIds, setMultiSelectedControlIds] = useState(new Set(["thumb_01"]));
+    // Match App's device-selection reset and fallback effect, including update priorities.
+    useEffect(() => {
+      if (selectedControlId === null || !config.physicalControls.some((control) =>
+        control.id === selectedControlId && control.deviceId === activeDeviceId)) {
+        startTransition(() => setSelectedControlId(resolveInitialControlId(config, activeDeviceId)));
+      }
+    }, [selectedControlId, activeDeviceId]);
+    return <>
+      <output data-testid="selection">{JSON.stringify({ activeDeviceId, selectedControlId, selectedProfileId, selectedLayer, multi: [...multiSelectedControlIds] })}</output>
+      <ProfilesWorkspace {...props} activeDeviceId={activeDeviceId}
+        activeProfile={config.profiles.find((profile) => profile.id === selectedProfileId)!}
+        effectiveProfileId={selectedProfileId!} selectedLayer={selectedLayer}
+        multiSelectedControlIds={multiSelectedControlIds} setMultiSelectedControlIds={setMultiSelectedControlIds}
+        onSelectDevice={(id) => {
+          setActiveDeviceId(id);
+          setSelectedControlId(null);
+          setMultiSelectedControlIds(new Set());
+        }}
+        setSelectedProfileId={setSelectedProfileId} onSelectLayer={setSelectedLayer}
+        setSelectedControlId={setSelectedControlId} />
+    </>;
+  }
+  render(<Parent />);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Find this" } });
+  fireEvent.click(screen.getByRole("button", { name: i18n.t("profile.searchAllProfiles") }));
+  fireEvent.click(screen.getByRole("button", { name: /Gaming.*Find this/ }));
+  expect(JSON.parse(screen.getByTestId("selection").textContent!)).toEqual({
+    activeDeviceId: controlId === "thumb_02" ? v2 : NAGA_V3_DEVICE_ID,
+    selectedControlId: controlId, selectedProfileId: "p2", selectedLayer: "hypershift", multi: [],
+  });
+  expect(screen.getByRole<HTMLInputElement>("searchbox").value).toBe("");
 });
 
 it("opens a foreign profile's rule menu and reorders within its owning profile", () => {

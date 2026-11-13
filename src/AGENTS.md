@@ -17,7 +17,7 @@ The React 19 + TypeScript UI. Renders the mouse visualization, action editors, p
 - Every user-facing string is an i18next key present in both locales (see `i18n/AGENTS.md`).
 - Backend calls go through `lib/backend.ts` wrappers, never raw `invoke`. Surface failures via `setError`/`showToast`; never swallow a user-relevant error. `setError` opens `ErrorModal` whenever an error is set (not only on a failed config load).
 - Razer takeover events are owned by the consolidated `SynapseNotice` card, not separate root toasts; preserve its unchecked-by-default startup opt-in and explicit physical verification step.
-- Config reloads synchronously invalidate the import revision; Synapse merges cannot start while a reload is pending or awaiting React commit, or apply across its revision.
+- Config reloads synchronously invalidate the import revision; Synapse merges cannot start while a reload is pending or its revision marker awaits React commit, or apply across its revision.
 
 ## Work Guidance
 

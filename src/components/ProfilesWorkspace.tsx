@@ -1000,7 +1000,7 @@ export function ProfilesWorkspace({
                       if (r.deviceId) onSelectDevice(r.deviceId);
                       setSelectedProfileId(r.binding.profileId);
                       onSelectLayer(r.binding.layer);
-                      startTransition(() => setSelectedControlId(r.binding.controlId));
+                      setSelectedControlId(r.binding.controlId);
                       setSearchAllProfiles(false);
                       setBindingSearch("");
                     }}

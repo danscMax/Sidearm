@@ -6922,6 +6922,38 @@ body:has(.modal-backdrop) .toast-stack {
 }
 .synapse-binding-list__control { color: var(--c-text); }
 .synapse-binding-list__kind { opacity: 0.6; }
+/* Merge strategy: one card per choice, the hint under its title. */
+.synapse-import-modal__strategy {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin: 16px 0 0;
+  padding: 0;
+  border: 0;
+}
+.synapse-import-modal__strategy legend {
+  padding: 0;
+  margin-bottom: var(--space-sm);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--c-text-muted);
+}
+.synapse-import-modal__strategy label {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  padding: 10px 14px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  color: var(--c-text);
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+.synapse-import-modal__strategy label:has(input:checked) { border-color: var(--c-accent); }
+.synapse-import-modal__strategy input { margin: 0; }
+.synapse-import-modal__strategy small { grid-column: 2; font-size: 0.78rem; }
 .synapse-import-warnings { margin-top: 16px; font-size: 0.8rem; }
 .synapse-import-warnings summary { cursor: pointer; color: var(--c-warning-light); }
 .synapse-import-warnings ul { margin: 8px 0 0; padding-left: 18px; }

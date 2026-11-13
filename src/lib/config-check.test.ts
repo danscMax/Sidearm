@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Action, Binding } from "./config";
 import { checkProfile } from "./config-check";
+import { findShortcutConflicts } from "./conflict-detection";
 import { makeConfig } from "./test-fixtures";
 
 const key = (id: string, keyName: string, mods: Partial<{ ctrl: boolean; alt: boolean }> = {}): Action =>
@@ -35,7 +36,20 @@ describe("checkProfile", () => {
     expect(issues[0]).toMatchObject({ kind: "enterNextToClose", binding: { id: "b2" } });
   });
 
-  it("names the same text on two buttons of one mouse and layer, not the same shortcut or another layer", () => {
+  it("notes a shortcut on two press patterns; one doubled on the same pattern is a conflict until kept", () => {
+    const base = {
+      actions: [key("v", "V", { ctrl: true }), key("v2", "V", { ctrl: true })],
+      bindings: [bind("b1", "thumb_12", "v"), bind("b2", "thumb_03", "v2", { triggerMode: "longPress" as const }), bind("b3", "thumb_05", "v")],
+    };
+    // b1 and b3: both plain presses (a conflict, not noted); b2 alone is left.
+    expect(checkProfile(makeConfig(base), "p1")).toEqual([]);
+    const kept = makeConfig(base);
+    kept.settings.acceptedConflicts = [findShortcutConflicts(kept)[0]!.key];
+    expect(findShortcutConflicts(kept)).toEqual([]);
+    expect(checkProfile(kept, "p1")).toMatchObject([{ kind: "duplicate", bindings: [{ id: "b1" }, { id: "b2" }, { id: "b3" }] }]);
+  });
+
+  it("names the same text or shortcut on two buttons of one mouse and layer, not another layer", () => {
     const text = (id: string, value: string): Action =>
       ({ id, type: "textSnippet", displayName: id, payload: { source: "inline", text: value, pasteMode: "sendText", tags: [] } }) as Action;
     const config = makeConfig({
@@ -49,7 +63,10 @@ describe("checkProfile", () => {
       ],
     });
     const issues = checkProfile(config, "p1");
-    expect(issues).toHaveLength(1);
-    expect(issues[0]).toMatchObject({ kind: "duplicate", bindings: [{ id: "b1" }, { id: "b2" }] });
+    expect(issues).toMatchObject([
+      { kind: "duplicate", bindings: [{ id: "b1" }, { id: "b2" }] },
+      // The same shortcut on a double press and a plain press: a choice, noted.
+      { kind: "duplicate", bindings: [{ id: "b4" }, { id: "b5" }] },
+    ]);
   });
 });

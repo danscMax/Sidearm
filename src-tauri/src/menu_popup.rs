@@ -498,6 +498,8 @@ struct OpenMenu {
 static OPEN: Mutex<Option<OpenMenu>> = Mutex::new(None);
 static IS_OPEN: AtomicBool = AtomicBool::new(false);
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The menu whose first layout came at the wrong scale (`page_layout`).
+static DEFERRED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Cheap check for the capture hot path.
 pub(crate) fn is_open() -> bool {
@@ -545,13 +547,14 @@ pub(crate) fn open(
         anchor: platform::cursor_position(),
     };
     let view = view_of(&menu);
+    let anchor = menu.anchor;
     *OPEN.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(menu);
     IS_OPEN.store(true, Ordering::Release);
     log::info!("[menu] opened `{title}` ({} items)", view.items.len());
     if crate::fake_mode() {
         return; // A test run has no windows; the model still answers presses.
     }
-    show(app, &view);
+    show(app, &view, anchor);
     platform::spawn_watch(app.clone(), generation);
 }
 
@@ -587,19 +590,28 @@ fn menu_details(config: &AppConfig, items: &[MenuItem]) -> HashMap<String, Strin
     details
 }
 
-fn show(app: &AppHandle, view: &View) {
-    if app.get_webview_window(WINDOW_LABEL).is_none() {
+fn show(app: &AppHandle, view: &View, anchor: (i32, i32)) {
+    let Some(window) = app.get_webview_window(WINDOW_LABEL) else {
         // The page asks for the view once loaded (`menu_ready`). No window, no
         // menu: an invisible one would swallow the buttons.
-        if !create_window(app) {
+        if !create_window(app, anchor) {
             close(app);
         }
         return;
-    }
+    };
+    move_hidden(&window, anchor);
     let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, view);
 }
 
-fn create_window(app: &AppHandle) -> bool {
+/// Put the hidden popup on the cursor's monitor before the page measures
+/// itself: it renders at that monitor's scale from the start. Measured at
+/// another monitor's scale, it showed that size for a moment and then jumped
+/// to the right one (first open after launch, the window parked off-screen).
+fn move_hidden(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: anchor.0, y: anchor.1 }));
+}
+
+fn create_window(app: &AppHandle, anchor: (i32, i32)) -> bool {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
     match WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("/menu.html".into()))
         .title("")
@@ -618,6 +630,7 @@ fn create_window(app: &AppHandle) -> bool {
     {
         Ok(window) => {
             let _ = window.hide();
+            move_hidden(&window, anchor);
             true
         }
         Err(error) => {
@@ -873,6 +886,17 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
     // monitor's scale, and multiplying by the target's scale cut the menu off.
     // The page measures again once the move changes its scale.
     let scale = platform::dpi_scale_at(anchor);
+    // Still at another monitor's scale (the move has not reached the page yet):
+    // wait for the page to measure again at the new one instead of showing a
+    // wrong size. Once per menu, so a page that never re-measures still shows.
+    if let Ok(now) = window.scale_factor()
+        && (now - scale).abs() > 0.01
+        && DEFERRED.swap(generation, Ordering::AcqRel) != generation
+    {
+        log::info!("[menu] the popup is at scale {now}, the cursor's monitor at {scale}: waiting for the page");
+        move_hidden(&window, anchor);
+        return;
+    }
     let (w, h) = (width.ceil() as i32, height.ceil() as i32);
     let (x, y) = platform::position_near(anchor, w, h, (6.0 * scale).round() as i32);
     // Position first so a cross-monitor DPI change settles before sizing (see `show_osd`).

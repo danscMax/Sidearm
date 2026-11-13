@@ -650,7 +650,9 @@
     "group": "{{signature}} — {{controls}}",
     "keepThis": "Keep {{label}}",
     "kept_one": "Kept {{label}}, disabled {{count}} other",
-    "kept_other": "Kept {{label}}, disabled {{count}} others"
+    "kept_other": "Kept {{label}}, disabled {{count}} others",
+    "keepBoth": "Keep both",
+    "keepAll": "Keep all"
   },
   "bulk": {
     "label": "Bulk actions",
@@ -1855,7 +1857,8 @@
     "missingAction": "«{{where}}» points at an action that no longer exists — it does nothing.",
     "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
     "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one.",
-    "duplicate": "\"{{name}}\" is on several buttons ({{layer}}): {{buttons}}. A leftover? One may go."
+    "duplicate": "“{{name}}” ({{layer}}): {{buttons}}.",
+    "duplicatesBanner": "The same thing on several buttons:"
   },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm."

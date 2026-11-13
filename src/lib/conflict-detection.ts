@@ -9,8 +9,11 @@ import type {
   ShortcutActionPayload,
   TextSnippetPayload,
 } from "./config";
+import { gestureOf, type Gesture } from "./config-editing";
 
 export interface ConflictGroup {
+  /** The group's identity (`conflictKey`), kept in `settings.acceptedConflicts` to keep it. */
+  key: string;
   signature: string;
   deviceId: string | null;
   profileId: string;
@@ -18,15 +21,24 @@ export interface ConflictGroup {
   bindings: Array<{ bindingId: string; controlId: ControlId; label: string; triggerMode?: Binding["triggerMode"] }>;
 }
 
+/** A conflict's identity: profile, layer, mouse, shortcut and press pattern. */
+function conflictKey(profileId: string, layer: Layer, deviceId: string | null, signature: string, gesture: Gesture): string {
+  return [profileId, layer, deviceId ?? "", signature, gesture].join("|");
+}
+
 /**
- * Pure: find bindings that fire the same shortcut on the same device, profile, and layer.
+ * Pure: find bindings that fire the same shortcut on the same device, profile,
+ * layer and press pattern (the same shortcut on a press of one button and a
+ * hold of another is a choice, not a conflict: `checkProfile` notes it).
  * Returns one entry per *group* of conflicting bindings (size ≥ 2). Bindings
- * that are disabled, or whose action is missing/disabled, are ignored.
+ * that are disabled, or whose action is missing/disabled, are ignored, and so
+ * are groups the user kept (`settings.acceptedConflicts`).
  *
  * Only shortcut actions are considered — text snippets, sequences, and mouse
  * actions are idiosyncratic and don't conflict in the traditional sense.
  */
 export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
+  const accepted = new Set(config.settings.acceptedConflicts ?? []);
   const actionsById = new Map<string, Action>();
   for (const a of config.actions) actionsById.set(a.id, a);
   const devicesByControlId = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
@@ -41,7 +53,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
     if (!signature) continue;
 
     const deviceId = devicesByControlId.get(binding.controlId) ?? null;
-    const key = JSON.stringify([deviceId, binding.profileId, binding.layer, signature]);
+    const key = conflictKey(binding.profileId, binding.layer, deviceId, signature, gestureOf(binding.triggerMode));
     const existing = grouped.get(key);
     const entry = {
       bindingId: binding.id,
@@ -53,6 +65,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
       existing.bindings.push(entry);
     } else {
       grouped.set(key, {
+        key,
         signature,
         deviceId,
         profileId: binding.profileId,
@@ -62,7 +75,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
     }
   }
 
-  return [...grouped.values()].filter((g) => g.bindings.length > 1);
+  return [...grouped.values()].filter((g) => g.bindings.length > 1 && !accepted.has(g.key));
 }
 
 /**

@@ -743,6 +743,7 @@ mod tests {
                 sync_mice: false,
                 osd_actions: false,
                 hs2_cheat_sheet: false,
+                accepted_conflicts: Vec::new(),
                 offline_profile_id: None,
             },
             profiles: vec![
@@ -1155,6 +1156,7 @@ mod edge_proptests {
                 sync_mice: false,
                 osd_actions: false,
                 hs2_cheat_sheet: false,
+                accepted_conflicts: Vec::new(),
                 offline_profile_id: None,
             },
             profiles: vec![

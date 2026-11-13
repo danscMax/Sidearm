@@ -27,7 +27,8 @@
         7,
         8,
         9,
-        10
+        10,
+        11
       ]
     },
     "settings": {
@@ -288,6 +289,15 @@
         },
         "showBatteryInTray": {
           "type": "boolean"
+        },
+        "acceptedConflicts": {
+          "type": "array",
+          "description": "Shortcut conflicts kept on purpose (`profile|layer|device|shortcut|press pattern`): not shown as conflicts.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
         },
         "hs2CheatSheet": {
           "type": "boolean",

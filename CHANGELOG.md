@@ -68,6 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
+- The same shortcut on two buttons is no longer a conflict when the press
+  patterns differ (Ctrl+V on a press of one button and a hold of another): it is
+  a note under "The same thing on several buttons", with the other doubles.
+  A real conflict (the same press pattern) can be kept with "Keep both"
+  (`settings.acceptedConflicts`, config version 11).
+- The popup menu no longer shows at a wrong size for a moment on its first
+  opening on a monitor with another scale.
 - A shortcut sent into a Remote Desktop window lost its modifier: Alt+V from a
   mouse button arrived on the remote PC as Alt, then V without Alt (a bare "v").
   A shortcut's modifiers now go down a moment before its key.

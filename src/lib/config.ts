@@ -86,6 +86,8 @@ export interface Settings {
   osdActions?: boolean;
   /** Hold the HyperShift 2 trigger 1 s: its grid shows at the cursor. */
   hs2CheatSheet?: boolean;
+  /** Shortcut conflicts kept on purpose (`conflictKey`): shown as a note instead. */
+  acceptedConflicts?: string[];
   /** Profile written into the mouse on exit; absent = the fallback profile,
    *  `OFFLINE_PROFILE_ACTIVE` = the one in effect then. */
   offlineProfileId?: string;

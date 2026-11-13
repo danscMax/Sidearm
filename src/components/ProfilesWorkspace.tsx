@@ -15,6 +15,7 @@ import {
   applyBindingImport,
   copyBindingBetweenProfiles,
   createDevice,
+  acceptConflict,
   keepBindingDisableOthers,
   copyBindingFromLayer,
   createAppMapping,
@@ -40,7 +41,7 @@ import {
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
 import type { Slot } from "../lib/binding-moves";
-import { checkProfile } from "../lib/config-check";
+import { checkProfile, type ConfigIssue } from "../lib/config-check";
 import { CopyAssignmentsModal } from "./CopyAssignmentsModal";
 import { CompareProfilesModal } from "./CompareProfilesModal";
 import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
@@ -469,7 +470,10 @@ export function ProfilesWorkspace({
     [activeConfig, activeDevice?.id, effectiveProfileId, selectedLayer],
   );
 
-  const profileIssues = effectiveProfileId ? checkProfile(activeConfig, effectiveProfileId) : [];
+  const checked = effectiveProfileId ? checkProfile(activeConfig, effectiveProfileId) : [];
+  // The same thing on several buttons is a note (often a choice), not a problem.
+  const profileIssues = checked.filter((issue) => issue.kind !== "duplicate");
+  const duplicates = checked.filter((issue): issue is Extract<ConfigIssue, { kind: "duplicate" }> => issue.kind === "duplicate");
 
   // Conflict merge: keep one binding enabled, disable the rest of its group.
   const handleKeepBinding = (
@@ -483,6 +487,8 @@ export function ProfilesWorkspace({
       "success",
     );
   };
+  // Doubled on purpose: every button keeps it, the banner drops the group.
+  const handleAcceptConflict = (key: string) => updateDraft((c) => acceptConflict(c, key));
 
   const searchQuery = bindingSearch.trim();
   const matchedControlIds = useMemo(() => {
@@ -1018,13 +1024,24 @@ export function ProfilesWorkspace({
               <li key={index}>
                 {issue.kind === "enterNextToClose"
                   ? t("configCheck.enterNextToClose", { button: displayNameForControlId(issue.binding.controlId), layer: labelForLayer(issue.binding.layer) })
-                  : issue.kind === "duplicate"
-                    ? t("configCheck.duplicate", {
-                        name: issue.name,
-                        layer: labelForLayer(issue.bindings[0]!.layer),
-                        buttons: issue.bindings.map((b) => controlWithGesture(b.controlId, b.triggerMode)).join(", "),
-                      })
-                    : t(`configCheck.${issue.kind}`, { where: issue.where })}
+                  : t(`configCheck.${issue.kind}`, { where: issue.where })}
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      ) : null}
+
+      {duplicates.length > 0 ? (
+        <Notice variant="info" className="profiles__conflict-banner">
+          <strong>{t("configCheck.duplicatesBanner")}</strong>
+          <ul>
+            {duplicates.map((issue, index) => (
+              <li key={index}>
+                {t("configCheck.duplicate", {
+                  name: issue.name,
+                  layer: labelForLayer(issue.bindings[0]!.layer),
+                  buttons: issue.bindings.map((b) => controlWithGesture(b.controlId, b.triggerMode)).join(", "),
+                })}
               </li>
             ))}
           </ul>
@@ -1040,7 +1057,7 @@ export function ProfilesWorkspace({
               // The buttons, not the action names: those are the same shortcut.
               const where = (b: (typeof g.bindings)[number]) => controlWithGesture(b.controlId, b.triggerMode);
               return (
-                <li key={`${g.layer}:${g.signature}`}>
+                <li key={g.key}>
                   {t("conflict.group", {
                     signature: g.signature,
                     controls: g.bindings.map(where).join(", "),
@@ -1058,6 +1075,9 @@ export function ProfilesWorkspace({
                         {t("conflict.keepThis", { label: where(b) })}
                       </button>
                     ))}
+                    <button type="button" className="profiles__conflict-keep" onClick={() => handleAcceptConflict(g.key)}>
+                      {g.bindings.length === 2 ? t("conflict.keepBoth") : t("conflict.keepAll")}
+                    </button>
                   </span>
                 </li>
               );

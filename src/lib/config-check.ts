@@ -2,10 +2,12 @@
 // script edit can leave (an assignment or a menu item pointing at an action
 // that is gone, a phrase pointing at a deleted library text), and risky pairs
 // on one button — a press that sends Enter next to one that closes the window —
-// and the same text, macro, menu or launch on several buttons of one mouse and
-// layer (a duplicate is often a leftover; same shortcuts are the conflict banner's).
+// and the same text, macro, menu, launch or shortcut on several buttons of one
+// mouse and layer (`duplicate`: a note, often a choice; a shortcut doubled on the
+// same press pattern is the conflict banner's unless the user kept it).
 
 import type { Action, AppConfig, Binding, MenuItem } from "./config";
+import { conflictingBindingIds, shortcutSignature } from "./conflict-detection";
 
 export type ConfigIssue =
   | { kind: "missingAction"; where: string }
@@ -34,7 +36,7 @@ function sendsEnter(action: Action | undefined): boolean {
 }
 
 /** What a button does, as a key for spotting the same thing on two buttons;
- *  null for shortcuts and clicks (the conflict banner and plain use). */
+ *  null for clicks and the like (plain use). */
 function contentKey(action: Action, library: Map<string, string>): string | null {
   switch (action.type) {
     case "textSnippet":
@@ -45,6 +47,10 @@ function contentKey(action: Action, library: Map<string, string>): string | null
       return `menu:${action.id}`;
     case "launch":
       return `launch:${action.payload.target}\u0000${(action.payload.args ?? []).join(" ")}`;
+    case "shortcut": {
+      const signature = shortcutSignature(action.payload);
+      return signature ? `shortcut:${signature}` : null;
+    }
     default:
       return null;
   }
@@ -99,7 +105,9 @@ export function checkProfile(config: AppConfig, profileId: string): ConfigIssue[
   const library = new Map(config.snippetLibrary.map((snippet) => [snippet.id, snippet.text]));
   const deviceOf = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
   const same = new Map<string, { name: string; bindings: Binding[] }>();
+  const conflicted = conflictingBindingIds(config);
   for (const binding of bindings) {
+    if (conflicted.has(binding.id)) continue; // In the conflict banner.
     const action = actions.get(binding.actionId);
     const content = action ? contentKey(action, library) : null;
     if (!action || !content) continue;

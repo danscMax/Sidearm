@@ -1560,6 +1560,13 @@ export function keepBindingDisableOthers(
   return next;
 }
 
+/** Conflict kept on purpose: every binding of the group stays, the banner drops it. */
+export function acceptConflict(config: AppConfig, key: string): AppConfig {
+  const accepted = config.settings.acceptedConflicts ?? [];
+  if (accepted.includes(key)) return config;
+  return { ...config, settings: { ...config.settings, acceptedConflicts: [...accepted, key] } };
+}
+
 /** A camelCase name as an id token (schema `idToken` is lowercase kebab):
  *  `hypershiftBoth` → `hypershift-both`, `doublePress` → `double-press`. */
 function kebabToken(name: string): string {

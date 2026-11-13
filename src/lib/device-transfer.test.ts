@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AppConfig, Binding, PhysicalControl } from "./config";
 import { RAZER_NAGA_DEVICE_ID } from "./config";
 import { NAGA_V3_DEVICE_ID } from "./devices";
-import { applyDeviceTransfer, mirrorMouseEdit, planDeviceTransfer, retargetImportedBindings } from "./device-transfer";
+import { applyDeviceTransfer, applyHoldOffers, mirrorMouseEdit, planDeviceTransfer, planHoldsFromHypershift2, retargetImportedBindings } from "./device-transfer";
 import { makeAction, makeConfig } from "./test-fixtures";
 
 const control = (id: string, deviceId: string): PhysicalControl => ({
@@ -141,5 +141,21 @@ describe("keeping the mice alike", () => {
     const untouched = structuredClone(off);
     untouched.bindings.pop();
     expect(mirrorMouseEdit(off, untouched)).toBe(untouched);
+  });
+});
+
+describe("HyperShift 2 onto holds of a mouse without it", () => {
+  it("offers HyperShift 2 presses whose button's hold is free, and puts the chosen ones there", () => {
+    const config = twoMice([
+      binding("hs2", "v3_thumb_01", { layer: "hypershift2" }),
+      binding("hs2-wheel", "v3_wheel_left", { layer: "hypershift2" }),
+      binding("held", "mouse_4", { triggerMode: "longPress" }),
+    ]);
+    config.physicalControls.push(control("thumb_01", RAZER_NAGA_DEVICE_ID), control("mouse_4", RAZER_NAGA_DEVICE_ID));
+    const offers = planHoldsFromHypershift2(config, NAGA_V3_DEVICE_ID, RAZER_NAGA_DEVICE_ID, ["p1"]);
+    expect(offers.map((offer) => [offer.binding.id, offer.target])).toEqual([["hs2", "thumb_01"]]);
+    expect(planHoldsFromHypershift2(config, RAZER_NAGA_DEVICE_ID, NAGA_V3_DEVICE_ID, ["p1"])).toEqual([]);
+    const next = applyHoldOffers(config, offers);
+    expect(next.bindings.at(-1)).toMatchObject({ controlId: "thumb_01", layer: "standard", triggerMode: "longPress", actionId: "a1" });
   });
 });

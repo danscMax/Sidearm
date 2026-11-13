@@ -3236,6 +3236,9 @@ code {
 .transfer-modal__body { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .transfer-modal__summary { margin: 8px 0 0; color: var(--c-text); font-weight: 600; }
 .transfer-modal__list { margin: 6px 0 0; padding-left: 18px; font-size: 0.82rem; line-height: 1.6; color: var(--c-text-muted); }
+.transfer-modal__holds { display: grid; gap: 8px; }
+.transfer-modal__holds > summary { cursor: pointer; color: var(--c-text-bright); }
+.transfer-modal__hold { display: inline-flex; align-items: center; gap: 8px; color: var(--c-text); cursor: pointer; }
 
 /* ── Compare profiles ── */
 .compare-modal { width: min(1000px, 94vw); }

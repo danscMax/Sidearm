@@ -1,9 +1,9 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig } from "../lib/config";
-import { applyDeviceTransfer, planDeviceTransfer, type TransferConflict } from "../lib/device-transfer";
+import { applyDeviceTransfer, applyHoldOffers, planDeviceTransfer, planHoldsFromHypershift2, type TransferConflict } from "../lib/device-transfer";
 import { deviceLayout } from "../lib/devices";
-import { displayNameForControlId, labelForLayer } from "../lib/labels";
+import { controlWithGesture, displayNameForControlId, labelForLayer } from "../lib/labels";
 import { PillTrack } from "./PillTrack";
 import { ModalFooter, ModalHeader, ModalShell, SelectField, SettingRow, Toggle } from "./shared";
 
@@ -31,12 +31,20 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
   const [scope, setScope] = useState<"profile" | "all">(activeProfileId && !allProfiles ? "profile" : "all");
   const [conflict, setConflict] = useState<TransferConflict>("keep");
   const [shareMenus, setShareMenus] = useState(false);
+  // HyperShift 2 of the source mouse → long presses of a mouse without it.
+  const [chosenHolds, setChosenHolds] = useState<Set<string>>(new Set());
 
   const profileIds = scope === "all" || !activeProfileId ? config.profiles.map((profile) => profile.id) : [activeProfileId];
   const plan = from && to && from !== to ? planDeviceTransfer(config, from, to, profileIds, conflict) : [];
   const copied = plan.filter((item) => item.outcome === "copy" || item.outcome === "replace");
   const skipped = plan.filter((item) => item.outcome === "noMatch" || item.outcome === "noLayer" || item.outcome === "occupied");
   const options = mice.map((device) => ({ value: device.id, label: device.name }));
+  const holdOffers = from && to && from !== to ? planHoldsFromHypershift2(config, from, to, profileIds) : [];
+  const toggleHold = (id: string) => setChosenHolds((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const profileName = (id: string) => config.profiles.find((profile) => profile.id === id)?.name ?? id;
 
   return (
@@ -81,6 +89,27 @@ export function DeviceTransferModal({ config, activeDeviceId, activeProfileId, a
         <p role="status" className="transfer-modal__summary">
           {plan.length === 0 ? t("transfer.nothing") : t("transfer.summary", { copied: copied.length, skipped: skipped.length })}
         </p>
+        {holdOffers.length > 0 ? (
+          <details className="transfer-modal__holds">
+            <summary>{t("transfer.holdsTitle", { count: holdOffers.length })}</summary>
+            <p className="panel__muted">{t("transfer.holdsHelp")}</p>
+            <ul className="transfer-modal__list">
+              {holdOffers.map((offer) => (
+                <li key={offer.binding.id}>
+                  <label className="transfer-modal__hold">
+                    <input type="checkbox" checked={chosenHolds.has(offer.binding.id)} onChange={() => toggleHold(offer.binding.id)} />
+                    {offer.binding.label} → {controlWithGesture(offer.target, "longPress")}
+                    {scope === "all" ? <span className="panel__muted"> · {profileName(offer.binding.profileId)}</span> : null}
+                  </label>
+                </li>
+              ))}
+            </ul>
+            <button type="button" className="action-button action-button--secondary" disabled={chosenHolds.size === 0}
+              onClick={() => onApply(applyHoldOffers(config, holdOffers.filter((offer) => chosenHolds.has(offer.binding.id))), chosenHolds.size)}>
+              {t("transfer.holdsApply", { count: chosenHolds.size })}
+            </button>
+          </details>
+        ) : null}
         {skipped.length > 0 && (
           <details>
             <summary>{t("transfer.skippedDetails")}</summary>

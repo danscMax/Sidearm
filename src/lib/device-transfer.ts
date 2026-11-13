@@ -145,6 +145,45 @@ export function applyDeviceTransfer(
   };
 }
 
+/** A HyperShift 2 assignment of one mouse that the other mouse (without that
+ *  layer) can take as a long press of the same button. */
+export interface HoldOffer {
+  binding: Binding;
+  /** The other mouse's control. */
+  target: ControlId;
+}
+
+/** What of `fromDevice`'s HyperShift 2 layer fits on long presses of
+ *  `toDevice` (a mouse without HyperShift 2): plain presses whose button's long
+ *  press is free there. */
+export function planHoldsFromHypershift2(config: AppConfig, fromDevice: string, toDevice: string, profileIds: readonly string[]): HoldOffer[] {
+  if (hasLayer(toDevice, "hypershift2") || !hasLayer(fromDevice, "hypershift2")) return [];
+  const onFrom = new Set(config.physicalControls.filter((c) => c.deviceId === fromDevice).map((c) => c.id));
+  const actions = new Map(config.actions.map((action) => [action.id, action]));
+  return config.bindings.flatMap((binding) => {
+    if (!binding.enabled || binding.layer !== "hypershift2" || gestureOf(binding.triggerMode) !== "press"
+      || !profileIds.includes(binding.profileId) || !onFrom.has(binding.controlId)
+      || !actions.get(binding.actionId) || actions.get(binding.actionId)!.type === "disabled") return [];
+    const target = translate(config, fromDevice, toDevice, binding.controlId);
+    const taken = target && config.bindings.some((other) => other.profileId === binding.profileId && other.layer === "standard"
+      && other.controlId === target && gestureOf(other.triggerMode) === "longPress");
+    return target && !taken ? [{ binding, target }] : [];
+  });
+}
+
+/** Puts the chosen offers on their long presses (the same action). */
+export function applyHoldOffers(config: AppConfig, offers: readonly HoldOffer[]): AppConfig {
+  const added: Binding[] = offers.map(({ binding, target }) => ({
+    ...structuredClone(binding),
+    id: makeRandomId("binding"),
+    controlId: target,
+    layer: "standard",
+    triggerMode: "longPress",
+    chordPartner: undefined,
+  }));
+  return { ...config, bindings: [...config.bindings, ...added] };
+}
+
 /** Moves imported bindings for controls this config does not have onto the
  *  same places of `toDevice` (a profile exported from another mouse). Returns
  *  the config and how many bindings found no place. */

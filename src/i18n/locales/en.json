@@ -1757,7 +1757,10 @@
     "shareMenusHelp": "Menus are not copied: both mice open the same menu, and editing it on one changes it on the other. Off: each mouse gets its own copy.",
     "reasonNoLayer": "the other mouse has no HyperShift 2 layer",
     "syncMice": "Keep the mice alike",
-    "syncMiceHelp": "From now on, an assignment changed on one mouse changes the same button on the other (HyperShift 2 only where the mouse has it). Copy once first so they start alike. For your own mice; off by default."
+    "syncMiceHelp": "From now on, an assignment changed on one mouse changes the same button on the other (HyperShift 2 only where the mouse has it). Copy once first so they start alike. For your own mice; off by default.",
+    "holdsTitle": "HyperShift 2 onto holds ({{count}} fit)",
+    "holdsHelp": "The other mouse has no HyperShift 2. Tick what it should get as a long press of the same button (the button's plain press then fires on release). With \"Keep the mice alike\" on, both mice get it.",
+    "holdsApply": "Put on holds ({{count}})"
   },
   "menuTemplates": {
     "agent": "Phrases for an AI agent",

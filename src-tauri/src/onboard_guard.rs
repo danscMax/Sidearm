@@ -239,6 +239,7 @@ fn run(
     // everything.
     let mut wait = Duration::ZERO;
     let mut last_full: Option<Instant> = None;
+    let mut last_battery_scan: Option<Instant> = None;
     let mut suspect = true;
     let mut unreadable_since: Option<Instant> = None;
     loop {
@@ -305,6 +306,13 @@ fn run(
                     .is_ok()
             };
             if !restored {
+                // The mouse holding the offline profile may sleep for hours; the
+                // other mice's batteries (tray badge, tooltip) must not wait for it.
+                let due = last_battery_scan.is_none_or(|at| at.elapsed() >= FULL_SCAN_EVERY);
+                poll_batteries(app, config_dir, !due);
+                if due {
+                    last_battery_scan = Some(Instant::now());
+                }
                 wait = FAST_POLL;
                 continue;
             }
@@ -334,6 +342,9 @@ fn run(
             last_full = Some(Instant::now());
         }
         poll_batteries(app, config_dir, !full);
+        if full {
+            last_battery_scan = last_full;
+        }
         // `Absent` stays suspect: a mouse plugged back in gets a full scan.
         suspect = !matches!(verdict, Verdict::Clean(_) | Verdict::ModeOnly | Verdict::ReadOnly);
         if full {

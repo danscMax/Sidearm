@@ -461,6 +461,10 @@ New-Item -ItemType Directory -Path $PORTABLE_DIR -Force | Out-Null
 Copy-Item -LiteralPath $TAURI_EXE -Destination (Join-Path $PORTABLE_DIR $EXE_NAME)
 Write-Ok "$EXE_NAME"
 
+# Runtime licenses are regenerated after package cleanup; missing texts fail assembly.
+& node (Join-Path $PROJECT_ROOT 'tools/licenses.mjs') (Join-Path $PORTABLE_DIR 'THIRD-PARTY-NOTICES.txt')
+if ($LASTEXITCODE -ne 0) { throw 'Runtime license notice generation failed.' }
+
 # --- Portable mode marker ---
 # Presence of this empty file next to the exe tells Sidearm to store its
 # config, logs, and snapshots in ./data/ instead of %APPDATA%.
@@ -529,6 +533,15 @@ if (Test-Path -LiteralPath $portableExe) {
     Write-Ok "$EXE_NAME (${exeSize} MB)"
 } else {
     Write-Fail "$EXE_NAME not found!"
+    $errors++
+}
+
+# Check runtime license notices
+$notices = Join-Path $PORTABLE_DIR 'THIRD-PARTY-NOTICES.txt'
+if ((Test-Path -LiteralPath $notices) -and (Get-Item -LiteralPath $notices).Length -gt 0) {
+    Write-Ok 'THIRD-PARTY-NOTICES.txt'
+} else {
+    Write-Fail 'THIRD-PARTY-NOTICES.txt missing or empty'
     $errors++
 }
 

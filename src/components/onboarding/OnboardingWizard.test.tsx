@@ -53,7 +53,7 @@ const press = (encodedKey: string, backendTag: string, isHypershift = false) =>
   act(() => receive({ encodedKey, backend: backendTag, isHypershift, receivedAt: 0, isRepeat: false, isKeyUp: false }));
 
 beforeEach(async () => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   await i18n.changeLanguage("en");
   vi.mocked(backend.listenEncodedKeyEvent).mockImplementation(async (_name, callback) => {
     receive = callback;
@@ -107,6 +107,20 @@ describe("the setup wizard", () => {
     expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(false);
   });
 
+  it("offers a way out when the mouse never gets ready", async () => {
+    vi.mocked(backend.listNativeMice).mockResolvedValue([V3]);
+    vi.mocked(backend.getLiveMapReady).mockResolvedValue(false);
+    render(<OnboardingWizard config={configWithV3()} applyConfig={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(false));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByRole("heading", { name: "Getting your mouse ready" });
+    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
+    expect(screen.getByRole("heading", { name: "The mouse does not answer" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skip the check" }).hasAttribute("disabled")).toBe(false);
+  });
+
   it("checks a V3 on its own stream in both layers", async () => {
     vi.mocked(backend.listNativeMice).mockResolvedValue([V3]);
     const save = vi.fn();
@@ -139,20 +153,6 @@ describe("the setup wizard", () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(save).toHaveBeenCalledWith({ ...config, settings: { ...config.settings, onboardingCompleted: true, onboardingStep: undefined } });
     expect(onClose).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID);
-  });
-
-  it("offers a way out when the mouse never gets ready", async () => {
-    vi.mocked(backend.listNativeMice).mockResolvedValue([V3]);
-    vi.mocked(backend.getLiveMapReady).mockResolvedValue(false);
-    render(<OnboardingWizard config={configWithV3()} applyConfig={vi.fn()} onClose={vi.fn()} />);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(false));
-    vi.useFakeTimers({ shouldAdvanceTime: true });
-    fireEvent.click(screen.getByRole("button", { name: "Next" }));
-    await screen.findByRole("heading", { name: "Getting your mouse ready" });
-    await act(async () => { await vi.advanceTimersByTimeAsync(16_000); });
-    expect(screen.getByRole("heading", { name: "The mouse does not answer" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Check again" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Skip the check" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("goes on without a mouse and skips the checks", async () => {

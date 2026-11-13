@@ -1,11 +1,16 @@
 # Runtime Pipeline
 
-- Status: Implemented baseline with remaining hardware-validation debt
+- Status: Historical iteration 1 baseline
 - Date: 2026-03-08
 
 ## Purpose
 
 This document describes the runtime behavior implemented for iteration 1 and the limits that still remain.
+
+For the current Windows capture subprocess, pipe protocol, state ownership and
+recovery, see [ADR-0006](adr/0006-isolate-windows-capture-in-a-helper-process.md)
+and the operational [capture contract](../src-tauri/src/capture_backend/AGENTS.md).
+The `RegisterHotKey`-only notes below are historical, not the current capture boundary.
 
 It clarifies:
 
@@ -53,7 +58,7 @@ Non-responsibilities:
 - control resolution
 - action execution
 
-Current implementation note:
+Iteration 1 implementation note (historical):
 
 - iteration 1 now uses a Windows `RegisterHotKey` backend for validated `encoderMappings`
 - the backend listens only for configured encoded keys rather than all keyboard traffic

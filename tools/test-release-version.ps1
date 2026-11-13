@@ -15,6 +15,8 @@ function Write-Warn {}
 function Test-Path { param($LiteralPath, $PathType) return $artifactExists }
 function Get-Item {
     param($LiteralPath)
+    # The license-notice guard after the version check reads only the file's length.
+    if ($LiteralPath -eq (Join-Path $portable 'THIRD-PARTY-NOTICES.txt')) { return [pscustomobject]@{ Length = 1 } }
     if ($LiteralPath -ne (Join-Path $portable 'Sidearm.exe')) { throw "Unexpected artifact path: $LiteralPath" }
     return [pscustomobject]@{ VersionInfo = $metadata }
 }

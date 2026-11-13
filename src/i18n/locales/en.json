@@ -1874,7 +1874,8 @@
     "new": "new",
     "unusedTitle": "Never pressed ({{count}})",
     "unusedHelp": "Assignments of this profile on this mouse with no press in the period: free for something used.",
-    "localOnly": "Counted on this computer only; wheel scrolling is left out."
+    "localOnly": "Counted on this computer only; wheel scrolling is left out.",
+    "before": "The period before: {{count}}"
   },
   "print": {
     "open": "Print the layout",

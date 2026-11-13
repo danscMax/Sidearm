@@ -33,9 +33,18 @@ pub(crate) struct Cell {
     /// The plain press's label.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
-    /// The other press patterns: "⌛ name", "2× name", "3× name".
+    /// The other press patterns, drawn with their marks by the page.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub extras: Vec<String>,
+    pub extras: Vec<Extra>,
+}
+
+/// A long, double or triple press of a cell's button.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Extra {
+    /// `longPress`, `doublePress` or `triplePress`.
+    pub gesture: &'static str,
+    pub label: String,
 }
 
 /// What the page draws.
@@ -55,12 +64,16 @@ pub(crate) fn sheet_of(config: &AppConfig, profile_id: &str, title: String) -> S
             continue;
         };
         let Some(cell) = cells.get_mut(number.wrapping_sub(1)) else { continue };
-        match Gesture::of(binding.trigger_mode) {
-            Gesture::Press => cell.label = Some(binding.label.clone()),
-            Gesture::LongPress => cell.extras.push(format!("⌛ {}", binding.label)),
-            Gesture::DoublePress => cell.extras.push(format!("2× {}", binding.label)),
-            Gesture::TriplePress => cell.extras.push(format!("3× {}", binding.label)),
-        }
+        let gesture = match Gesture::of(binding.trigger_mode) {
+            Gesture::Press => {
+                cell.label = Some(binding.label.clone());
+                continue;
+            }
+            Gesture::LongPress => "longPress",
+            Gesture::DoublePress => "doublePress",
+            Gesture::TriplePress => "triplePress",
+        };
+        cell.extras.push(Extra { gesture, label: binding.label.clone() });
     }
     Sheet { title, cells }
 }
@@ -229,7 +242,10 @@ mod tests {
         ];
         let sheet = sheet_of(&config, &profile, "Main · HyperShift 2".into());
         assert_eq!(sheet.cells.len(), 12);
-        assert_eq!(sheet.cells[0], Cell { number: 1, label: Some("Win+Left".into()), extras: vec!["⌛ Win+D".into()] });
+        assert_eq!(
+            sheet.cells[0],
+            Cell { number: 1, label: Some("Win+Left".into()), extras: vec![Extra { gesture: "longPress", label: "Win+D".into() }] }
+        );
         assert_eq!(sheet.cells[11].label.as_deref(), Some("Tab"));
         assert!(sheet.cells[1].label.is_none());
     }

@@ -61,11 +61,17 @@ export function topPlaces(config: AppConfig, now: PressSums, before: PressSums, 
     .sort((a, b) => b.count - a.count);
 }
 
+/** Wheel scrolling: never in the log (`press_log`), so never "unused" either. */
+const SCROLLS = new Set(["scrollUp", "scrollDown", "scrollLeft", "scrollRight"]);
+
 /** The profile's assignments on a mouse never pressed in the period. */
 export function unusedPlaces(config: AppConfig, now: PressSums, profileId: string, deviceId: string): Binding[] {
   const actions = new Map(config.actions.map((action) => [action.id, action]));
-  return placesOf(config, profileId, deviceId).filter((binding) =>
-    !now.slots.get(slotKey(binding)) && actions.get(binding.actionId)?.type !== "disabled");
+  return placesOf(config, profileId, deviceId).filter((binding) => {
+    const action = actions.get(binding.actionId);
+    const scroll = action?.type === "mouseAction" && SCROLLS.has(action.payload.action);
+    return !now.slots.get(slotKey(binding)) && action?.type !== "disabled" && !scroll;
+  });
 }
 
 /** Keys one run of an action stands for: the characters a text types (+ its

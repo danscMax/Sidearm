@@ -62,7 +62,7 @@ export function PressStats({ config, deviceId, profileId, onAddHold }: PressStat
           <p className="panel__muted">{t("stats.hintsHelp")}</p>
           <ul className="press-stats__list">
             {hints.map((hint) => (
-              <li key={hint.binding.id} className="press-stats__row">
+              <li key={hint.binding.id} className="press-stats__row press-stats__row--hint">
                 <span className="press-stats__name">{hint.binding.label}</span>
                 <span className="press-stats__where">{place(hint.binding)}</span>
                 <span className="press-stats__count">{hint.count}×</span>
@@ -87,8 +87,9 @@ export function PressStats({ config, deviceId, profileId, onAddHold }: PressStat
                   <span className="press-stats__fill" ref={(el) => el?.style.setProperty("--share", String(entry.count / peak))} />
                 </span>
                 <span className="press-stats__count">{entry.count}×</span>
-                <span className={`press-stats__trend${entry.count >= entry.before ? " press-stats__trend--up" : ""}`}>
-                  {entry.before === 0 ? t("stats.new") : `${entry.count >= entry.before ? "↑" : "↓"} ${entry.before}`}
+                <span className={`press-stats__trend${entry.count >= entry.before ? " press-stats__trend--up" : ""}`}
+                  title={t("stats.before", { count: entry.before })}>
+                  {entry.before === 0 ? t("stats.new") : entry.count === entry.before ? "=" : `${entry.count > entry.before ? "+" : "−"}${Math.abs(entry.count - entry.before)}`}
                 </span>
               </li>
             ))}

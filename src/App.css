@@ -6969,6 +6969,9 @@ input[type="search"]::-webkit-search-decoration {
   background: var(--c-surface-alt);
   font-size: var(--fs-body-sm);
 }
+/* A hint row: name, place, count and its button (no bar, no trend). */
+.press-stats__row--hint { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 52px auto; }
+.press-stats__row--hint .action-button { white-space: nowrap; }
 .press-stats__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text-bright); }
 .press-stats__where { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--c-text-muted); }
 .press-stats__bar { height: 6px; border-radius: 3px; background: var(--c-border); overflow: hidden; }

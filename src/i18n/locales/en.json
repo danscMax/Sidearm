@@ -1165,7 +1165,8 @@
     "configChangedOutside": "The settings file was changed outside Sidearm: loaded, the buttons already use it.",
     "menuEditNoButton": "This menu is on no button, so there is nothing to open it from.",
     "configChangedOutsideWhat": "Settings changed outside Sidearm (another computer?), already in use: {{list}}",
-    "changedMenu": "menu \"{{name}}\""
+    "changedMenu": "menu \"{{name}}\"",
+    "menuEditPickerOpen": "Close the open assignment dialog first (it may have unsaved changes), then pick Edit again."
   },
   "instance": {
     "blocked": "Sidearm is already running — duplicate launch ignored"

@@ -130,8 +130,10 @@
   /** The whole text of the phrase still highlighted, when the tip cut it. */
   function showFull(index) {
     if (!tip.classList.contains("tip--clipped") && !/…$/.test(view.items[index].detail || "")) return;
+    var asked = view;
     tauri.invoke("menu_full_text", { index: index }).then(function (text) {
-      if (highlight !== index || !text) return;
+      // Still the same menu (not reopened or redrawn) on the same row.
+      if (view !== asked || highlight !== index || !text) return;
       tip.classList.add("tip--full");
       tip.classList.remove("tip--clipped");
       tip.textContent = text;

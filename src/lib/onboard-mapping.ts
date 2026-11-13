@@ -12,7 +12,11 @@ const FIRMWARE_MOUSE = new Set(["leftClick", "rightClick", "middleClick", "mouse
  */
 export function playsWithoutSidearm(binding: Binding, action: Action | null | undefined): boolean {
   if (!action || gestureOf(binding.triggerMode) !== "press" || binding.triggerMode === "chord") return false;
-  if (action.type === "shortcut") return true;
+  if (action.type === "shortcut") {
+    const p = action.payload;
+    // A key, or modifiers alone (push-to-talk); an empty shortcut sends nothing.
+    return p.key.trim() !== "" || p.ctrl || p.shift || p.alt || p.win;
+  }
   return action.type === "mouseAction" && FIRMWARE_MOUSE.has(action.payload.action)
     && !(action.payload.ctrl || action.payload.shift || action.payload.alt || action.payload.win);
 }

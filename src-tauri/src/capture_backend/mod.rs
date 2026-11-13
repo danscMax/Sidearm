@@ -983,6 +983,7 @@ fn run_fire_and_forget(
         && let crate::config::ActionPayload::Menu(payload) = &action.payload
     {
         flush_log_entries(runtime_store, log_entries);
+        count_press(config, preview, &action.id);
         crate::menu_popup::open(app, runtime_store, config, preview, &action.display_name, payload, is_fg_elevated);
         return;
     }

@@ -634,9 +634,14 @@ fn run_live_sequence_action(
     // another window came to the front meanwhile — it would submit there.
     let start_window = foreground_window();
     let mut only_text_so_far = true;
+    let mut typed_text = false;
     let mut warnings = Vec::new();
     for step in &payload.steps {
-        if skips_enter(step, only_text_so_far, || foreground_window() != start_window) {
+        // No window in front for an instant (0) is no other window.
+        if skips_enter(step, only_text_so_far && typed_text, || {
+            let now = foreground_window();
+            now != 0 && now != start_window
+        }) {
             log::warn!("[executor] sequence Enter skipped: the window in front changed while the text was typed");
             warnings.push(crate::ui_text!(
                 "execution.enterSkippedWindowChanged",
@@ -647,6 +652,7 @@ fn run_live_sequence_action(
         if matches!(step, SequenceStep::Launch { .. } | SequenceStep::Send { .. }) {
             only_text_so_far = false;
         }
+        typed_text |= matches!(step, SequenceStep::Text { .. });
         match step {
             SequenceStep::Sleep { delay_ms } => {
                 thread::sleep(Duration::from_millis(
@@ -681,8 +687,13 @@ fn run_live_sequence_action(
                 repeat,
             } => {
                 let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
-                // The same tokens a text snippet has ({date}, {selection}, {cursor}…).
-                let (value, cursor_back) = input_synthesis::expand_snippet_tokens(value);
+                // The same tokens a text snippet has ({date}, {selection}, {cursor}…);
+                // a text without one is typed as it is ({{ included).
+                let (value, cursor_back) = if input_synthesis::has_snippet_token(value) {
+                    input_synthesis::expand_snippet_tokens(value)
+                } else {
+                    (value.clone(), None)
+                };
                 for _ in 0..times {
                     input_synthesis::send_text(&value).map_err(|message| {
                         execution_error(

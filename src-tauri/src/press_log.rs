@@ -41,8 +41,33 @@ fn file() -> PathBuf {
     crate::paths::AppPaths::resolve().config_dir.join(FILE_NAME)
 }
 
-fn read(path: &Path) -> Log {
-    std::fs::read_to_string(path).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default()
+/// The log on disk: empty when there is none yet; an error when it cannot be
+/// read (a lock) — then nothing is written over it. A file that does not parse
+/// is set aside as `press-log.corrupt.json` and the log starts again.
+fn read(path: &Path) -> Result<Log, String> {
+    match std::fs::read_to_string(path) {
+        Ok(text) => Ok(serde_json::from_str(&text).unwrap_or_else(|error| {
+            log::warn!("[press-log] unreadable log set aside: {error}");
+            let _ = std::fs::rename(path, path.with_extension("corrupt.json"));
+            Log::new()
+        })),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Log::new()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+/// Today in local time (YYYY-MM-DD): a day is the user's day, as the UI counts it.
+fn today() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let mut time = windows_sys::Win32::Foundation::SYSTEMTIME::default();
+        unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut time) };
+        format!("{:04}-{:02}-{:02}", time.wYear, time.wMonth, time.wDay)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        crate::backup::today_date_string()
+    }
 }
 
 /// Adds `more` into `log` and keeps only the newest [`KEEP_DAYS`] days.
@@ -75,7 +100,7 @@ pub(crate) fn count(slot: &str, action_id: &str) {
         return;
     }
     let mut pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let day = pending.log.entry(crate::backup::today_date_string()).or_default();
+    let day = pending.log.entry(today()).or_default();
     *day.slots.entry(slot.to_owned()).or_default() += 1;
     *day.actions.entry(action_id.to_owned()).or_default() += 1;
     if pending.last_flush.is_none_or(|at| at.elapsed() >= FLUSH_EVERY) {
@@ -92,8 +117,15 @@ pub(crate) fn flush() {
 }
 
 fn write_out(pending: &mut Pending) {
+    pending.last_flush = Some(Instant::now());
     let path = file();
-    let mut log = read(&path);
+    let mut log = match read(&path) {
+        Ok(log) => log,
+        Err(error) => {
+            log::warn!("[press-log] could not read the log, kept in memory: {error}");
+            return;
+        }
+    };
     merge(&mut log, &pending.log);
     let temp = path.with_extension("json.tmp");
     let written = serde_json::to_vec(&log)
@@ -104,13 +136,12 @@ fn write_out(pending: &mut Pending) {
         Ok(()) => pending.log.clear(),
         Err(error) => log::warn!("[press-log] could not write: {error}"),
     }
-    pending.last_flush = Some(Instant::now());
 }
 
 /// The log on disk plus what has not been written yet.
 pub(crate) fn snapshot() -> Log {
     let pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut log = read(&file());
+    let mut log = read(&file()).unwrap_or_default();
     merge(&mut log, &pending.log);
     log
 }

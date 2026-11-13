@@ -233,9 +233,12 @@ function App() {
     let disposed = false;
     void listenConfigChangedExternally(() => {
       // Set before the reload: the new config may arrive before it resolves.
-      changedFromRef.current = latestConfigRef.current;
+      const previous = latestConfigRef.current;
+      changedFromRef.current = previous;
       void refreshConfigRef.current().then((ok) => {
         if (!ok) changedFromRef.current = null;
+        // Nothing loaded yet to compare with: just say it was reloaded.
+        else if (!previous) showToast(t("toast.configChangedOutside"), "info");
       });
     }).then((fn) => {
       if (disposed) fn();
@@ -947,6 +950,11 @@ function App() {
   // the profile it was opened from, if it is there), its picker, the item.
   function openMenuItemEditor(request: MenuEditRequest) {
     if (!activeConfig) return;
+    // An open assignment dialog may hold unsaved edits: never replace it silently.
+    if (actionPickerOpen) {
+      showToast(t("toast.menuEditPickerOpen"), "warning");
+      return;
+    }
     const uses = activeConfig.bindings.filter((binding) => binding.actionId === request.menuActionId);
     const binding = uses.find((candidate) => candidate.profileId === request.profileId) ?? uses[0];
     if (!binding) {

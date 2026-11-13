@@ -1566,13 +1566,15 @@ async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<Stri
     let config_dir = resolve_config_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
         let parent = PathBuf::from(&target_dir);
-        if !parent.is_dir() {
+        let plain = parent.is_absolute() && !parent.components().any(|part| matches!(part, std::path::Component::ParentDir));
+        if !plain || !parent.is_dir() {
             return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
         }
         let source = config_dir.join("config.json");
         if !source.is_file() {
             return Err(CommandError::new("io_error", "No config.json to export — save the app at least once first.", None));
         }
+        press_log::flush();
         let base = format!("Sidearm-layout-{}", backup::today_date_string());
         let folder = (1..100)
             .map(|n| parent.join(if n == 1 { base.clone() } else { format!("{base}-{n}") }))
@@ -4340,8 +4342,9 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                // Alt+F4 pressed to be recorded as a shortcut must not close the window.
-                if capture_backend::key_recording() {
+                // Alt+F4 pressed to be recorded as a shortcut must not close
+                // the window (the page clears a flag left on when it loads).
+                if window.label() == "main" && capture_backend::key_recording() {
                     api.prevent_close();
                     return;
                 }

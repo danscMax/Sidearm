@@ -1284,8 +1284,14 @@ pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
     let date = crate::backup::today_date_string();
     // The selection first: copying it must not show up as `{clipboard}`.
     let selection = text.contains("{selection}").then(selection_text_for_token).flatten();
-    let clipboard = get_clipboard_text_for_token();
+    let clipboard = text.contains("{clipboard}").then(get_clipboard_text_for_token).flatten();
     expand_tokens_with(text, &date, clipboard.as_deref(), selection.as_deref())
+}
+
+/// Whether a text holds one of the tokens (a macro's text is typed verbatim
+/// otherwise, `{{` included).
+pub fn has_snippet_token(text: &str) -> bool {
+    ["{date}", "{clipboard}", "{selection}", "{cursor}", "{|}"].iter().any(|token| text.contains(token))
 }
 
 #[cfg(test)]
@@ -1402,7 +1408,11 @@ fn selection_text_for_token() -> Option<String> {
         time::{Duration, Instant},
     };
     use windows_sys::Win32::System::DataExchange::EmptyClipboard;
-    let saved = with_clipboard_open(clipboard_snapshot).ok();
+    // Nothing to put back if the clipboard could not be read: then the copy stays.
+    let Ok(saved) = with_clipboard_open(clipboard_snapshot) else {
+        log::info!("[input] {{selection}}: the clipboard could not be read");
+        return None;
+    };
     let before = clipboard_sequence_number();
     send_hotkey_string("Ctrl+Insert", &ALL_MODIFIERS).ok()?;
     let deadline = Instant::now() + Duration::from_millis(500);
@@ -1418,9 +1428,7 @@ fn selection_text_for_token() -> Option<String> {
     let text = clipboard_get_text();
     let _ = with_clipboard_open(|| {
         unsafe { EmptyClipboard() };
-        if let Some(saved) = &saved {
-            write_clipboard_snapshot(saved);
-        }
+        write_clipboard_snapshot(&saved);
     });
     text
 }
@@ -2901,6 +2909,9 @@ mod tests {
         );
         // Nothing selected: the token goes, the rest stays.
         assert_eq!(expand_tokens_with("[{selection}]", "d", None, None), ("[]".to_string(), None));
+        // A macro's text without a token is typed as it is, `{{` included.
+        assert!(!has_snippet_token("{{name}} and {json: 1}"));
+        assert!(has_snippet_token("at {|} here") && has_snippet_token("{date}"));
     }
 
     #[test]

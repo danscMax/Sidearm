@@ -4904,19 +4904,45 @@ fn run_foreground_watcher(
         System::Threading::GetCurrentThreadId,
         UI::Accessibility::{SetWinEventHook, UnhookWinEvent},
         UI::WindowsAndMessaging::{
-            DispatchMessageW, GetForegroundWindow, GetMessageW, KillTimer, MSG, SetTimer, TranslateMessage,
+            DispatchMessageW, GetForegroundWindow, GetMessageW, GetWindowThreadProcessId, KillTimer, MSG, SetTimer,
+            TranslateMessage,
         },
     };
 
     // Thread-local storage for the callback to access our context.
     thread_local! {
         static FG_CTX: RefCell<Option<ForegroundWatcherCtx>> = const { RefCell::new(None) };
-        /// A title-change re-check is scheduled (timer id), so a burst of
-        /// title changes (a spinner in a terminal tab) resolves once.
+        /// A title-change re-check is scheduled (timer id): a spinner in a
+        /// terminal tab re-checks at most every [`TITLE_SETTLE_MS`].
         static TITLE_TIMER: Cell<usize> = const { Cell::new(0) };
+        /// Title changes are watched (a title rule exists) and the hook on the
+        /// front window's process (re-hooked on each foreground change).
+        static WATCH_TITLES: Cell<bool> = const { Cell::new(false) };
+        static TITLE_HOOK: Cell<usize> = const { Cell::new(0) };
     }
-    /// The quiet time a window's title is given before its profile is resolved again.
+    /// At most this often a changing title is resolved again.
     const TITLE_SETTLE_MS: u32 = 300;
+    const EVENT_OBJECT_NAMECHANGE: u32 = 0x800C;
+
+    /// Title changes of the front window's process only (not every app's).
+    fn hook_front_titles() {
+        if !WATCH_TITLES.with(Cell::get) {
+            return;
+        }
+        let old = TITLE_HOOK.with(|hook| hook.replace(0));
+        if old != 0 {
+            unsafe { UnhookWinEvent(old as _) };
+        }
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(GetForegroundWindow(), &mut pid) };
+        if pid == 0 {
+            return;
+        }
+        let hook = unsafe {
+            SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, std::ptr::null_mut(), Some(title_callback), pid, 0, 0)
+        };
+        TITLE_HOOK.with(|cell| cell.set(hook as usize));
+    }
 
     struct ForegroundWatcherCtx {
         app: AppHandle,
@@ -4951,7 +4977,7 @@ fn run_foreground_watcher(
     unsafe extern "system" fn title_settled(_hwnd: *mut std::ffi::c_void, _msg: u32, id: usize, _time: u32) {
         unsafe { KillTimer(std::ptr::null_mut(), id) };
         TITLE_TIMER.with(|timer| timer.set(0));
-        resolve_foreground();
+        resolve_foreground(true);
     }
 
     unsafe extern "system" fn winevent_callback(
@@ -4963,11 +4989,14 @@ fn run_foreground_watcher(
         _event_thread: u32,
         _event_time: u32,
     ) {
-        resolve_foreground();
+        hook_front_titles();
+        resolve_foreground(false);
     }
 
-    /// Resolve the window in front and switch the profile (and its OSD) if it changed.
-    fn resolve_foreground() {
+    /// Resolve the window in front and switch the profile (and its OSD) if it
+    /// changed. `title_only`: the same window, a new title — nothing is sent
+    /// on unless the profile is another one.
+    fn resolve_foreground(title_only: bool) {
         // A panic unwinding across this `extern "system"` boundary is UB, and
         // this callback runs on a thread in the MAIN app process. Contain any
         // panic (heavy capture/emit, poisoned lock, re-entrant borrow) and drop
@@ -5009,6 +5038,15 @@ fn run_foreground_watcher(
                         Ok(result) => result,
                         Err(_) => return,
                     };
+                let same_profile = || {
+                    ctx.runtime_store.lock().ok().is_some_and(|store| {
+                        store.last_foreground_window().map(|last| &last.resolved_profile_id)
+                            == Some(&capture_result.resolved_profile_id)
+                    })
+                };
+                if title_only && same_profile() {
+                    return;
+                }
 
                 super::emit_profile_resolved_and_notify(
                     &ctx.app,
@@ -5026,6 +5064,8 @@ fn run_foreground_watcher(
     // A title rule (`AppMapping.titleIncludes`) can pick another profile when a
     // window's title changes without it losing the front (terminal tabs).
     let watch_titles = config.app_mappings.iter().any(|mapping| mapping.enabled && !mapping.title_includes.is_empty());
+
+    WATCH_TITLES.with(|cell| cell.set(watch_titles));
 
     // Store context in thread-local
     FG_CTX.with(|cell| {
@@ -5057,14 +5097,7 @@ fn run_foreground_watcher(
         return;
     }
 
-    const EVENT_OBJECT_NAMECHANGE: u32 = 0x800C;
-    let title_hook = if watch_titles {
-        unsafe {
-            SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, std::ptr::null_mut(), Some(title_callback), 0, 0, 0)
-        }
-    } else {
-        std::ptr::null_mut()
-    };
+    hook_front_titles();
 
     let thread_id = unsafe { GetCurrentThreadId() };
     let _ = ready_tx.send(thread_id);
@@ -5084,8 +5117,9 @@ fn run_foreground_watcher(
     }
 
     unsafe { UnhookWinEvent(hook) };
-    if !title_hook.is_null() {
-        unsafe { UnhookWinEvent(title_hook) };
+    let title_hook = TITLE_HOOK.with(|cell| cell.replace(0));
+    if title_hook != 0 {
+        unsafe { UnhookWinEvent(title_hook as _) };
     }
 
     // Clean up thread-local

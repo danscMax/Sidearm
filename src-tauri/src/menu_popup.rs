@@ -526,7 +526,7 @@ pub(crate) fn open(
         .collect();
     let others: Vec<(String, String, Vec<MenuItem>)> = menus
         .iter()
-        .filter(|(_, menu)| menu.items != payload.items)
+        .filter(|(action, _)| preview.action_id.as_deref() != Some(action.id.as_str()))
         .map(|(action, menu)| (action.id.clone(), action.display_name.clone(), menu.items.clone()))
         .collect();
     let mut all_items = payload.items.clone();

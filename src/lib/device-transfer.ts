@@ -230,7 +230,9 @@ function hasLayer(deviceId: string, layer: Layer): boolean {
 /** The binding with its action and, for a menu, its items' actions: what the
  *  button does. Two bindings with the same signature do the same thing. */
 function signature(binding: Binding, actions: ReadonlyMap<string, Action>): string {
-  const { id: _id, controlId: _control, chordPartner: _partner, actionId, ...rest } = binding;
+  const { id: _id, controlId: _control, chordPartner, actionId, ...rest } = binding;
+  // The chord partner by its place: the same chord on either mouse.
+  const partner = chordPartner ? sharedPlace(chordPartner) : null;
   const seen = new Set<string>();
   const content = (id: string): unknown => {
     const action = actions.get(id);
@@ -242,7 +244,7 @@ function signature(binding: Binding, actions: ReadonlyMap<string, Action>): stri
       item.kind === "submenu" ? { ...item, items: items(item.items) } : { ...item, action: content(item.actionId) });
     return { ...body, payload: { ...action.payload, items: items(action.payload.items) } };
   };
-  return JSON.stringify([rest, content(actionId)]);
+  return JSON.stringify([rest, partner, content(actionId)]);
 }
 
 /** Bindings of one mouse by place: profile, layer, press pattern and the
@@ -267,7 +269,8 @@ function slotsOf(config: AppConfig, deviceId: string, actions: ReadonlyMap<strin
  * Actions only the replaced bindings used are dropped (their texts kept).
  */
 export function mirrorMouseEdit(previous: AppConfig, next: AppConfig): AppConfig {
-  if (!next.settings.syncMice) return next;
+  // Nothing of the assignments changed (a setting, a profile name): nothing to repeat.
+  if (!next.settings.syncMice || (previous.bindings === next.bindings && previous.actions === next.actions)) return next;
   const mice = next.devices.filter((device) => device.builtin && deviceLayout(device.id)).map((device) => device.id);
   if (mice.length < 2) return next;
   const before = new Map(previous.actions.map((action) => [action.id, action]));

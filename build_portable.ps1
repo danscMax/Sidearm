@@ -259,8 +259,11 @@ if ($Clean) {
     Write-Host "  Cleaning build artifacts..." -ForegroundColor Yellow
     if (Test-Path -LiteralPath $PORTABLE_DIR) {
         Stop-AppProcessIfRunning
-        Remove-Item -Recurse -Force -LiteralPath $PORTABLE_DIR
-        Write-Ok "Removed $PORTABLE_DIR"
+        # ./data is the user's config (dev runs use it too) -- never part of "build artifacts".
+        Get-ChildItem -LiteralPath $PORTABLE_DIR -Force |
+            Where-Object { $_.Name -ne 'data' } |
+            Remove-Item -Recurse -Force
+        Write-Ok "Removed build artifacts from $PORTABLE_DIR (kept ./data)"
     } else {
         Write-Info "Nothing to clean"
     }
@@ -291,6 +294,13 @@ if ($Verify) {
 # Step 1: Build Tauri application
 # ============================================================================
 $totalSteps = 3
+
+# -Verify checks the existing package only: no audit, no build, no assembly.
+# (The block below is deliberately not re-indented; it ends before Step 3.)
+if ($Verify) {
+    $totalSteps = 1
+    $stepNum = 0
+} else {
 
 # Every mode that produces a package (incl. -SkipBuild) passes the audit first.
 Invoke-DependencyAudit
@@ -500,6 +510,8 @@ $installBat = Join-Path $resOutDir 'install-webview2.bat'
 $installBatContent = "@echo off`r`necho Installing Microsoft Edge WebView2 Runtime...`r`n""%~dp0MicrosoftEdgeWebview2Setup.exe"" /install`r`necho Done. You can now run Sidearm.`r`npause"
 [System.IO.File]::WriteAllText($installBat, $installBatContent, [System.Text.Encoding]::ASCII)
 Write-Ok "resources/install-webview2.bat"
+
+} # end of the non -Verify block (audit, build, assembly)
 
 # ============================================================================
 # Step 3: Verification

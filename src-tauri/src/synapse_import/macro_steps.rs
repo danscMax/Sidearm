@@ -45,13 +45,16 @@ pub fn build(
     let mut steps: Vec<ParsedSequenceStep> = Vec::new();
     let mut mods = ModifierFlags::default();
     let mut pending_down: Option<(u16, bool)> = None;
+    // Each kind of warning once per macro: an untrusted export with thousands of
+    // events (and a long macro name) must not multiply into thousands of copies.
+    let mut warned = WarnedKinds::default();
 
     for event in events {
         match *event {
             NormalizedEvent::Delay(delay_ms) => {
                 if delay_ms > 0 {
                     let clamped = delay_ms.min(MAX_MACRO_DELAY_MS);
-                    if clamped != delay_ms {
+                    if clamped != delay_ms && !std::mem::replace(&mut warned.delay_clamped, true) {
                         warnings.push(ImportWarning::new(
                             "macro_delay_clamped",
                             format!(
@@ -76,19 +79,21 @@ pub fn build(
                         // Overlapping non-modifier downs — emit the first and warn
                         // that simultaneous holds fire as independent keystrokes.
                         let (prev_code, prev_ext) = pending_down.take().unwrap();
-                        emit_send(&mut steps, prev_code, prev_ext, mods, macro_name, warnings);
+                        emit_send(&mut steps, prev_code, prev_ext, mods, macro_name, warnings, &mut warned);
                         pending_down = Some((makecode, is_extended));
-                        warnings.push(ImportWarning::new(
-                            "macro_hold_flattened",
-                            format!(
-                                "Macro `{macro_name}` had overlapping key-holds — they will fire as independent keystrokes."
-                            ),
-                        ));
+                        if !std::mem::replace(&mut warned.hold_flattened, true) {
+                            warnings.push(ImportWarning::new(
+                                "macro_hold_flattened",
+                                format!(
+                                    "Macro `{macro_name}` had overlapping key-holds — they will fire as independent keystrokes."
+                                ),
+                            ));
+                        }
                     }
                 } else if let Some(canon) = makecode::modifier_canonical(makecode, is_extended) {
                     set_modifier(&mut mods, canon, false);
                 } else if let Some((code, ext)) = pending_down.take() {
-                    emit_send(&mut steps, code, ext, mods, macro_name, warnings);
+                    emit_send(&mut steps, code, ext, mods, macro_name, warnings, &mut warned);
                 }
             }
         }
@@ -96,10 +101,18 @@ pub fn build(
 
     // Emit any pending key if the macro ended with a dangling down.
     if let Some((code, ext)) = pending_down {
-        emit_send(&mut steps, code, ext, mods, macro_name, warnings);
+        emit_send(&mut steps, code, ext, mods, macro_name, warnings, &mut warned);
     }
 
     steps
+}
+
+/// Warnings already given for the macro being built.
+#[derive(Default)]
+struct WarnedKinds {
+    delay_clamped: bool,
+    hold_flattened: bool,
+    unknown_scancodes: std::collections::BTreeSet<u16>,
 }
 
 fn set_modifier(mods: &mut ModifierFlags, canon: &str, value: bool) {
@@ -119,16 +132,19 @@ fn emit_send(
     mods: ModifierFlags,
     macro_name: &str,
     warnings: &mut Vec<ImportWarning>,
+    warned: &mut WarnedKinds,
 ) {
     let key_name = match makecode::makecode_to_key(makecode_val, is_extended) {
         Some(k) => k.to_string(),
         None => {
-            warnings.push(ImportWarning::new(
-                "unknown_scancode",
-                format!(
-                    "Macro `{macro_name}` uses unknown scancode 0x{makecode_val:02X} — emitted as a literal."
-                ),
-            ));
+            if warned.unknown_scancodes.insert(makecode_val) {
+                warnings.push(ImportWarning::new(
+                    "unknown_scancode",
+                    format!(
+                        "Macro `{macro_name}` uses unknown scancode 0x{makecode_val:02X} — emitted as a literal."
+                    ),
+                ));
+            }
             format!("Scancode(0x{makecode_val:02X})")
         }
     };
@@ -149,6 +165,21 @@ mod edge_proptests {
     // -----------------------------------------------------------------------
     // Boundary: empty event list → empty steps
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn a_repeated_warning_is_given_once_per_macro() {
+        // Untrusted input: 10k over-long delays and unknown keys must not make 10k warnings.
+        let mut events: Vec<NormalizedEvent> =
+            (0..10_000).map(|_| NormalizedEvent::Delay(MAX_MACRO_DELAY_MS + 1)).collect();
+        for _ in 0..10_000 {
+            events.push(NormalizedEvent::Key { makecode: 0x7F, is_extended: true, is_down: true });
+            events.push(NormalizedEvent::Key { makecode: 0x7F, is_extended: true, is_down: false });
+        }
+        let mut w = Vec::new();
+        build(&events, "m", &mut w);
+        assert_eq!(w.iter().filter(|w| w.code == "macro_delay_clamped").count(), 1);
+        assert!(w.iter().filter(|w| w.code == "unknown_scancode").count() <= 1);
+    }
 
     #[test]
     fn boundary_empty_events_produce_no_steps() {

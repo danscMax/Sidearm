@@ -236,6 +236,7 @@ fn build_steps(
     warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedSequenceStep> {
     let mut normalized: Vec<NormalizedEvent> = Vec::new();
+    let mut mouse_warned = false;
     for ev in events {
         if let Some(delay_ms) = ev.delay_ms
             && delay_ms > 0
@@ -249,7 +250,7 @@ fn build_steps(
             // that the v4 path emits so the in-ZIP/sibling-XML paths have equal
             // visibility. Other non-key types still skip without a warning. This
             // changes no produced steps — only adds the warning.
-            if ev.ty == "2" {
+            if ev.ty == "2" && !std::mem::replace(&mut mouse_warned, true) {
                 warnings.push(ImportWarning::new(
                     "macro_mouse_event_skipped",
                     format!(

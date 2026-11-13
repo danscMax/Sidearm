@@ -63,6 +63,12 @@ pub enum SynapseV3Error {
 pub(crate) const MAX_ZIP_ENTRIES: usize = 4096;
 pub(crate) const MAX_ENTRY_UNCOMPRESSED: u64 = 16 * 1024 * 1024; // 16 MiB per entry
 const MAX_TOTAL_UNCOMPRESSED: u64 = 128 * 1024 * 1024; // 128 MiB total
+/// Profiles taken from one archive (the V4 parser's limit too).
+const MAX_V3_PROFILES: usize = 64;
+/// Macro steps copied into all profiles together: each profile gets its own
+/// copy of the macros it uses, so one big macro shared by many profiles would
+/// multiply past the ZIP budget, which only counts the archive's bytes.
+const MAX_IMPORTED_MACRO_STEPS: usize = 200_000;
 
 /// Validate the archive's declared shape (entry count + per-entry and total
 /// uncompressed sizes) before reading any entry. Pure and testable; the live
@@ -164,8 +170,16 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
 
     // 2. Profiles — one XML per profile with guid + name.
     let mut profiles: Vec<ParsedProfile> = Vec::new();
+    let mut step_budget = MAX_IMPORTED_MACRO_STEPS;
     for name in &names {
         if name.starts_with("Profiles/") && name.ends_with(".xml") {
+            if profiles.len() >= MAX_V3_PROFILES {
+                warnings.push(ImportWarning::new(
+                    "v3_too_many_profiles",
+                    format!("The export has more than {MAX_V3_PROFILES} profiles; the rest were skipped."),
+                ));
+                break;
+            }
             let raw = read_file(&mut archive, name)?;
             match parse_v3_profile_meta(&raw) {
                 Ok((guid, pname)) => {
@@ -177,7 +191,8 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
                         &pname,
                         &mut warnings,
                     );
-                    let referenced_macros = collect_referenced_macros(&bindings, &macros_by_guid);
+                    let referenced_macros =
+                        collect_referenced_macros(&bindings, &macros_by_guid, &mut step_budget, &mut warnings);
                     profiles.push(ParsedProfile {
                         synapse_guid: guid,
                         name: pname,
@@ -261,6 +276,8 @@ fn collect_profile_bindings<R: Read + std::io::Seek>(
 fn collect_referenced_macros(
     bindings: &[ParsedBinding],
     macros_by_guid: &HashMap<String, ParsedMacro>,
+    step_budget: &mut usize,
+    warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedMacro> {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut out: Vec<ParsedMacro> = Vec::new();
@@ -269,6 +286,15 @@ fn collect_referenced_macros(
             && seen.insert(macro_guid.clone())
             && let Some(m) = macros_by_guid.get(macro_guid)
         {
+            // Checked before the copy is made, so the budget bounds memory.
+            let Some(left) = step_budget.checked_sub(m.steps.len()) else {
+                warnings.push(ImportWarning::new(
+                    "v3_macro_budget_exceeded",
+                    format!("Macro `{}` was skipped: the export's macros are too large to import together.", m.name),
+                ));
+                continue;
+            };
+            *step_budget = left;
             out.push(m.clone());
         }
     }

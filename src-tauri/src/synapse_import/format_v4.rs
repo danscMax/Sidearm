@@ -640,6 +640,7 @@ fn build_macro_steps(
     warnings: &mut Vec<ImportWarning>,
 ) -> Vec<ParsedSequenceStep> {
     let mut normalized: Vec<NormalizedEvent> = Vec::new();
+    let mut mouse_warned = false;
     for ev in events {
         match event_type(&ev.ty) {
             EventType::Delay => {
@@ -663,15 +664,15 @@ fn build_macro_steps(
             }
             EventType::MouseEvent => {
                 // Mouse events in macros are rare and Sidearm's sequence model
-                // doesn't express them natively — warn and skip.
-                warnings.push(
-                    ImportWarning::new(
+                // doesn't express them natively — warn (once per macro) and skip.
+                if !std::mem::replace(&mut mouse_warned, true) {
+                    warnings.push(ImportWarning::new(
                         "macro_mouse_event_skipped",
                         format!(
                             "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only."
                         ),
-                    ),
-                );
+                    ));
+                }
             }
             EventType::ActionBar => {
                 // UI marker inside the exported macro — not a runtime event.

@@ -2,7 +2,7 @@ import type { AppConfig } from "./config";
 import i18n from "../i18n";
 import { modifierLabels, mouseActionLabel } from "./action-helpers";
 
-export type SourceKind = "synapseV4";
+type SourceKind = "synapseV4";
 
 export interface ParsedSynapseProfiles {
   sourceKind: SourceKind;
@@ -11,14 +11,14 @@ export interface ParsedSynapseProfiles {
   warnings: ImportWarning[];
 }
 
-export interface ParsedProfile {
+interface ParsedProfile {
   synapseGuid: string;
   name: string;
   bindings: ParsedBinding[];
   macros: ParsedMacro[];
 }
 
-export interface ParsedBinding {
+interface ParsedBinding {
   controlId: string;
   layer: "standard" | "hypershift";
   sourceInputId: string;
@@ -47,7 +47,7 @@ export interface ParsedMacro {
   steps: ParsedSequenceStep[];
 }
 
-export type ParsedSequenceStep =
+type ParsedSequenceStep =
   | { kind: "send"; value: string }
   | { kind: "sleep"; delayMs: number };
 
@@ -73,7 +73,7 @@ export function describeParsedAction(action: ParsedAction, macros: ParsedMacro[]
   }
 }
 
-export interface ImportWarning {
+interface ImportWarning {
   code: string;
   message: string;
   context?: string;

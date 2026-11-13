@@ -18,6 +18,7 @@ import type {
 import { ACTION_CATEGORIES } from "./constants";
 import { mediaKeyLabel, modifierLabels, mouseActionLabel } from "./action-helpers";
 import { assertNever } from "./assertNever";
+import { isPlaceholderAction } from "./config-editing";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -32,10 +33,19 @@ const KEY_NAME_MAP: Record<string, string> = {
   Escape: "Esc",
 };
 
+const PRIMARY_KEY_BY_CODE: Record<string, string> = {
+  Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Backslash: "\\",
+  Semicolon: ";", Quote: "'", Backquote: "`", Comma: ",", Period: ".", Slash: "/",
+};
+
 /** Resolve the human-readable key name from a KeyboardEvent.
  *  Chromium returns key="Unidentified" and code="" for F13-F24 (sent via SendInput).
  *  In that case, fall back to the deprecated keyCode (124=F13 … 135=F24). */
 export function resolveKeyName(event: KeyboardEvent | ReactKeyboardEvent): string {
+  // Modifiers are stored separately; event.key already includes Shift/layout.
+  const digit = /^Digit([0-9])$/.exec(event.code);
+  if (digit) return digit[1];
+  if (Object.hasOwn(PRIMARY_KEY_BY_CODE, event.code)) return PRIMARY_KEY_BY_CODE[event.code];
   // 1. Try event.key
   if (event.key && event.key !== "Unidentified") return event.key;
   // 2. Try event.code (e.g. "F13")
@@ -326,6 +336,7 @@ export function buildAction(params: {
     }
   })();
 
+  if (existingAction && !isPlaceholderAction(existingAction) && existingAction.notes !== undefined) base.notes = existingAction.notes;
   return validConditions.length > 0 ? { ...base, conditions: validConditions } : base;
 }
 

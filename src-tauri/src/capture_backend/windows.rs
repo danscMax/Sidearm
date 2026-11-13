@@ -110,6 +110,17 @@ const VK_PROBE_KEY: u16 = 0xE8;
 /// How often the health monitor checks (milliseconds).
 const HOOK_HEALTH_CHECK_INTERVAL_MS: u32 = 5000;
 
+fn hook_health_due(
+    deadline: &mut std::time::Instant,
+    now: std::time::Instant,
+) -> bool {
+    if now < *deadline {
+        return false;
+    }
+    *deadline = now + std::time::Duration::from_millis(u64::from(HOOK_HEALTH_CHECK_INTERVAL_MS));
+    true
+}
+
 /// How many consecutive probe failures required before reinstalling the hook.
 /// A single failed probe can be caused by UIPI blocking SendInput (e.g. an
 /// elevated window is in the foreground), not necessarily a dead hook.
@@ -224,6 +235,10 @@ thread_local! {
         const { std::cell::RefCell::new(Vec::new()) };
     static HELPER_MODIFIERS: std::cell::RefCell<HelperModifierState> =
         std::cell::RefCell::new(HelperModifierState::default());
+    /// Only hardware modifier events; our replays and other apps' injections
+    /// cannot prove that a physical key was released.
+    static PHYSICAL_MODIFIERS: std::cell::RefCell<HelperModifierState> =
+        std::cell::RefCell::new(HelperModifierState::default());
     static HELPER_SUPPRESSIONS: std::cell::RefCell<std::collections::HashMap<u32, String>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
@@ -285,6 +300,7 @@ thread_local! {
 }
 
 pub(super) struct CaptureBackendHandle {
+    app: AppHandle,
     hook_thread_id: u32,
     hook_thread: JoinHandle<()>,
     worker_thread: JoinHandle<()>,
@@ -371,28 +387,32 @@ struct HelperModifierState {
     alt: bool,
     shift: bool,
     win: bool,
+    held_vks: u16,
 }
 
 impl HelperModifierState {
     fn apply_vk_event(&mut self, vk: u32, is_down: bool) -> bool {
-        if is_control_vk(vk) {
-            self.ctrl = is_down;
-            return true;
+        let (bit, family, active) = match vk {
+            VK_CONTROL => (1, 7, &mut self.ctrl),
+            VK_LCONTROL => (2, 7, &mut self.ctrl),
+            VK_RCONTROL => (4, 7, &mut self.ctrl),
+            VK_MENU => (8, 56, &mut self.alt),
+            VK_LMENU => (16, 56, &mut self.alt),
+            VK_RMENU => (32, 56, &mut self.alt),
+            VK_SHIFT => (64, 448, &mut self.shift),
+            VK_LSHIFT => (128, 448, &mut self.shift),
+            VK_RSHIFT => (256, 448, &mut self.shift),
+            VK_LWIN => (512, 1536, &mut self.win),
+            VK_RWIN => (1024, 1536, &mut self.win),
+            _ => return false,
+        };
+        if is_down {
+            self.held_vks |= bit;
+        } else {
+            self.held_vks &= !bit;
         }
-        if is_alt_vk(vk) {
-            self.alt = is_down;
-            return true;
-        }
-        if is_shift_vk(vk) {
-            self.shift = is_down;
-            return true;
-        }
-        if is_win_vk(vk) {
-            self.win = is_down;
-            return true;
-        }
-
-        false
+        *active = self.held_vks & family != 0;
+        true
     }
 
     /// Returns the current modifier state as a bitmask compatible with
@@ -431,22 +451,6 @@ impl HelperModifierState {
         }
         result
     }
-}
-
-fn is_control_vk(vk: u32) -> bool {
-    matches!(vk, VK_CONTROL | VK_LCONTROL | VK_RCONTROL)
-}
-
-fn is_alt_vk(vk: u32) -> bool {
-    matches!(vk, VK_MENU | VK_LMENU | VK_RMENU)
-}
-
-fn is_shift_vk(vk: u32) -> bool {
-    matches!(vk, VK_SHIFT | VK_LSHIFT | VK_RSHIFT)
-}
-
-fn is_win_vk(vk: u32) -> bool {
-    matches!(vk, VK_LWIN | VK_RWIN)
 }
 
 /// RegisterHotKey modifier-mask bit for a modifier VK, or 0 if `vk` is not a
@@ -657,27 +661,9 @@ const CONSUMED_MODIFIER_FRESHNESS_WINDOW: std::time::Duration =
 /// tune via `Settings.modifierStaleGcMs`.
 const DEFAULT_CONSUMED_MODIFIER_STALE_MS: u64 = 5000;
 
-/// Default maximum age of a `REPLAYED_AWAITING_UP` entry before we
-/// force-release the modifier via SendInput key-up.  Guards against
-/// orphan-replays where the user's physical modifier-up was lost (alt-tab,
-/// focus change, RDP, slow Razer firmware drop, external app injecting
-/// modifier without matching up).
-///
-/// 3 s balances responsiveness against breaking legitimate long-presses:
-///  - Too **short** and a force-release fires while the user is still
-///    physically holding the modifier — OS thinks it is up, the next
-///    Sidearm action that depends on the held modifier sees no Ctrl.
-///  - Too **long** and the orphan-stuck window stretches uncomfortably.
-///
-/// 30 s (the historical default) was painful enough that users perceived
-/// random "stuck Ctrl" episodes and reached for workarounds (re-pressing
-/// Ctrl, restarting other tools).  3 s recovers fast enough that most
-/// stuck-Ctrl events are imperceptible while still covering routine
-/// hold-Ctrl-then-click multi-selects.  Combined with the OS-state probe
-/// in `gc_orphan_replayed_modifiers`, holding Ctrl with periodic activity
-/// in apps that GetAsyncKeyState-poll won't trigger spurious releases.
-///
-/// Users can tune via `Settings.replayedModifierForceReleaseMs`.
+/// Maximum age of a replay without a confirmed physical hold. Hardware
+/// modifiers stay held until their release or an explicit hook reset.
+/// Tuned by `Settings.replayedModifierForceReleaseMs`.
 const DEFAULT_REPLAYED_AWAITING_UP_MS: u64 = 3_000;
 
 thread_local! {
@@ -860,13 +846,14 @@ fn gc_stale_consumed_modifiers() {
 /// expiry logic without injecting key events into the running OS.
 fn drain_expired_replayed_modifiers() -> Vec<(u32, u128)> {
     let threshold = REPLAYED_AWAITING_UP_THRESHOLD.with(|c| c.get());
+    let physical = PHYSICAL_MODIFIERS.with_borrow(|state| state.as_modifier_flags());
     REPLAYED_AWAITING_UP.with(|cell| {
         let now = std::time::Instant::now();
         let mut map = cell.borrow_mut();
         let mut out: Vec<(u32, u128)> = Vec::new();
         map.retain(|vk, at| {
             let age = now.duration_since(*at);
-            if age >= threshold {
+            if age >= threshold && physical & modifier_mask_bit(*vk) == 0 {
                 out.push((*vk, age.as_millis()));
                 false
             } else {
@@ -1372,6 +1359,7 @@ impl CaptureBackendHandle {
         let foreground_watcher_thread_id = fg_ready_rx.recv().ok();
 
         Ok(Self {
+            app,
             hook_thread_id,
             hook_thread,
             worker_thread,
@@ -1384,6 +1372,7 @@ impl CaptureBackendHandle {
 
     pub(super) fn stop(self) -> Result<(), String> {
         use windows_sys::Win32::UI::WindowsAndMessaging::{PostThreadMessageW, WM_QUIT};
+        crate::cheatsheet::cancel(&self.app);
 
         // Every mouse restores at once, on its own thread: a mouse stuck in a
         // HID call must not hang the stop (and with it the app's exit).
@@ -1487,7 +1476,7 @@ fn build_hotkey_registrations(
     consumer: bool,
 ) -> Result<Vec<RegisteredHotkey>, String> {
     let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
-    for (index, mapping) in config.encoder_mappings.iter().enumerate() {
+    for mapping in &config.encoder_mappings {
         let device = config.physical_controls.iter()
             .find(|control| control.id == mapping.control_id)
             .map(|control| control.device_id.as_str());
@@ -1537,7 +1526,7 @@ fn build_hotkey_registrations(
             });
 
         registrations.push(RegisteredHotkey {
-            id: (index + 1) as i32,
+            id: (registrations.len() + 1) as i32,
             encoded_key: hotkey.canonical,
             modifiers_mask: register_hotkey_mask(&hotkey.modifiers),
             primary_vk: u32::from(hotkey.key.code),
@@ -2830,7 +2819,24 @@ unsafe fn unhook_mouse_hook(handle: &mut windows_sys::Win32::UI::WindowsAndMessa
             *handle = std::ptr::null_mut();
         }
     }
+    reset_mouse_capture_state(queue_hyper_injection);
+}
+
+fn reset_mouse_capture_state(mut inject: impl FnMut(u8, bool)) {
     HELPER_HYPER_ACTIVE.store(false, Ordering::Relaxed);
+    HELPER_HYPER_USED.store(false, Ordering::Relaxed);
+    if HELPER_LMB_TRANSLATED.swap(false, Ordering::Relaxed) {
+        inject(HYPER_TRIGGER_RIGHT, false);
+    }
+    let held = HELPER_HYPER2_HELD.swap(HYPER_TRIGGER_OFF, Ordering::Relaxed);
+    HELPER_HYPER2_USED.store(false, Ordering::Relaxed);
+    HELPER_HYPER2_SINCE.set(None);
+    PENDING_TRIGGER2.set(None);
+    PASSED_TRIGGER2.set(None);
+    RAW_PRESSES.with_borrow_mut(|presses| presses.fill(None));
+    if held != HYPER_TRIGGER_OFF {
+        HELPER_MATCHES.with_borrow_mut(|lines| lines.push(format!("{TRIGGER2_PREFIX}0")));
+    }
 }
 
 #[cfg(test)]
@@ -3209,6 +3215,39 @@ mod mouse_hook_tests {
     }
 }
 
+#[cfg(test)]
+mod mouse_capture_reset_tests {
+    use super::*;
+    static LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn resetting_mouse_capture_releases_a_translated_right_button_once() {
+        let _lock = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        HELPER_LMB_TRANSLATED.store(true, Ordering::Relaxed);
+        let mut injected = Vec::new();
+        reset_mouse_capture_state(|button, down| injected.push((button, down)));
+        reset_mouse_capture_state(|button, down| injected.push((button, down)));
+        assert_eq!(injected, [(HYPER_TRIGGER_RIGHT, false)]);
+        assert!(!HELPER_LMB_TRANSLATED.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn resetting_mouse_capture_cancels_hyper2_without_a_tap() {
+        let _lock = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        HELPER_LMB_TRANSLATED.store(false, Ordering::Relaxed);
+        HELPER_HYPER2_HELD.store(HYPER_TRIGGER_RIGHT, Ordering::Relaxed);
+        HELPER_HYPER2_USED.store(false, Ordering::Relaxed);
+        HELPER_HYPER2_SINCE.set(Some(std::time::Instant::now()));
+        HELPER_MATCHES.with_borrow_mut(Vec::clear);
+        let mut injected = Vec::new();
+        reset_mouse_capture_state(|button, down| injected.push((button, down)));
+        assert!(!hyper2_stamp(&["F13".into()]));
+        assert!(HELPER_HYPER2_SINCE.get().is_none());
+        assert!(HELPER_MATCHES.with_borrow(|lines| lines.iter().any(|line| line == "H2HOLD:0")));
+        assert!(injected.is_empty(), "recovery must never synthesize a quick tap");
+    }
+}
+
 /// LL keyboard hook callback for the capture helper process.
 /// Matches modifier+F-key combos and buffers the encoded key in HELPER_MATCHES.
 unsafe extern "system" fn helper_ll_keyboard_proc(code: i32, w_param: usize, l_param: isize) -> isize {
@@ -3322,6 +3361,9 @@ unsafe extern "system" fn helper_ll_keyboard_proc(code: i32, w_param: usize, l_p
         // short-circuited above before reaching this block.
         const LLKHF_INJECTED: u32 = 0x10;
         let externally_injected = (kb.flags & LLKHF_INJECTED) != 0;
+        if is_modifier && (is_keydown || is_keyup) && !externally_injected {
+            PHYSICAL_MODIFIERS.with_borrow_mut(|state| { state.apply_vk_event(vk, is_keydown); });
+        }
 
         // Factory-defaults detection: watch digit-row keydowns (real and
         // externally-injected) for the Razer "real press + injected duplicate"
@@ -3684,7 +3726,7 @@ pub fn capture_helper_main() {
     use std::io::BufRead;
     use std::mem::MaybeUninit;
     use windows_sys::Win32::{
-        Foundation::{WAIT_FAILED, WAIT_TIMEOUT},
+        Foundation::WAIT_FAILED,
         System::{LibraryLoader::GetModuleHandleW, Threading::GetCurrentThreadId},
         UI::WindowsAndMessaging::{
             DispatchMessageW, MSG, MWMO_INPUTAVAILABLE, MsgWaitForMultipleObjectsEx, PM_REMOVE,
@@ -3833,6 +3875,7 @@ pub fn capture_helper_main() {
         super::consumer::spawn_reader(reader.signals, model, hyper, stamp2, true);
     }
     HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
+    PHYSICAL_MODIFIERS.with_borrow_mut(|state| *state = HelperModifierState::default());
     HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
     HELPER_MATCHES.with(|cell| cell.borrow_mut().clear());
     PENDING_MODIFIERS.with(|cell| cell.borrow_mut().clear());
@@ -3949,6 +3992,8 @@ pub fn capture_helper_main() {
     let mut mouse_held_cycles: u32 = 0;
     let mut mouse_reinstall_count: u32 = 0;
     let mut last_mouse_pos = current_cursor_pos();
+    let mut health_deadline = std::time::Instant::now()
+        + std::time::Duration::from_millis(u64::from(HOOK_HEALTH_CHECK_INTERVAL_MS));
 
     // Every exit below leaves the process: an inner `break` alone would keep a
     // hookless helper alive until the parent kills it (5 s on every stop).
@@ -3967,6 +4012,8 @@ pub fn capture_helper_main() {
                 remaining.max(1) // at least 1ms to avoid busy-wait
             }
         }) };
+        let health_wait = health_deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as u32;
+        let wait_timeout = wait_timeout.min(health_wait.max(1));
 
         // Wait for messages OR timeout (health check / modifier replay).
         let wait_result = unsafe {
@@ -3988,14 +4035,7 @@ pub fn capture_helper_main() {
             continue;
         }
 
-        if wait_result == WAIT_TIMEOUT {
-            // Timeout fired — could be for modifier replay (20ms) or health
-            // check (5000ms).  Only run health check logic when the timeout
-            // was the full health check interval (no pending modifiers).
-            let was_health_timeout = wait_timeout == HOOK_HEALTH_CHECK_INTERVAL_MS;
-
-            if was_health_timeout {
-                // No messages arrived within the interval — run health check.
+        if hook_health_due(&mut health_deadline, std::time::Instant::now()) {
 
                 // Fast path: if ANY LL hook callback fired since the last check,
                 // the hook is demonstrably alive — no probe needed.
@@ -4040,6 +4080,7 @@ pub fn capture_helper_main() {
                             HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
                             HELPER_MODIFIERS
                                 .with(|cell| *cell.borrow_mut() = HelperModifierState::default());
+                            PHYSICAL_MODIFIERS.with_borrow_mut(|state| *state = HelperModifierState::default());
                             HELPER_MATCHES.with(|cell| {
                                 cell.borrow_mut().push(format!(
                                     "DEBUG:mod-clear-on-health-reinstall pending={} consumed={}",
@@ -4166,12 +4207,10 @@ pub fn capture_helper_main() {
                         }
                     }
                 }
-            } // was_health_timeout
-            // Fall through to pump any messages that may have arrived.
         }
 
-        // Pump all pending messages (PeekMessageW is non-blocking).
-        loop {
+        // Bound each drain so continuous raw input cannot starve maintenance.
+        for _ in 0..256 {
             let found =
                 unsafe { PeekMessageW(msg.as_mut_ptr(), std::ptr::null_mut(), 0, 0, PM_REMOVE) };
             if found == 0 {
@@ -4209,6 +4248,7 @@ pub fn capture_helper_main() {
                 CONSUMED_MODIFIER_VKS.with(|cell| cell.borrow_mut().clear());
                 HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
                 HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
+                PHYSICAL_MODIFIERS.with_borrow_mut(|state| *state = HelperModifierState::default());
                 let new_hook = unsafe {
                     SetWindowsHookExW(WH_KEYBOARD_LL, Some(helper_ll_keyboard_proc), hmod, 0)
                 };
@@ -4296,7 +4336,9 @@ pub fn capture_helper_main() {
         }
     }
 
-    // 6. Cleanup (reached only on reinstall failure)
+    // 6. Common cleanup after every message-pump exit.
+    reset_mouse_capture_state(queue_hyper_injection);
+    let _ = drain_helper_matches(&stdout);
     // Let a queued right-click finish before the process goes away: exiting with
     // a pending right-up still queued would leave the button down at OS level.
     drain_pending_hyper_injections(std::time::Duration::from_millis(300));
@@ -4722,9 +4764,7 @@ fn spawn_capture_helper(
         // B-F4 Mode A: the read loop only exits when the helper's stdout hits
         // EOF — i.e. the helper process has exited/crashed. Flag it so the
         // worker releases holds whose key-ups will now never arrive.
-        helper_died.store(true, Ordering::SeqCst);
-        // No release of a reader-reported button can arrive any more.
-        crate::mouse_memory::live_overlay::clear_held();
+        finish_helper_capture(&helper_died, crate::mouse_memory::live_overlay::clear_held, || crate::cheatsheet::cancel(&app));
         if reader_stopping.load(Ordering::SeqCst) {
             return; // `stop()` closed it
         }
@@ -4740,6 +4780,12 @@ fn spawn_capture_helper(
         reader_thread,
         stopping,
     })
+}
+
+fn finish_helper_capture(helper_died: &AtomicBool, clear_held: impl FnOnce(), cancel_sheet: impl FnOnce()) {
+    helper_died.store(true, Ordering::SeqCst);
+    clear_held();
+    cancel_sheet();
 }
 
 /// Restart delays after successive helper deaths within [`HELPER_RESTART_WINDOW`];
@@ -5366,6 +5412,73 @@ mod helper_modifier_state_tests {
     use super::*;
 
     #[test]
+    fn helper_eof_cancels_both_a_visible_sheet_and_a_waiting_timer() {
+        for initially_visible in [false, true] {
+            let died = AtomicBool::new(false);
+            let mut held = vec!["F13"];
+            let mut sheet = crate::cheatsheet::SheetLifecycle::default();
+            let timer = sheet.begin();
+            let visible = std::cell::Cell::new(false);
+            if initially_visible {
+                sheet.draw(timer, || {});
+                sheet.layout(|| visible.set(true));
+            }
+            finish_helper_capture(&died, || held.clear(), || sheet.cancel(|| visible.set(false)));
+            assert!(died.load(Ordering::SeqCst));
+            assert!(held.is_empty());
+            assert!(!visible.get(), "a visible sheet is hidden at EOF");
+            sheet.draw(timer, || panic!("the real timer's late show must be cancelled"));
+            sheet.layout(|| panic!("a page measured before teardown must not show"));
+        }
+    }
+
+    #[test]
+    fn busy_message_queue_cannot_postpone_hook_health_checks() {
+        let start = std::time::Instant::now();
+        let mut deadline = start + std::time::Duration::from_secs(5);
+        let mut checked_at = Vec::new();
+        for ms in (0..=10_000).step_by(10) {
+            if hook_health_due(&mut deadline, start + std::time::Duration::from_millis(ms)) {
+                checked_at.push(ms);
+            }
+        }
+        assert_eq!(checked_at, [5_000, 10_000]);
+    }
+
+    #[test]
+    fn filtered_mappings_keep_hotkey_ids_addressable() {
+        let mut config = crate::mouse_memory::live_overlay::tests::config_with_v3();
+        config.encoder_mappings.sort_by_key(|mapping| !mapping.control_id.as_str().starts_with("v3_"));
+        let registrations = build_hotkey_registrations(&config, &[], true).unwrap();
+        assert!(registrations.len() < config.encoder_mappings.len());
+        for registration in &registrations {
+            let selected = registrations.get((registration.id as usize) - 1);
+            assert_eq!(selected.map(|reg| reg.encoded_key.as_str()), Some(registration.encoded_key.as_str()));
+        }
+    }
+
+    #[test]
+    fn releasing_one_side_keeps_the_other_modifier_held() {
+        for (left, right, mask) in [
+            (VK_LCONTROL, VK_RCONTROL, MOD_CONTROL),
+            (VK_LMENU, VK_RMENU, MOD_ALT),
+            (VK_LSHIFT, VK_RSHIFT, MOD_SHIFT),
+            (VK_LWIN, VK_RWIN, MOD_WIN),
+        ] {
+            for (first, last) in [(left, right), (right, left)] {
+                let mut state = HelperModifierState::default();
+                state.apply_vk_event(first, true);
+                state.apply_vk_event(last, true);
+                state.apply_vk_event(last, true); // repeated downs are idempotent
+                state.apply_vk_event(first, false);
+                assert!(state.matches_mask(mask), "other side of {mask} is still held");
+                state.apply_vk_event(last, false);
+                assert_eq!(state.as_modifier_flags(), 0);
+            }
+        }
+    }
+
+    #[test]
     fn tracks_left_and_right_modifier_variants() {
         let mut state = HelperModifierState::default();
 
@@ -5378,13 +5491,13 @@ mod helper_modifier_state_tests {
         assert!(state.apply_vk_event(VK_LWIN, true));
         assert!(state.win);
 
-        assert!(state.apply_vk_event(VK_CONTROL, false));
+        assert!(state.apply_vk_event(VK_LCONTROL, false));
         assert!(!state.ctrl);
-        assert!(state.apply_vk_event(VK_SHIFT, false));
+        assert!(state.apply_vk_event(VK_RSHIFT, false));
         assert!(!state.shift);
-        assert!(state.apply_vk_event(VK_MENU, false));
+        assert!(state.apply_vk_event(VK_RMENU, false));
         assert!(!state.alt);
-        assert!(state.apply_vk_event(VK_RWIN, false));
+        assert!(state.apply_vk_event(VK_LWIN, false));
         assert!(!state.win);
     }
 
@@ -5395,6 +5508,7 @@ mod helper_modifier_state_tests {
             alt: false,
             shift: true,
             win: false,
+            ..HelperModifierState::default()
         };
 
         // Exact match
@@ -5414,6 +5528,7 @@ mod helper_modifier_state_tests {
             alt: true,
             shift: false,
             win: false,
+            ..HelperModifierState::default()
         };
         assert_eq!(state.as_modifier_flags(), MOD_CONTROL | MOD_ALT);
     }
@@ -5430,9 +5545,23 @@ mod replayed_awaiting_up_tests {
     /// onto the same worker thread.)
     fn reset_state() {
         REPLAYED_AWAITING_UP.with(|cell| cell.borrow_mut().clear());
+        PHYSICAL_MODIFIERS.with_borrow_mut(|state| *state = HelperModifierState::default());
         REPLAYED_AWAITING_UP_THRESHOLD.with(|c| {
             c.set(Duration::from_millis(DEFAULT_REPLAYED_AWAITING_UP_MS));
         });
+    }
+
+    #[test]
+    fn a_physical_modifier_survives_replay_gc_until_its_release() {
+        reset_state();
+        PHYSICAL_MODIFIERS.with_borrow_mut(|state| { state.apply_vk_event(VK_LCONTROL, true); });
+        REPLAYED_AWAITING_UP.with_borrow_mut(|map| {
+            map.insert(VK_LCONTROL, Instant::now() - Duration::from_secs(30));
+        });
+        assert!(drain_expired_replayed_modifiers().is_empty(), "a long physical hold is no orphan");
+        assert!(REPLAYED_AWAITING_UP.with_borrow(|map| map.contains_key(&VK_LCONTROL)));
+        PHYSICAL_MODIFIERS.with_borrow_mut(|state| { state.apply_vk_event(VK_LCONTROL, false); });
+        assert_eq!(drain_expired_replayed_modifiers().len(), 1);
     }
 
     #[test]
@@ -6634,7 +6763,7 @@ mod edge_proptests {
             shift in any::<bool>(),
             win in any::<bool>(),
         ) {
-            let state = HelperModifierState { ctrl, alt, shift, win };
+            let state = HelperModifierState { ctrl, alt, shift, win, ..HelperModifierState::default() };
             let flags = state.as_modifier_flags();
             prop_assert_eq!(flags & !MOD_MODIFIER_BITS, 0,
                 "as_modifier_flags must not set bits outside MOD_MODIFIER_BITS; got {:#010X}", flags);
@@ -6649,7 +6778,7 @@ mod edge_proptests {
             shift in any::<bool>(),
             win in any::<bool>(),
         ) {
-            let state = HelperModifierState { ctrl, alt, shift, win };
+            let state = HelperModifierState { ctrl, alt, shift, win, ..HelperModifierState::default() };
             prop_assert!(state.matches_mask(0),
                 "bare (mask=0) must always match regardless of modifier state");
         }
@@ -6663,7 +6792,7 @@ mod edge_proptests {
             shift in any::<bool>(),
             win in any::<bool>(),
         ) {
-            let state = HelperModifierState { ctrl, alt, shift, win };
+            let state = HelperModifierState { ctrl, alt, shift, win, ..HelperModifierState::default() };
             let result = state.matches_mask(MOD_MODIFIER_BITS);
             let expected = ctrl && alt && shift && win;
             prop_assert_eq!(result, expected,
@@ -7080,7 +7209,7 @@ mod edge_proptests {
                 reg("Ctrl+F14",  MOD_CONTROL,           0x7D),
                 reg("Shift+F15", MOD_SHIFT,             0x7E),
             ];
-            let mut modifiers = HelperModifierState { ctrl: true, shift: true, alt: false, win: false };
+            let mut modifiers = HelperModifierState { ctrl: true, shift: true, alt: false, win: false, ..HelperModifierState::default() };
             let mut suppressions: HashMap<u32, String> = HashMap::new();
             let mut matches = Vec::new();
 
@@ -7107,7 +7236,7 @@ mod edge_proptests {
         ) {
             // Use bare F13 (no modifier needed) for simplicity
             let regs = vec![reg("F13", 0, 0x7C)];
-            let mut modifiers = HelperModifierState { ctrl, shift, alt: false, win: false };
+            let mut modifiers = HelperModifierState { ctrl, shift, alt: false, win: false, ..HelperModifierState::default() };
             let mut suppressions: HashMap<u32, String> = HashMap::new();
             let mut matches = Vec::new();
 
@@ -7232,6 +7361,7 @@ mod edge_proptests {
             alt: flags & MOD_ALT != 0,
             shift: flags & MOD_SHIFT != 0,
             win: flags & MOD_WIN != 0,
+            ..HelperModifierState::default()
         }
     }
 }

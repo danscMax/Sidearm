@@ -65,6 +65,11 @@ impl<T: Clone> Default for Gestures<T> {
 }
 
 impl<T: Clone> Gestures<T> {
+    /// A capture mode change or lost input session cancels every open pattern.
+    pub fn clear(&mut self) {
+        self.pending.clear();
+    }
+
     /// Whether `key` is being told apart (its release and repeats belong here).
     pub fn tracks(&self, key: &str) -> bool {
         self.pending.iter().any(|pending| pending.key == key)

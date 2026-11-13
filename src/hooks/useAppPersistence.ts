@@ -290,7 +290,7 @@ export function useAppPersistence(
     const reloadRevision = ++revisions.reload;
     const applyRevision = ++revisions.apply;
     revisions.pending += 1;
-    const superseded = () => applyRevision !== revisionRef.current.apply;
+    const superseded = () => applyRevision !== revisions.apply;
     // Cancel any pending auto-save
     clearTimeout(saveTimerRef.current);
     saveQueueRef.current = null;
@@ -306,7 +306,7 @@ export function useAppPersistence(
       }
       const result = await loadConfig();
       if (superseded()) return false;
-      revisionRef.current.awaiting = reloadRevision;
+      revisions.awaiting = reloadRevision;
       lastPersistedConfigRef.current = result.config;
       // Undo steps belong to the config they were taken on: replaying one onto
       // a reloaded config (restore, import, another instance's write) would
@@ -332,7 +332,7 @@ export function useAppPersistence(
       });
       return false;
     } finally {
-      revisionRef.current.pending -= 1;
+      revisions.pending -= 1;
     }
   }
 

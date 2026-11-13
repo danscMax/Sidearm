@@ -1329,7 +1329,6 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
             if mouse_memory::live_overlay::configure(&mut response.config, &mouse_memory::present_models()) {
                 let migrated = config::save_config(&config_dir, response.config, response.stamp)?;
                 response.config = migrated.config;
-                response.stamp = migrated.stamp;
                 response.warnings.extend(migrated.warnings);
                 response.stamp = migrated.stamp;
             }

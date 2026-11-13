@@ -104,7 +104,7 @@ describe("config revision for asynchronous imports", () => {
     expect(setError).not.toHaveBeenCalled();
   });
 
-  it.each(["success", "failure"])("keeps a later reload pending after the earlier reload's %s", async (outcome) => {
+  it.each(["success", "failure"])("keeps a later reload pending after a superseded earlier reload's %s", async (outcome) => {
     const { result } = await ready();
     const getRevision = result.current.getConfigRevision;
     const first = pendingLoad();
@@ -128,6 +128,32 @@ describe("config revision for asynchronous imports", () => {
       second.resolve(response(latest));
       expect(await secondRefresh).toBe(true);
       expect(getRevision?.()).toBeNull();
+    });
+    expect(result.current.activeConfig).toBe(latest);
+    expect(getRevision?.()).toBe(3);
+  });
+
+  it("stays pending while a reload that started after a committed one still loads", async () => {
+    const { result } = await ready();
+    const getRevision = result.current.getConfigRevision;
+    const first = pendingLoad();
+    const second = pendingLoad();
+    vi.mocked(loadConfig).mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    let firstRefresh!: Promise<boolean>;
+    act(() => { firstRefresh = result.current.refreshConfig(); });
+    await act(async () => {
+      first.resolve(response(makeConfig({ version: 2 })));
+      expect(await firstRefresh).toBe(true);
+    });
+    expect(getRevision?.()).toBe(2);
+    let secondRefresh!: Promise<boolean>;
+    act(() => { secondRefresh = result.current.refreshConfig(); });
+    // The first reload's commit marker is cleared, but the second still loads.
+    expect(getRevision?.()).toBeNull();
+    const latest = makeConfig({ version: 3 });
+    await act(async () => {
+      second.resolve(response(latest));
+      expect(await secondRefresh).toBe(true);
     });
     expect(result.current.activeConfig).toBe(latest);
     expect(getRevision?.()).toBe(3);

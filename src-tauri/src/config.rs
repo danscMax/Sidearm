@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 9;
+const SCHEMA_VERSION: i32 = 10;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -288,6 +288,10 @@ pub struct Settings {
     /// right thing went out). Off by default.
     #[serde(default)]
     pub osd_actions: bool,
+    /// Hold the HyperShift 2 trigger 1 s without pressing anything: its grid
+    /// shows at the cursor (`cheatsheet.rs`). Off by default.
+    #[serde(default)]
+    pub hs2_cheat_sheet: bool,
     /// Profile written into the mouse on exit for use without Sidearm;
     /// `None` = the fallback profile, [`OFFLINE_PROFILE_ACTIVE`] = the profile
     /// in effect at that moment (whichever window happened to be focused).
@@ -1043,7 +1047,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=8) {
+    if matches!(config.version, 2..=9) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -2013,6 +2017,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             show_battery_in_tray: false,
             sync_mice: false,
             osd_actions: false,
+            hs2_cheat_sheet: false,
             offline_profile_id: None,
         },
         profiles: seed_profiles(),
@@ -3845,7 +3850,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (9, 0xb7f4_c71e_ac34_625a);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (10, 0xb60d_e34a_e90f_699b);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

@@ -84,6 +84,8 @@ export interface Settings {
   syncMice?: boolean;
   /** Show the name of each action run in the OSD bubble. */
   osdActions?: boolean;
+  /** Hold the HyperShift 2 trigger 1 s: its grid shows at the cursor. */
+  hs2CheatSheet?: boolean;
   /** Profile written into the mouse on exit; absent = the fallback profile,
    *  `OFFLINE_PROFILE_ACTIVE` = the one in effect then. */
   offlineProfileId?: string;

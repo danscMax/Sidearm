@@ -1,5 +1,5 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
-  "entry": ["public/osd.js", "public/menu.js"],
+  "entry": ["public/osd.js", "public/menu.js", "public/cheatsheet.js"],
   "ignoreBinaries": ["pwsh", "taskkill"]
 }

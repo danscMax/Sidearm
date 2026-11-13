@@ -215,6 +215,10 @@ const HS_PREFIX: &str = "HS:";
 /// sees a right click, and only this line says whether Sidearm produced it.
 const NOTE_PREFIX: &str = "NOTE:";
 
+/// The helper's line when the HyperShift 2 trigger goes down (`1`) or up (`0`):
+/// the parent shows the cheat sheet after a while (`cheatsheet.rs`).
+const TRIGGER2_PREFIX: &str = "H2HOLD:";
+
 thread_local! {
     static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
         const { std::cell::RefCell::new(Vec::new()) };
@@ -2054,6 +2058,8 @@ fn note_press_for_triggers(decision: Trigger2, held: u8, is_down: bool) {
 fn apply_trigger2(button: u8, held: bool) {
     let used = HELPER_HYPER2_USED.swap(false, Ordering::Relaxed);
     HELPER_HYPER2_HELD.store(if held { button } else { HYPER_TRIGGER_OFF }, Ordering::Relaxed);
+    HELPER_MATCHES.with(|cell| cell.borrow_mut().push(format!("{TRIGGER2_PREFIX}{}", u8::from(held))));
+    wake_helper_loop();
     if !held && !used {
         if crate::fake_mode() {
             log::info!("[capture-helper] HyperShift 2 click (simulated, button {button})");
@@ -4540,6 +4546,8 @@ fn spawn_capture_helper(
     let generation = HELPER_GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     let stopping = Arc::new(AtomicBool::new(false));
     let reader_stopping = stopping.clone();
+    // The cheat sheet reads the profile's HyperShift 2 grid when it shows.
+    let cheat_config = config.settings.hs2_cheat_sheet.then(|| Arc::new(config.clone()));
 
     // Reader thread: reads encoded keys from helper stdout, converts to events
     let reader_thread = thread::spawn(move || {
@@ -4578,6 +4586,11 @@ fn spawn_capture_helper(
             // SIDEARM_DEBUG_CAPTURE=1 plus a Debug log level to see them.
             if let Some(rest) = trimmed.strip_prefix("DEBUG:") {
                 log::debug!("[helper] {rest}");
+                continue;
+            }
+            // The HyperShift 2 trigger went down or up: the cheat sheet follows.
+            if let Some(state) = trimmed.strip_prefix(TRIGGER2_PREFIX) {
+                crate::cheatsheet::trigger_held(&app, &runtime_store, cheat_config.as_ref(), state == "1");
                 continue;
             }
             // Hook events worth a normal-level line (see `NOTE_PREFIX`).
@@ -4632,6 +4645,9 @@ fn spawn_capture_helper(
                 Some(rest) => (true, rest),
                 None => (false, input),
             };
+            if is_hypershift2 {
+                crate::cheatsheet::cancel(&app); // a button pressed under HyperShift 2
+            }
             let (is_hypershift, rest) = match input.strip_prefix(HS_PREFIX) {
                 Some(rest) => (true, rest),
                 None => (false, input),

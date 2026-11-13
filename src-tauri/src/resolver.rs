@@ -742,6 +742,7 @@ mod tests {
                 show_battery_in_tray: false,
                 sync_mice: false,
                 osd_actions: false,
+                hs2_cheat_sheet: false,
                 offline_profile_id: None,
             },
             profiles: vec![
@@ -1153,6 +1154,7 @@ mod edge_proptests {
                 show_battery_in_tray: false,
                 sync_mice: false,
                 osd_actions: false,
+                hs2_cheat_sheet: false,
                 offline_profile_id: None,
             },
             profiles: vec![

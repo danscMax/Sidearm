@@ -7,7 +7,8 @@ import { layerCopy, type FamilySection, type ViewState } from "../lib/constants"
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
 import { open } from "@tauri-apps/plugin-dialog";
-import { deleteDeviceImage, getPressLog, importDeviceImage } from "../lib/backend";
+import { deleteDeviceImage, exportLayoutHtml, getPressLog, importDeviceImage } from "../lib/backend";
+import { layoutHtml } from "../lib/layout-print";
 import { layerHeat, sumDays, type PressLog } from "../lib/press-stats";
 import {
   addLearnedControl,
@@ -1289,6 +1290,13 @@ export function ProfilesWorkspace({
               {t("compare.open")}
             </button>
           ) : null}
+          <button type="button" className="action-button action-button--small" title={t("print.hint")}
+            onClick={() => {
+              exportLayoutHtml(t("print.saveTitle"), layoutHtml(activeConfig, new Date()))
+                .catch(() => showToast(t("print.failed"), "warning"));
+            }}>
+            {t("print.open")}
+          </button>
         </div>
       ) : null}
       {copyDialog && activeProfile ? (

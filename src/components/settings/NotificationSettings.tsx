@@ -87,6 +87,14 @@ export function NotificationSettings({
             />
           </SettingRow>
 
+          <SettingRow title={t("settings.hs2CheatSheet")} hint={t("settings.hs2CheatSheetHelp")}>
+            <Toggle
+              checked={osd.hs2CheatSheet ?? false}
+              onChange={(checked) => updateSettings({ hs2CheatSheet: checked })}
+              ariaLabel={t("settings.hs2CheatSheet")}
+            />
+          </SettingRow>
+
           <SettingRow title={t("settings.osdDuration")}>
             <PillTrack
               items={[1000, 1500, 2000, 3000, 5000].map((ms) => ({

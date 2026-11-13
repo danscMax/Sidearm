@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "cheatsheet",
+  "description": "Minimal capability for the HyperShift 2 cheat sheet window (it listens for its grid and reports its size)",
+  "windows": ["cheatsheet"],
+  "permissions": ["core:default"]
+}

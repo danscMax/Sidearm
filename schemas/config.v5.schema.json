@@ -26,7 +26,8 @@
         6,
         7,
         8,
-        9
+        9,
+        10
       ]
     },
     "settings": {
@@ -287,6 +288,10 @@
         },
         "showBatteryInTray": {
           "type": "boolean"
+        },
+        "hs2CheatSheet": {
+          "type": "boolean",
+          "description": "Hold the HyperShift 2 trigger 1 s without pressing anything: its side-button grid shows at the cursor."
         },
         "osdActions": {
           "type": "boolean",

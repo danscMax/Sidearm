@@ -91,6 +91,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its neighbours.
 - Switching a phrase's Enter off removes the ⏎ from its name (and on adds it).
 
+- HyperShift 2 cheat sheet (Settings → OSD, off by default): hold the V3's
+  right button for a second without pressing anything and its 12 side buttons
+  show at the cursor; it goes on release or a press. Config schema version 10.
+- "Print the layout": every profile and layer as one page in the browser (side
+  buttons as the mouse's grid), to print or save as PDF.
+
 ### Changed
 - The mouse's buttons work in Sidearm's own window too (Space, screenshot,
   phrases…), except while a key combination is recorded there: then they run

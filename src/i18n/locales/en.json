@@ -640,7 +640,9 @@
     "exportLayout": "Export the whole layout…",
     "exportLayoutTitle": "Folder for the layout export",
     "exportLayoutHelp": "A new folder with the settings, the menu-pick and press counters and the mouse photos: everything to set Sidearm up again.",
-    "exportLayoutDone": "Saved to {{folder}}"
+    "exportLayoutDone": "Saved to {{folder}}",
+    "hs2CheatSheet": "HyperShift 2 cheat sheet",
+    "hs2CheatSheetHelp": "Hold the HyperShift 2 button (the V3's right button) for a second without pressing anything: its 12 side buttons show at the cursor. Release or press a button and it goes."
   },
   "conflict": {
     "banner_one": "{{count}} shortcut conflict on this layer",
@@ -1724,6 +1726,9 @@
       "pickEnter": "Insert and press Enter",
       "pickCopy": "Only copy to the clipboard",
       "pickEdit": "Edit in Sidearm"
+    },
+    "cheatsheet": {
+      "title": "{{profile}} · HyperShift 2"
     }
   },
   "newMouse": {
@@ -1869,5 +1874,14 @@
     "unusedTitle": "Never pressed ({{count}})",
     "unusedHelp": "Assignments of this profile on this mouse with no press in the period: free for something used.",
     "localOnly": "Counted on this computer only; wheel scrolling is left out."
+  },
+  "print": {
+    "open": "Print the layout",
+    "hint": "Every profile and layer as one page in the browser: print it or save as PDF.",
+    "saveTitle": "Save the layout page",
+    "failed": "The layout page could not be saved.",
+    "title": "Sidearm layout",
+    "made": "Made {{date}}",
+    "legend": "⌛ hold · 2× double press · 3× triple press"
   }
 }

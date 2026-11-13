@@ -17,6 +17,7 @@ mod log_cleanup;
 mod menu_popup;
 mod menu_usage;
 mod press_log;
+mod cheatsheet;
 mod mouse_memory;
 #[cfg(target_os = "windows")]
 mod mouse_settings;
@@ -953,6 +954,25 @@ async fn export_snippets(path: String, contents: String) -> Result<(), CommandEr
     })
     .await
     .map_err(|e| CommandError::internal(format!("export_snippets task failed: {e}")))?
+}
+
+/// The printable layout page (`layout-print.ts`) to a user-chosen `.html`,
+/// then opened in the default browser (print or save as PDF there).
+#[tauri::command]
+async fn export_layout_html(path: String, contents: String) -> Result<(), CommandError> {
+    let validated_path = validate_user_path_with_ext(&path, &["html", "htm"], "The layout page must be an .html file.")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        config::persist_atomically(&validated_path, |file| {
+            use std::io::Write as _;
+            file.write_all(contents.as_bytes())
+        })
+        .map_err(|e| CommandError::internal(format!("Failed to write file: {e}")))?;
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        crate::platform::shell::open_target(&validated_path.to_string_lossy()).map_err(CommandError::internal)?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("export_layout_html task failed: {e}")))?
 }
 
 #[tauri::command]
@@ -2187,6 +2207,18 @@ fn get_press_log() -> press_log::Log {
 #[tauri::command]
 fn get_menu_usage() -> std::collections::BTreeMap<String, u64> {
     menu_usage::counts()
+}
+
+/// The cheat sheet page loaded: it gets the sheet of a hold still going on.
+#[tauri::command]
+fn cheatsheet_ready(app: AppHandle) {
+    cheatsheet::page_ready(&app);
+}
+
+/// The cheat sheet measured itself (physical pixels): place and show it.
+#[tauri::command]
+fn cheatsheet_layout(app: AppHandle, width: f64, height: f64) {
+    cheatsheet::page_layout(&app, width, height);
 }
 
 /// A key combination is being recorded in the window (on) or not (off): the
@@ -4340,6 +4372,9 @@ pub fn run() {
             menu_pick_child,
             menu_edit,
             set_key_recording,
+            cheatsheet_layout,
+            cheatsheet_ready,
+            export_layout_html,
             export_layout_folder,
             get_press_log,
             menu_wheel,

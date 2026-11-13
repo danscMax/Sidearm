@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #1a1f16;
+    --text: #e8eae4;
+    --muted: rgba(232, 234, 228, 0.6);
+    --accent: #9fca69;
+    --line: rgba(159, 202, 105, 0.28);
+    --cell: rgba(255, 255, 255, 0.04);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: transparent; overflow: hidden; user-select: none; -webkit-user-select: none; }
+  /* Sized to its content; Rust sizes and places the window to what it measures. */
+  .sheet {
+    display: inline-block;
+    padding: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--bg);
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.45);
+    font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+    font-size: 12.5px;
+    color: var(--text);
+  }
+  .title { margin: 0 2px 8px; font-weight: 700; color: var(--accent); letter-spacing: 0.02em; }
+  /* The side buttons as on the mouse: 4 rows of 3 (#1-2-3 on top). */
+  .grid { display: grid; grid-template-columns: repeat(3, 168px); gap: 5px; }
+  .cell { position: relative; min-height: 38px; padding: 5px 8px 5px 28px; border-radius: 6px; background: var(--cell); }
+  .n { position: absolute; left: 7px; top: 5px; font-weight: 700; color: var(--accent); }
+  .main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+  .extra, .none { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet"></div>
+<script src="/cheatsheet.js"></script>
+</body>
+</html>

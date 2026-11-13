@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { uiText } from "./ui-text";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 import type {
   Action,
@@ -252,6 +252,14 @@ export async function exportLayoutFolder(title: string): Promise<string | null> 
  *  nothing there meanwhile, and Alt+F4 does not close the window. */
 export async function setKeyRecording(on: boolean): Promise<void> {
   return invoke<void>("set_key_recording", { on });
+}
+
+/** Saves the printable layout page and opens it in the browser; false when cancelled. */
+export async function exportLayoutHtml(title: string, contents: string): Promise<boolean> {
+  const path = await save({ title, defaultPath: `sidearm-layout-${new Date().toISOString().slice(0, 10)}.html`, filters: [{ name: "HTML", extensions: ["html"] }] });
+  if (!path) return false;
+  await invoke<void>("export_layout_html", { path, contents });
+  return true;
 }
 
 /** Daily press counters, by date: places ("profile|layer|control|gesture") and actions. */

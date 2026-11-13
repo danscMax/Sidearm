@@ -248,6 +248,12 @@ export async function exportLayoutFolder(title: string): Promise<string | null> 
   return invoke<string>("export_layout_folder", { targetDir });
 }
 
+/** A key combination is being recorded in the window: the mouse's buttons run
+ *  nothing there meanwhile, and Alt+F4 does not close the window. */
+export async function setKeyRecording(on: boolean): Promise<void> {
+  return invoke<void>("set_key_recording", { on });
+}
+
 /** Daily press counters, by date: places ("profile|layer|control|gesture") and actions. */
 export interface PressDay {
   slots: Record<string, number>;

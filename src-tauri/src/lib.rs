@@ -2189,6 +2189,13 @@ fn get_menu_usage() -> std::collections::BTreeMap<String, u64> {
     menu_usage::counts()
 }
 
+/// A key combination is being recorded in the window (on) or not (off): the
+/// mouse's buttons then run nothing there and the window does not close.
+#[tauri::command]
+fn set_key_recording(on: bool) {
+    capture_backend::set_key_recording(on);
+}
+
 /// Right click → Edit on a popup row: open its item in the main window.
 #[tauri::command]
 fn menu_edit(app: AppHandle, index: usize) {
@@ -4301,6 +4308,11 @@ pub fn run() {
         })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                // Alt+F4 pressed to be recorded as a shortcut must not close the window.
+                if capture_backend::key_recording() {
+                    api.prevent_close();
+                    return;
+                }
                 let minimize = window
                     .app_handle()
                     .state::<MinimizeToTray>()
@@ -4327,6 +4339,7 @@ pub fn run() {
             menu_full_text,
             menu_pick_child,
             menu_edit,
+            set_key_recording,
             export_layout_folder,
             get_press_log,
             menu_wheel,

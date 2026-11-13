@@ -17,6 +17,7 @@ vi.mock("../lib/backend", () => ({
   getExeIcon: vi.fn().mockResolvedValue(null),
   readDeviceImage: vi.fn().mockResolvedValue(null),
   pickExecutablePath: vi.fn().mockResolvedValue(null),
+  setKeyRecording: vi.fn().mockResolvedValue(undefined),
 }));
 
 beforeEach(async () => { await i18n.changeLanguage("en"); });

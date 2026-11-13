@@ -4883,22 +4883,59 @@ fn run_foreground_watcher(
 ) {
     use std::cell::RefCell;
     use std::mem::MaybeUninit;
+    use std::cell::Cell;
     use windows_sys::Win32::{
         System::Threading::GetCurrentThreadId,
         UI::Accessibility::{SetWinEventHook, UnhookWinEvent},
-        UI::WindowsAndMessaging::{DispatchMessageW, GetMessageW, MSG, TranslateMessage},
+        UI::WindowsAndMessaging::{
+            DispatchMessageW, GetForegroundWindow, GetMessageW, KillTimer, MSG, SetTimer, TranslateMessage,
+        },
     };
 
     // Thread-local storage for the callback to access our context.
     thread_local! {
         static FG_CTX: RefCell<Option<ForegroundWatcherCtx>> = const { RefCell::new(None) };
+        /// A title-change re-check is scheduled (timer id), so a burst of
+        /// title changes (a spinner in a terminal tab) resolves once.
+        static TITLE_TIMER: Cell<usize> = const { Cell::new(0) };
     }
+    /// The quiet time a window's title is given before its profile is resolved again.
+    const TITLE_SETTLE_MS: u32 = 300;
 
     struct ForegroundWatcherCtx {
         app: AppHandle,
         runtime_store: Arc<Mutex<RuntimeStore>>,
         config: AppConfig,
         app_name: String,
+    }
+
+    /// The foreground window's title changed (a terminal switched tabs): the
+    /// profile is resolved again once the title settles. Other windows' and
+    /// child objects' name changes are ignored.
+    unsafe extern "system" fn title_callback(
+        _hook: *mut std::ffi::c_void,
+        _event: u32,
+        hwnd: *mut std::ffi::c_void,
+        id_object: i32,
+        id_child: i32,
+        _event_thread: u32,
+        _event_time: u32,
+    ) {
+        const OBJID_WINDOW: i32 = 0;
+        if id_object != OBJID_WINDOW || id_child != 0 || hwnd != unsafe { GetForegroundWindow() } {
+            return;
+        }
+        TITLE_TIMER.with(|timer| {
+            if timer.get() == 0 {
+                timer.set(unsafe { SetTimer(std::ptr::null_mut(), 0, TITLE_SETTLE_MS, Some(title_settled)) });
+            }
+        });
+    }
+
+    unsafe extern "system" fn title_settled(_hwnd: *mut std::ffi::c_void, _msg: u32, id: usize, _time: u32) {
+        unsafe { KillTimer(std::ptr::null_mut(), id) };
+        TITLE_TIMER.with(|timer| timer.set(0));
+        resolve_foreground();
     }
 
     unsafe extern "system" fn winevent_callback(
@@ -4910,6 +4947,11 @@ fn run_foreground_watcher(
         _event_thread: u32,
         _event_time: u32,
     ) {
+        resolve_foreground();
+    }
+
+    /// Resolve the window in front and switch the profile (and its OSD) if it changed.
+    fn resolve_foreground() {
         // A panic unwinding across this `extern "system"` boundary is UB, and
         // this callback runs on a thread in the MAIN app process. Contain any
         // panic (heavy capture/emit, poisoned lock, re-entrant borrow) and drop
@@ -4965,6 +5007,10 @@ fn run_foreground_watcher(
         }
     }
 
+    // A title rule (`AppMapping.titleIncludes`) can pick another profile when a
+    // window's title changes without it losing the front (terminal tabs).
+    let watch_titles = config.app_mappings.iter().any(|mapping| mapping.enabled && !mapping.title_includes.is_empty());
+
     // Store context in thread-local
     FG_CTX.with(|cell| {
         *cell.borrow_mut() = Some(ForegroundWatcherCtx {
@@ -4995,6 +5041,15 @@ fn run_foreground_watcher(
         return;
     }
 
+    const EVENT_OBJECT_NAMECHANGE: u32 = 0x800C;
+    let title_hook = if watch_titles {
+        unsafe {
+            SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE, std::ptr::null_mut(), Some(title_callback), 0, 0, 0)
+        }
+    } else {
+        std::ptr::null_mut()
+    };
+
     let thread_id = unsafe { GetCurrentThreadId() };
     let _ = ready_tx.send(thread_id);
 
@@ -5013,6 +5068,9 @@ fn run_foreground_watcher(
     }
 
     unsafe { UnhookWinEvent(hook) };
+    if !title_hook.is_null() {
+        unsafe { UnhookWinEvent(title_hook) };
+    }
 
     // Clean up thread-local
     FG_CTX.with(|cell| {

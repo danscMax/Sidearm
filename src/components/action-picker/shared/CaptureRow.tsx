@@ -1,5 +1,6 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { setKeyRecording } from "../../../lib/backend";
 
 /** Read-only input paired with a Record/Stop toggle button. Shared by the
  *  shortcut-key and signal capture fields. The caller owns capture state.
@@ -29,6 +30,13 @@ export function CaptureRow({
   // not this render's, so the second one does not undo the first.
   const live = useRef(capturing);
   live.current = capturing;
+  // While recording, the mouse runs nothing in this window and Alt+F4 does
+  // not close it, so any combination (closing ones too) can be recorded.
+  useEffect(() => {
+    if (!capturing) return;
+    void setKeyRecording(true).catch(() => {});
+    return () => { void setKeyRecording(false).catch(() => {}); };
+  }, [capturing]);
   const start = () => {
     if (!live.current) {
       live.current = true;

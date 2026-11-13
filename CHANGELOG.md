@@ -92,6 +92,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Switching a phrase's Enter off removes the ⏎ from its name (and on adds it).
 
 ### Changed
+- The mouse's buttons work in Sidearm's own window too (Space, screenshot,
+  phrases…), except while a key combination is recorded there: then they run
+  nothing and Alt+F4 does not close the window, so it can be recorded.
+- A title rule now follows a window whose title changes while it stays in
+  front (a terminal switching tabs).
 - A menu item may open another menu, also one that links back (two menus with
   a link to each other); only a link to the same menu is refused.
 - The HyperShift button and the old device name are no longer in Settings: the

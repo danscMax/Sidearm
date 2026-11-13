@@ -351,7 +351,7 @@ fn fire_gestures(
             .iter()
             .find(|action| Some(action.id.as_str()) == preview.action_id.as_deref())
             .map(|action| &action.payload);
-        if context.own_window && !can_execute_in_own_window(payload) {
+        if context.own_window && !can_execute_in_own_window(payload, key_recording()) {
             log::info!("[capture] {gesture:?} of {} not dispatched: own window", context.encoded_key);
             continue;
         }
@@ -695,7 +695,7 @@ fn process_encoded_key_event(
     // DPI stepping writes mouse hardware; other actions stay blocked while Sidearm
     // is focused so injected shortcuts cannot operate its own editor.
     let resolved_action = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref());
-    if own_window && !can_execute_in_own_window(resolved_action.map(|action| &action.payload)) {
+    if own_window && !can_execute_in_own_window(resolved_action.map(|action| &action.payload), key_recording()) {
         log::info!("[capture] Not dispatched {}: Sidearm's own window ({:?})", preview.encoded_key, capture_result.title);
         log_entries.push((
             "capture",
@@ -929,14 +929,30 @@ fn native_wheel_scroll(
     None
 }
 
-fn can_execute_in_own_window(payload: Option<&config::ActionPayload>) -> bool {
-    matches!(
-        payload,
-        Some(config::ActionPayload::MouseAction(config::MouseActionPayload {
-            action: config::MouseActionKind::DpiUp | config::MouseActionKind::DpiDown,
-            ..
-        }))
-    )
+/// A shortcut or signal is being recorded in Sidearm's own window
+/// (`set_key_recording`): the mouse must not type into it or close it.
+static KEY_RECORDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub(crate) fn set_key_recording(on: bool) {
+    KEY_RECORDING.store(on, std::sync::atomic::Ordering::Release);
+}
+
+pub(crate) fn key_recording() -> bool {
+    KEY_RECORDING.load(std::sync::atomic::Ordering::Acquire)
+}
+
+/// In Sidearm's own window the buttons work as anywhere else (owner's call),
+/// except while a key combination is recorded there: then only DPI steps
+/// (they write the mouse, nothing reaches the window).
+fn can_execute_in_own_window(payload: Option<&config::ActionPayload>, recording: bool) -> bool {
+    !recording
+        || matches!(
+            payload,
+            Some(config::ActionPayload::MouseAction(config::MouseActionPayload {
+                action: config::MouseActionKind::DpiUp | config::MouseActionKind::DpiDown,
+                ..
+            }))
+        )
 }
 
 fn run_fire_and_forget(
@@ -1305,7 +1321,7 @@ mod own_window_tests {
     }
 
     #[test]
-    fn permits_only_direct_dpi_steps() {
+    fn everything_runs_in_own_window_but_while_recording_only_dpi_steps() {
         for kind in [
             config::MouseActionKind::DpiUp,
             config::MouseActionKind::DpiDown,
@@ -1320,9 +1336,10 @@ mod own_window_tests {
                 win: false,
             });
             assert_eq!(
-                can_execute_in_own_window(Some(&payload)),
+                can_execute_in_own_window(Some(&payload), true),
                 matches!(kind, config::MouseActionKind::DpiUp | config::MouseActionKind::DpiDown)
             );
+            assert!(can_execute_in_own_window(Some(&payload), false));
         }
         let shortcut = config::ActionPayload::Shortcut(config::ShortcutActionPayload {
             key: "Backspace".into(),
@@ -1332,7 +1349,8 @@ mod own_window_tests {
             win: false,
             raw: None,
         });
-        assert!(!can_execute_in_own_window(Some(&shortcut)));
-        assert!(!can_execute_in_own_window(None));
+        assert!(!can_execute_in_own_window(Some(&shortcut), true));
+        assert!(!can_execute_in_own_window(None, true));
+        assert!(can_execute_in_own_window(Some(&shortcut), false));
     }
 }

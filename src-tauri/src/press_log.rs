@@ -1,8 +1,9 @@
-//! Daily press counters: `press-log.json` next to the config, for the weekly
+//! Daily press counters: `press-log-<computer>.json` next to the config (one
+//! file per computer, added up when read: `machine_files`), for the weekly
 //! report, the heat map per layer and the hints. Per day: how often each place
 //! fired (`"profile|layer|control|gesture"`) and each action ran (a menu pick
 //! counts its item's action). Kept out of the config (a press must not rewrite
-//! or sync it), on this computer only, the last [`KEEP_DAYS`] days.
+//! or sync it), the last [`KEEP_DAYS`] days.
 //!
 //! Counts gather in memory and are written at most every [`FLUSH_EVERY`] and
 //! at exit ([`flush`]): a crash loses at most that long.
@@ -14,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-pub(crate) const FILE_NAME: &str = "press-log.json";
+pub(crate) const STEM: &str = "press-log";
 const KEEP_DAYS: usize = 90;
 const FLUSH_EVERY: Duration = Duration::from_secs(15);
 
@@ -37,8 +38,8 @@ struct Pending {
 
 static PENDING: Mutex<Pending> = Mutex::new(Pending { log: BTreeMap::new(), last_flush: None });
 
-fn file() -> PathBuf {
-    crate::paths::AppPaths::resolve().config_dir.join(FILE_NAME)
+fn dir() -> PathBuf {
+    crate::paths::AppPaths::resolve().config_dir
 }
 
 /// The log on disk: empty when there is none yet; an error when it cannot be
@@ -110,7 +111,7 @@ pub(crate) fn flush() {
 
 fn write_out(pending: &mut Pending) {
     pending.last_flush = Some(Instant::now());
-    let path = file();
+    let path = crate::machine_files::own(&dir(), STEM);
     let mut log = match read(&path, true) {
         Ok(log) => log,
         Err(error) => {
@@ -130,10 +131,13 @@ fn write_out(pending: &mut Pending) {
     }
 }
 
-/// The log on disk plus what has not been written yet.
+/// Every computer's log plus what has not been written yet.
 pub(crate) fn snapshot() -> Log {
     let pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut log = read(&file(), false).unwrap_or_default();
+    let mut log = Log::new();
+    for file in crate::machine_files::all(&dir(), STEM) {
+        merge(&mut log, &read(&file, false).unwrap_or_default());
+    }
     merge(&mut log, &pending.log);
     log
 }

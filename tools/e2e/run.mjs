@@ -145,7 +145,8 @@ class World {
   }
 
   start() {
-    this.app = spawn(EXE, [], { env: this.env, stdio: "ignore" });
+    // Hidden: a debug build opens a console window, which would take the focus.
+    this.app = spawn(EXE, [], { env: this.env, stdio: "ignore", windowsHide: true });
     this.exited = new Promise((resolve) => this.app.on("exit", resolve));
   }
 

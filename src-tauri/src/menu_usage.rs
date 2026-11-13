@@ -1,16 +1,17 @@
-//! How often each menu item was picked: `menu-usage.json` next to the config
-//! (`{ action id: count }`), so the menu editor can show which items are used.
-//! Kept out of the config itself: a pick must not rewrite (and sync) the config.
+//! How often each menu item was picked: `menu-usage-<computer>.json` next to
+//! the config (`{ action id: count }`, one file per computer, added up when read:
+//! `machine_files`), so the menu editor can show which items are used. Kept out
+//! of the config itself: a pick must not rewrite (and sync) the config.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-pub(crate) const FILE_NAME: &str = "menu-usage.json";
+pub(crate) const STEM: &str = "menu-usage";
 static LOCK: Mutex<()> = Mutex::new(());
 
-fn file() -> PathBuf {
-    crate::paths::AppPaths::resolve().config_dir.join(FILE_NAME)
+fn dir() -> PathBuf {
+    crate::paths::AppPaths::resolve().config_dir
 }
 
 fn read(path: &Path) -> BTreeMap<String, u64> {
@@ -23,7 +24,7 @@ pub(crate) fn count(action_id: &str) {
         return;
     }
     let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let path = file();
+    let path = crate::machine_files::own(&dir(), STEM);
     let mut counts = read(&path);
     *counts.entry(action_id.to_owned()).or_default() += 1;
     let temp = path.with_extension("json.tmp");
@@ -36,8 +37,14 @@ pub(crate) fn count(action_id: &str) {
     }
 }
 
-/// Every action's pick count so far.
+/// Every action's pick count so far, on every computer.
 pub(crate) fn counts() -> BTreeMap<String, u64> {
     let _guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    read(&file())
+    let mut total = BTreeMap::new();
+    for file in crate::machine_files::all(&dir(), STEM) {
+        for (id, n) in read(&file) {
+            *total.entry(id).or_default() += n;
+        }
+    }
+    total
 }

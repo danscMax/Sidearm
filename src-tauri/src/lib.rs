@@ -15,6 +15,7 @@ mod input_synthesis;
 mod log_cleanup;
 #[cfg(target_os = "windows")]
 mod menu_popup;
+mod machine_files;
 mod menu_usage;
 mod press_log;
 mod cheatsheet;
@@ -1557,7 +1558,7 @@ async fn export_full_config(app: AppHandle, target_path: String) -> Result<Strin
 
 /// Files next to the config that belong to the layout but never to the config
 /// (they change on every pick or press): exported with it.
-const LAYOUT_SIDE_FILES: [&str; 2] = [menu_usage::FILE_NAME, press_log::FILE_NAME];
+const LAYOUT_SIDE_FILES: [&str; 2] = [menu_usage::STEM, press_log::STEM];
 
 /// The whole layout into a new folder `Sidearm-layout-<date>` inside `target_dir`:
 /// config.json, the pick and press counters, the device photos. Returns the folder.
@@ -1583,10 +1584,11 @@ async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<Stri
         let fail = |e: std::io::Error| CommandError::internal(format!("Failed to export the layout: {e}"));
         fs::create_dir_all(&folder).map_err(fail)?;
         atomic_copy_file(&source, &folder.join("config.json")).map_err(fail)?;
-        for name in LAYOUT_SIDE_FILES {
-            let file = config_dir.join(name);
-            if file.is_file() {
-                fs::copy(&file, folder.join(name)).map_err(fail)?;
+        for stem in LAYOUT_SIDE_FILES {
+            for file in machine_files::all(&config_dir, stem) {
+                if let Some(name) = file.file_name() {
+                    fs::copy(&file, folder.join(name)).map_err(fail)?;
+                }
             }
         }
         let images = config_dir.join(DEVICE_IMAGE_DIR);

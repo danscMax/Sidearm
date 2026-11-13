@@ -47,7 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A Statistics tab per mouse: what is pressed most (and versus the period
   before), what never, how many keystrokes the mouse saved, HyperShift actions
   worth a hold (one click puts them there). Counted per day on this computer
-  in press-log.json, never in the config. The heat map shows the last 7 days on
+  in press-log-<computer>.json (and picks in menu-usage-<computer>.json): one
+  file per computer, added up, so a synced data folder never conflicts; never
+  in the config. The heat map shows the last 7 days on
   the layer shown; the menu editor lists items not picked for 30 days.
 - Copy from another mouse offers the V3's HyperShift 2 as long presses of the
   same buttons on the V2 (tick what you want; free holds only).

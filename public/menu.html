@@ -3,6 +3,13 @@
 <head>
 <meta charset="utf-8">
 <style>
+  /* The app's thin scrollbar (App.css), always visible here: the tip of a long
+     phrase scrolls while the pointer is on the list, not on it. */
+  * { scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.16) transparent; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; background: transparent; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.16); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
   :root {
     --bg: #1a1f16;
     --text: #e8eae4;

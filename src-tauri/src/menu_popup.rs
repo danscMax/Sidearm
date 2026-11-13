@@ -500,6 +500,8 @@ static IS_OPEN: AtomicBool = AtomicBool::new(false);
 static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// The menu whose first layout came at the wrong scale (`page_layout`).
 static DEFERRED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The menu last sized and shown by `page_layout`.
+static SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Cheap check for the capture hot path.
 pub(crate) fn is_open() -> bool {
@@ -603,12 +605,13 @@ fn show(app: &AppHandle, view: &View, anchor: (i32, i32)) {
     let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, view);
 }
 
-/// Put the hidden popup on the cursor's monitor before the page measures
-/// itself: it renders at that monitor's scale from the start. Measured at
-/// another monitor's scale, it showed that size for a moment and then jumped
-/// to the right one (first open after launch, the window parked off-screen).
+/// Put the popup on the cursor's monitor before the page measures itself, as
+/// a 1×1 transparent window that takes no focus: a hidden window keeps the
+/// scale of the monitor it was last shown on (measured 2026-11-13: moved while
+/// hidden, it stayed at 2.25 on a 1.0 monitor), so the page measured at the
+/// wrong scale and the menu showed oversized, then jumped.
 fn move_hidden(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
-    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: anchor.0, y: anchor.1 }));
+    platform::park_at(window, anchor);
 }
 
 fn create_window(app: &AppHandle, anchor: (i32, i32)) -> bool {
@@ -886,17 +889,27 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
     // monitor's scale, and multiplying by the target's scale cut the menu off.
     // The page measures again once the move changes its scale.
     let scale = platform::dpi_scale_at(anchor);
-    // Still at another monitor's scale (the move has not reached the page yet):
-    // wait for the page to measure again at the new one instead of showing a
-    // wrong size. Once per menu, so a page that never re-measures still shows.
+    // Still at another monitor's scale (the new one has not reached the page
+    // yet): wait for the page to measure again instead of showing a wrong size —
+    // once per menu, and at most 200 ms: then it shows with what it has (a menu
+    // that never appears would hold the mouse's buttons).
     if let Ok(now) = window.scale_factor()
         && (now - scale).abs() > 0.01
         && DEFERRED.swap(generation, Ordering::AcqRel) != generation
     {
         log::info!("[menu] the popup is at scale {now}, the cursor's monitor at {scale}: waiting for the page");
         move_hidden(&window, anchor);
+        let app = app.clone();
+        let _ = std::thread::Builder::new().name("menu-layout-wait".into()).spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            if SHOWN.load(Ordering::Acquire) != generation {
+                log::warn!("[menu] the page did not measure again: its size rescaled to the monitor");
+                page_layout(&app, generation, width / now * scale, height / now * scale);
+            }
+        });
         return;
     }
+    SHOWN.store(generation, Ordering::Release);
     let (w, h) = (width.ceil() as i32, height.ceil() as i32);
     let (x, y) = platform::position_near(anchor, w, h, (6.0 * scale).round() as i32);
     // Position first so a cross-monitor DPI change settles before sizing (see `show_osd`).
@@ -980,6 +993,17 @@ mod platform {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
+        }
+    }
+
+    /// Move, size 1×1 and show without activating, in one call (no frame of
+    /// the old menu at the old place): visible, the window takes the scale of
+    /// the monitor it is on. Transparent and 1 px, it is not seen.
+    pub(super) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowPos};
+        let Ok(hwnd) = window.hwnd() else { return };
+        unsafe {
+            SetWindowPos(hwnd.0 as HWND, std::ptr::null_mut(), anchor.0, anchor.1, 1, 1, SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW);
         }
     }
 
@@ -1079,6 +1103,9 @@ mod platform {
     }
     pub(super) fn hide_window(window: &tauri::WebviewWindow) {
         let _ = window.hide();
+    }
+    pub(super) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: anchor.0, y: anchor.1 }));
     }
     pub(super) fn spawn_watch(_: AppHandle, _: u64) {}
 }

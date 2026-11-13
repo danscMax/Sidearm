@@ -1040,9 +1040,6 @@ async fn export_verification_session(
     })?
 }
 
-/// Record this process's view of the on-disk config fingerprint so a later
-/// `save_config` can detect a concurrent overwrite by another instance.
-/// Best-effort: re-resolves the config dir and stores `None` if unreadable.
 /// The UI is told to reload (`config_changed_externally`) and the running
 /// capture picks the file up: an edit by hand, a script or another machine's
 /// sync takes effect without restarting Sidearm. Our own saves are not news:
@@ -1092,11 +1089,64 @@ fn spawn_config_watch(app: AppHandle, config_dir: PathBuf) {
     }
 }
 
-fn record_config_stamp(app: &AppHandle) {
-    if let Ok(dir) = resolve_config_dir(app) {
-        let stamp = config::config_file_stamp(&dir);
-        *app.state::<ConfigStamp>().inner().lock().recover_poison() = stamp;
-    }
+fn apply_config_shortcut(config: &AppConfig, apply: impl FnOnce(&str)) {
+    let desired = config.settings.global_shortcut.as_deref()
+        .map(str::trim).filter(|s| !s.is_empty()).unwrap_or(DEFAULT_GLOBAL_SHORTCUT);
+    apply(desired);
+}
+
+fn accept_config(app: &AppHandle, config: &AppConfig, stamp: Option<u64>) {
+    app.state::<MinimizeToTray>().store(config.settings.minimize_to_tray, Ordering::Relaxed);
+    // The baseline belongs to this snapshot, even if disk changed before publication.
+    *app.state::<ConfigStamp>().inner().lock().recover_poison() = stamp;
+    apply_config_shortcut(config, |desired| apply_global_shortcut(app, desired));
+}
+
+/// Serialize backend changes through their public status update; never hold the
+/// store lock while a backend stops and joins its worker.
+fn runtime_transition<C, T, U>(
+    controller: &Mutex<C>,
+    change: impl FnOnce(&mut C) -> T,
+    publish: impl FnOnce(T) -> U,
+) -> Result<U, CommandError> {
+    let mut controller = controller.lock()
+        .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
+    let result = change(&mut controller);
+    Ok(publish(result))
+}
+
+fn reload_active_config(
+    app: &AppHandle,
+    store: &Arc<Mutex<RuntimeStore>>,
+    controller: &Mutex<RuntimeController>,
+    config: &AppConfig,
+    warning_count: usize,
+    keep_maps: bool,
+) -> Result<(), CommandError> {
+    runtime_transition(controller, |controller| {
+        if !store.lock().recover_poison().is_running() {
+            return None;
+        }
+        let name = app.package_info().name.clone();
+        Some(if keep_maps {
+            controller.reload_saved_config(app.clone(), store.clone(), config.clone(), name)
+        } else {
+            controller.restart(app.clone(), store.clone(), config.clone(), name)
+        })
+    }, |result| match result {
+        None => Ok(()),
+        Some(Ok(())) => {
+            let summary = store.lock().recover_poison().reload(config.version, warning_count);
+            app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
+                CommandError::internal(format!("Failed to emit config_reloaded event: {error}"))
+            })
+        }
+        Some(Err(message)) => {
+            let summary = store.lock().recover_poison().stop();
+            let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
+            Err(CommandError::new("runtime_reload_failed", message, None))
+        }
+    })?
 }
 
 // ── Device images (universal-device support) ────────────────────────────────
@@ -1254,13 +1304,12 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
     let config_dir = resolve_config_dir(&app)?;
     let response =
         tauri::async_runtime::spawn_blocking(move || {
-            #[cfg(target_os = "windows")]
-            let stamp = config::config_file_stamp(&config_dir);
             let mut response = load_or_initialize_config(&config_dir)?;
             #[cfg(target_os = "windows")]
             if mouse_memory::live_overlay::configure(&mut response.config, &mouse_memory::present_models()) {
-                let migrated = config::save_config(&config_dir, response.config, stamp)?;
+                let migrated = config::save_config(&config_dir, response.config, response.stamp)?;
                 response.config = migrated.config;
+                response.stamp = migrated.stamp;
                 response.warnings.extend(migrated.warnings);
             }
             Ok::<_, config::ConfigStoreError>(response)
@@ -1269,12 +1318,7 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
             .map_err(|error| CommandError::internal(format!("load_config task failed: {error}")))?
             .map_err(CommandError::from)?;
 
-    // Sync the cached minimize_to_tray flag for the close handler
-    app.state::<MinimizeToTray>()
-        .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
-    // Remember what we just loaded so save_config can guard against clobbering
-    // a newer config written by a concurrent instance.
-    record_config_stamp(&app);
+    accept_config(&app, &response.config, response.stamp);
 
     Ok(response)
 }
@@ -1282,10 +1326,7 @@ async fn load_config(app: AppHandle) -> Result<LoadConfigResponse, CommandError>
 /// Save the config to disk and, if the runtime is active, restart the capture
 /// backend so it picks up the new config.
 ///
-/// CONCURRENCY NOTE: The `runtime_controller` lock serializes concurrent
-/// `save_config` calls through the restart path. The `runtime_store` lock is
-/// re-acquired immediately after restart to update the version. No async yield
-/// points exist between `controller.reload_saved_config()` and `store.reload()`.
+/// The controller lock covers both backend replacement and status publication.
 #[tauri::command]
 async fn save_config(
     app: AppHandle,
@@ -1305,76 +1346,12 @@ async fn save_config(
     .map_err(|error| CommandError::internal(format!("save_config task failed: {error}")))?
     .map_err(CommandError::from)?;
 
-    // Sync the cached minimize_to_tray flag for the close handler
-    app.state::<MinimizeToTray>()
-        .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
-    // We just wrote the file — adopt its new fingerprint as our baseline.
-    record_config_stamp(&app);
+    accept_config(&app, &result.config, result.stamp);
 
-    let is_running = {
-        let store = runtime_store.lock().recover_poison();
-        store.is_running()
-    };
-
-    let maybe_runtime_summary = if is_running {
-        let restart_result = {
-            let mut controller = runtime_controller
-                .lock()
-                .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-
-            // TOCTOU guard: re-check runtime status after acquiring the controller lock.
-            // The runtime may have been stopped between the initial check and lock acquisition.
-            let still_running = runtime_store.lock().recover_poison().is_running();
-            if !still_running {
-                None
-            } else {
-                Some(controller.reload_saved_config(
-                    app.clone(),
-                    runtime_store.inner().clone(),
-                    result.config.clone(),
-                    app.package_info().name.clone(),
-                ))
-            }
-        };
-        match restart_result {
-            Some(Err(message)) => {
-                let stopped_summary = {
-                    let mut store = runtime_store.lock().recover_poison();
-                    store.stop()
-                };
-                let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
-                return Err(CommandError::new("runtime_reload_failed", message, None));
-            }
-            Some(Ok(())) => {
-                let mut store = runtime_store.lock().recover_poison();
-                Some(store.reload(result.config.version, result.warnings.len()))
-            }
-            None => None,
-        }
-    } else {
-        None
-    };
-
-    if let Some(summary) = maybe_runtime_summary {
-        app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
-            CommandError::internal(format!("Failed to emit config_reloaded event: {error}"))
-        })?;
-    }
+    reload_active_config(&app, &runtime_store, &runtime_controller, &result.config, result.warnings.len(), true)?;
 
     // Keep the tray's profile list / active marker in sync after a save.
     rebuild_tray_menu_from_config(&app, &result.config);
-
-    // Apply a changed global shortcut immediately — re-registers only if the
-    // value actually changed, and leaves the old one live if the new combo fails.
-    let desired = result
-        .config
-        .settings
-        .global_shortcut
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(DEFAULT_GLOBAL_SHORTCUT);
-    apply_global_shortcut(&app, desired);
 
     Ok(result)
 }
@@ -1495,59 +1472,9 @@ async fn restore_config_from_backup(
     .await
     .map_err(|e| CommandError::internal(format!("restore task failed: {e}")))??;
 
-    app.state::<MinimizeToTray>()
-        .store(response.config.settings.minimize_to_tray, Ordering::Relaxed);
-    // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
-    // the next save_config does not falsely report a concurrent change.
-    record_config_stamp(&app);
+    accept_config(&app, &response.config, response.stamp);
 
-    let is_running = {
-        let store = runtime_store.lock().recover_poison();
-        store.is_running()
-    };
-
-    if is_running {
-        let restart_result = {
-            let mut controller = runtime_controller
-                .lock()
-                .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-            let still_running = runtime_store.lock().recover_poison().is_running();
-            if still_running {
-                Some(controller.restart(
-                    app.clone(),
-                    runtime_store.inner().clone(),
-                    response.config.clone(),
-                    app.package_info().name.clone(),
-                ))
-            } else {
-                None
-            }
-        };
-
-        if let Some(restart_result) = restart_result {
-            match restart_result {
-                Ok(()) => {
-                    let summary = {
-                        let mut store = runtime_store.lock().recover_poison();
-                        store.reload(response.config.version, response.warnings.len())
-                    };
-                    app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
-                        CommandError::internal(format!(
-                            "Failed to emit config_reloaded event: {error}"
-                        ))
-                    })?;
-                }
-                Err(message) => {
-                    let stopped_summary = {
-                        let mut store = runtime_store.lock().recover_poison();
-                        store.stop()
-                    };
-                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
-                    return Err(CommandError::new("runtime_reload_failed", message, None));
-                }
-            }
-        }
-    }
+    reload_active_config(&app, &runtime_store, &runtime_controller, &response.config, response.warnings.len(), false)?;
 
     rebuild_tray_menu_from_config(&app, &response.config);
 
@@ -1734,59 +1661,9 @@ async fn import_full_config_apply(
     .await
     .map_err(|e| CommandError::internal(format!("import apply task failed: {e}")))??;
 
-    app.state::<MinimizeToTray>()
-        .store(result.config.settings.minimize_to_tray, Ordering::Relaxed);
-    // Explicit overwrite — adopt the new on-disk fingerprint as our baseline so
-    // the next save_config does not falsely report a concurrent change.
-    record_config_stamp(&app);
+    accept_config(&app, &result.config, result.stamp);
 
-    let is_running = {
-        let store = runtime_store.lock().recover_poison();
-        store.is_running()
-    };
-
-    if is_running {
-        let restart_result = {
-            let mut controller = runtime_controller
-                .lock()
-                .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-            let still_running = runtime_store.lock().recover_poison().is_running();
-            if still_running {
-                Some(controller.restart(
-                    app.clone(),
-                    runtime_store.inner().clone(),
-                    result.config.clone(),
-                    app.package_info().name.clone(),
-                ))
-            } else {
-                None
-            }
-        };
-
-        if let Some(restart_result) = restart_result {
-            match restart_result {
-                Ok(()) => {
-                    let summary = {
-                        let mut store = runtime_store.lock().recover_poison();
-                        store.reload(result.config.version, result.warnings.len())
-                    };
-                    app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
-                        CommandError::internal(format!(
-                            "Failed to emit config_reloaded event: {error}"
-                        ))
-                    })?;
-                }
-                Err(message) => {
-                    let stopped_summary = {
-                        let mut store = runtime_store.lock().recover_poison();
-                        store.stop()
-                    };
-                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
-                    return Err(CommandError::new("runtime_reload_failed", message, None));
-                }
-            }
-        }
-    }
+    reload_active_config(&app, &runtime_store, &runtime_controller, &result.config, result.warnings.len(), false)?;
 
     rebuild_tray_menu_from_config(&app, &result.config);
 
@@ -2057,10 +1934,10 @@ async fn start_runtime(
             .map_err(|error| CommandError::internal(format!("start_runtime task failed: {error}")))?
             .map_err(CommandError::from)?;
 
-    {
-        let mut controller = runtime_controller
-            .lock()
-            .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
+    let summary = runtime_transition(&runtime_controller, |controller| {
+        if runtime_store.lock().recover_poison().is_running() {
+            return Ok(false);
+        }
         controller
             .start(
                 app.clone(),
@@ -2068,17 +1945,21 @@ async fn start_runtime(
                 load_response.config.clone(),
                 app.package_info().name.clone(),
             )
-            .map_err(|message| CommandError::new("runtime_start_failed", message, None))?;
-    }
-
-    let summary = {
-        let mut store = runtime_store.lock().recover_poison();
-        store.start(load_response.config.version, load_response.warnings.len())
-    };
-
-    app.emit(EVENT_RUNTIME_STARTED, &summary).map_err(|error| {
-        CommandError::internal(format!("Failed to emit runtime_started event: {error}"))
-    })?;
+            .map(|()| true)
+    }, |result| {
+        let started = result.map_err(|message| CommandError::new("runtime_start_failed", message, None))?;
+        let summary = {
+            let mut store = runtime_store.lock().recover_poison();
+            if started { store.start(load_response.config.version, load_response.warnings.len()) }
+            else { store.summary() }
+        };
+        if started {
+            app.emit(EVENT_RUNTIME_STARTED, &summary).map_err(|error| {
+                CommandError::internal(format!("Failed to emit runtime_started event: {error}"))
+            })?;
+        }
+        Ok::<_, CommandError>(summary)
+    })??;
 
     // Tray label and tooltip carry the running state, so they go stale unless
     // every start/stop path refreshes them - not just the tray's own menu item.
@@ -2093,23 +1974,14 @@ async fn stop_runtime(
     runtime_store: State<'_, Arc<Mutex<RuntimeStore>>>,
     runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
 ) -> Result<RuntimeStateSummary, CommandError> {
-    {
-        let mut controller = runtime_controller
-            .lock()
-            .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-        controller
-            .stop()
-            .map_err(|message| CommandError::new("runtime_stop_failed", message, None))?;
-    }
-
-    let summary = {
-        let mut store = runtime_store.lock().recover_poison();
-        store.stop()
-    };
-
-    app.emit(EVENT_RUNTIME_STOPPED, &summary).map_err(|error| {
-        CommandError::internal(format!("Failed to emit runtime_stopped event: {error}"))
-    })?;
+    let summary = runtime_transition(&runtime_controller, |controller| controller.stop(), |result| {
+        result.map_err(|message| CommandError::new("runtime_stop_failed", message, None))?;
+        let summary = runtime_store.lock().recover_poison().stop();
+        app.emit(EVENT_RUNTIME_STOPPED, &summary).map_err(|error| {
+            CommandError::internal(format!("Failed to emit runtime_stopped event: {error}"))
+        })?;
+        Ok::<_, CommandError>(summary)
+    })??;
 
     rebuild_tray_menu(&app);
 
@@ -2290,17 +2162,15 @@ async fn reload_runtime(
             })?
             .map_err(CommandError::from)?;
 
-    let restart_result = {
-        let mut controller = runtime_controller
-            .lock()
-            .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
-        controller.restart(
-            app.clone(),
-            runtime_store.inner().clone(),
-            load_response.config.clone(),
-            app.package_info().name.clone(),
-        )
-    };
+    let mut controller = runtime_controller
+        .lock()
+        .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
+    let restart_result = controller.restart(
+        app.clone(),
+        runtime_store.inner().clone(),
+        load_response.config.clone(),
+        app.package_info().name.clone(),
+    );
     if let Err(message) = restart_result {
         let stopped_summary = {
             let mut store = runtime_store.lock().recover_poison();
@@ -2318,6 +2188,7 @@ async fn reload_runtime(
     app.emit(EVENT_CONFIG_RELOADED, &summary).map_err(|error| {
         CommandError::internal(format!("Failed to emit config_reloaded event: {error}"))
     })?;
+    drop(controller);
 
     // Reflect any profile changes in the tray menu.
     rebuild_tray_menu_from_config(&app, &load_response.config);
@@ -4150,57 +4021,11 @@ pub fn run() {
                             };
 
                             if is_running {
-                                let stop_result = match runtime_controller.lock() {
-                                    Ok(mut controller) => controller.stop(),
-                                    Err(_) => {
-                                        log::error!("[tray] runtime_controller lock poisoned");
-                                        return;
-                                    }
-                                };
-                                if stop_result.is_ok() {
-                                    let summary = match runtime_store.lock() {
-                                        Ok(mut store) => store.stop(),
-                                        Err(_) => return,
-                                    };
-                                    let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
-                                    rebuild_tray_menu(&app);
+                                if let Err(error) = stop_runtime(app.clone(), runtime_store, runtime_controller).await {
+                                    log::error!("[tray] could not stop runtime: {}", error.message);
                                 }
-                            } else {
-                                let config_dir = resolve_app_paths(&app).config_dir.clone();
-                                let load_result = tauri::async_runtime::spawn_blocking(move || {
-                                    load_or_initialize_config(&config_dir)
-                                })
-                                .await;
-
-                                let load_response = match load_result {
-                                    Ok(Ok(response)) => response,
-                                    _ => return,
-                                };
-
-                                let start_result = match runtime_controller.lock() {
-                                    Ok(mut controller) => controller.start(
-                                        app.clone(),
-                                        runtime_store.inner().clone(),
-                                        load_response.config.clone(),
-                                        app.package_info().name.clone(),
-                                    ),
-                                    Err(_) => {
-                                        log::error!("[tray] runtime_controller lock poisoned");
-                                        return;
-                                    }
-                                };
-
-                                if start_result.is_ok() {
-                                    let summary = match runtime_store.lock() {
-                                        Ok(mut store) => store.start(
-                                            load_response.config.version,
-                                            load_response.warnings.len(),
-                                        ),
-                                        Err(_) => return,
-                                    };
-                                    let _ = app.emit(EVENT_RUNTIME_STARTED, &summary);
-                                    rebuild_tray_menu(&app);
-                                }
+                            } else if let Err(error) = start_runtime(app.clone(), runtime_store, runtime_controller).await {
+                                log::error!("[tray] could not start runtime: {}", error.message);
                             }
                         });
                     }
@@ -4476,6 +4301,115 @@ mod tests {
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")
+    }
+
+    #[test]
+    fn loaded_snapshot_stamp_rejects_external_replacement() {
+        let dir = temp_home();
+        let seeded = load_or_initialize_config(dir.path()).unwrap();
+        let path = dir.path().join(config::CONFIG_FILE_NAME);
+        // Noncanonical whitespace proves that the stamp follows the bytes, not serialization.
+        fs::write(&path, serde_json::to_vec(&seeded.config).unwrap()).unwrap();
+        let loaded = load_or_initialize_config(dir.path()).unwrap();
+        assert_eq!(loaded.stamp, config::config_file_stamp(dir.path()));
+        let mut external = loaded.config.clone();
+        external.settings.global_shortcut = Some("ctrl+shift+f9".into());
+        save_config_to_store(dir.path(), external, None).unwrap();
+        let result = save_config_to_store(dir.path(), loaded.config, loaded.stamp);
+        assert!(matches!(result, Err(ConfigStoreError::ConcurrentModification)));
+        assert!(!serde_json::to_value(seeded).unwrap().as_object().unwrap().contains_key("stamp"));
+    }
+
+    #[test]
+    fn saved_snapshot_stamp_rejects_external_replacement() {
+        let dir = temp_home();
+        let saved = save_config_to_store(dir.path(), config::default_seed_config(), None).unwrap();
+        assert_eq!(saved.stamp, config::config_file_stamp(dir.path()));
+        let mut external = saved.config.clone();
+        external.settings.global_shortcut = Some("ctrl+shift+f9".into());
+        save_config_to_store(dir.path(), external, None).unwrap();
+        let result = save_config_to_store(dir.path(), saved.config, saved.stamp);
+        assert!(matches!(result, Err(ConfigStoreError::ConcurrentModification)));
+    }
+
+    #[test]
+    fn runtime_transition_holds_controller_during_publication() {
+        let controller = Mutex::new(false);
+        runtime_transition(&controller, |backend| *backend = true, |()| {
+            assert!(matches!(controller.try_lock(), Err(std::sync::TryLockError::WouldBlock)));
+        }).unwrap();
+    }
+
+    #[test]
+    fn runtime_transition_keeps_stop_out_until_start_is_published() {
+        let controller = Mutex::new(false);
+        let store = Mutex::new(RuntimeStore::default());
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            let start = scope.spawn(|| {
+                runtime_transition(&controller, |backend| {
+                    assert!(store.try_lock().is_ok(), "backend work must not hold the store");
+                    *backend = true;
+                    barrier.wait();
+                    barrier.wait();
+                }, |()| {
+                    assert!(matches!(controller.try_lock(), Err(std::sync::TryLockError::WouldBlock)),
+                        "stop must not enter between backend start and status publication");
+                    store.lock().unwrap().start(11, 0);
+                }).unwrap();
+            });
+            barrier.wait();
+            assert!(!store.lock().unwrap().is_running());
+            let stop = scope.spawn(|| {
+                runtime_transition(&controller, |backend| {
+                    assert!(store.try_lock().is_ok());
+                    *backend = false;
+                }, |()| { store.lock().unwrap().stop(); }).unwrap();
+            });
+            barrier.wait();
+            start.join().unwrap();
+            stop.join().unwrap();
+        });
+        assert!(!*controller.lock().unwrap());
+        assert!(!store.lock().unwrap().is_running());
+    }
+
+    #[test]
+    fn import_applies_the_incoming_global_shortcut() {
+        let dir = temp_home();
+        let mut incoming = config::default_seed_config();
+        incoming.settings.global_shortcut = Some("  ctrl+shift+f9  ".into());
+        let merged = merge_configs_by_id(config::default_seed_config(), incoming);
+        let saved = save_config_to_store(dir.path(), merged, None).unwrap();
+        let mut desired = None;
+        apply_config_shortcut(&saved.config, |shortcut| desired = Some(shortcut.to_owned()));
+        assert_eq!(desired.as_deref(), Some("ctrl+shift+f9"));
+    }
+
+    #[test]
+    fn restore_applies_the_backed_up_global_shortcut() {
+        let dir = temp_home();
+        let mut backup = config::default_seed_config();
+        backup.settings.global_shortcut = Some("ctrl+shift+f10".into());
+        let path = dir.path().join("backup.json");
+        fs::write(&path, serde_json::to_vec(&backup).unwrap()).unwrap();
+        let restored = read_and_migrate_config_file(&path).unwrap();
+        save_config_to_store(dir.path(), restored, None).unwrap();
+        let loaded = load_or_initialize_config(dir.path()).unwrap();
+        let mut desired = None;
+        apply_config_shortcut(&loaded.config, |shortcut| desired = Some(shortcut.to_owned()));
+        assert_eq!(desired.as_deref(), Some("ctrl+shift+f10"));
+    }
+
+    #[test]
+    fn config_shortcut_defaults_for_absent_or_blank_settings() {
+        for shortcut in [None, Some(" \t ".into())] {
+            let mut config = config::default_seed_config();
+            config.settings.global_shortcut = shortcut;
+            let mut desired = None;
+            apply_config_shortcut(&config, |shortcut| desired = Some(shortcut.to_owned()));
+            assert_eq!(desired.as_deref(), Some("ctrl+alt+n"));
+        }
     }
 
     /// The app ACL (build.rs `APP_COMMANDS` + capabilities) must cover exactly the

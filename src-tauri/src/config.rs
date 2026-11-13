@@ -73,6 +73,8 @@ pub struct ValidationWarning {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LoadConfigResponse {
+    #[serde(skip)]
+    pub(crate) stamp: Option<u64>,
     pub config: AppConfig,
     pub warnings: Vec<ValidationWarning>,
     pub path: String,
@@ -82,6 +84,8 @@ pub struct LoadConfigResponse {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveConfigResponse {
+    #[serde(skip)]
+    pub(crate) stamp: Option<u64>,
     pub config: AppConfig,
     pub warnings: Vec<ValidationWarning>,
     pub path: String,
@@ -1122,7 +1126,7 @@ pub fn load_or_initialize_config(
         log::warn!("[config] config.json is missing; looking for a usable backup before seeding defaults");
     } else {
         match load_and_validate(&config_path) {
-            Ok((config, warnings)) => {
+            Ok((config, warnings, stamp)) => {
                 // Mark the current config as last-known-good *after* it has loaded
                 // and validated cleanly. Failure is non-fatal — log and continue.
                 if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
@@ -1130,6 +1134,7 @@ pub fn load_or_initialize_config(
                 }
 
                 return Ok(LoadConfigResponse {
+                    stamp: Some(stamp),
                     config,
                     warnings,
                     path: path_string(&config_path),
@@ -1162,9 +1167,13 @@ pub fn load_or_initialize_config(
         if !primary_missing {
             quarantine_corrupt_config(&config_path);
         }
-        if let Err(err) = write_config_to_path(config_dir, &config) {
-            log::warn!("[config] Failed to persist recovered config: {err}");
-        }
+        let stamp = match write_config_to_path(config_dir, &config) {
+            Ok((_, _, stamp)) => Some(stamp),
+            Err(err) => {
+                log::warn!("[config] Failed to persist recovered config: {err}");
+                None
+            }
+        };
         if let Err(err) = crate::backup::mark_last_known_good(config_dir) {
             log::warn!("[config] Failed to update last-known-good marker after recovery: {err}");
         }
@@ -1188,6 +1197,7 @@ pub fn load_or_initialize_config(
             severity: ValidationSeverity::Warning,
         });
         return Ok(LoadConfigResponse {
+            stamp,
             config,
             warnings,
             path: path_string(&config_path),
@@ -1204,9 +1214,10 @@ pub fn load_or_initialize_config(
     let mut config = default_seed_config();
     let warnings = validate_config(&config)?;
     config.compile_title_regexes();
-    write_config_to_path(config_dir, &config)?;
+    let (_, _, stamp) = write_config_to_path(config_dir, &config)?;
 
     Ok(LoadConfigResponse {
+        stamp: Some(stamp),
         config,
         warnings,
         path: path_string(&config_path),
@@ -1218,14 +1229,14 @@ pub fn load_or_initialize_config(
 /// shared by the initial load and by backup recovery.
 fn load_and_validate(
     config_path: &Path,
-) -> Result<(AppConfig, Vec<ValidationWarning>), ConfigStoreError> {
-    let mut config = read_config_from_path(config_path)?;
+) -> Result<(AppConfig, Vec<ValidationWarning>, u64), ConfigStoreError> {
+    let (mut config, stamp) = read_config_from_path(config_path)?;
     migrate_devices(&mut config);
     migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
     let warnings = validate_config(&config)?;
     config.compile_title_regexes();
-    Ok((config, warnings))
+    Ok((config, warnings, stamp))
 }
 
 /// Best-effort peek at the declared `version` of a possibly-broken config file.
@@ -1268,7 +1279,7 @@ fn recover_config_from_backups(
             continue;
         }
         match load_and_validate(&candidate) {
-            Ok((config, warnings)) => return Some((config, warnings, candidate)),
+            Ok((config, warnings, _)) => return Some((config, warnings, candidate)),
             Err(err) => log::warn!(
                 "[config] Recovery candidate {} is also unusable: {err}",
                 candidate.display()
@@ -1288,9 +1299,13 @@ fn recover_config_from_backups(
 // ever actually matter.
 pub fn config_file_stamp(config_dir: &Path) -> Option<u64> {
     let bytes = fs::read(config_dir.join(CONFIG_FILE_NAME)).ok()?;
+    Some(config_bytes_stamp(&bytes))
+}
+
+fn config_bytes_stamp(bytes: &[u8]) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     bytes.hash(&mut hasher);
-    Some(hasher.finish())
+    hasher.finish()
 }
 
 /// Persist `config` to `config_dir`. When `expected_stamp` is `Some`, the save
@@ -1322,13 +1337,14 @@ pub fn save_config(
         return Err(ConfigStoreError::ConcurrentModification);
     }
 
-    let (backup_path, backup_failed) = write_config_to_path(config_dir, &config)?;
+    let (backup_path, backup_failed, stamp) = write_config_to_path(config_dir, &config)?;
     let config_path = config_dir.join(CONFIG_FILE_NAME);
 
     let mut config = config;
     config.compile_title_regexes();
 
     Ok(SaveConfigResponse {
+        stamp: Some(stamp),
         config,
         warnings,
         path: path_string(&config_path),
@@ -1337,7 +1353,7 @@ pub fn save_config(
     })
 }
 
-fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreError> {
+fn read_config_from_path(config_path: &Path) -> Result<(AppConfig, u64), ConfigStoreError> {
     let raw =
         fs::read_to_string(config_path).map_err(|error| io_error(Some(config_path), error))?;
     let raw_value: Value = serde_json::from_str(&raw).map_err(|error| ConfigStoreError::Parse {
@@ -1347,10 +1363,11 @@ fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreErr
 
     validate_config_schema_value(&raw_value)?;
 
-    serde_json::from_value(raw_value).map_err(|error| ConfigStoreError::Parse {
+    let config = serde_json::from_value(raw_value).map_err(|error| ConfigStoreError::Parse {
         path: path_string(config_path),
         message: format!("Failed to deserialize schema-valid config JSON: {error}"),
-    })
+    })?;
+    Ok((config, config_bytes_stamp(raw.as_bytes())))
 }
 
 /// Read an `AppConfig` from `config_path`, applying the same schema validation,
@@ -1358,7 +1375,7 @@ fn read_config_from_path(config_path: &Path) -> Result<AppConfig, ConfigStoreErr
 /// Use this anywhere a config file is loaded outside `load_or_initialize_config`
 /// (backup restore, full-config import) so those paths cannot skip migrations.
 pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, ConfigStoreError> {
-    let mut config = read_config_from_path(config_path)?;
+    let (mut config, _) = read_config_from_path(config_path)?;
     migrate_devices(&mut config);
     migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
@@ -1389,7 +1406,7 @@ pub(crate) fn persist_atomically(
 fn write_config_to_path(
     config_dir: &Path,
     config: &AppConfig,
-) -> Result<(Option<PathBuf>, bool), ConfigStoreError> {
+) -> Result<(Option<PathBuf>, bool, u64), ConfigStoreError> {
     let config_path = config_dir.join(CONFIG_FILE_NAME);
     // Tracks whether any best-effort backup (rolling rotation / daily snapshot)
     // failed to write, so the caller can warn that the safety net is broken.
@@ -1409,12 +1426,12 @@ fn write_config_to_path(
         }
     };
 
-    let serialized = serde_json::to_string_pretty(config)
+    let mut serialized = serde_json::to_string_pretty(config)
         .map_err(|error| ConfigStoreError::Serialize(error.to_string()))?;
+    serialized.push('\n');
 
     persist_atomically(&config_path, |file| {
-        file.write_all(serialized.as_bytes())?;
-        file.write_all(b"\n")
+        file.write_all(serialized.as_bytes())
     })
     .map_err(|error| ConfigStoreError::Io {
         path: Some(path_string(&config_path)),
@@ -1427,7 +1444,7 @@ fn write_config_to_path(
         backup_failed = true;
     }
 
-    Ok((backup_path, backup_failed))
+    Ok((backup_path, backup_failed, config_bytes_stamp(serialized.as_bytes())))
 }
 
 fn config_schema_validator() -> Result<&'static Validator, ConfigStoreError> {

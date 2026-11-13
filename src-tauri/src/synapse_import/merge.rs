@@ -11,7 +11,7 @@ use crate::config::{
     Action, ActionPayload, ActionType, AppConfig, AppMapping, Binding, ControlId, EncoderMapping,
     Layer, MenuItem, MouseActionKind, MouseActionPayload, PasteMode, PhysicalControl, Profile,
     SequenceActionPayload, SequenceStep, ShortcutActionPayload, SnippetLibraryItem,
-    TextSnippetPayload,
+    TextSnippetPayload, MAX_SEQUENCE_STEPS,
 };
 
 use super::types::{
@@ -56,11 +56,11 @@ pub fn apply_parsed_into_config(
             &options.name_suffix,
             replaced_id,
         ) {
-            Ok(ProfileAddition { bindings, actions }) => {
+            Ok(ProfileAddition { bindings, actions, macros }) => {
                 summary.profiles_added += 1;
                 summary.bindings_added += bindings;
                 summary.actions_added += actions;
-                summary.macros_added += profile.macros.len();
+                summary.macros_added += macros;
             }
             Err(err) => {
                 warnings.push(
@@ -84,6 +84,7 @@ pub fn apply_parsed_into_config(
 struct ProfileAddition {
     bindings: usize,
     actions: usize,
+    macros: usize,
 }
 
 fn append_profile(
@@ -124,10 +125,11 @@ fn append_profile(
 
     for m in &parsed.macros {
         let action_id = make_random_id("action");
-        let action = build_sequence_action(&action_id, m, warnings);
+        let Some(action) = build_sequence_action(&action_id, m, warnings) else { continue; };
         macro_action_ids.insert(m.synapse_guid.clone(), action_id);
         new_actions.push(action);
     }
+    let added_macros = new_actions.len();
 
     // Bindings + per-binding actions.
     let mut new_bindings: Vec<Binding> = Vec::new();
@@ -226,6 +228,7 @@ fn append_profile(
     Ok(ProfileAddition {
         bindings: added_bindings,
         actions: added_actions,
+        macros: added_macros,
     })
 }
 
@@ -346,8 +349,18 @@ fn build_action_from_parsed(
 fn build_sequence_action(
     action_id: &str,
     parsed: &ParsedMacro,
-    _warnings: &mut Vec<ImportWarning>,
-) -> Action {
+    warnings: &mut Vec<ImportWarning>,
+) -> Option<Action> {
+    if parsed.steps.len() > MAX_SEQUENCE_STEPS {
+        let message = crate::ui_text!(
+            "synapseImport.macroTooLong",
+            "Skipped macro `{name}`: {count} steps exceeds the maximum of {limit}.",
+            name = &parsed.name, count = parsed.steps.len(), limit = MAX_SEQUENCE_STEPS
+        );
+        warnings.push(ImportWarning::new("macro_sequence_too_long", crate::ui_text::native(&message))
+            .with_context(parsed.name.clone()));
+        return None;
+    }
     let steps: Vec<SequenceStep> = parsed
         .steps
         .iter()
@@ -370,7 +383,7 @@ fn build_sequence_action(
         steps
     };
 
-    Action {
+    Some(Action {
         id: action_id.to_string(),
         action_type: ActionType::Sequence,
         payload: ActionPayload::Sequence(SequenceActionPayload { steps }),
@@ -380,7 +393,7 @@ fn build_sequence_action(
             parsed.name
         )),
         conditions: Vec::new(),
-    }
+    })
 }
 
 // ============================================================================
@@ -670,6 +683,37 @@ mod tests {
         assert_eq!(result.summary.profiles_added, 1);
         assert_eq!(result.summary.bindings_added, 1);
         assert_eq!(result.summary.actions_added, 1);
+    }
+
+    #[test]
+    fn import_sequence_limit_keeps_valid_macros_and_skips_oversized_ones() {
+        for count in [200, 201] {
+            let parsed = ParsedSynapseProfiles {
+                source_kind: super::super::types::SourceKind::SynapseV4,
+                source_path: "test".into(), warnings: Vec::new(),
+                profiles: vec![ParsedProfile {
+                synapse_guid: "g".into(), name: "Imported".into(),
+                bindings: vec![ParsedBinding {
+                    control_id: "thumb_01".into(), layer: "standard".into(),
+                    source_input_id: "KEY_1".into(), label: "Macro".into(),
+                    action: ParsedAction::Sequence { macro_guid: "m".into() },
+                }, ParsedBinding {
+                    control_id: "thumb_02".into(), layer: "standard".into(),
+                    source_input_id: "KEY_2".into(), label: "Shortcut".into(),
+                    action: ParsedAction::Shortcut { key: "B".into(), ctrl: false, shift: false, alt: false, win: false },
+                }],
+                macros: vec![ParsedMacro {
+                    synapse_guid: "m".into(), name: "Boundary".into(),
+                    steps: vec![ParsedSequenceStep::Send { value: "A".into() }; count],
+                }],
+            }]};
+            let result = apply_parsed_into_config(crate::config::default_seed_config(), parsed, &ImportOptions::default());
+            assert_eq!(result.summary.bindings_added, if count == 200 { 2 } else { 1 });
+            assert_eq!(result.summary.macros_added, usize::from(count == 200));
+            assert_eq!(result.warnings.iter().any(|w| w.code == "macro_sequence_too_long"), count == 201);
+            let dir = tempfile::tempdir().unwrap();
+            crate::config::save_config(dir.path(), result.config, None).unwrap();
+        }
     }
 
     #[test]
@@ -1160,7 +1204,7 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Overflow: macro with 10 000 steps → no panic, all steps are converted
+    // Overflow: oversized macros are skipped without affecting valid imports.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -1194,9 +1238,9 @@ mod edge_proptests {
             }],
         }]);
         let result = apply_parsed_into_config(base, parsed, &ImportOptions::default());
-        // The macro action must be created; binding links to it.
-        assert_eq!(result.config.bindings.len(), 1);
-        assert_eq!(result.summary.macros_added, 1);
+        assert!(result.config.bindings.is_empty());
+        assert_eq!(result.summary.macros_added, 0);
+        assert!(result.warnings.iter().any(|w| w.code == "macro_sequence_too_long"));
     }
 
     // -----------------------------------------------------------------------

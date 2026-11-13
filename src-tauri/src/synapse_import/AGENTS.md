@@ -18,6 +18,7 @@ Parse exported Razer Synapse profiles (`.synapse3` / `.synapse4`, incl. zipped) 
 - Macro `Send` steps occur at non-modifier key-down with that moment's modifiers; key-up tracks holds only. Preserve delay order and warn once for overlapping holds. V4 key integers accept numeric strings with checked conversion, require State 0..=3, and default only missing/null State to 0; malformed key payloads reject that macro with a warning.
 - Canonicalize keys on the way in: F-key tokens to `F{n}`, bare-modifier VKs folded to modifier flags, dedupe case-insensitive path collisions.
 - Report skipped/unreadable entries as warnings rather than failing the whole import.
+- Merge rejects macros longer than `config::MAX_SEQUENCE_STEPS` before creating actions; their bindings are skipped and `macrosAdded` counts accepted macros only. The length warning uses `ui_text!` plus `ui_text::native` to preserve the existing string warning payload in the current UI language.
 - XML element text is collected through `macro_xml::TextBuf` (handles both `Event::Text` and `Event::GeneralRef`, trims once per element); never assign a raw `Event::Text` chunk — quick-xml ≥0.38 splits `A &amp; B` into three events.
 
 ## Work Guidance

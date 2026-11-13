@@ -1585,6 +1585,9 @@
     "slotKeep": "Leave as is"
   },
   "backend": {
+    "synapseImport": {
+      "macroTooLong": "Skipped macro `{{name}}`: {{count}} steps exceeds the maximum of {{limit}}."
+    },
     "admin": {
       "relaunchFailed": "Could not restart with administrator rights.",
       "elevationCancelled": "Elevation was cancelled in the UAC prompt.",

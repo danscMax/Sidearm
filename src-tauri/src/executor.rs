@@ -12,6 +12,26 @@ const MAX_STEP_DELAY_MS: u64 = 30_000;
 /// Upper bound on how many times a single Send/Text sequence step may repeat.
 const MAX_STEP_REPEAT: u32 = 100;
 
+fn sequence_delay_ms(delay_ms: u32) -> u64 {
+    u64::from(delay_ms).min(MAX_STEP_DELAY_MS)
+}
+
+fn run_repeated_input<T, E>(
+    repeat: Option<u32>,
+    delay_ms: Option<u32>,
+    mut send: impl FnMut() -> Result<T, E>,
+    mut wait: impl FnMut(u32) -> Result<(), E>,
+) -> Result<usize, E> {
+    let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
+    for _ in 0..times {
+        send()?;
+        if let Some(delay_ms) = delay_ms {
+            wait(delay_ms)?;
+        }
+    }
+    Ok(times as usize)
+}
+
 /// Bumped to stop the live sequence that runs and drop the queued ones: the
 /// capture stopped, or the profile was switched by hand.
 static SEQUENCE_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -681,7 +701,7 @@ fn run_live_sequence_action(
     };
     let check = || if live_sequence_generation() == started { Ok(()) } else { Err(cancelled()) };
     let wait = |delay_ms: u32| {
-        if pause(u64::from(delay_ms).min(MAX_STEP_DELAY_MS), started) { Ok(()) } else { Err(cancelled()) }
+        if pause(sequence_delay_ms(delay_ms), started) { Ok(()) } else { Err(cancelled()) }
     };
     for step in &payload.steps {
         check()?;
@@ -728,7 +748,6 @@ fn run_live_sequence_action(
                 delay_ms,
                 repeat,
             } => {
-                let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
                 // The same tokens a text snippet has ({date}, {selection}, {cursor}…);
                 // a text without one is typed as it is ({{ included).
                 let (value, cursor_back) = if input_synthesis::has_snippet_token(value) {
@@ -736,7 +755,7 @@ fn run_live_sequence_action(
                 } else {
                     (value.clone(), None)
                 };
-                for _ in 0..times {
+                injected_input_steps += run_repeated_input(*repeat, *delay_ms, || {
                     check()?;
                     input_synthesis::send_text(&value).map_err(|message| {
                         execution_error(
@@ -746,12 +765,8 @@ fn run_live_sequence_action(
                             Some(preview.encoded_key.clone()),
                             action_id.clone(),
                         )
-                    })?;
-                    injected_input_steps += 1;
-                    if let Some(delay_ms) = delay_ms {
-                        wait(*delay_ms)?;
-                    }
-                }
+                    })
+                }, wait)?;
                 if let Some(back) = cursor_back.filter(|&back| back > 0)
                     && let Err(message) = input_synthesis::send_left_arrows(back)
                 {
@@ -763,8 +778,7 @@ fn run_live_sequence_action(
                 delay_ms,
                 repeat,
             } => {
-                let times = repeat.unwrap_or(1).min(MAX_STEP_REPEAT);
-                for _ in 0..times {
+                injected_input_steps += run_repeated_input(*repeat, *delay_ms, || {
                     check()?;
                     input_synthesis::send_hotkey_string(value, &encoding_mods).map_err(
                         |message| {
@@ -776,12 +790,8 @@ fn run_live_sequence_action(
                                 action_id.clone(),
                             )
                         },
-                    )?;
-                    injected_input_steps += 1;
-                    if let Some(delay_ms) = delay_ms {
-                        wait(*delay_ms)?;
-                    }
-                }
+                    )
+                }, wait)?;
             }
         }
     }
@@ -2432,19 +2442,14 @@ mod edge_proptests {
     }
 
     // -----------------------------------------------------------------------
-    // Overflow: delay clamping — Duration computation stays bounded
-    //
-    // The runtime uses:
-    //   Duration::from_millis(u64::from(delay_ms).min(MAX_STEP_DELAY_MS))
-    // We verify the computed Duration is always <= MAX_STEP_DELAY_MS.
-    // No sleep() calls; we only test the Duration value.
+    // Overflow: exercise the delay bound used by the live wait path.
     // -----------------------------------------------------------------------
 
     proptest! {
         /// For any u32 delay, the computed Duration must be capped at 30 s.
         #[test]
         fn sleep_step_delay_clamped_to_max(delay_ms in any::<u32>()) {
-            let clamped = u64::from(delay_ms).min(MAX_STEP_DELAY_MS);
+            let clamped = sequence_delay_ms(delay_ms);
             let duration = std::time::Duration::from_millis(clamped);
             prop_assert!(
                 duration <= std::time::Duration::from_millis(MAX_STEP_DELAY_MS),
@@ -2454,55 +2459,84 @@ mod edge_proptests {
             );
         }
 
-        /// For any u32 delay, the clamped value must be <= MAX_STEP_DELAY_MS
-        /// and must not overflow u64.
-        #[test]
-        fn sleep_step_u64_cast_never_overflows(delay_ms in any::<u32>()) {
-            // u32 widened to u64 cannot overflow; this is the compile-time
-            // guarantee; we also verify the .min() result stays in range.
-            let clamped: u64 = u64::from(delay_ms).min(MAX_STEP_DELAY_MS);
-            prop_assert!(clamped <= MAX_STEP_DELAY_MS);
-        }
     }
 
-    // -----------------------------------------------------------------------
-    // Boundary: repeat — repeat=Some(0) means "do not execute" (step skipped)
-    // -----------------------------------------------------------------------
-
-    /// repeat=Some(0) must mean "do not execute". Production now uses
-    /// `repeat.unwrap_or(1).min(MAX_STEP_REPEAT)` (executor.rs:437/461), so 0 → 0
-    /// and the `for _ in 0..times` loop runs zero times → the step is skipped.
     #[test]
-    fn repeat_zero_skips_step() {
-        let times = 0u32;
-        assert_eq!(
-            times, 0,
-            "repeat=0 must produce 0 iterations (step skipped)"
-        );
+    fn sequence_delay_boundaries() {
+        for (delay, expected) in [
+            (0, 0), (1, 1), (29_999, 29_999), (30_000, 30_000),
+            (30_001, 30_000), (u32::MAX, 30_000),
+        ] {
+            assert_eq!(sequence_delay_ms(delay), expected);
+        }
     }
 
-    proptest! {
-        /// repeat=Some(n) for n in 1..=MAX_STEP_REPEAT must preserve n exactly
-        /// (no clamping modifies a valid in-range repeat value).
-        #[test]
-        fn repeat_valid_range_preserved(n in 1u32..=MAX_STEP_REPEAT) {
-            let times = n.min(MAX_STEP_REPEAT);
-            prop_assert_eq!(times, n);
+    #[test]
+    fn sequence_repeat_counts_and_post_input_delays() {
+        for (repeat, expected) in [
+            (None, 1), (Some(0), 0), (Some(1), 1), (Some(100), 100),
+            (Some(101), 100), (Some(u32::MAX), 100),
+        ] {
+            for delay in [None, Some(7)] {
+                let trace = std::cell::RefCell::new(Vec::new());
+                let count = run_repeated_input(repeat, delay, || {
+                    trace.borrow_mut().push("send");
+                    Ok::<_, ()>(())
+                }, |ms| {
+                    assert_eq!(ms, 7);
+                    trace.borrow_mut().push("wait");
+                    Ok(())
+                }).unwrap();
+                assert_eq!(count, expected);
+                let iteration = if delay.is_some() { vec!["send", "wait"] } else { vec!["send"] };
+                assert_eq!(*trace.borrow(), iteration.repeat(expected), "repeat={repeat:?}");
+            }
         }
+    }
 
-        /// repeat=Some(n) for n > MAX_STEP_REPEAT must be capped to MAX_STEP_REPEAT.
-        #[test]
-        fn repeat_above_max_clamped_to_max(n in (MAX_STEP_REPEAT + 1)..=u32::MAX) {
-            let times = n.min(MAX_STEP_REPEAT);
-            prop_assert_eq!(times, MAX_STEP_REPEAT);
-        }
+    #[test]
+    fn repeated_input_stops_on_send_or_wait_error() {
+        let mut waits = 0;
+        let error = run_repeated_input(Some(2), Some(1), || Err::<(), _>("send"), |_| {
+            waits += 1;
+            Ok(())
+        }).unwrap_err();
+        assert_eq!(error, "send");
+        assert_eq!(waits, 0);
 
-        /// None repeat defaults to 1 (exactly one execution).
-        #[test]
-        fn repeat_none_defaults_to_one(_x in 0u8..1) {
-            let times = 1.clamp(1, MAX_STEP_REPEAT);
-            prop_assert_eq!(times, 1);
+        let mut sent = 0;
+        let error = run_repeated_input(Some(2), Some(1), || {
+            sent += 1;
+            Ok(())
+        }, |_| Err("wait")).unwrap_err();
+        assert_eq!(error, "wait");
+        assert_eq!(sent, 1);
+    }
+
+    #[test]
+    fn recorded_inputs_keep_their_schedule_in_the_live_repeat_loop() {
+        let mut recorder = crate::recorder::MacroRecorder::new();
+        recorder.start(0).unwrap();
+        recorder.record_keystroke("Ctrl+C".into(), 0);
+        recorder.record_keystroke("Ctrl+V".into(), 2000);
+        recorder.record_keystroke("Enter".into(), 2100);
+        let recording = recorder.stop(4000).unwrap();
+        let clock = std::cell::Cell::new(0u64);
+        let mut sent = Vec::new();
+        for step in &recording.steps {
+            let SequenceStep::Send { value, delay_ms, repeat } = step else {
+                panic!("expected recorded Send step");
+            };
+            run_repeated_input(*repeat, *delay_ms, || {
+                sent.push((value.as_str(), clock.get()));
+                Ok::<_, ()>(())
+            }, |ms| {
+                clock.set(clock.get() + sequence_delay_ms(ms));
+                Ok(())
+            }).unwrap();
         }
+        assert_eq!(sent, [("Ctrl+C", 0), ("Ctrl+V", 2000), ("Enter", 2100)]);
+        assert_eq!(clock.get(), 2100, "no trailing pause");
     }
 
     // -----------------------------------------------------------------------
@@ -2555,20 +2589,4 @@ mod edge_proptests {
         assert_eq!(format_shortcut(&payload), "");
     }
 
-    // -----------------------------------------------------------------------
-    // Concurrency: N/A
-    //
-    // executor.rs does not expose any shared state (AtomicBool, Arc, Mutex)
-    // that can be tested without driving real OS input.  The cancellation flag
-    // in `run_live_sequence_action` is checked only inside the live send loop
-    // which calls send_text / send_hotkey_string — both emit real input and are
-    // excluded from pure-logic testing.
-    // -----------------------------------------------------------------------
-
-    // -----------------------------------------------------------------------
-    // Temporal: N/A for actual sleep; Duration computation verified above.
-    // The only temporal logic in executor.rs is:
-    //   Duration::from_millis(u64::from(delay_ms).min(MAX_STEP_DELAY_MS))
-    // which is fully covered by the overflow/clamp props above.
-    // -----------------------------------------------------------------------
 }

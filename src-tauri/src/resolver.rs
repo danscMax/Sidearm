@@ -154,10 +154,7 @@ pub(crate) fn select_profile_for_app_context_with_override<'a>(
         }
     }
 
-    let fallback_profile = config
-        .profiles
-        .iter()
-        .find(|profile| profile.id == config.settings.fallback_profile_id);
+    let fallback_profile = find_profile(config, &config.settings.fallback_profile_id);
     let candidates = matching_app_mappings(config, exe, title, process_path);
     let winner = candidates.first().copied();
     let profile = winner
@@ -166,9 +163,14 @@ pub(crate) fn select_profile_for_app_context_with_override<'a>(
     let used_fallback = winner.is_none();
     let reason = if let Some(mapping) = winner {
         format!("Matched app mapping `{}`.", mapping.id)
-    } else {
+    } else if fallback_profile.is_some() {
         format!(
             "No matching app mapping found. Using fallback profile `{}`.",
+            config.settings.fallback_profile_id
+        )
+    } else {
+        format!(
+            "No matching app mapping or enabled fallback profile `{}` found.",
             config.settings.fallback_profile_id
         )
     };
@@ -491,6 +493,7 @@ pub(crate) fn matching_app_mappings<'a>(
     process_path: Option<&str>,
 ) -> Vec<&'a AppMapping> {
     let normalized_title = title.to_ascii_lowercase();
+    let literal_title = title.to_lowercase();
     // Normalize the active process path ONCE per call — it is invariant across
     // all candidate mappings, so recomputing it (lowercase + regex) inside the
     // per-mapping filter closure below would repeat the same work N times on
@@ -539,7 +542,7 @@ pub(crate) fn matching_app_mappings<'a>(
                                 false
                             }
                         } else {
-                            normalized_title.contains(&needle.to_ascii_lowercase())
+                            literal_title.contains(&needle.to_lowercase())
                         }
                     })
         })
@@ -598,6 +601,55 @@ mod tests {
         assert_eq!(result.status, ResolutionStatus::Resolved);
         assert_eq!(result.resolved_profile_id.as_deref(), Some("default"));
         assert!(result.used_fallback_profile);
+    }
+
+    #[test]
+    fn resolve_input_preview_ignores_disabled_fallback_profile() {
+        let mut config = test_config(vec![]);
+        config.profiles[0].enabled = false;
+        config.actions[0].action_type = ActionType::Shortcut;
+        config.actions[0].payload = ActionPayload::Shortcut(crate::config::ShortcutActionPayload {
+            key: "A".into(), ctrl: true, shift: false, alt: false, win: false, raw: None,
+        });
+        assert!(config.bindings[0].enabled);
+
+        let result = resolve_input_preview(&config, "F13", "chrome.exe", "Docs", None);
+
+        assert_eq!(result.status, ResolutionStatus::Unresolved);
+        assert!(result.resolved_profile_id.is_none());
+        assert!(result.binding_id.is_none());
+        assert!(result.action_id.is_none());
+        assert!(result.used_fallback_profile);
+    }
+
+    #[test]
+    fn title_includes_matches_unicode_case() {
+        for (needle, title) in [("проект", "ПРОЕКТ"), ("ПРОЕКТ", "проект")] {
+            let config = test_config(vec![app_mapping(
+                "project", "code.exe", "code", 100, vec![needle],
+            )]);
+            let matching = resolve_input_preview(&config, "F13", "code.exe", title, None);
+            assert_eq!(matching.resolved_profile_id.as_deref(), Some("code"));
+            let other = resolve_input_preview(&config, "F13", "code.exe", "ДОКУМЕНТ", None);
+            assert_eq!(other.resolved_profile_id.as_deref(), Some("default"));
+        }
+    }
+
+    #[test]
+    fn title_regex_keeps_its_existing_case_semantics() {
+        let mapping = app_mapping(
+            "uppercase", "code.exe", "code", 100, vec!["regex:(?-i:ПРОЕКТ)"]
+        );
+        for compiled in [false, true] {
+            let mut config = test_config(vec![mapping.clone()]);
+            if compiled {
+                config.compile_title_regexes();
+            }
+            let result = resolve_input_preview(&config, "F13", "code.exe", "ПРОЕКТ", None);
+            assert_eq!(result.resolved_profile_id.as_deref(), Some("code"));
+            let other = resolve_input_preview(&config, "F13", "code.exe", "проект", None);
+            assert_eq!(other.resolved_profile_id.as_deref(), Some("default"));
+        }
     }
 
     #[test]

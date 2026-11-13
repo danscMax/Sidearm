@@ -122,13 +122,12 @@ fn convert_to_sequence_steps(events: &[RecordedEvent]) -> Vec<SequenceStep> {
         .iter()
         .enumerate()
         .map(|(i, event)| {
-            let delay_ms = if i == 0 {
-                None
-            } else {
-                let delta = event.timestamp.saturating_sub(events[i - 1].timestamp);
+            // Send waits after input, so each input owns the gap before the next.
+            let delay_ms = events.get(i + 1).and_then(|next| {
+                let delta = next.timestamp.saturating_sub(event.timestamp);
                 let capped = delta.min(MAX_STEP_DELAY_MS as u64) as u32;
-                if capped > 0 { Some(capped) } else { None }
-            };
+                (capped > 0).then_some(capped)
+            });
             SequenceStep::Send {
                 value: event.key.clone(),
                 delay_ms,
@@ -190,7 +189,7 @@ mod tests {
                 value, delay_ms, ..
             } => {
                 assert_eq!(value, "F13");
-                assert_eq!(*delay_ms, None); // first step has no delay
+                assert_eq!(*delay_ms, None); // no trailing delay
             }
             _ => panic!("Expected Send step"),
         }
@@ -201,38 +200,38 @@ mod tests {
         let mut recorder = MacroRecorder::new();
         recorder.start(1000).unwrap();
         recorder.record_keystroke("Ctrl+C".into(), 1000);
-        recorder.record_keystroke("Ctrl+V".into(), 1250);
-        recorder.record_keystroke("Enter".into(), 1500);
-        let recording = recorder.stop(2000).unwrap();
+        recorder.record_keystroke("Ctrl+V".into(), 3000);
+        recorder.record_keystroke("Enter".into(), 3100);
+        let recording = recorder.stop(4000).unwrap();
 
         assert_eq!(recording.steps.len(), 3);
-        // First step: no delay
+        // Wait after Copy, before Paste.
         match &recording.steps[0] {
             SequenceStep::Send {
                 value, delay_ms, ..
             } => {
                 assert_eq!(value, "Ctrl+C");
-                assert_eq!(*delay_ms, None);
+                assert_eq!(*delay_ms, Some(2000));
             }
             _ => panic!("Expected Send step"),
         }
-        // Second step: 250ms delay
+        // Wait after Paste, before Enter.
         match &recording.steps[1] {
             SequenceStep::Send {
                 value, delay_ms, ..
             } => {
                 assert_eq!(value, "Ctrl+V");
-                assert_eq!(*delay_ms, Some(250));
+                assert_eq!(*delay_ms, Some(100));
             }
             _ => panic!("Expected Send step"),
         }
-        // Third step: 250ms delay
+        // No trailing pause after the final input.
         match &recording.steps[2] {
             SequenceStep::Send {
                 value, delay_ms, ..
             } => {
                 assert_eq!(value, "Enter");
-                assert_eq!(*delay_ms, Some(250));
+                assert_eq!(*delay_ms, None);
             }
             _ => panic!("Expected Send step"),
         }
@@ -246,7 +245,7 @@ mod tests {
         recorder.record_keystroke("B".into(), 60_000); // 60s gap
         let recording = recorder.stop(60_001).unwrap();
 
-        match &recording.steps[1] {
+        match &recording.steps[0] {
             SequenceStep::Send { delay_ms, .. } => {
                 assert_eq!(*delay_ms, Some(30_000)); // capped
             }
@@ -315,7 +314,7 @@ mod tests {
         recorder.record_keystroke("B".into(), 100); // same timestamp
         let recording = recorder.stop(200).unwrap();
 
-        match &recording.steps[1] {
+        match &recording.steps[0] {
             SequenceStep::Send { delay_ms, .. } => {
                 assert_eq!(*delay_ms, None); // zero delay -> None
             }
@@ -381,12 +380,13 @@ mod edge_proptests {
             recorder.record_keystroke("B".into(), gap_ms);
             let recording = recorder.stop(gap_ms + 1).unwrap();
 
-            if let Some(SequenceStep::Send { delay_ms: Some(d), .. }) = recording.steps.get(1) {
-                prop_assert!(
-                    *d <= MAX_STEP_DELAY_MS,
-                    "delay {} exceeds MAX_STEP_DELAY_MS={}", d, MAX_STEP_DELAY_MS
-                );
-            }
+            let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] else {
+                panic!("expected Send step");
+            };
+            let expected = if gap_ms == 0 { None } else {
+                Some(gap_ms.min(u64::from(MAX_STEP_DELAY_MS)) as u32)
+            };
+            prop_assert_eq!(*delay_ms, expected);
         }
 
         /// Zero-gap events (same timestamp) must produce delay_ms = None, not Some(0).
@@ -400,14 +400,14 @@ mod edge_proptests {
             recorder.record_keystroke("B".into(), ts); // same timestamp
             let recording = recorder.stop(ts + 1).unwrap();
 
-            if let SequenceStep::Send { delay_ms, .. } = &recording.steps[1] {
+            if let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] {
                 prop_assert_eq!(*delay_ms, None, "zero-gap must produce None delay");
             }
         }
 
-        /// First step must ALWAYS have delay_ms = None, regardless of start_at timestamp.
+        /// A single input has no trailing delay, regardless of the start timestamp.
         #[test]
-        fn prop_first_step_delay_always_none(
+        fn prop_single_step_has_no_trailing_delay(
             start_ts in 0u64..=u64::MAX / 2,
             key_ts in 0u64..=u64::MAX / 2,
         ) {
@@ -417,7 +417,7 @@ mod edge_proptests {
             recorder.record_keystroke("X".into(), key_ts);
             let recording = recorder.stop(key_ts.saturating_add(1)).unwrap();
             if let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] {
-                prop_assert_eq!(*delay_ms, None, "first step delay must always be None");
+                prop_assert_eq!(*delay_ms, None, "single input must have no trailing delay");
             }
         }
     }
@@ -493,7 +493,7 @@ mod edge_proptests {
         ];
         let steps = convert_to_sequence_steps(&events);
         // saturating_sub(0, 1000) = 0 → capped = 0 → delay_ms = None
-        match &steps[1] {
+        match &steps[0] {
             SequenceStep::Send { delay_ms, .. } => {
                 assert_eq!(
                     *delay_ms, None,
@@ -585,10 +585,11 @@ mod edge_proptests {
                 RecordedEvent { key: "B".into(), timestamp: t1 },
             ];
             let steps = convert_to_sequence_steps(&events);
-            if let SequenceStep::Send { delay_ms: Some(d), .. } = &steps[1] {
-                prop_assert_eq!(*d, MAX_STEP_DELAY_MS,
-                    "near-overflow gap must be capped at MAX_STEP_DELAY_MS");
-            }
+            let SequenceStep::Send { delay_ms, .. } = &steps[0] else {
+                panic!("expected Send step");
+            };
+            prop_assert_eq!(*delay_ms, Some(MAX_STEP_DELAY_MS),
+                "near-overflow gap must be capped at MAX_STEP_DELAY_MS");
         }
     }
 }

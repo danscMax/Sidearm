@@ -6,11 +6,12 @@
 import type { ControlId } from "../../lib/config";
 import type { ControlSurfaceEntry } from "../../lib/constants";
 import type { ControlInteractions } from "../../hooks/useControlInteractions";
+import { useTranslation } from "react-i18next";
 import { legendCellClass } from "../../lib/mouse-visual";
+import { GestureIcon } from "./GestureIcon";
 import { HeatCount } from "./HeatCount";
 
-/** Marks of the other press patterns, the same as the trigger badges. */
-const GESTURE_MARK = { longPress: "⌛", doublePress: "2×", triplePress: "3×" } as const;
+const GESTURE_NAME = { longPress: "picker.gestureLongPress", doublePress: "picker.gestureDoublePress", triplePress: "picker.gestureTriplePress" } as const;
 
 interface LegendCellProps {
   entry: ControlSurfaceEntry;
@@ -47,7 +48,10 @@ export function LegendCell({
   executionCounts,
   heatmapEnabled,
 }: LegendCellProps) {
+  const { t } = useTranslation();
   const { hoveredId, dragOverId, getInteractionProps, applyHeatBg } = interaction;
+  // A chip's own bubble (the cell's hides while it shows), or a native title in the side grid.
+  const tip = (text: string) => (nativeTooltip ? { title: text } : { "data-tip": text });
   const hovered = hoveredId === controlId;
   const dragOver = dragOverId === controlId;
   return (
@@ -61,13 +65,27 @@ export function LegendCell({
       {...getInteractionProps(controlId, { contextMenu })}
     >
       <span className="btn-legend__badge">{badge}</span>
-      <span className="btn-legend__label">{label}</span>
-      {entry.sidearmOnly ? <span className="btn-legend__extra btn-legend__extra--live" aria-hidden="true">S</span> : null}
-      {entry.extras?.length ? (
-        <span className="btn-legend__extras" aria-hidden="true">
-          {entry.extras.map((extra) => <span key={extra.gesture} className="btn-legend__extra">{GESTURE_MARK[extra.gesture]}</span>)}
+      <span className="btn-legend__text">
+        <span className="btn-legend__main">
+          <span className="btn-legend__label">{label}</span>
+          {entry.sidearmOnly ? (
+            <span className="btn-legend__live" {...tip(t("mouseVisual.sidearmOnly"))}>
+              <GestureIcon mark="live" />
+            </span>
+          ) : null}
         </span>
-      ) : null}
+        {/* The other press patterns, one chip each: what the hold / double / triple press does. */}
+        {entry.extras?.length ? (
+          <span className="btn-legend__gestures">
+            {entry.extras.map((extra) => (
+              <span key={extra.gesture} className="btn-legend__gesture" {...tip(`${t(GESTURE_NAME[extra.gesture])}: ${extra.action.displayName}`)}>
+                <GestureIcon mark={extra.gesture} />
+                <span className="btn-legend__gesture-name">{extra.action.displayName}</span>
+              </span>
+            ))}
+          </span>
+        ) : null}
+      </span>
       <HeatCount
         controlId={controlId}
         executionCounts={executionCounts}

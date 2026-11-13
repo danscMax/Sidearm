@@ -11,7 +11,7 @@ describe("layoutHtml", () => {
     const config = makeConfig({ actions: [action], bindings: [bind("b1", "thumb_01", "<Copy>"), bind("b2", "thumb_01", "Cut", { triggerMode: "longPress" }), bind("b3", "mouse_4", "Back")] });
     const html = layoutHtml(config, new Date(2026, 10, 13));
     expect(html).toContain("&lt;Copy&gt;");
-    expect(html).toContain("⌛ Cut");
+    expect(html).toMatch(/<b>[^<]+:<\/b> Cut/);
     expect(html.match(/class="key"/g)).toHaveLength(12);
     expect(html).toContain("<table>");
   });

@@ -55,8 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mouse cannot store for use without Sidearm are marked S in the profile it
   keeps. "Export the whole layout" saves the settings, counters and photos
   into one folder. A config changed outside Sidearm says what changed.
-- The buttons beside the mouse picture mark their other press patterns
-  (⌛ hold, 2×, 3×), and the tooltip says what each does.
+- The buttons beside the mouse picture show their other press patterns as
+  chips under the name (a hold, double or triple press mark and its action);
+  pointing at a chip says exactly what is assigned there.
 - `{selection}` in a phrase puts in the text selected in the window in front
   (the clipboard is put back); `{|}` is a short `{cursor}`. Tokens now work in
   macro text steps and in "copy only" too.

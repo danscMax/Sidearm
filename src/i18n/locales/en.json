@@ -1858,7 +1858,7 @@
     "duplicate": "\"{{name}}\" is on several buttons ({{layer}}): {{buttons}}. A leftover? One may go."
   },
   "mouseVisual": {
-    "sidearmOnly": "S: works only while Sidearm runs (not stored in the mouse)"
+    "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm."
   },
   "stats": {
     "loading": "Reading the press log…",
@@ -1882,7 +1882,6 @@
     "saveTitle": "Save the layout page",
     "failed": "The layout page could not be saved.",
     "title": "Sidearm layout",
-    "made": "Made {{date}}",
-    "legend": "⌛ hold · 2× double press · 3× triple press"
+    "made": "Made {{date}}"
   }
 }

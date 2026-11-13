@@ -10,7 +10,7 @@ import i18n from "../i18n";
 import { displayNameForControlId, labelForLayer } from "./labels";
 
 const LAYERS: Layer[] = ["standard", "hypershift", "hypershift2", "hypershiftBoth"];
-const MARK = { press: "", longPress: "⌛ ", doublePress: "2× ", triplePress: "3× " } as const;
+const GESTURE_NAME = { longPress: "picker.gestureLongPress", doublePress: "picker.gestureDoublePress", triplePress: "picker.gestureTriplePress" } as const;
 const ORDER = { press: 0, longPress: 1, doublePress: 2, triplePress: 3 } as const;
 
 const escape = (text: string) =>
@@ -22,7 +22,9 @@ function cell(bindings: Binding[]): string {
     .sort((a, b) => ORDER[gestureOf(a.triggerMode)] - ORDER[gestureOf(b.triggerMode)])
     .map((b) => {
       const gesture = gestureOf(b.triggerMode);
-      return `<div class="${gesture === "press" ? "main" : "extra"}">${MARK[gesture]}${escape(b.label)}</div>`;
+      return gesture === "press"
+        ? `<div class="main">${escape(b.label)}</div>`
+        : `<div class="extra"><b>${escape(i18n.t(GESTURE_NAME[gesture]))}:</b> ${escape(b.label)}</div>`;
     })
     .join("");
 }
@@ -74,13 +76,14 @@ export function layoutHtml(config: AppConfig, made: Date): string {
   .n { position: absolute; left: 8px; top: 6px; font-weight: 700; color: var(--accent); }
   .main { font-weight: 600; }
   .extra { color: var(--muted); font-size: 12px; }
+  .extra b { font-weight: 600; color: var(--accent); }
   .none { color: var(--muted); }
   table { margin-top: 8px; border-collapse: collapse; max-width: 720px; width: 100%; }
   th, td { text-align: left; vertical-align: top; padding: 4px 8px; border-bottom: 1px solid var(--line); }
   th { width: 34%; font-weight: 500; color: var(--muted); }
 </style></head><body>
 <h1>${escape(title)}</h1>
-<p class="made">${escape(i18n.t("print.made", { date: made.toLocaleString(i18n.language) }))} · ${escape(i18n.t("print.legend"))}</p>
+<p class="made">${escape(i18n.t("print.made", { date: made.toLocaleString(i18n.language) }))}</p>
 ${sections.join("\n")}
 </body></html>
 `;

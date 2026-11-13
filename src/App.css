@@ -2098,18 +2098,29 @@ input[type="radio"] {
   min-width: 0;
 }
 
-/* Other press patterns of the button (hold ⌛, double 2×, triple 3×). */
-.btn-legend__extras { display: inline-flex; gap: 3px; margin-left: auto; flex-shrink: 0; }
-.btn-legend__extra {
-  padding: 0 4px;
-  border: 1px solid var(--c-border-hover);
-  border-radius: var(--radius-sm);
+/* The label and, under it, the other press patterns as chips. */
+.btn-legend__text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.btn-legend__main { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.btn-legend__gestures { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.btn-legend__gesture {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  background: rgba(var(--layer-rgb, 159, 202, 105), 0.1);
   color: var(--c-text-muted);
-  font-size: var(--fs-body-sm);
+  font-size: var(--fs-micro);
   line-height: 16px;
 }
-/* Not stored in the mouse: without Sidearm this button does not do it. */
-.btn-legend__extra--live { border-style: dashed; opacity: 0.7; }
+.btn-legend__gesture .gesture-icon { flex: none; color: var(--layer-accent, var(--c-accent)); }
+.btn-legend__gesture-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-legend__gesture:hover { background: rgba(var(--layer-rgb, 159, 202, 105), 0.2); color: var(--c-text-bright); }
+/* Works only while Sidearm runs: a quiet mark beside the label. */
+.btn-legend__live { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
+.btn-legend__live:hover { opacity: 1; color: var(--c-text-bright); }
 
 /* ── Tooltip on legend cells ── */
 .btn-legend__cell {
@@ -2133,6 +2144,29 @@ input[type="radio"] {
   z-index: 10;
   width: max-content;
   max-width: 220px;
+  line-height: 1.4;
+  animation: tab-fade-in 120ms ease-out;
+}
+
+/* A chip's own bubble: what that press pattern does; the cell's bubble hides meanwhile. */
+.btn-legend__cell:has([data-tip]:hover)[data-tooltip]:hover::after { display: none; }
+.btn-legend__gesture[data-tip]:hover::after,
+.btn-legend__live[data-tip]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 10px;
+  border-radius: var(--radius-xs);
+  background: rgba(0, 0, 0, 0.88);
+  color: var(--c-text-bright);
+  font-size: var(--fs-caption);
+  white-space: pre-line;
+  pointer-events: none;
+  z-index: 11;
+  width: max-content;
+  max-width: 240px;
   line-height: 1.4;
   animation: tab-fade-in 120ms ease-out;
 }

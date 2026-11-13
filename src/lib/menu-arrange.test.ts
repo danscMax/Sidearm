@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Action, MenuItem } from "./config";
-import { cloneMenuItem, indentMenuItem, otherMenuUses, outdentMenuItem, placeMenuItem, promptsFromFile, searchMenus } from "./menu-arrange";
+import type { Action, Binding, MenuItem } from "./config";
+import { bindingUses, cloneMenuItem, indentMenuItem, otherMenuUses, outdentMenuItem, placeMenuItem, promptsFromFile, searchMenus } from "./menu-arrange";
 import { NO_MENU_EDITS } from "./menu-phrase";
 import { makeConfig } from "./test-fixtures";
 
@@ -69,5 +69,17 @@ describe("searching all menus", () => {
 
   it("lists the other menus using the same action", () => {
     expect(otherMenuUses(config, NO_MENU_EDITS, "a-hello", "m1")).toEqual(["Другое › Письма › Привет"]);
+  });
+});
+
+describe("bindingUses", () => {
+  it("lists the other buttons of the action once, never the edited one or its twin on the other mouse", () => {
+    const bind = (id: string, controlId: string, extra: Partial<Binding> = {}): Binding =>
+      ({ id, profileId: "p1", layer: "standard", controlId, label: id, actionId: "a1", enabled: true, ...extra });
+    const own = bind("own", "thumb_01");
+    const config = makeConfig({ bindings: [own, bind("twin", "v3_thumb_01"), bind("hold", "mouse_4", { triggerMode: "longPress" }), bind("off", "mouse_4", { enabled: false, layer: "hypershift" })] });
+    const uses = bindingUses(config, "a1", own);
+    expect(uses).toHaveLength(1);
+    expect(uses[0]).toMatch(/·.*·/);
   });
 });

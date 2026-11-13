@@ -25,6 +25,7 @@ import {
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
+import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
 import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice } from "./shared";
 import {
   autoName,
@@ -134,6 +135,10 @@ export function ActionPickerModal({
     ? config.actions.find((a) => a.id === binding.actionId) ?? null
     : null;
   const existingAction = isPlaceholderAction(savedAction) ? null : savedAction;
+  // Where else this action runs: other buttons and menu items (shown under the preview).
+  const elsewhere = existingAction
+    ? [...bindingUses(config, existingAction.id, binding), ...otherMenuUses(config, NO_MENU_EDITS, existingAction.id, existingAction.id)]
+    : [];
   // Other buttons using this very action (one menu for both mice, say).
   const sharedUses = existingAction && binding
     ? config.bindings.filter((b) => b.actionId === existingAction.id && b.id !== binding.id).length
@@ -720,6 +725,12 @@ export function ActionPickerModal({
           <span className="action-picker__preview-label">{t("picker.previewLabel")}</span>
           <span className="action-picker__preview-text">{previewText}</span>
         </p>
+        {elsewhere.length > 0 ? (
+          <p className="action-picker__uses">
+            {t("picker.alsoUsed", { places: elsewhere.slice(0, 4).join("; ") })}
+            {elsewhere.length > 4 ? ` ${t("picker.alsoUsedMore", { count: elsewhere.length - 4 })}` : ""}
+          </p>
+        ) : null}
 
         {testResult ? (
           <div className="action-picker__test-result">

@@ -473,7 +473,8 @@
     "stripMore": "+{{count}} more",
     "stripLess": "Show fewer",
     "exportWithoutTexts": "Export without my texts",
-    "exportWithoutTextsHint": "For someone else: keys, mouse, launches and the rest go; texts, macros with text and menus of phrases stay here."
+    "exportWithoutTextsHint": "For someone else: keys, mouse, launches and the rest go; texts, macros with text and menus of phrases stay here.",
+    "searchFoundElsewhere": "found in other profiles: {{count}} — show"
   },
   "newRule": {
     "title": "New rule",
@@ -1083,7 +1084,9 @@
     "autoProfile": "Profile: {{name}}",
     "autoProfileFallback": "Profile",
     "menuShared": "This menu is also on other buttons ({{count}}): editing it changes it there too. Choosing another kind of action changes this button only.",
-    "tokenSelectionDesc": "Puts in the text selected in the window in front (copied with Ctrl+Insert, the clipboard is put back)."
+    "tokenSelectionDesc": "Puts in the text selected in the window in front (copied with Ctrl+Insert, the clipboard is put back).",
+    "alsoUsed": "Also here: {{places}}",
+    "alsoUsedMore": "and {{count}} more"
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1828,6 +1831,7 @@
     "banner": "This profile has {{count}} problem(s) to look at:",
     "missingAction": "«{{where}}» points at an action that no longer exists — it does nothing.",
     "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
-    "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one."
+    "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one.",
+    "duplicate": "\"{{name}}\" is on several buttons ({{layer}}): {{buttons}}. A leftover? One may go."
   }
 }

@@ -3767,6 +3767,13 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Where else the same action runs (other buttons, menu items). */
+.action-picker__uses {
+  margin: -6px 0 0;
+  padding: 0 20px 10px;
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+}
 
 .action-picker__footer {
   display: flex;
@@ -6819,6 +6826,18 @@ input[type="search"]::-webkit-search-decoration {
 .profiles-workspace__search-meta {
   font-size: 0.72rem;
   color: var(--c-text-muted);
+}
+
+/* "Found in other profiles: N" — opens the all-profiles search. */
+.profiles-workspace__search-elsewhere {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  font-size: 0.72rem;
+  color: var(--c-accent);
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 .mouse-visual__hotspot--dimmed {

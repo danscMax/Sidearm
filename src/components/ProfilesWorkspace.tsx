@@ -23,7 +23,6 @@ import {
   importProfile,
   placeDeviceHotspot,
   clearControl,
-  gestureOf,
   removeBindingsForControls,
   removeControl,
   removeDevice,
@@ -49,7 +48,7 @@ import {
   findShortcutConflicts,
 } from "../lib/conflict-detection";
 import { sortAppMappings, toggleInSet } from "../lib/helpers";
-import { displayNameForControl, displayNameForControlId, labelForLayer } from "../lib/labels";
+import { controlWithGesture, displayNameForControl, displayNameForControlId, labelForLayer } from "../lib/labels";
 import { defaultLayout, deviceLayers, deviceLayout } from "../lib/devices";
 import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
@@ -485,8 +484,9 @@ export function ProfilesWorkspace({
 
   // Cross-profile search: scan every binding in the config (bindingMatchesQuery
   // is profile-agnostic) so the user can find a shortcut wherever it's bound.
+  // Also counted while searching one profile: "found in other profiles: N".
   const crossProfileResults = useMemo(() => {
-    if (!searchQuery || !searchAllProfiles) return [];
+    if (!searchQuery) return [];
     const actionsById = new Map(activeConfig.actions.map((a) => [a.id, a]));
     const profilesById = new Map(activeConfig.profiles.map((p) => [p.id, p]));
     const controlsById = new Map(activeConfig.physicalControls.map((c) => [c.id, c]));
@@ -500,7 +500,10 @@ export function ProfilesWorkspace({
           controlName: control ? displayNameForControl(control, "raw") : b.controlId,
         };
       });
-  }, [activeConfig, searchQuery, searchAllProfiles]);
+  }, [activeConfig, searchQuery]);
+  const foundElsewhere = searchQuery && !searchAllProfiles && matchedControlIds?.size === 0
+    ? crossProfileResults.filter((result) => result.binding.profileId !== effectiveProfileId).length
+    : 0;
 
   const selectedAppMappings = useMemo(
     () =>
@@ -930,6 +933,11 @@ export function ProfilesWorkspace({
             {t("profile.searchMeta", { count: matchedControlIds.size })}
           </span>
         ) : null}
+        {foundElsewhere > 0 ? (
+          <button type="button" className="profiles-workspace__search-elsewhere" onClick={() => setSearchAllProfiles(true)}>
+            {t("profile.searchFoundElsewhere", { count: foundElsewhere })}
+          </button>
+        ) : null}
         <button
           type="button"
           className={`action-button action-button--small${searchAllProfiles ? " action-button--active" : ""}`}
@@ -980,7 +988,13 @@ export function ProfilesWorkspace({
               <li key={index}>
                 {issue.kind === "enterNextToClose"
                   ? t("configCheck.enterNextToClose", { button: displayNameForControlId(issue.binding.controlId), layer: labelForLayer(issue.binding.layer) })
-                  : t(`configCheck.${issue.kind}`, { where: issue.where })}
+                  : issue.kind === "duplicate"
+                    ? t("configCheck.duplicate", {
+                        name: issue.name,
+                        layer: labelForLayer(issue.bindings[0]!.layer),
+                        buttons: issue.bindings.map((b) => controlWithGesture(b.controlId, b.triggerMode)).join(", "),
+                      })
+                    : t(`configCheck.${issue.kind}`, { where: issue.where })}
               </li>
             ))}
           </ul>
@@ -994,11 +1008,7 @@ export function ProfilesWorkspace({
             {layerConflicts.map((g) => {
               const bindingIds = g.bindings.map((b) => b.bindingId);
               // The buttons, not the action names: those are the same shortcut.
-              const where = (b: (typeof g.bindings)[number]) => {
-                const gesture = gestureOf(b.triggerMode);
-                const button = displayNameForControlId(b.controlId);
-                return gesture === "press" ? button : `${button} · ${t(`picker.${gesture === "longPress" ? "gestureLongPress" : gesture === "doublePress" ? "gestureDoublePress" : "gestureTriplePress"}`)}`;
-              };
+              const where = (b: (typeof g.bindings)[number]) => controlWithGesture(b.controlId, b.triggerMode);
               return (
                 <li key={`${g.layer}:${g.signature}`}>
                   {t("conflict.group", {

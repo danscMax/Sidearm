@@ -34,4 +34,22 @@ describe("checkProfile", () => {
     expect(issues).toHaveLength(1);
     expect(issues[0]).toMatchObject({ kind: "enterNextToClose", binding: { id: "b2" } });
   });
+
+  it("names the same text on two buttons of one mouse and layer, not the same shortcut or another layer", () => {
+    const text = (id: string, value: string): Action =>
+      ({ id, type: "textSnippet", displayName: id, payload: { source: "inline", text: value, pasteMode: "sendText", tags: [] } }) as Action;
+    const config = makeConfig({
+      actions: [text("t1", "hello"), text("t2", "hello"), key("k", "A")],
+      bindings: [
+        bind("b1", "thumb_01", "t1"),
+        bind("b2", "mouse_4", "t2", { triggerMode: "longPress" }),
+        bind("b3", "thumb_01", "t1", { layer: "hypershift" }),
+        bind("b4", "thumb_01", "k", { triggerMode: "doublePress" }),
+        bind("b5", "mouse_4", "k"),
+      ],
+    });
+    const issues = checkProfile(config, "p1");
+    expect(issues).toHaveLength(1);
+    expect(issues[0]).toMatchObject({ kind: "duplicate", bindings: [{ id: "b1" }, { id: "b2" }] });
+  });
 });

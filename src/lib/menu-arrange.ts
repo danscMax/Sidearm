@@ -1,7 +1,8 @@
 // Arranging a menu's items: drop one before / after / inside another, a level
 // in or out, copies with fresh ids, and where a text is used across all menus.
 
-import type { Action, AppConfig, MenuItem } from "./config";
+import type { Action, AppConfig, Binding, MenuItem } from "./config";
+import { controlWithGesture, labelForLayer } from "./labels";
 import { nextUniqueId } from "./config-editing";
 import { collectMenuItemIds, removeMenuItem } from "./menu-helpers";
 import { editedActions, editedLibrary, parentOf, phraseOf, type MenuEdits } from "./menu-phrase";
@@ -148,6 +149,23 @@ export function searchMenus(
     if (menu.type === "menu") walk(menu.id, menu.displayName, menu.payload.items, []);
   }
   return hits;
+}
+
+/** "Profile · Thumb 3 · Hold · Standard": where a binding sits. */
+function bindingPlace(config: AppConfig, binding: Binding): string {
+  const profile = config.profiles.find((candidate) => candidate.id === binding.profileId)?.name ?? binding.profileId;
+  return `${profile} · ${controlWithGesture(binding.controlId, binding.triggerMode)} · ${labelForLayer(binding.layer)}`;
+}
+
+/** The other buttons running `actionId`, each place once (the same button of
+ *  the other mouse is the same place) and never the edited binding's own. */
+export function bindingUses(config: AppConfig, actionId: string, own?: Binding | null): string[] {
+  const ownPlace = own ? bindingPlace(config, own) : null;
+  const places = config.bindings
+    .filter((binding) => binding.enabled && binding.actionId === actionId && binding.id !== own?.id)
+    .map((binding) => bindingPlace(config, binding))
+    .filter((place) => place !== ownPlace);
+  return [...new Set(places)];
 }
 
 /** The other menus that run `actionId` or type the same library text: "Menu › Block › Item". */

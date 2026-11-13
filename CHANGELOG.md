@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   front while it was typed (it would submit there).
 - `npm run e2e -- --layout <config.json>`: every side-button assignment of a
   real config, pressed on virtual mice.
+- The assignment dialog says where else the same action runs (other buttons,
+  menu items); the profile check names the same text, macro or menu on
+  several buttons of one mouse; a search that finds nothing in this profile
+  says how much it found in the others.
 - The buttons beside the mouse picture mark their other press patterns
   (⌛ hold, 2×, 3×), and the tooltip says what each does.
 - `{selection}` in a phrase puts in the text selected in the window in front

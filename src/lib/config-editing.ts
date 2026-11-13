@@ -72,8 +72,12 @@ export function removeBinding(config: AppConfig, bindingId: string): AppConfig {
   const binding = config.bindings.find((b) => b.id === bindingId);
   if (!binding) return config;
   const nextBindings = config.bindings.filter((b) => b.id !== bindingId);
-  const actionStillReferenced = computeReferencedActionIds(config.actions, nextBindings).has(binding.actionId);
-  if (actionStillReferenced) {
+  const referenced = computeReferencedActionIds(config.actions, nextBindings);
+  // Unbound menus are retained too, so their targets must survive partial pruning.
+  for (const action of config.actions) {
+    if (action.type === "menu") collectMenuActionRefs(action.payload.items, referenced);
+  }
+  if (referenced.has(binding.actionId)) {
     return { ...config, bindings: nextBindings };
   }
   // The action is now orphaned. Preserve any inline snippet text in the library
@@ -1423,6 +1427,10 @@ export function applyBindingImport(
   targetLayer: Layer,
   targetControlId: ControlId,
 ): AppConfig {
+  if (!isValidBindingExport(data) || !validActionReferences([data.action], data.referencedSnippets,
+    new Set(config.profiles.map((profile) => profile.id)))) {
+    throw new Error(i18n.t("binding.importInvalid"));
+  }
   let snippetLibrary = config.snippetLibrary;
   let action: Action = structuredClone(data.action);
 
@@ -1790,7 +1798,11 @@ export function isValidProfileExport(raw: unknown): raw is ProfileExportData {
     if (key !== "encoderMappings" && !uniqueIds(entries as { id: string }[])) return false;
   }
   const data = raw as unknown as ProfileExportData;
-  return data.bindings.every((binding) => typeof binding.actionId === "string" && data.actions.some((action) => action.id === binding.actionId))
+  // Every binding is assigned to one new profile, regardless of its source profileId.
+  const slots = data.bindings.map((binding) => JSON.stringify([binding.controlId, binding.layer, gestureOf(binding.triggerMode)]));
+  const mappings = (data.encoderMappings ?? []).map((mapping) => JSON.stringify([mapping.controlId, mapping.layer]));
+  return new Set(slots).size === slots.length && new Set(mappings).size === mappings.length
+    && data.bindings.every((binding) => typeof binding.actionId === "string" && data.actions.some((action) => action.id === binding.actionId))
     && validActionReferences(data.actions, data.snippetLibrary ?? []);
 }
 
@@ -1919,6 +1931,7 @@ export function importProfile(
   config: AppConfig,
   data: ProfileExportData,
 ): AppConfig {
+  if (!isValidProfileExport(data)) throw new Error(i18n.t("settings.invalidProfileError"));
   const existingIds = config.profiles.map((p) => p.id);
   const newId = nextUniqueId(existingIds, makeProfileId(data.profile.name));
   const newName = existingIds.includes(data.profile.id)
@@ -1964,6 +1977,12 @@ export function importProfile(
       : { ...item, actionId: actionIdMap.get(item.actionId) ?? item.actionId }));
   for (const action of newActions) {
     if (action.type === "menu") action.payload = { ...action.payload, items: remapItems(action.payload.items) };
+    if (action.type === "profileSwitch" && action.payload.targetProfileId === data.profile.id) {
+      action.payload = { ...action.payload, targetProfileId: newId };
+    }
+  }
+  if (!validActionReferences(newActions, [...config.snippetLibrary, ...newSnippets], new Set([...existingIds, newId]))) {
+    throw new Error(i18n.t("settings.invalidProfileError"));
   }
 
   const newBindings: Binding[] = remapBindings(data.bindings, newId, actionIdMap);

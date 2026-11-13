@@ -83,6 +83,16 @@ describe("shortcutSignature", () => {
     expect(shortcutSignature({ key: "Return", ctrl: false, shift: false, alt: false, win: false })).toBe("ENTER");
     expect(findShortcutConflicts(cfg)).toEqual([]);
   });
+
+  it.each([
+    ["F+13", false], ["F+13", true], ["VK_+65", false], ["VK_+65", true],
+  ] as const)("keeps accepted conflicts with plus inside the primary key %s (ctrl=%s)", (key, ctrl) => {
+    const cfg = makeConfig({ actions: [shortcutAction("a", key, { ctrl }), shortcutAction("b", key, { ctrl })],
+      bindings: [binding("b1", "p1", "standard", "thumb_01", "a"), binding("b2", "p1", "standard", "mouse_4", "b")] });
+    expect(findShortcutConflicts(cfg)).toHaveLength(1);
+    cfg.settings.acceptedConflicts = [`p1|standard|razer-naga|${ctrl ? "Ctrl+" : ""}${key}|press`];
+    expect(findShortcutConflicts(cfg)).toEqual([]);
+  });
   it("uppercases the key", () => {
     expect(
       shortcutSignature({ key: "a", ctrl: true, shift: false, alt: false, win: false }),

@@ -43,7 +43,7 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
     const parts = key.split("|");
     if (parts.length !== 5) return key;
     const signature = parts[3];
-    const primary = signature.lastIndexOf("+") + 1;
+    const primary = /^(?:(?:Ctrl|Shift|Alt|Win)\+)*/.exec(signature)![0].length;
     parts[3] = signature.slice(0, primary) + canonicalPrimaryKey(signature.slice(primary));
     return parts.join("|");
   }));

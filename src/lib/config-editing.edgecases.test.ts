@@ -1262,7 +1262,7 @@ describe("extractProfileExport / importProfile roundtrip (PBT)", () => {
       const controlId = ALL_CONTROL_IDS[i % ALL_CONTROL_IDS.length];
       const layer = ALL_LAYERS[Math.floor(i / ALL_CONTROL_IDS.length) % 2];
       bindings.push({
-        id: `binding-${profileId}-${layer}-${controlId}`,
+        id: `binding-${profileId}-${layer}-${controlId.replace(/_/g, "-")}`,
         profileId,
         layer,
         controlId,

@@ -28,7 +28,8 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 - Config edits are pure `(config) => config` functions — no side effects, no I/O. This keeps them idempotent under React strict mode and unit-testable.
 - Validate untrusted import files at the boundary (`isValid*Export`) before mutating; never dereference an unvalidated entry.
-- Binding removal and replacement preserve actions reachable through linked menus (`computeReferencedActionIds`); profile exports carry that full closure, including cycles. Imported encoder mappings must name controls present on this computer; retargeting keeps the target mouse's signals.
+- Profile imports reject duplicate control/layer/gesture bindings and control/layer encoder mappings before publishing a draft. Profile-switch targets must exist in the destination; importing a profile remaps switches to itself to its new ID.
+- Binding removal and replacement preserve targets of every retained menu, including unbound menus; profile exports carry the binding-reachable closure (`computeReferencedActionIds`), including cycles. Imported encoder mappings must name controls present on this computer; retargeting keeps the target mouse's signals.
 - A phrase editor accepts only a single text or the canonical text / 80 ms pause / Enter sequence, without other timing or repeats. Picker saves preserve real action notes, excluding placeholder notes.
 - Verification observations only update pending steps; previews must match the observed encoded key before changing recommendations or finalized resolution.
 - `ActionPayload` is a discriminated union keyed by `type` — handle every variant; use `assertNever` for exhaustiveness.

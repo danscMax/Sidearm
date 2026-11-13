@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Action, Binding, SnippetLibraryItem } from "./config";
+import type { Action, AppConfig, Binding, MenuItem, SnippetLibraryItem } from "./config";
 import {
   applyBindingImport, buildBindingExport, extractProfileExport, importProfile,
   isValidBindingExport, isValidProfileExport, isValidSnippetLibraryExport,
@@ -19,6 +19,16 @@ const menu = (id: string, target: string): Action => ({ id, displayName: id, typ
   items: [{ kind: "action", id: "item", label: "Item", actionId: target, enabled: true }],
 } });
 const exported = () => extractProfileExport(makeConfig({ actions: [shortcut], bindings: [bind("b1", shortcut.id)] }), "p1");
+
+function expectMenuReferencesResolve(config: AppConfig) {
+  const check = (items: MenuItem[]) => {
+    for (const item of items) {
+      if (item.kind === "submenu") check(item.items);
+      else expect(config.actions.some((action) => action.id === item.actionId)).toBe(true);
+    }
+  };
+  for (const action of config.actions) if (action.type === "menu") check(action.payload.items);
+}
 
 describe("import boundary validation", () => {
   it.each([
@@ -81,6 +91,67 @@ describe("import boundary validation", () => {
     expect(isValidProfileExport({ ...exported(), actions: [{ ...shortcut, type: "textSnippet", payload: { source: "libraryRef", snippetId: "missing" } }] })).toBe(false);
     expect(isValidProfileExport({ ...exported(), actions: [menu(shortcut.id, "missing")] })).toBe(false);
   });
+
+  it.each(["encoder mappings", "binding tuples", "remapped binding tuples"])("rejects duplicate %s before publishing a draft", (kind) => {
+    const data = exported();
+    if (kind === "encoder mappings") {
+      data.encoderMappings = ["F13", "F14"].map((encodedKey) => ({ controlId: "thumb_01", layer: "standard", encodedKey, source: "synapse", verified: true }));
+    } else {
+      data.bindings.push({ ...data.bindings[0], id: "duplicate", triggerMode: "hold",
+        profileId: kind === "remapped binding tuples" ? "other-source-profile" : data.profile.id });
+    }
+    const config = makeConfig();
+    const before = structuredClone(config);
+    let draft = config;
+    expect(() => { draft = importProfile(draft, data); }).toThrow();
+    expect(draft).toBe(config);
+    expect(config).toEqual(before);
+    expect(isValidProfileExport(data)).toBe(false);
+  });
+
+  it("rejects a profile switch to a missing profile before publishing a draft", () => {
+    const data = { ...exported(), actions: [{ ...shortcut, type: "profileSwitch" as const, payload: { targetProfileId: "absent" } }] };
+    const config = makeConfig();
+    const before = structuredClone(config);
+    let draft = config;
+    expect(() => { draft = importProfile(draft, data); }).toThrow();
+    expect(draft).toBe(config);
+    expect(config).toEqual(before);
+  });
+
+  it.each(["p1", "p2"])("resolves imported profile switches to %s after id remapping", (targetProfileId) => {
+    const data = { ...exported(), actions: [{ ...shortcut, type: "profileSwitch" as const, payload: { targetProfileId } }] };
+    const config = makeConfig();
+    const next = importProfile(config, data);
+    const action = next.actions[0];
+    const importedId = next.profiles.at(-1)!.id;
+    expect(importedId).not.toBe("p1");
+    expect(action.type === "profileSwitch" && action.payload.targetProfileId).toBe(targetProfileId === "p1" ? importedId : "p2");
+    expect(config.actions).toEqual([]);
+  });
+
+  it("imports distinct press patterns on the same control", () => {
+    const data = exported();
+    data.bindings.push({ ...data.bindings[0], id: "long", triggerMode: "longPress" });
+    expect(isValidProfileExport(data)).toBe(true);
+    expect(importProfile(makeConfig(), data).bindings).toHaveLength(2);
+  });
+
+  it.each(["absent", "p2"])("validates a single-binding profile switch to %s against the destination", (targetProfileId) => {
+    const source = makeConfig({ actions: [{ ...shortcut, type: "profileSwitch", payload: { targetProfileId } }], bindings: [bind("b1", shortcut.id)] });
+    const data = buildBindingExport(source, "b1")!;
+    const config = makeConfig();
+    let draft = config;
+    const apply = () => { draft = applyBindingImport(draft, data, "p1", "standard", "thumb_01"); };
+    if (targetProfileId === "absent") {
+      expect(apply).toThrow();
+      expect(draft).toBe(config);
+    } else {
+      apply();
+      expect(draft.actions[0]).toMatchObject({ type: "profileSwitch", payload: { targetProfileId: "p2" } });
+    }
+    expect(config.actions).toEqual([]);
+  });
 });
 
 describe("binding identity and menu reachability", () => {
@@ -101,6 +172,17 @@ describe("binding identity and menu reachability", () => {
     expect(removeBindingsForControls(config, "p1", "standard", new Set(["thumb_01"])).config.actions).toContainEqual(shortcut);
   });
 
+  it.each([false, true])("keeps menu references valid after removing A→B→X then the direct X binding (bulk=%s)", (bulk) => {
+    const config = makeConfig({ actions: [menu("menu-a", "menu-b"), menu("menu-b", shortcut.id), shortcut],
+      bindings: [bind("menu", "menu-a", { controlId: "mouse_4" }), bind("direct", shortcut.id)] });
+    const withoutMenuBinding = removeBinding(config, "menu");
+    expectMenuReferencesResolve(withoutMenuBinding);
+    const next = bulk ? removeBindingsForControls(withoutMenuBinding, "p1", "standard", new Set(["thumb_01"])).config
+      : removeBinding(withoutMenuBinding, "direct");
+    expect(next.bindings).toEqual([]);
+    expectMenuReferencesResolve(next);
+  });
+
   it("keeps a replaced action used by another button's menu, and rescues orphaned text", () => {
     const config = makeConfig({ actions: [shortcut, menu("menu-a", "old"),
       { id: "old", displayName: "Old text", type: "textSnippet", payload: { source: "inline", text: "Keep me", pasteMode: "sendText", tags: [] } }],
@@ -108,8 +190,15 @@ describe("binding identity and menu reachability", () => {
     config.devices.push({ id: NAGA_V3_DEVICE_ID, name: "V3", builtin: true });
     config.physicalControls.push({ ...config.physicalControls[1], id: "v3_thumb_01", deviceId: NAGA_V3_DEVICE_ID });
     const transfer = (c: typeof config) => applyDeviceTransfer(c, "razer-naga", NAGA_V3_DEVICE_ID, planDeviceTransfer(c, "razer-naga", NAGA_V3_DEVICE_ID, ["p1"], "replace"));
-    expect(transfer(config).actions.some((a) => a.id === "old")).toBe(true);
-    expect(transfer({ ...config, bindings: config.bindings.filter((b) => b.id !== "menu") }).snippetLibrary.map((s) => s.text)).toContain("Keep me");
+    const linked = transfer(config);
+    expect(linked.actions.some((a) => a.id === "old")).toBe(true);
+    expectMenuReferencesResolve(linked);
+    const unboundMenu = transfer({ ...config, bindings: config.bindings.filter((b) => b.id !== "menu") });
+    expectMenuReferencesResolve(unboundMenu);
+    expect(unboundMenu.actions.some((a) => a.id === "old") || unboundMenu.snippetLibrary.some((s) => s.text === "Keep me")).toBe(true);
+    const orphan = transfer({ ...config, actions: config.actions.filter((a) => a.id !== "menu-a"), bindings: config.bindings.filter((b) => b.id !== "menu") });
+    expect(orphan.snippetLibrary.map((s) => s.text)).toContain("Keep me");
+    expectMenuReferencesResolve(orphan);
   });
 
   it("round-trips linked menus with library text and terminates on menu cycles", () => {

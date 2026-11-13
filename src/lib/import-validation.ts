@@ -96,8 +96,8 @@ export function uniqueIds(entries: { id: string }[]): boolean {
   return new Set(entries.map((entry) => entry.id)).size === entries.length;
 }
 
-/** References carried by a portable export must resolve inside that export. */
-export function validActionReferences(actions: Action[], snippets: SnippetLibraryItem[]): boolean {
+/** Action/text references resolve inside the export; profile links use the destination after remapping. */
+export function validActionReferences(actions: Action[], snippets: SnippetLibraryItem[], profileIds?: ReadonlySet<string>): boolean {
   const ids = new Set(actions.map((action) => action.id));
   const snippetIds = new Set(snippets.map((snippet) => snippet.id));
   const menuRefs = (items: MenuItem[], ownId: string): boolean => uniqueIds(items) && items.every((item) => item.kind === "submenu"
@@ -109,6 +109,8 @@ export function validActionReferences(actions: Action[], snippets: SnippetLibrar
       ? snippetIds.has(action.payload.snippetId) : !!action.payload.text.trim();
     if (action.type === "shortcut") return !!action.payload.key.trim() || action.payload.ctrl || action.payload.shift || action.payload.alt || action.payload.win;
     if (action.type === "launch") return !!action.payload.target.trim();
+    if (action.type === "profileSwitch") return !!action.payload.targetProfileId.trim()
+      && (!profileIds || profileIds.has(action.payload.targetProfileId));
     if (action.type === "sequence") return action.payload.steps.length <= 200 && action.payload.steps.every((step) =>
       step.delayMs === undefined || step.delayMs <= 0xFFFFFFFF);
     return true;

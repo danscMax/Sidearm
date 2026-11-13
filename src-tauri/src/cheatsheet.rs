@@ -139,13 +139,25 @@ pub(crate) fn trigger_held(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeSto
 
 /// A button was pressed while the trigger is held: the sheet goes (or never comes).
 pub(crate) fn cancel(app: &AppHandle) {
-    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).begin();
-    // A window call off the main thread waits for it, and `page_layout` (a sync
-    // command, on the main thread) waits for the lock: hide there, never under the lock.
     let handle = app.clone();
-    let _ = app.run_on_main_thread(move || {
-        LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).settle_hidden(|| hide(&handle));
-    });
+    cancel_then(&LIFECYCLE, |hide_later| {
+        if let Err(error) = app.run_on_main_thread(hide_later) {
+            log::warn!("[cheatsheet] hide not scheduled: {error}");
+        }
+    }, move || hide(&handle));
+}
+
+/// Cancels at once and hands `schedule` the hide, which takes the lock again when
+/// it runs. A window call off the main thread waits for it, and `page_layout` (a
+/// sync command, on the main thread) waits for the lock: the hide must run there,
+/// never under the lock.
+fn cancel_then(
+    lifecycle: &'static Mutex<SheetLifecycle>,
+    schedule: impl FnOnce(Box<dyn FnOnce() + Send>),
+    hide: impl FnOnce() + Send + 'static,
+) {
+    lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner).begin();
+    schedule(Box::new(move || lifecycle.lock().unwrap_or_else(std::sync::PoisonError::into_inner).settle_hidden(hide)));
 }
 
 fn show(app: &AppHandle, generation: u64, sheet: Sheet) {
@@ -266,7 +278,6 @@ mod tests {
         lifecycle.layout(|| visible.set(true));
         assert!(visible.get());
         lifecycle.pending = Some((old_timer, Sheet { title: String::new(), cells: Vec::new() }));
-        // The same steps `cancel` takes: the state now, the hide later on the main thread.
         lifecycle.begin();
         lifecycle.settle_hidden(|| visible.set(false));
         assert!(!visible.get());
@@ -280,14 +291,27 @@ mod tests {
     }
 
     #[test]
-    fn a_queued_hide_spares_a_newer_drawn_sheet() {
-        let mut lifecycle = SheetLifecycle::default();
-        let old = lifecycle.begin();
-        lifecycle.draw(old, || {});
-        lifecycle.begin(); // cancel: its hide waits for the main thread
-        let fresh = lifecycle.begin();
-        lifecycle.draw(fresh, || {});
-        lifecycle.settle_hidden(|| panic!("the stale hide took the new hold's sheet"));
+    fn cancel_releases_the_lock_before_its_hide_and_spares_a_newer_sheet() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static SHEET: Mutex<SheetLifecycle> = Mutex::new(SheetLifecycle { generation: 0, drawn: None, pending: None });
+        static HIDES: AtomicUsize = AtomicUsize::new(0);
+        let old = SHEET.lock().unwrap().begin();
+        SHEET.lock().unwrap().draw(old, || {});
+        let mut queued = Vec::new();
+        let schedule = |hide_later: Box<dyn FnOnce() + Send>| {
+            // The main thread may be waiting for the lock in `page_layout`.
+            assert!(SHEET.try_lock().is_ok(), "the hide is scheduled with the lock held");
+            queued.push(hide_later);
+        };
+        cancel_then(&SHEET, schedule, || { HIDES.fetch_add(1, Ordering::SeqCst); });
+        SHEET.lock().unwrap().layout(|| panic!("a cancelled sheet's late layout showed it"));
+        queued.pop().unwrap()();
+        assert_eq!(HIDES.load(Ordering::SeqCst), 1, "the cancelled sheet is hidden");
+        // Cancelled, then a new hold drew before the queued hide ran.
+        cancel_then(&SHEET, |hide_later| queued.push(hide_later), || panic!("the stale hide took the new hold's sheet"));
+        let fresh = SHEET.lock().unwrap().begin();
+        SHEET.lock().unwrap().draw(fresh, || {});
+        queued.pop().unwrap()();
     }
 
     #[test]

@@ -211,6 +211,14 @@ export function useAppPersistence(
         return;
       }
       const rollbackTarget = lastPersistedConfigRef.current;
+      if (rollbackTarget) {
+        // A newer draft queued during this save builds on the rejected one; the
+        // UI is rolled back below, so saving it later would persist edits the
+        // user no longer sees.
+        clearTimeout(saveTimerRef.current);
+        saveQueueRef.current = null;
+        lastCoalesceKeyRef.current = null;
+      }
       startTransition(() => {
         setError(normalized);
         setViewState("error");
@@ -262,7 +270,13 @@ export function useAppPersistence(
     try {
       const result = await loadConfig();
       lastPersistedConfigRef.current = result.config;
+      // Undo steps belong to the config they were taken on: replaying one onto
+      // a reloaded config (restore, import, another instance's write) would
+      // save the old config over it.
+      lastCoalesceKeyRef.current = null;
       startTransition(() => {
+        setUndoStack([]);
+        setRedoStack([]);
         setSnapshot(result);
         setWorkingConfig(result.config);
         setLastSave(null);

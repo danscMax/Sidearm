@@ -676,5 +676,57 @@ describe("useAppPersistence", () => {
       });
       expect(result.current.error).toBeNull();
     });
+
+    it("reloading the config drops undo/redo taken on the previous config", async () => {
+      const result = await renderReady();
+      act(() => {
+        result.current.updateDraft(() => altConfig);
+      });
+      expect(result.current.undoStack).toHaveLength(1);
+
+      // e.g. a restore, an import or another instance's write
+      mockedLoadConfig.mockResolvedValue({ ...loadResponse, config: makeConfig({ version: 7 }) });
+      await act(async () => {
+        await result.current.refreshConfig();
+      });
+      expect(result.current.undoStack).toHaveLength(0);
+      expect(result.current.redoStack).toHaveLength(0);
+    });
+
+    it("a failed save drops the edit queued behind it instead of saving it after the rollback", async () => {
+      const result = await renderReady();
+      let rejectFirst!: (reason: unknown) => void;
+      mockedSaveConfig.mockReset();
+      mockedSaveConfig.mockImplementationOnce(
+        () =>
+          new Promise<SaveConfigResponse>((_res, rej) => {
+            rejectFirst = rej;
+          }),
+      );
+      mockedSaveConfig.mockResolvedValue(saveResponse);
+
+      act(() => {
+        result.current.updateDraft(() => makeConfig({ version: 2 }));
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(mockedSaveConfig).toHaveBeenCalledTimes(1);
+
+      // Queued while the first save is in flight.
+      act(() => {
+        result.current.updateDraft(() => makeConfig({ version: 3 }));
+      });
+      await act(async () => {
+        rejectFirst({ code: "validation_error", message: "rejected" });
+        await Promise.resolve();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(1000);
+      });
+
+      expect(result.current.workingConfig).toEqual(baseConfig);
+      expect(mockedSaveConfig).toHaveBeenCalledTimes(1);
+    });
   });
 });

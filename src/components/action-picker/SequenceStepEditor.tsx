@@ -16,11 +16,44 @@ import {
   recordKeystroke,
   startMacroRecording,
   stopMacroRecording,
+  type MacroRecording,
 } from "../../lib/backend";
 import { ChipEditor } from "../ChipEditor";
 import { ExecutablePathField } from "../ExecutablePathField";
 import { DirectoryPathField } from "../DirectoryPathField";
 import { CompoundCard } from "./shared/CompoundCard";
+import { acquireKeyRecording } from "./shared/key-recording";
+
+export const MAX_SEQUENCE_STEPS = 200;
+
+// The backend recorder is shared by editor instances, including pending teardown.
+let recordingCleanup: Promise<unknown> = Promise.resolve();
+
+interface RecordingSession {
+  cancelled: boolean;
+  started: boolean;
+  count: number;
+  start: Promise<void>;
+  pending: Promise<void>;
+  keyRecording?: ReturnType<typeof acquireKeyRecording>;
+  stop?: Promise<MacroRecording | undefined>;
+}
+
+function finishRecording(session: RecordingSession): Promise<MacroRecording | undefined> {
+  if (!session.stop) {
+    session.stop = (async () => {
+      try {
+        await session.start;
+        await session.pending;
+        if (session.started) return await stopMacroRecording();
+      } finally {
+        await session.keyRecording?.release();
+      }
+    })();
+    recordingCleanup = session.stop.catch(() => {});
+  }
+  return session.stop;
+}
 
 export function SequenceStepEditor({
   steps,
@@ -34,6 +67,15 @@ export function SequenceStepEditor({
   const [recordedCount, setRecordedCount] = useState(0);
   const [limitReached, setLimitReached] = useState(false);
   const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [recordingBusy, setRecordingBusy] = useState(false);
+  const recordingRef = useRef<RecordingSession | null>(null);
+
+  useEffect(() => () => {
+    const session = recordingRef.current;
+    if (!session) return;
+    session.cancelled = true;
+    void finishRecording(session).catch(() => {});
+  }, []);
 
   // Stable per-step keys decoupled from array index. SequenceStep is a
   // persisted/serialized type, so we can't add an id field to it; instead we
@@ -58,9 +100,6 @@ export function SequenceStepEditor({
     (step, index) => step.type === "launch" && index < steps.length - 1,
   );
 
-  /** Hard cap on recorded steps to protect against runaway sequences. */
-  const RECORD_LIMIT = 1000;
-
   // Capture keystrokes during recording and forward to Rust
   useEffect(() => {
     if (!isRecording) return;
@@ -68,10 +107,13 @@ export function SequenceStepEditor({
     function handleRecordKey(e: KeyboardEvent) {
       // Ignore bare modifiers
       if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+      const rawKey = resolveKeyName(e);
+      if (rawKey === "VK_232") return;
       e.preventDefault();
       e.stopPropagation();
 
-      const rawKey = resolveKeyName(e);
+      const session = recordingRef.current;
+      if (!session || session.cancelled || session.stop || session.count >= MAX_SEQUENCE_STEPS) return;
       // Canonical Ctrl→Shift→Alt→Win order (+ Win, previously missing) via the
       // shared modifierLabels helper, so recorded chords match the rest of the UI.
       const mods = modifierLabels({
@@ -83,51 +125,85 @@ export function SequenceStepEditor({
       const keyName = normalizeKeyName(rawKey);
       const formatted = [...mods, keyName].join("+");
 
-      void recordKeystroke(formatted);
-      setRecordedCount((c) => c + 1);
+      session.pending = session.pending.then(() => recordKeystroke(formatted)).catch((error) => {
+        if (!session.cancelled) {
+          setRecordingError(normalizeCommandError(error).message);
+          void handleStopRecording();
+        }
+      });
+      session.count += 1;
+      setRecordedCount(session.count);
+      if (session.count >= MAX_SEQUENCE_STEPS) {
+        setLimitReached(true);
+        void handleStopRecording();
+      }
     }
 
     window.addEventListener("keydown", handleRecordKey, true);
     return () => window.removeEventListener("keydown", handleRecordKey, true);
   }, [isRecording]);
 
-  // Auto-stop when the hard cap is reached.
-  useEffect(() => {
-    if (isRecording && recordedCount >= RECORD_LIMIT) {
-      setLimitReached(true);
-      void handleStopRecording();
-    }
-  }, [recordedCount, isRecording]);
-
   async function handleStartRecording() {
-    try {
-      setRecordedCount(0);
-      setLimitReached(false);
-      setRecordingError(null);
+    if (recordingRef.current) return;
+    const session: RecordingSession = {
+      cancelled: false, started: false, count: 0,
+      start: Promise.resolve(), pending: Promise.resolve(),
+    };
+    recordingRef.current = session;
+    setRecordingBusy(true);
+    setRecordedCount(0);
+    setLimitReached(false);
+    setRecordingError(null);
+    session.start = (async () => {
+      await recordingCleanup;
+      if (session.cancelled) return;
+      session.keyRecording = acquireKeyRecording();
+      await session.keyRecording.ready;
+      if (session.cancelled) return;
       await startMacroRecording();
-      setIsRecording(true);
+      session.started = true;
+    })();
+    try {
+      await session.start;
+      if (!session.cancelled) setIsRecording(true);
     } catch (unknownError) {
-      setRecordingError(normalizeCommandError(unknownError).message);
+      try { await finishRecording(session); } catch { /* The start error is shown below. */ }
+      if (!session.cancelled) {
+        recordingRef.current = null;
+        setRecordingError(normalizeCommandError(unknownError).message);
+      }
+    } finally {
+      if (!session.cancelled) setRecordingBusy(false);
     }
   }
 
   async function handleStopRecording() {
+    const session = recordingRef.current;
+    if (!session || session.stop) return;
+    setIsRecording(false);
+    setRecordingBusy(true);
     try {
-      const recording = await stopMacroRecording();
-      setIsRecording(false);
-      if (recording.steps.length > 0) {
+      const recording = await finishRecording(session);
+      if (session.cancelled) return;
+      if (recording && recording.steps.length > 0) {
         // Wholesale replacement: clear keys so the render-time reconcile mints
         // fresh ones matching the new step list.
         stepKeysRef.current = [];
-        onChange(recording.steps);
+        if (recording.steps.length >= MAX_SEQUENCE_STEPS) setLimitReached(true);
+        onChange(recording.steps.slice(0, MAX_SEQUENCE_STEPS));
       }
     } catch (unknownError) {
-      setIsRecording(false);
-      setRecordingError(normalizeCommandError(unknownError).message);
+      if (!session.cancelled) setRecordingError(normalizeCommandError(unknownError).message);
+    } finally {
+      if (!session.cancelled) {
+        recordingRef.current = null;
+        setRecordingBusy(false);
+      }
     }
   }
 
   function addStep(type: SequenceStep["type"]) {
+    if (steps.length >= MAX_SEQUENCE_STEPS) return;
     stepKeysRef.current.push(newStepKey());
     onChange([...steps, createDefaultSequenceStep(type)]);
   }
@@ -178,6 +254,7 @@ export function SequenceStepEditor({
                 type="button"
                 className="action-button action-button--small action-button--accent"
                 onClick={() => { void handleStartRecording(); }}
+                disabled={recordingBusy}
               >
                 {t("picker.recordMacro")}
               </button>
@@ -194,6 +271,7 @@ export function SequenceStepEditor({
                   key={stepType}
                   className="action-button action-button--secondary action-button--small"
                   onClick={() => addStep(stepType)}
+                  disabled={recordingBusy || steps.length >= MAX_SEQUENCE_STEPS}
                 >
                   + {label}
                 </button>
@@ -208,7 +286,7 @@ export function SequenceStepEditor({
           <strong>
             {t("picker.recordingNotice")}{" "}
             <span className="text-dim">
-              {t("picker.recordingCount", { count: recordedCount, max: RECORD_LIMIT })}
+              {t("picker.recordingCount", { count: recordedCount, max: MAX_SEQUENCE_STEPS })}
             </span>
           </strong>
           <p>{t("picker.recordingHint")}</p>
@@ -216,7 +294,16 @@ export function SequenceStepEditor({
       ) : null}
       {limitReached ? (
         <Notice variant="warning" className="mb-8">
-          <strong>{t("picker.recordLimitReached", { max: RECORD_LIMIT })}</strong>
+          <strong>{t("picker.recordLimitReached", { max: MAX_SEQUENCE_STEPS })}</strong>
+        </Notice>
+      ) : null}
+      {steps.length >= MAX_SEQUENCE_STEPS ? (
+        <Notice variant="warning" className="mb-8">
+          <strong>{t("picker.sequenceStepLimit", { max: MAX_SEQUENCE_STEPS })}</strong>
+        </Notice>
+      ) : steps.length === 0 ? (
+        <Notice variant="warning" className="mb-8">
+          <strong>{t("picker.sequenceEmpty")}</strong>
         </Notice>
       ) : null}
       {recordingError ? (
@@ -285,6 +372,7 @@ export function SequenceStepEditor({
                   <div className="field">
                     <span className="field__label">{t("picker.launchArgsLabel")}</span>
                     <ChipEditor
+                      literalValues
                       values={step.args ?? []}
                       onChange={(vals) =>
                         updateStep(index, {

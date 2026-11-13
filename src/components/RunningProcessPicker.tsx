@@ -29,13 +29,14 @@ export function RunningProcessPicker({
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const mountedRef = useRef(true);
+  const requestRef = useRef(0);
 
   const loadProcesses = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
     try {
       const list = await listRunningProcesses();
-      if (!mountedRef.current) return;
+      if (request !== requestRef.current) return;
       // De-duplicate by (exe + path) because Chromium / Electron-style
       // apps spawn many child processes with the same name.
       const seen = new Set<string>();
@@ -53,24 +54,19 @@ export function RunningProcessPicker({
     } catch (unknownError) {
       // Distinguish a genuine failure from an empty list so the UI doesn't show
       // a misleading "nothing running" when process enumeration actually failed.
-      if (mountedRef.current) {
+      if (request === requestRef.current) {
         const err = normalizeCommandError(unknownError);
         setLoadError(err);
         setError?.(err);
       }
     } finally {
-      if (mountedRef.current) setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
   }, [setError]);
 
   useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  useEffect(() => {
     void loadProcesses();
+    return () => { requestRef.current += 1; };
   }, [loadProcesses]);
 
   useEffect(() => {

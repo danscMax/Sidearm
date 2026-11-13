@@ -1512,6 +1512,7 @@ function App() {
         <SynapseImportModal
           parsed={synapseParsed}
           activeConfig={activeConfig}
+          getConfigRevision={persistence.getConfigRevision}
           onImported={(next, summary) => {
             updateDraft(() => next, { immediate: true });
             setSynapseParsed(null);

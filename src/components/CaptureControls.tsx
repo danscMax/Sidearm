@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PillTrack } from "./PillTrack";
@@ -10,7 +11,7 @@ interface CaptureControlsProps {
   onSelectDelay: (ms: number) => void;
   /** Trigger an active-window capture. */
   onCapture: () => void;
-  /** Report an exe basename dropped onto the dropzone (`.lnk` is mapped to `.exe`). */
+  /** Report an executable basename dropped onto the dropzone. */
   onDropExe: (exeName: string) => void;
   /** Disable the capture trigger (e.g. while loading/saving or mid-countdown). */
   disabled?: boolean;
@@ -18,7 +19,7 @@ interface CaptureControlsProps {
 
 /**
  * Active-window capture block shared by the rule card: a drag-drop target for an
- * `.exe`/shortcut, a capture button with a live countdown, and a delay selector.
+ * `.exe`, a capture button with a live countdown, and a delay selector.
  * Presentational — the runtime capture machinery (countdown timer, foreground
  * read) lives in the workspace and is wired through the props.
  */
@@ -31,6 +32,7 @@ export function CaptureControls({
   disabled,
 }: CaptureControlsProps) {
   const { t } = useTranslation();
+  const [invalidFile, setInvalidFile] = useState(false);
 
   return (
     <>
@@ -54,7 +56,8 @@ export function CaptureControls({
           e.preventDefault();
           const file = e.dataTransfer.files[0];
           if (file) {
-            const name = file.name.replace(/\.lnk$/i, ".exe").toLowerCase();
+            const name = file.name.toLowerCase();
+            setInvalidFile(!name.endsWith(".exe"));
             if (name.endsWith(".exe")) onDropExe(name);
           }
         }}
@@ -66,6 +69,7 @@ export function CaptureControls({
         </svg>
         <span>{t("newRule.dropzone")}</span>
       </div>
+      {invalidFile ? <p role="alert" className="panel__muted">{t("newRule.exeOnly")}</p> : null}
 
       <div className="new-rule__divider">{t("newRule.divider")}</div>
 

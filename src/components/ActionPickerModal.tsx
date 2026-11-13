@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
@@ -37,7 +37,7 @@ import {
   type PickerDrafts,
 } from "../lib/action-picker-helpers";
 import type { TriggerMode } from "../lib/config";
-import { SequenceStepEditor } from "./action-picker/SequenceStepEditor";
+import { MAX_SEQUENCE_STEPS, SequenceStepEditor } from "./action-picker/SequenceStepEditor";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { MouseActionEditor } from "./action-picker/MouseActionEditor";
 import { TextSnippetEditor } from "./action-picker/TextSnippetEditor";
@@ -107,11 +107,16 @@ export function ActionPickerModal({
   const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
+  const mountedRef = useRef(false);
+  const testTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Save previously focused element and restore on unmount
   useEffect(() => {
+    mountedRef.current = true;
     previousFocusRef.current = document.activeElement as HTMLElement | null;
     return () => {
+      mountedRef.current = false;
+      if (testTimerRef.current !== null) clearTimeout(testTimerRef.current);
       previousFocusRef.current?.focus();
     };
   }, []);
@@ -232,10 +237,7 @@ export function ActionPickerModal({
   const [isCapturing, setIsCapturing] = useState(false);
 
   // Draft action state per category — seeded once from the edited action/binding
-  const initial = useMemo(
-    () => createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary),
-    [existingAction, binding, config.profiles, config.snippetLibrary],
-  );
+  const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
   const [shortcutDraft, setShortcutDraft] = useState(initial.shortcut);
   const [mouseDraft, setMouseDraft] = useState(initial.mouse);
   const [textDraft, setTextDraft] = useState(initial.text);
@@ -304,6 +306,7 @@ export function ActionPickerModal({
 
   /** The config with this tab's edit in it; null when it cannot be saved. */
   function buildSave(): AppConfig | null {
+    if (saveDisabled) return null;
     if (effectiveCategory === "hypershift") {
       if (!canBeTrigger || !controlId) return null;
       return {
@@ -334,9 +337,9 @@ export function ActionPickerModal({
     }
     if (!targetBinding) return null;
     const nextAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
-    // An action other buttons use too is edited for this button alone, except a
+    // An action other buttons or menus use is edited for this button alone, except a
     // shared menu edited as a menu: keeping it one menu is why it is shared.
-    if (existingAction && sharedUses > 0 && !(existingAction.type === "menu" && nextAction.type === "menu")) {
+    if (existingAction && (sharedUses > 0 || elsewhere.length > 0) && !(existingAction.type === "menu" && nextAction.type === "menu")) {
       nextAction.id = nextUniqueId(config.actions.map((a) => a.id), existingAction.id);
     }
     // Reuse the new slot's action id so Save cannot leave an orphan placeholder.
@@ -410,7 +413,7 @@ export function ActionPickerModal({
   }
 
   async function handleTest() {
-    if (testRunning) return;
+    if (testRunning || saveDisabled) return;
     const draftAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
     setTestRunning(true);
     try {
@@ -420,19 +423,22 @@ export function ActionPickerModal({
       if (effectiveCategory !== "launch") {
         for (let n = 3; n > 0; n -= 1) {
           setTestResult({ ok: true, text: t("picker.testCountdown", { n }) });
-          await new Promise((resolve) => setTimeout(resolve, 1000));
+          await new Promise<void>((resolve) => { testTimerRef.current = setTimeout(resolve, 1000); });
+          testTimerRef.current = null;
+          if (!mountedRef.current) return;
         }
       }
       const result = await liveTestAction(draftAction, profileId ?? binding?.profileId);
+      if (!mountedRef.current) return;
       const detail =
         result.warnings.length > 0
           ? `${uiText(result.summary)} — ${result.warnings.map(uiText).join("; ")}`
           : uiText(result.summary);
       setTestResult({ ok: true, text: detail });
     } catch (error) {
-      setTestResult({ ok: false, text: normalizeCommandError(error).message });
+      if (mountedRef.current) setTestResult({ ok: false, text: normalizeCommandError(error).message });
     } finally {
-      setTestRunning(false);
+      if (mountedRef.current) setTestRunning(false);
     }
   }
 
@@ -440,6 +446,7 @@ export function ActionPickerModal({
   const saveDisabled = roleCategory
     ? false
     : isSaveDisabled(effectiveCategory, drafts)
+      || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS))
       || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [

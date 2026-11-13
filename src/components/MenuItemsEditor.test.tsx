@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import "../i18n";
 
 import type { Action, AppConfig, MenuItem } from "../lib/config";
-import { NO_MENU_EDITS, phraseOf } from "../lib/menu-phrase";
+import { applyMenuEdits, NO_MENU_EDITS, phraseOf } from "../lib/menu-phrase";
 import { MenuItemsEditor } from "./MenuItemsEditor";
 
 afterEach(() => cleanup());
@@ -61,6 +62,42 @@ describe("MenuItemsEditor", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Commands" }));
     expect(onEditsChange.mock.calls.at(-1)![0].actions.m2.payload.items).toEqual(items);
     expect(onChange.mock.calls.at(-1)![0]).toEqual([]);
+  });
+
+  function movedMenu(onSave = vi.fn()) {
+    const source: Extract<Action, { type: "menu" }> = { id: "m1", displayName: "Source", type: "menu", payload: { items } };
+    const target: Extract<Action, { type: "menu" }> = { id: "m2", displayName: "Commands", type: "menu", payload: { items: [] } };
+    const withMenus = { ...config, actions: [phrase, source, target] } as AppConfig;
+    function Harness() {
+      const [draft, setDraft] = useState(items);
+      const [edits, setEdits] = useState(NO_MENU_EDITS);
+      return <>
+        <MenuItemsEditor items={draft} menuActionId="m1" onChange={setDraft} config={withMenus} edits={edits} onEditsChange={setEdits} />
+        <button onClick={() => onSave(applyMenuEdits({ ...withMenus, actions: [phrase, { ...source, payload: { items: draft } }, target] }, edits, draft))}>Save draft</button>
+        <button onClick={() => setEdits({ ...edits, actions: { ...edits.actions, a1: { ...phrase, displayName: "Edited after move" } } })}>Subsequent edit</button>
+      </>;
+    }
+    render(<Harness />);
+    fireEvent.contextMenu(screen.getByRole("button", { name: /1\s*Hi/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Переместить в меню|Move to menu/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Commands" }));
+    return onSave;
+  }
+
+  it("restores both menus after a move, including the saved draft", () => {
+    const onSave = movedMenu();
+    fireEvent.click(screen.getByRole("button", { name: /Вернуть|Restore/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Save draft" }));
+    const saved = onSave.mock.calls[0][0] as AppConfig;
+    expect(saved.actions.find((action) => action.id === "m1")).toMatchObject({ payload: { items } });
+    expect(saved.actions.find((action) => action.id === "m2")).toMatchObject({ payload: { items: [] } });
+  });
+
+  it("does not offer a move restore after later action edits", () => {
+    movedMenu();
+    expect(screen.getByRole("button", { name: /Вернуть|Restore/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Subsequent edit" }));
+    expect(screen.queryByRole("button", { name: /Вернуть|Restore/ })).toBeNull();
   });
 
   it("pins an item to the top of the popup and unpins it", () => {

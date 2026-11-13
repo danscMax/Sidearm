@@ -28,6 +28,7 @@ export interface SnippetLibrarySettingsProps {
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
   selectedSnippetId?: string;
+  selectedSnippetNonce?: number;
 }
 
 /** Snippets tab: full CRUD over the reusable snippet library — add / rename /
@@ -39,14 +40,22 @@ export function SnippetLibrarySettings({
   setConfirmModal,
   showToast,
   selectedSnippetId,
+  selectedSnippetNonce,
 }: SnippetLibrarySettingsProps) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [textDraft, setTextDraft] = useState<{ id: string; text: string } | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const selectionRequestRef = useRef<{ id: string; nonce?: number } | null>(null);
 
   const library = activeConfig.snippetLibrary;
   const selected = library.find((s) => s.id === selectedId) ?? null;
+  const invalidText = textDraft?.id === selectedId ? textDraft.text : null;
+
+  useEffect(() => {
+    setTextDraft(null);
+  }, [selectedId, selected?.text]);
   const snippetRefCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const action of activeConfig.actions) {
@@ -81,10 +90,17 @@ export function SnippetLibrarySettings({
   }, [selectedId]);
 
   useEffect(() => {
-    if (selectedSnippetId && library.some((snippet) => snippet.id === selectedSnippetId)) {
+    if (!selectedSnippetId) {
+      selectionRequestRef.current = null;
+      return;
+    }
+    const previous = selectionRequestRef.current;
+    if (previous?.id === selectedSnippetId && previous.nonce === selectedSnippetNonce) return;
+    if (library.some((snippet) => snippet.id === selectedSnippetId)) {
+      selectionRequestRef.current = { id: selectedSnippetId, nonce: selectedSnippetNonce };
       setSelectedId(selectedSnippetId);
     }
-  }, [library, selectedSnippetId]);
+  }, [library, selectedSnippetId, selectedSnippetNonce]);
 
   function handleDedupe() {
     let removed = 0;
@@ -320,11 +336,27 @@ export function SnippetLibrarySettings({
               <span className="field__label">{t("snippet.text")}</span>
               <textarea
                 rows={4}
-                value={selected.text}
-                onChange={(e) => patch(selected.id, { text: e.target.value }, `snippet-text:${selected.id}`)}
+                value={invalidText ?? selected.text}
+                aria-invalid={invalidText !== null || undefined}
+                aria-describedby={invalidText !== null ? "snippet-library-text-error" : undefined}
+                onChange={(e) => {
+                  const text = e.target.value;
+                  if (!text.trim()) {
+                    setTextDraft({ id: selected.id, text });
+                    return;
+                  }
+                  setTextDraft(null);
+                  patch(selected.id, { text }, `snippet-text:${selected.id}`);
+                }}
                 placeholder={t("picker.textPlaceholder")}
               />
             </label>
+
+            {invalidText !== null ? (
+              <p id="snippet-library-text-error" className="panel__muted" role="alert">
+                {t("snippetLibrary.textRequired")}
+              </p>
+            ) : null}
 
             <div className="field">
               <span className="field__label">{t("snippet.tags")}</span>

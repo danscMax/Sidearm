@@ -7,6 +7,8 @@ export interface ChipEditorProps {
   placeholder?: string;
   ariaLabel: string;
   disabled?: boolean;
+  /** Preserve ordered argv values instead of normalizing a set of filters. */
+  literalValues?: boolean;
 }
 
 /**
@@ -22,6 +24,7 @@ export function ChipEditor({
   placeholder,
   ariaLabel,
   disabled,
+  literalValues = false,
 }: ChipEditorProps) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState("");
@@ -30,9 +33,9 @@ export function ChipEditor({
   const inputRef = useRef<HTMLInputElement>(null);
 
   function commit() {
-    const trimmed = draft.trim();
+    const trimmed = literalValues ? draft : draft.trim();
     if (!trimmed) return;
-    if (values.includes(trimmed)) {
+    if (!literalValues && values.includes(trimmed)) {
       setDraft("");
       return;
     }
@@ -52,12 +55,12 @@ export function ChipEditor({
 
   function commitEdit() {
     if (editingIndex === null) return;
-    const trimmed = editDraft.trim();
+    const trimmed = literalValues ? editDraft : editDraft.trim();
     const next = [...values];
     if (!trimmed) {
       // Emptied → drop the chip.
       next.splice(editingIndex, 1);
-    } else if (values.some((v, i) => i !== editingIndex && v === trimmed)) {
+    } else if (!literalValues && values.some((v, i) => i !== editingIndex && v === trimmed)) {
       // Edited into an existing value → drop this duplicate.
       next.splice(editingIndex, 1);
     } else {
@@ -147,7 +150,7 @@ export function ChipEditor({
         disabled={disabled}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === ",") {
+          if (e.key === "Enter" || (!literalValues && e.key === ",")) {
             e.preventDefault();
             commit();
           } else if (e.key === "Backspace" && draft === "" && values.length > 0) {
@@ -155,7 +158,7 @@ export function ChipEditor({
           }
         }}
         onBlur={() => {
-          if (draft.trim()) commit();
+          commit();
         }}
       />
     </div>

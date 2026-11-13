@@ -1122,10 +1122,13 @@ fn device_image_mime(extension: &str) -> Option<&'static str> {
 /// Reject anything that is not a bare file name (defense in depth on top of
 /// the same check in `validate_config`).
 fn validated_device_image_path(app: &AppHandle, file_name: &str) -> Result<PathBuf, CommandError> {
-    if file_name.trim().is_empty()
-        || file_name.contains(['/', '\\'])
-        || file_name.contains("..")
-    {
+    // Only a photo of ours: a bare name with an image extension.
+    let is_image = Path::new(file_name)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(device_image_mime)
+        .is_some();
+    if !config::is_bare_file_name(file_name) || !is_image {
         return Err(CommandError::new(
             "device_image_invalid_name",
             format!("`{file_name}` is not a bare file name."),
@@ -4475,6 +4478,48 @@ mod tests {
 
     fn temp_home() -> TempDir {
         TempDir::new().expect("create temp home dir")
+    }
+
+    /// The app ACL (build.rs `APP_COMMANDS` + capabilities) must cover exactly the
+    /// registered commands, and each popup window only its own: a command added to
+    /// the handler but not to build.rs is rejected in every window.
+    #[test]
+    fn app_acl_lists_every_command() {
+        fn quoted(text: &str) -> Vec<String> {
+            text.split('"').skip(1).step_by(2).map(str::to_owned).collect()
+        }
+        fn allowed(capability: &str) -> std::collections::BTreeSet<String> {
+            let value: serde_json::Value = serde_json::from_str(capability).expect("capability json");
+            value["permissions"]
+                .as_array()
+                .expect("permissions")
+                .iter()
+                .filter_map(|p| p.as_str()?.strip_prefix("allow-").map(|c| c.replace('-', "_")))
+                .collect()
+        }
+        let lib = include_str!("lib.rs");
+        let start = lib.find(concat!("generate_handler", "![")).expect("handler list") + 18;
+        let handler: std::collections::BTreeSet<String> = lib[start..start + lib[start..].find(']').expect("end")]
+            .split(',')
+            .map(|name| name.trim().to_owned())
+            .filter(|name| !name.is_empty())
+            .collect();
+        let build = include_str!("../build.rs");
+        let list = &build[build.find("APP_COMMANDS: &[&str] = &[").expect("APP_COMMANDS")..];
+        let acl: std::collections::BTreeSet<String> = quoted(&list[..list.find("];").expect("end")]).into_iter().collect();
+        assert_eq!(acl, handler, "build.rs APP_COMMANDS must equal generate_handler!");
+
+        let menu = allowed(include_str!("../capabilities/menu.json"));
+        let sheet = allowed(include_str!("../capabilities/cheatsheet.json"));
+        let main = allowed(include_str!("../capabilities/default.json"));
+        assert!(allowed(include_str!("../capabilities/osd.json")).is_empty(), "the OSD calls no command");
+        assert!(menu.iter().all(|c| c.starts_with("menu_")), "menu window: only menu_* ({menu:?})");
+        assert!(sheet.iter().all(|c| c.starts_with("cheatsheet_")), "cheat sheet: only cheatsheet_*");
+        let mut every: std::collections::BTreeSet<String> = main.clone();
+        every.extend(menu.iter().cloned());
+        every.extend(sheet.iter().cloned());
+        assert_eq!(every, handler, "every command is allowed in some window");
+        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c)), "main gets no popup command");
     }
 
     /// Merge-import must not orphan the base config's user devices: since v3

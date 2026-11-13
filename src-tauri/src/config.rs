@@ -1096,6 +1096,17 @@ fn migrate_paste_mode(config: &mut AppConfig) {
     }
 }
 
+/// A plain file name that stays inside the folder it is joined to: no
+/// separators, no `..`, and no `:` — `E:name` is relative to drive E's current
+/// directory and `name:stream` an alternate data stream on Windows.
+pub fn is_bare_file_name(name: &str) -> bool {
+    let mut components = Path::new(name).components();
+    !name.trim().is_empty()
+        && !name.contains(['/', '\\', ':'])
+        && matches!(components.next(), Some(std::path::Component::Normal(part)) if part == name)
+        && components.next().is_none()
+}
+
 pub fn load_or_initialize_config(
     config_dir: &Path,
 ) -> Result<LoadConfigResponse, ConfigStoreError> {
@@ -1547,7 +1558,7 @@ fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarning>, ConfigS
         // The image is a bare file name resolved inside app-data; reject
         // anything that could escape that directory.
         if let Some(image) = &device.image
-            && (image.trim().is_empty() || image.contains(['/', '\\']) || image.contains(".."))
+            && !is_bare_file_name(image)
         {
             errors.push(format!(
                 "device `{}` image must be a bare file name, got `{image}`.",
@@ -3657,7 +3668,7 @@ mod tests {
     /// Device image must be a bare file name (it is resolved inside app-data).
     #[test]
     fn validation_rejects_path_traversal_device_image() {
-        for bad in ["../../evil.png", "sub/dir.png", "..\\evil.png", "  "] {
+        for bad in ["../../evil.png", "sub/dir.png", "..\\evil.png", "  ", "..", "E:notes.txt", "a.png:stream"] {
             let mut config = default_seed_config();
             config.devices[0].image = Some(bad.to_string());
             assert!(

@@ -2,6 +2,22 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "menu",
   "description": "Minimal capability for the menu popup window (it only listens for its view and calls the menu_* commands)",
-  "windows": ["menu"],
-  "permissions": ["core:default"]
+  "windows": [
+    "menu"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-menu-ready",
+    "allow-menu-layout",
+    "allow-menu-pick",
+    "allow-menu-hover",
+    "allow-menu-full-text",
+    "allow-menu-pick-child",
+    "allow-menu-edit",
+    "allow-menu-wheel",
+    "allow-menu-search",
+    "allow-menu-confirm",
+    "allow-menu-close",
+    "allow-menu-back"
+  ]
 }

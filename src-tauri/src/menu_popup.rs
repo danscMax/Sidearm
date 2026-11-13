@@ -750,7 +750,7 @@ fn copy_pick(config: &AppConfig, action_id: &str, mode: PickMode, copy: impl FnO
     true
 }
 
-fn finish_pick(mode: PickMode, succeeded: bool, enter: impl FnOnce()) {
+pub(crate) fn finish_pick(mode: PickMode, succeeded: bool, enter: impl FnOnce()) {
     if mode == PickMode::Enter && succeeded {
         enter();
     }

@@ -268,7 +268,7 @@ pub(super) enum EventOutcome {
 #[derive(Clone)]
 struct GestureContext {
     encoded_key: String,
-    hwnd: String,
+    target: GestureTarget,
     exe: String,
     title: String,
     process_path: Option<String>,
@@ -279,6 +279,20 @@ struct GestureContext {
 }
 
 type PendingGestures = gestures::Gestures<GestureContext>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct GestureTarget {
+    hwnd: String,
+    exe: String,
+    title: String,
+    process_path: String,
+}
+
+impl From<&window_capture::WindowCaptureResult> for GestureTarget {
+    fn from(window: &window_capture::WindowCaptureResult) -> Self {
+        Self { hwnd: window.hwnd.clone(), exe: window.exe.clone(), title: window.title.clone(), process_path: window.process_path.clone() }
+    }
+}
 
 fn suppresses_event<T: Clone>(gestures: &mut gestures::Gestures<T>, suppressed: bool, key_up: bool) -> bool {
     if suppressed {
@@ -298,8 +312,8 @@ fn replay_native_wheel(
 
 fn gesture_target_is_current(
     payload: Option<&config::ActionPayload>,
-    start_window: &str,
-    current_window: Option<&str>,
+    start_window: &GestureTarget,
+    current_window: Option<&GestureTarget>,
 ) -> bool {
     use config::{ActionPayload, MouseActionKind, SequenceStep};
     let sends_input = match payload {
@@ -309,7 +323,21 @@ fn gesture_target_is_current(
         Some(ActionPayload::Launch(_) | ActionPayload::Menu(_) | ActionPayload::ProfileSwitch(_)
             | ActionPayload::Disabled(_) | ActionPayload::RepairClipboard(_)) | None => false,
     };
-    !sends_input || (!start_window.is_empty() && current_window == Some(start_window))
+    !sends_input || current_window.is_some_and(|current| {
+        if !start_window.hwnd.is_empty() {
+            current.hwnd == start_window.hwnd
+        } else {
+            // shortcut: GNOME exposes no ID; use app/title/path until the extension supplies a stable window ID.
+            !start_window.exe.is_empty() && !start_window.title.is_empty() && current == start_window
+        }
+    })
+}
+
+fn gesture_dispatch_allowed(payload: Option<&config::ActionPayload>, target: &GestureTarget, current: Option<&window_capture::WindowCaptureResult>, suppressed: bool, recording: bool) -> bool {
+    !suppressed
+        && gesture_target_is_current(payload, target, current.map(GestureTarget::from).as_ref())
+        && (current.is_none_or(|window| window.ignore_reason.as_deref() != Some(window_capture::OWN_WINDOW_REASON))
+            || can_execute_in_own_window(payload, recording))
 }
 
 fn check_binding_throttle(
@@ -406,7 +434,7 @@ fn fire_gestures(
             .find(|action| Some(action.id.as_str()) == preview.action_id.as_deref())
             .map(|action| &action.payload);
         let current = window_capture::capture_active_window_with_resolution(config, "", None).ok();
-        if !crate::fake_mode() && !gesture_target_is_current(payload, &context.hwnd, current.as_ref().map(|window| window.hwnd.as_str())) {
+        if !crate::fake_mode() && !gesture_dispatch_allowed(payload, &context.target, current.as_ref(), SUPPRESS_EXECUTION.load(Ordering::Relaxed), key_recording()) {
             log::info!("[capture] {gesture:?} of {} cancelled: foreground window changed", context.encoded_key);
             continue;
         }
@@ -416,7 +444,7 @@ fn fire_gestures(
             continue;
         }
         log::info!("[capture] {gesture:?} of {}", context.encoded_key);
-        run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), context.is_fg_elevated, false);
+        run_fire_and_forget(app, runtime_store, config, &preview, Vec::new(), context.is_fg_elevated, false, Some(context.target));
     }
 }
 
@@ -683,7 +711,7 @@ fn process_encoded_key_event(
 
     let context = || GestureContext {
         encoded_key: event.encoded_key.clone(),
-        hwnd: capture_result.hwnd.clone(),
+        target: GestureTarget::from(&capture_result),
         exe: exe.to_owned(),
         title: title.to_owned(),
         process_path: process_path.map(str::to_owned),
@@ -919,6 +947,7 @@ fn process_encoded_key_event(
                 log_entries,
                 is_fg_elevated,
                 false,
+                None,
             );
         }
     } else {
@@ -930,6 +959,7 @@ fn process_encoded_key_event(
             log_entries,
             is_fg_elevated,
             false,
+            None,
         );
     }
 
@@ -979,6 +1009,7 @@ fn can_execute_in_own_window(payload: Option<&config::ActionPayload>, recording:
         )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_fire_and_forget(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
@@ -988,6 +1019,7 @@ fn run_fire_and_forget(
     is_fg_elevated: bool,
     // A popup menu's pick: its press was counted when the menu opened.
     menu_pick: bool,
+    gesture_target: Option<GestureTarget>,
 ) {
     // All tap paths, including settled gestures. Holds never reach this path;
     // a menu pick belongs to the opening press and must not consume its throttle twice.
@@ -1035,17 +1067,20 @@ fn run_fire_and_forget(
             && matches!(a.payload, crate::config::ActionPayload::Sequence(_))
     });
     if is_sequence && !crate::fake_mode() {
-        let (app, store, config, preview) = (app.clone(), runtime_store.clone(), config.clone(), preview.clone());
+        let (app, store, config, preview) = (app.clone(), runtime_store.clone(), Arc::new(config.clone()), preview.clone());
         let entries: Vec<(String, crate::ui_text::UiText, bool)> =
             log_entries.into_iter().map(|(category, text, error)| (category.to_owned(), text, error)).collect();
         let queued = executor::live_sequence_generation();
-        submit_sequence(Box::new(move || {
+        let guard_config = config.clone();
+        let guard_preview = preview.clone();
+        submit_sequence(guarded_sequence_job(queued, executor::live_sequence_generation, move || {
+            gesture_target.as_ref().is_none_or(|target| {
+                let payload = guard_config.actions.iter().find(|action| Some(action.id.as_str()) == guard_preview.action_id.as_deref()).map(|action| &action.payload);
+                let current = window_capture::capture_active_window_with_resolution(&guard_config, "", None).ok();
+                gesture_dispatch_allowed(payload, target, current.as_ref(), SUPPRESS_EXECUTION.load(Ordering::Relaxed), key_recording())
+            })
+        }, move || {
             let log_entries = entries.iter().map(|(c, t, e)| (c.as_str(), t.clone(), *e)).collect();
-            if executor::live_sequence_generation() != queued {
-                log::info!("[capture] Queued sequence for {} dropped: cancelled before it started", preview.encoded_key);
-                flush_log_entries(&store, log_entries);
-                return;
-            }
             let executed = executor::run_preview_action(&config, &preview);
             report_execution(&app, &store, &config, &preview, log_entries, is_fg_elevated, menu_pick, executed);
         }));
@@ -1074,6 +1109,10 @@ fn submit_sequence(job: Box<dyn FnOnce() + Send>) {
             .ok()
             .map(|_| sender)
     });
+    queue_sequence(runner.as_ref(), job);
+}
+
+fn queue_sequence(runner: Option<&std::sync::mpsc::SyncSender<Box<dyn FnOnce() + Send>>>, job: Box<dyn FnOnce() + Send>) {
     match runner {
         Some(sender) => {
             if let Err(error) = sender.try_send(job) {
@@ -1086,6 +1125,21 @@ fn submit_sequence(job: Box<dyn FnOnce() + Send>) {
 
 /// Presses of sequences that may wait behind the one running.
 const SEQUENCE_QUEUE: usize = 8;
+
+fn guarded_sequence_job(
+    queued: u64,
+    generation: impl FnOnce() -> u64 + Send + 'static,
+    allowed: impl FnOnce() -> bool + Send + 'static,
+    run: impl FnOnce() + Send + 'static,
+) -> Box<dyn FnOnce() + Send> {
+    Box::new(move || {
+        if generation() == queued && allowed() {
+            run();
+        } else {
+            log::info!("[capture] Queued sequence dropped: cancelled or capture target changed before it started");
+        }
+    })
+}
 
 /// Logs, emits and shows what an action run did (or why it failed).
 #[allow(clippy::too_many_arguments)]
@@ -1219,12 +1273,7 @@ pub(crate) fn run_menu_item(
     let is_sequence = matches!(action.payload, config::ActionPayload::Sequence(_));
     let (app, store, config, menu_press, action) = (app.clone(), runtime_store.clone(), config.clone(), menu_press.clone(), action.clone());
     let queued = executor::live_sequence_generation();
-    let run = move || {
-        if is_sequence && executor::live_sequence_generation() != queued {
-            log::info!("[menu] Queued item `{}` cancelled before it started", action.id);
-            completed(false);
-            return;
-        }
+    let run = menu_item_job(is_sequence.then_some(queued), executor::live_sequence_generation, move |completed| {
         // The popup has returned focus; recheck the selected action, retaining the opening profile/control/layer.
         let context = if action.conditions.is_empty() { None } else {
             window_capture::capture_active_window_with_resolution(&config, "Sidearm", None).ok()
@@ -1239,7 +1288,7 @@ pub(crate) fn run_menu_item(
             return;
         }
         if matches!(action.payload, config::ActionPayload::Menu(_)) {
-            run_fire_and_forget(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true);
+            run_fire_and_forget(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true, None);
             completed(false); // Opening another menu has not inserted text.
             return;
         }
@@ -1249,20 +1298,42 @@ pub(crate) fn run_menu_item(
             preview.control_id.as_deref().unwrap_or("?"),
             preview.layer.as_deref().unwrap_or("?")
         );
-        let executed = if crate::fake_mode() {
-            executor::execute_preview_action(&config, &preview)
-        } else {
-            executor::run_preview_action(&config, &preview)
-        };
-        let succeeded = executed.is_ok();
-        report_execution(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true, executed);
-        completed(succeeded);
-    };
+        run_menu_execution(|| {
+            if crate::fake_mode() {
+                executor::execute_preview_action(&config, &preview)
+            } else {
+                executor::run_preview_action(&config, &preview)
+            }
+        }, |executed| report_execution(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true, executed), completed);
+    }, completed);
     if is_sequence && !crate::fake_mode() {
-        submit_sequence(Box::new(run));
+        submit_sequence(run);
     } else {
         run();
     }
+}
+
+fn run_menu_execution<T, E>(execute: impl FnOnce() -> Result<T, E>, report: impl FnOnce(Result<T, E>), completed: impl FnOnce(bool)) {
+    let executed = execute();
+    let succeeded = executed.is_ok();
+    report(executed);
+    completed(succeeded);
+}
+
+fn menu_item_job(
+    queued: Option<u64>,
+    generation: impl FnOnce() -> u64 + Send + 'static,
+    run: impl FnOnce(Box<dyn FnOnce(bool) + Send>) + Send + 'static,
+    completed: impl FnOnce(bool) + Send + 'static,
+) -> Box<dyn FnOnce() + Send> {
+    Box::new(move || {
+        if queued.is_some_and(|queued| generation() != queued) {
+            log::info!("[menu] Queued item cancelled before it started");
+            completed(false);
+        } else {
+            run(Box::new(completed));
+        }
+    })
 }
 
 fn menu_item_preview(menu_press: &resolver::ResolvedInputPreview, action: &config::Action, context: Option<(&str, &str)>) -> resolver::ResolvedInputPreview {
@@ -1440,26 +1511,137 @@ mod dispatch_regression_tests {
 
     #[test]
     fn delayed_input_is_cancelled_when_its_foreground_window_changes() {
+        let target = |hwnd: &str| GestureTarget { hwnd: hwnd.into(), exe: String::new(), title: String::new(), process_path: String::new() };
         let shortcut = config::ActionPayload::Shortcut(config::ShortcutActionPayload {
             key: "W".into(), ctrl: true, shift: false, alt: false, win: false, raw: None,
         });
-        assert!(!gesture_target_is_current(Some(&shortcut), "0xA", Some("0xB")));
-        assert!(!gesture_target_is_current(Some(&shortcut), "0xA", None));
-        assert!(gesture_target_is_current(Some(&shortcut), "0xA", Some("0xA")));
+        assert!(!gesture_target_is_current(Some(&shortcut), &target("0xA"), Some(&target("0xB"))));
+        assert!(!gesture_target_is_current(Some(&shortcut), &target("0xA"), None));
+        assert!(gesture_target_is_current(Some(&shortcut), &target("0xA"), Some(&target("0xA"))));
         let launch = config::ActionPayload::Launch(config::LaunchActionPayload {
             target: "notepad.exe".into(), args: Vec::new(), working_dir: None,
         });
-        assert!(gesture_target_is_current(Some(&launch), "0xA", Some("0xB")));
-        assert!(!gesture_target_is_current(Some(&shortcut), "", Some("")));
+        assert!(gesture_target_is_current(Some(&launch), &target("0xA"), Some(&target("0xB"))));
+        assert!(!gesture_target_is_current(Some(&shortcut), &target(""), Some(&target(""))));
         let sequence = config::ActionPayload::Sequence(config::SequenceActionPayload {
             steps: vec![config::SequenceStep::Sleep { delay_ms: 100 }, config::SequenceStep::Text { value: "text".into(), delay_ms: None, repeat: None }],
         });
-        assert!(!gesture_target_is_current(Some(&sequence), "0xA", Some("0xB")));
+        assert!(!gesture_target_is_current(Some(&sequence), &target("0xA"), Some(&target("0xB"))));
         for kind in [config::MouseActionKind::LeftClick, config::MouseActionKind::DpiUp] {
             let payload = config::ActionPayload::MouseAction(config::MouseActionPayload {
                 action: kind, ctrl: false, shift: false, alt: false, win: false,
             });
-            assert_eq!(gesture_target_is_current(Some(&payload), "0xA", Some("0xB")), kind == config::MouseActionKind::DpiUp);
+            assert_eq!(gesture_target_is_current(Some(&payload), &target("0xA"), Some(&target("0xB"))), kind == config::MouseActionKind::DpiUp);
+        }
+    }
+
+    fn gnome_window(title: &str) -> window_capture::WindowCaptureResult {
+        let mut window = window_capture::without_foreground_window(&config::default_seed_config(), None);
+        window.exe = "org.gnome.texteditor".into();
+        window.process_path = "/usr/bin/gnome-text-editor".into();
+        window.title = title.into();
+        window
+    }
+
+    fn input_sequence() -> config::ActionPayload {
+        config::ActionPayload::Sequence(config::SequenceActionPayload {
+            steps: vec![config::SequenceStep::Send { value: "Ctrl+W".into(), delay_ms: None, repeat: None }],
+        })
+    }
+
+    #[test]
+    fn delayed_gnome_input_uses_the_available_window_identity() {
+        let a = gnome_window("Document A");
+        assert!(a.hwnd.is_empty(), "the real GNOME capture has no HWND");
+        let target = GestureTarget::from(&a);
+        let payload = input_sequence();
+        assert!(gesture_dispatch_allowed(Some(&payload), &target, Some(&a), false, false));
+        assert!(!gesture_dispatch_allowed(Some(&payload), &target, Some(&gnome_window("Document B")), false, false));
+        let mut other_app = a.clone();
+        other_app.exe = "org.gnome.Terminal".into();
+        assert!(!gesture_dispatch_allowed(Some(&payload), &target, Some(&other_app), false, false));
+        assert!(!gesture_dispatch_allowed(Some(&payload), &target, None, false, false));
+    }
+
+    #[test]
+    fn queued_gesture_rechecks_window_capture_and_recording_at_start() {
+        use std::sync::mpsc::channel;
+        for scenario in ["same", "changed", "suppressed", "recording", "cancelled"] {
+            let a = gnome_window("Document A");
+            let current = Arc::new(Mutex::new((a.clone(), false, false, 7)));
+            let (started_tx, started_rx) = channel();
+            let (release_tx, release_rx) = channel();
+            submit_sequence(Box::new(move || { started_tx.send(()).unwrap(); release_rx.recv_timeout(Duration::from_secs(5)).unwrap(); }));
+            started_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let (sent_tx, sent_rx) = channel();
+            let generation_state = current.clone();
+            let target_state = current.clone();
+            submit_sequence(guarded_sequence_job(7, move || generation_state.lock().unwrap().3, move || {
+                let (window, suppressed, recording, _) = &*target_state.lock().unwrap();
+                gesture_dispatch_allowed(Some(&input_sequence()), &GestureTarget::from(&a), Some(window), *suppressed, *recording)
+            }, move || sent_tx.send("Ctrl+W").unwrap()));
+            {
+                let mut state = current.lock().unwrap();
+                match scenario {
+                    "changed" => state.0 = gnome_window("Document B"),
+                    "suppressed" => state.1 = true,
+                    "recording" => { state.0.ignore_reason = Some(window_capture::OWN_WINDOW_REASON.into()); state.2 = true; }
+                    "cancelled" => state.3 += 1,
+                    _ => {}
+                }
+            }
+            let (done_tx, done_rx) = channel();
+            submit_sequence(Box::new(move || done_tx.send(()).unwrap()));
+            release_tx.send(()).unwrap();
+            done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(sent_rx.try_iter().count(), usize::from(scenario == "same"), "{scenario}");
+        }
+    }
+
+    #[test]
+    fn menu_execution_reports_failure_and_only_enters_after_queued_success() {
+        use std::sync::mpsc::channel;
+        for scenario in ["success", "error", "cancelled", "rejected"] {
+            let effects = Arc::new(Mutex::new(Vec::new()));
+            let execution_effects = effects.clone();
+            let completion_effects = effects.clone();
+            let report_effects = effects.clone();
+            let (entered_tx, entered_rx) = channel();
+            let (release_tx, release_rx) = channel();
+            let (done_tx, done_rx) = channel();
+            let job = menu_item_job(Some(7), move || if scenario == "cancelled" { 8 } else { 7 }, move |completed| {
+                run_menu_execution(|| {
+                    // Controlled executor: fail its first step before Text, or finish Text after release.
+                    execution_effects.lock().unwrap().push("first");
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                    if scenario == "error" { return Err("first step failed"); }
+                    execution_effects.lock().unwrap().push("Text");
+                    Ok(())
+                }, |result| report_effects.lock().unwrap().push(if result.is_ok() { "reported ok" } else { "reported error" }), completed);
+            }, move |success| {
+                crate::menu_popup::finish_pick(crate::menu_popup::PickMode::Enter, success, || completion_effects.lock().unwrap().push("Enter"));
+                done_tx.send(()).unwrap();
+            });
+            if scenario == "rejected" {
+                let (sender, _receiver) = std::sync::mpsc::sync_channel(0);
+                queue_sequence(Some(&sender), job);
+                assert!(effects.lock().unwrap().is_empty());
+                continue;
+            }
+            submit_sequence(job);
+            if scenario != "cancelled" {
+                entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert_eq!(*effects.lock().unwrap(), ["first"], "completion must wait for execution");
+                release_tx.send(()).unwrap();
+            }
+            done_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            let expected: &[&str] = match scenario {
+                "success" => &["first", "Text", "reported ok", "Enter"],
+                "error" => &["first", "reported error"],
+                _ => &[],
+            };
+            assert_eq!(*effects.lock().unwrap(), expected, "{scenario}");
         }
     }
 

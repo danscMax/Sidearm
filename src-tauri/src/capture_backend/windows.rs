@@ -5416,17 +5416,19 @@ mod helper_modifier_state_tests {
         for initially_visible in [false, true] {
             let died = AtomicBool::new(false);
             let mut held = vec!["F13"];
-            let mut generation = 1;
-            let pending_timer = generation;
-            let mut visible = initially_visible;
-            finish_helper_capture(&died, || held.clear(), || {
-                generation += 1;
-                visible = false;
-            });
+            let mut sheet = crate::cheatsheet::SheetLifecycle::default();
+            let timer = sheet.begin();
+            let visible = std::cell::Cell::new(false);
+            if initially_visible {
+                sheet.draw(timer, || {});
+                sheet.layout(|| visible.set(true));
+            }
+            finish_helper_capture(&died, || held.clear(), || sheet.cancel(|| visible.set(false)));
             assert!(died.load(Ordering::SeqCst));
             assert!(held.is_empty());
-            assert_ne!(generation, pending_timer, "an old timer must not show a new sheet");
-            assert!(!visible);
+            assert!(!visible.get(), "a visible sheet is hidden at EOF");
+            sheet.draw(timer, || panic!("the real timer's late show must be cancelled"));
+            sheet.layout(|| panic!("a page measured before teardown must not show"));
         }
     }
 

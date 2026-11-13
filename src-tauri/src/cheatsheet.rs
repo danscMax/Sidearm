@@ -4,7 +4,6 @@
 //! release or any press while it is held hides it. The window never takes the
 //! focus and lets clicks through (`public/cheatsheet.html` + `cheatsheet.js`).
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,12 +17,41 @@ pub(crate) const WINDOW_LABEL: &str = "cheatsheet";
 const EVENT_SHOW: &str = "cheatsheet-show";
 pub(crate) const SHOW_AFTER: Duration = Duration::from_millis(1000);
 
-/// Bumps on every hold, release and press: a late timer of an older hold does nothing.
-static GENERATION: AtomicU64 = AtomicU64::new(0);
-/// The hold whose sheet the page draws now: its layout shows only while it lasts.
-static DRAWN: AtomicU64 = AtomicU64::new(0);
-/// The sheet waiting for a page still loading (the first hold creates the window).
-static PENDING: Mutex<Option<(u64, Sheet)>> = Mutex::new(None);
+static LIFECYCLE: Mutex<SheetLifecycle> = Mutex::new(SheetLifecycle { generation: 0, drawn: None, pending: None });
+
+#[derive(Default)]
+pub(crate) struct SheetLifecycle {
+    generation: u64,
+    drawn: Option<u64>,
+    pending: Option<(u64, Sheet)>,
+}
+
+impl SheetLifecycle {
+    pub(crate) fn begin(&mut self) -> u64 {
+        self.generation += 1;
+        self.drawn = None;
+        self.pending = None;
+        self.generation
+    }
+
+    pub(crate) fn cancel(&mut self, hide: impl FnOnce()) {
+        self.begin();
+        hide();
+    }
+
+    pub(crate) fn draw(&mut self, generation: u64, show: impl FnOnce()) {
+        if self.generation == generation {
+            self.drawn = Some(generation);
+            show();
+        }
+    }
+
+    pub(crate) fn layout(&self, show: impl FnOnce()) {
+        if self.drawn == Some(self.generation) {
+            show();
+        }
+    }
+}
 
 /// One side button of the grid.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
@@ -80,11 +108,11 @@ pub(crate) fn sheet_of(config: &AppConfig, profile_id: &str, title: String) -> S
 
 /// The helper says the HyperShift 2 trigger went down (`held`) or up.
 pub(crate) fn trigger_held(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: Option<&Arc<AppConfig>>, held: bool) {
-    let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     if !held {
-        hide(app);
+        cancel(app);
         return;
     }
+    let generation = LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).begin();
     let Some(config) = config.cloned() else { return };
     let profile_id = runtime_store
         .lock()
@@ -96,9 +124,6 @@ pub(crate) fn trigger_held(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeSto
     let app = app.clone();
     std::thread::spawn(move || {
         std::thread::sleep(SHOW_AFTER);
-        if GENERATION.load(Ordering::Acquire) != generation {
-            return; // released or pressed meanwhile
-        }
         let name = config.profiles.iter().find(|p| p.id == profile_id).map_or(profile_id.as_str(), |p| p.name.as_str());
         let title = crate::ui_text::native(&crate::ui_text!("cheatsheet.title", "{profile} · HyperShift 2", profile = name));
         show(&app, generation, sheet_of(&config, &profile_id, title));
@@ -107,29 +132,31 @@ pub(crate) fn trigger_held(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeSto
 
 /// A button was pressed while the trigger is held: the sheet goes (or never comes).
 pub(crate) fn cancel(app: &AppHandle) {
-    GENERATION.fetch_add(1, Ordering::AcqRel);
-    hide(app);
+    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).cancel(|| hide(app));
 }
 
 fn show(app: &AppHandle, generation: u64, sheet: Sheet) {
-    if app.get_webview_window(WINDOW_LABEL).is_none() {
+    let window_exists = app.get_webview_window(WINDOW_LABEL).is_some();
+    let mut lifecycle = LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if lifecycle.generation != generation {
+        return;
+    }
+    if !window_exists {
         // The page asks for it once loaded (`cheatsheet_ready`).
-        *PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((generation, sheet));
+        lifecycle.pending = Some((generation, sheet));
+        // Window construction may wait for the UI thread, which can itself be cancelling the sheet.
+        drop(lifecycle);
         create_window(app);
         return;
     }
-    DRAWN.store(generation, Ordering::Release);
-    let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &sheet);
+    lifecycle.draw(generation, || { let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &sheet); });
 }
 
 /// The page loaded: the sheet of a hold still going on.
 pub(crate) fn page_ready(app: &AppHandle) {
-    let pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
-    if let Some((generation, sheet)) = pending
-        && GENERATION.load(Ordering::Acquire) == generation
-    {
-        DRAWN.store(generation, Ordering::Release);
-        let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &sheet);
+    let mut lifecycle = LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((generation, sheet)) = lifecycle.pending.take() {
+        lifecycle.draw(generation, || { let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &sheet); });
     }
 }
 
@@ -137,10 +164,8 @@ pub(crate) fn page_ready(app: &AppHandle) {
 /// it without taking the focus.
 pub(crate) fn page_layout(app: &AppHandle, width: f64, height: f64) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else { return };
-    if GENERATION.load(Ordering::Acquire) != DRAWN.load(Ordering::Acquire) {
-        return; // released (or pressed) while it was drawn
-    }
-    platform::place_and_show(&window, width.ceil() as i32, height.ceil() as i32);
+    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        .layout(|| platform::place_and_show(&window, width.ceil() as i32, height.ceil() as i32));
 }
 
 fn hide(app: &AppHandle) {
@@ -218,6 +243,27 @@ mod platform {
 mod tests {
     use super::*;
     use crate::config::{Binding, ControlId, TriggerMode};
+
+    #[test]
+    fn stop_cancels_visible_pending_and_delayed_shows() {
+        let visible = std::cell::Cell::new(false);
+        let mut lifecycle = SheetLifecycle::default();
+        let old_timer = lifecycle.begin();
+        lifecycle.draw(old_timer, || {});
+        lifecycle.layout(|| visible.set(true));
+        assert!(visible.get());
+        lifecycle.pending = Some((old_timer, Sheet { title: String::new(), cells: Vec::new() }));
+        // The same cancellation used by CaptureBackendHandle::stop, with only the window sink replaced.
+        lifecycle.cancel(|| visible.set(false));
+        assert!(!visible.get());
+        assert!(lifecycle.pending.is_none());
+        lifecycle.draw(old_timer, || panic!("late timer emitted a stale sheet"));
+        lifecycle.layout(|| panic!("late page layout reopened the sheet"));
+        let fresh = lifecycle.begin();
+        lifecycle.draw(fresh, || {});
+        lifecycle.layout(|| visible.set(true));
+        assert!(visible.get(), "a subsequent capture session can still show its sheet");
+    }
 
     #[test]
     fn the_grid_holds_each_side_button_with_its_press_patterns() {

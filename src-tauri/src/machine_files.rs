@@ -7,6 +7,8 @@
 use std::path::{Path, PathBuf};
 
 /// This computer's name as a file-name part (letters, digits, `-`, `_`).
+/// Windows always sets `COMPUTERNAME`; elsewhere `HOSTNAME` may be missing for
+/// a GUI process, and such computers then share one file (a Windows-first app).
 fn machine() -> String {
     let name = std::env::var("COMPUTERNAME").or_else(|_| std::env::var("HOSTNAME")).unwrap_or_default();
     let clean: String = name.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
@@ -24,7 +26,7 @@ pub(crate) fn is_counter_file(name: &str, stem: &str) -> bool {
         || name
             .strip_prefix(&format!("{stem}-"))
             .and_then(|rest| rest.strip_suffix(".json"))
-            .is_some_and(|machine| !machine.is_empty() && !machine.contains('.') && !machine.starts_with("corrupt"))
+            .is_some_and(|machine| !machine.is_empty() && !machine.contains('.'))
 }
 
 /// Every computer's file of `stem` in `dir` (and the old shared one).
@@ -48,7 +50,7 @@ mod tests {
         assert!(is_counter_file("press-log.json", "press-log"));
         assert!(is_counter_file("press-log-main.json", "press-log"));
         assert!(!is_counter_file("press-log-main.json.tmp", "press-log"));
-        assert!(!is_counter_file("press-log-corrupt-17.json", "press-log"));
+        assert!(!is_counter_file("press-log-main.corrupt-17.json", "press-log"));
         assert!(!is_counter_file("menu-usage-main.json", "press-log"));
         let dir = tempfile::tempdir().expect("temp dir");
         for name in ["press-log.json", "press-log-main.json", "press-log-notebook.json", "config.json"] {

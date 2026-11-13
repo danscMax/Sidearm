@@ -45,7 +45,7 @@ fn dir() -> PathBuf {
 /// The log on disk: empty when there is none yet; an error when it cannot be
 /// read (a lock) — then nothing is written over it. A file that does not parse
 /// counts as empty; before a write over it (`set_aside`) it is kept as
-/// `press-log.corrupt-<unix seconds>.json`.
+/// `press-log-<computer>.corrupt-<unix seconds>.json`.
 fn read(path: &Path, set_aside: bool) -> Result<Log, String> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(serde_json::from_str(&text).unwrap_or_else(|error| {

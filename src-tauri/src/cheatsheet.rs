@@ -16,7 +16,7 @@ use crate::runtime::RuntimeStore;
 
 pub(crate) const WINDOW_LABEL: &str = "cheatsheet";
 const EVENT_SHOW: &str = "cheatsheet-show";
-const SHOW_AFTER: Duration = Duration::from_millis(1000);
+pub(crate) const SHOW_AFTER: Duration = Duration::from_millis(1000);
 
 /// Bumps on every hold, release and press: a late timer of an older hold does nothing.
 static GENERATION: AtomicU64 = AtomicU64::new(0);

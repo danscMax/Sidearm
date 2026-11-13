@@ -68,6 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HyperShift 2 is repeated only on a mouse that has it. Config schema version 9.
 
 ### Fixed
+- After a long phrase (typed through the clipboard) the clipboard kept the
+  phrase instead of what was copied before: the change check read the
+  clipboard's sequence number before closing it, and closing moves it. Checked
+  live in Windows Terminal.
+- With the HyperShift 2 cheat sheet on, letting go of the right button after
+  the sheet showed made a right click (a paste in a terminal); it only puts the
+  sheet away now.
 - `{date}` in a phrase was the UTC date (yesterday between midnight and the
   UTC offset); it is the local date now, as are the press log's days.
 - Deleting an item inside a list in the menu editor jumped back to the top

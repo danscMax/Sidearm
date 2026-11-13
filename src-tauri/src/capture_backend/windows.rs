@@ -1828,6 +1828,13 @@ static HELPER_HYPER2_TRIGGER: AtomicU8 = AtomicU8::new(HYPER_TRIGGER_OFF);
 static HELPER_HYPER2_HELD: AtomicU8 = AtomicU8::new(HYPER_TRIGGER_OFF);
 /// Something was pressed while the HyperShift 2 trigger was held.
 static HELPER_HYPER2_USED: AtomicBool = AtomicBool::new(false);
+/// With the cheat sheet on: a hold this long (ms) has shown it, so its release
+/// is no click (0 = off). The quick-press click stays for shorter holds.
+static HELPER_HYPER2_QUIET_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+thread_local! {
+    /// When the HyperShift 2 trigger went down (hook thread).
+    static HELPER_HYPER2_SINCE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
+}
 /// Parent → helper: `HS2:<code>`.
 const HYPER2_COMMAND: &str = "HS2:";
 /// Catalog index of the HyperShift 2 mouse (`usize::MAX` = none): raw input
@@ -2060,7 +2067,14 @@ fn apply_trigger2(button: u8, held: bool) {
     HELPER_HYPER2_HELD.store(if held { button } else { HYPER_TRIGGER_OFF }, Ordering::Relaxed);
     HELPER_MATCHES.with(|cell| cell.borrow_mut().push(format!("{TRIGGER2_PREFIX}{}", u8::from(held))));
     wake_helper_loop();
-    if !held && !used {
+    let since = HELPER_HYPER2_SINCE.replace(held.then(std::time::Instant::now));
+    let quiet_ms = HELPER_HYPER2_QUIET_MS.load(Ordering::Relaxed);
+    // The cheat sheet was on screen: letting go only puts it away.
+    let showed_sheet = quiet_ms > 0 && since.is_some_and(|at| at.elapsed().as_millis() >= u128::from(quiet_ms));
+    if !held && !used && showed_sheet {
+        log::info!("[capture-helper] HyperShift 2 released after the cheat sheet: no click");
+    }
+    if !held && !used && !showed_sheet {
         if crate::fake_mode() {
             log::info!("[capture-helper] HyperShift 2 click (simulated, button {button})");
         } else {
@@ -3712,6 +3726,9 @@ pub fn capture_helper_main() {
         readers: Vec<ReaderInit>,
         #[serde(default)]
         firmware_hypershift: bool,
+        /// With the cheat sheet on: how long a HyperShift 2 hold shows it (its release is then no click).
+        #[serde(default)]
+        hypershift2_quiet_after_ms: Option<u64>,
         /// Sidearm's config folder: when Sidearm dies without stopping the
         /// helper, the live maps it left are restored from there.
         #[serde(default)]
@@ -3732,6 +3749,7 @@ pub fn capture_helper_main() {
                     hypershift2_model: None,
                     readers: Vec::new(),
                     firmware_hypershift: false,
+                    hypershift2_quiet_after_ms: None,
                     config_dir: None,
                 },
                 Err(e) => {
@@ -3751,9 +3769,11 @@ pub fn capture_helper_main() {
         hypershift2_model,
         readers,
         firmware_hypershift,
+        hypershift2_quiet_after_ms,
         config_dir,
     } = init;
     HELPER_HYPER_TAP.store(hypershift_tap, Ordering::Relaxed);
+    HELPER_HYPER2_QUIET_MS.store(hypershift2_quiet_after_ms.unwrap_or(0), Ordering::Relaxed);
 
     // Software Hypershift: resolved to a wire code once here, then read by both
     // hooks (keyboard stamps the layer, mouse swallows/translates the buttons).
@@ -4483,6 +4503,8 @@ fn spawn_capture_helper(
         #[serde(skip_serializing_if = "Vec::is_empty")]
         readers: Vec<ReaderInit>,
         firmware_hypershift: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        hypershift2_quiet_after_ms: Option<u64>,
         config_dir: &'a std::path::Path,
     }
     let software_trigger = if firmware_hypershift {
@@ -4515,6 +4537,10 @@ fn spawn_capture_helper(
         hypershift2_model: hypershift2.as_ref().map(|(model, _)| *model),
         readers,
         firmware_hypershift,
+        hypershift2_quiet_after_ms: config
+            .settings
+            .hs2_cheat_sheet
+            .then(|| crate::cheatsheet::SHOW_AFTER.as_millis() as u64),
         config_dir: &config_dir,
     };
     let json = match serde_json::to_string(&init) {

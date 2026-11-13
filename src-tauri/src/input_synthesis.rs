@@ -475,11 +475,13 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         write_text(text).map(|()| {
             // Keep this staged snippet out of Win+V history and the cloud clipboard.
             exclude_from_history();
-            unsafe { GetClipboardSequenceNumber() }
         })
     })?;
+    // The sequence number moves again when the clipboard is closed (measured
+    // 2026-11-13: +3 at CloseClipboard), so it is read after closing; read
+    // inside, the restore below always saw a change and left the phrase there.
     let seq = match staged {
-        Ok(seq) => seq,
+        Ok(()) => unsafe { GetClipboardSequenceNumber() },
         Err(e) => {
             if let Some(ref original) = saved_clipboard {
                 restore(original);
@@ -2839,6 +2841,46 @@ fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
+    /// Live check (owner-approved, Windows, run by hand): a long phrase goes
+    /// through the clipboard into the terminal in front and the clipboard is
+    /// put back. Needs a terminal window titled `SidearmClipTest` in front and
+    /// `SIDEARM_LIVE_PASTE_FILE`: the phrase is a PowerShell command writing a
+    /// marker there (proof the terminal got it). Types nothing when another
+    /// window is in front. The clipboard is saved and restored around it.
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "live: types into the terminal in front"]
+    fn live_paste_into_a_terminal_puts_the_clipboard_back() {
+        use std::time::Duration;
+        let file = std::env::var("SIDEARM_LIVE_PASTE_FILE").expect("SIDEARM_LIVE_PASTE_FILE");
+        let front = crate::platform::window::capture_foreground_window().expect("foreground window");
+        assert!(front.title.contains("SidearmClipTest"), "not the test terminal in front: {:?}", front.title);
+        let saved = super::with_clipboard_open(super::clipboard_snapshot).expect("snapshot");
+        super::clipboard_set_text("SIDEARM-CLIP-MARKER").expect("set marker");
+        let marker = "x".repeat(150);
+        let command = format!("Set-Content -LiteralPath '{file}' -Value '{marker}'");
+        assert!(command.chars().count() > super::CLIPBOARD_PASTE_THRESHOLD, "must take the clipboard path");
+        let typed = super::send_text(&command);
+        std::thread::sleep(Duration::from_millis(500));
+        let _ = super::send_hotkey_string("Enter", &super::HotkeyModifiers::default());
+        std::thread::sleep(Duration::from_millis(1500));
+        let after = super::clipboard_get_text();
+        let written = std::fs::read_to_string(&file).unwrap_or_default();
+        let _ = super::with_clipboard_open(|| {
+            unsafe { windows_sys::Win32::System::DataExchange::EmptyClipboard() };
+            super::write_clipboard_snapshot(&saved);
+        });
+        typed.expect("send_text");
+        let seq_note = super::clipboard_sequence_number();
+        assert_eq!(
+            after.as_deref(),
+            Some("SIDEARM-CLIP-MARKER"),
+            "the clipboard was not put back (now {:?}…, seq {seq_note})",
+            after.as_deref().map(|text| text.chars().take(40).collect::<String>())
+        );
+        assert_eq!(written.trim(), marker, "the terminal did not get the whole phrase");
+    }
+
     #[test]
     fn only_memory_block_clipboard_formats_are_kept() {
         use super::is_memory_clipboard_format as kept;

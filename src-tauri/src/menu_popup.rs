@@ -715,10 +715,10 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
             platform::restore_foreground(menu.target_window);
             log::info!("[menu] picked `{action_id}` ({mode:?})");
             crate::menu_usage::count(&action_id);
-            crate::press_log::count(None, &action_id);
             if mode == PickMode::Copy
                 && let Some(text) = full_text(&menu.config, &action_id)
             {
+                crate::press_log::count(None, &action_id);
                 // What it would type: tokens filled in, the {cursor} marker gone.
                 let text = crate::input_synthesis::expand_snippet_tokens(&text).0;
                 if !crate::fake_mode()
@@ -740,7 +740,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
                 // The same pause a phrase with Enter keeps before it.
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 // Not into another window that came up meanwhile: it would submit there.
-                if platform::foreground_window() == menu.target_window {
+                if menu.target_window == 0 || platform::foreground_window() == menu.target_window {
                     let _ = crate::input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default());
                 } else {
                     log::warn!("[menu] Enter skipped: the window in front changed while the text was typed");

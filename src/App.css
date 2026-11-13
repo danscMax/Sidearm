@@ -6953,7 +6953,7 @@ input[type="search"]::-webkit-search-decoration {
 .mouse-dpi-control .pill-track__pill { padding-inline: var(--space-sm); }
 .mouse-dpi-control__entry { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-sm); }
 
-/* ── Statistics tab (press log of this computer) ── */
+/* ── Statistics tab (press log (every computer's)) ── */
 .press-stats { display: grid; gap: 18px; }
 .press-stats__head { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
 .press-stats__summary { margin: 0; color: var(--c-text-muted); font-size: var(--fs-body-sm); }

@@ -987,7 +987,7 @@ fn run_fire_and_forget(
         && let crate::config::ActionPayload::Menu(payload) = &action.payload
     {
         flush_log_entries(runtime_store, log_entries);
-        count_press(config, preview, &action.id, true);
+        count_press(config, preview, &action.id, !menu_pick);
         crate::menu_popup::open(app, runtime_store, config, preview, &action.display_name, payload, is_fg_elevated);
         return;
     }
@@ -1058,8 +1058,6 @@ fn run_fire_and_forget(
     }
 }
 
-/// Run the item picked in a menu as if the menu's own press had resolved to it
-/// (same profile, window, control and layer).
 /// Counts a run in the daily press log: its place (profile, layer, control and
 /// the binding's press pattern) and its action. Wheel scrolling (zoom too: a
 /// scroll with Ctrl) is left out: they fire per notch and would bury every button.
@@ -1094,6 +1092,8 @@ fn count_press(config: &AppConfig, preview: &resolver::ResolvedInputPreview, act
 /// Longest the OSD names an action run (`Settings.osdActions`).
 const ACTION_OSD_MS: u32 = 1200;
 
+/// Run the item picked in a menu as if the menu's own press had resolved to it
+/// (same profile, window, control and layer).
 pub(crate) fn run_menu_item(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,

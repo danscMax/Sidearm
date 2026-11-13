@@ -875,7 +875,9 @@
     "menuChipLibrary": "Библиотека: {{name}}",
     "menuChipPlaces": "Ещё на: {{places}}",
     "menuChipMenus": "Ещё в: {{places}}",
-    "menuSharedChip": "Общее · ещё кнопок: {{count}}"
+    "menuSharedChip": "Общее · ещё кнопок: {{count}}",
+    "menuMoreShort": "Ещё",
+    "menuPinShort": "Закрепить"
   },
   "properties": {
     "empty": "Выберите кнопку, чтобы увидеть свойства",

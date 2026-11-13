@@ -86,3 +86,55 @@ export function TrashIcon({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/** The action picker's category glyphs (16 px line icons); a category without
+ *  one (the HyperShift roles) shows its `fallback` letters. */
+export function CategoryIcon({ id, fallback, size = 16 }: { id: string; fallback: string; size?: number }) {
+  const paths: Record<string, React.ReactNode> = {
+    native: <path d="M3 8a5 5 0 1 0 1.5-3.5M3 2.5v3h3" />,
+    shortcut: (
+      <>
+        <rect x="1.5" y="4" width="13" height="8" rx="1.5" />
+        <path d="M4 6.5h1M7 6.5h1M10 6.5h1M4.5 9.5h7" />
+      </>
+    ),
+    mouseAction: (
+      <>
+        <rect x="4" y="1.5" width="8" height="13" rx="4" />
+        <path d="M8 1.5v4.5" />
+      </>
+    ),
+    textSnippet: <path d="M3 3h10M8 3v10M5.5 13h5" />,
+    sequence: <path d="M2 4h7M2 8h7M2 12h5M11 9.5l3 2-3 2z" />,
+    launch: <path d="M9.5 2H14v4.5M14 2 7.5 8.5M12 9.5V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h3.5" />,
+    mediaKey: (
+      <>
+        <path d="M6 12V3l7-1.5V10" />
+        <circle cx="4.5" cy="12" r="1.8" />
+        <circle cx="11.5" cy="10.5" r="1.8" />
+      </>
+    ),
+    profileSwitch: <path d="M2 5h10l-2.5-2.5M14 11H4l2.5 2.5" />,
+    menu: <path d="M2 3.5h1M5.5 3.5H14M2 8h1M5.5 8H14M2 12.5h1M5.5 12.5H14" />,
+    disabled: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <path d="m3.8 12.2 8.4-8.4" />
+      </>
+    ),
+    repairClipboard: (
+      <>
+        <rect x="3" y="2.5" width="10" height="12" rx="1.5" />
+        <path d="M6 2.5h4v2H6zM5.5 8.5l1.8 1.8 3.2-3.3" />
+      </>
+    ),
+  };
+  const drawn = paths[id];
+  if (!drawn) return <>{fallback}</>;
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {drawn}
+    </svg>
+  );
+}

@@ -865,7 +865,9 @@
     "menuChipLibrary": "Library: {{name}}",
     "menuChipPlaces": "Also on: {{places}}",
     "menuChipMenus": "Also in: {{places}}",
-    "menuSharedChip": "Shared · {{count}} more button(s)"
+    "menuSharedChip": "Shared · {{count}} more button(s)",
+    "menuMoreShort": "More",
+    "menuPinShort": "Pin"
   },
   "properties": {
     "empty": "Select a button to see properties",

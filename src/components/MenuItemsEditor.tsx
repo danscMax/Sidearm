@@ -422,9 +422,11 @@ export function MenuItemsEditor({
 
   function renderTools(item: MenuItem) {
     const { siblings, index } = placeOf(item);
-    const tool = (icon: string, label: string, onClick: (event: React.MouseEvent<HTMLButtonElement>) => void, off = false, extra = "") => (
-      <button type="button" className={`menu-ed__tool${extra}`} disabled={disabled || off} title={label} aria-label={label} onClick={onClick}>
-        {icon}
+    // Icon and its word: what each button does reads at a glance.
+    const tool = (icon: string, label: string, onClick: (event: React.MouseEvent<HTMLButtonElement>) => void, off = false, extra = "", title = label) => (
+      <button type="button" className={`menu-ed__tool${extra}`} disabled={disabled || off} title={title} onClick={onClick}>
+        <span className="menu-ed__tool-icon" aria-hidden="true">{icon}</span>
+        {label}
       </button>
     );
     return (
@@ -434,13 +436,13 @@ export function MenuItemsEditor({
         <span className="menu-ed__tools-gap" />
         {tool("⧉", t("common.duplicate"), () => duplicate(item))}
         {item.kind === "action"
-          ? tool(item.pinned ? "★" : "☆", item.pinned ? t("inspector.menuUnpin") : t("inspector.menuPin"), () => togglePin(item), false, item.pinned ? " menu-ed__tool--on" : "")
+          ? tool(item.pinned ? "★" : "☆", item.pinned ? t("inspector.menuUnpin") : t("inspector.menuPinShort"), () => togglePin(item), false,
+            item.pinned ? " menu-ed__tool--on" : "", item.pinned ? t("inspector.menuUnpin") : t("inspector.menuPin"))
           : null}
-        {tool("⋯", t("inspector.menuMore"), (event) => {
+        {tool("⋯", t("inspector.menuMoreShort"), (event) => {
           const box = event.currentTarget.getBoundingClientRect();
           setCtx({ x: box.left, y: box.bottom + 4, id: item.id });
-        })}
-        <span className="menu-ed__tools-gap" />
+        }, false, "", t("inspector.menuMore"))}
         {tool("✕", t("common.delete"), () => remove(item), false, " menu-ed__tool--danger")}
       </div>
     );
@@ -575,17 +577,18 @@ export function MenuItemsEditor({
         <input className="input menu-ed__pane-name" type="text" value={item.label} disabled={disabled} aria-label={nameLabel}
           placeholder={nameLabel} onChange={(event) => rename(event.target.value)} />
         {item.kind === "submenu" ? <HelpTip text={isBlock ? t("inspector.menuBlockHint") : t("inspector.menuSubmenuHint")} /> : null}
-        <span className="menu-ed__switch" title={t("inspector.menuItemEnabled")}>
+        <label className="menu-ed__switch">
+          {t("inspector.menuItemEnabled")}
           <Toggle checked={item.enabled} disabled={disabled} ariaLabel={t("inspector.menuItemEnabled")}
             onChange={(on) => onChange(updateMenuItem(items, item.id, (current) => ({ ...current, enabled: on })))} />
-        </span>
-        {renderTools(item)}
+        </label>
       </div>
     );
     if (item.kind === "submenu") {
       return (
         <div className="menu-ed__pane">
           {head}
+          {renderTools(item)}
           <p className="menu-ed__note">{t("inspector.menuGroupAddHint", { name: item.label })}</p>
         </div>
       );
@@ -600,6 +603,7 @@ export function MenuItemsEditor({
     return (
       <div className="menu-ed__pane">
         {head}
+        {renderTools(item)}
         <div className="menu-ed__pane-row">
           <PillTrack<ItemKind>
             active={kind}

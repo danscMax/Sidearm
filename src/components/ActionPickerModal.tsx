@@ -24,6 +24,7 @@ import {
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
+import { CategoryIcon } from "./icons";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
 import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice } from "./shared";
@@ -525,7 +526,7 @@ export function ActionPickerModal({
                 aria-current={effectiveCategory === cat.id ? "true" : undefined}
                 title={t(cat.label)}
               >
-                <span className="action-picker__cat-icon">{cat.icon}</span>
+                <span className="action-picker__cat-icon"><CategoryIcon id={cat.id} fallback={cat.icon} /></span>
                 <span className="action-picker__cat-label">{t(cat.label)}</span>
               </button>
             ))}
@@ -537,7 +538,7 @@ export function ActionPickerModal({
           <div className="action-picker__editor">
             <div className="action-picker__cat-head">
               <span className="action-picker__cat-head-icon" aria-hidden="true">
-                {activeCat?.icon}
+                {activeCat ? <CategoryIcon id={activeCat.id} fallback={activeCat.icon} /> : null}
               </span>
               <div className="action-picker__cat-head-text">
                 <h3 className="action-picker__cat-title">

@@ -1842,7 +1842,6 @@ input[type="radio"] {
 .menu-ed__pane-head { display: flex; gap: 8px; align-items: center; }
 .menu-ed__pane-name { flex: 1; min-width: 0; font-weight: 600; }
 .menu-ed__pane-title { flex: 1; }
-.menu-ed__pane-head .menu-ed__tools { padding: 0; border: 0; background: none; }
 .menu-ed__pane-row { display: flex; gap: 8px 18px; align-items: center; flex-wrap: wrap; }
 .menu-ed__pane-row > .pill-track,
 .menu-ed__pane-row > .menu-ed__note { margin-right: auto; }
@@ -1868,14 +1867,32 @@ input[type="radio"] {
 .menu-ed__fold:hover { color: var(--c-accent); background: var(--c-card-bg); }
 .menu-ed__count { margin-left: auto; color: var(--c-text-muted); font-weight: 600; letter-spacing: 0; }
 
-/* The menu editor's dialog: the categories become a rail of their icons
-   (names in the tooltip), the category heading goes — the editor gets the room. */
-.action-picker--tall .action-picker__categories { min-width: 0; width: 60px; padding: 8px 6px; align-items: center; }
-.action-picker--tall .action-picker__search,
-.action-picker--tall .action-picker__cat-label,
-.action-picker--tall .action-picker__no-results,
-.action-picker--tall .action-picker__cat-head { display: none; }
-.action-picker--tall .action-picker__cat-btn { justify-content: center; padding: 6px; }
+/* The menu editor's dialog: the categories become a rail of their icons that
+   unfolds over the editor with the names (hover or keyboard focus); the
+   category heading goes — the editor gets the room. */
+.action-picker--tall .action-picker__categories {
+  position: relative;
+  z-index: 6;
+  flex: none;
+  width: 60px;
+  min-width: 0;
+  padding: 8px 6px;
+  overflow-x: hidden;
+  background: var(--c-bg);
+  transition: width 140ms ease, margin-right 140ms ease, box-shadow 140ms ease;
+}
+.action-picker--tall .action-picker__categories:hover,
+.action-picker--tall .action-picker__categories:has(:focus-visible) {
+  width: 230px;
+  margin-right: -170px;
+  box-shadow: 12px 0 28px rgba(0, 0, 0, 0.45);
+}
+.action-picker--tall .action-picker__cat-head,
+.action-picker--tall .action-picker__no-results { display: none; }
+.action-picker--tall .action-picker__categories:not(:hover, :has(:focus-visible)) .action-picker__search,
+.action-picker--tall .action-picker__categories:not(:hover, :has(:focus-visible)) .action-picker__cat-label { display: none; }
+.action-picker--tall .action-picker__categories:not(:hover, :has(:focus-visible)) .action-picker__cat-btn { justify-content: center; padding: 6px; }
+.action-picker__cat-btn { white-space: nowrap; }
 
 .menu-ed__list {
   display: grid;
@@ -1970,37 +1987,35 @@ input[type="radio"] {
 
 /* Quiet text buttons: the add bar under the list and the item tools. */
 .menu-ed__bar { display: flex; flex-wrap: wrap; gap: 2px 4px; }
-/* The selected item's tools: one row of square icon buttons (name in the tooltip),
-   grouped move · edit · delete; ⋯ opens the same menu as a right click on the row. */
-.menu-ed__tools {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
-  border: 1px solid var(--c-card-border);
-  border-radius: var(--radius-sm);
-  background: var(--c-surface-alt);
-  width: max-content;
-}
-.menu-ed__tools-gap { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--c-card-border); }
+/* The selected item's tools: one line of buttons, each an icon and its word,
+   grouped move · edit, delete at the far end; ⋯ More opens the same menu as a
+   right click on the row. */
+.menu-ed__tools { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.menu-ed__tools-gap { width: 1px; height: 20px; margin: 0 4px; background: var(--c-card-border); }
 .menu-ed__tool {
-  display: grid;
-  place-items: center;
-  width: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: 30px;
-  border: 0;
+  padding: 0 9px;
+  border: 1px solid var(--c-card-border);
   border-radius: var(--radius-xs);
-  background: none;
+  background: var(--c-surface-alt);
   color: var(--c-text);
-  font-size: 1rem;
+  font-size: var(--fs-caption);
+  font-weight: 600;
   line-height: 1;
+  white-space: nowrap;
   cursor: pointer;
 }
+.menu-ed__tool-icon { font-size: 0.95rem; color: var(--c-accent); }
+.menu-ed__tools > .menu-ed__tool--danger { margin-left: auto; }
+.menu-ed__tool--danger .menu-ed__tool-icon { color: var(--c-danger); }
 .menu-ed__tool:hover:not(:disabled) { background: var(--c-card-bg); color: var(--c-accent); }
 .menu-ed__tool:focus-visible { outline: 2px solid var(--c-accent); outline-offset: 1px; }
 .menu-ed__tool:disabled { opacity: 0.35; cursor: default; }
 .menu-ed__tool--on { color: var(--c-accent); }
-.menu-ed__tool--danger { color: var(--c-danger); }
+.menu-ed__tool--danger { color: var(--c-danger); border-color: color-mix(in srgb, var(--c-danger) 30%, transparent); }
 .menu-ed__tool--danger:hover:not(:disabled) { color: var(--c-danger); background: color-mix(in srgb, var(--c-danger) 14%, transparent); }
 .menu-ed__ghost {
   padding: 4px 8px;

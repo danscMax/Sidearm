@@ -1561,7 +1561,9 @@ fn format_date_pattern(pattern: &str, time: &crate::backup::LocalTime, months: &
 /// Whether a text holds one of the tokens (a macro's text is typed verbatim
 /// otherwise, `{{` included).
 pub fn has_snippet_token(text: &str) -> bool {
-    SNIPPET_TOKENS.iter().any(|token| text.contains(&format!("{{{token}}}"))) || text.contains("{date:")
+    // An escaped input field (`{{input:…}}`, the recorder writes one for a typed
+    // `{input:…}`) must be read too, or its doubled braces would be typed.
+    SNIPPET_TOKENS.iter().any(|token| text.contains(&format!("{{{token}}}"))) || text.contains("{date:") || text.contains("{{input:")
 }
 
 /// Every token `expand_tokens_with` replaces (a test keeps the two in step);

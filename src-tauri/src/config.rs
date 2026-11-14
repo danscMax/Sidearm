@@ -1189,7 +1189,9 @@ fn migrate_enter_phrases(config: &mut AppConfig) {
         // A text step types a text without tokens as it is; a text action reads
         // its braces (`{{`): only a text both type the same way moves.
         let same_text = crate::input_synthesis::has_snippet_token(value) || !value.contains(['{', '}']);
-        if action.action_type != ActionType::Sequence || !once(delay_ms, repeat) || !once(key_delay, key_repeat) || !key.eq_ignore_ascii_case("enter") || !same_text {
+        // A blank text step is a valid macro ("space, then Enter") but no valid
+        // text action: moved, it would fail the whole config's validation.
+        if action.action_type != ActionType::Sequence || !once(delay_ms, repeat) || !once(key_delay, key_repeat) || !key.eq_ignore_ascii_case("enter") || !same_text || value.trim().is_empty() {
             continue;
         }
         let text = value.clone();
@@ -5179,6 +5181,8 @@ mod edge_proptests {
             macro_of("repeat", vec![SequenceStep::Text { value: "hi".into(), delay_ms: None, repeat: Some(2) }, pause(80), enter("Enter")]),
             macro_of("braces", vec![text("a {{b}}"), pause(80), enter("Enter")]),
             macro_of("text-only", vec![text("hi")]),
+            macro_of("blank", vec![text(" "), pause(80), enter("Enter")]),
+            macro_of("empty", vec![text(""), pause(80), enter("Enter")]),
         ];
         let mut cfg = minimal_valid_config();
         cfg.actions = kept.clone();

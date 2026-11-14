@@ -193,6 +193,15 @@ fn literal_text(text: String) -> String {
 mod tests {
     use super::*;
 
+    /// A typed `{input:host}` is replayed as typed: the escape is read back.
+    #[test]
+    fn a_typed_input_field_is_replayed_as_typed() {
+        let step = literal_text("ssh {input:host}".to_owned());
+        assert_eq!(step, "ssh {{input:host}}", "no field to ask for");
+        assert!(crate::input_synthesis::has_snippet_token(&step));
+        assert_eq!(crate::input_synthesis::expand_snippet_tokens(&step).0, "ssh {input:host}");
+    }
+
     #[test]
     fn recording_at_and_beyond_save_limit_is_saveable() {
         use crate::config::{Action, ActionPayload, ActionType, SequenceActionPayload};

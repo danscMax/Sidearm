@@ -286,9 +286,12 @@ pub fn spawn_watchdog(app: &tauri::AppHandle, config_dir: &Path) {
             if wait_for_mutex(&watchdog_mutex(pid), std::time::Duration::from_secs(5)) {
                 if outside {
                     log::info!("[system] mouse watchdog running");
-                } else {
+                } else if job_kills_on_close() {
                     log::warn!("[system] mouse watchdog runs inside Sidearm's job: the job's end takes it along");
                     set_state(Some(&app), StatusKind::WatchdogOff, true);
+                } else {
+                    // A job that does not end its processes leaves the watchdog running.
+                    log::info!("[system] mouse watchdog running (inside Sidearm's job, which does not end with it)");
                 }
                 return;
             }
@@ -297,6 +300,29 @@ pub fn spawn_watchdog(app: &tauri::AppHandle, config_dir: &Path) {
         log::error!("[system] no mouse watchdog: a killed Sidearm will not restore the mice by itself");
         set_state(Some(&app), StatusKind::WatchdogOff, true);
     });
+}
+
+/// Whether the job this process runs in ends every process in it when it
+/// closes (`cargo run`'s does): only then does a watchdog left inside it die
+/// with Sidearm. Unknown counts as yes.
+fn job_kills_on_close() -> bool {
+    use windows_sys::Win32::System::JobObjects::{
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
+        QueryInformationJobObject,
+    };
+    // SAFETY: a null job handle queries the caller's own job; the buffer is the
+    // structure the information class names, zeroed.
+    unsafe {
+        let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+        let ok = QueryInformationJobObject(
+            std::ptr::null_mut(),
+            JobObjectExtendedLimitInformation,
+            (&mut info as *mut JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+            std::ptr::null_mut(),
+        );
+        ok == 0 || info.BasicLimitInformation.LimitFlags & JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE != 0
+    }
 }
 
 /// Held by the watchdog of Sidearm `pid` while it waits for it.
@@ -621,6 +647,12 @@ pub fn claim_app() -> Option<windows_sys::Win32::Foundation::HANDLE> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_own_job_is_read() {
+        // Under cargo test the process is in cargo's job, which ends with it.
+        let _ = job_kills_on_close();
+    }
 
     #[test]
     fn an_argument_reads_back_as_it_was_quoted() {

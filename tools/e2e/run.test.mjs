@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
-import { World, dispatched, layoutPlan } from "./run.mjs";
+import { World, dispatched, layoutPlan, restorersDone } from "./run.mjs";
 
 const expected = { controlId: "v3_thumb_03", layer: "standard", encodedKey: "F15", actionId: "action-l", profileId: "default" };
 const completed = (patch = {}) => `[capture] E2E execution ${JSON.stringify({ ...expected, outcome: "simulated", ...patch })}\n`;
@@ -22,6 +22,30 @@ test("an unrelated simulated completion cannot satisfy a dispatch", () => {
     + "Dispatching action for F16 (control v3_thumb_04, layer standard)\n"
     + "Action complete for F16 (outcome: Simulated)\n";
   assert.equal(dispatched(log, expected), false);
+});
+
+test("restore processes are done once each one that started logged its end", () => {
+  const started = (pid) => `[restore] process ${pid} started for C:\\data (after a crash: true)\n`;
+  const done = (pid) => `[restore] process ${pid} done: the mice are restored after 1 tries\n`;
+  assert.equal(restorersDone(""), true);
+  assert.equal(restorersDone(started(10) + started(11) + done(11)), false);
+  assert.equal(restorersDone(started(10) + started(11) + done(11) + done(10)), true);
+  assert.equal(restorersDone(done(12) + started(10)), false, "another process's end does not count");
+});
+
+test("a missed wait prints the tail of what it read", async () => {
+  const world = Object.create(World.prototype);
+  const lines = [];
+  const log = console.log;
+  console.log = (line) => lines.push(line);
+  try {
+    assert.equal(await world.waitFor(() => `${"x".repeat(1000)}the end`, /never/, 1), false);
+  } finally {
+    console.log = log;
+  }
+  assert.match(lines.join("\n"), /waited 1 ms for \/never\//);
+  assert.match(lines.join("\n"), /x+the end$/);
+  assert.ok(lines.join("\n").length < 800, "only the tail");
 });
 
 test("layout rejects empty runs including V2-only, disabled, switch and missing actions", () => {

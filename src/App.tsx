@@ -385,6 +385,8 @@ function App() {
           },
         });
       }
+      // Raised once per run, seconds after the start: the Mouse tab keeps it too.
+      if (kind === "watchdogOff" && active) showToast(t("mouse.statusWatchdogOff"), "warning");
     }).then((fn) => {
       if (disposed) { fn(); return; }
       unlisten = fn;

@@ -1634,6 +1634,7 @@
     "statusRestart": "Restart",
     "statusButtonsUnreadable": "Sidearm cannot read the side buttons: the mouse receiver was not found. Plug it in — Sidearm reconnects on its own.",
     "statusMouseUnreachable": "The mouse has not answered for over a minute: assignment protection, battery and profile DPI do not work right now.",
+    "statusWatchdogOff": "Crash protection for the mice is off this run: if Sidearm is killed or crashes, the side buttons stay silent until Sidearm starts again. A normal exit is not affected.",
     "unverifiedModel": "{{name}}: this model is not verified yet. DPI and battery work; buttons work through signals: add the mouse as your own device and record its buttons.",
     "unavailable": "The mouse does not respond — it may be asleep. Move it and click Refresh.",
     "retry": "Refresh",

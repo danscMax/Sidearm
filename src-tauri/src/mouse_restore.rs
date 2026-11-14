@@ -124,8 +124,9 @@ pub fn live_map_restore_running() -> bool {
 
 /// Starts this exe with `args`, detached, windowless and without Sidearm's
 /// standard handles. It also leaves a job Sidearm runs in when the job allows
-/// that (a job's end would take it along), else stays in it.
-fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<()> {
+/// that (a job's end would take it along), else stays in it. Returns whether
+/// it left (`false`: Sidearm's job, when it ends, ends the process too).
+fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<bool> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
     const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -146,9 +147,10 @@ fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<()> {
         // Not for an elevated Sidearm: a watchdog with the shell's token might
         // not open it to wait for its end (a medium-integrity process).
         .or_else(|error| if crate::window_capture::is_current_process_elevated() { Err(error) } else { spawn_under_shell(args, CREATE_NO_WINDOW | DETACHED_PROCESS) })
+        .map(|()| true)
         .or_else(|error| {
             log::warn!("[system] restore process stays in Sidearm's job (its end takes it along): {error}");
-            spawn(CREATE_NO_WINDOW | DETACHED_PROCESS)
+            spawn(CREATE_NO_WINDOW | DETACHED_PROCESS).map(|()| false)
         })
 }
 
@@ -261,27 +263,39 @@ pub fn spawn_live_map_restore(config_dir: &Path, after_crash: bool) {
 /// be the one to notice. It goes through a process that ends at once
 /// (`--spawn-watchdog`): with its parent gone, the watchdog is no part of
 /// Sidearm's process tree and survives that.
-pub fn spawn_watchdog(config_dir: &Path) {
+/// A watchdog that is missing, or stuck in Sidearm's job (an elevated Sidearm
+/// in a job that forbids breakaway), is the `watchdogOff` state for this run.
+pub fn spawn_watchdog(app: &tauri::AppHandle, config_dir: &Path) {
+    use crate::mouse_status::{StatusKind, set_state};
     // A mark an earlier Sidearm left (its watchdog gone) must not pass for this one's.
     let _ = std::fs::remove_file(config_dir.join(CLEAN_EXIT_FILE));
     let pid = std::process::id();
-    let config_dir = config_dir.to_owned();
-    // The broker it goes through ends at once and has no log: a watchdog that
-    // never came up says so only by its missing mutex. Checked off the setup.
+    let (app, config_dir) = (app.clone(), config_dir.to_owned());
+    // The broker it goes through ends at once and logs only a failed spawn: a
+    // watchdog that never came up says so by its missing mutex. Checked off the setup.
     let _ = std::thread::Builder::new().name("watchdog-start".into()).spawn(move || {
         for attempt in 1..=2 {
             let pid_text = pid.to_string();
-            if let Err(error) = spawn_detached(&[SPAWN_WATCHDOG_ARG.as_ref(), config_dir.as_os_str(), WATCH_ARG.as_ref(), pid_text.as_ref()]) {
-                log::warn!("[system] mouse watchdog not started (attempt {attempt}): {error}");
-                continue;
-            }
+            let outside = match spawn_detached(&[SPAWN_WATCHDOG_ARG.as_ref(), config_dir.as_os_str(), WATCH_ARG.as_ref(), pid_text.as_ref()]) {
+                Ok(outside) => outside,
+                Err(error) => {
+                    log::warn!("[system] mouse watchdog not started (attempt {attempt}): {error}");
+                    continue;
+                }
+            };
             if wait_for_mutex(&watchdog_mutex(pid), std::time::Duration::from_secs(5)) {
-                log::info!("[system] mouse watchdog running");
+                if outside {
+                    log::info!("[system] mouse watchdog running");
+                } else {
+                    log::warn!("[system] mouse watchdog runs inside Sidearm's job: the job's end takes it along");
+                    set_state(Some(&app), StatusKind::WatchdogOff, true);
+                }
                 return;
             }
             log::warn!("[system] mouse watchdog did not come up (attempt {attempt})");
         }
         log::error!("[system] no mouse watchdog: a killed Sidearm will not restore the mice by itself");
+        set_state(Some(&app), StatusKind::WatchdogOff, true);
     });
 }
 
@@ -315,13 +329,22 @@ pub fn restore_entry(args: &[String]) -> bool {
     let value = |name: &str| args.iter().position(|arg| arg == name).and_then(|index| args.get(index + 1));
     // The logon entry: start the restore detached and end, so a restore
     // that waits for a sleeping mouse never holds up the logon.
+    // The brokers stay fast: their log is opened only for a failure.
+    let broker_failed = |what: &str, error: std::io::Error| {
+        init_restore_log(false);
+        log::error!("[restore] {what} not started: {error}");
+    };
     if let Some(dir) = value(SPAWN_RESTORE_ARG) {
-        let _ = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref()]);
+        if let Err(error) = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref()]) {
+            broker_failed("restore process (logon entry)", error);
+        }
         return true;
     }
     if let Some(dir) = value(SPAWN_WATCHDOG_ARG) {
-        if let Some(pid) = value(WATCH_ARG) {
-            let _ = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref(), WATCH_ARG.as_ref(), pid.as_ref()]);
+        if let Some(pid) = value(WATCH_ARG)
+            && let Err(error) = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref(), WATCH_ARG.as_ref(), pid.as_ref()])
+        {
+            broker_failed(&format!("watchdog of Sidearm {pid}"), error);
         }
         return true;
     }
@@ -359,47 +382,129 @@ fn wait_for_exit(pid: u32) {
     }
 }
 
+/// The restore processes' log, next to Sidearm's logs (no Tauri log plugin runs in them).
+const RESTORE_LOG: &str = "restore.log";
+/// A restore process starting finds a log over this moved to `restore.log.1`.
+const RESTORE_LOG_LIMIT: u64 = 1_000_000;
+
+/// Logs this process into [`RESTORE_LOG`]. `rotate` first moves a log over
+/// [`RESTORE_LOG_LIMIT`] aside (replacing an older one) — only at a process's
+/// start, never mid-run: the e2e run reads the file from an offset.
+fn init_restore_log(rotate: bool) {
+    let path = crate::paths::AppPaths::resolve().log_dir.join(RESTORE_LOG);
+    if rotate {
+        rotate_log(&path, RESTORE_LOG_LIMIT);
+    }
+    let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) else { return };
+    let inner = env_logger::Builder::new()
+        .filter_level(log::LevelFilter::Info)
+        .target(env_logger::Target::Pipe(Box::new(file)))
+        .build();
+    let level = inner.filter();
+    if log::set_boxed_logger(Box::new(RestoreLogger(inner))).is_ok() {
+        log::set_max_level(level);
+    }
+}
+
+/// Moves `path` to `<path>.1` when it is over `limit` bytes.
+fn rotate_log(path: &Path, limit: u64) {
+    // Best effort: no log is open yet to tell of a failure (the file then grows on).
+    if std::fs::metadata(path).is_ok_and(|meta| meta.len() > limit) {
+        let _ = std::fs::rename(path, path.with_extension("log.1"));
+    }
+}
+
+/// The lines of the retry round under way and of the one before: a mouse that
+/// sleeps fails the same way every 2 s, so a line the last round logged
+/// already is left out (7.5 MB of one line seen).
+#[derive(Default)]
+struct Rounds {
+    /// Set by the first round's end: lines before it are all written.
+    quiet: bool,
+    last: Vec<String>,
+    this: Vec<String>,
+    left_out: usize,
+}
+
+impl Rounds {
+    /// Whether `line` is written.
+    fn admit(&mut self, line: String) -> bool {
+        let repeated = self.quiet && self.last.contains(&line);
+        self.this.push(line);
+        self.left_out += usize::from(repeated);
+        !repeated
+    }
+
+    /// Ends a round. Returns how many of its lines were left out.
+    fn end(&mut self) -> usize {
+        self.quiet = true;
+        self.last = std::mem::take(&mut self.this);
+        std::mem::take(&mut self.left_out)
+    }
+}
+
+static ROUNDS: std::sync::Mutex<Rounds> = std::sync::Mutex::new(Rounds { quiet: false, last: Vec::new(), this: Vec::new(), left_out: 0 });
+
+fn rounds() -> std::sync::MutexGuard<'static, Rounds> {
+    ROUNDS.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// env_logger with [`Rounds`] in front of it.
+struct RestoreLogger(env_logger::Logger);
+
+impl log::Log for RestoreLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        self.0.enabled(metadata)
+    }
+
+    fn log(&self, record: &log::Record) {
+        if self.0.matches(record) && rounds().admit(format!("{} {} {}", record.level(), record.target(), record.args())) {
+            self.0.log(record);
+        }
+    }
+
+    fn flush(&self) {
+        self.0.flush();
+    }
+}
+
+/// How often a restore that keeps waiting says so while it logs nothing new.
+const STILL_WAITING_EVERY: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
 /// Restores the live maps a dead Sidearm left and stores an offline profile an
 /// exit could not, retrying while a mouse sleeps (an asleep mouse answers
 /// nothing and plays Sidearm's silent signals once it wakes).
-/// Quits when Sidearm turns out alive, after 30 minutes, or once a Sidearm
-/// starts — its own start restores them after this process ends.
+/// Quits when Sidearm turns out alive or once a Sidearm starts — its own start
+/// restores them after this process ends. Every end logs
+/// `[restore] process <pid> done: <why>`.
 pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Option<u32>) {
     use std::time::{Duration, Instant};
-    // No Tauri log plugin here: its own file next to Sidearm's logs.
-    if let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(crate::paths::AppPaths::resolve().log_dir.join("restore.log"))
-    {
-        let _ = env_logger::Builder::new()
-            .filter_level(log::LevelFilter::Info)
-            .target(env_logger::Target::Pipe(Box::new(file)))
-            .try_init();
-    }
+    init_restore_log(true);
+    let me = std::process::id();
+    let done = |why: &str| log::info!("[restore] process {me} done: {why}");
     let mut after_crash = after_crash;
     if let Some(pid) = watch {
         // Tells Sidearm its watchdog is up; released when this process ends.
         let _ready = create_mutex(&watchdog_mutex(pid));
         wait_for_exit(pid);
         if exited_cleanly(config_dir, pid) {
-            return;
+            return done(&format!("Sidearm {pid} exited cleanly"));
         }
         log::warn!("[restore] Sidearm {pid} ended without its exit (killed or crashed): restoring the mice");
         after_crash = true;
     }
-    log::info!("[restore] started for {} (after a crash: {after_crash})", config_dir.display());
+    log::info!("[restore] process {me} started for {} (after a crash: {after_crash})", config_dir.display());
     // The dying Sidearm's mutex goes when its process has fully ended. Checked
     // before taking the restore mutex: a live Sidearm is never paused by it.
     let grace = Instant::now() + Duration::from_secs(15);
     while mutex_exists(APP_MUTEX) {
         if Instant::now() >= grace {
-            return;
+            return done("a Sidearm still runs after 15 s (it keeps the mice)");
         }
         std::thread::sleep(Duration::from_millis(200));
     }
     // One restorer at a time, holding the mutex until it exits.
-    let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return };
+    let Some(_restoring) = create_mutex(RESTORE_MUTEX) else { return done("another restore process has the mice") };
     let failed_marker = config_dir.join(crate::mouse_offline::OFFLINE_FAILED_FILE);
     // The signal kind the dead Sidearm used: the inert records match it.
     crate::mouse_memory::set_consumer_signals(!config_dir.join(crate::mouse_memory::KEY_SIGNALS_FILE).exists());
@@ -415,8 +520,15 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
     // until it answers (every 2 s at first, then every minute), and come back
     // at the next logon if Windows ends first.
     let started = Instant::now();
+    let mut said_waiting = started;
+    let mut tries = 0u32;
     let mut next_logon = None;
-    'retry: while !mutex_exists(APP_MUTEX) {
+    let sidearm_started = "a Sidearm started (it restores the mice itself)";
+    let outcome = 'retry: loop {
+        if mutex_exists(APP_MUTEX) {
+            break sidearm_started;
+        }
+        tries += 1;
         let maps_done = crate::mouse_memory::live_overlay::restore_orphaned(config_dir);
         // A mouse asleep at exit has no offline profile yet: store it once it
         // answers (the marker names the profile; a success removes it).
@@ -425,8 +537,13 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
         {
             crate::mouse_offline::retry_offline_profile(&config, config_dir);
         }
+        let left_out = rounds().end();
         if maps_done && !failed_marker.exists() {
-            break;
+            break "the mice are restored";
+        }
+        if left_out > 0 && said_waiting.elapsed() >= STILL_WAITING_EVERY {
+            log::info!("[restore] still waiting for a mouse to answer ({tries} tries, {} min)", started.elapsed().as_secs() / 60);
+            said_waiting = Instant::now();
         }
         if next_logon.is_none() {
             next_logon = Some(set_run_once(config_dir, true));
@@ -437,14 +554,14 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
         for _ in 0..pause {
             std::thread::sleep(Duration::from_secs(2));
             if mutex_exists(APP_MUTEX) {
-                break 'retry;
+                break 'retry sidearm_started;
             }
         }
-    }
-    // Done, or a Sidearm started (it restores the mice itself).
+    };
     if next_logon == Some(true) {
         set_run_once(config_dir, false);
     }
+    done(&format!("{outcome} after {tries} tries"));
 }
 
 /// `RunOnce` value that starts the restore process at the next logon while a
@@ -537,6 +654,38 @@ mod tests {
         assert!(mutex_exists(&name), "still held by the starting one");
         unsafe { windows_sys::Win32::Foundation::CloseHandle(starting) };
         assert!(!mutex_exists(&name));
+    }
+
+    /// A log over the limit moves to `.1`, replacing an older one; a smaller one stays.
+    #[test]
+    fn a_large_restore_log_is_rotated_at_start() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join(RESTORE_LOG);
+        std::fs::write(&log, "small").unwrap();
+        rotate_log(&log, 10);
+        assert!(log.exists(), "under the limit");
+        std::fs::write(dir.path().join("restore.log.1"), "older").unwrap();
+        std::fs::write(&log, "more than ten bytes").unwrap();
+        rotate_log(&log, 10);
+        assert!(!log.exists());
+        assert_eq!(std::fs::read_to_string(dir.path().join("restore.log.1")).unwrap(), "more than ten bytes");
+    }
+
+    /// A retry round's line the round before logged is left out; a changed
+    /// line, and every line before the first round's end, is written.
+    #[test]
+    fn a_repeated_retry_line_is_logged_once() {
+        let mut rounds = Rounds::default();
+        assert!(rounds.admit("started".into()));
+        assert!(rounds.admit("V2 asleep".into()));
+        assert_eq!(rounds.end(), 0);
+        assert!(!rounds.admit("V2 asleep".into()), "the same failure");
+        assert!(rounds.admit("V3 restored".into()));
+        assert_eq!(rounds.end(), 1);
+        assert!(!rounds.admit("V2 asleep".into()));
+        assert!(rounds.admit("V2 out of range".into()), "a new text");
+        assert_eq!(rounds.end(), 1);
+        assert!(rounds.admit("V3 restored".into()), "not in the last round");
     }
 
     #[test]

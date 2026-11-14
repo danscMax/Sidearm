@@ -1,6 +1,7 @@
 //! What the user must know about the mouse path that is not a takeover: the
 //! capture helper gone for good, side buttons that cannot be read, a mouse the
-//! guard cannot reach, an offline profile that was not stored, a signal switch.
+//! guard cannot reach, no watchdog to restore the mice after a kill, an
+//! offline profile that was not stored, a signal switch.
 //!
 //! States (`set_state`) hold until cleared and show in the Mouse tab; notices
 //! (`notice`) are shown once as a toast. Both are emitted as
@@ -24,6 +25,9 @@ pub enum StatusKind {
     ButtonsUnreadable,
     /// State: the guard has not reached the mouse for a while.
     MouseUnreachable,
+    /// State: no watchdog outlives this Sidearm (it did not come up, or it is
+    /// in a job that ends with Sidearm): a kill leaves the mice unrestored.
+    WatchdogOff,
     /// Notice: the mouse slept at the last exit, its offline profile was not stored.
     OfflineNotStored,
     /// Notice: the side buttons were switched to the configured signal kind.

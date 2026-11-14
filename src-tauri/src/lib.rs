@@ -4257,7 +4257,7 @@ pub fn run() {
             match resolve_config_dir(app.handle()) {
                 Ok(config_dir) => {
                     // Restores the mice should this Sidearm be killed with its helper.
-                    mouse_restore::spawn_watchdog(&config_dir);
+                    mouse_restore::spawn_watchdog(app.handle(), &config_dir);
                     spawn_main_thread_watch(app.handle().clone());
                     spawn_config_watch(app.handle().clone(), config_dir.clone());
                     // Before the guard and the capture runtime read it.

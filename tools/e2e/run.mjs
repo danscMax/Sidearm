@@ -166,15 +166,28 @@ class World {
     }
   }
 
+  /** Polls `read()` (from offset `from`) until `pattern` matches. A miss prints
+   *  what it waited for and the last 600 characters it read. */
   async waitFor(read, pattern, timeoutMs = 20000, from = 0) {
     const deadline = Date.now() + timeoutMs;
+    let text = "";
     while (Date.now() < deadline) {
-      const text = read().slice(from);
+      text = read().slice(from);
       const found = typeof pattern === "function" ? pattern(text) : pattern.test(text);
       if (found) return true;
       await sleep(200);
     }
+    const what = typeof pattern === "function" ? pattern.name || "a condition" : pattern;
+    console.log(`      waited ${timeoutMs} ms for ${what}; last read:\n${text.slice(-600).replace(/^/gm, "      | ")}`);
     return false;
+  }
+
+  /** Waits for this start's live maps in both mice and its watchdog
+   *  (`from`: the app log's length before the start). */
+  async startedFully(from) {
+    return await this.waitFor(() => this.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, from)
+      && await this.waitFor(() => this.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 40000, from)
+      && await this.waitFor(() => this.log(), /\[system\] mouse watchdog (running|runs inside)/, 10000, from);
   }
 
   start() {
@@ -209,6 +222,23 @@ class World {
       `Get-CimInstance Win32_Process -Filter "Name='sidearm.exe'" | Where-Object { $_.CommandLine -like '*${this.data.replace(/'/g, "''")}*' -or $_.ExecutablePath -eq '${EXE}' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`]);
     for (const entry of Object.values(this.pipes)) entry.server.close();
   }
+}
+
+/** Removes a passed run's folder. WebView2 helpers of the last app can hold
+ *  `EBWebView` a while longer: a folder left behind does not fail the run. */
+function removeRunFolder(root) {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  } catch (error) {
+    console.log(`Run folder not removed (${error.code}): ${root}`);
+  }
+}
+
+/** Whether every restore process that logged its start in this part of
+ *  `restore.log` has logged its end (`[restore] process <pid> done`). */
+function restorersDone(text) {
+  const started = [...text.matchAll(/\[restore\] process (\d+) started/g)].map((match) => match[1]);
+  return started.every((pid) => text.includes(`[restore] process ${pid} done`));
 }
 
 const v2State = () => ({ records: [], dpi: {}, pollCode: 1, battery: 200, banks: [], activeBank: 0, slots: {} });
@@ -475,32 +505,35 @@ async function main() {
 
     // 7. Killed: the watchdog restores.
     mark = world.restoreLog().length;
+    let appMark = world.log().length;
     world.start();
-    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000, world.log().length - 1);
-    await sleep(1500);
+    check("a start writes both live maps and starts its watchdog", await world.startedFully(appMark));
     await world.kill();
     check("watchdog notices the kill", await world.waitFor(() => world.restoreLog(), /ended without its exit/, 20000, mark));
     check("watchdog restores the V3 live map", await world.waitFor(() => world.restoreLog(), /Razer Naga V3 Pro restored previous assignments in bank 0/, 30000, mark));
 
+    // A restorer still holding the mice would make the next start wait for it.
+    check("the kill's restore processes end", await world.waitFor(() => world.restoreLog(), restorersDone, 30000, mark));
+
     // 8. Asleep at exit: queued, written once the mouse wakes.
-    await world.waitFor(() => "", /never/, 3000); // let the restorer finish
+    appMark = world.log().length;
     world.start();
-    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, world.log().length - 1);
-    await sleep(1500);
+    await world.startedFully(appMark);
     await world.edit(V2, (state) => { state.asleep = true; });
     mark = world.restoreLog().length;
     await world.quit();
     check("asleep mouse queued", fs.existsSync(path.join(world.data, "mouse-offline-failed")));
     await world.edit(V2, (state) => { state.asleep = false; });
     check("queued profile written after waking", await world.waitFor(() => (fs.existsSync(path.join(world.data, "mouse-offline-failed")) ? "" : "gone"), /gone/, 30000));
+    check("…and its restore process ends", await world.waitFor(() => world.restoreLog(), restorersDone, 30000, mark));
 
     // 9. Started while the last exit still waits on a sleeping mouse: the new
     // Sidearm waits for it to be gone (one WebView2 data folder), then takes
     // the mice over from the restorer that exit left once the V2 wakes.
-    await world.waitFor(() => "", /never/, 3000);
+    appMark = world.log().length;
     world.start();
-    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, world.log().length - 1);
-    await sleep(1500);
+    // The V2's live map must be in place: its exit restore is what waits.
+    await world.startedFully(appMark);
     // As slow to not answer as a real sleeping mouse: the exit takes seconds.
     await world.edit(V2, (state) => { state.asleep = true; state.asleepDelayMs = 300; });
     mark = world.log().length;
@@ -522,7 +555,7 @@ async function main() {
     console.log(`\n${passed}/${results.length} passed — FAILED. Logs: ${world.data}\\logs`);
   } else {
     await sleep(2000);
-    fs.rmSync(world.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    removeRunFolder(world.root);
     console.log(`\n${passed}/${results.length} passed.`);
   }
   process.exit(failed ? 1 : 0);
@@ -638,11 +671,11 @@ async function layoutMain(file) {
   check("layout exercised at least one assignment", tested > 0);
   const passed = results.filter((r) => r.ok).length;
   console.log(`\n${passed}/${results.length} passed${failed ? ` — FAILED. Logs: ${world.data}\\logs` : "."}`);
-  if (!failed) fs.rmSync(world.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+  if (!failed) removeRunFolder(world.root);
   process.exit(failed ? 1 : 0);
 }
 
-export { World, dispatched, layoutPlan };
+export { World, dispatched, layoutPlan, restorersDone };
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const layoutArg = process.argv.indexOf("--layout");

@@ -1177,6 +1177,27 @@ fn migrate_paste_mode(config: &mut AppConfig) {
     }
 }
 
+/// Before `pressEnter`, a phrase with Enter was a macro of exactly [text, 80 ms
+/// pause, Enter] (`menu-phrase.ts` `phraseOf`): it becomes the text action it
+/// stands for, so it gets the text editor and its input modes. Id, name, notes
+/// and conditions stay; any other macro is left alone.
+fn migrate_enter_phrases(config: &mut AppConfig) {
+    let once = |delay: &Option<u32>, repeat: &Option<u32>| delay.unwrap_or(0) == 0 && repeat.unwrap_or(1) == 1;
+    for action in &mut config.actions {
+        let ActionPayload::Sequence(SequenceActionPayload { steps }) = &action.payload else { continue };
+        let [SequenceStep::Text { value, delay_ms, repeat }, SequenceStep::Sleep { delay_ms: 80 }, SequenceStep::Send { value: key, delay_ms: key_delay, repeat: key_repeat }] = steps.as_slice() else { continue };
+        // A text step types a text without tokens as it is; a text action reads
+        // its braces (`{{`): only a text both type the same way moves.
+        let same_text = crate::input_synthesis::has_snippet_token(value) || !value.contains(['{', '}']);
+        if action.action_type != ActionType::Sequence || !once(delay_ms, repeat) || !once(key_delay, key_repeat) || !key.eq_ignore_ascii_case("enter") || !same_text {
+            continue;
+        }
+        let text = value.clone();
+        action.action_type = ActionType::TextSnippet;
+        action.payload = ActionPayload::TextSnippet(TextSnippetPayload::Inline { text, paste_mode: PasteMode::SendText, tags: Vec::new(), press_enter: true });
+    }
+}
+
 /// A plain file name that stays inside the folder it is joined to: no
 /// separators, no `..`, and no `:` — `E:name` is relative to drive E's current
 /// directory and `name:stream` an alternate data stream on Windows.
@@ -1311,6 +1332,7 @@ fn load_and_validate(
     migrate_devices(&mut config);
     migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
+    migrate_enter_phrases(&mut config);
     let warnings = validate_config(&config)?;
     config.compile_title_regexes();
     Ok((config, warnings))
@@ -1463,6 +1485,7 @@ pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, Con
     migrate_devices(&mut config);
     migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
+    migrate_enter_phrases(&mut config);
     config.compile_title_regexes();
     Ok(config)
 }
@@ -5122,6 +5145,47 @@ mod edge_proptests {
         }];
         migrate_paste_mode(&mut cfg);
         assert_eq!(cfg.snippet_library[0].paste_mode, PasteMode::SendText);
+    }
+
+    /// Exactly an old text + 80 ms + Enter macro becomes a text with Enter;
+    /// any other macro stays.
+    #[test]
+    fn an_old_enter_phrase_becomes_a_text_with_enter() {
+        let text = |value: &str| SequenceStep::Text { value: value.into(), delay_ms: None, repeat: None };
+        let pause = |delay_ms| SequenceStep::Sleep { delay_ms };
+        let enter = |value: &str| SequenceStep::Send { value: value.into(), delay_ms: None, repeat: None };
+        let macro_of = |id: &str, steps: Vec<SequenceStep>| Action {
+            id: id.into(),
+            action_type: ActionType::Sequence,
+            payload: ActionPayload::Sequence(SequenceActionPayload { steps }),
+            display_name: format!("name {id}"),
+            notes: Some("note".into()),
+            conditions: vec![ActionCondition::ExeEquals { value: "code.exe".into() }],
+        };
+        let kept = vec![
+            macro_of("pause", vec![text("hi"), pause(100), enter("Enter")]),
+            macro_of("key", vec![text("hi"), pause(80), enter("Tab")]),
+            macro_of("longer", vec![text("hi"), pause(80), enter("Enter"), pause(80)]),
+            macro_of("repeat", vec![SequenceStep::Text { value: "hi".into(), delay_ms: None, repeat: Some(2) }, pause(80), enter("Enter")]),
+            macro_of("braces", vec![text("a {{b}}"), pause(80), enter("Enter")]),
+            macro_of("text-only", vec![text("hi")]),
+        ];
+        let mut cfg = minimal_valid_config();
+        cfg.actions = kept.clone();
+        cfg.actions.push(macro_of("old", vec![text("ok {date}"), pause(80), enter("enter")]));
+        migrate_enter_phrases(&mut cfg);
+        assert_eq!(cfg.actions[..kept.len()], kept[..], "other macros are untouched");
+        let migrated = cfg.actions.last().unwrap();
+        assert_eq!(migrated.action_type, ActionType::TextSnippet);
+        assert_eq!(
+            migrated.payload,
+            ActionPayload::TextSnippet(TextSnippetPayload::Inline { text: "ok {date}".into(), paste_mode: PasteMode::SendText, tags: vec![], press_enter: true })
+        );
+        assert_eq!((migrated.id.as_str(), migrated.display_name.as_str(), migrated.notes.as_deref()), ("old", "name old", Some("note")));
+        assert_eq!(migrated.conditions, vec![ActionCondition::ExeEquals { value: "code.exe".into() }]);
+        let once = cfg.clone();
+        migrate_enter_phrases(&mut cfg);
+        assert_eq!(cfg.actions, once.actions, "idempotent");
     }
 
     /// migrate_paste_mode idempotent: applying twice equals applying once.

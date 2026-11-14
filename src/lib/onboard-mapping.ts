@@ -147,6 +147,7 @@ export type MouseStatusKind =
   | "helperLost"
   | "buttonsUnreadable"
   | "mouseUnreachable"
+  | "watchdogOff"
   | "offlineNotStored"
   | "signalsSwitched";
 

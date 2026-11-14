@@ -283,22 +283,31 @@ fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, onl
     use crate::mouse_memory::live_overlay;
     let wanted = |device_id: &str| only.is_none_or(|ids| ids.iter().any(|id| id == device_id));
     let present = crate::mouse_memory::present_models();
-    let mut slept: Vec<String> = Vec::new();
-    for model in &present {
+    // One writer per mouse; each returns the device id of a mouse that slept.
+    let mut writers: Vec<Box<dyn FnOnce() -> Option<String> + Send + '_>> = Vec::new();
+    for &model in &present {
         if model.transport != Transport::LiveOverlay || !live_overlay::configured(config, model) || !wanted(model.device_id) {
             continue;
         }
-        if let Err(error) = live_overlay::write_offline(config, model, profile_id, config_dir) {
+        writers.push(Box::new(move || {
+            let error = live_overlay::write_offline(config, model, profile_id, config_dir).err()?;
             log::warn!("[mouse-offline] {} profile `{profile_id}` was not stored: {error}", model.name);
-            if crate::mouse_memory::is_no_response(&error) {
-                slept.push(model.device_id.to_owned());
-            }
-        }
+            crate::mouse_memory::is_no_response(&error).then(|| model.device_id.to_owned())
+        }));
     }
-    let onboard_wanted = CATALOG.iter().any(|model| model.transport == Transport::Onboard && wanted(model.device_id));
-    if onboard_wanted && let Some(device_id) = write_onboard_offline(config, profile_id, config_dir) {
-        slept.push(device_id);
+    if CATALOG.iter().any(|model| model.transport == Transport::Onboard && wanted(model.device_id)) {
+        writers.push(Box::new(|| write_onboard_offline(config, profile_id, config_dir)));
     }
+    // Each model has its own device lock (`DEVICE_LOCKS`): two mice are written
+    // side by side, so a sleeping one does not hold up the other.
+    let mut slept: Vec<String> = if writers.len() < 2 {
+        writers.into_iter().filter_map(|write| write()).collect()
+    } else {
+        std::thread::scope(|scope| {
+            let running: Vec<_> = writers.into_iter().map(|write| scope.spawn(write)).collect();
+            running.into_iter().filter_map(|writer| writer.join().unwrap_or_else(|panic| std::panic::resume_unwind(panic))).collect()
+        })
+    };
     // A retry keeps waiting for a mouse that is switched off for now.
     if let Some(ids) = only {
         for id in ids {

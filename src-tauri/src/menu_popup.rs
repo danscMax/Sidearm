@@ -122,6 +122,9 @@ pub(crate) struct ViewItem {
     /// A line between items (no label, no number).
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub separator: bool,
+    /// The search box's place among the top-level items (no label, no number).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub search: bool,
     pub enabled: bool,
     /// What it sends (text, keys).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,6 +167,13 @@ pub(crate) struct View {
     pub max_height: u32,
     /// The search also looks in the other menus (the scope switch shows when there are any).
     pub search_all: bool,
+    /// The menu has a search box (turned off in the editor: none, typing searches nothing).
+    pub search_on: bool,
+    /// Where the page draws the box: "top" (fixed above the rows), "bottom"
+    /// (fixed below) or "row" (at the search row, among the rows). From the
+    /// item's place in the top level: first → top, last → bottom, between →
+    /// its row there; a list or the results keep the top or the bottom.
+    pub search_place: &'static str,
     pub has_others: bool,
     /// The scope switch's two names, in the UI language.
     pub scope_all: String,
@@ -181,12 +191,13 @@ pub(crate) struct View {
 fn item_enabled(item: &MenuItem) -> bool {
     match item {
         MenuItem::Action { enabled, .. } | MenuItem::Submenu { enabled, .. } => *enabled,
-        MenuItem::Separator { .. } => false,
+        MenuItem::Separator { .. } | MenuItem::Search { .. } => false,
     }
 }
 
-fn is_line(item: &MenuItem) -> bool {
-    matches!(item, MenuItem::Separator { .. })
+/// A row with a number (a side button picks it): not a line or the search box.
+fn is_numbered(item: &MenuItem) -> bool {
+    matches!(item, MenuItem::Action { .. } | MenuItem::Submenu { .. })
 }
 
 fn item_pinned(item: &MenuItem) -> bool {
@@ -196,7 +207,7 @@ fn item_pinned(item: &MenuItem) -> bool {
 fn item_label(item: &MenuItem) -> &str {
     match item {
         MenuItem::Action { label, .. } | MenuItem::Submenu { label, .. } => label,
-        MenuItem::Separator { .. } => "",
+        MenuItem::Separator { .. } | MenuItem::Search { .. } => "",
     }
 }
 
@@ -214,6 +225,7 @@ impl Model {
             only_this: false,
             grid: None,
         };
+        model.only_this = model.search_box().is_some_and(|(_, all, _)| !all);
         model.highlight = model.first_enabled().unwrap_or(0);
         model
     }
@@ -228,6 +240,28 @@ impl Model {
 
     fn needle(&self) -> String {
         self.query.trim().to_lowercase()
+    }
+
+    /// The menu's search box item: (shows, starts in all menus, its index in the top level).
+    fn search_box(&self) -> Option<(bool, bool, usize)> {
+        let at = self.root.iter().position(|item| matches!(item, MenuItem::Search { .. }))?;
+        let MenuItem::Search { enabled, all_menus, .. } = &self.root[at] else { return None };
+        Some((*enabled, *all_menus, at))
+    }
+
+    /// [`View::search_place`]: the ★ block and disabled blocks do not move it,
+    /// so the box stays at the same end on every level.
+    fn search_place(&self) -> &'static str {
+        match self.search_box() {
+            Some((_, _, at)) if at + 1 == self.root.len() && at > 0 => "bottom",
+            Some((_, _, at)) if at > 0 && self.path.is_empty() && self.needle().is_empty() => "row",
+            _ => "top",
+        }
+    }
+
+    /// Typing searches: a cheat sheet always, a menu unless its box is off.
+    fn search_on(&self) -> bool {
+        self.grid.is_some() || self.search_box().is_none_or(|(on, _, _)| on)
     }
 
     /// A cheat sheet's cell that does not match the typed query.
@@ -261,7 +295,7 @@ impl Model {
         let (level, _) = self.walk();
         let entry = level.get(index)?;
         let id = match entry.item {
-            MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } | MenuItem::Separator { id } => id.clone(),
+            MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } | MenuItem::Separator { id } | MenuItem::Search { id, .. } => id.clone(),
         };
         Some((id, entry.menu.map(str::to_owned)))
     }
@@ -282,7 +316,7 @@ impl Model {
     pub(crate) fn action_at(&self, index: usize) -> Option<String> {
         match self.walk().0.get(index)?.item {
             MenuItem::Action { action_id, .. } => Some(action_id.clone()),
-            MenuItem::Submenu { .. } | MenuItem::Separator { .. } => None,
+            MenuItem::Submenu { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => None,
         }
     }
 
@@ -393,6 +427,8 @@ impl Model {
                     }
                 }
                 _ if item_pinned(item) => {}
+                // A box turned off has no place in the list.
+                MenuItem::Search { enabled: false, .. } => {}
                 _ => level.push(Entry { item, group: None, menu: None }),
             }
         }
@@ -474,7 +510,7 @@ impl Model {
                 self.highlight = self.first_enabled().unwrap_or(0);
                 Step::Stay
             }
-            MenuItem::Separator { .. } => Step::Stay,
+            MenuItem::Separator { .. } | MenuItem::Search { .. } => Step::Stay,
         }
     }
 
@@ -532,6 +568,9 @@ impl Model {
     /// Typing in the search box: results from the whole tree, best first; in a
     /// grid the best matching cell (none highlighted when nothing matches).
     pub(crate) fn set_query(&mut self, query: &str) {
+        if !self.search_on() {
+            return;
+        }
         self.query = query.to_owned();
         self.path.clear();
         let none = if self.grid.is_some() { self.walk().0.len() } else { 0 };
@@ -549,7 +588,7 @@ impl Model {
 
     /// The row of item `number` (0-based) of the level shown: lines are skipped.
     fn row_of_number(&self, number: usize) -> Option<usize> {
-        self.walk().0.iter().enumerate().filter(|(_, entry)| !is_line(entry.item)).nth(number).map(|(index, _)| index)
+        self.walk().0.iter().enumerate().filter(|(_, entry)| is_numbered(entry.item)).nth(number).map(|(index, _)| index)
     }
 
     pub(crate) fn view(&self, title: &str, generation: u64) -> View {
@@ -568,16 +607,17 @@ impl Model {
                 .enumerate()
                 .map(|(index, entry)| ViewItem {
                     label: item_label(entry.item).to_owned(),
-                    number: (!is_line(entry.item)).then(|| {
+                    number: is_numbered(entry.item).then(|| {
                         numbered += 1;
                         numbered
                     }),
-                    separator: is_line(entry.item),
+                    separator: matches!(entry.item, MenuItem::Separator { .. }),
+                    search: matches!(entry.item, MenuItem::Search { .. }),
                     submenu: matches!(entry.item, MenuItem::Submenu { .. }),
                     enabled: item_enabled(entry.item),
                     detail: match entry.item {
                         MenuItem::Action { action_id, .. } => self.details.get(action_id).map(|text| clip(text)),
-                        MenuItem::Submenu { .. } | MenuItem::Separator { .. } => None,
+                        MenuItem::Submenu { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => None,
                     },
                     text: matches!(entry.item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id)),
                     // The rows its level shows (pinned ones live in the ★ block).
@@ -585,13 +625,13 @@ impl Model {
                         MenuItem::Submenu { items, .. } => {
                             items.iter().filter(|item| !item_pinned(item)).map(|item| item_label(item).to_owned()).collect()
                         }
-                        MenuItem::Action { .. } | MenuItem::Separator { .. } => Vec::new(),
+                        MenuItem::Action { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => Vec::new(),
                     },
                     text_children: match entry.item {
                         MenuItem::Submenu { items, .. } => items.iter().filter(|item| !item_pinned(item)).map(|item| {
                             matches!(item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id))
                         }).collect(),
-                        MenuItem::Action { .. } | MenuItem::Separator { .. } => Vec::new(),
+                        MenuItem::Action { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
                     extras: self.grid.as_ref().and_then(|extras| extras.get(index).cloned()).unwrap_or_default(),
@@ -606,7 +646,9 @@ impl Model {
             generation,
             max_height: u32::MAX,
             search_all: !self.only_this,
-            has_others: !self.others.is_empty(),
+            search_on: self.search_on(),
+            search_place: self.search_place(),
+            has_others: !self.others.is_empty() && self.search_on(),
             scope_all: String::new(),
             scope_this: String::new(),
             grid: self.grid.is_some(),
@@ -827,7 +869,8 @@ fn open_model(
     let anchor = menu.anchor;
     *OPEN.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(menu);
     IS_OPEN.store(true, Ordering::Release);
-    log::info!("[menu] opened `{title}` ({} items)", view.items.len());
+    // The numbered rows: no line, no search box.
+    log::info!("[menu] opened `{title}` ({} items)", view.items.iter().filter(|item| item.number.is_some()).count());
     if crate::fake_mode() && !crate::fake_popups() {
         return; // A test run has no windows; the model still answers presses.
     }
@@ -868,7 +911,7 @@ fn menu_details(config: &AppConfig, items: &[MenuItem]) -> HashMap<String, Strin
                 }
             }
             MenuItem::Submenu { items, .. } => stack.extend(items),
-            MenuItem::Separator { .. } => {}
+            MenuItem::Separator { .. } | MenuItem::Search { .. } => {}
         }
     }
     details
@@ -1551,6 +1594,42 @@ mod tests {
         assert_eq!(model.apply(Input::Pick(3)), Step::Run("act-r".into()), "inside a block");
         assert_eq!(model.apply(Input::Pick(1)), Step::Stay, "a disabled item does nothing");
         assert_eq!(model.apply(Input::Pick(9)), Step::Stay, "past the end does nothing");
+    }
+
+    #[test]
+    fn the_search_item_places_the_box_sets_its_scope_and_can_turn_it_off() {
+        let search = |enabled, all_menus| MenuItem::Search { id: "find".into(), enabled, all_menus };
+        let other = || vec![("menu-2".to_owned(), "Work".to_owned(), vec![action("w", "Polish")])];
+        // Between two items: its own row, no number, never picked; the numbers go on.
+        let mut model = Model::new(vec![action("a", "A"), search(true, false), action("b", "B")], HashMap::new()).with_others(other(), HashSet::new());
+        let view = model.view("Phrases", 1);
+        let rows: Vec<_> = view.items.iter().map(|item| (item.search, item.number)).collect();
+        assert_eq!(rows, [(false, Some(1)), (true, None), (false, Some(2))]);
+        assert!(view.search_on && view.search_place == "row" && !view.search_all, "starts in this menu only");
+        assert_eq!(model.apply(Input::Number(1)), Step::Run("act-b".into()), "thumb 2 is the second item, the box skipped");
+        assert_eq!(model.apply(Input::Pick(1)), Step::Stay);
+        model.set_query("pol");
+        assert_eq!(labels(&model.view("Phrases", 1)), Vec::<&str>::new(), "this menu only: Polish is in another one");
+
+        // Last: the box goes below the rows, also in a list or the results.
+        let mut model = Model::new(vec![action("a", "Polite"), search(true, true)], HashMap::new());
+        model.set_query("pol");
+        let view = model.view("Phrases", 1);
+        assert!(view.search_place == "bottom" && view.search_all);
+        assert_eq!(labels(&view), ["Polite"]);
+
+        // First stays on top, also under the ★ block (its row comes after the pinned ones).
+        let pinned = MenuItem::Action { id: "p".into(), label: "P".into(), action_id: "act-p".into(), enabled: true, pinned: true };
+        let model = Model::new(vec![search(true, true), action("a", "A"), pinned], HashMap::new());
+        assert_eq!(model.view("Phrases", 1).search_place, "top");
+
+        // Off: no row, typing searches nothing, Tab has nothing to switch.
+        let mut model = Model::new(vec![search(false, true), action("a", "Polite")], HashMap::new()).with_others(other(), HashSet::new());
+        model.set_query("pol");
+        let view = model.view("Phrases", 1);
+        assert!(!view.search_on && !view.has_others && view.query.is_empty());
+        assert_eq!(view.items.len(), 1);
+        assert_eq!(view.items[0].number, Some(1));
     }
 
     #[test]

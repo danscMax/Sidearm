@@ -1,4 +1,5 @@
 import i18n from "../i18n";
+import { isMenuMark } from "./config";
 import type {
   Action,
   ActionType,
@@ -1995,7 +1996,7 @@ export function importProfile(
   const remapItems = (items: MenuItem[]): MenuItem[] =>
     items.map((item) => (item.kind === "submenu"
       ? { ...item, items: remapItems(item.items) }
-      : item.kind === "separator" ? item
+      : isMenuMark(item) ? item
       : { ...item, actionId: actionIdMap.get(item.actionId) ?? item.actionId }));
   for (const action of newActions) {
     if (action.type === "menu") action.payload = { ...action.payload, items: remapItems(action.payload.items) };

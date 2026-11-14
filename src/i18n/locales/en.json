@@ -899,7 +899,16 @@
     "menuUsesCount_one": "{{count}} time",
     "menuUsesCount_other": "{{count}} times",
     "menuSeparator": "Separator",
-    "menuSeparatorHint": "A line between items in the popup: no number, never picked. Drag it or move it with ↑ ↓."
+    "menuSeparatorHint": "A line between items in the popup: no number, never picked. Drag it or move it with ↑ ↓.",
+    "menuSearch": "Search",
+    "menuSearchAllShort": "All menus",
+    "menuSearchThisShort": "This menu",
+    "menuSearchOff": "off",
+    "menuSearchShow": "Show",
+    "menuSearchScope": "Search first in",
+    "menuSearchHint": "The popup's search box sits here among the items. Typing searches the phrases; Tab in the popup switches between all menus and this one until it closes. Drag it or move it with ↑ ↓.",
+    "menuSearchOffHint": "This menu has no search box: typing searches nothing, the numbers and the wheel work as usual.",
+    "menuSearchTopOnly": "The search box stays among the top-level items, not inside a block or list."
   },
   "properties": {
     "empty": "Select a button to see properties",

@@ -1208,8 +1208,35 @@
         },
         {
           "$ref": "#/$defs/separatorMenuItem"
+        },
+        {
+          "$ref": "#/$defs/searchMenuItem"
         }
       ]
+    },
+    "searchMenuItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "enabled",
+        "allMenus"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "kind": {
+          "const": "search"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "allMenus": {
+          "type": "boolean"
+        }
+      }
     },
     "separatorMenuItem": {
       "type": "object",

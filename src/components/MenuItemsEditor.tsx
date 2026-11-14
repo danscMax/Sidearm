@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { Action, AppConfig, MenuItem } from "../lib/config";
+import { isMenuMark, type Action, type AppConfig, type MenuItem } from "../lib/config";
 import { nextUniqueId } from "../lib/config-editing";
 import { displayNameForControlId } from "../lib/labels";
-import { appendMenuItem, collectMenuItemIds, insertMenuItemAfter, menuItemLabel, removeMenuItem, updateMenuItem } from "../lib/menu-helpers";
+import { appendMenuItem, collectMenuItemIds, insertMenuItemAfter, menuItemLabel, removeMenuItem, searchNested, updateMenuItem } from "../lib/menu-helpers";
 import {
   editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withKeyboardOnly, withPhrase,
   type ItemKind, type MenuEdits,
@@ -55,7 +55,7 @@ function numbering(items: MenuItem[]): Map<string, number> {
   const level = (list: MenuItem[]) => {
     let next = 1;
     for (const item of list) {
-      if (item.kind === "separator") continue;
+      if (isMenuMark(item)) continue;
       numbers.set(item.id, next++);
       if (item.kind === "submenu") level(item.items);
     }
@@ -64,11 +64,11 @@ function numbering(items: MenuItem[]): Map<string, number> {
   for (const item of items) {
     if (item.kind === "submenu") {
       for (const inner of item.items) {
-        if (inner.kind === "separator") continue;
+        if (isMenuMark(inner)) continue;
         numbers.set(inner.id, next++);
         if (inner.kind === "submenu") level(inner.items);
       }
-    } else if (item.kind !== "separator") {
+    } else if (!isMenuMark(item)) {
       numbers.set(item.id, next++);
     }
   }
@@ -135,7 +135,7 @@ export function MenuItemsEditor({
   items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled, name, namePlaceholder, onNameChange, sharedUses,
 }: MenuItemsEditorProps) {
   const { t } = useTranslation();
-  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? items[0]?.id ?? null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? (items.find((item) => !isMenuMark(item)) ?? items[0])?.id ?? null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const [dragId, setDragId] = useState<string | null>(null);
@@ -199,7 +199,7 @@ export function MenuItemsEditor({
   const profileName = new Map(config.profiles.map((profile) => [profile.id, profile.name]));
   const numbers = numbering(items);
   const blocks = items.filter((item) => item.kind === "submenu");
-  const selected = findItem(items, selectedId) ?? items[0];
+  const selected = findItem(items, selectedId) ?? items.find((item) => !isMenuMark(item)) ?? items[0];
   const templates = menuTemplates(t, config);
   // What keeps Save off: shown, so a disabled Save is never a mystery.
   const missing = new Set(incompleteItems(config, edits, items));
@@ -315,6 +315,16 @@ export function MenuItemsEditor({
     return Boolean(action && phraseOf(action, library)?.enter);
   }
 
+  /** A new arrangement, unless it puts the search box inside a block or list
+   *  (the popup draws it only among the top-level items). */
+  function arrange(next: MenuItem[]) {
+    if (searchNested(next)) {
+      setNotice(t("inspector.menuSearchTopOnly"));
+      return;
+    }
+    onChange(next);
+  }
+
   /** Drag to reorder: the upper half of a row drops before it, the lower half
    *  after it, the middle of a list or block into it. Alt+arrows do the same. */
   function arrangeProps(item: MenuItem) {
@@ -341,7 +351,7 @@ export function MenuItemsEditor({
         e.preventDefault();
         e.stopPropagation();
         const dragged = e.dataTransfer.getData(MENU_DRAG_TYPE);
-        if (dragged && drop) onChange(placeMenuItem(items, dragged, item.id, drop.place));
+        if (dragged && drop) arrange(placeMenuItem(items, dragged, item.id, drop.place));
         setDragId(null);
         setDrop(null);
       },
@@ -355,7 +365,7 @@ export function MenuItemsEditor({
         };
         if (!moves[e.key]) return;
         e.preventDefault();
-        onChange(moves[e.key]!());
+        arrange(moves[e.key]!());
       },
     };
   }
@@ -363,6 +373,28 @@ export function MenuItemsEditor({
   function renderRow(item: MenuItem, nested: boolean) {
     const number = numbers.get(item.id) ?? 0;
     const on = selected?.id === item.id;
+    if (item.kind === "search") {
+      const { dropClass, ...arrange } = arrangeProps(item);
+      return (
+        <div key={item.id}>
+          <button
+            type="button"
+            className={`menu-ed__row${on ? " menu-ed__row--on" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dragId === item.id ? " menu-ed__row--dragging" : ""}${dropClass}`}
+            aria-pressed={on}
+            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+            onClick={() => { setMarked(new Set()); setSelectedId(item.id); }}
+            onContextMenu={(event) => openCtx(event, item)}
+            {...arrange}
+          >
+            <span className="menu-ed__key" aria-hidden="true">⌕</span>
+            <span className="menu-ed__label">{t("inspector.menuSearch")}</span>
+            <span className="menu-ed__uses">
+              {item.enabled ? t(item.allMenus ? "inspector.menuSearchAllShort" : "inspector.menuSearchThisShort") : t("inspector.menuSearchOff")}
+            </span>
+          </button>
+        </div>
+      );
+    }
     if (item.kind === "separator") {
       const { dropClass, ...arrange } = arrangeProps(item);
       return (
@@ -483,6 +515,7 @@ export function MenuItemsEditor({
       <div className="menu-ed__tools" role="toolbar" aria-label={t("inspector.menuItemTools")}>
         {tool("↑", t("inspector.menuMoveUp"), () => onChange(moveMenuItem(items, item.id, -1)), index <= 0)}
         {tool("↓", t("inspector.menuMoveDown"), () => onChange(moveMenuItem(items, item.id, 1)), index >= siblings.length - 1)}
+        {item.kind === "search" ? null : <>
         <span className="menu-ed__tools-gap" />
         {tool("⧉", t("common.duplicate"), () => duplicate(item))}
         {item.kind === "action"
@@ -494,6 +527,7 @@ export function MenuItemsEditor({
           setCtx({ x: box.left, y: box.bottom + 4, id: item.id });
         }, false, "", t("inspector.menuMore"))}
         {tool("✕", t("common.delete"), () => remove(item), false, " menu-ed__tool--danger")}
+        </>}
       </div>
     );
   }
@@ -556,7 +590,8 @@ export function MenuItemsEditor({
         const parent = parentOf(items, id);
         return parent ? parent === ancestor || holds(ancestor, parent) : false;
       };
-      const start = selected && !holds(selected.id, item.id) ? [selected.id] : [];
+      // Never the search box: it is not picked with others.
+      const start = selected && selected.kind !== "search" && !holds(selected.id, item.id) ? [selected.id] : [];
       const next = new Set(marked.size > 0 ? marked : start);
       if (next.has(item.id)) next.delete(item.id);
       else next.add(item.id);
@@ -604,7 +639,7 @@ export function MenuItemsEditor({
       const parent = parentOf(items, id);
       return parent ? marked.has(parent) || inMarked(parent) : false;
     };
-    return [...marked].filter((id) => !inMarked(id)).map((id) => findItem(items, id)).filter((item): item is MenuItem => Boolean(item));
+    return [...marked].filter((id) => !inMarked(id)).map((id) => findItem(items, id)).filter((item): item is MenuItem => Boolean(item) && item?.kind !== "search");
   }
 
   function setMarkedEnabled(list: MenuItem[], enabled: boolean) {
@@ -617,7 +652,7 @@ export function MenuItemsEditor({
     setRemoved({ before: items, after, editsBefore: edits, editsAfter, message });
     onChange(after);
     setMarked(new Set());
-    setSelectedId(after[0]?.id ?? null);
+    setSelectedId((after.find((item) => !isMenuMark(item)) ?? after[0])?.id ?? null);
   }
 
   function moveMarked(list: MenuItem[], menuId: string) {
@@ -669,6 +704,12 @@ export function MenuItemsEditor({
     }
     const { siblings, index } = placeOf(item);
     const next = (target: "copy" | "move") => () => { keepCtx.current = true; setCtx((open) => (open ? { ...open, to: target } : open)); };
+    if (item.kind === "search") {
+      return [
+        { label: `↑ ${t("inspector.menuMoveUp")}`, disabled: index <= 0, onClick: () => onChange(moveMenuItem(items, item.id, -1)) },
+        { label: `↓ ${t("inspector.menuMoveDown")}`, disabled: index >= siblings.length - 1, onClick: () => onChange(moveMenuItem(items, item.id, 1)) },
+      ];
+    }
     return [
       { label: `↑ ${t("inspector.menuMoveUp")}`, disabled: index <= 0, onClick: () => onChange(moveMenuItem(items, item.id, -1)) },
       { label: `↓ ${t("inspector.menuMoveDown")}`, disabled: index >= siblings.length - 1, onClick: () => onChange(moveMenuItem(items, item.id, 1)) },
@@ -743,6 +784,36 @@ export function MenuItemsEditor({
   }
 
   function renderPane(item: MenuItem) {
+    if (item.kind === "search") {
+      const set = (change: Partial<Extract<MenuItem, { kind: "search" }>>) =>
+        onChange(updateMenuItem(items, item.id, (current) => (current.kind === "search" ? { ...current, ...change } : current)));
+      return (
+        <div className="menu-ed__pane">
+          <div className="menu-ed__pane-head">
+            <strong className="menu-ed__pane-title">{t("inspector.menuSearch")}</strong>
+            <label className="menu-ed__switch">
+              {t("inspector.menuSearchShow")}
+              <Toggle checked={item.enabled} disabled={disabled} ariaLabel={t("inspector.menuSearchShow")} onChange={(on) => set({ enabled: on })} />
+            </label>
+          </div>
+          {renderTools(item)}
+          {item.enabled ? (
+            <div className="menu-ed__pane-row">
+              <span className="field__label">{t("inspector.menuSearchScope")}</span>
+              <PillTrack<"all" | "this">
+                active={item.allMenus ? "all" : "this"}
+                items={[
+                  { key: "all", label: t("inspector.menuSearchAllShort") },
+                  { key: "this", label: t("inspector.menuSearchThisShort") },
+                ]}
+                onSelect={(scope) => set({ allMenus: scope === "all" })}
+              />
+            </div>
+          ) : null}
+          <p className="menu-ed__note">{t(item.enabled ? "inspector.menuSearchHint" : "inspector.menuSearchOffHint")}</p>
+        </div>
+      );
+    }
     if (item.kind === "separator") {
       return (
         <div className="menu-ed__pane">
@@ -967,10 +1038,10 @@ export function MenuItemsEditor({
             </p>
           ) : null}
         </div>
-        {items.length === 0 || templatesOpen ? (
+        {items.every(isMenuMark) || templatesOpen ? (
           <div className="menu-ed__pane">
             <div className="menu-ed__pane-head">
-              <span className="field__label menu-ed__pane-title">{items.length === 0 ? t("inspector.menuStartWith") : t("inspector.menuAddTemplate")}</span>
+              <span className="field__label menu-ed__pane-title">{items.every(isMenuMark) ? t("inspector.menuStartWith") : t("inspector.menuAddTemplate")}</span>
               {items.length > 0 ? (
                 <button type="button" className="menu-ed__tool" aria-label={t("common.close")} title={t("common.close")} onClick={() => setTemplatesOpen(false)}>✕</button>
               ) : null}

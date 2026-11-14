@@ -11,6 +11,7 @@ import type {
   TextSnippetPayload,
 } from "./config";
 import i18n from "../i18n";
+import { isMenuMark } from "./config";
 import { MEDIA_KEY_OPTIONS, MOUSE_ACTION_OPTIONS } from "./constants";
 import { labelForPasteMode } from "./labels";
 
@@ -81,7 +82,7 @@ export function describeActionSummary(
   }
 
   if (action.type === "menu") {
-    return i18n.t("actionSummary.menu", { count: action.payload.items.length });
+    return i18n.t("actionSummary.menu", { count: action.payload.items.filter((item) => !isMenuMark(item)).length });
   }
 
   if (action.type === "repairClipboard") {

@@ -255,7 +255,18 @@ export type MenuItem =
       enabled: boolean;
     }
   /** A line between items: no number, never picked. */
-  | { kind: "separator"; id: string };
+  | { kind: "separator"; id: string }
+  /** The popup's search box: its place among the top-level items, shown or
+   *  not (off: typing searches nothing), starting in all menus or only this
+   *  one (Tab switches while open). One per menu, top level only. */
+  | { kind: "search"; id: string; enabled: boolean; allMenus: boolean };
+
+/** An item with no name and no action: a line or the search box. */
+export type MenuMark = Extract<MenuItem, { kind: "separator" | "search" }>;
+
+export function isMenuMark(item: MenuItem): item is MenuMark {
+  return item.kind === "separator" || item.kind === "search";
+}
 
 export interface MenuActionPayload {
   items: MenuItem[];

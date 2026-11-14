@@ -6,7 +6,7 @@ Framework-free TypeScript: config editing, conflict detection, action/label help
 
 ## Ownership
 
-- `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v5.schema.json`).
+- `config.ts` — the `AppConfig` shape and action/payload types (must mirror the Rust structs + `config.v5.schema.json`). `isMenuMark`: a menu item with no name and no action (a line, the search box) — use it wherever an item's label or action is read. `menu-helpers.ts` `withSearchItem` / `searchNested`: a menu's search box first when it has none; an arrangement that puts it inside a block or list.
 - `config-editing.ts` — all config mutations (bindings, profiles, snippets, app-mappings), import validators, dedupe. `deleteProfile` also drops the profile's `settings.syncSlots` keys (`<profileId>|…`). A profile export carries the actions of its menus' items (import re-points them) and can leave out the owner's texts (`withoutTexts`: texts, macros with text, menus).
 - `import-validation.ts` — export guards reuse the config schema definitions for nested payloads and export-local references. Its schema keyword subset fails closed on additions; it does not replace backend validation of the complete config.
 - `key-names.ts` — layout-independent primary-key aliases and VK codes, mirroring Rust `hotkeys::parse_primary_key`; shared by conflict signatures (including legacy accepted conflicts) and firmware eligibility; `otherLayout` maps text between the Russian and US layouts for searches.

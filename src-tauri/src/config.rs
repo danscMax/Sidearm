@@ -928,6 +928,12 @@ pub enum MenuItem {
     },
     /// A line between items: no number, never picked.
     Separator { id: String },
+    /// The popup's search box: where it sits in the top level, whether it
+    /// shows (off: typing searches nothing), and whether it starts in all
+    /// menus or only this one (Tab switches while the popup is open). One per
+    /// menu, top level only; a menu without one gets it first (`migrate_menu_search`).
+    #[serde(rename_all = "camelCase")]
+    Search { id: String, enabled: bool, all_menus: bool },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1200,6 +1206,28 @@ fn migrate_enter_phrases(config: &mut AppConfig) {
     }
 }
 
+/// Every menu gets its search box as an item, first (where the popup always
+/// drew it), so the editor can move it, turn it off or set where it searches.
+fn migrate_menu_search(config: &mut AppConfig) {
+    for action in &mut config.actions {
+        let ActionPayload::Menu(MenuActionPayload { items }) = &mut action.payload else { continue };
+        if items.iter().any(|item| matches!(item, MenuItem::Search { .. })) {
+            continue;
+        }
+        let mut id = "menu-search".to_owned();
+        while items.iter().any(|item| menu_item_id(item) == id) {
+            id.push('-');
+        }
+        items.insert(0, MenuItem::Search { id, enabled: true, all_menus: true });
+    }
+}
+
+fn menu_item_id(item: &MenuItem) -> &str {
+    match item {
+        MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } | MenuItem::Separator { id } | MenuItem::Search { id, .. } => id,
+    }
+}
+
 /// A plain file name that stays inside the folder it is joined to: no
 /// separators, no `..`, and no `:` — `E:name` is relative to drive E's current
 /// directory and `name:stream` an alternate data stream on Windows.
@@ -1335,6 +1363,7 @@ fn load_and_validate(
     migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
     migrate_enter_phrases(&mut config);
+    migrate_menu_search(&mut config);
     let warnings = validate_config(&config)?;
     config.compile_title_regexes();
     Ok((config, warnings))
@@ -1488,6 +1517,7 @@ pub fn read_and_migrate_config_file(config_path: &Path) -> Result<AppConfig, Con
     migrate_mouse_settings(&mut config);
     migrate_paste_mode(&mut config);
     migrate_enter_phrases(&mut config);
+    migrate_menu_search(&mut config);
     config.compile_title_regexes();
     Ok(config)
 }
@@ -2005,13 +2035,23 @@ fn validate_action(
             }
         }
         (ActionType::Menu, ActionPayload::Menu(payload)) => {
-            if payload.items.is_empty() {
+            if payload.items.iter().all(|item| matches!(item, MenuItem::Search { .. })) {
                 errors.push(format!(
                     "action `{}` menu must contain at least one item.",
                     action.id
                 ));
             }
             validate_menu_items(&action.id, &payload.items, action_ids, errors);
+            // The popup draws one search box, placed among the top-level items.
+            fn nested_search(items: &[MenuItem]) -> bool {
+                items.iter().any(|item| match item {
+                    MenuItem::Submenu { items, .. } => items.iter().any(|inner| matches!(inner, MenuItem::Search { .. })) || nested_search(items),
+                    _ => false,
+                })
+            }
+            if payload.items.iter().filter(|item| matches!(item, MenuItem::Search { .. })).count() > 1 || nested_search(&payload.items) {
+                errors.push(format!("action `{}` menu must have at most one search box, at its top level.", action.id));
+            }
         }
         // MouseAction and MediaKey use typed enums — serde validates values at deserialization.
         (ActionType::MouseAction, ActionPayload::MouseAction(_)) => {}
@@ -2088,7 +2128,7 @@ fn validate_menu_items(
                 }
                 validate_menu_items(action_id, items, action_ids, errors);
             }
-            MenuItem::Separator { id } => {
+            MenuItem::Separator { id } | MenuItem::Search { id, .. } => {
                 if !menu_item_ids.insert(id.clone()) {
                     errors.push(format!(
                         "menu action `{action_id}` contains duplicate menu item id `{id}`."
@@ -4075,7 +4115,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x6eaa_8215_6021_3db0);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x6a87_4c4b_f84c_1ed9);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -5157,6 +5197,50 @@ mod edge_proptests {
         }];
         migrate_paste_mode(&mut cfg);
         assert_eq!(cfg.snippet_library[0].paste_mode, PasteMode::SendText);
+    }
+
+    #[test]
+    fn every_menu_gets_one_search_box_first_and_keeps_a_moved_one() {
+        let target = Action {
+            id: "act".into(),
+            action_type: ActionType::Disabled,
+            payload: ActionPayload::Disabled(DisabledActionPayload {}),
+            display_name: "A".into(),
+            notes: None,
+            conditions: Vec::new(),
+        };
+        let item = |id: &str| MenuItem::Action { id: id.into(), label: id.into(), action_id: "act".into(), enabled: true, pinned: false };
+        let menu = |id: &str, items: Vec<MenuItem>| Action {
+            id: id.into(),
+            action_type: ActionType::Menu,
+            payload: ActionPayload::Menu(MenuActionPayload { items }),
+            display_name: id.into(),
+            notes: None,
+            conditions: Vec::new(),
+        };
+        let moved = MenuItem::Search { id: "find".into(), enabled: false, all_menus: false };
+        let mut cfg = minimal_valid_config();
+        cfg.actions = vec![target, menu("plain", vec![item("menu-search"), item("b")]), menu("moved", vec![item("a"), moved.clone()])];
+        migrate_menu_search(&mut cfg);
+        migrate_menu_search(&mut cfg);
+        let ActionPayload::Menu(plain) = &cfg.actions[1].payload else { panic!() };
+        assert_eq!(plain.items[0], MenuItem::Search { id: "menu-search-".into(), enabled: true, all_menus: true }, "first, with a free id, once");
+        assert_eq!(plain.items.len(), 3);
+        let ActionPayload::Menu(kept) = &cfg.actions[2].payload else { panic!() };
+        assert_eq!(kept.items, [item("a"), moved.clone()], "a menu that has one keeps it where it is");
+        assert!(validate_config(&cfg).is_ok());
+
+        // One per menu, top level only, and a menu of nothing but a search box is empty.
+        for bad in [
+            menu("nested", vec![item("a"), MenuItem::Submenu { id: "g".into(), label: "G".into(), enabled: true, items: vec![moved.clone()] }]),
+            menu("twice", vec![moved.clone(), item("a"), MenuItem::Search { id: "find2".into(), enabled: true, all_menus: true }]),
+            menu("only", vec![moved.clone()]),
+        ] {
+            let mut broken = cfg.clone();
+            let id = bad.id.clone();
+            broken.actions.push(bad);
+            assert!(validate_config(&broken).is_err(), "{id} must be rejected");
+        }
     }
 
     /// Exactly an old text + 80 ms + Enter macro becomes a text with Enter;

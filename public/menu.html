@@ -121,7 +121,11 @@
   /* A cheat sheet: the side buttons as the mouse's grid, no search box (it
      stays, out of sight, for the keyboard focus). */
   .menu--grid .list { width: auto; }
-  .menu--grid .search { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; opacity: 0; }
+  .menu--grid .search, .menu--nosearch .search { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; opacity: 0; }
+  /* The search box below the list, or among its rows (where the editor put it). */
+  .search--bottom { margin: 4px 0 0; }
+  .search--inline { margin: 2px 0; }
+  .search-mark { display: none; }
   .rows--grid { display: grid; grid-template-columns: repeat(3, 168px); gap: 4px; }
   .sheet-title {
     grid-column: 1 / -1;

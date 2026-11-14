@@ -19,7 +19,7 @@ describe("describeConfigChange", () => {
     after.bindings.push(bind("z", "thumb_01", "a", { triggerMode: "longPress" })); // a new hold
     const edited = after.actions.find((action) => action.id === "m")!;
     const first = edited.type === "menu" ? edited.payload.items[0] : undefined;
-    if (first && first.kind !== "separator") first.label = "A2";
+    if (first && (first.kind === "action" || first.kind === "submenu")) first.label = "A2";
     const change = describeConfigChange(before, after);
     expect(change.places).toHaveLength(2);
     expect(change.menus).toEqual(["Phrases"]);

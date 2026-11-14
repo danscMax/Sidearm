@@ -1,5 +1,5 @@
 import configSchema from "../../schemas/config.v5.schema.json";
-import { MAX_SEQUENCE_STEPS, type Action, type MenuItem, type SnippetLibraryItem } from "./config";
+import { isMenuMark, MAX_SEQUENCE_STEPS, type Action, type MenuItem, type SnippetLibraryItem } from "./config";
 
 interface Schema {
   $ref?: string;
@@ -102,7 +102,7 @@ export function validActionReferences(actions: Action[], snippets: SnippetLibrar
   const snippetIds = new Set(snippets.map((snippet) => snippet.id));
   const menuRefs = (items: MenuItem[], ownId: string): boolean => uniqueIds(items) && items.every((item) => item.kind === "submenu"
     ? menuRefs(item.items, ownId)
-    : item.kind === "separator" || (typeof item.actionId === "string" && item.actionId !== ownId && ids.has(item.actionId)));
+    : isMenuMark(item) || (typeof item.actionId === "string" && item.actionId !== ownId && ids.has(item.actionId)));
   return actions.every((action) => {
     if (typeof action.displayName !== "string") return false;
     if (action.type === "menu") return menuRefs(action.payload.items, action.id);

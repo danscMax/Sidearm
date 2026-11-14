@@ -1,4 +1,4 @@
-import type { Action, AppConfig, MenuItem, PasteMode, SnippetLibraryItem } from "./config";
+import { isMenuMark, type Action, type AppConfig, type MenuItem, type PasteMode, type SnippetLibraryItem } from "./config";
 import { nextUniqueId, upsertAction } from "./config-editing";
 import { appendMenuItem, collectMenuItemIds, removeMenuItem } from "./menu-helpers";
 
@@ -150,7 +150,7 @@ export function incompleteItems(config: AppConfig, edits: MenuEdits, items: Menu
   const actions = new Map(editedActions(config, edits).map((action) => [action.id, action]));
   const library = editedLibrary(config, edits);
   const empty = (item: MenuItem): boolean => {
-    if (item.kind === "separator") return false;
+    if (isMenuMark(item)) return false;
     if (item.label.trim() === "") return true;
     if (item.kind === "submenu") return false;
     const action = actions.get(item.actionId);

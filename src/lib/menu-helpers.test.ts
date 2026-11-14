@@ -5,6 +5,8 @@ import {
   appendMenuItem,
   updateMenuItem,
   removeMenuItem,
+  searchNested,
+  withSearchItem,
 } from "./menu-helpers";
 
 // ---------------------------------------------------------------------------
@@ -273,5 +275,19 @@ describe("removeMenuItem", () => {
     ];
     const result = removeMenuItem(items, "nonexistent");
     expect(result).toHaveLength(1);
+  });
+});
+
+describe("the search box item", () => {
+  const phrase: MenuItem = { kind: "action", id: "menu-search", label: "A", actionId: "a", enabled: true };
+  it("is added first, once, with a free id", () => {
+    const once = withSearchItem([phrase]);
+    expect(once[0]).toEqual({ kind: "search", id: "menu-search-", enabled: true, allMenus: true });
+    expect(withSearchItem(once)).toBe(once);
+  });
+  it("is refused inside a block or list", () => {
+    const search: MenuItem = { kind: "search", id: "s", enabled: true, allMenus: true };
+    expect(searchNested([search, phrase])).toBe(false);
+    expect(searchNested([{ kind: "submenu", id: "b", label: "B", enabled: true, items: [search] }])).toBe(true);
   });
 });

@@ -6,7 +6,7 @@
 // mouse and layer (`duplicate`: a note, often a choice; a shortcut doubled on the
 // same press pattern is the conflict banner's unless the user kept it).
 
-import type { Action, AppConfig, Binding, MenuItem } from "./config";
+import { isMenuMark, type Action, type AppConfig, type Binding, type MenuItem } from "./config";
 import { conflictingBindingIds, shortcutSignature } from "./conflict-detection";
 
 export type ConfigIssue =
@@ -71,7 +71,7 @@ export function checkProfile(config: AppConfig, profileId: string): ConfigIssue[
     }
     if (action.type === "menu") {
       const walk = (items: MenuItem[], path: string) => items.forEach((item) => {
-        if (item.kind === "separator") return;
+        if (isMenuMark(item)) return;
         const here = `${path} › ${item.label}`;
         if (item.kind === "submenu") return walk(item.items, here);
         const inner = actions.get(item.actionId);

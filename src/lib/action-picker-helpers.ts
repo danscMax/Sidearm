@@ -1,26 +1,28 @@
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { TFunction } from "i18next";
-import type {
-  Action,
-  ActionCondition,
-  ActionType,
-  Binding,
-  Layer,
-  MediaKeyKind,
-  MenuItem,
-  MouseActionKind,
-  PasteMode,
-  Profile,
-  SequenceStep,
-  ShortcutActionPayload,
-  SnippetLibraryItem,
-  TriggerMode,
+import {
+  isMenuMark,
+  type Action,
+  type ActionCondition,
+  type ActionType,
+  type Binding,
+  type Layer,
+  type MediaKeyKind,
+  type MenuItem,
+  type MouseActionKind,
+  type PasteMode,
+  type Profile,
+  type SequenceStep,
+  type ShortcutActionPayload,
+  type SnippetLibraryItem,
+  type TriggerMode,
 } from "./config";
 import { ACTION_CATEGORIES } from "./constants";
 import { mediaKeyLabel, modifierLabels, mouseActionLabel } from "./action-helpers";
 import { assertNever } from "./assertNever";
 import { isPlaceholderAction } from "./config-editing";
 import { phraseOf } from "./menu-phrase";
+import { withSearchItem } from "./menu-helpers";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -237,7 +239,7 @@ export function describeAction(
       return p ? t("picker.previewProfile", { name: p.name }) : t("picker.previewEmpty");
     }
     case "menu":
-      return t("picker.previewMenu", { count: drafts.menuItems.length });
+      return t("picker.previewMenu", { count: drafts.menuItems.filter((item) => !isMenuMark(item)).length });
     case "disabled":
       return t("picker.previewDisabled");
     case "repairClipboard":
@@ -444,7 +446,7 @@ export function createInitialDrafts(
       existingAction?.type === "sequence"
         ? existingAction.payload.steps
         : [],
-    menuItems: existingAction?.type === "menu" ? existingAction.payload.items : [],
+    menuItems: withSearchItem(existingAction?.type === "menu" ? existingAction.payload.items : []),
     cheatLayer: existingAction?.type === "cheatSheet" ? existingAction.payload.layer : "hypershift",
     name: existingAction?.displayName ?? "",
     conditions: existingAction?.conditions ?? [],
@@ -472,6 +474,6 @@ export function isSaveDisabled(effectiveCategory: string, drafts: PickerDrafts):
   // Audit F005: an empty menu passes the backend schema check only to be rejected by
   // validate_action (menu must have >=1 item), which rolls back the whole draft. Block
   // Save here so the user keeps their work instead of losing it to a backend error.
-  if (effectiveCategory === "menu") return drafts.menuItems.length === 0;
+  if (effectiveCategory === "menu") return drafts.menuItems.every(isMenuMark);
   return false;
 }

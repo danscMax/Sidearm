@@ -1,4 +1,4 @@
-import type { MenuItem } from "./config";
+import { isMenuMark, type MenuItem } from "./config";
 
 export function collectMenuItemIds(items: MenuItem[]): string[] {
   return items.flatMap((item) =>
@@ -23,9 +23,26 @@ export function insertMenuItemAfter(items: MenuItem[], afterId: string | null, n
   return placed ? out : [...items, nextItem];
 }
 
-/** A menu item's name; a line has none. */
+/** The items with the popup's search box, first when the menu had none (as
+ *  the popup always drew it; the backend's `migrate_menu_search` does the
+ *  same on load), so the editor can move it, turn it off or set its scope. */
+export function withSearchItem(items: MenuItem[]): MenuItem[] {
+  if (items.some((item) => item.kind === "search")) return items;
+  const ids = new Set(collectMenuItemIds(items));
+  let id = "menu-search";
+  while (ids.has(id)) id += "-";
+  return [{ kind: "search", id, enabled: true, allMenus: true }, ...items];
+}
+
+/** The search box inside a block or list: the popup draws it only among the
+ *  top-level items, so an arrangement that puts it there is refused. */
+export function searchNested(items: MenuItem[]): boolean {
+  return items.some((item) => item.kind === "submenu" && (item.items.some((inner) => inner.kind === "search") || searchNested(item.items)));
+}
+
+/** A menu item's name; a line and the search box have none. */
 export function menuItemLabel(item: MenuItem): string {
-  return item.kind === "separator" ? "" : item.label;
+  return isMenuMark(item) ? "" : item.label;
 }
 
 export function appendMenuItem(

@@ -1,7 +1,7 @@
 // Arranging a menu's items: drop one before / after / inside another, a level
 // in or out, copies with fresh ids, and where a text is used across all menus.
 
-import type { Action, AppConfig, Binding, MenuItem } from "./config";
+import { isMenuMark, type Action, type AppConfig, type Binding, type MenuItem } from "./config";
 import { controlWithGesture, labelForLayer } from "./labels";
 import { nextUniqueId } from "./config-editing";
 import { collectMenuItemIds, removeMenuItem } from "./menu-helpers";
@@ -86,7 +86,7 @@ export function cloneMenuItem(
     const id = nextUniqueId(itemIds, `${current.id}-copy`);
     itemIds.add(id);
     if (current.kind === "submenu") return { ...current, id, items: current.items.map(copy) };
-    if (current.kind === "separator") return { ...current, id };
+    if (isMenuMark(current)) return { ...current, id };
     const action = actions.get(current.actionId);
     if (!action || (action.type !== "shortcut" && !phraseOf(action, library))) return { ...current, id };
     const actionId = nextUniqueId(actionIds, `${action.id}-copy`);
@@ -136,7 +136,7 @@ export function searchMenus(
   const menus = actions.filter((action) => action.type === "menu" && action.id !== current?.menuId);
   const walk = (menuId: string, menuName: string, list: MenuItem[], path: string[]) => {
     for (const item of list) {
-      if (item.kind === "separator") continue;
+      if (isMenuMark(item)) continue;
       const here = [...path, item.label];
       const action = item.kind === "action" ? byId.get(item.actionId) : undefined;
       const text = action ? phraseOf(action, library)?.text ?? "" : "";
@@ -181,7 +181,7 @@ export function otherMenuUses(config: AppConfig, edits: MenuEdits, actionId: str
   const walk = (menuName: string, list: MenuItem[], path: string[]) => {
     for (const item of list) {
       if (item.kind === "submenu") { walk(menuName, item.items, [...path, item.label]); continue; }
-      if (item.kind === "separator") continue;
+      if (isMenuMark(item)) continue;
       const action = byId.get(item.actionId);
       const sameSnippet = snippet && action && phraseOf(action, library)?.snippetId === snippet;
       if (item.actionId === actionId || sameSnippet) uses.push([menuName, ...path, item.label].join(" › "));

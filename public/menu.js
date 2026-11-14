@@ -13,6 +13,7 @@
   var items = []; // the row elements of the level shown
   var highlight = -1;
   var search = null;
+  var searchBox = null;
   var scope = null;
   var tip = null;
   var lastLayout = "";
@@ -39,12 +40,15 @@
     root.textContent = "";
     var list = el("div", "list");
     var box = el("label", "search");
+    searchBox = box;
     box.appendChild(el("span", null, "⌕"));
     search = el("input");
     search.type = "text";
     search.spellcheck = false;
     // In a cheat sheet the box is out of sight: typing dims the cells that do not match.
     search.addEventListener("input", function () {
+      // A menu without a search box: the hidden field keeps the keys, typing searches nothing.
+      if (view && !view.searchOn) { search.value = ""; return; }
       invoke("menu_search", { query: search.value });
     });
     search.addEventListener("keydown", onKey);
@@ -111,10 +115,27 @@
     });
   }
 
+  /** The search box where the menu's editor put it (`view.searchPlace`, Rust
+   *  decides): fixed above or below the rows, or at its row among them. Off:
+   *  out of sight, still holding the keys. Returns the row it goes to, or -1. */
+  function placeSearch(list, rows) {
+    root.classList.toggle("menu--nosearch", !view.grid && !view.searchOn);
+    var at = -1;
+    if (view.searchPlace === "row") view.items.forEach(function (item, index) { if (item.search) at = index; });
+    var bottom = view.searchPlace === "bottom";
+    searchBox.classList.toggle("search--bottom", bottom);
+    searchBox.classList.toggle("search--inline", at >= 0);
+    if (at >= 0) return at; // put among the rows by buildRows
+    if (bottom) list.appendChild(searchBox);
+    else list.insertBefore(searchBox, rows);
+    return -1;
+  }
+
   function buildRows() {
     var rows = root.querySelector(".rows");
     rows.textContent = "";
     items = [];
+    var inlineAt = view.grid ? -1 : placeSearch(rows.parentNode, rows);
     root.classList.toggle("menu--grid", !!view.grid);
     rows.classList.toggle("rows--grid", !!view.grid);
     if (view.grid) {
@@ -135,6 +156,13 @@
       if ((item.group || null) !== group) {
         group = item.group || null;
         if (group) rows.appendChild(el("div", "group", group));
+      }
+      // The search box's own row: the box itself, or an empty mark when it sits above or below.
+      if (item.search) {
+        var place = index === inlineAt ? searchBox : el("div", "search-mark");
+        rows.appendChild(place);
+        items.push(place);
+        return;
       }
       // A line between items: no number, nothing to pick (kept in `items` so indices line up).
       if (item.separator) {
@@ -160,7 +188,7 @@
       rows.appendChild(row);
       items.push(row);
     });
-    if (view.items.length === 0) rows.appendChild(el("div", "empty", view.empty));
+    if (!view.items.some(function (item) { return !item.search; })) rows.appendChild(el("div", "empty", view.empty));
     highlight = -1;
   }
 
@@ -169,7 +197,7 @@
     var row = items[index];
     clearTimeout(fullTimer);
     tip.classList.remove("tip--full");
-    if (!item || !row) { tip.style.visibility = "hidden"; return; }
+    if (!item || !row || item.search) { tip.style.visibility = "hidden"; return; }
     tip.style.visibility = "";
     tip.textContent = "";
     tip.classList.toggle("tip--list", !!(item.children && item.children.length));
@@ -302,7 +330,8 @@
       layout();
     }
     setHighlight(view.highlight);
-    search.focus();
+    // The box may have moved among the rows: focusing it must not scroll the list away from the highlight.
+    search.focus({ preventScroll: true });
   }
 
   /** A cheat sheet's keys: ↑↓ a row, ←→ a cell, Tab the other layer, Esc
@@ -323,7 +352,8 @@
     else if (event.key === "ArrowUp") invoke("menu_wheel", { down: false });
     else if (event.key === "Enter") invoke("menu_confirm");
     else if (event.key === "Escape") invoke("menu_close");
-    else if (event.key === "Tab" && view.hasOthers) toggleScope();
+    // Tab never moves the focus out of the box (the keys stay with the menu).
+    else if (event.key === "Tab") { if (view.hasOthers) toggleScope(); }
     else if (event.key === "Backspace" && search.value === "") invoke("menu_back");
     // The whole text of a long phrase scrolls with PageUp / PageDown.
     else if (event.key === "PageDown" || event.key === "PageUp") {

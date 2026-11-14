@@ -1940,7 +1940,8 @@
       "windowCapture": "Не удалось прочитать окно на переднем плане: {{reason}}",
       "shortcutUnreadable": "Не удалось прочитать ярлык: {{reason}}",
       "shortcutNotExe": "Ярлык запускает не программу .exe, а «{{target}}».",
-      "shortcutWindowsOnly": "Ярлыки читаются только в Windows."
+      "shortcutWindowsOnly": "Ярлыки читаются только в Windows.",
+      "shortcutLocalOnly": "Читается только ярлык .lnk на локальном диске."
     }
   },
   "newMouse": {

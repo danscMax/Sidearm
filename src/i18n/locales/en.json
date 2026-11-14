@@ -1900,7 +1900,8 @@
       "windowCapture": "Could not read the window in front: {{reason}}",
       "shortcutUnreadable": "The shortcut could not be read: {{reason}}",
       "shortcutNotExe": "The shortcut does not start an .exe program (it starts `{{target}}`).",
-      "shortcutWindowsOnly": "Shortcuts are read only on Windows."
+      "shortcutWindowsOnly": "Shortcuts are read only on Windows.",
+      "shortcutLocalOnly": "Only a .lnk shortcut on a local drive can be read."
     }
   },
   "newMouse": {

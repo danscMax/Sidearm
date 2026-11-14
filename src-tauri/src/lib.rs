@@ -1095,6 +1095,14 @@ fn shortcut_target(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// A `.lnk` on a drive letter (`C:\…` or `\\?\C:\…`), never a UNC or device path.
+#[cfg(target_os = "windows")]
+fn is_local_shortcut(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    let local = matches!(path.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)));
+    local && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+}
+
 /// An app rule picked from a shortcut: the `.exe` it starts. Anything else (a
 /// shortcut to a document, a folder or a store app) is refused.
 #[tauri::command]
@@ -1102,6 +1110,11 @@ async fn resolve_shortcut_target(path: String) -> Result<String, CommandError> {
     #[cfg(target_os = "windows")]
     {
         let source = validate_user_file_path(&path)?;
+        // Only a .lnk on a local drive: loading a UNC path would make Windows
+        // contact that server (and offer it the user's NTLM credentials).
+        if !is_local_shortcut(&source) {
+            return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.shortcutLocalOnly", "Only a .lnk shortcut on a local drive can be read.")));
+        }
         let target = tauri::async_runtime::spawn_blocking(move || shortcut_target(&source))
             .await
             .map_err(|e| CommandError::internal(format!("resolve_shortcut_target task failed: {e}")))?
@@ -4756,6 +4769,16 @@ mod tests {
     fn untranslated_command_errors_do_not_grow() {
         let count = include_str!("lib.rs").matches(concat!("CommandError::", "new(")).count();
         assert!(count <= 8, "{count} untranslated CommandError::new calls: use CommandError::from_ui with ui_text!");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn only_a_local_lnk_is_read() {
+        assert!(is_local_shortcut(Path::new(r"C:\Users\me\Desktop\Editor.lnk")));
+        assert!(is_local_shortcut(Path::new(r"\\?\C:\Editor.LNK")));
+        assert!(!is_local_shortcut(Path::new(r"\\attacker\share\x.lnk")), "UNC: would leak NTLM");
+        assert!(!is_local_shortcut(Path::new(r"\\?\UNC\attacker\share\x.lnk")));
+        assert!(!is_local_shortcut(Path::new(r"C:\Users\me\notes.txt")));
     }
 
     #[cfg(target_os = "windows")]

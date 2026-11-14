@@ -1067,7 +1067,9 @@
       "profileSwitch": "Switches the active bindings profile.",
       "menu": "Shows a popup menu of several actions.",
       "disabled": "The button does nothing.",
-      "repairClipboard": "Fixes a corrupted clipboard encoding."
+      "repairClipboard": "Fixes a corrupted clipboard encoding.",
+      "stopMacros": "Ends the running macro and the ones waiting behind it.",
+      "cheatSheet": "Shows this mouse's side buttons of one layer at the cursor."
     },
     "conditionsLabel": "Execution conditions",
     "conditionsHelp": "The action runs only when ALL conditions are met at once (AND logic). With no conditions it always runs.",
@@ -1159,7 +1161,8 @@
     "waitWindowTimeout": "Wait at most, ms (up to 30000)",
     "tokenInputDesc": "A field asked for in a small window before the phrase is typed: {input:host} — Enter inserts, Esc cancels. Rename the field after inserting it.",
     "tokenInputName": "field",
-    "waitWindowExeMissing": "A \"Wait for window\" step needs the program to wait for (its .exe name)."
+    "waitWindowExeMissing": "A \"Wait for window\" step needs the program to wait for (its .exe name).",
+    "keyboardOnlyLibraryHint": "Types this library text key by key, never through the clipboard — everywhere it is used."
   },
   "assignments": {
     "copyBinding": "Copy binding",

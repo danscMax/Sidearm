@@ -60,6 +60,17 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: /3\s*Three/ })).toBeTruthy();
   });
 
+  it("Ctrl+click inside the selected list picks those items, not the list", () => {
+    const nested: MenuItem[] = [{ kind: "submenu", id: "list", label: "List", enabled: true, items: [
+      { kind: "action", id: "one", label: "One", actionId: "a1", enabled: true },
+      { kind: "action", id: "two", label: "Two", actionId: "a1", enabled: true },
+    ] }];
+    render(<MenuItemsEditor items={nested} initialSelectedId="list" onChange={vi.fn()} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /One/ }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Two/ }), { ctrlKey: true });
+    expect(screen.getByText(/2 items picked|Выбрано 2 пункта/)).toBeTruthy();
+  });
+
   it("after deleting an item of a list, the next item of that list is selected", () => {
     const onChange = vi.fn();
     const nested: MenuItem[] = [{ kind: "submenu", id: "b", label: "Block", enabled: true, items: [

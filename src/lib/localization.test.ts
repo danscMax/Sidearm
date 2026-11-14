@@ -4,6 +4,7 @@ import en from "../i18n/locales/en.json";
 import ru from "../i18n/locales/ru.json";
 import { recoveryTestInstruction } from "./labels";
 import type { HypershiftTrigger } from "./config";
+import { ALL_ACTION_TYPES } from "./constants/ui-copy";
 
 function flatten(value: unknown, prefix = ""): Record<string, string> {
   if (typeof value !== "object" || !value) return {};
@@ -37,6 +38,14 @@ describe("complete locale catalogues", () => {
         expect(parameters(text), `${language}: ${key}`).toEqual(parameters(counterpart));
       }
     }
+  });
+});
+
+describe("every action type is described", () => {
+  it("has its picker category description in both languages", () => {
+    const missing = ALL_ACTION_TYPES.flatMap((type) =>
+      (["en", "ru"] as const).filter((lang) => !locales[lang][`picker.categoryDesc.${type}`]).map((lang) => `${lang}:${type}`));
+    expect(missing).toEqual([]);
   });
 });
 

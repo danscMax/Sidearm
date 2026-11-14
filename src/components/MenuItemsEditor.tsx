@@ -504,7 +504,13 @@ export function MenuItemsEditor({
    *  picks the run of its list up to the selected one, a plain click selects it. */
   function pick(event: React.MouseEvent, item: MenuItem) {
     if (event.ctrlKey || event.metaKey) {
-      const next = new Set(marked.size > 0 ? marked : selected ? [selected.id] : []);
+      // The selected row joins the picked ones, unless it is a list holding this item.
+      const holds = (ancestor: string, id: string): boolean => {
+        const parent = parentOf(items, id);
+        return parent ? parent === ancestor || holds(ancestor, parent) : false;
+      };
+      const start = selected && !holds(selected.id, item.id) ? [selected.id] : [];
+      const next = new Set(marked.size > 0 ? marked : start);
       if (next.has(item.id)) next.delete(item.id);
       else next.add(item.id);
       setMarked(next);
@@ -715,6 +721,7 @@ export function MenuItemsEditor({
             ]}
             onSelect={(next) => setKind(item, next)}
           />
+          <div className="menu-ed__switches">
           {kind === "phrase" && action && phrase ? (
             <label className="menu-ed__switch">
               {t("inspector.menuPhraseEnter")}
@@ -728,14 +735,23 @@ export function MenuItemsEditor({
                 }} />
             </label>
           ) : null}
-          {/* A phrase with Enter is a macro, whose text step has no input mode. */}
-          {kind === "phrase" && action?.type === "textSnippet" && action.payload.source === "inline" ? (
-            <label className="menu-ed__switch" title={t("picker.keyboardOnlyHint")}>
-              {t("picker.keyboardOnly")}
-              <Toggle checked={action.payload.pasteMode === "keyboardOnly"} disabled={disabled} ariaLabel={t("picker.keyboardOnly")}
-                onChange={(on) => onEditsChange(putAction(withKeyboardOnly(action, on)))} />
-            </label>
-          ) : null}
+          {/* A phrase with Enter is a macro, whose text step has no input mode. A
+              library phrase keeps its mode in the library item (all its uses). */}
+          {kind === "phrase" && action?.type === "textSnippet" ? (() => {
+            const linked = action.payload.source === "libraryRef" ? library.find((item) => action.payload.source === "libraryRef" && item.id === action.payload.snippetId) : undefined;
+            const mode = action.payload.source === "inline" ? action.payload.pasteMode : linked?.pasteMode;
+            if (!mode) return null;
+            return (
+              <label className="menu-ed__switch" title={t(linked ? "picker.keyboardOnlyLibraryHint" : "picker.keyboardOnlyHint")}>
+                {t("picker.keyboardOnly")}
+                <Toggle checked={mode === "keyboardOnly"} disabled={disabled} ariaLabel={t("picker.keyboardOnly")}
+                  onChange={(on) => linked
+                    ? onEditsChange({ ...edits, libraryModes: { ...edits.libraryModes, [linked.id]: on ? "keyboardOnly" : "sendText" } })
+                    : onEditsChange(putAction(withKeyboardOnly(action, on)))} />
+              </label>
+            );
+          })() : null}
+          </div>
         </div>
         {kind === "phrase" && action && phrase ? (
           <textarea className="input menu-ed__text" value={phrase.text} disabled={disabled}

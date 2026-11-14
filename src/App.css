@@ -1845,6 +1845,8 @@ input[type="radio"] {
 .menu-ed__pane-row { display: flex; gap: 8px 18px; align-items: center; flex-wrap: wrap; }
 .menu-ed__pane-row > .pill-track,
 .menu-ed__pane-row > .menu-ed__note { margin-right: auto; }
+.menu-ed__switches { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; margin-left: auto; }
+.menu-ed__switches:empty { display: none; }
 .menu-ed__switch { display: inline-flex; gap: 8px; align-items: center; color: var(--c-text-muted); font-size: var(--fs-caption); font-weight: 600; }
 .menu-ed-root .menu-ed__text { flex: 1; min-height: 160px; resize: none; }
 .menu-ed__chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }

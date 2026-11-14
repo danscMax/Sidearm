@@ -124,3 +124,15 @@ describe("withKeyboardOnly", () => {
     expect(withKeyboardOnly(macro, true)).toBe(macro);
   });
 });
+
+describe("library input modes", () => {
+  it("a library phrase's keyboard-only switch is saved into its library item, the others untouched", () => {
+    const base = { actions: [], snippetLibrary: [
+      { id: "s1", name: "One", text: "a", pasteMode: "sendText", tags: [] },
+      { id: "s2", name: "Two", text: "b", pasteMode: "sendText", tags: [] },
+    ] } as unknown as AppConfig;
+    const next = applyMenuEdits(base, { ...NO_MENU_EDITS, libraryModes: { s1: "keyboardOnly" } }, []);
+    expect(next.snippetLibrary.map((item) => item.pasteMode)).toEqual(["keyboardOnly", "sendText"]);
+    expect(next.snippetLibrary[1]).toBe(base.snippetLibrary[1]);
+  });
+});

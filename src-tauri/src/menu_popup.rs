@@ -471,8 +471,7 @@ impl Model {
             parent,
             items: level
                 .iter()
-                .enumerate()
-                .map(|(_, entry)| ViewItem {
+                .map(|entry| ViewItem {
                     label: item_label(entry.item).to_owned(),
                     number: (!is_line(entry.item)).then(|| {
                         numbered += 1;

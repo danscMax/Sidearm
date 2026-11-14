@@ -615,6 +615,25 @@ fn settle_tray_icon<E: std::fmt::Display>(shown: &Mutex<Option<Option<u8>>>, bad
     }
 }
 
+/// The exit gives the mice their own buttons back and stores the offline
+/// profile, which takes seconds: the tray says so (its tooltip, and a menu of
+/// that one line), so a closing Sidearm is not taken for a hung one. Called on
+/// the main thread (`RunEvent::Exit`), where tray calls run at once.
+fn show_exiting_in_tray(app: &AppHandle) {
+    let Some(tray) = app.tray_by_id("sidearm-tray") else {
+        return;
+    };
+    let text = crate::ui_text::native(&crate::ui_text!("runtime.trayExiting", "Sidearm is closing: giving the mice their own buttons back…"));
+    if let Err(error) = tray.set_tooltip(Some(&text)) {
+        log::warn!("[tray] exit tooltip not set: {error}");
+    }
+    let menu = tauri::menu::MenuItem::with_id(app, "exiting", &text, false, None::<&str>)
+        .and_then(|item| tauri::menu::Menu::with_items(app, &[&item]));
+    if let Err(error) = menu.and_then(|menu| tray.set_menu(Some(menu))) {
+        log::warn!("[tray] exit menu not set: {error}");
+    }
+}
+
 fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
     let Some(tray) = app.tray_by_id("sidearm-tray") else {
         return;
@@ -4654,6 +4673,7 @@ pub fn run() {
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
                 log::info!("[system] Clean shutdown.");
+                show_exiting_in_tray(app);
                 press_log::flush();
                 shutdown_mouse(app);
                 remove_crash_sentinel(app);

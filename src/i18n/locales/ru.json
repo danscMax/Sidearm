@@ -1902,7 +1902,8 @@
       "trayStopMacros": "Остановить макросы",
       "trayRulesBack": "Вернуться к правилам приложений",
       "trayRulesNow": "Сейчас",
-      "trayRulesAfter": "Через {{minutes}} мин"
+      "trayRulesAfter": "Через {{minutes}} мин",
+      "trayExiting": "Sidearm закрывается: возвращает мышам их кнопки…"
     },
     "window": {
       "captured": "Захвачено `{{exe}}`, профиль `{{profile_id}}`.",

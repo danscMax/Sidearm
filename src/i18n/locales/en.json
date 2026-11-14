@@ -1860,7 +1860,8 @@
       "trayStopMacros": "Stop macros",
       "trayRulesBack": "Back to the app rules",
       "trayRulesNow": "Now",
-      "trayRulesAfter": "In {{minutes}} minutes"
+      "trayRulesAfter": "In {{minutes}} minutes",
+      "trayExiting": "Sidearm is closing: giving the mice their own buttons back…"
     },
     "window": {
       "captured": "Captured `{{exe}}`, profile `{{profile_id}}`.",

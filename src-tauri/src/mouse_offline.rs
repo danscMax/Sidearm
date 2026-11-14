@@ -340,18 +340,20 @@ fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path
 fn write_onboard_offline_on(device: &VendorDevice, config: &AppConfig, profile_id: &str, config_dir: &Path) -> Option<String> {
     let records = plan(config, device.model(), profile_id);
     let mut asleep = false;
-    let failed = records
-        .iter()
-        .filter(|r| {
-            device
-                .write_record(r.button_id, r.layer, r.action)
-                .inspect_err(|e| {
-                    log::warn!("[mouse-offline] {e}");
-                    asleep |= crate::mouse_memory::is_no_response(e);
-                })
-                .is_err()
-        })
-        .count();
+    let mut failed = 0;
+    for record in &records {
+        if let Err(error) = device.write_record(record.button_id, record.layer, record.action) {
+            log::warn!("[mouse-offline] {error}");
+            failed += 1;
+            // A mouse that did not answer answers none of the rest: each would
+            // wait for its silence (an exit took a minute). The whole profile
+            // is retried once it is awake (`mouse-offline-failed`).
+            if crate::mouse_memory::is_no_response(&error) {
+                log::warn!("[mouse-offline] {} did not answer: the offline profile waits until it is awake", device.model().name);
+                return Some(device.model().device_id.to_owned());
+            }
+        }
+    }
     // Profile switches set the DPI live only: store the offline profile's own
     // DPI; a profile without one leaves the mouse's stored DPI alone.
     if let Some(dpi) = config.profiles.iter().find(|p| p.id == profile_id)
@@ -632,6 +634,24 @@ mod tests {
         restore_live_speed(&device, &config, &profile, true).unwrap();
         crate::mouse_speed::forget_originals("razer-naga", true, true);
         assert_eq!(fake::with(|mouse| (mouse.poll_code, mouse.dpi[&0x00])), (0x01, 800));
+    }
+
+    /// A sleeping mouse is asked once, not once per record (an exit waited
+    /// for every record's silence and took a minute).
+    #[test]
+    fn a_sleeping_mouse_is_not_asked_for_every_record() {
+        let asked = |controls: &[&str]| {
+            let (mut config, profile) = empty_profile();
+            for control in controls {
+                bind(&mut config, &profile, control, Layer::Standard, shortcut("T", true, false, false), None);
+            }
+            let dir = tempfile::tempdir().unwrap();
+            let (device, _fake) = fake_v2();
+            fake::with(|mouse| mouse.asleep = true);
+            assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"));
+            fake::with(|mouse| mouse.asked)
+        };
+        assert_eq!(asked(&["thumb_01", "thumb_02", "thumb_03", "thumb_04"]), asked(&["thumb_01"]));
     }
 
     #[test]

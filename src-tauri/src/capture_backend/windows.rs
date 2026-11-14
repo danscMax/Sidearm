@@ -1401,12 +1401,15 @@ impl CaptureBackendHandle {
                 stopping,
             } = helper;
             stopping.store(true, Ordering::SeqCst);
-            // A stop says so first: stdin closing without it means Sidearm died.
-            let _ = write_helper_line(&stdin_pipe, HELPER_EXIT);
-            drop(stdin_pipe);
-
-            // Bounded wait: poll try_wait() up to 5 seconds, then force-kill
+            // One deadline for the whole stop, the EXIT write included: a helper
+            // that stopped reading fills the pipe, and the write (or a profile
+            // switch's writer holding the pipe) would block before any timeout.
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            // A stop says so first: stdin closing without it means Sidearm died.
+            // The writer ends at the latest when the kill below breaks the pipe.
+            let _ = thread::Builder::new().name("helper-exit".into()).spawn(move || {
+                let _ = write_helper_line(&stdin_pipe, HELPER_EXIT);
+            });
             loop {
                 match child.try_wait() {
                     Ok(Some(_)) => break,
@@ -1421,7 +1424,9 @@ impl CaptureBackendHandle {
                 }
             }
 
-            let _ = reader_thread.join();
+            // The helper is gone, so its stdout is closed and the reader ends —
+            // unless it is stuck dispatching; never wait for it unbounded.
+            join_within(reader_thread, std::time::Duration::from_secs(2), "helper reader");
         }
 
         // Join in a reaper thread with a bounded wait, so a wedged hook/worker
@@ -2121,6 +2126,21 @@ fn hypershift2_codes(config: &AppConfig, model: &crate::device_catalog::NativeMo
 }
 
 /// Writes one command line to the helper.
+/// Joins `handle` unless that takes longer than `limit`: a stuck thread is left
+/// behind (logged) instead of holding up its caller.
+fn join_within(handle: JoinHandle<()>, limit: std::time::Duration, what: &str) -> bool {
+    let (done_tx, done_rx) = mpsc::channel();
+    thread::spawn(move || {
+        let _ = handle.join();
+        let _ = done_tx.send(());
+    });
+    let joined = done_rx.recv_timeout(limit).is_ok();
+    if !joined {
+        log::warn!("[capture] {what} thread did not end within {limit:?}; left behind");
+    }
+    joined
+}
+
 fn write_helper_line(stdin: &Mutex<std::process::ChildStdin>, line: &str) -> std::io::Result<()> {
     use std::io::Write;
     let mut pipe = stdin.lock().map_err(|_| std::io::Error::other("helper stdin lock poisoned"))?;
@@ -5410,6 +5430,17 @@ mod hold_deadline_tests {
 #[cfg(test)]
 mod helper_modifier_state_tests {
     use super::*;
+
+    #[test]
+    fn join_within_does_not_wait_for_a_stuck_thread() {
+        let quick = thread::spawn(|| {});
+        assert!(join_within(quick, std::time::Duration::from_secs(2), "quick"));
+        let (_release, stuck_rx) = mpsc::channel::<()>();
+        let stuck = thread::spawn(move || { let _ = stuck_rx.recv(); });
+        let started = std::time::Instant::now();
+        assert!(!join_within(stuck, std::time::Duration::from_millis(50), "stuck"));
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+    }
 
     #[test]
     fn helper_eof_cancels_both_a_visible_sheet_and_a_waiting_timer() {

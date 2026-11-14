@@ -55,6 +55,22 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: /2\s*Two/ })).toBeTruthy();
   });
 
+  it("a second click on an open list, or its chevron, folds it; the chevron opens it again", () => {
+    const blocks: MenuItem[] = [
+      { kind: "submenu", id: "b1", label: "Start", enabled: true, items: [
+        { kind: "submenu", id: "l1", label: "List", enabled: true, items: [{ kind: "action", id: "x1", label: "Inner", actionId: "a1", enabled: true }] },
+      ] },
+    ];
+    render(<MenuItemsEditor items={blocks} onChange={vi.fn()} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} initialSelectedId="l1" />);
+    expect(screen.getByRole("button", { name: /1\s*Inner/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^1\s*List/ }));
+    expect(screen.queryByRole("button", { name: /1\s*Inner/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Unfold|Развернуть/ }));
+    expect(screen.getByRole("button", { name: /1\s*Inner/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Fold «List»|Свернуть «List»/ }));
+    expect(screen.queryByRole("button", { name: /1\s*Inner/ })).toBeNull();
+  });
+
   it("folding a block hides all it holds and moves a selection inside onto the block", () => {
     const blocks: MenuItem[] = [
       { kind: "submenu", id: "b1", label: "Start", enabled: true, items: [{ kind: "action", id: "x1", label: "One", actionId: "a1", enabled: true }] },

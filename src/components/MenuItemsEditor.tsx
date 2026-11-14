@@ -380,7 +380,7 @@ export function MenuItemsEditor({
         </div>
       );
     }
-    const open = item.kind === "submenu" && (on || (selected && parentOf(items, selected.id) === item.id));
+    const open = isListOpen(item);
     const { dropClass, ...arrange } = arrangeProps(item);
     return (
       <div key={item.id}>
@@ -403,7 +403,13 @@ export function MenuItemsEditor({
               {t("inspector.menuUsesCount", { count: usage[item.actionId] ?? 0 })}
             </span>
           ) : null}
-          {item.kind === "submenu" ? <span className="menu-ed__mark"><ChevronIcon open={Boolean(open)} /></span> : null}
+          {item.kind === "submenu" ? (
+            <span className="menu-ed__mark menu-ed__mark--toggle" role="button" tabIndex={-1}
+              aria-label={t(open ? "inspector.menuFold" : "inspector.menuUnfold", { name: item.label })}
+              onClick={(event) => { event.stopPropagation(); toggleList(item); }}>
+              <ChevronIcon open={open} />
+            </span>
+          ) : null}
         </button>
         {/* A list's items show while it or one of them is selected. */}
         {item.kind === "submenu" && open ? item.items.map((inner) => renderRow(inner, true)) : null}
@@ -566,6 +572,28 @@ export function MenuItemsEditor({
       }
     }
     setMarked(new Set());
+    // A second click on the list shown open folds it (and a folded one opens).
+    if (item.kind === "submenu" && selected?.id === item.id && parentOf(items, item.id) !== null) {
+      toggleList(item);
+      return;
+    }
+    setSelectedId(item.id);
+  }
+
+  /** A list (a submenu inside a block) shows its items while it or one of
+   *  them is selected, unless it was folded. */
+  function isListOpen(item: MenuItem): boolean {
+    if (item.kind !== "submenu" || folded.has(item.id)) return false;
+    return selected?.id === item.id || (selected !== undefined && parentOf(items, selected.id) === item.id);
+  }
+
+  /** Fold an open list (a selection inside moves to it), or open it and select it. */
+  function toggleList(item: MenuItem) {
+    if (isListOpen(item)) {
+      toggleFold(item);
+      return;
+    }
+    if (folded.has(item.id)) toggleFold(item);
     setSelectedId(item.id);
   }
 

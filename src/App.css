@@ -1831,9 +1831,21 @@ input[type="radio"] {
    filter, "+ Add ▾", "?"), under it the tree and the item's inspector, both
    the full height left in the dialog, each scrolling on its own. */
 .menu-ed-root { display: flex; flex-direction: column; gap: 12px; height: 100cqh; min-height: 320px; }
-.menu-ed__top { display: flex; gap: 8px; align-items: center; }
+/* One height for the whole line: name, search, the chips and "+ Add". */
+.menu-ed__top { --menu-top-h: 38px; display: flex; gap: 8px; align-items: center; }
 .menu-ed__menu-name { width: 220px; font-weight: 600; }
-.menu-ed__top .menu-ed__search { flex: 1; min-width: 140px; }
+.menu-ed__top .menu-ed__search { flex: 1; min-width: 140px; margin-bottom: 0; }
+.menu-ed__top > .input,
+.menu-ed__top > .menu-ed__chip-btn,
+.menu-ed__top > .menu-ed__chip,
+.menu-ed__top > .menu-ed__add-btn {
+  box-sizing: border-box;
+  height: var(--menu-top-h);
+  margin: 0;
+}
+.menu-ed__top > .menu-ed__chip-btn,
+.menu-ed__top > .menu-ed__chip { display: inline-flex; align-items: center; padding: 0 12px; border-radius: var(--radius-sm); }
+.menu-ed__top > .menu-ed__add-btn { display: inline-flex; align-items: center; padding-block: 0; }
 .menu-ed__chip-btn,
 .menu-ed__chip {
   flex: none;
@@ -2012,6 +2024,9 @@ input[type="radio"] {
 .menu-ed__key--extra { border-style: dashed; opacity: 0.55; }
 .menu-ed__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .menu-ed__mark { flex: none; color: var(--c-text-muted); }
+/* A list's chevron folds or opens it. */
+.menu-ed__mark--toggle { display: inline-grid; place-items: center; width: 24px; height: 24px; margin: -4px -4px -4px 0; border-radius: var(--radius-xs); cursor: pointer; }
+.menu-ed__mark--toggle:hover { background: var(--c-card-bg); color: var(--c-accent); }
 .menu-ed__add { display: flex; flex-wrap: wrap; gap: 6px; }
 
 .menu-ed__pane {

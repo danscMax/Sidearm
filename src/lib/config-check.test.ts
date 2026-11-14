@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Action, Binding } from "./config";
-import { checkProfile } from "./config-check";
+import { checkProfile, duplicatesOnDevice, duplicatesSignature, sameAsByControl } from "./config-check";
+import { controlWithGesture } from "./labels";
 import { findShortcutConflicts } from "./conflict-detection";
 import { makeConfig } from "./test-fixtures";
 
@@ -68,5 +69,36 @@ describe("checkProfile", () => {
       // The same shortcut on a double press and a plain press: a choice, noted.
       { kind: "duplicate", bindings: [{ id: "b4" }, { id: "b5" }] },
     ]);
+  });
+
+  it("keeps the duplicates of the mouse shown, marks each button with the others, signs the set", () => {
+    const base = makeConfig();
+    const other = (id: string) => ({ ...base.physicalControls[0]!, id, deviceId: "v3" });
+    const config = makeConfig({
+      physicalControls: [...base.physicalControls, other("v3_mouse_4"), other("v3_thumb_01")],
+      actions: [key("k", "A", { ctrl: true }), key("k2", "A", { ctrl: true })],
+      settings: { ...base.settings, acceptedConflicts: [] },
+      bindings: [
+        bind("b1", "thumb_01", "k"),
+        bind("b2", "mouse_4", "k2", { triggerMode: "longPress" }),
+        bind("b3", "v3_thumb_01", "k"),
+        bind("b4", "v3_mouse_4", "k2", { triggerMode: "longPress" }),
+      ],
+    });
+    const issues = checkProfile(config, "p1");
+    // The same group on both mice: one each, not twice on one.
+    expect(issues).toHaveLength(2);
+    const shown = duplicatesOnDevice(issues, config, base.physicalControls[0]!.deviceId);
+    expect(shown).toMatchObject([{ bindings: [{ id: "b1" }, { id: "b2" }] }]);
+    expect(duplicatesOnDevice(issues, config, "v3")).toMatchObject([{ bindings: [{ id: "b3" }, { id: "b4" }] }]);
+    expect(duplicatesOnDevice(issues, config, null)).toEqual([]);
+
+    const sameAs = sameAsByControl(shown, "standard");
+    expect(sameAs.get("thumb_01")).toEqual([controlWithGesture("mouse_4", "longPress")]);
+    expect(sameAs.get("mouse_4")).toEqual([controlWithGesture("thumb_01")]);
+    expect(sameAsByControl(shown, "hypershift").size).toBe(0);
+
+    expect(duplicatesSignature(shown)).toBe(duplicatesSignature([...shown].reverse()));
+    expect(duplicatesSignature(shown)).not.toBe(duplicatesSignature(duplicatesOnDevice(issues, config, "v3")));
   });
 });

@@ -2115,13 +2115,15 @@
     "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
     "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one.",
     "duplicate": "“{{name}}” ({{layer}}): {{buttons}}.",
-    "duplicatesBanner": "The same thing on several buttons:",
+    "duplicatesLine": "The same thing on several buttons: {{count}}",
+    "duplicatesHide": "Hide",
     "banner_one": "This profile has {{count}} problem to look at:",
     "banner_other": "This profile has {{count}} problems to look at:"
   },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm.",
-    "syncedWith": "The same on {{mice}}: an edit of this button is repeated there."
+    "syncedWith": "The same on {{mice}}: an edit of this button is repeated there.",
+    "sameAs": "The same on: {{buttons}}"
   },
   "stats": {
     "loading": "Reading the press log…",

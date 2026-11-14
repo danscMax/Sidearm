@@ -6,8 +6,9 @@
 // mouse and layer (`duplicate`: a note, often a choice; a shortcut doubled on the
 // same press pattern is the conflict banner's unless the user kept it).
 
-import type { Action, AppConfig, Binding, MenuItem } from "./config";
+import type { Action, AppConfig, Binding, ControlId, Layer, MenuItem } from "./config";
 import { conflictingBindingIds, shortcutSignature } from "./conflict-detection";
+import { controlWithGesture } from "./labels";
 
 export type ConfigIssue =
   | { kind: "missingAction"; where: string }
@@ -121,4 +122,36 @@ export function checkProfile(config: AppConfig, profileId: string): ConfigIssue[
     if (new Set(group.bindings.map((binding) => binding.controlId)).size > 1) issues.push({ kind: "duplicate", ...group });
   }
   return issues;
+}
+
+export type DuplicateIssue = Extract<ConfigIssue, { kind: "duplicate" }>;
+
+/** The duplicate groups of one mouse: `checkProfile` groups them per device,
+ *  so a profile with the same thing on two mice would otherwise list it twice. */
+export function duplicatesOnDevice(issues: ConfigIssue[], config: AppConfig, deviceId: string | null | undefined): DuplicateIssue[] {
+  const deviceOf = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
+  // A group is one device by construction: its first binding names it.
+  return issues.filter((issue): issue is DuplicateIssue => issue.kind === "duplicate" && deviceOf.get(issue.bindings[0]!.controlId) === deviceId);
+}
+
+/** Per button, on one layer: the other buttons doing the same thing as one of
+ *  its press patterns ("Thumb 2", "Thumb 3 · Long press"). */
+export function sameAsByControl(duplicates: DuplicateIssue[], layer: Layer): Map<ControlId, string[]> {
+  const sameAs = new Map<ControlId, string[]>();
+  for (const group of duplicates) {
+    if (group.bindings[0]!.layer !== layer) continue;
+    for (const { controlId } of group.bindings) {
+      const others = group.bindings.filter((other) => other.controlId !== controlId).map((other) => controlWithGesture(other.controlId, other.triggerMode));
+      sameAs.set(controlId, [...new Set([...(sameAs.get(controlId) ?? []), ...others])]);
+    }
+  }
+  return sameAs;
+}
+
+/** Identifies a set of duplicate groups: a hidden set stays hidden, a new group shows the line again. */
+export function duplicatesSignature(duplicates: DuplicateIssue[]): string {
+  return duplicates
+    .map((group) => [group.name, group.bindings[0]!.layer, ...group.bindings.map((b) => `${b.controlId}:${b.triggerMode ?? "press"}`).sort()].join("\u0001"))
+    .sort()
+    .join("\u0002");
 }

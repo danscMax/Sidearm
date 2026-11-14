@@ -37,6 +37,9 @@ export type ControlSurfaceEntry = {
   /** The other mice whose same button this one is kept alike with (synced,
    *  with an assignment there): marked with a link beside the label. */
   syncedWith?: string[];
+  /** The other buttons of this mouse and layer doing the same thing as one of
+   *  this one's press patterns (`sameAsByControl`): marked beside the label. */
+  sameAs?: string[];
 };
 
 export type HotspotPosition = { left: number; top: number; label: string; size?: "sm" | "lg" };

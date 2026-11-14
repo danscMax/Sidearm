@@ -29,7 +29,7 @@ describe("MenuItemsEditor", () => {
     const typo: Action = { ...phrase, payload: { source: "inline", text: "hi {clipbord}", pasteMode: "sendText", tags: [] } };
     render(<MenuItemsEditor items={items} onChange={vi.fn()} config={{ ...config, actions: [typo] }} edits={NO_MENU_EDITS} onEditsChange={onEditsChange} />);
     expect(screen.getByText(i18n.t("picker.tokenUnknownLike", { token: "{clipbord}", fix: "{clipboard}" }))).toBeTruthy();
-    expect(screen.getByText(i18n.t("picker.previewLabel"))).toBeTruthy();
+    expect(screen.getByText(i18n.t("picker.tokenPreviewLabel"))).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.tokenFix", { fix: "{clipboard}" }) }));
     expect(phraseOf(onEditsChange.mock.calls[0][0].actions.a1, [])).toEqual({ text: "hi {clipboard}", enter: false });
   });

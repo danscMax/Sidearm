@@ -1168,7 +1168,7 @@
     "waitWindowExeMissing": "A \"Wait for window\" step needs the program to wait for (its .exe name).",
     "keyboardOnlyLibraryHint": "Types this library text key by key, never through the clipboard — everywhere it is used.",
     "tokenDateChip": "Date and time",
-    "previewLabel": "Types:",
+    "tokenPreviewLabel": "Types:",
     "previewHint": "What the phrase types now: the date and time are filled in; the clipboard, the selection and the fields when it runs.",
     "previewSlot": {
       "clipboard": "clipboard",

@@ -22,11 +22,11 @@ describe("token textarea", () => {
 
   it("previews the phrase with the date filled and the clipboard as a placeholder", () => {
     show("Hi {clipboard} {{x}}");
-    const preview = screen.getByText(i18n.t("picker.previewLabel")).parentElement!;
-    expect(preview.textContent).toBe(`${i18n.t("picker.previewLabel")}Hi ${i18n.t("picker.previewSlot.clipboard")} {x}`);
+    const preview = screen.getByText(i18n.t("picker.tokenPreviewLabel")).parentElement!;
+    expect(preview.textContent).toBe(`${i18n.t("picker.tokenPreviewLabel")}Hi ${i18n.t("picker.previewSlot.clipboard")} {x}`);
     cleanup();
     show("plain text");
-    expect(screen.queryByText(i18n.t("picker.previewLabel"))).toBeNull();
+    expect(screen.queryByText(i18n.t("picker.tokenPreviewLabel"))).toBeNull();
   });
 
   it("warns about a typo and a wrong date letter, each with its fix", () => {

@@ -146,7 +146,7 @@ export function TokenTextarea({
       </div>
       {preview ? (
         <p className="token-preview" title={t("picker.previewHint")}>
-          <span className="token-preview__label">{t("picker.previewLabel")}</span>
+          <span className="token-preview__label">{t("picker.tokenPreviewLabel")}</span>
           <span className="token-preview__text">
             {preview.map((part, index) => ("text" in part
               ? <span key={index}>{part.text}</span>

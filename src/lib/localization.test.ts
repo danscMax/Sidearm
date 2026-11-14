@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import en from "../i18n/locales/en.json";
 import ru from "../i18n/locales/ru.json";
+import enRaw from "../i18n/locales/en.json?raw";
+import ruRaw from "../i18n/locales/ru.json?raw";
 import { recoveryTestInstruction } from "./labels";
 import type { HypershiftTrigger } from "./config";
 import { ALL_ACTION_TYPES } from "./constants/ui-copy";
@@ -83,5 +85,21 @@ describe("configuration-aware recovery instructions", () => {
     await i18n.changeLanguage("en");
     expect(recoveryTestInstruction("wheel_click")).toContain("hold Wheel click");
     expect(recoveryTestInstruction("none")).not.toContain("HyperShift");
+  });
+});
+
+// Two branches adding the same key: JSON keeps the last, so one text silently
+// replaced another (picker.previewLabel, 2026-11-14).
+describe("locale files", () => {
+  it.each([["en", enRaw], ["ru", ruRaw]])("%s has no key twice in one object", (_lang, raw) => {
+    const dupes: string[] = [];
+    const stack: Set<string>[] = [];
+    for (const token of raw.matchAll(/"((?:[^"\\]|\\.)*)"\s*:|[{}]/g)) {
+      if (token[0] === "{") stack.push(new Set());
+      else if (token[0] === "}") stack.pop();
+      else if (stack.at(-1)?.has(token[1]!)) dupes.push(token[1]!);
+      else stack.at(-1)?.add(token[1]!);
+    }
+    expect(dupes).toEqual([]);
   });
 });

@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         mpsc,
     },
     thread,
@@ -51,6 +51,13 @@ pub const MAX_BANKS: u8 = 5;
 
 static ACTIVE: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
 static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
+/// A session that ended at exit left its live map to the exit's bank write
+/// (`write_offline`): the bank reselect reloads it, so restoring it record by
+/// record first (~5 s on the V3) was overwritten right after.
+static EXIT_DEFERRED: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
+/// Presses of each mouse dropped while its live map was being written
+/// ([`events_allowed`]), logged as one line once it is ready.
+static DROPPED: [AtomicU32; CATALOG_LEN] = [const { AtomicU32::new(0) }; CATALOG_LEN];
 /// Inputs of each mouse that are down right now: its signals as the capture
 /// helper reads them, and the keys and buttons its firmware sends, as raw input
 /// reports them (`system_events`). A live record rewritten while its button is
@@ -125,6 +132,19 @@ pub fn is_ready(model: &NativeModel) -> bool {
 /// live map still being written could deliver another session's signal.
 pub fn events_allowed(model: &NativeModel) -> bool {
     !is_active(model) || is_ready(model)
+}
+
+/// A press of `model` dropped because [`events_allowed`] said no.
+pub fn note_dropped(model: &NativeModel) {
+    DROPPED[model.catalog_index()].fetch_add(1, Ordering::Relaxed);
+}
+
+/// One line for the presses dropped since the session began (`since`).
+fn log_dropped(model: &NativeModel, since: std::time::Instant, outcome: &str) {
+    let count = DROPPED[model.catalog_index()].swap(0, Ordering::Relaxed);
+    if count > 0 {
+        log::info!("[naga-live] {} dropped {count} press(es) in {} ms while its live map was written ({outcome})", model.name, since.elapsed().as_millis());
+    }
 }
 
 /// The models that need a live-map session, given the ones plugged in: every
@@ -474,12 +494,72 @@ pub(crate) fn write_offline(
     config_dir: &Path,
 ) -> Result<(), String> {
     let device = VendorDevice::open_model(model)?;
-    let banks = read_banks(&device)?;
+    // The live map this mouse's session left to the bank reselect below.
+    let deferred = EXIT_DEFERRED[model.catalog_index()].swap(false, Ordering::AcqRel).then(|| live_backup(config_dir, model));
+    write_offline_on(&device, config, offline_profile, config_dir, deferred)
+}
+
+/// [`write_offline`] on the open `device`; `deferred`: the rollback file of a
+/// live map that still holds Sidearm's signals.
+fn write_offline_on(
+    device: &VendorDevice,
+    config: &AppConfig,
+    offline_profile: &str,
+    config_dir: &Path,
+    deferred: Option<PathBuf>,
+) -> Result<(), String> {
+    let model = device.model();
+    let mut reloaded = false;
+    let result = store_banks(device, config, model, offline_profile, config_dir, deferred.as_deref(), &mut reloaded);
+    if let Some(live) = deferred {
+        // Reloaded: what was left in the rollback file is the bank's now.
+        // Otherwise (no reselect, or it failed) it goes back record by record.
+        let left = if reloaded {
+            match std::fs::remove_file(&live) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
+                _ => Ok(()),
+            }
+        } else {
+            restore_bank(device, LIVE_BANK, &live)
+        };
+        match left {
+            Ok(()) if reloaded => log::info!("[naga-live] {} live map reloaded from its bank", model.name),
+            Ok(()) => {}
+            Err(error) => log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name),
+        }
+    }
+    result
+}
+
+/// The banks part of [`write_offline_on`]. `deferred`: the rollback file of a
+/// live map still holding Sidearm's signals; `reloaded` is set once the bank
+/// reselect replaced them.
+fn store_banks(
+    device: &VendorDevice,
+    config: &AppConfig,
+    model: &'static NativeModel,
+    offline_profile: &str,
+    config_dir: &Path,
+    deferred: Option<&Path>,
+    reloaded: &mut bool,
+) -> Result<(), String> {
+    let banks = read_banks(device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
     let mut asleep = None;
+    // The live records the exit bank will not reload go back now, as the
+    // session would have; the reselect reloads the ones it holds.
+    let mut live_left = true;
+    if let Some(live) = deferred {
+        let reloads = reloaded_by_exit_bank(config, model, &plan, &banks, offline_profile);
+        if let Err(error) = restore_bank_except(device, LIVE_BANK, live, |button, layer| reloads.contains(&(button, layer))) {
+            log::warn!("[naga-live] {} live map not restored before the bank write: {error}", model.name);
+            note_asleep(&mut asleep, error);
+            live_left = false;
+        }
+    }
     // The bank reselect below sets the DPI (no linked bank: no reselect); the
     // poll rate stays what the last profile switch left.
-    if let Err(error) = crate::mouse_offline::restore_live_speed(&device, config, offline_profile, plan.is_empty()) {
+    if let Err(error) = crate::mouse_offline::restore_live_speed(device, config, offline_profile, plan.is_empty()) {
         log::warn!("[mouse-offline] {} poll rate not put back: {error}", model.name);
         note_asleep(&mut asleep, error);
     }
@@ -487,7 +567,7 @@ pub(crate) fn write_offline(
     // Sidearm stored there earlier (an old turbo record included) would play on.
     for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
         let backup = bank_backup(config_dir, model, bank);
-        if backup.exists() && let Err(error) = restore_bank(&device, bank, &backup) {
+        if backup.exists() && let Err(error) = restore_bank(device, bank, &backup) {
             log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
             note_asleep(&mut asleep, error);
         }
@@ -499,15 +579,15 @@ pub(crate) fn write_offline(
     for &(bank, profile_id) in &plan {
         let backup = bank_backup(config_dir, model, bank);
         let targets = offline_targets(config, model, profile_id);
-        let already_stored = load_snapshot(&device, &backup)?.is_some_and(|snapshot| {
+        let already_stored = load_snapshot(device, &backup)?.is_some_and(|snapshot| {
             snapshot.records.len() == targets.len()
                 && snapshot.records.iter().zip(&targets).all(|(record, &(button, layer, action))| {
                     (record.button, record.layer, record.target) == (button, layer, bank_block(bank, action))
                 })
-                && verify_bank(&device, bank, &snapshot.records).is_ok()
+                && verify_bank(device, bank, &snapshot.records).is_ok()
         });
         if !already_stored {
-            apply_bank(&device, bank, &backup, &targets)?;
+            apply_bank(device, bank, &backup, &targets)?;
         }
         log::info!("[mouse-offline] {} profile `{profile_id}` verified in bank {bank}: {} records", model.name, targets.len());
         // Each bank keeps its own DPI and the mouse switches to it with the
@@ -527,11 +607,31 @@ pub(crate) fn write_offline(
         }
     }
     // The records are stored either way; playing them at once is a convenience.
-    if let Err(error) = select_bank(&device, exit_bank(&plan, &banks, offline_profile)) {
-        log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
-        note_asleep(&mut asleep, error);
+    match select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
+        // The firmware reloaded the live map from the bank just verified.
+        Ok(()) => *reloaded = live_left,
+        Err(error) => {
+            log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
+            note_asleep(&mut asleep, error);
+        }
     }
     asleep.map_or(Ok(()), Err)
+}
+
+/// The live-map addresses the exit's bank reselect reloads from a bank this
+/// write verified: the records planned for that bank (the last profile linked
+/// to it wins, as its write is the one that stands). None when the bank played
+/// after exit is not written (no profile linked to it).
+fn reloaded_by_exit_bank(config: &AppConfig, model: &NativeModel, plan: &[(u8, &str)], banks: &Banks, offline_profile: &str) -> Vec<(u8, u8)> {
+    if plan.is_empty() {
+        return Vec::new();
+    }
+    let bank = exit_bank(plan, banks, offline_profile);
+    plan.iter()
+        .rev()
+        .find(|&&(planned, _)| planned == bank)
+        .map(|&(_, profile)| offline_targets(config, model, profile).into_iter().map(|(button, layer, _)| (button, layer)).collect())
+        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -573,6 +673,18 @@ pub fn stop_sessions(mut sessions: Vec<Session>) {
     }
     sessions.iter_mut().for_each(Session::request_stop);
     let _ = thread::Builder::new().name("live-map-stop".into()).spawn(move || drop(sessions));
+}
+
+/// Restores a live map its session left to the exit's bank write
+/// ([`EXIT_DEFERRED`]) when that write did not take it (the mouse is not a
+/// configured offline target, the config could not be read): the exit's last
+/// HID work, run only when no restore process is left to do it.
+pub fn restore_deferred(config_dir: &Path) {
+    for model in CATALOG.iter().filter(|model| EXIT_DEFERRED[model.catalog_index()].swap(false, Ordering::AcqRel)) {
+        if let Err(error) = VendorDevice::open_model(model).and_then(|device| restore_bank(&device, LIVE_BANK, &live_backup(config_dir, model))) {
+            log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name);
+        }
+    }
 }
 
 /// Puts back every live map a Sidearm process left when it died without
@@ -715,9 +827,15 @@ fn save_snapshot(backup: &Path, snapshot: &Snapshot) -> Result<(), String> {
 
 /// Puts back every record Sidearm still owns (the user's own changes stay).
 fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), String> {
-    let Some(snapshot) = load_snapshot(device, backup)? else { return Ok(()) };
+    restore_bank_except(device, bank, backup, |_, _| false)
+}
+
+/// [`restore_bank`] for every record but the addresses `keep` names, which stay
+/// in the rollback file (it goes once none is left).
+fn restore_bank_except(device: &VendorDevice, bank: u8, backup: &Path, keep: impl Fn(u8, u8) -> bool) -> Result<(), String> {
+    let Some(mut snapshot) = load_snapshot(device, backup)? else { return Ok(()) };
     let mut failure = None;
-    for record in snapshot.records.iter().rev().filter(|record| record.before != record.target) {
+    for record in snapshot.records.iter().rev().filter(|record| record.before != record.target && !keep(record.button, record.layer)) {
         // Read as something else twice: the user's own change, kept. A single
         // odd read is a firmware transition, not a reason to give the record up.
         let result = confirmed_drift(record.target, || device.read_block(bank, record.button, record.layer)).and_then(|changed| {
@@ -730,8 +848,14 @@ fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), St
     if let Some(error) = failure {
         return Err(error);
     }
-    std::fs::remove_file(backup).map_err(|error| error.to_string())?;
-    log::info!("[naga-live] {} restored previous assignments in bank {bank}", device.model().name);
+    snapshot.records.retain(|record| keep(record.button, record.layer));
+    if snapshot.records.is_empty() {
+        std::fs::remove_file(backup).map_err(|error| error.to_string())?;
+        log::info!("[naga-live] {} restored previous assignments in bank {bank}", device.model().name);
+    } else {
+        save_snapshot(backup, &snapshot)?;
+        log::info!("[naga-live] {} restored previous assignments in bank {bank}, {} kept", device.model().name, snapshot.records.len());
+    }
     Ok(())
 }
 
@@ -802,10 +926,28 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     if device.mode()? != MODE_NORMAL {
         return Err("Mouse is not in firmware mode".into());
     }
-    restore_bank(device, bank, backup)?;
+    // A record Sidearm wrote earlier that stays the same keeps it and its
+    // original: putting the original back only to write the same record again
+    // cost five commands a record. Every other one goes back first, as before.
+    let previous = load_snapshot(device, backup)?.map(|snapshot| snapshot.records).unwrap_or_default();
+    let mut kept: Vec<Record> = Vec::new();
+    for &(button, layer, action) in targets {
+        if let Some(record) = previous.iter().find(|record| {
+            (record.button, record.layer) == (button, layer) && record.before != record.target && record.target == bank_block(bank, action)
+        }) && !confirmed_drift(record.target, || device.read_block(bank, button, layer))?
+        {
+            kept.push(record.clone());
+        }
+    }
+    let is_kept = |button: u8, layer: u8| kept.iter().any(|record| (record.button, record.layer) == (button, layer));
+    restore_bank_except(device, bank, backup, is_kept)?;
     let mut records = Vec::with_capacity(targets.len());
     let model = device.model();
     for &(button, layer, action) in targets {
+        if let Some(record) = kept.iter().find(|record| (record.button, record.layer) == (button, layer)) {
+            records.push(record.clone());
+            continue;
+        }
         let mut before = device.read_block(bank, button, layer)?;
         // A map no session restored (its rollback file lost) still holds
         // Sidearm's signal: a native button gets its plain record back as the
@@ -826,7 +968,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     let result = snapshot
         .records
         .iter()
-        .filter(|record| record.before != record.target)
+        .filter(|record| record.before != record.target && !is_kept(record.button, record.layer))
         .try_for_each(|record| write_bank(device, bank, record.button, record.layer, record.target))
         .and_then(|()| verify_bank(device, bank, &snapshot.records));
     if let Err(error) = result {
@@ -875,6 +1017,7 @@ impl Session {
         let claimed = Arc::new(AtomicBool::new(ACTIVE[index].compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire).is_ok()));
         let worker_claimed = Arc::clone(&claimed);
         let (stop, stopped) = mpsc::channel();
+        let started = std::time::Instant::now();
         let worker = thread::Builder::new()
             .name("naga-live".into())
             .spawn(move || {
@@ -930,6 +1073,7 @@ impl Session {
                 };
                 let mut last_error = None;
                 let mut active = None;
+                let has_banks = model.live.as_ref().is_some_and(|live| live.banks);
                 'session: loop {
                     loop {
                         match attempt(&mut active) {
@@ -946,10 +1090,10 @@ impl Session {
                     }
                     last_error = None;
                     READY[index].store(true, Ordering::Release);
+                    log_dropped(model, started, "ready");
                     // The profile button reloads the whole live map from another
                     // bank: watching the active bank catches it at once, where the
                     // record-by-record check would take a full cycle.
-                    let has_banks = model.live.as_ref().is_some_and(|live| live.banks);
                     let mut last_bank = None;
                     for &(button, layer, action) in worker_targets.iter().cycle() {
                         if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
@@ -975,8 +1119,15 @@ impl Session {
                     }
                 }
                 READY[index].store(false, Ordering::Release);
+                log_dropped(model, started, "stopped before it was ready");
                 if active.is_some() {
-                    if let Err(error) = open().and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
+                    if crate::is_shutting_down() && has_banks {
+                        // The exit's bank write reselects a bank, which reloads
+                        // this map; it puts back whatever that bank does not hold
+                        // (`write_offline`, else `restore_deferred`).
+                        EXIT_DEFERRED[index].store(true, Ordering::Release);
+                        log::info!("[naga-live] {} live map left to the exit's bank write", model.name);
+                    } else if let Err(error) = open().and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
                         log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name);
                     }
                     // The restored map plays what the mouse had stored (often the
@@ -1402,6 +1553,179 @@ pub(crate) mod tests {
             write_bank(&device, LIVE_BANK, button, 0, record).unwrap();
         }
         println!("records put back");
+    }
+
+    const V3_PATH: &str = r"\\?\hid#vid_1532&pid_00e8&mi_00#x";
+
+    fn snapshot_at(path: &Path) -> Option<Vec<Record>> {
+        std::fs::read(path).ok().map(|bytes| serde_json::from_slice::<Snapshot>(&bytes).unwrap().records)
+    }
+
+    /// What the mouse holds, the rollback files left, how many commands it took.
+    type FlowEnd = (std::collections::BTreeMap<(u8, u8, u8), [u8; 7]>, Vec<(String, Option<Vec<Record>>)>, usize);
+
+    /// Runs `flow` on a copy of `start` (the fake's records) in a fresh copy of
+    /// `files`.
+    fn run_flow(start: &crate::mouse_memory::fake::FakeMouse, files: &[(String, Vec<u8>)], flow: impl FnOnce(&VendorDevice, &Path)) -> FlowEnd {
+        use crate::mouse_memory::fake;
+        let dir = tempfile::tempdir().unwrap();
+        for (name, bytes) in files {
+            std::fs::write(dir.path().join(name), bytes).unwrap();
+        }
+        fake::with(|mouse| {
+            *mouse = start.clone();
+            mouse.asked = 0;
+            mouse.writes.clear();
+        });
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        flow(&device, dir.path());
+        drop(device);
+        let left = files
+            .iter()
+            .map(|(name, _)| name.clone())
+            .chain(["razer-naga-v3-live.json".to_owned(), "razer-naga-v3-bank-1.json".to_owned()])
+            .map(|name| {
+                let records = snapshot_at(&dir.path().join(&name));
+                (name, records)
+            })
+            .collect();
+        fake::with(|mouse| (mouse.records.iter().map(|(&key, &block)| (key, block)).collect(), left, mouse.asked))
+    }
+
+    /// A V3 with three banks, bank 1 playing: every address the live map uses
+    /// holds a factory record in the live map and in each bank, except one
+    /// address bank 1 holds no record for.
+    fn v3_with_banks(live: &[(u8, u8, OnboardAction)]) -> crate::mouse_memory::fake::FakeMouse {
+        let mut mouse = crate::mouse_memory::fake::FakeMouse { banks: vec![1, 2, 3], active_bank: 1, poll_code: 1, ..Default::default() };
+        for (index, &(button, layer, _)) in live.iter().enumerate() {
+            let factory = block(OnboardAction::Key { modifier: 0, usage: 0x04 + index as u8 });
+            for bank in [0, 1, 2, 3] {
+                if bank == 1 && index == live.len() - 1 {
+                    continue;
+                }
+                mouse.records.insert((bank, button, layer), factory);
+            }
+        }
+        mouse
+    }
+
+    /// A config whose fallback profile is linked to V3 bank 1 and has a
+    /// shortcut, a text and the HyperShift trigger to store there.
+    fn config_for_bank_one() -> (AppConfig, String) {
+        let mut config = config_with_v3();
+        let profile = config.profiles[0].id.clone();
+        config.profiles[0].device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
+        let action = |kind| config.actions.iter().find(|action| action.action_type == kind).unwrap().id.clone();
+        let (shortcut, text) = (action(ActionType::Shortcut), action(ActionType::TextSnippet));
+        for (id, control, layer, action) in [("t2", "thumb_02", Layer::Hypershift, shortcut), ("t3", "thumb_03", Layer::Standard, text)] {
+            config.bindings.push(crate::config::Binding {
+                id: id.into(),
+                profile_id: profile.clone(),
+                layer,
+                control_id: control_id(&NAGA_V3_PRO, control),
+                label: id.into(),
+                action_id: action,
+                color_tag: None,
+                trigger_mode: None,
+                chord_partner: None,
+                enabled: true,
+                throttle_ms: None,
+            });
+        }
+        (config, profile)
+    }
+
+    /// The exit used to restore the live map record by record and then
+    /// reselect the bank it had just written, which reloads the live map from
+    /// it. Leaving the map to that reselect ends with the same records in the
+    /// live map and every bank, the same rollback files — and fewer commands.
+    /// Also when the reselect fails: then the rest goes back afterwards.
+    #[test]
+    fn leaving_the_live_map_to_the_exit_reselect_ends_as_restoring_it_first() {
+        use crate::mouse_memory::fake::{self, FakeMouse};
+        let (config, profile) = config_for_bank_one();
+        let live = overlay(&config, &NAGA_V3_PRO, true, false).unwrap().targets;
+        let planned = offline_targets(&config, &NAGA_V3_PRO, &profile);
+        assert!(planned.len() > 2 && planned.len() < live.len(), "some live records reload from bank 1, some do not");
+        let _fake = fake::install(FakeMouse::default());
+        // The session wrote the live map.
+        let (start, files) = {
+            fake::with(|mouse| *mouse = v3_with_banks(&live));
+            let dir = tempfile::tempdir().unwrap();
+            let backup = live_backup(dir.path(), &NAGA_V3_PRO);
+            let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+            apply_bank(&device, LIVE_BANK, &backup, &live).unwrap();
+            drop(device);
+            let name = backup.file_name().unwrap().to_string_lossy().into_owned();
+            (fake::with(|mouse| mouse.clone()), vec![(name, std::fs::read(&backup).unwrap())])
+        };
+        let live_file = |dir: &Path| live_backup(dir, &NAGA_V3_PRO);
+        for select_fails in [false, true] {
+            let mut start = start.clone();
+            if select_fails {
+                start.refused.push((CLASS_BANKS, CMD_SELECT_BANK));
+            }
+            let restored_first = run_flow(&start, &files, |device, dir| {
+                restore_bank(device, LIVE_BANK, &live_file(dir)).unwrap();
+                let result = write_offline_on(device, &config, &profile, dir, None);
+                assert!(result.is_ok(), "a refused reselect is only logged");
+            });
+            let left_to_reselect = run_flow(&start, &files, |device, dir| {
+                write_offline_on(device, &config, &profile, dir, Some(live_file(dir))).unwrap();
+            });
+            assert_eq!(left_to_reselect.0, restored_first.0, "the mouse holds the same records (reselect fails: {select_fails})");
+            assert_eq!(left_to_reselect.1, restored_first.1, "the same rollback files are left (reselect fails: {select_fails})");
+            assert!(left_to_reselect.1.iter().all(|(name, records)| !name.ends_with("-live.json") || records.is_none()));
+            if !select_fails {
+                assert!(left_to_reselect.2 < restored_first.2, "{} commands, not {}", left_to_reselect.2, restored_first.2);
+            }
+        }
+    }
+
+    /// Rewriting a bank used to put every record Sidearm wrote there back first.
+    /// A record that stays the same now keeps it: same records and the same
+    /// rollback file, fewer commands — also with a record the user changed
+    /// meanwhile and one odd read.
+    #[test]
+    fn rewriting_a_bank_ends_as_restoring_it_first() {
+        use crate::mouse_memory::fake::{self, FakeMouse};
+        let key = |usage| OnboardAction::Key { modifier: 0, usage };
+        let first = [(0x40, 0, key(0x10)), (0x41, 0, key(0x11)), (0x42, 0, key(0x12)), (0x43, 1, key(0x13)), (0x44, 0, key(0x14))];
+        // Same, changed, same (but the user changes it), dropped, same; and a new one.
+        let second = [(0x40, 0, key(0x10)), (0x41, 0, key(0x21)), (0x42, 0, key(0x12)), (0x44, 0, key(0x14)), (0x45, 1, key(0x15))];
+        let _fake = fake::install(FakeMouse::default());
+        let (mut start, files) = {
+            let mut mouse = FakeMouse { banks: vec![1], active_bank: 1, ..Default::default() };
+            for (index, button) in (0x40..=0x45).enumerate() {
+                for layer in [0, 1] {
+                    mouse.records.insert((1, button, layer), block(key(0x30 + index as u8)));
+                }
+            }
+            fake::with(|fake| *fake = mouse);
+            let dir = tempfile::tempdir().unwrap();
+            let backup = bank_backup(dir.path(), &NAGA_V3_PRO, 1);
+            let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+            apply_bank(&device, 1, &backup, &first).unwrap();
+            drop(device);
+            let name = backup.file_name().unwrap().to_string_lossy().into_owned();
+            (fake::with(|mouse| mouse.clone()), vec![(name, std::fs::read(&backup).unwrap())])
+        };
+        start.records.insert((1, 0x42, 0), block(key(0x55)));
+        start.odd_once.insert((1, 0x40, 0), block(key(0x66)));
+        let restored_first = run_flow(&start, &files, |device, dir| {
+            let backup = bank_backup(dir, &NAGA_V3_PRO, 1);
+            restore_bank(device, 1, &backup).unwrap();
+            apply_bank(device, 1, &backup, &second).unwrap();
+        });
+        let kept = run_flow(&start, &files, |device, dir| {
+            apply_bank(device, 1, &bank_backup(dir, &NAGA_V3_PRO, 1), &second).unwrap();
+        });
+        assert_eq!(kept.0, restored_first.0, "the mouse holds the same records");
+        assert_eq!(kept.1, restored_first.1, "the rollback file holds the same originals");
+        assert!(kept.2 < restored_first.2, "{} commands, not {}", kept.2, restored_first.2);
+        let originals = kept.1.iter().find_map(|(name, records)| name.ends_with("-bank-1.json").then_some(records.clone())).flatten().unwrap();
+        assert_eq!(originals.iter().find(|record| record.button == 0x42).unwrap().before, block(key(0x55)), "the user's change is the original now");
+        assert_eq!(originals.iter().find(|record| record.button == 0x40).unwrap().before, block(key(0x30)));
     }
 
     #[test]

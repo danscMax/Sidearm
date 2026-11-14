@@ -617,8 +617,9 @@ fn settle_tray_icon<E: std::fmt::Display>(shown: &Mutex<Option<Option<u8>>>, bad
 
 /// The exit gives the mice their own buttons back and stores the offline
 /// profile, which takes seconds: the tray says so (its tooltip, and a menu of
-/// that one line), so a closing Sidearm is not taken for a hung one. Called on
-/// the main thread (`RunEvent::Exit`), where tray calls run at once.
+/// that one line), so a closing Sidearm is not taken for a hung one. Called by
+/// [`request_exit`] while the event loop still runs, and again from
+/// `RunEvent::Exit` (main thread, where tray calls run at once).
 fn show_exiting_in_tray(app: &AppHandle) {
     let Some(tray) = app.tray_by_id("sidearm-tray") else {
         return;
@@ -2342,22 +2343,28 @@ fn restart_capture_with(app: &AppHandle, still_wanted: impl Fn() -> bool, keep_m
     let config_dir = resolve_config_dir(app).map_err(|error| error.message)?;
     let loaded = load_or_initialize_config(&config_dir).map_err(|error| error.to_string())?;
     let store = app.state::<Arc<Mutex<RuntimeStore>>>().inner().clone();
-    let controller = app.state::<Arc<Mutex<RuntimeController>>>();
-    let mut controller = controller.lock().map_err(|_| "runtime controller lock poisoned".to_string())?;
-    if !store.lock().recover_poison().is_running() || !still_wanted() {
-        return Ok(false);
-    }
-    let name = app.package_info().name.clone();
-    let result = if keep_maps {
-        controller.reload_saved_config(app.clone(), store.clone(), loaded.config, name)
-    } else {
-        controller.restart(app.clone(), store.clone(), loaded.config, name)
+    let result = {
+        let controller = app.state::<Arc<Mutex<RuntimeController>>>();
+        let mut controller = controller.lock().map_err(|_| "runtime controller lock poisoned".to_string())?;
+        if !store.lock().recover_poison().is_running() || !still_wanted() {
+            return Ok(false);
+        }
+        let name = app.package_info().name.clone();
+        let result = if keep_maps {
+            controller.reload_saved_config(app.clone(), store.clone(), loaded.config, name)
+        } else {
+            controller.restart(app.clone(), store.clone(), loaded.config, name)
+        };
+        if result.is_err() {
+            // `restart` already dropped the old backend: say so, as `reload_runtime` does.
+            let stopped_summary = store.lock().recover_poison().stop();
+            let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
+        }
+        result
     };
+    // And in the tray — nobody may be watching the window. After the controller
+    // lock: a tray call waits for the main thread, which may wait for that lock.
     if result.is_err() {
-        // `restart` already dropped the old backend: say so, as `reload_runtime`
-        // does, and in the tray — nobody may be watching the window.
-        let stopped_summary = store.lock().recover_poison().stop();
-        let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
         rebuild_tray_menu(app);
     }
     result.map(|()| true)
@@ -2689,7 +2696,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
         // New elevated process launched successfully — release modifiers and
         // exit the current one. The new process has its own keyboard hook.
         let _ = std::panic::catch_unwind(input_synthesis::release_all_modifiers);
-        app.exit(0);
+        request_exit(&app, "relaunch as administrator");
         Ok(())
     }
 
@@ -3539,35 +3546,90 @@ pub(crate) fn shutdown_mouse(app: &AppHandle) {
     }
 }
 
+/// Runs one exit step and logs how long it took.
+fn exit_step<T>(name: &str, work: impl FnOnce() -> T) -> T {
+    let started = std::time::Instant::now();
+    let result = work();
+    log::info!("[system] exit step `{name}`: {} ms", started.elapsed().as_millis());
+    result
+}
+
 fn shutdown_mouse_once(app: &AppHandle) {
+    let started = std::time::Instant::now();
+    // From here on no press is dispatched (`capture_backend`) and no capture
+    // restart writes the mice.
     SHUTTING_DOWN.store(true, Ordering::SeqCst);
     // A Sidearm started from now on waits for this one to be gone.
     #[cfg(target_os = "windows")]
     mouse_restore::mark_exiting();
+    exit_step("stop capture", || {
+        if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()
+            && let Err(message) = controller.stop()
+        {
+            log::warn!("[system] runtime stop on exit failed: {message}");
+        }
+    });
     #[cfg(target_os = "windows")]
-    onboard_guard::wait_tick();
-    if let Ok(mut controller) = app.state::<Arc<Mutex<RuntimeController>>>().lock()
-        && let Err(message) = controller.stop()
-    {
-        log::warn!("[system] runtime stop on exit failed: {message}");
-    }
+    exit_step("guard tick", onboard_guard::wait_tick);
     // Every session still restoring its mouse — the stop's own, and any a
     // config reload handed off — finishes before the offline write.
     #[cfg(target_os = "windows")]
-    if !mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
-        log::warn!("[system] a live map was still being restored at exit");
-    }
+    exit_step("live maps restored", || {
+        if !mouse_memory::live_overlay::wait_idle(std::time::Duration::from_secs(30)) {
+            log::warn!("[system] a live map was still being restored at exit");
+        }
+    });
     #[cfg(target_os = "windows")]
     {
-        write_offline_mouse_profile(app);
-        // A mouse that slept through it gets its profile once it wakes.
+        exit_step("offline profile", || write_offline_mouse_profile(app));
         if let Ok(config_dir) = resolve_config_dir(app) {
             if config_dir.join(mouse_offline::OFFLINE_FAILED_FILE).exists() {
-                spawn_live_map_restore(&config_dir, false);
+                // A mouse that slept through it gets its profile once it wakes,
+                // and its live map back (`restore_orphaned`).
+                exit_step("restorer started", || spawn_live_map_restore(&config_dir, false));
+            } else {
+                // A live map left to a bank reselect that did not happen.
+                exit_step("deferred live maps", || mouse_memory::live_overlay::restore_deferred(&config_dir));
             }
             // Last: an exit cut short leaves the watchdog to finish it.
             mouse_restore::mark_clean_exit(&config_dir);
         }
+    }
+    log::info!("[system] exit work done in {} ms", started.elapsed().as_millis());
+}
+
+/// Set once the event loop may end: the exit work ran on [`request_exit`]'s
+/// worker (or has to run in `RunEvent::Exit`, the worker failing to start).
+static EXIT_READY: AtomicBool = AtomicBool::new(false);
+
+/// A quit Sidearm itself asks for (tray, relaunch, a test run, any
+/// `ExitRequested`): the windows go and the tray says Sidearm is closing at
+/// once, then the exit work runs on a worker while the event loop keeps
+/// pumping — on the main thread it froze the window and the tray for its whole
+/// length (3-36 s), and every worker needing the main thread meanwhile (tray,
+/// OSD, menu) hung until the capture join gave up. `app.exit` follows it, and
+/// `RunEvent::Exit` finds the work done (`shutdown_mouse` runs once).
+pub(crate) fn request_exit(app: &AppHandle, source: &str) {
+    static REQUESTED: AtomicBool = AtomicBool::new(false);
+    if REQUESTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    log::info!("[system] exit requested ({source})");
+    for window in app.webview_windows().values() {
+        let _ = window.hide();
+    }
+    show_exiting_in_tray(app);
+    let worker = app.clone();
+    let spawned = std::thread::Builder::new().name("exit".into()).spawn(move || {
+        press_log::flush();
+        shutdown_mouse(&worker);
+        EXIT_READY.store(true, Ordering::SeqCst);
+        worker.exit(0);
+    });
+    if let Err(error) = spawned {
+        log::warn!("[system] exit worker not started, exiting on the main thread: {error}");
+        EXIT_READY.store(true, Ordering::SeqCst);
+        app.exit(0);
     }
 }
 
@@ -4470,7 +4532,7 @@ pub fn run() {
                             log::info!("[tray] quick-rule capture for `{}`", result.exe);
                         });
                     }
-                    "quit" => app.exit(0),
+                    "quit" => request_exit(app, "tray"),
                     "rules_now" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn_blocking(move || release_manual_profile(&app, None));
@@ -4678,14 +4740,21 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if let tauri::RunEvent::Exit = event {
+        .run(|app, event| match event {
+            // Any quit goes through the worker first, so the loop keeps pumping.
+            tauri::RunEvent::ExitRequested { api, code, .. } if !EXIT_READY.load(Ordering::SeqCst) => {
+                api.prevent_exit();
+                request_exit(app, &code.map_or_else(|| "last window closed".to_owned(), |code| format!("exit code {code}")));
+            }
+            // Fallback: already done when `request_exit` ran (once-only).
+            tauri::RunEvent::Exit => {
                 log::info!("[system] Clean shutdown.");
                 show_exiting_in_tray(app);
                 press_log::flush();
                 shutdown_mouse(app);
                 remove_crash_sentinel(app);
             }
+            _ => {}
         });
 }
 

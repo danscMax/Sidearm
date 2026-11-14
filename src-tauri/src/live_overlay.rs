@@ -51,10 +51,6 @@ pub const MAX_BANKS: u8 = 5;
 
 static ACTIVE: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
 static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
-/// A session that ended at exit left its live map to the exit's bank write
-/// (`write_offline`): the bank reselect reloads it, so restoring it record by
-/// record first (~5 s on the V3) was overwritten right after.
-static EXIT_DEFERRED: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
 /// Presses of each mouse dropped while its live map was being written
 /// ([`events_allowed`]), logged as one line once it is ready.
 static DROPPED: [AtomicU32; CATALOG_LEN] = [const { AtomicU32::new(0) }; CATALOG_LEN];
@@ -494,69 +490,25 @@ pub(crate) fn write_offline(
     config_dir: &Path,
 ) -> Result<(), String> {
     let device = VendorDevice::open_model(model)?;
-    // The live map this mouse's session left to the bank reselect below.
-    let deferred = EXIT_DEFERRED[model.catalog_index()].swap(false, Ordering::AcqRel).then(|| live_backup(config_dir, model));
-    write_offline_on(&device, config, offline_profile, config_dir, deferred)
+    store_banks(&device, config, model, offline_profile, config_dir)
 }
 
-/// [`write_offline`] on the open `device`; `deferred`: the rollback file of a
-/// live map that still holds Sidearm's signals.
-fn write_offline_on(
-    device: &VendorDevice,
-    config: &AppConfig,
-    offline_profile: &str,
-    config_dir: &Path,
-    deferred: Option<PathBuf>,
-) -> Result<(), String> {
-    let model = device.model();
-    let mut reloaded = false;
-    let result = store_banks(device, config, model, offline_profile, config_dir, deferred.as_deref(), &mut reloaded);
-    if let Some(live) = deferred {
-        // Reloaded: what was left in the rollback file is the bank's now.
-        // Otherwise (no reselect, or it failed) it goes back record by record.
-        let left = if reloaded {
-            match std::fs::remove_file(&live) {
-                Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error.to_string()),
-                _ => Ok(()),
-            }
-        } else {
-            restore_bank(device, LIVE_BANK, &live)
-        };
-        match left {
-            Ok(()) if reloaded => log::info!("[naga-live] {} live map reloaded from its bank", model.name),
-            Ok(()) => {}
-            Err(error) => log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name),
-        }
-    }
-    result
-}
-
-/// The banks part of [`write_offline_on`]. `deferred`: the rollback file of a
-/// live map still holding Sidearm's signals; `reloaded` is set once the bank
-/// reselect replaced them.
+/// The banks part of [`write_offline`]. The live map is already back (its
+/// session restores it record by record when it stops): leaving it to the bank
+/// reselect below was tried and failed on the real V3 (2026-11-14: after an
+/// exit only the 2 records restored first played, the 38 left to the reselect
+/// stayed Sidearm's silent signals — reselecting the bank already playing
+/// reloads nothing).
 fn store_banks(
     device: &VendorDevice,
     config: &AppConfig,
     model: &'static NativeModel,
     offline_profile: &str,
     config_dir: &Path,
-    deferred: Option<&Path>,
-    reloaded: &mut bool,
 ) -> Result<(), String> {
     let banks = read_banks(device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
     let mut asleep = None;
-    // The live records the exit bank will not reload go back now, as the
-    // session would have; the reselect reloads the ones it holds.
-    let mut live_left = true;
-    if let Some(live) = deferred {
-        let reloads = reloaded_by_exit_bank(config, model, &plan, &banks, offline_profile);
-        if let Err(error) = restore_bank_except(device, LIVE_BANK, live, |button, layer| reloads.contains(&(button, layer))) {
-            log::warn!("[naga-live] {} live map not restored before the bank write: {error}", model.name);
-            note_asleep(&mut asleep, error);
-            live_left = false;
-        }
-    }
     // The bank reselect below sets the DPI (no linked bank: no reselect); the
     // poll rate stays what the last profile switch left.
     if let Err(error) = crate::mouse_offline::restore_live_speed(device, config, offline_profile, plan.is_empty()) {
@@ -607,31 +559,11 @@ fn store_banks(
         }
     }
     // The records are stored either way; playing them at once is a convenience.
-    match select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
-        // The firmware reloaded the live map from the bank just verified.
-        Ok(()) => *reloaded = live_left,
-        Err(error) => {
-            log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
-            note_asleep(&mut asleep, error);
-        }
+    if let Err(error) = select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
+        log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
+        note_asleep(&mut asleep, error);
     }
     asleep.map_or(Ok(()), Err)
-}
-
-/// The live-map addresses the exit's bank reselect reloads from a bank this
-/// write verified: the records planned for that bank (the last profile linked
-/// to it wins, as its write is the one that stands). None when the bank played
-/// after exit is not written (no profile linked to it).
-fn reloaded_by_exit_bank(config: &AppConfig, model: &NativeModel, plan: &[(u8, &str)], banks: &Banks, offline_profile: &str) -> Vec<(u8, u8)> {
-    if plan.is_empty() {
-        return Vec::new();
-    }
-    let bank = exit_bank(plan, banks, offline_profile);
-    plan.iter()
-        .rev()
-        .find(|&&(planned, _)| planned == bank)
-        .map(|&(_, profile)| offline_targets(config, model, profile).into_iter().map(|(button, layer, _)| (button, layer)).collect())
-        .unwrap_or_default()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -675,17 +607,6 @@ pub fn stop_sessions(mut sessions: Vec<Session>) {
     let _ = thread::Builder::new().name("live-map-stop".into()).spawn(move || drop(sessions));
 }
 
-/// Restores a live map its session left to the exit's bank write
-/// ([`EXIT_DEFERRED`]) when that write did not take it (the mouse is not a
-/// configured offline target, the config could not be read): the exit's last
-/// HID work, run only when no restore process is left to do it.
-pub fn restore_deferred(config_dir: &Path) {
-    for model in CATALOG.iter().filter(|model| EXIT_DEFERRED[model.catalog_index()].swap(false, Ordering::AcqRel)) {
-        if let Err(error) = VendorDevice::open_model(model).and_then(|device| restore_bank(&device, LIVE_BANK, &live_backup(config_dir, model))) {
-            log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name);
-        }
-    }
-}
 
 /// Puts back every live map a Sidearm process left when it died without
 /// restoring (killed, crashed): run by its capture helper, which outlives it.
@@ -943,6 +864,11 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     restore_bank_except(device, bank, backup, is_kept)?;
     let mut records = Vec::with_capacity(targets.len());
     let model = device.model();
+    // A live map of a mouse with banks is what the firmware loaded from the
+    // bank playing: that bank's record is the address's true original.
+    let playing = (bank == LIVE_BANK && model.live.as_ref().is_some_and(|live| live.banks))
+        .then(|| read_banks(device).map(|banks| banks.active).ok())
+        .flatten();
     for &(button, layer, action) in targets {
         if let Some(record) = kept.iter().find(|record| (record.button, record.layer) == (button, layer)) {
             records.push(record.clone());
@@ -950,12 +876,14 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
         }
         let mut before = device.read_block(bank, button, layer)?;
         // A map no session restored (its rollback file lost) still holds
-        // Sidearm's signal: a native button gets its plain record back as the
-        // original, anything else keeps it and says so.
+        // Sidearm's signal: the playing bank's record is its original, else a
+        // native button's plain record; anything else keeps it and says so.
         if is_own_signal(model, button, layer, before) {
-            match model.native_buttons.iter().find(|&&(_, id, _)| id == button) {
-                Some(&(_, _, value)) => before = block(OnboardAction::Mouse(value)),
-                None => log::warn!("[naga-live] {} {button:#04x}/{layer} holds a Sidearm signal with no original", model.name),
+            let stored = playing.and_then(|active| device.read_block(active, button, layer).ok()).filter(|stored| !is_own_signal(model, button, layer, *stored));
+            match (stored, model.native_buttons.iter().find(|&&(_, id, _)| id == button)) {
+                (Some(stored), _) => before = stored,
+                (None, Some(&(_, _, value))) => before = block(OnboardAction::Mouse(value)),
+                (None, None) => log::warn!("[naga-live] {} {button:#04x}/{layer} holds a Sidearm signal with no original", model.name),
             }
         }
         records.push(Record { button, layer, before, target: bank_block(bank, action) });
@@ -1121,13 +1049,7 @@ impl Session {
                 READY[index].store(false, Ordering::Release);
                 log_dropped(model, started, "stopped before it was ready");
                 if active.is_some() {
-                    if crate::is_shutting_down() && has_banks {
-                        // The exit's bank write reselects a bank, which reloads
-                        // this map; it puts back whatever that bank does not hold
-                        // (`write_offline`, else `restore_deferred`).
-                        EXIT_DEFERRED[index].store(true, Ordering::Release);
-                        log::info!("[naga-live] {} live map left to the exit's bank write", model.name);
-                    } else if let Err(error) = open().and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
+                    if let Err(error) = open().and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
                         log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name);
                     }
                     // The restored map plays what the mouse had stored (often the
@@ -1592,94 +1514,34 @@ pub(crate) mod tests {
         fake::with(|mouse| (mouse.records.iter().map(|(&key, &block)| (key, block)).collect(), left, mouse.asked))
     }
 
-    /// A V3 with three banks, bank 1 playing: every address the live map uses
-    /// holds a factory record in the live map and in each bank, except one
-    /// address bank 1 holds no record for.
-    fn v3_with_banks(live: &[(u8, u8, OnboardAction)]) -> crate::mouse_memory::fake::FakeMouse {
-        let mut mouse = crate::mouse_memory::fake::FakeMouse { banks: vec![1, 2, 3], active_bank: 1, poll_code: 1, ..Default::default() };
-        for (index, &(button, layer, _)) in live.iter().enumerate() {
-            let factory = block(OnboardAction::Key { modifier: 0, usage: 0x04 + index as u8 });
-            for bank in [0, 1, 2, 3] {
-                if bank == 1 && index == live.len() - 1 {
-                    continue;
-                }
-                mouse.records.insert((bank, button, layer), factory);
-            }
-        }
-        mouse
-    }
-
-    /// A config whose fallback profile is linked to V3 bank 1 and has a
-    /// shortcut, a text and the HyperShift trigger to store there.
-    fn config_for_bank_one() -> (AppConfig, String) {
-        let mut config = config_with_v3();
-        let profile = config.profiles[0].id.clone();
-        config.profiles[0].device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
-        let action = |kind| config.actions.iter().find(|action| action.action_type == kind).unwrap().id.clone();
-        let (shortcut, text) = (action(ActionType::Shortcut), action(ActionType::TextSnippet));
-        for (id, control, layer, action) in [("t2", "thumb_02", Layer::Hypershift, shortcut), ("t3", "thumb_03", Layer::Standard, text)] {
-            config.bindings.push(crate::config::Binding {
-                id: id.into(),
-                profile_id: profile.clone(),
-                layer,
-                control_id: control_id(&NAGA_V3_PRO, control),
-                label: id.into(),
-                action_id: action,
-                color_tag: None,
-                trigger_mode: None,
-                chord_partner: None,
-                enabled: true,
-                throttle_ms: None,
-            });
-        }
-        (config, profile)
-    }
-
-    /// The exit used to restore the live map record by record and then
-    /// reselect the bank it had just written, which reloads the live map from
-    /// it. Leaving the map to that reselect ends with the same records in the
-    /// live map and every bank, the same rollback files — and fewer commands.
-    /// Also when the reselect fails: then the rest goes back afterwards.
+    /// A live map left holding Sidearm's signals with its rollback file gone
+    /// (an exit that left it to a bank reselect, 2026-11-14): the next session
+    /// takes the playing bank's records as the originals, so its stop gives the
+    /// buttons back instead of the silent signals.
     #[test]
-    fn leaving_the_live_map_to_the_exit_reselect_ends_as_restoring_it_first() {
+    fn a_live_map_left_with_sidearms_signals_takes_the_playing_banks_records_as_originals() {
         use crate::mouse_memory::fake::{self, FakeMouse};
-        let (config, profile) = config_for_bank_one();
-        let live = overlay(&config, &NAGA_V3_PRO, true, false).unwrap().targets;
-        let planned = offline_targets(&config, &NAGA_V3_PRO, &profile);
-        assert!(planned.len() > 2 && planned.len() < live.len(), "some live records reload from bank 1, some do not");
+        let live = overlay(&config_with_v3(), &NAGA_V3_PRO, true, false).unwrap().targets;
         let _fake = fake::install(FakeMouse::default());
-        // The session wrote the live map.
-        let (start, files) = {
-            fake::with(|mouse| *mouse = v3_with_banks(&live));
-            let dir = tempfile::tempdir().unwrap();
-            let backup = live_backup(dir.path(), &NAGA_V3_PRO);
-            let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
-            apply_bank(&device, LIVE_BANK, &backup, &live).unwrap();
-            drop(device);
-            let name = backup.file_name().unwrap().to_string_lossy().into_owned();
-            (fake::with(|mouse| mouse.clone()), vec![(name, std::fs::read(&backup).unwrap())])
-        };
-        let live_file = |dir: &Path| live_backup(dir, &NAGA_V3_PRO);
-        for select_fails in [false, true] {
-            let mut start = start.clone();
-            if select_fails {
-                start.refused.push((CLASS_BANKS, CMD_SELECT_BANK));
-            }
-            let restored_first = run_flow(&start, &files, |device, dir| {
-                restore_bank(device, LIVE_BANK, &live_file(dir)).unwrap();
-                let result = write_offline_on(device, &config, &profile, dir, None);
-                assert!(result.is_ok(), "a refused reselect is only logged");
-            });
-            let left_to_reselect = run_flow(&start, &files, |device, dir| {
-                write_offline_on(device, &config, &profile, dir, Some(live_file(dir))).unwrap();
-            });
-            assert_eq!(left_to_reselect.0, restored_first.0, "the mouse holds the same records (reselect fails: {select_fails})");
-            assert_eq!(left_to_reselect.1, restored_first.1, "the same rollback files are left (reselect fails: {select_fails})");
-            assert!(left_to_reselect.1.iter().all(|(name, records)| !name.ends_with("-live.json") || records.is_none()));
-            if !select_fails {
-                assert!(left_to_reselect.2 < restored_first.2, "{} commands, not {}", left_to_reselect.2, restored_first.2);
-            }
+        let mut mouse = FakeMouse { banks: vec![1, 2], active_bank: 2, poll_code: 1, ..Default::default() };
+        for (index, &(button, layer, action)) in live.iter().enumerate() {
+            mouse.records.insert((LIVE_BANK, button, layer), bank_block(LIVE_BANK, action));
+            mouse.records.insert((2, button, layer), block(OnboardAction::Key { modifier: 0, usage: 0x04 + index as u8 }));
         }
+        fake::with(|fake| *fake = mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let backup = live_backup(dir.path(), &NAGA_V3_PRO);
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        apply_bank(&device, LIVE_BANK, &backup, &live).unwrap();
+        restore_bank(&device, LIVE_BANK, &backup).unwrap();
+        drop(device);
+        let own: Vec<_> = live.iter().filter(|&&(button, layer, action)| is_own_signal(&NAGA_V3_PRO, button, layer, bank_block(LIVE_BANK, action))).collect();
+        assert!(!own.is_empty());
+        fake::with(|mouse| {
+            for &&(button, layer, _) in &own {
+                assert_eq!(mouse.records[&(LIVE_BANK, button, layer)], mouse.records[&(2, button, layer)], "{button:#04x}/{layer} plays bank 2's record again");
+            }
+        });
     }
 
     /// Rewriting a bank used to put every record Sidearm wrote there back first.

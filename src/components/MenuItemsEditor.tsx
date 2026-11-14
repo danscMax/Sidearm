@@ -12,7 +12,7 @@ import { addTemplate, menuTemplates, type MenuTemplate } from "../lib/menu-templ
 import {
   cloneMenuItem, indentMenuItem, otherMenuUses, outdentMenuItem, placeMenuItem, promptsFromFile, searchMenus, type DropPlace,
 } from "../lib/menu-arrange";
-import { getMenuUsage, getPressLog, pickTextFolder } from "../lib/backend";
+import { getMenuUsage, getPressLog, normalizeCommandError, pickTextFolder } from "../lib/backend";
 import { sumDays, unpickedItems, type PressLog } from "../lib/press-stats";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { PillTrack } from "./PillTrack";
@@ -537,11 +537,22 @@ export function MenuItemsEditor({
 
   /** "Add from folder": a list of the folder's prompts, their text copied in. */
   async function addFromFolder() {
-    const picked = await pickTextFolder(t("inspector.menuFolderTitle")).catch(() => null);
-    if (!picked) return;
+    let picked: Awaited<ReturnType<typeof pickTextFolder>>;
+    try {
+      picked = await pickTextFolder(t("inspector.menuFolderTitle"));
+    } catch (error) {
+      setNotice(t("inspector.menuFolderFailed", { reason: normalizeCommandError(error).message }));
+      return;
+    }
+    if (!picked) return; // the dialog was cancelled
+    // Files left out are named, so a partial import is never mistaken for a whole one.
+    const skipped = picked.skipped.length === 0 ? "" : " " + t("inspector.menuFolderSkipped", {
+      count: picked.skipped.length,
+      list: picked.skipped.map((file) => t("inspector.menuFolderSkippedFile", { name: file.name, reason: t(`inspector.menuFolderReason.${file.reason}`) })).join(", "),
+    });
     const prompts = picked.files.flatMap((file) => promptsFromFile(file.name, file.text));
     if (prompts.length === 0) {
-      setNotice(t("inspector.menuFolderEmpty", { name: picked.folder }));
+      setNotice(t("inspector.menuFolderEmpty", { name: picked.folder }) + skipped);
       return;
     }
     let nextEdits = edits;
@@ -564,7 +575,7 @@ export function MenuItemsEditor({
     onEditsChange(nextEdits);
     onChange(appendMenuItem(nextItems, parentId, { kind: "submenu", id: listId, label: picked.folder, enabled: true, items: children }));
     setSelectedId(listId);
-    setNotice(t("inspector.menuFolderAdded", { count: children.length, name: picked.folder }));
+    setNotice(t("inspector.menuFolderAdded", { count: children.length, name: picked.folder }) + skipped);
   }
 
   function renderPane(item: MenuItem) {

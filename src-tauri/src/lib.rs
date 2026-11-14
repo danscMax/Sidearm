@@ -960,12 +960,58 @@ struct TextFile {
     text: String,
 }
 
+/// A `.txt` / `.md` file "Add from folder" did not take, and why.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkippedTextFile {
+    /// File name with its extension.
+    name: String,
+    /// `tooLarge` (over 1 MiB), `notUtf8`, `unreadable`, `overLimit` (past the first 200).
+    reason: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct TextFolder {
+    files: Vec<TextFile>,
+    skipped: Vec<SkippedTextFile>,
+}
+
+/// Reads the text files of a folder listing, saying why each one left out was.
+fn read_text_files(mut files: Vec<PathBuf>, max_file: u64, max_files: usize) -> TextFolder {
+    files.sort();
+    let name_of = |file: &Path| file.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let mut folder = TextFolder { files: Vec::new(), skipped: Vec::new() };
+    for (index, file) in files.into_iter().enumerate() {
+        let reason = if index >= max_files {
+            Some("overLimit")
+        } else if file.metadata().is_ok_and(|meta| meta.len() > max_file) {
+            Some("tooLarge")
+        } else {
+            match fs::read(&file) {
+                Err(_) => Some("unreadable"),
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Err(_) => Some("notUtf8"),
+                    Ok(text) => {
+                        let name = file.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+                        folder.files.push(TextFile { name, text });
+                        None
+                    }
+                },
+            }
+        };
+        if let Some(reason) = reason {
+            folder.skipped.push(SkippedTextFile { name: name_of(&file), reason });
+        }
+    }
+    folder
+}
+
 /// The `.txt` / `.md` files directly in a user-chosen folder, sorted by name,
 /// for the menu editor's "Add from folder". Their text is copied into the
 /// config; the folder is not referenced afterwards. Files over 1 MiB, files
-/// that are not UTF-8 and everything past the first 200 are skipped.
+/// that are not UTF-8 and everything past the first 200 are skipped and named.
 #[tauri::command]
-async fn read_text_folder(path: String) -> Result<Vec<TextFile>, CommandError> {
+async fn read_text_folder(path: String) -> Result<TextFolder, CommandError> {
     const MAX_FILE: u64 = 1024 * 1024;
     const MAX_FILES: usize = 200;
     tauri::async_runtime::spawn_blocking(move || {
@@ -973,7 +1019,7 @@ async fn read_text_folder(path: String) -> Result<Vec<TextFile>, CommandError> {
         if !dir.is_dir() {
             return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
         }
-        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+        let files: Vec<PathBuf> = fs::read_dir(&dir)
             .map_err(|e| CommandError::internal(format!("Failed to read the folder: {e}")))?
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|file| {
@@ -982,19 +1028,9 @@ async fn read_text_folder(path: String) -> Result<Vec<TextFile>, CommandError> {
                         .extension()
                         .and_then(|ext| ext.to_str())
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("txt") || ext.eq_ignore_ascii_case("md"))
-                    && file.metadata().is_ok_and(|meta| meta.len() <= MAX_FILE)
             })
             .collect();
-        files.sort();
-        Ok(files
-            .into_iter()
-            .take(MAX_FILES)
-            .filter_map(|file| {
-                let text = fs::read_to_string(&file).ok()?;
-                let name = file.file_stem()?.to_string_lossy().into_owned();
-                Some(TextFile { name, text })
-            })
-            .collect())
+        Ok(read_text_files(files, MAX_FILE, MAX_FILES))
     })
     .await
     .map_err(|e| CommandError::internal(format!("read_text_folder task failed: {e}")))?
@@ -4612,6 +4648,27 @@ mod tests {
             apply_config_shortcut(&config, |shortcut| desired = Some(shortcut.to_owned()));
             assert_eq!(desired.as_deref(), Some("ctrl+alt+n"));
         }
+    }
+
+    #[test]
+    fn a_text_folder_names_every_file_it_left_out_and_why() {
+        let dir = std::env::temp_dir().join(format!("sidearm-text-folder-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.txt"), "first").unwrap();
+        fs::write(dir.join("b.md"), [0xff, 0xfe, 0x00]).unwrap();
+        fs::write(dir.join("c.txt"), "x".repeat(20)).unwrap();
+        fs::write(dir.join("d.txt"), "late").unwrap();
+        let files = ["d.txt", "c.txt", "b.md", "a.txt"].map(|name| dir.join(name)).to_vec();
+        let folder = read_text_files(files, 10, 3);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(folder.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!(folder.skipped, [
+            SkippedTextFile { name: "b.md".into(), reason: "notUtf8" },
+            SkippedTextFile { name: "c.txt".into(), reason: "tooLarge" },
+            SkippedTextFile { name: "d.txt".into(), reason: "overLimit" },
+        ]);
+        assert_eq!(read_text_files(vec![dir.join("gone.txt")], 10, 3).skipped[0].reason, "unreadable");
     }
 
     #[cfg(target_os = "windows")]

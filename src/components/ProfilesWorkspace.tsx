@@ -1282,16 +1282,34 @@ export function ProfilesWorkspace({
                 }
                 // A profile from another mouse lands on the one shown now.
                 const target = activeDevice?.builtin ? activeDevice.id : RAZER_NAGA_DEVICE_ID;
-                let dropped = 0;
-                updateDraft((c) => {
+                const place = (c: AppConfig) => {
                   const before = new Set(c.bindings.map((binding) => binding.id));
                   const imported = importProfile(c, result.data);
                   const added = new Set(imported.bindings.filter((binding) => !before.has(binding.id)).map((binding) => binding.id));
-                  const placed = retargetImportedBindings(imported, added, target);
-                  dropped = placed.dropped;
-                  return placed.config;
+                  return retargetImportedBindings(imported, added, target);
+                };
+                const apply = () => updateDraft((c) => place(c).config);
+                // Assignments with no place on this mouse are named before anything changes.
+                const lost = place(activeConfig).droppedBindings;
+                if (lost.length === 0) {
+                  apply();
+                  return;
+                }
+                setConfirmModal({
+                  title: t("transfer.importDroppedTitle", { count: lost.length }),
+                  message: (
+                    <>
+                      <p>{t("transfer.importDroppedIntro")}</p>
+                      <ul>
+                        {lost.map((binding) => (
+                          <li key={binding.id}>{t("transfer.importDroppedItem", { button: displayNameForControlId(binding.controlId), layer: labelForLayer(binding.layer), label: binding.label })}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ),
+                  confirmLabel: t("transfer.importAnyway"),
+                  onConfirm: apply,
                 });
-                if (dropped > 0) showToast(t("transfer.importDropped", { count: dropped }), "warning");
               } catch {
                 showToast(t("settings.readProfileError"), "warning");
               }

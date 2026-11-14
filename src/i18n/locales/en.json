@@ -868,7 +868,16 @@
     "menuChipMenus": "Also in: {{places}}",
     "menuSharedChip": "Shared · {{count}} more button(s)",
     "menuMoreShort": "More",
-    "menuPinShort": "Pin"
+    "menuPinShort": "Pin",
+    "menuFolderFailed": "The folder could not be read: {{reason}}",
+    "menuFolderSkipped": "Left out {{count}}: {{list}}.",
+    "menuFolderSkippedFile": "{{name}} ({{reason}})",
+    "menuFolderReason": {
+      "tooLarge": "over 1 MB",
+      "notUtf8": "not UTF-8 text",
+      "unreadable": "could not be read",
+      "overLimit": "past the first 200 files"
+    }
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -1466,7 +1475,8 @@
       "unverified": "connected, not tested with Sidearm yet: the button check is skipped",
       "choose": "Two mice are connected. Which one do you want to set up now?",
       "later": "You can set up the other one later: Settings → Run setup again.",
-      "noneNote": "No supported Razer Naga is connected. Plug in its receiver or cable: Sidearm notices it at once. You can also continue and connect the mouse later."
+      "noneNote": "No supported Razer Naga is connected. Plug in its receiver or cable: Sidearm notices it at once. You can also continue and connect the mouse later.",
+      "checkFailed": "Could not check the mice: {{reason}}"
     },
     "synapse": {
       "label": "Razer Synapse",
@@ -1831,7 +1841,6 @@
     "reasonNoMatch": "the other mouse has no such button",
     "apply": "Copy ({{count}})",
     "done": "Assignments copied: {{count}}",
-    "importDropped": "Not imported, no matching button on this mouse: {{count}}",
     "shareMenus": "One menu for both mice",
     "shareMenusHelp": "Menus are not copied: both mice open the same menu, and editing it on one changes it on the other. Off: each mouse gets its own copy.",
     "reasonNoLayer": "the other mouse has no HyperShift 2 layer",
@@ -1839,7 +1848,12 @@
     "syncMiceHelp": "From now on, an assignment changed on one mouse changes the same button on the other (HyperShift 2 only where the mouse has it). Copy once first so they start alike. For your own mice; off by default.",
     "holdsTitle": "HyperShift 2 onto holds ({{count}} fit)",
     "holdsHelp": "The other mouse has no HyperShift 2. Tick what it should get as a long press of the same button (the button's plain press then fires on release). With \"Keep the mice alike\" on, both mice get it.",
-    "holdsApply": "Put on holds ({{count}})"
+    "holdsApply": "Put on holds ({{count}})",
+    "importDroppedTitle_one": "{{count}} assignment has no place on this mouse",
+    "importDroppedTitle_other": "{{count}} assignments have no place on this mouse",
+    "importDroppedIntro": "These buttons do not exist on the mouse shown, so they would not be imported:",
+    "importDroppedItem": "{{button}} · {{layer}} — {{label}}",
+    "importAnyway": "Import the rest"
   },
   "menuTemplates": {
     "agent": "Phrases for an AI agent",

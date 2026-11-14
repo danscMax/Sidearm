@@ -74,6 +74,8 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
 
   // Mice plugged in now; null until the first answer.
   const [mice, setMice] = useState<NativeModelInfo[] | null>(null);
+  // Why the mouse list could not be read: not the same as no mouse plugged in.
+  const [miceError, setMiceError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
   const mouse = mice?.find((item) => item.deviceId === chosen) ?? (mice?.length === 1 ? mice[0] : null);
   const deviceId = mouse?.deviceId ?? null;
@@ -139,8 +141,10 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   const refreshMice = useCallback(async () => {
     try {
       setMice(await listNativeMice());
-    } catch {
+      setMiceError(null);
+    } catch (error) {
       setMice([]);
+      setMiceError(normalizeCommandError(error).message);
     }
   }, []);
 
@@ -213,7 +217,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     void getAdminAutostartStatus()
       .then((status) => !cancelled && setAdmin(status))
       .catch((err) => !cancelled && setAdminError(normalizeCommandError(err).message));
-    keep(listenNativeMiceChanged((next) => setMice(next)));
+    keep(listenNativeMiceChanged((next) => { setMice(next); setMiceError(null); }));
     keep(listenEncodedKeyEvent("encoded_key_received", (event) => receiveKey(event)));
     keep(listenActionExecutionEvent("action_executed", (event) => setFired(event)));
     return () => {
@@ -402,6 +406,7 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
                   state={mouseState}
                   label={mouse ? mouse.name : t("onboarding.device.label")}
                   hint={mice === null ? t("onboarding.checkPending")
+                    : miceError ? t("onboarding.device.checkFailed", { reason: miceError })
                     : !mouse ? t(mice.length > 1 ? "onboarding.device.pick" : "onboarding.device.none")
                       : mouse.verified ? t("onboarding.device.found") : t("onboarding.device.unverified")}
                   action={mice !== null && mice.length === 0 ? (

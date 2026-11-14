@@ -54,8 +54,9 @@ describe("copying assignments between mice", () => {
 
   it("puts an imported profile from another mouse on the chosen one", () => {
     const config = makeConfig({ bindings: [binding("i1", "v3_thumb_01"), binding("i2", "v3_top_special_01"), binding("own", "thumb_01")] });
-    const { config: next, dropped } = retargetImportedBindings(config, new Set(["i1", "i2"]), RAZER_NAGA_DEVICE_ID);
+    const { config: next, dropped, droppedBindings } = retargetImportedBindings(config, new Set(["i1", "i2"]), RAZER_NAGA_DEVICE_ID);
     expect(dropped).toBe(1);
+    expect(droppedBindings.map((item) => item.id)).toEqual(["i2"]);
     expect(next.bindings.map((item) => [item.id, item.controlId])).toEqual([["i1", "thumb_01"], ["own", "thumb_01"]]);
   });
 

@@ -88,6 +88,10 @@ export function describeActionSummary(
     return i18n.t("actionSummary.repairClipboard");
   }
 
+  if (action.type === "stopMacros") {
+    return i18n.t("actionSummary.stopMacros");
+  }
+
   return action.notes ?? i18n.t("actionSummary.disabledFallback");
 }
 
@@ -148,7 +152,7 @@ export function isActionLiveRunnable(config: AppConfig, actionId: string): boole
     return true;
   }
 
-  if (action.type === "repairClipboard") {
+  if (action.type === "repairClipboard" || action.type === "stopMacros") {
     return true;
   }
 
@@ -276,6 +280,8 @@ export function defaultPayloadFor(actionType: ActionType): Action["payload"] {
       return {} as Record<string, never>;
     case "repairClipboard":
       return { strategy: "latin1" };
+    case "stopMacros":
+      return { scope: "all" };
   }
 }
 

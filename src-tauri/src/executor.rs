@@ -310,6 +310,28 @@ pub fn run_preview_action(
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {
             run_live_repair_clipboard_action(action, preview, Some(action_id))
         }
+        // Runs on the capture worker, never queued behind the macro it stops.
+        (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {
+            cancel_live_sequences();
+            Ok(ActionExecutionEvent {
+                encoded_key: preview.encoded_key.clone(),
+                action_id: action.id.clone(),
+                action_type: action.action_type.as_str().into(),
+                action_pretty: action.display_name.clone(),
+                resolved_profile_id: preview.resolved_profile_id.clone(),
+                resolved_profile_name: preview.resolved_profile_name.clone(),
+                matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+                control_id: preview.control_id.clone(),
+                layer: preview.layer.clone(),
+                binding_id: preview.binding_id.clone(),
+                mode: ExecutionMode::Live,
+                outcome: ExecutionOutcome::Noop,
+                process_id: None,
+                summary: crate::ui_text!("execution.macrosStopped", "Macros stopped: the running one ends, the queued ones are dropped."),
+                warnings: Vec::new(),
+                executed_at: timestamp_millis(),
+            })
+        }
         // Audit F003: ProfileSwitch sets the sticky runtime profile override. The
         // override WRITE happens in the live dispatch path (capture_backend), which
         // owns the RuntimeStore; here we only report the switch so the Test/dry-run
@@ -518,6 +540,11 @@ fn summarize_action(
                 "execution.disabledPreview",
                 "Disabled action — nothing will be executed."
             ),
+            Vec::new(),
+        )),
+        (ActionType::StopMacros, ActionPayload::StopMacros(_)) => Ok((
+            ExecutionOutcome::Simulated,
+            crate::ui_text!("execution.stopMacrosPreview", "Will stop the running macro and drop the queued ones."),
             Vec::new(),
         )),
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => Ok((

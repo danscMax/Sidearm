@@ -184,6 +184,8 @@ export function autoName(
       return t("picker.defaultDisabled");
     case "repairClipboard":
       return t("action.type.repairClipboard");
+    case "stopMacros":
+      return t("action.type.stopMacros");
     default:
       return assertNever(actionType);
   }
@@ -233,6 +235,8 @@ export function describeAction(
       return t("picker.previewDisabled");
     case "repairClipboard":
       return t("picker.previewRepair");
+    case "stopMacros":
+      return t("picker.previewStopMacros");
     default:
       return assertNever(category.actionType);
   }
@@ -331,6 +335,8 @@ export function buildAction(params: {
         return { id: actionId, type: "disabled" as const, payload: {} as Record<string, never>, displayName: displayName || t("picker.defaultDisabled") };
       case "repairClipboard":
         return { id: actionId, type: "repairClipboard" as const, payload: { strategy: "latin1" as const }, displayName };
+      case "stopMacros":
+        return { id: actionId, type: "stopMacros" as const, payload: { scope: "all" as const }, displayName: displayName || t("action.type.stopMacros") };
       default:
         return assertNever(actionType);
     }

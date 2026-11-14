@@ -128,6 +128,12 @@ export function CategoryIcon({ id, fallback, size = 16 }: { id: string; fallback
         <path d="M6 2.5h4v2H6zM5.5 8.5l1.8 1.8 3.2-3.3" />
       </>
     ),
+    stopMacros: (
+      <>
+        <circle cx="8" cy="8" r="6" />
+        <rect x="5.5" y="5.5" width="5" height="5" rx="0.8" />
+      </>
+    ),
   };
   const drawn = paths[id];
   if (!drawn) return <>{fallback}</>;

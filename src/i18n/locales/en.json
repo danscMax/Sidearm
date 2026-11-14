@@ -14,7 +14,8 @@
     "menu_one": "Menu of {{count}} item",
     "menu_other": "Menu of {{count}} items",
     "disabledFallback": "Disabled placeholder action.",
-    "repairClipboard": "Repair clipboard encoding (UTF-8 ↔ Latin-1)."
+    "repairClipboard": "Repair clipboard encoding (UTF-8 ↔ Latin-1).",
+    "stopMacros": "Stops running and queued macros"
   },
   "common": {
     "na": "N/A",
@@ -222,7 +223,8 @@
       "profileSwitch": "Switch profile",
       "menu": "Menu",
       "disabled": "Disabled",
-      "repairClipboard": "Repair clipboard"
+      "repairClipboard": "Repair clipboard",
+      "stopMacros": "Stop macros"
     }
   },
   "mouseAction": {
@@ -1126,7 +1128,9 @@
     "previewSequence_one": "Runs a macro ({{count}} step)",
     "previewSequence_other": "Runs a macro ({{count}} steps)",
     "previewMenu_one": "Opens a menu ({{count}} item)",
-    "previewMenu_other": "Opens a menu ({{count}} items)"
+    "previewMenu_other": "Opens a menu ({{count}} items)",
+    "stopMacrosHint": "Ends the macro that is running now and drops the ones waiting behind it. Other buttons keep working; nothing is typed.",
+    "previewStopMacros": "Stops the running macro and the queued ones"
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1715,7 +1719,11 @@
       "dpiFailed": "Could not change DPI: {{detail}}",
       "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected.",
       "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed.",
-      "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched."
+      "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched.",
+      "macrosStopped": "Macros stopped: the running one ends, the queued ones are dropped.",
+      "stopMacrosPreview": "Will stop the running macro and drop the queued ones.",
+      "sequenceQueued": "Macro waits: {{ahead}} ahead of it.",
+      "sequenceDropped": "Macro not started: {{count}} are already waiting. \"Stop macros\" ends them."
     },
     "synapse": {
       "v3MacroParseFailed": "Could not parse macro `{{name}}`: {{error}}",
@@ -1793,7 +1801,8 @@
       "trayPaused": "paused",
       "trayQuit": "Quit",
       "trayRelaunchAsAdmin": "Restart as administrator",
-      "trayTooltip": "Sidearm — {{state_label}}\nProfile: {{profile_name}}{{battery_line}}"
+      "trayTooltip": "Sidearm — {{state_label}}\nProfile: {{profile_name}}{{battery_line}}",
+      "trayStopMacros": "Stop macros"
     },
     "window": {
       "captured": "Captured `{{exe}}`, profile `{{profile_id}}`.",

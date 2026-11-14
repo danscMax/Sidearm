@@ -653,6 +653,12 @@ export function ActionPickerModal({
               </div>
             ) : null}
 
+            {effectiveCategory === "stopMacros" ? (
+              <div className="editor-grid">
+                <Notice variant="info">{t("picker.stopMacrosHint")}</Notice>
+              </div>
+            ) : null}
+
             {controlId && selectedLayer && !builtinControl ? (
               <SignalCaptureField
                 signalDraft={signalDraft}

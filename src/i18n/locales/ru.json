@@ -18,7 +18,8 @@
     "menu_many": "Меню из {{count}} пунктов",
     "menu_other": "Меню из {{count}} пунктов",
     "disabledFallback": "Отключённое действие-заглушка.",
-    "repairClipboard": "Чинит кодировку буфера обмена (UTF-8 ↔ Latin-1)."
+    "repairClipboard": "Чинит кодировку буфера обмена (UTF-8 ↔ Latin-1).",
+    "stopMacros": "Останавливает идущие и ждущие макросы"
   },
   "common": {
     "na": "н/д",
@@ -228,7 +229,8 @@
       "profileSwitch": "Переключить профиль",
       "menu": "Меню",
       "disabled": "Отключено",
-      "repairClipboard": "Починить буфер"
+      "repairClipboard": "Починить буфер",
+      "stopMacros": "Остановить макросы"
     }
   },
   "mouseAction": {
@@ -1142,7 +1144,9 @@
     "previewMenu_one": "Откроет меню ({{count}} пункт)",
     "previewMenu_few": "Откроет меню ({{count}} пункта)",
     "previewMenu_many": "Откроет меню ({{count}} пунктов)",
-    "previewMenu_other": "Откроет меню ({{count}} пункта)"
+    "previewMenu_other": "Откроет меню ({{count}} пункта)",
+    "stopMacrosHint": "Завершает макрос, который идёт сейчас, и убирает те, что ждут за ним. Остальные кнопки работают как обычно; ничего не печатается.",
+    "previewStopMacros": "Остановит идущий макрос и очередь"
   },
   "assignments": {
     "copyBinding": "Копировать назначение",
@@ -1749,7 +1753,11 @@
       "dpiFailed": "Не удалось изменить DPI: {{detail}}",
       "dpiStagesOtherMouse": "В этом профиле ступени DPI заданы только для мыши, которая не подключена.",
       "enterSkippedWindowChanged": "Enter не отправлен: пока печатался текст, впереди оказалось другое окно.",
-      "sequenceCancelled": "Последовательность остановлена: захват выключен или профиль переключён вручную."
+      "sequenceCancelled": "Последовательность остановлена: захват выключен или профиль переключён вручную.",
+      "macrosStopped": "Макросы остановлены: идущий завершается, очередь убрана.",
+      "stopMacrosPreview": "Остановит идущий макрос и уберёт очередь.",
+      "sequenceQueued": "Макрос ждёт: перед ним {{ahead}}.",
+      "sequenceDropped": "Макрос не запущен: уже ждут {{count}}. «Остановить макросы» их уберёт."
     },
     "synapse": {
       "v3MacroParseFailed": "Не удалось разобрать макрос `{{name}}`: {{error}}",
@@ -1827,7 +1835,8 @@
       "trayPaused": "приостановлен",
       "trayQuit": "Выход",
       "trayRelaunchAsAdmin": "Перезапустить от администратора",
-      "trayTooltip": "Sidearm — {{state_label}}\nПрофиль: {{profile_name}}{{battery_line}}"
+      "trayTooltip": "Sidearm — {{state_label}}\nПрофиль: {{profile_name}}{{battery_line}}",
+      "trayStopMacros": "Остановить макросы"
     },
     "window": {
       "captured": "Захвачено `{{exe}}`, профиль `{{profile_id}}`.",

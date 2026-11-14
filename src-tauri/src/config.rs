@@ -670,6 +670,8 @@ pub enum ActionType {
     ProfileSwitch,
     Disabled,
     RepairClipboard,
+    /// Ends the running macro and drops the queued ones.
+    StopMacros,
 }
 
 impl ActionType {
@@ -685,6 +687,7 @@ impl ActionType {
             ActionType::ProfileSwitch => "profileSwitch",
             ActionType::Disabled => "disabled",
             ActionType::RepairClipboard => "repairClipboard",
+            ActionType::StopMacros => "stopMacros",
         }
     }
 
@@ -694,7 +697,7 @@ impl ActionType {
     /// `match` below forces a new variant to be added here and to the schema
     /// (a missed schema entry is a save-breaker).
     #[cfg(test)]
-    const ALL: [ActionType; 10] = [
+    const ALL: [ActionType; 11] = [
         ActionType::Shortcut,
         ActionType::TextSnippet,
         ActionType::Sequence,
@@ -705,6 +708,7 @@ impl ActionType {
         ActionType::ProfileSwitch,
         ActionType::Disabled,
         ActionType::RepairClipboard,
+        ActionType::StopMacros,
     ];
 }
 
@@ -722,7 +726,8 @@ const _: fn(ActionType) = |a| match a {
     | ActionType::MediaKey
     | ActionType::ProfileSwitch
     | ActionType::Disabled
-    | ActionType::RepairClipboard => {}
+    | ActionType::RepairClipboard
+    | ActionType::StopMacros => {}
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -767,6 +772,7 @@ pub enum ActionPayload {
     ProfileSwitch(ProfileSwitchPayload),
     Disabled(DisabledActionPayload),
     RepairClipboard(RepairClipboardActionPayload),
+    StopMacros(StopMacrosPayload),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1027,6 +1033,22 @@ pub enum RepairStrategy {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RepairClipboardActionPayload {
     pub strategy: RepairStrategy,
+}
+
+/// What [`StopMacrosPayload`] stops. A required field, like `strategy` above:
+/// the payload is `{"scope":"all"}`, never the empty disabled one.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum StopScope {
+    /// The running macro and every queued one.
+    #[default]
+    All,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StopMacrosPayload {
+    pub scope: StopScope,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1942,6 +1964,7 @@ fn validate_action(
         // (Audit F001: a missing arm here sent every repairClipboard action to the
         // catch-all below, so validate_config rejected save/load of any config using it.)
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {}
+        (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {}
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
@@ -3526,6 +3549,24 @@ mod tests {
     }
 
     #[test]
+    fn stop_macros_has_its_own_payload_and_passes_validation() {
+        let payload = ActionPayload::StopMacros(StopMacrosPayload { scope: StopScope::All });
+        let json = serde_json::to_string(&payload).expect("serialize");
+        assert_eq!(json, r#"{"scope":"all"}"#);
+        assert_eq!(serde_json::from_str::<ActionPayload>(&json).expect("roundtrip"), payload);
+        let mut config = default_seed_config();
+        let mut action = config.actions[0].clone();
+        action.id = "stop".into();
+        action.action_type = ActionType::StopMacros;
+        action.payload = payload;
+        action.conditions = Vec::new();
+        config.actions.push(action);
+        let value = serde_json::to_value(&config).expect("config json");
+        assert!(validate_config_schema_value(&value).is_ok(), "schema accepts stopMacros: {:?}", collect_schema_errors(&value));
+        assert!(validate_config(&config).is_ok(), "semantic validation accepts stopMacros");
+    }
+
+    #[test]
     fn sequence_step_repeat_is_optional_and_roundtrips() {
         // Backward compat: a step without `repeat` deserializes with repeat = None.
         let legacy: SequenceStep =
@@ -3930,7 +3971,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x869b_d7d9_f471_3354);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xaa4b_e772_a374_27b3);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

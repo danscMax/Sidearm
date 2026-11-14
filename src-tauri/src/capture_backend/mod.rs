@@ -321,7 +321,7 @@ fn gesture_target_is_current(
         Some(ActionPayload::MouseAction(mouse)) => !matches!(mouse.action, MouseActionKind::DpiUp | MouseActionKind::DpiDown),
         Some(ActionPayload::Sequence(sequence)) => sequence.steps.iter().any(|step| matches!(step, SequenceStep::Send { .. } | SequenceStep::Text { .. })),
         Some(ActionPayload::Launch(_) | ActionPayload::Menu(_) | ActionPayload::ProfileSwitch(_)
-            | ActionPayload::Disabled(_) | ActionPayload::RepairClipboard(_)) | None => false,
+            | ActionPayload::Disabled(_) | ActionPayload::RepairClipboard(_) | ActionPayload::StopMacros(_)) | None => false,
     };
     !sends_input || current_window.is_some_and(|current| {
         if !start_window.hwnd.is_empty() {
@@ -1086,7 +1086,8 @@ fn run_fire_and_forget(
         let queued = executor::live_sequence_generation();
         let guard_config = config.clone();
         let guard_preview = preview.clone();
-        submit_sequence(guarded_sequence_job(queued, executor::live_sequence_generation, move || {
+        let (notify_app, notify_store, notify_settings) = (app.clone(), store.clone(), config.settings.clone());
+        let admitted = submit_sequence(guarded_sequence_job(queued, executor::live_sequence_generation, move || {
             gesture_target.as_ref().is_none_or(|target| {
                 let payload = guard_config.actions.iter().find(|action| Some(action.id.as_str()) == guard_preview.action_id.as_deref()).map(|action| &action.payload);
                 let current = window_capture::capture_active_window_with_resolution(&guard_config, "", None).ok();
@@ -1097,6 +1098,7 @@ fn run_fire_and_forget(
             let executed = executor::run_preview_action(&config, &preview);
             report_execution(&app, &store, &config, &preview, log_entries, is_fg_elevated, menu_pick, executed);
         }));
+        report_sequence_admission(&notify_app, &notify_store, &notify_settings, admitted);
         return;
     }
     // A test run against virtual mice resolves and reports, but sends nothing.
@@ -1110,7 +1112,32 @@ fn run_fire_and_forget(
 
 /// Live sequences run on one thread, one after another (a second waits for the
 /// first). Bounded: a full queue drops the press instead of piling up.
-fn submit_sequence(job: Box<dyn FnOnce() + Send>) {
+/// Macros queued or running: the ones a new press waits behind.
+static SEQUENCES_IN_FLIGHT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Tells the user a macro press that does not start at once: one waiting
+/// behind others (how many), or one dropped because the queue is full.
+fn report_sequence_admission(app: &AppHandle, store: &Arc<Mutex<RuntimeStore>>, settings: &crate::config::Settings, admitted: Option<usize>) {
+    let text = match admitted {
+        Some(0) => return,
+        Some(ahead) => crate::ui_text!("execution.sequenceQueued", "Macro waits: {ahead} ahead of it.", ahead = ahead),
+        None => {
+            let text = crate::ui_text!(
+                "execution.sequenceDropped",
+                "Macro not started: {count} are already waiting. \"Stop macros\" ends them.",
+                count = SEQUENCE_QUEUE
+            );
+            if let Ok(mut store) = store.lock() {
+                store.record_warn("execution", text.clone());
+            }
+            text
+        }
+    };
+    crate::show_osd(app, "", &crate::ui_text::native(&text), settings);
+}
+
+/// `Some(n)` when accepted, `n` the macros ahead of it; `None` when dropped.
+fn submit_sequence(job: Box<dyn FnOnce() + Send>) -> Option<usize> {
     type Job = Box<dyn FnOnce() + Send>;
     static RUNNER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<Job>>> = std::sync::OnceLock::new();
     let runner = RUNNER.get_or_init(|| {
@@ -1122,17 +1149,32 @@ fn submit_sequence(job: Box<dyn FnOnce() + Send>) {
             .ok()
             .map(|_| sender)
     });
-    queue_sequence(runner.as_ref(), job);
+    let ahead = SEQUENCES_IN_FLIGHT.fetch_add(1, Ordering::SeqCst);
+    let counted: Box<dyn FnOnce() + Send> = Box::new(move || {
+        job();
+        SEQUENCES_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+    });
+    if queue_sequence(runner.as_ref(), counted) {
+        Some(ahead)
+    } else {
+        SEQUENCES_IN_FLIGHT.fetch_sub(1, Ordering::SeqCst);
+        None
+    }
 }
 
-fn queue_sequence(runner: Option<&std::sync::mpsc::SyncSender<Box<dyn FnOnce() + Send>>>, job: Box<dyn FnOnce() + Send>) {
+fn queue_sequence(runner: Option<&std::sync::mpsc::SyncSender<Box<dyn FnOnce() + Send>>>, job: Box<dyn FnOnce() + Send>) -> bool {
     match runner {
-        Some(sender) => {
-            if let Err(error) = sender.try_send(job) {
+        Some(sender) => match sender.try_send(job) {
+            Ok(()) => true,
+            Err(error) => {
                 log::warn!("[capture] Sequence press dropped: {error}");
+                false
             }
+        },
+        None => {
+            log::error!("[capture] Sequence press dropped: no sequence thread");
+            false
         }
-        None => log::error!("[capture] Sequence press dropped: no sequence thread"),
     }
 }
 
@@ -1297,6 +1339,7 @@ pub(crate) fn run_menu_item(
         return;
     };
     let is_sequence = matches!(action.payload, config::ActionPayload::Sequence(_));
+    let (notify_app, notify_store, notify_settings) = (app.clone(), runtime_store.clone(), config.settings.clone());
     let (app, store, config, menu_press, action) = (app.clone(), runtime_store.clone(), config.clone(), menu_press.clone(), action.clone());
     let queued = executor::live_sequence_generation();
     let run = menu_item_job(is_sequence.then_some(queued), executor::live_sequence_generation, move |completed| {
@@ -1333,7 +1376,8 @@ pub(crate) fn run_menu_item(
         }, |executed| report_execution(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true, executed), completed);
     }, completed);
     if is_sequence && !crate::fake_mode() {
-        submit_sequence(run);
+        let admitted = submit_sequence(run);
+        report_sequence_admission(&notify_app, &notify_store, &notify_settings, admitted);
     } else {
         run();
     }
@@ -1491,6 +1535,14 @@ fn emit_runtime_error(
 mod dispatch_regression_tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_full_sequence_queue_says_the_press_was_dropped() {
+        let (sender, _receiver) = std::sync::mpsc::sync_channel::<Box<dyn FnOnce() + Send>>(1);
+        assert!(queue_sequence(Some(&sender), Box::new(|| {})), "room left: queued");
+        assert!(!queue_sequence(Some(&sender), Box::new(|| {})), "full: dropped, and the caller is told");
+        assert!(!queue_sequence(None, Box::new(|| {})), "no runner: dropped");
+    }
 
     #[test]
     fn menu_item_checks_its_own_exe_and_title_conditions() {

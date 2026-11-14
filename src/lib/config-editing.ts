@@ -652,6 +652,12 @@ export function coerceActionType(
           type: "repairClipboard",
           payload: defaultPayloadFor("repairClipboard"),
         };
+      case "stopMacros":
+        return {
+          ...action,
+          type: "stopMacros",
+          payload: defaultPayloadFor("stopMacros"),
+        };
     }
   })();
 

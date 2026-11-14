@@ -494,6 +494,13 @@ fn build_tray_menu(
     )?)?;
     // "Restart as administrator" only when non-elevated (UIPI blocks SendInput
     // into elevated foreground windows otherwise).
+    menu.append(&MenuItem::with_id(
+        app,
+        "stop_macros",
+        crate::ui_text::native(&crate::ui_text!("runtime.trayStopMacros", "Stop macros")),
+        true,
+        None::<&str>,
+    )?)?;
     if !is_elevated {
         menu.append(&MenuItem::with_id(
             app,
@@ -4224,6 +4231,10 @@ pub fn run() {
                         });
                     }
                     "quit" => app.exit(0),
+                    "stop_macros" => {
+                        executor::cancel_live_sequences();
+                        log::info!("[tray] macros stopped");
+                    }
                     "relaunch_as_admin" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {

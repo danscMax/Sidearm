@@ -28,7 +28,8 @@ export type ActionType =
   | "mediaKey"
   | "profileSwitch"
   | "disabled"
-  | "repairClipboard";
+  | "repairClipboard"
+  | "stopMacros";
 
 export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord" | "longPress";
 
@@ -297,6 +298,12 @@ interface RepairClipboardPayload {
   strategy: "latin1";
 }
 
+/** Stop-macros payload (Rust `StopMacrosPayload`): a required `scope`, so it is
+ *  `{"scope":"all"}` and never the empty disabled payload. */
+interface StopMacrosPayload {
+  scope: "all";
+}
+
 export type ActionCondition =
   | { type: "windowTitleContains"; value: string }
   | { type: "windowTitleNotContains"; value: string }
@@ -322,6 +329,7 @@ export type Action = ActionBase &
     | { type: "profileSwitch"; payload: ProfileSwitchPayload }
     | { type: "disabled"; payload: DisabledActionPayload }
     | { type: "repairClipboard"; payload: RepairClipboardPayload }
+    | { type: "stopMacros"; payload: StopMacrosPayload }
   );
 
 export interface SnippetLibraryItem {

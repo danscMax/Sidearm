@@ -158,7 +158,8 @@
         "mediaKey",
         "profileSwitch",
         "disabled",
-        "repairClipboard"
+        "repairClipboard",
+        "stopMacros"
       ]
     },
     "pasteMode": {
@@ -834,6 +835,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "stopMacros"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/stopMacrosPayload"
+              }
+            }
+          }
         }
       ]
     },
@@ -1303,6 +1320,20 @@
         "strategy": {
           "enum": [
             "latin1"
+          ]
+        }
+      }
+    },
+    "stopMacrosPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "all"
           ]
         }
       }

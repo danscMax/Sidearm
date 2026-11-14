@@ -178,13 +178,29 @@ fn is_foreground_fullscreen() -> bool {
     return false;
 }
 
+/// The OSD page listens for `osd-show` (it said so through `osd_ready`).
+static OSD_READY: AtomicBool = AtomicBool::new(false);
+/// The latest bubble asked for while the page was still loading.
+static OSD_PENDING: Mutex<Option<(String, String, config::Settings)>> = Mutex::new(None);
+
+/// The OSD page registered its listener: show the bubble that waited for it.
+#[tauri::command]
+fn osd_ready(app: AppHandle) {
+    let pending = {
+        let mut pending = OSD_PENDING.lock().recover_poison();
+        OSD_READY.store(true, Ordering::Release);
+        pending.take()
+    };
+    if let Some((label, name, settings)) = pending {
+        show_osd(&app, &label, &name, &settings);
+    }
+}
+
 /// Show the OSD notification bubble with the profile name.
 ///
-/// OSD window lifecycle (lazy creation):
-/// 1. First call: create the window and return without showing (let WebView load JS).
-/// 2. Subsequent calls: window exists, emit event + position + show + auto-hide.
-///
-/// This avoids startup flash, event loss, and foreground watcher interference.
+/// OSD window lifecycle (lazy creation): the first call creates the window and
+/// keeps the bubble pending; the page asks for it once it listens
+/// (`osd_ready`). Later calls emit the event, position, show and auto-hide.
 /// Shows the OSD bubble: `label` (bold-less, may be empty) then `profile_name`.
 pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, settings: &config::Settings) {
     if !settings.osd_enabled {
@@ -194,11 +210,21 @@ pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, setting
         return;
     }
 
-    let w = match app.get_webview_window("osd") {
-        Some(w) => w,
-        None => {
-            create_osd_window(app);
-            return; // WebView loading; next call will show
+    let existing = app.get_webview_window("osd");
+    let w = {
+        // Checked and kept under one lock with `osd_ready`: a bubble asked for
+        // while the page loads waits there and is shown once it listens.
+        let mut pending = OSD_PENDING.lock().recover_poison();
+        match existing {
+            Some(w) if OSD_READY.load(Ordering::Acquire) => w,
+            existing => {
+                *pending = Some((label.to_owned(), profile_name.to_owned(), settings.clone()));
+                drop(pending);
+                if existing.is_none() {
+                    create_osd_window(app);
+                }
+                return;
+            }
         }
     };
 
@@ -4291,6 +4317,7 @@ pub fn run() {
             set_key_recording,
             cheatsheet_layout,
             cheatsheet_ready,
+            osd_ready,
             export_layout_html,
             export_layout_folder,
             get_press_log,
@@ -4604,14 +4631,16 @@ mod tests {
         let menu = allowed(include_str!("../capabilities/menu.json"));
         let sheet = allowed(include_str!("../capabilities/cheatsheet.json"));
         let main = allowed(include_str!("../capabilities/default.json"));
-        assert!(allowed(include_str!("../capabilities/osd.json")).is_empty(), "the OSD calls no command");
+        let osd = allowed(include_str!("../capabilities/osd.json"));
+        assert!(osd.iter().all(|c| c.starts_with("osd_")), "OSD window: only osd_* ({osd:?})");
         assert!(menu.iter().all(|c| c.starts_with("menu_")), "menu window: only menu_* ({menu:?})");
         assert!(sheet.iter().all(|c| c.starts_with("cheatsheet_")), "cheat sheet: only cheatsheet_*");
         let mut every: std::collections::BTreeSet<String> = main.clone();
         every.extend(menu.iter().cloned());
         every.extend(sheet.iter().cloned());
+        every.extend(osd.iter().cloned());
         assert_eq!(every, handler, "every command is allowed in some window");
-        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c)), "main gets no popup command");
+        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c) && !osd.contains(c)), "main gets no popup command");
     }
 
     /// Merge-import must not orphan the base config's user devices: since v3

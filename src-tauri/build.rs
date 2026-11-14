@@ -14,6 +14,7 @@ const APP_COMMANDS: &[&str] = &[
     "set_key_recording",
     "cheatsheet_layout",
     "cheatsheet_ready",
+    "osd_ready",
     "export_layout_html",
     "export_layout_folder",
     "get_press_log",

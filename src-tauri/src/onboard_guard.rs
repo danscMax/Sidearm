@@ -596,17 +596,12 @@ fn report_battery(app: &AppHandle, config: &crate::config::AppConfig, config_dir
         let text = crate::ui_text!("guard.batteryLow", "{model} battery: {percent}%", model = model.name, percent = percent);
         log::warn!("[onboard-guard] {text}");
         let message = crate::ui_text::native(&text);
-        // Off the guard tick, which holds the mouse: the OSD window is created
-        // lazily and its first call only creates it, so give the WebView a
-        // moment and show it again — this warning must not be the call lost.
+        // Off the guard tick, which holds the mouse (the OSD waits for the main
+        // thread). A page still loading shows it once ready (`osd_ready`).
         let (app, settings) = (app.clone(), config.settings.clone());
-        let _ = std::thread::Builder::new().name("battery-osd".into()).spawn(move || {
-            if app.get_webview_window("osd").is_none() {
-                crate::show_osd(&app, "", &message, &settings);
-                std::thread::sleep(Duration::from_secs(1));
-            }
-            crate::show_osd(&app, "", &message, &settings);
-        });
+        let _ = std::thread::Builder::new()
+            .name("battery-osd".into())
+            .spawn(move || crate::show_osd(&app, "", &message, &settings));
     }
 }
 

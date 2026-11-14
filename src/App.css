@@ -1946,6 +1946,8 @@ input[type="radio"] {
 .menu-ed__row--on { background: var(--c-menu-selected); }
 .menu-ed__row--on:hover { background: var(--c-menu-selected-hover); }
 .menu-ed__row--off { opacity: 0.45; }
+/* Picked together (Ctrl / Shift click): an accent edge, the selected fill stays its own. */
+.menu-ed__row--marked { box-shadow: inset 3px 0 0 var(--c-accent); background: var(--c-menu-selected); }
 
 .menu-ed__key {
   flex: none;

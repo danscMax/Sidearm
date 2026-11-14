@@ -880,7 +880,18 @@
       "overLimit": "past the first 200 files"
     },
     "menuSharedChip_one": "Shared · {{count}} more button",
-    "menuSharedChip_other": "Shared · {{count}} more buttons"
+    "menuSharedChip_other": "Shared · {{count}} more buttons",
+    "menuRemovedMany_one": "{{count}} item deleted.",
+    "menuRemovedMany_other": "{{count}} items deleted.",
+    "menuMovedMany_one": "{{count}} item moved to the end of the “{{menu}}” menu; saved with this menu.",
+    "menuMovedMany_other": "{{count}} items moved to the end of the “{{menu}}” menu; saved with this menu.",
+    "menuMarked_one": "{{count}} item picked",
+    "menuMarked_other": "{{count}} items picked",
+    "menuMarkedTools": "What to do with the picked items",
+    "menuMarkedOn": "Turn on",
+    "menuMarkedOff": "Turn off",
+    "menuMarkedClear": "Unpick",
+    "menuMarkedHint": "Ctrl+click adds or removes an item, Shift+click picks a run of one list. A plain click picks one again."
   },
   "properties": {
     "empty": "Select a button to see properties",

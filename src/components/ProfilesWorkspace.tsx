@@ -1613,7 +1613,7 @@ export function ProfilesWorkspace({
                       onClick: () => setDeviceTab(tab),
                     }))
                   : []),
-                ...(builtinMice > 1 ? [null, { label: t("transfer.open"), onClick: () => setShowTransfer(true) }] : []),
+                ...(builtinMice > 1 ? [...(deviceLayout(activeDevice.id) ? [null] : []), { label: t("transfer.open"), onClick: () => setShowTransfer(true) }] : []),
               ]
             : [
                 { label: t("device.rename"), onClick: () => setRenameFreshDevice(true) },

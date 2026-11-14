@@ -636,6 +636,12 @@ fn show_exiting_in_tray(app: &AppHandle) {
 }
 
 fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
+    // During the exit the tray keeps its one "closing" line: a rebuild (a mouse
+    // moved, a profile resolved) would bring back items that act mid-exit.
+    if is_shutting_down() {
+        show_exiting_in_tray(app);
+        return;
+    }
     let Some(tray) = app.tray_by_id("sidearm-tray") else {
         return;
     };
@@ -3588,8 +3594,22 @@ fn shutdown_mouse_once(app: &AppHandle) {
                 // and its live map back (`restore_orphaned`).
                 exit_step("restorer started", || spawn_live_map_restore(&config_dir, false));
             } else {
-                // A live map left to a bank reselect that did not happen.
-                exit_step("deferred live maps", || mouse_memory::live_overlay::restore_deferred(&config_dir));
+                // A live map left to a bank reselect that did not happen —
+                // bounded like the other mouse work: a stuck mouse call must
+                // not keep the app alive; its rollback file stays for the
+                // restorer (`restore_orphaned`).
+                exit_step("deferred live maps", || {
+                    let (done, receiver) = std::sync::mpsc::channel();
+                    let dir = config_dir.clone();
+                    let started = std::thread::Builder::new().name("live-deferred".into()).spawn(move || {
+                        mouse_memory::live_overlay::restore_deferred(&dir);
+                        let _ = done.send(());
+                    });
+                    if started.is_err() || receiver.recv_timeout(std::time::Duration::from_secs(30)).is_err() {
+                        log::warn!("[system] a deferred live map was not restored at exit; the restorer takes over");
+                        spawn_live_map_restore(&config_dir, false);
+                    }
+                });
             }
             // Last: an exit cut short leaves the watchdog to finish it.
             mouse_restore::mark_clean_exit(&config_dir);

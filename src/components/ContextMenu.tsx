@@ -69,6 +69,8 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps) {
       tabIndex={-1}
       aria-activedescendant={activeItemId}
       onKeyDown={onKeyDown}
+      // A right click inside the open menu is not one on what lies under it.
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); }}
     >
       {items.map((item, i) => {
         if (item === null) {

@@ -141,7 +141,8 @@ export function DeviceCards({
             onClick={select}
             onContextMenu={(e) => {
               e.preventDefault();
-              select();
+              // Only a card not selected yet is selected (and its mouse re-read).
+              if (!active) select();
               onContextMenu?.(e.clientX, e.clientY);
             }}
             title={device.name}

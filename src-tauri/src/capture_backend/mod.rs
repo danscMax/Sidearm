@@ -123,6 +123,12 @@ impl RuntimeController {
         #[cfg(target_os = "windows")]
         {
             self.stop()?;
+            // Once the exit began, nothing may write the mice again: a config
+            // save or a restart that lands now (the event loop keeps pumping
+            // during the exit) would start a new live session the exit never stops.
+            if crate::is_shutting_down() {
+                return Err("Sidearm is closing".into());
+            }
             let backend = CaptureBackendHandle::start(app, runtime_store, config, app_name)?;
             self.backend = Some(backend);
             Ok(())

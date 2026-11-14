@@ -15,7 +15,9 @@ export function useDismissable<T extends HTMLElement>(
 ) {
   useEffect(() => {
     if (!enabled) return;
-    function handleMouseDown(e: MouseEvent) {
+    // pointerdown, not mousedown: Tauri's title-bar drag script stops the
+    // mousedown there, so a click on the title bar never closed the menu.
+    function handleMouseDown(e: PointerEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose();
       }
@@ -26,10 +28,10 @@ export function useDismissable<T extends HTMLElement>(
         onClose();
       }
     }
-    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("pointerdown", handleMouseDown);
     window.addEventListener("keydown", handleKeyDown, true);
     return () => {
-      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("pointerdown", handleMouseDown);
       window.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [ref, onClose, enabled]);

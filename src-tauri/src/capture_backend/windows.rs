@@ -4720,12 +4720,18 @@ fn spawn_capture_helper(
                     // map is not ready: that is when it is being written).
                     let signal = input.strip_prefix(super::consumer::H2_PREFIX).unwrap_or(input);
                     let signal = signal.strip_prefix(HS_PREFIX).unwrap_or(signal);
-                    if let Some(released) = signal.strip_prefix("UP:") {
+                    let released = signal.strip_prefix("UP:");
+                    let pressed = released.is_none() && !signal.starts_with("REPEAT:");
+                    if let Some(released) = released {
                         crate::mouse_memory::live_overlay::note_input(model, released, false);
-                    } else if !signal.starts_with("REPEAT:") {
+                    } else if pressed {
                         crate::mouse_memory::live_overlay::note_input(model, signal, true);
                     }
                     if !crate::mouse_memory::live_overlay::events_allowed(model) {
+                        // Counted, logged as one line once the map is ready.
+                        if pressed {
+                            crate::mouse_memory::live_overlay::note_dropped(model);
+                        }
                         continue;
                     }
                     (input, hid_backend(model))

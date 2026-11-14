@@ -39,6 +39,7 @@ try {
 # Info, Get-AppVersion). Vendored at the repo root.
 $kit = Join-Path $PSScriptRoot 'ScriptKit.ps1'
 if (Test-Path $kit) { . $kit }
+. (Join-Path $PSScriptRoot 'tools\locked-exe.ps1')
 
 $PROJECT_DIR = $PSScriptRoot
 $TAURI_DIR   = Join-Path $PROJECT_DIR 'src-tauri'
@@ -57,23 +58,20 @@ $APP_VERSION = Get-AppVersion $PROJECT_DIR
 # above).
 
 function Stop-StaleProcesses {
-    # Only the dev build's Sidearm processes (app, helper, mouse restorer): they
-    # hold target\debug\sidearm.exe, which the next build must replace.
+    # Only the dev build's Sidearm processes: they hold target\debug\sidearm.exe,
+    # which the next build must replace. The app and its capture helper stop; a
+    # restore process (`--restore-live-maps`: the watchdog of a killed app, or
+    # one its helper started) keeps running — it may be waiting for a sleeping
+    # mouse — and its exe is moved out of the way instead.
     $target = Join-Path $TAURI_DIR 'target'
-    $ours = {
-        Get-CimInstance Win32_Process -Filter "Name = 'sidearm.exe'" -ErrorAction SilentlyContinue |
-            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target, [StringComparison]::OrdinalIgnoreCase) }
-    }
-    # A restorer a killed dev app left puts the mice back first (30 s at most:
-    # one waiting for a sleeping mouse never ends; the next start restores it).
-    $deadline = (Get-Date).AddSeconds(30)
-    while ((& $ours | Where-Object { $_.CommandLine -match '--restore-live-maps' }) -and (Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 1
-    }
-    & $ours | ForEach-Object {
-        Write-Host "  Stopping PID $($_.ProcessId)" -ForegroundColor Yellow
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
+    Get-CimInstance Win32_Process -Filter "Name = 'sidearm.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target, [StringComparison]::OrdinalIgnoreCase) } |
+        Where-Object { $_.CommandLine -notmatch '--restore-live-maps' } |
+        ForEach-Object {
+            Write-Host "  Stopping PID $($_.ProcessId)" -ForegroundColor Yellow
+            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+    Move-LockedExe (Join-Path $target 'debug\sidearm.exe')
 
     # Kill Vite/node holding our port
     $portPids = netstat -ano 2>$null | Select-String ":${VITE_PORT}.*LISTENING" |

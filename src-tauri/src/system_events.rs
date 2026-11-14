@@ -54,8 +54,7 @@ pub fn spawn(app: AppHandle) {
                     && std::fs::remove_file(&quit).is_ok()
                     && let Some(app) = APP.get()
                 {
-                    log::info!("[system] quit requested by a test run");
-                    app.exit(0);
+                    crate::request_exit(app, "test run");
                 }
                 let now = crate::mouse_memory::present_models().len();
                 if now != last && let Some(changed) = CHANGED.get() {

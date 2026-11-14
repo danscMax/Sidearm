@@ -395,7 +395,7 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
 
 /// Dispatches what the clock settled (long presses, closed tap windows).
 fn fire_due_gestures(app: &AppHandle, runtime_store: &Arc<Mutex<RuntimeStore>>, config: &AppConfig, gestures: &mut PendingGestures) {
-    if suppresses_event(gestures, SUPPRESS_EXECUTION.load(Ordering::Relaxed), false) {
+    if suppresses_event(gestures, SUPPRESS_EXECUTION.load(Ordering::Relaxed) || crate::is_shutting_down(), false) {
         return;
     }
     let fired = gestures.tick(std::time::Instant::now());
@@ -490,8 +490,11 @@ fn process_encoded_key_event(
     // Live-capture/test mode: the UI just observed the raw key above; do NOT
     // resolve, execute, or inject it. Lets the onboarding hardware test light
     // up buttons without firing their real actions (search/delete/etc.).
-    if suppresses_event(gestures, SUPPRESS_EXECUTION.load(Ordering::Relaxed), event.is_key_up) {
-        log::info!("[capture] Not dispatched {}: live-capture mode", event.encoded_key);
+    // Exiting: the mice are being given back, a press would start work the
+    // exit then waits for.
+    let exiting = crate::is_shutting_down();
+    if suppresses_event(gestures, exiting || SUPPRESS_EXECUTION.load(Ordering::Relaxed), event.is_key_up) {
+        log::info!("[capture] Not dispatched {}: {}", event.encoded_key, if exiting { "exiting" } else { "live-capture mode" });
         flush_log_entries(runtime_store, log_entries);
         return EventOutcome::Handled;
     }

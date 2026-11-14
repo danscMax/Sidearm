@@ -15,7 +15,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const APP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-const TARGET = path.join(APP, "src-tauri", "target", "e2e");
+// Beside the shared target dir when one is set (a git worktree builds into the main checkout's).
+const TARGET = path.join(process.env.CARGO_TARGET_DIR || path.join(APP, "src-tauri", "target"), "e2e");
 const EXE = path.join(TARGET, "debug", "sidearm.exe");
 const V2 = "razer-naga";
 const V3 = "razer-naga-v3";
@@ -496,11 +497,22 @@ async function main() {
 
     // 6. Quit: offline profiles in both mice, live maps restored, clean exit.
     mark = world.log().length;
+    const v3Originals = JSON.parse(fs.readFileSync(path.join(world.data, `${V3}-live.json`), "utf8")).records;
     check("quit ends the app", await world.quit());
     const exitLog = world.log().slice(mark);
     check("V3 banks stored", /Razer Naga V3 Pro profile `[^`]+` verified in bank \d/.test(exitLog), exitLog.slice(-800));
     check("V2 offline profile stored", /profile `[^`]+` written for use without Sidearm: \d+ records, 0 failed/.test(exitLog));
     check("V3 bank 1 holds records", bankRecords(world.mouse(V3), 1).length > 0);
+    // Bank 1 plays after exit: each live record is what that bank holds there
+    // (the reselect reloads it), else the original Sidearm replaced.
+    const v3After = world.mouse(V3);
+    const at = (bank, button, layer) => v3After.records.find(([b, n, l]) => b === bank && n === button && l === layer)?.[3];
+    const wrongLive = v3Originals.filter(({ button, layer, before }) =>
+      JSON.stringify(at(0, button, layer) ?? [0, 0, 0, 0, 0, 0, 0]) !== JSON.stringify(at(1, button, layer) ?? before));
+    check("V3 live map is the bank's or the original", wrongLive.length === 0, JSON.stringify(wrongLive));
+    check("V3 live rollback file gone", !fs.existsSync(path.join(world.data, `${V3}-live.json`)));
+    check("exit runs off the main thread, step by step", /exit requested \(test run\)/.test(exitLog)
+      && /exit step `stop capture`: \d+ ms/.test(exitLog) && /exit work done in \d+ ms/.test(exitLog), exitLog.slice(-1500));
     check("crash sentinel removed", !fs.existsSync(path.join(world.data, "logs", ".running")));
 
     // 7. Killed: the watchdog restores.

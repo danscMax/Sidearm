@@ -493,6 +493,7 @@ fn remove_profile_by_name(
             MenuItem::Submenu {
                 items: children, ..
             } => items.extend(children),
+            MenuItem::Separator { .. } => {}
         }
     }
     config

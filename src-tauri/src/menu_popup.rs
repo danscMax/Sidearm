@@ -41,8 +41,11 @@ const EVENT_SHOW: &str = "menu-show";
 /// What a press does while the menu is open.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Input {
-    /// Item at this index of the level shown.
+    /// Item at this index of the level shown (a click on its row).
     Pick(usize),
+    /// The item with this number (0-based), a side button's: lines between
+    /// items have none, so it is no row index.
+    Number(usize),
     Next,
     Prev,
     Confirm,
@@ -98,6 +101,9 @@ pub(crate) struct ViewItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number: Option<usize>,
     pub submenu: bool,
+    /// A line between items (no label, no number).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub separator: bool,
     pub enabled: bool,
     /// What it sends (text, keys).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,10 +146,16 @@ pub(crate) struct View {
     pub scope_this: String,
 }
 
+/// A line is never enabled: it is not highlighted, hovered or picked.
 fn item_enabled(item: &MenuItem) -> bool {
     match item {
         MenuItem::Action { enabled, .. } | MenuItem::Submenu { enabled, .. } => *enabled,
+        MenuItem::Separator { .. } => false,
     }
+}
+
+fn is_line(item: &MenuItem) -> bool {
+    matches!(item, MenuItem::Separator { .. })
 }
 
 fn item_pinned(item: &MenuItem) -> bool {
@@ -153,6 +165,7 @@ fn item_pinned(item: &MenuItem) -> bool {
 fn item_label(item: &MenuItem) -> &str {
     match item {
         MenuItem::Action { label, .. } | MenuItem::Submenu { label, .. } => label,
+        MenuItem::Separator { .. } => "",
     }
 }
 
@@ -186,7 +199,7 @@ impl Model {
         let (level, _) = self.walk();
         let entry = level.get(index)?;
         let id = match entry.item {
-            MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } => id.clone(),
+            MenuItem::Action { id, .. } | MenuItem::Submenu { id, .. } | MenuItem::Separator { id } => id.clone(),
         };
         Some((id, entry.menu.map(str::to_owned)))
     }
@@ -207,7 +220,7 @@ impl Model {
     pub(crate) fn action_at(&self, index: usize) -> Option<String> {
         match self.walk().0.get(index)?.item {
             MenuItem::Action { action_id, .. } => Some(action_id.clone()),
-            MenuItem::Submenu { .. } => None,
+            MenuItem::Submenu { .. } | MenuItem::Separator { .. } => None,
         }
     }
 
@@ -370,6 +383,7 @@ impl Model {
                 self.highlight = self.first_enabled().unwrap_or(0);
                 Step::Stay
             }
+            MenuItem::Separator { .. } => Step::Stay,
         }
     }
 
@@ -394,6 +408,10 @@ impl Model {
     pub(crate) fn apply(&mut self, input: Input) -> Step {
         match input {
             Input::Pick(index) => self.take(index),
+            Input::Number(number) => match self.row_of_number(number) {
+                Some(index) => self.take(index),
+                None => Step::Stay,
+            },
             Input::Confirm => self.take(self.highlight),
             Input::Next => {
                 self.highlight = self.step(true);
@@ -435,8 +453,14 @@ impl Model {
         false
     }
 
+    /// The row of item `number` (0-based) of the level shown: lines are skipped.
+    fn row_of_number(&self, number: usize) -> Option<usize> {
+        self.walk().0.iter().enumerate().filter(|(_, entry)| !is_line(entry.item)).nth(number).map(|(index, _)| index)
+    }
+
     pub(crate) fn view(&self, title: &str, generation: u64) -> View {
         let (level, labels) = self.walk();
+        let mut numbered = 0;
         let parent = match labels.len() {
             0 => None,
             1 => Some(title.to_owned()),
@@ -448,14 +472,18 @@ impl Model {
             items: level
                 .iter()
                 .enumerate()
-                .map(|(index, entry)| ViewItem {
+                .map(|(_, entry)| ViewItem {
                     label: item_label(entry.item).to_owned(),
-                    number: Some(index + 1),
+                    number: (!is_line(entry.item)).then(|| {
+                        numbered += 1;
+                        numbered
+                    }),
+                    separator: is_line(entry.item),
                     submenu: matches!(entry.item, MenuItem::Submenu { .. }),
                     enabled: item_enabled(entry.item),
                     detail: match entry.item {
                         MenuItem::Action { action_id, .. } => self.details.get(action_id).map(|text| clip(text)),
-                        MenuItem::Submenu { .. } => None,
+                        MenuItem::Submenu { .. } | MenuItem::Separator { .. } => None,
                     },
                     text: matches!(entry.item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id)),
                     // The rows its level shows (pinned ones live in the ★ block).
@@ -463,13 +491,13 @@ impl Model {
                         MenuItem::Submenu { items, .. } => {
                             items.iter().filter(|item| !item_pinned(item)).map(|item| item_label(item).to_owned()).collect()
                         }
-                        MenuItem::Action { .. } => Vec::new(),
+                        MenuItem::Action { .. } | MenuItem::Separator { .. } => Vec::new(),
                     },
                     text_children: match entry.item {
                         MenuItem::Submenu { items, .. } => items.iter().filter(|item| !item_pinned(item)).map(|item| {
                             matches!(item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id))
                         }).collect(),
-                        MenuItem::Action { .. } => Vec::new(),
+                        MenuItem::Action { .. } | MenuItem::Separator { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
                 })
@@ -539,7 +567,7 @@ pub(crate) fn input_for_control(control_id: &str, opener: bool) -> Input {
     if let Some(number) = name.strip_prefix("thumb_").and_then(|n| n.parse::<usize>().ok())
         && (1..=NUMBERED).contains(&number)
     {
-        return Input::Pick(number - 1);
+        return Input::Number(number - 1);
     }
     match name {
         "wheel_down" => Input::Next,
@@ -671,6 +699,7 @@ fn menu_details(config: &AppConfig, items: &[MenuItem]) -> HashMap<String, Strin
                 }
             }
             MenuItem::Submenu { items, .. } => stack.extend(items),
+            MenuItem::Separator { .. } => {}
         }
     }
     details
@@ -1332,6 +1361,23 @@ mod tests {
     }
 
     #[test]
+    fn a_line_has_no_number_and_is_never_picked() {
+        let line = MenuItem::Separator { id: "line".into() };
+        let mut model = Model::new(
+            vec![action("a", "A"), line.clone(), submenu("g", "Group", vec![action("b", "B"), line, action("c", "C")])],
+            HashMap::new(),
+        );
+        let view = model.view("Phrases", 1);
+        let numbers: Vec<_> = view.items.iter().map(|item| (item.separator, item.number)).collect();
+        assert_eq!(numbers, [(false, Some(1)), (true, None), (false, Some(2)), (true, None), (false, Some(3))]);
+        assert_eq!(model.apply(Input::Number(2)), Step::Run("act-c".into()), "thumb 3 is the third item, lines skipped");
+        assert_eq!(model.apply(Input::Pick(1)), Step::Stay, "a click on a line does nothing");
+        assert!(!model.hover(1));
+        model.apply(Input::Next);
+        assert_ne!(model.view("Phrases", 1).highlight, 1, "the wheel steps over a line");
+    }
+
+    #[test]
     fn the_wheel_skips_disabled_items_and_wraps() {
         let mut model = sample();
         assert_eq!(model.highlight, 0);
@@ -1391,8 +1437,8 @@ mod tests {
 
     #[test]
     fn controls_map_to_menu_inputs() {
-        assert_eq!(input_for_control("v3_thumb_05", false), Input::Pick(4));
-        assert_eq!(input_for_control("thumb_12", false), Input::Pick(11));
+        assert_eq!(input_for_control("v3_thumb_05", false), Input::Number(4));
+        assert_eq!(input_for_control("thumb_12", false), Input::Number(11));
         assert_eq!(input_for_control("v3_wheel_down", false), Input::Next);
         assert_eq!(input_for_control("v3_wheel_up", false), Input::Prev);
         assert_eq!(input_for_control("v3_wheel_click", false), Input::Confirm);

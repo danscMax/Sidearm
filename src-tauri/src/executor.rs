@@ -1600,6 +1600,7 @@ fn count_enabled_menu_items(items: &[MenuItem]) -> usize {
             MenuItem::Submenu { enabled, items, .. } => {
                 usize::from(*enabled) + count_enabled_menu_items(items)
             }
+            MenuItem::Separator { .. } => 0,
         })
         .sum()
 }

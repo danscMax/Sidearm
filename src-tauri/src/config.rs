@@ -905,6 +905,8 @@ pub enum MenuItem {
         items: Vec<MenuItem>,
         enabled: bool,
     },
+    /// A line between items: no number, never picked.
+    Separator { id: String },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -2039,6 +2041,13 @@ fn validate_menu_items(
                     ));
                 }
                 validate_menu_items(action_id, items, action_ids, errors);
+            }
+            MenuItem::Separator { id } => {
+                if !menu_item_ids.insert(id.clone()) {
+                    errors.push(format!(
+                        "menu action `{action_id}` contains duplicate menu item id `{id}`."
+                    ));
+                }
             }
         }
     }
@@ -3999,7 +4008,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xe1d4_6b69_8f53_7479);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x155e_ae32_4468_d983);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

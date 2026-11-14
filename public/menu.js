@@ -99,6 +99,13 @@
         group = item.group || null;
         if (group) rows.appendChild(el("div", "group", group));
       }
+      // A line between items: no number, nothing to pick (kept in `items` so indices line up).
+      if (item.separator) {
+        var line = el("div", "line");
+        rows.appendChild(line);
+        items.push(line);
+        return;
+      }
       var row = el("div", "row" + (item.enabled ? "" : " item--off"));
       var keyClass = item.number == null ? "key key--none" : item.number > 12 ? "key key--extra" : "key";
       row.appendChild(el("span", keyClass, item.number != null ? String(item.number) : "0"));
@@ -133,6 +140,8 @@
       // A submenu: what it holds, one name per line.
       // Each name is a button: it takes that item without opening the submenu first.
       item.children.forEach(function (name, child) {
+        // A line between the submenu's items (the only nameless entry).
+        if (name === "") { tip.appendChild(el("div", "line")); return; }
         var entry = el("button", "tip__item", name);
         entry.type = "button";
         entry.addEventListener("click", function () { invoke("menu_pick_child", { index: index, child: child }); });

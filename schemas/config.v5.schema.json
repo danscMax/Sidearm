@@ -1191,8 +1191,27 @@
         },
         {
           "$ref": "#/$defs/submenuItem"
+        },
+        {
+          "$ref": "#/$defs/separatorMenuItem"
         }
       ]
+    },
+    "separatorMenuItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/idToken"
+        },
+        "kind": {
+          "const": "separator"
+        }
+      }
     },
     "actionMenuItem": {
       "type": "object",

@@ -70,13 +70,27 @@ pub fn spawn(app: AppHandle) {
     }
 }
 
+/// The longest a burst of device changes delays the check: a steady stream of
+/// `WM_DEVICECHANGE` from any device must not hold a new mouse back for good.
+const SETTLE_AT_MOST: Duration = Duration::from_secs(2);
+
+/// Waits for the burst to end (`settle` without a change), at most `cap` from now.
+fn wait_for_quiet(changes: &mpsc::Receiver<()>, settle: Duration, cap: Duration) {
+    let deadline = std::time::Instant::now() + cap;
+    loop {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() || changes.recv_timeout(settle.min(left)).is_err() {
+            return;
+        }
+    }
+}
+
 /// Restarts capture when the set of connected native mice changes.
 fn watch_mice(app: &AppHandle, changes: &mpsc::Receiver<()>) {
     let names = || crate::mouse_memory::present_models().iter().map(|model| model.name).collect::<Vec<_>>();
     let mut last = names();
     while changes.recv().is_ok() {
-        // Wait for the burst to end.
-        while changes.recv_timeout(SETTLE).is_ok() {}
+        wait_for_quiet(changes, SETTLE, SETTLE_AT_MOST);
         let now = names();
         if now == last {
             continue;
@@ -237,5 +251,37 @@ unsafe extern "system" fn window_proc(hwnd: HWND, message: u32, wparam: WPARAM, 
             0
         }
         _ => unsafe { DefWindowProcW(hwnd, message, wparam, lparam) },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_steady_stream_of_changes_is_cut_off_at_the_cap() {
+        let (sender, changes) = mpsc::channel();
+        let feeder = std::thread::spawn(move || {
+            for _ in 0..40 {
+                if sender.send(()).is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        });
+        let started = std::time::Instant::now();
+        wait_for_quiet(&changes, Duration::from_millis(100), Duration::from_millis(300));
+        let waited = started.elapsed();
+        assert!(waited < Duration::from_millis(600), "waited {waited:?} despite the cap");
+        drop(changes);
+        let _ = feeder.join();
+    }
+
+    #[test]
+    fn a_quiet_line_ends_the_wait_after_one_settle() {
+        let (_sender, changes) = mpsc::channel::<()>();
+        let started = std::time::Instant::now();
+        wait_for_quiet(&changes, Duration::from_millis(50), Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 }

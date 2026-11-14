@@ -20,7 +20,7 @@ import { ACTION_CATEGORIES } from "./constants";
 import { mediaKeyLabel, modifierLabels, mouseActionLabel } from "./action-helpers";
 import { assertNever } from "./assertNever";
 import { isPlaceholderAction } from "./config-editing";
-import { phraseOf, withPhrase } from "./menu-phrase";
+import { phraseOf } from "./menu-phrase";
 
 /* ─────────────────────────────────────────────────────────
    Normalize Key Name
@@ -293,15 +293,12 @@ export function buildAction(params: {
         // (source: libraryRef). Editing the text in the picker clears snippetId
         // upstream, detaching into an inline copy — so here snippetId is the
         // single source of truth for link-vs-inline.
-        // Text + Enter is the menu's two-step phrase macro, the same one the menu editor writes.
-        if (drafts.text.enter) {
-          return withPhrase({ id: actionId, type: "textSnippet", payload: { source: "inline", text: "", pasteMode: "sendText", tags: [] }, displayName }, drafts.text.text, true);
-        }
+        const pressEnter = drafts.text.enter ? { pressEnter: true } : {};
         if (drafts.text.snippetId) {
           return {
             id: actionId,
             type: "textSnippet" as const,
-            payload: { source: "libraryRef" as const, snippetId: drafts.text.snippetId },
+            payload: { source: "libraryRef" as const, snippetId: drafts.text.snippetId, ...pressEnter },
             displayName,
           };
         }
@@ -321,6 +318,7 @@ export function buildAction(params: {
             text: drafts.text.text,
             pasteMode: drafts.text.pasteMode,
             tags: preservedTags,
+            ...pressEnter,
           },
           displayName,
         };
@@ -382,14 +380,16 @@ function seedTextDraft(
 ): PickerDrafts["text"] {
   if (existingAction?.type === "textSnippet") {
     const payload = existingAction.payload;
+    const enter = payload.pressEnter ? { enter: true } : {};
     if (payload.source === "inline") {
-      return { text: payload.text, pasteMode: payload.pasteMode };
+      return { text: payload.text, pasteMode: payload.pasteMode, ...enter };
     }
     const snippet = snippetLibrary.find((s) => s.id === payload.snippetId);
     return {
       text: snippet?.text ?? "",
       pasteMode: snippet?.pasteMode ?? "sendText",
       snippetId: payload.snippetId,
+      ...enter,
     };
   }
   const phrase = existingAction ? enterPhraseOf(existingAction, snippetLibrary) : null;
@@ -397,7 +397,7 @@ function seedTextDraft(
   return { text: "", pasteMode: "sendText" };
 }
 
-/** The text of a "text, then Enter" macro (it opens as a text with Enter), or null. */
+/** The text of an old "text, then Enter" macro (it opens, and is saved, as a text with Enter), or null. */
 export function enterPhraseOf(action: Action, snippetLibrary: SnippetLibraryItem[]): string | null {
   const phrase = action.type === "sequence" ? phraseOf(action, snippetLibrary) : null;
   return phrase?.enter ? phrase.text : null;

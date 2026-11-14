@@ -37,10 +37,15 @@ describe("phraseOf", () => {
 });
 
 describe("withPhrase", () => {
-  it("toggles between a text snippet and text + Enter, keeping id, name and paste mode", () => {
+  it("toggles Enter on the text itself, keeping id, name, paste mode and a library link", () => {
     const sent = withPhrase(inline("a", "hi"), "hi", true);
-    expect(sent.type).toBe("sequence");
-    expect(sent.id).toBe("a");
+    expect(sent).toMatchObject({ id: "a", type: "textSnippet", payload: { source: "inline", text: "hi", pasteMode: "clipboardPaste", pressEnter: true } });
+    expect(phraseOf(sent, [])).toEqual({ text: "hi", enter: true });
+    const linked: Action = { id: "l", displayName: "L", type: "textSnippet", payload: { source: "libraryRef", snippetId: "s1" } };
+    expect(withPhrase(linked, "ignored", true).payload).toEqual({ source: "libraryRef", snippetId: "s1", pressEnter: true });
+    const old: Action = { id: "o", displayName: "O", type: "sequence", payload: { steps: [{ type: "text", value: "x" }, { type: "sleep", delayMs: 80 }, { type: "send", value: "Enter" }] } };
+    expect(phraseOf(old, [])).toEqual({ text: "x", enter: true });
+    expect(withPhrase(old, "x", true).type).toBe("textSnippet");
     const back = withPhrase(inline("a", "hi"), "bye", false);
     expect(back).toMatchObject({ id: "a", type: "textSnippet", payload: { source: "inline", text: "bye", pasteMode: "clipboardPaste", tags: ["t"] } });
   });
@@ -119,9 +124,11 @@ describe("withKeyboardOnly", () => {
     expect(auto.type === "textSnippet" && auto.payload.source === "inline" && auto.payload.pasteMode).toBe("sendText");
   });
 
-  it("leaves anything that is not an inline phrase alone", () => {
-    const macro = withPhrase(inline("a", "hi"), "hi", true);
+  it("leaves anything that is not an inline phrase alone, and keeps a phrase's Enter", () => {
+    const macro: Action = { id: "m", displayName: "M", type: "sequence", payload: { steps: [{ type: "text", value: "x" }] } };
     expect(withKeyboardOnly(macro, true)).toBe(macro);
+    const typed = withKeyboardOnly(withPhrase(inline("a", "hi"), "hi", true), true);
+    expect(typed.payload).toMatchObject({ pasteMode: "keyboardOnly", pressEnter: true });
   });
 });
 

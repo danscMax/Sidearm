@@ -209,9 +209,10 @@ export function MenuItemsEditor({
 
   function setPhrase(action: Action, text: string, enter: boolean) {
     const phrase = phraseOf(action, library);
-    // A library text stays linked while Enter is off: the library holds it.
-    if (phrase?.snippetId && !enter) {
-      onEditsChange({ ...edits, library: { ...edits.library, [phrase.snippetId]: text } });
+    // A library text stays linked: the library holds the text, the use its Enter.
+    if (phrase?.snippetId) {
+      const nextEdits = { ...edits, library: { ...edits.library, [phrase.snippetId]: text } };
+      onEditsChange(enter === phrase.enter ? nextEdits : putAction(withPhrase(action, text, enter), nextEdits));
       return;
     }
     onEditsChange(putAction(withPhrase(action, text, enter)));
@@ -783,8 +784,8 @@ export function MenuItemsEditor({
                 }} />
             </label>
           ) : null}
-          {/* A phrase with Enter is a macro, whose text step has no input mode. A
-              library phrase keeps its mode in the library item (all its uses). */}
+          {/* A library phrase keeps its mode in the library item (all its uses);
+              an old text + Enter macro has none until it is edited. */}
           {kind === "phrase" && action?.type === "textSnippet" ? (() => {
             const linked = action.payload.source === "libraryRef" ? library.find((item) => action.payload.source === "libraryRef" && item.id === action.payload.snippetId) : undefined;
             const mode = action.payload.source === "inline" ? action.payload.pasteMode : linked?.pasteMode;

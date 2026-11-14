@@ -171,13 +171,14 @@ describe("text with Enter", () => {
     { type: "text", value: "/resume" }, { type: "sleep", delayMs: 80 }, { type: "send", value: "Enter" },
   ] } });
 
-  it("opens the menu's text + Enter macro as a text with Enter, and saves it back the same", () => {
+  it("opens an old text + Enter macro as a text with Enter, and saves it as a text with pressEnter", () => {
     const drafts = createInitialDrafts(enterMacro, null, profiles);
     expect(drafts.text).toEqual({ text: "/resume", pasteMode: "sendText", enter: true });
     expect(drafts.sequence).toHaveLength(3);
-    const saved = buildAction({ effectiveCategory: "textSnippet", existingAction: enterMacro, drafts, t, profiles });
-    expect(saved.type).toBe("sequence");
-    expect(saved.type === "sequence" ? saved.payload.steps : null).toEqual((enterMacro.payload as { steps: unknown }).steps);
+    const saved = buildAction({ effectiveCategory: "textSnippet", existingAction: enterMacro, drafts: { ...drafts, text: { ...drafts.text, pasteMode: "keyboardOnly" } }, t, profiles });
+    expect(saved).toMatchObject({ type: "textSnippet", payload: { source: "inline", text: "/resume", pasteMode: "keyboardOnly", pressEnter: true } });
+    const reopened = createInitialDrafts(saved, null, profiles);
+    expect(reopened.text).toEqual({ text: "/resume", pasteMode: "keyboardOnly", enter: true });
   });
 
   it("leaves another macro a macro", () => {

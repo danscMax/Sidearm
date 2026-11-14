@@ -200,10 +200,14 @@ export type TextSnippetPayload =
       text: string;
       pasteMode: PasteMode;
       tags: string[];
+      /** Enter after the text (80 ms later; not into another window that came up). */
+      pressEnter?: boolean;
     }
   | {
       source: "libraryRef";
       snippetId: string;
+      /** Enter after the text, for this use of the library text. */
+      pressEnter?: boolean;
     };
 
 export type SequenceStep =

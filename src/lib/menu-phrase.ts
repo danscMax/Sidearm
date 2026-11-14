@@ -19,10 +19,11 @@ export function phraseOf(action: Action, library: SnippetLibraryItem[]): Phrase 
     const payload = action.payload;
     if (payload.source === "libraryRef") {
       const snippet = library.find((item) => item.id === payload.snippetId);
-      return snippet ? { text: snippet.text, enter: false, snippetId: snippet.id } : null;
+      return snippet ? { text: snippet.text, enter: Boolean(payload.pressEnter), snippetId: snippet.id } : null;
     }
-    return { text: payload.text, enter: false };
+    return { text: payload.text, enter: Boolean(payload.pressEnter) };
   }
+  // Before pressEnter a phrase with Enter was a text + pause + Enter macro: still read.
   if (action.type === "sequence") {
     const [first, pause, enter, ...rest] = action.payload.steps;
     if (first?.type !== "text" || (first.repeat ?? 1) !== 1 || (first.delayMs ?? 0) !== 0) return null;
@@ -44,23 +45,21 @@ export function kindOf(action: Action | undefined, library: SnippetLibraryItem[]
   return action.type === "shortcut" ? "keys" : "other";
 }
 
-/** The action typing `text` (then Enter when `enter`): text alone stays a text
- *  snippet, text + Enter is a two-step macro. Keeps id, name and conditions. */
+/** The text action typing `text`, then Enter when `enter` (`pressEnter`). A
+ *  library use stays linked (its text lives in the library); an old text +
+ *  Enter macro becomes a text. Keeps id, name, conditions and the input mode. */
 export function withPhrase(action: Action, text: string, enter: boolean): Action {
   const { id, displayName, notes, conditions } = action;
   const base = { id, displayName, ...(notes ? { notes } : {}), ...(conditions ? { conditions } : {}) };
-  if (enter) {
-    return {
-      ...base,
-      type: "sequence",
-      payload: { steps: [{ type: "text", value: text }, { type: "sleep", delayMs: ENTER_DELAY_MS }, { type: "send", value: "Enter" }] },
-    };
+  const pressEnter = enter ? { pressEnter: true } : {};
+  if (action.type === "textSnippet" && action.payload.source === "libraryRef") {
+    return { ...base, type: "textSnippet", payload: { source: "libraryRef", snippetId: action.payload.snippetId, ...pressEnter } };
   }
   const keep = action.type === "textSnippet" && action.payload.source === "inline" ? action.payload : null;
   return {
     ...base,
     type: "textSnippet",
-    payload: { source: "inline", text, pasteMode: keep?.pasteMode ?? "sendText", tags: keep?.tags ?? [] },
+    payload: { source: "inline", text, pasteMode: keep?.pasteMode ?? "sendText", tags: keep?.tags ?? [], ...pressEnter },
   };
 }
 

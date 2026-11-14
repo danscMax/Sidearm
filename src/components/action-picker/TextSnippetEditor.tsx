@@ -203,14 +203,13 @@ export function TextSnippetEditor({
       <div className="snippet-save-toggle">
         <Toggle
           checked={Boolean(draft.enter)}
-          onChange={(on) => onChange({ ...draft, enter: on || undefined, ...(on ? { pasteMode: "sendText" as const } : {}) })}
+          onChange={(on) => onChange({ ...draft, enter: on || undefined })}
           ariaLabel={t("picker.pressEnterAfter")}
         />
         <span>{t("picker.pressEnterAfter")}</span>
         <HelpTip text={t("picker.pressEnterAfterHint")} />
       </div>
-      {/* Text + Enter is a macro, whose text step has no input mode (menu-phrase.ts). */}
-      {linked || draft.enter ? null : (
+      {linked ? null : (
         <div className="snippet-save-toggle">
           <Toggle
             checked={keyboardOnly}

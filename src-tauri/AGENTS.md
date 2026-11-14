@@ -26,6 +26,7 @@ The Rust backend: low-level keyboard capture, Razer-encoding detection, action e
 
 ## Local Contracts
 
+- A path the page sends (import, export, folders, device photos, shortcuts) must be on a local drive (`is_local_path`, inside `validate_user_file_path`) before any file system call: touching `\\server\share` would offer that server the user's NTLM credentials.
 - Internal fns return `Result<T, String>`; convert to `CommandError` at the IPC boundary. An error the UI shows is `CommandError::from_ui(code, ui_text!("error.*", …))` (a passed-through internal reason goes in as `{reason}` inside a translated frame; technical details via `.with_details`); `tests::untranslated_command_errors_do_not_grow` ratchets the remaining `CommandError::new` calls. A config declaring a newer schema is `ConfigStoreError::NewerVersion` → `config_newer_version`, never recovered or overwritten.
 - Config load/save responses carry a non-serialized `stamp` of the exact bytes read/written; IPC adopts that snapshot's stamp without rereading the current file. Migration carries the saved stamp forward. The IPC acceptance step also applies minimize-to-tray and the trimmed/defaulted global shortcut on load, save, import and restore.
 - Runtime lifecycle changes hold the controller lock through backend work, the corresponding `RuntimeStore` update and event emission; the store lock is released during backend stop/join. Start rechecks the running state under the controller lock. Tray toggles use the same IPC handlers.

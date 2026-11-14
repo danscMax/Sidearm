@@ -918,6 +918,9 @@ fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
     if !path.is_absolute() {
         return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.pathNotAbsolute", "File path must be absolute.")));
     }
+    if !is_local_path(&path) {
+        return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.pathNotLocal", "Only a file on a local drive can be used (a network path would send your Windows sign-in to that server).")));
+    }
     if path
         .components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
@@ -1127,9 +1130,22 @@ fn shortcut_target(path: &Path) -> Result<PathBuf, String> {
 /// A `.lnk` on a drive letter (`C:\…` or `\\?\C:\…`), never a UNC or device path.
 #[cfg(target_os = "windows")]
 fn is_local_shortcut(path: &Path) -> bool {
-    use std::path::{Component, Prefix};
-    let local = matches!(path.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)));
-    local && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+    is_local_path(path) && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+}
+
+/// A path on a drive letter (`C:\…`, `\\?\C:\…`), never a UNC or device path:
+/// touching `\\server\share` makes Windows offer that server the user's NTLM
+/// credentials. Checked before any file system call on a path the page sent.
+fn is_local_path(path: &Path) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use std::path::{Component, Prefix};
+        matches!(path.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        path.is_absolute()
+    }
 }
 
 /// An app rule picked from a shortcut: the `.exe` it starts. Anything else (a
@@ -1173,7 +1189,7 @@ async fn read_text_folder(path: String) -> Result<TextFolder, CommandError> {
     const MAX_FILES: usize = 200;
     tauri::async_runtime::spawn_blocking(move || {
         let dir = PathBuf::from(&path);
-        if !dir.is_dir() {
+        if !is_local_path(&dir) || !dir.is_dir() {
             return Err(CommandError::from_ui("not_a_folder", crate::ui_text!("error.notAFolder", "The chosen path is not a folder.")));
         }
         let files: Vec<PathBuf> = fs::read_dir(&dir)
@@ -1462,7 +1478,7 @@ fn validated_device_image_path(app: &AppHandle, file_name: &str) -> Result<PathB
 /// file name the config should reference.
 #[tauri::command]
 async fn import_device_image(app: AppHandle, source_path: String) -> Result<String, CommandError> {
-    let source = PathBuf::from(&source_path);
+    let source = validate_user_file_path(&source_path)?;
     let extension = source
         .extension()
         .and_then(|ext| ext.to_str())
@@ -1764,7 +1780,7 @@ async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<Stri
     let config_dir = resolve_config_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
         let parent = PathBuf::from(&target_dir);
-        let plain = parent.is_absolute() && !parent.components().any(|part| matches!(part, std::path::Component::ParentDir));
+        let plain = parent.is_absolute() && is_local_path(&parent) && !parent.components().any(|part| matches!(part, std::path::Component::ParentDir));
         if !plain || !parent.is_dir() {
             return Err(CommandError::from_ui("not_a_folder", crate::ui_text!("error.notAFolder", "The chosen path is not a folder.")));
         }
@@ -4845,6 +4861,17 @@ mod tests {
         assert!(!is_local_shortcut(Path::new(r"\\attacker\share\x.lnk")), "UNC: would leak NTLM");
         assert!(!is_local_shortcut(Path::new(r"\\?\UNC\attacker\share\x.lnk")));
         assert!(!is_local_shortcut(Path::new(r"C:\Users\me\notes.txt")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn imports_and_exports_take_only_local_paths() {
+        assert!(validate_user_file_path(r"C:\Users\me\profile.json").is_ok());
+        assert!(validate_user_file_path(r"\\?\D:\backup\profile.json").is_ok());
+        for remote in [r"\\attacker\share\profile.json", r"\\?\UNC\attacker\share\p.json", r"\\.\pipe\x"] {
+            let error = validate_user_file_path(remote).expect_err(remote);
+            assert_eq!(error.key, Some("error.pathNotLocal"), "{remote}");
+        }
     }
 
     #[cfg(target_os = "windows")]

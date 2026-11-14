@@ -89,6 +89,9 @@ windows = { version = "0.61", features = [
   "Win32_Storage_FileSystem",
   "Win32_UI_Shell",
 ] }
+# The WebView2 interfaces Tauri does not wrap (memory target level, `webview2.rs`);
+# the same version Tauri's wry already builds, so nothing new is compiled.
+webview2-com = "0.38"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 evdev = { version = "0.13", features = ["tokio"] }

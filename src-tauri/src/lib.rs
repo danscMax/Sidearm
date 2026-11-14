@@ -50,6 +50,8 @@ mod resolver;
 mod runtime;
 mod synapse_import;
 mod vk;
+#[cfg(target_os = "windows")]
+mod webview2;
 mod window_capture;
 
 use std::{
@@ -4207,6 +4209,15 @@ pub fn run() {
         // TODO: Audit that the environment access only happens in single-threaded code.
         unsafe { std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview_dir) };
     }
+    // Before any webview starts, after `claim_app` waited for an exiting Sidearm.
+    // Roaming: Tauri's own default, `%LOCALAPPDATA%\<identifier>`.
+    #[cfg(target_os = "windows")]
+    let webview_caches = if app_paths.mode == paths::PathMode::Portable {
+        Some(app_paths.config_dir.join("EBWebView"))
+    } else {
+        dirs_fallback_local().map(|local| local.join("com.sidearm.desktop"))
+    }
+    .and_then(|user_data| webview2::clear_caches(&user_data));
 
 
     // Push-based debug log: RuntimeStore::push_log sends each new entry on
@@ -4306,6 +4317,10 @@ pub fn run() {
             if orphan_deleted > 0 {
                 log::info!("[log-retention] orphan sweep (roaming logs): deleted {orphan_deleted}");
             }
+            #[cfg(target_os = "windows")]
+            if let Some(said) = &webview_caches {
+                log::info!("{said}");
+            }
             if legacy_freed > 0 {
                 log::info!(
                     "[system] Removed pre-rebrand orphans (com.nagaworkflowstudio.*): {} MB freed",
@@ -4397,6 +4412,11 @@ pub fn run() {
                 // keep the rail + content column legible, not the full layout.
                 // Keep in sync with tauri.conf.json and the clamp below.
                 let _ = main_window.set_min_size(Some(tauri::LogicalSize::new(480.0, 600.0)));
+
+                // Less memory while it sits hidden in the tray or minimized.
+                // The popups stay as they are: their open latency is unmeasured.
+                #[cfg(target_os = "windows")]
+                webview2::low_memory_while_hidden(&main_window);
 
                 // Clamp restored size against the config minimums.  The
                 // window-state plugin restores raw saved dimensions and does

@@ -95,7 +95,7 @@ use runtime::{
     EVENT_QUICK_RULE_START, EVENT_RUNTIME_ERROR, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
     EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED, RuntimeStateSummary, RuntimeStore,
 };
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -441,6 +441,7 @@ fn build_tray_menu(
     app: &AppHandle,
     profiles: &[config::Profile],
     active_profile_id: Option<&str>,
+    manual_override: bool,
     is_running: bool,
     is_elevated: bool,
 ) -> tauri::Result<Menu<tauri::Wry>> {
@@ -473,6 +474,26 @@ fn build_tray_menu(
         )?)?;
     }
 
+    // A profile chosen by hand holds until changed: offer the way back to the rules.
+    if manual_override {
+        let later = |minutes: u64| -> tauri::Result<MenuItem<tauri::Wry>> {
+            MenuItem::with_id(
+                app,
+                format!("rules_after:{minutes}"),
+                crate::ui_text::native(&crate::ui_text!("runtime.trayRulesAfter", "In {minutes} minutes", minutes = minutes)),
+                true,
+                None::<&str>,
+            )
+        };
+        let now = MenuItem::with_id(app, "rules_now", crate::ui_text::native(&crate::ui_text!("runtime.trayRulesNow", "Now")), true, None::<&str>)?;
+        let (ten, thirty, sixty) = (later(10)?, later(30)?, later(60)?);
+        menu.append(&Submenu::with_items(
+            app,
+            crate::ui_text::native(&crate::ui_text!("runtime.trayRulesBack", "Back to the app rules")),
+            true,
+            &[&now, &ten, &thirty, &sixty],
+        )?)?;
+    }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(
         app,
@@ -578,6 +599,7 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         ),
         Err(_) => (false, None),
     };
+    let has_manual = manual_override.is_some();
     let active = manual_override
         .or_else(|| Some(config.settings.fallback_profile_id.clone()))
         .filter(|id| !id.is_empty());
@@ -632,6 +654,7 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         app,
         &config.profiles,
         active.as_deref(),
+        has_manual,
         is_running,
         is_elevated,
     ) {
@@ -642,6 +665,47 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         }
         Err(error) => log::warn!("[tray] build_tray_menu failed: {error}"),
     }
+}
+
+/// Bumped by every "back to the app rules" choice: only the latest one acts.
+static RULES_BACK: AtomicU64 = AtomicU64::new(0);
+
+/// After `delay`, the profile chosen by hand gives way to the app rules — unless
+/// another profile was chosen meanwhile, or a later choice replaced this one.
+fn schedule_rules_back(app: &AppHandle, delay: std::time::Duration) {
+    let generation = RULES_BACK.fetch_add(1, Ordering::SeqCst) + 1;
+    let held = app.state::<Arc<Mutex<RuntimeStore>>>().lock().ok().and_then(|store| store.manual_profile_override().map(str::to_owned));
+    let Some(held) = held else { return };
+    log::info!("[tray] back to the app rules in {delay:?} (now `{held}`)");
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("rules-back".into()).spawn(move || {
+        std::thread::sleep(delay);
+        if RULES_BACK.load(Ordering::SeqCst) == generation {
+            release_manual_profile(&app, Some(&held));
+        }
+    });
+}
+
+/// Drops the profile chosen by hand (only while it is still `expected`, when
+/// given) and resolves the window in front by the app rules at once.
+fn release_manual_profile(app: &AppHandle, expected: Option<&str>) {
+    RULES_BACK.fetch_add(1, Ordering::SeqCst);
+    let store = app.state::<Arc<Mutex<RuntimeStore>>>().inner().clone();
+    {
+        let Ok(mut runtime) = store.lock() else { return };
+        if expected.is_some_and(|expected| runtime.manual_profile_override() != Some(expected)) {
+            return; // another profile was chosen by hand meanwhile
+        }
+        runtime.set_manual_profile_override(None);
+    }
+    log::info!("[tray] back to the app rules");
+    if let Ok(config_dir) = resolve_config_dir(app)
+        && let Ok(load) = load_or_initialize_config(&config_dir)
+        && let Ok(result) = window_capture::capture_active_window_with_resolution(&load.config, &app.package_info().name, None)
+    {
+        capture_backend::emit_profile_resolved_and_notify(app, &store, &result, &load.config);
+    }
+    rebuild_tray_menu(app);
 }
 
 /// Reload config from disk and rebuild the tray menu. Use this from triggers
@@ -4123,7 +4187,7 @@ pub fn run() {
             // Initial menu has no profile rows yet — rebuild_tray_menu (called
             // right after build, below) loads config and populates them. Keeping
             // one menu-construction path (build_tray_menu) avoids drift.
-            let tray_menu = build_tray_menu(app.handle(), &[], None, false, is_elevated)?;
+            let tray_menu = build_tray_menu(app.handle(), &[], None, false, false, is_elevated)?;
 
             let mut tray_builder = TrayIconBuilder::with_id("sidearm-tray");
             match app.default_window_icon() {
@@ -4231,6 +4295,15 @@ pub fn run() {
                         });
                     }
                     "quit" => app.exit(0),
+                    "rules_now" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || release_manual_profile(&app, None));
+                    }
+                    other if other.starts_with("rules_after:") => {
+                        if let Some(minutes) = other.strip_prefix("rules_after:").and_then(|m| m.parse::<u64>().ok()) {
+                            schedule_rules_back(app, std::time::Duration::from_secs(minutes * 60));
+                        }
+                    }
                     "stop_macros" => {
                         executor::cancel_live_sequences();
                         log::info!("[tray] macros stopped");

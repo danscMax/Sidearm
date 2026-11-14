@@ -1805,7 +1805,10 @@
       "trayQuit": "Quit",
       "trayRelaunchAsAdmin": "Restart as administrator",
       "trayTooltip": "Sidearm — {{state_label}}\nProfile: {{profile_name}}{{battery_line}}",
-      "trayStopMacros": "Stop macros"
+      "trayStopMacros": "Stop macros",
+      "trayRulesBack": "Back to the app rules",
+      "trayRulesNow": "Now",
+      "trayRulesAfter": "In {{minutes}} minutes"
     },
     "window": {
       "captured": "Captured `{{exe}}`, profile `{{profile_id}}`.",

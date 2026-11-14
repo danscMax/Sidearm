@@ -1839,7 +1839,10 @@
       "trayQuit": "Выход",
       "trayRelaunchAsAdmin": "Перезапустить от администратора",
       "trayTooltip": "Sidearm — {{state_label}}\nПрофиль: {{profile_name}}{{battery_line}}",
-      "trayStopMacros": "Остановить макросы"
+      "trayStopMacros": "Остановить макросы",
+      "trayRulesBack": "Вернуться к правилам приложений",
+      "trayRulesNow": "Сейчас",
+      "trayRulesAfter": "Через {{minutes}} мин"
     },
     "window": {
       "captured": "Захвачено `{{exe}}`, профиль `{{profile_id}}`.",

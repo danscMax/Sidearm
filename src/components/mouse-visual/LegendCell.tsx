@@ -78,6 +78,11 @@ export function LegendCell({
               <GestureIcon mark="link" />
             </span>
           ) : null}
+          {entry.sameAs?.length ? (
+            <span className="btn-legend__same" {...tip(t("mouseVisual.sameAs", { buttons: entry.sameAs.join(", ") }))}>
+              <GestureIcon mark="copy" />
+            </span>
+          ) : null}
         </span>
         {/* The other press patterns, one chip each: what the hold / double / triple press does. */}
         {entry.extras?.length ? (

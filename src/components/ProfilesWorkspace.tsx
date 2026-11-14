@@ -41,7 +41,8 @@ import {
 import { useActionPicker } from "../hooks/useActionPicker";
 import { useMouseVisualPanel } from "../hooks/useMouseVisualPanel";
 import type { Slot } from "../lib/binding-moves";
-import { checkProfile, type ConfigIssue } from "../lib/config-check";
+import { checkProfile, duplicatesOnDevice } from "../lib/config-check";
+import { DuplicatesNote } from "./DuplicatesNote";
 import { CopyAssignmentsModal } from "./CopyAssignmentsModal";
 import { CompareProfilesModal } from "./CompareProfilesModal";
 import { exportProfileToFile, importProfileFromFile } from "../lib/profile-transfer";
@@ -473,7 +474,8 @@ export function ProfilesWorkspace({
   const checked = effectiveProfileId ? checkProfile(activeConfig, effectiveProfileId) : [];
   // The same thing on several buttons is a note (often a choice), not a problem.
   const profileIssues = checked.filter((issue) => issue.kind !== "duplicate");
-  const duplicates = checked.filter((issue): issue is Extract<ConfigIssue, { kind: "duplicate" }> => issue.kind === "duplicate");
+  // Only the mouse shown: the same group on the other mouse is that mouse's line.
+  const duplicates = duplicatesOnDevice(checked, activeConfig, activeDevice?.id);
 
   // Conflict merge: keep one binding enabled, disable the rest of its group.
   const handleKeepBinding = (
@@ -1033,22 +1035,6 @@ export function ProfilesWorkspace({
         </Notice>
       ) : null}
 
-      {duplicates.length > 0 ? (
-        <Notice variant="info" className="profiles__conflict-banner">
-          <strong>{t("configCheck.duplicatesBanner")}</strong>
-          <ul>
-            {duplicates.map((issue, index) => (
-              <li key={index}>
-                {t("configCheck.duplicate", {
-                  name: issue.name,
-                  layer: labelForLayer(issue.bindings[0]!.layer),
-                  buttons: issue.bindings.map((b) => controlWithGesture(b.controlId, b.triggerMode)).join(", "),
-                })}
-              </li>
-            ))}
-          </ul>
-        </Notice>
-      ) : null}
 
       {layerConflicts.length > 0 ? (
         <Notice variant="warning" className="profiles__conflict-banner">
@@ -1230,6 +1216,7 @@ export function ProfilesWorkspace({
           </button>
         </div>
       </div>
+      <DuplicatesNote duplicates={duplicates} />
 
       {/* ── Profile actions ── */}
       {activeProfile ? (

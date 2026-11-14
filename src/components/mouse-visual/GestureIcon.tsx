@@ -1,9 +1,10 @@
 // Monochrome marks of a button's other press patterns (and of "needs
 // Sidearm", "kept alike on the other mouse"), drawn in the current text colour:
 // a press held (a dot with a trail), two or three taps (two or three dots), no
-// Sidearm (a broken ring), synced (two chain links).
+// Sidearm (a broken ring), synced (two chain links), the same on another button
+// (two overlapping squares).
 
-type Mark = "longPress" | "doublePress" | "triplePress" | "live" | "link";
+type Mark = "longPress" | "doublePress" | "triplePress" | "live" | "link" | "copy";
 
 export function GestureIcon({ mark }: { mark: Mark }) {
   return (
@@ -17,6 +18,11 @@ export function GestureIcon({ mark }: { mark: Mark }) {
         <g fill="none" stroke="currentColor" strokeWidth="1.5">
           <rect x="1" y="2.5" width="8" height="5" rx="2.5" />
           <rect x="7" y="2.5" width="8" height="5" rx="2.5" />
+        </g>
+      ) : mark === "copy" ? (
+        <g fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="3" y="0.75" width="6.5" height="6" rx="1.5" />
+          <rect x="6.5" y="3.25" width="6.5" height="6" rx="1.5" />
         </g>
       ) : mark === "live" ? (
         <path d="M8 1.5a3.5 3.5 0 1 1-3.3 2.3M8 1.5V0" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />

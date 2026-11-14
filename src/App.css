@@ -2312,9 +2312,9 @@ input[type="radio"] {
 .btn-legend__gesture .gesture-icon { flex: none; color: var(--layer-accent, var(--c-accent)); }
 .btn-legend__gesture-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-legend__gesture:hover { background: rgba(var(--layer-rgb, 159, 202, 105), 0.2); color: var(--c-text-bright); }
-/* Quiet marks beside the label: works only while Sidearm runs; kept alike on the other mouse. */
-.btn-legend__live, .btn-legend__synced { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
-.btn-legend__live:hover, .btn-legend__synced:hover { opacity: 1; color: var(--c-text-bright); }
+/* Quiet marks beside the label: works only while Sidearm runs; kept alike on the other mouse; the same on another button. */
+.btn-legend__live, .btn-legend__synced, .btn-legend__same { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
+.btn-legend__live:hover, .btn-legend__synced:hover, .btn-legend__same:hover { opacity: 1; color: var(--c-text-bright); }
 
 /* ── Tooltip on legend cells ── */
 .btn-legend__cell {
@@ -2347,7 +2347,8 @@ input[type="radio"] {
 .btn-legend__cell:has([data-tip]:hover)[data-tooltip]:hover::after { display: none; }
 .btn-legend__gesture[data-tip]:hover::after,
 .btn-legend__live[data-tip]:hover::after,
-.btn-legend__synced[data-tip]:hover::after {
+.btn-legend__synced[data-tip]:hover::after,
+.btn-legend__same[data-tip]:hover::after {
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 6px);
@@ -5040,6 +5041,21 @@ code {
 .profiles__conflict-banner ul {
   margin: 6px 0 0;
   padding-left: 18px;
+}
+/* The same thing on several buttons: one quiet folded line under the mouse. */
+.duplicates-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  font-size: var(--fs-caption);
+}
+.duplicates-note__toggle { display: inline-flex; align-items: center; gap: 6px; }
+.duplicates-note__list {
+  flex-basis: 100%;
+  margin: 0;
+  padding-left: 34px;
 }
 .profiles__conflict-actions {
   display: inline-flex;

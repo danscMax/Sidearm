@@ -71,6 +71,7 @@ import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
 import { isBuiltinControl, offlineProfileId, playsWithoutSidearm } from "./lib/onboard-mapping";
 import { syncedWith } from "./lib/device-transfer";
+import { checkProfile, duplicatesOnDevice, sameAsByControl } from "./lib/config-check";
 import { describeConfigChange } from "./lib/config-diff";
 import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
@@ -1207,6 +1208,13 @@ function App() {
   // The profile written into the mice at exit, on a layer the mouse keeps.
   const offlineHere = !!activeConfig && offlineProfileId(activeConfig) === effectiveProfileId
     && (selectedLayer === "standard" || selectedLayer === "hypershift");
+  // Per button: the other buttons of this mouse and layer doing the same thing.
+  const sameAsByControlId = useMemo(
+    () => activeConfig && effectiveProfileId
+      ? sameAsByControl(duplicatesOnDevice(checkProfile(activeConfig, effectiveProfileId), activeConfig, effectiveDeviceId), selectedLayer)
+      : new Map<ControlId, string[]>(),
+    [activeConfig, effectiveProfileId, effectiveDeviceId, selectedLayer],
+  );
   const familySections = useMemo(
     () =>
       controlFamilyOrder.map((family) => ({
@@ -1238,10 +1246,11 @@ function App() {
                 sidearmOnly: offlineHere && isBuiltinControl(activeConfig, control.id) && binding !== null
                   && binding.enabled && !playsWithoutSidearm(binding, actionById.get(binding.actionId)),
                 syncedWith: binding ? syncedWith(activeConfig, binding.id) : undefined,
+                sameAs: sameAsByControlId.get(control.id),
               };
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, extrasByControlId, offlineHere],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, extrasByControlId, offlineHere, sameAsByControlId],
   );
 
   const isProfilesMode = workspaceMode === "profiles";

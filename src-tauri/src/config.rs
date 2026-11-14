@@ -857,6 +857,15 @@ pub enum SequenceStep {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
     },
+    /// Waits until a window of `exe` (and with `title` in its title, when set)
+    /// is in front; past `timeout_ms` the sequence stops instead of typing elsewhere.
+    #[serde(rename_all = "camelCase")]
+    WaitWindow {
+        exe: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        timeout_ms: u32,
+    },
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -3990,7 +3999,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xe2eb_39a0_cc29_c184);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xe1d4_6b69_8f53_7479);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

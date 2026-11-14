@@ -288,7 +288,8 @@
     "sleep": "Пауза",
     "launch": "Запуск",
     "defaultText": "Замените этот текст",
-    "defaultLaunch": "C:\\Путь\\К\\Программе.exe"
+    "defaultLaunch": "C:\\Путь\\К\\Программе.exe",
+    "waitWindow": "Ждать окно"
   },
   "configWaiting": {
     "eyebrow": "Ожидание конфигурации",
@@ -1172,7 +1173,12 @@
     "cheatSheetLayer": "Какой слой показать",
     "cheatSheetHint": "Показывает у курсора боковые кнопки той мыши, на которой нажали, на этом слое действующего профиля. Следующее нажатие её убирает (и всё равно срабатывает); через 10 секунд она уходит сама.",
     "defaultCheatSheet": "Шпаргалка · {{layer}}",
-    "previewCheatSheet": "Покажет кнопки слоя «{{layer}}»"
+    "previewCheatSheet": "Покажет кнопки слоя «{{layer}}»",
+    "addWaitWindow": "Ждать окно",
+    "stepWaitWindow": "Ждать окно",
+    "waitWindowExe": "Программа на переднем плане (.exe)",
+    "waitWindowTitle": "Её заголовок содержит (необязательно)",
+    "waitWindowTimeout": "Ждать не дольше, мс (до 30000)"
   },
   "assignments": {
     "copyBinding": "Копировать назначение",
@@ -1785,7 +1791,9 @@
       "sequenceQueued": "Макрос ждёт: перед ним {{ahead}}.",
       "sequenceDropped": "Макрос не запущен: уже ждут {{count}}. «Остановить макросы» их уберёт.",
       "pasteModeKeyboard": "только клавиатура",
-      "cheatSheetPreview": "Покажет сетку кнопок у курсора."
+      "cheatSheetPreview": "Покажет сетку кнопок у курсора.",
+      "stepWaitWindow": "ждать «{{exe}}»",
+      "waitWindowTimeout": "«{{exe}}» не вышла на передний план за {{seconds}} с: остальная последовательность не отправлена."
     },
     "synapse": {
       "v3MacroParseFailed": "Не удалось разобрать макрос `{{name}}`: {{error}}",

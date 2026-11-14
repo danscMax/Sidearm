@@ -774,6 +774,32 @@ fn run_live_sequence_action(
         typed_text |= matches!(step, SequenceStep::Text { .. });
         match step {
             SequenceStep::Sleep { delay_ms } => wait(*delay_ms)?,
+            SequenceStep::WaitWindow { exe, title, timeout_ms } => {
+                let limit = sequence_delay_ms(*timeout_ms);
+                let deadline = std::time::Instant::now() + Duration::from_millis(limit);
+                loop {
+                    if foreground_matches(exe, title.as_deref()) {
+                        break;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err(execution_error(
+                            "execution_failed",
+                            "execution",
+                            crate::ui_text!(
+                                "execution.waitWindowTimeout",
+                                "`{exe}` did not come to the front within {seconds} s: the rest of the sequence was not sent.",
+                                exe = exe,
+                                seconds = limit / 1000
+                            ),
+                            Some(preview.encoded_key.clone()),
+                            action_id.clone(),
+                        ));
+                    }
+                    if !pause(100, started) {
+                        return Err(cancelled());
+                    }
+                }
+            }
             SequenceStep::Launch {
                 value,
                 args,
@@ -893,7 +919,7 @@ fn validate_live_sequence(
 ) -> Result<(), crate::ui_text::UiText> {
     for step in &payload.steps {
         match step {
-            SequenceStep::Sleep { .. } => {}
+            SequenceStep::Sleep { .. } | SequenceStep::WaitWindow { .. } => {}
             SequenceStep::Launch {
                 value,
                 args,
@@ -1596,7 +1622,19 @@ fn sequence_step_summary(step: &SequenceStep) -> crate::ui_text::UiText {
         SequenceStep::Launch { value, .. } => {
             crate::ui_text!("execution.stepLaunch", "launch `{value}`", value = value)
         }
+        SequenceStep::WaitWindow { exe, .. } => {
+            crate::ui_text!("execution.stepWaitWindow", "wait for `{exe}`", exe = exe)
+        }
     }
+}
+
+/// The window in front is `exe` (file name, any case) and, when given, holds
+/// `title` in its title (any case).
+fn foreground_matches(exe: &str, title: Option<&str>) -> bool {
+    let Ok(window) = crate::window_capture::capture_foreground_window() else { return false };
+    let name = std::path::Path::new(&window.exe).file_name().and_then(|name| name.to_str()).unwrap_or(&window.exe);
+    name.eq_ignore_ascii_case(exe.trim())
+        && title.is_none_or(|title| window.title.to_lowercase().contains(&title.trim().to_lowercase()))
 }
 
 fn format_shortcut(payload: &crate::config::ShortcutActionPayload) -> String {
@@ -1716,6 +1754,26 @@ mod tests {
         assert_eq!(missing.event.message.key, Some("execution.dpiProfileMissing"));
         let no_stages = live_test_action(&config, &action, Some(&config.profiles[0].id)).expect_err("stages required");
         assert_eq!(no_stages.event.message.key, Some("execution.dpiStagesMissing"));
+    }
+
+    #[test]
+    fn a_window_that_never_comes_stops_the_sequence_at_its_timeout() {
+        let config = default_seed_config();
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
+        let payload = crate::config::SequenceActionPayload { steps: vec![
+            SequenceStep::WaitWindow { exe: "no-such-program-for-sidearm.exe".into(), title: None, timeout_ms: 300 },
+            SequenceStep::Text { value: "must not be typed".into(), delay_ms: None, repeat: None },
+        ] };
+        let action = Action {
+            id: "test-wait".into(), action_type: ActionType::Sequence,
+            payload: ActionPayload::Sequence(payload.clone()), display_name: "Wait".into(),
+            notes: None, conditions: Vec::new(),
+        };
+        let started = std::time::Instant::now();
+        let error = run_live_sequence_action(&action, &preview, &payload, Some(action.id.clone())).expect_err("timed out");
+        assert_eq!(error.event.message.key, Some("execution.waitWindowTimeout"));
+        assert!(started.elapsed() >= Duration::from_millis(300) && started.elapsed() < Duration::from_secs(3));
+        assert!(!foreground_matches("no-such-program-for-sidearm.exe", None));
     }
 
     #[test]

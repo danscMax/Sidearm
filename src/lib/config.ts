@@ -214,7 +214,9 @@ export type SequenceStep =
       args?: string[];
       workingDir?: string;
       delayMs?: number;
-    };
+    }
+  /** Waits until a window of `exe` (with `title` in its title, when set) is in front. */
+  | { type: "waitWindow"; exe: string; title?: string; timeoutMs: number };
 
 /** Most steps one sequence may hold: editor, recorder and imports (Rust `config::MAX_SEQUENCE_STEPS`). */
 export const MAX_SEQUENCE_STEPS = 200;

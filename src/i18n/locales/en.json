@@ -282,7 +282,8 @@
     "sleep": "Delay",
     "launch": "Launch",
     "defaultText": "Replace this text",
-    "defaultLaunch": "C:\\Path\\To\\Program.exe"
+    "defaultLaunch": "C:\\Path\\To\\Program.exe",
+    "waitWindow": "Wait for a window"
   },
   "configWaiting": {
     "eyebrow": "Waiting for config",
@@ -1150,7 +1151,12 @@
     "cheatSheetLayer": "Layer to show",
     "cheatSheetHint": "Shows the side buttons of the mouse you pressed, on this layer of the profile in effect, at the cursor. The next press puts it away (and still runs); after 10 seconds it goes by itself.",
     "defaultCheatSheet": "Cheat sheet · {{layer}}",
-    "previewCheatSheet": "Shows the {{layer}} button grid"
+    "previewCheatSheet": "Shows the {{layer}} button grid",
+    "addWaitWindow": "Wait for window",
+    "stepWaitWindow": "Wait for a window",
+    "waitWindowExe": "Program in front (.exe)",
+    "waitWindowTitle": "Its title contains (optional)",
+    "waitWindowTimeout": "Wait at most, ms (up to 30000)"
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1745,7 +1751,9 @@
       "sequenceQueued": "Macro waits: {{ahead}} ahead of it.",
       "sequenceDropped": "Macro not started: {{count}} are already waiting. \"Stop macros\" ends them.",
       "pasteModeKeyboard": "keyboard only",
-      "cheatSheetPreview": "Will show the button grid at the cursor."
+      "cheatSheetPreview": "Will show the button grid at the cursor.",
+      "stepWaitWindow": "wait for `{{exe}}`",
+      "waitWindowTimeout": "`{{exe}}` did not come to the front within {{seconds}} s: the rest of the sequence was not sent."
     },
     "synapse": {
       "v3MacroParseFailed": "Could not parse macro `{{name}}`: {{error}}",

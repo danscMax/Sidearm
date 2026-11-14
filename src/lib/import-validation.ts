@@ -112,7 +112,7 @@ export function validActionReferences(actions: Action[], snippets: SnippetLibrar
     if (action.type === "profileSwitch") return !!action.payload.targetProfileId.trim()
       && (!profileIds || profileIds.has(action.payload.targetProfileId));
     if (action.type === "sequence") return action.payload.steps.length <= MAX_SEQUENCE_STEPS && action.payload.steps.every((step) =>
-      step.delayMs === undefined || step.delayMs <= 0xFFFFFFFF);
+      (step.type === "waitWindow" ? step.timeoutMs : step.delayMs ?? 0) <= 0xFFFFFFFF);
     return true;
   });
 }

@@ -1026,6 +1026,9 @@
         },
         {
           "$ref": "#/$defs/launchSequenceStep"
+        },
+        {
+          "$ref": "#/$defs/waitWindowSequenceStep"
         }
       ]
     },
@@ -1074,6 +1077,29 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      }
+    },
+    "waitWindowSequenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "exe",
+        "timeoutMs"
+      ],
+      "properties": {
+        "type": {
+          "const": "waitWindow"
+        },
+        "exe": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "title": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/uint32"
         }
       }
     },

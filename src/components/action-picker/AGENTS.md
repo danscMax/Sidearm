@@ -14,6 +14,7 @@ The editors inside the "Assign action" modal — one per `ActionType` (shortcut,
 ## Local Contracts
 
 - The KEY capture is a DOM `onKeyDown` (`resolveKeyName`), so it also receives Sidearm's own injected VK 0xE8 (mask/hook-probe key) when the window is focused — capture ignores `"VK_232"` for this reason; keep that guard.
+- A `waitWindow` step (`exe`, optional `title`, `timeoutMs` up to 30 s) waits for that window to come to the front; past the timeout the sequence stops with `execution.waitWindowTimeout` instead of typing elsewhere. It has no step delay of its own, and turning a launch step into one waits for the program it started.
 - Sequences contain 1–200 steps; manual additions and recording respect the same maximum, and invalid existing drafts stay open with feedback until corrected. The recorder owns backend recording and a `KEY_RECORDING` lease for its lifetime, including cleanup after a pending Start completes following unmount; teardown finishes before another sequence editor starts, and it also ignores `VK_232`.
 - `dpiUp`/`dpiDown` are mouse actions with no keyboard modifiers. They use the resolved profile's stages; the picker test passes the edited profile ID explicitly.
 - Capture rows own their capture state via the parent; `CaptureRow` is presentational and requires a localized `ariaLabel`, forwarded to its readonly input. A changing capture placeholder must not change the field's accessible name.

@@ -28,6 +28,7 @@ import { CategoryIcon } from "./icons";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
 import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice, SelectField } from "./shared";
+import { historyKey, useDraftHistory } from "../hooks/useDraftHistory";
 import {
   autoName,
   buildAction,
@@ -466,6 +467,35 @@ export function ActionPickerModal({
     : describeAction(effectiveCategory, drafts, t, config.profiles);
   const activeCat = categories.find((c) => c.id === effectiveCategory);
 
+  // Undo / redo of every edit made in the picker before Save (a menu item moved
+  // into the wrong list, a step deleted…).
+  const history = useDraftHistory(
+    {
+      activeCategory, shortcutDraft, mouseDraft, textDraft, launchDraft, mediaDraft, profileDraft, sequenceDraft,
+      nameDraft, triggerModeDraft, chordPartnerDraft, throttleDraft, conditionsDraft, menuItemsDraft, cheatLayerDraft,
+      menuEdits, signalDraft,
+    },
+    (snapshot) => {
+      setActiveCategory(snapshot.activeCategory);
+      setShortcutDraft(snapshot.shortcutDraft);
+      setMouseDraft(snapshot.mouseDraft);
+      setTextDraft(snapshot.textDraft);
+      setLaunchDraft(snapshot.launchDraft);
+      setMediaDraft(snapshot.mediaDraft);
+      setProfileDraft(snapshot.profileDraft);
+      setSequenceDraft(snapshot.sequenceDraft);
+      setNameDraft(snapshot.nameDraft);
+      setTriggerModeDraft(snapshot.triggerModeDraft);
+      setChordPartnerDraft(snapshot.chordPartnerDraft);
+      setThrottleDraft(snapshot.throttleDraft);
+      setConditionsDraft(snapshot.conditionsDraft);
+      setMenuItemsDraft(snapshot.menuItemsDraft);
+      setCheatLayerDraft(snapshot.cheatLayerDraft);
+      setMenuEdits(snapshot.menuEdits);
+      setSignalDraft(snapshot.signalDraft);
+    },
+  );
+
   return (
     <ModalShell
       onClose={onCancel}
@@ -478,6 +508,13 @@ export function ActionPickerModal({
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !saveDisabled && !isCapturing && !isCapturingSignal) {
           e.preventDefault();
           handleSave();
+          return;
+        }
+        const move = isCapturing || isCapturingSignal ? null : historyKey(e);
+        if (move) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (move === "undo") history.undo(); else history.redo();
         }
       }}
     >
@@ -770,6 +807,12 @@ export function ActionPickerModal({
         ) : null}
 
         <ModalFooter className="action-picker__footer">
+          <div className="action-picker__history">
+            <button type="button" className="action-button action-button--ghost" onClick={history.undo}
+              disabled={!history.canUndo} aria-label={t("picker.undo")} title={t("picker.undo")}>↶</button>
+            <button type="button" className="action-button action-button--ghost" onClick={history.redo}
+              disabled={!history.canRedo} aria-label={t("picker.redo")} title={t("picker.redo")}>↷</button>
+          </div>
           <button type="button" className="action-button action-button--ghost" onClick={onCancel}>
             {t("common.cancel")}
           </button>

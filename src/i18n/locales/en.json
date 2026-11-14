@@ -1177,7 +1177,9 @@
     "stepSleepLength": "Pause length, ms (up to 30,000)",
     "sequenceStopHint": "To stop a running macro, use the “Stop macros” action on another button or the tray menu.",
     "pressEnterAfter": "Press Enter after the text",
-    "pressEnterAfterHint": "A short pause and Enter after the text — to send a command in a terminal or chat right away. Saved as a “text → pause → Enter” macro, whose steps the Macro category shows too. Typing key by key is not available with Enter."
+    "pressEnterAfterHint": "A short pause and Enter after the text — to send a command in a terminal or chat right away. Saved as a “text → pause → Enter” macro, whose steps the Macro category shows too. Typing key by key is not available with Enter.",
+    "undo": "Undo (Ctrl+Z)",
+    "redo": "Redo (Ctrl+Y)"
   },
   "assignments": {
     "copyBinding": "Copy binding",

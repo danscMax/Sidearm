@@ -94,11 +94,11 @@ describe("useControlInteractions — getInteractionProps", () => {
     );
   });
 
-  it("fires the context menu by default and omits it when opted out", () => {
+  it("fires the context menu with the binding, its action and the pointer position", () => {
     const params = makeParams();
     const { result } = renderHook(() => useControlInteractions(params));
     const m = makeMouse();
-    result.current.getInteractionProps(ASSIGNED).onContextMenu?.(m.event);
+    result.current.getInteractionProps(ASSIGNED).onContextMenu(m.event);
     expect(m.preventDefault).toHaveBeenCalled();
     expect(params.onContextMenu).toHaveBeenCalledWith(
       ASSIGNED,
@@ -107,9 +107,6 @@ describe("useControlInteractions — getInteractionProps", () => {
       10,
       20,
     );
-    expect(
-      result.current.getInteractionProps(ASSIGNED, { contextMenu: false }).onContextMenu,
-    ).toBeUndefined();
   });
 
   it("onDragStart serializes the binding for an assigned control, blocks an unassigned one", () => {

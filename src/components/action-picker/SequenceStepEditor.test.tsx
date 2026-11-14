@@ -317,6 +317,31 @@ describe("SequenceStepEditor rows", () => {
     expect(rows[0]!.textContent).toContain("2");
   });
 
+  it("a right click on a step offers its tools: up / down / duplicate / delete", () => {
+    const steps: SequenceStep[] = [{ type: "send", value: "Ctrl+L" }, { type: "text", value: "x" }];
+    const onChange = vi.fn();
+    render(<SequenceStepEditor steps={steps} onChange={onChange} />);
+    const menuOn = (text: string) => {
+      fireEvent.contextMenu(screen.getByText(text).closest("button")!);
+      return screen.getByRole("menu");
+    };
+    const item = (menu: HTMLElement, key: string) => within(menu).getByRole("menuitem", { name: i18n.t(key) });
+
+    let menu = menuOn("Ctrl+L");
+    expect((item(menu, "common.moveUp") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(item(menu, "common.moveDown"));
+    expect(onChange).toHaveBeenLastCalledWith([steps[1], steps[0]]);
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    menu = menuOn("Ctrl+L");
+    fireEvent.click(item(menu, "common.duplicate"));
+    expect(onChange).toHaveBeenLastCalledWith([steps[0], steps[0], steps[1]]);
+
+    menu = menuOn("Ctrl+L");
+    fireEvent.click(item(menu, "common.delete"));
+    expect(onChange).toHaveBeenLastCalledWith([steps[1]]);
+  });
+
   it("shows the step count and the estimated length, a window wait as up to its timeout", () => {
     const seconds = (value: number) => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 }).format(value);
     const steps: SequenceStep[] = [

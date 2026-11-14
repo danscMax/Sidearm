@@ -4,6 +4,7 @@ import { getPressLog } from "../lib/backend";
 import type { AppConfig } from "../lib/config";
 import { controlWithGesture, labelForLayer } from "../lib/labels";
 import { holdHints, savedKeystrokes, sumDays, topPlaces, unusedPlaces, type PlaceCount, type PressLog } from "../lib/press-stats";
+import { ContextMenu } from "./ContextMenu";
 import { PillTrack } from "./PillTrack";
 import { Notice } from "./shared";
 
@@ -24,6 +25,7 @@ export function PressStats({ config, deviceId, profileId, onAddHold }: PressStat
   const [log, setLog] = useState<PressLog | null>(null);
   const [failed, setFailed] = useState(false);
   const [days, setDays] = useState<7 | 30>(7);
+  const [hintMenu, setHintMenu] = useState<{ x: number; y: number; hint: PlaceCount } | null>(null);
   useEffect(() => {
     let live = true;
     getPressLog().then((loaded) => { if (live) setLog(loaded); }).catch(() => { if (live) setFailed(true); });
@@ -62,7 +64,14 @@ export function PressStats({ config, deviceId, profileId, onAddHold }: PressStat
           <p className="panel__muted">{t("stats.hintsHelp")}</p>
           <ul className="press-stats__list">
             {hints.map((hint) => (
-              <li key={hint.binding.id} className="press-stats__row press-stats__row--hint">
+              <li
+                key={hint.binding.id}
+                className="press-stats__row press-stats__row--hint"
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setHintMenu({ x: e.clientX, y: e.clientY, hint });
+                }}
+              >
                 <span className="press-stats__name">{hint.binding.label}</span>
                 <span className="press-stats__where">{place(hint.binding)}</span>
                 <span className="press-stats__count">{hint.count}×</span>
@@ -72,6 +81,14 @@ export function PressStats({ config, deviceId, profileId, onAddHold }: PressStat
               </li>
             ))}
           </ul>
+          {hintMenu ? (
+            <ContextMenu
+              x={hintMenu.x}
+              y={hintMenu.y}
+              onClose={() => setHintMenu(null)}
+              items={[{ label: t("stats.addHold"), onClick: () => onAddHold(hintMenu.hint) }]}
+            />
+          ) : null}
         </section>
       ) : null}
 

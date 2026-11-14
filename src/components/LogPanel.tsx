@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { LogPanelControl } from "../hooks/useLogPanel";
 import { normalizeCommandError, openLogDirectory } from "../lib/backend";
+import { ContextMenu } from "./ContextMenu";
 
 export interface LogPanelProps {
   logPanel: LogPanelControl;
@@ -23,6 +24,8 @@ function formatTime(timestamp: number): string {
 export function LogPanel({ logPanel }: LogPanelProps) {
   const { t } = useTranslation();
   const [openFolderError, setOpenFolderError] = useState<string | null>(null);
+  // Right click on the list: the toolbar's export / folder / clear.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const {
     filteredLogs,
     categories,
@@ -80,6 +83,13 @@ export function LogPanel({ logPanel }: LogPanelProps) {
     URL.revokeObjectURL(url);
   }
 
+  function handleOpenFolder() {
+    setOpenFolderError(null);
+    void openLogDirectory().catch((unknownError) => {
+      setOpenFolderError(normalizeCommandError(unknownError).message);
+    });
+  }
+
   return (
     <div className="log-panel">
       <div className="log-panel__toolbar">
@@ -134,12 +144,7 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           <button
             type="button"
             className="action-button action-button--small action-button--secondary"
-            onClick={() => {
-              setOpenFolderError(null);
-              void openLogDirectory().catch((unknownError) => {
-                setOpenFolderError(normalizeCommandError(unknownError).message);
-              });
-            }}
+            onClick={handleOpenFolder}
           >
             {t("log.folder")}
           </button>
@@ -160,6 +165,10 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           className="log-list log-panel__list"
           ref={listRef}
           onScroll={handleScroll}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setMenu({ x: e.clientX, y: e.clientY });
+          }}
         >
           {filteredLogs.map((entry) => (
             <li key={entry.id} className={`log-item log-item--${entry.level}`}>
@@ -177,6 +186,19 @@ export function LogPanel({ logPanel }: LogPanelProps) {
           {t("log.empty")}
         </p>
       )}
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: t("log.export"), onClick: handleExport },
+            { label: t("log.folder"), onClick: handleOpenFolder },
+            null,
+            { label: t("log.clear"), danger: true, onClick: clearLogs },
+          ]}
+        />
+      ) : null}
     </div>
   );
 }

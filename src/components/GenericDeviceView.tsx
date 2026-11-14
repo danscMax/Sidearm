@@ -36,6 +36,7 @@ export function GenericDeviceView({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  onCopyLayer,
   onContextMenu,
   executionCounts,
   executionHistory,
@@ -338,7 +339,7 @@ export function GenericDeviceView({
         </>
       )}
 
-      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} neutralLabels />
+      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} onCopyLayer={onCopyLayer} neutralLabels />
     </div>
   );
 }

@@ -67,6 +67,7 @@ export function DeviceCards({
   refreshToken,
   onSelect,
   onAdd,
+  onContextMenu,
 }: {
   config: AppConfig;
   devices: Device[];
@@ -76,6 +77,8 @@ export function DeviceCards({
   refreshToken: number;
   onSelect: (id: string) => void;
   onAdd: () => void;
+  /** Right click on a card: it is selected first, then its menu opens here. */
+  onContextMenu?: (x: number, y: number) => void;
 }) {
   const { t } = useTranslation();
   // Selecting a card reads that mouse again (it may have woken up since).
@@ -125,15 +128,21 @@ export function DeviceCards({
             : [t("device.notConnected")]
           : [t("device.chipControls", { count: controls })];
         const active = device.id === activeDeviceId;
+        const select = () => {
+          onSelect(device.id);
+          if (builtin && connected) setSelectToken((n) => n + 1);
+        };
         return (
           <button
             key={device.id}
             type="button"
             aria-pressed={active}
             className={`device-card${active ? " device-card--active" : ""}${builtin && !connected ? " device-card--offline" : ""}`}
-            onClick={() => {
-              onSelect(device.id);
-              if (builtin && connected) setSelectToken((n) => n + 1);
+            onClick={select}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              select();
+              onContextMenu?.(e.clientX, e.clientY);
             }}
             title={device.name}
           >

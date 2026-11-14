@@ -10,11 +10,11 @@ void setKeyRecording(false).catch(() => {});
 
 // A right click is never the browser's own menu (Back, Reload, Print…): the
 // app's own menus handle it where they exist. Text fields keep the native
-// cut / copy / paste menu, and a dev build keeps it everywhere (Inspect).
+// cut / copy / paste menu; a dev build shows it with Shift held (Inspect).
 document.addEventListener("contextmenu", (event) => {
   const target = event.target as HTMLElement | null;
   const editable = target?.closest("input, textarea, [contenteditable='true']");
-  if (!editable && !import.meta.env.DEV) event.preventDefault();
+  if (!editable && !(import.meta.env.DEV && event.shiftKey)) event.preventDefault();
 });
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

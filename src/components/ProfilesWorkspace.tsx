@@ -125,6 +125,15 @@ export interface ProfilesWorkspaceProps {
    Profiles Workspace
    ──────────────────────────────────────────────────────────── */
 
+/** A built-in mouse's tabs, in the panel header and the card's menu. */
+const DEVICE_TABS = ["buttons", "performance", "memory", "stats"] as const;
+const DEVICE_TAB_LABEL = {
+  buttons: "device.tabButtons",
+  performance: "device.tabPerformance",
+  memory: "device.tabMemory",
+  stats: "device.tabStats",
+} as const;
+
 export function ProfilesWorkspace({
   activeConfig,
   activeProfile,
@@ -221,8 +230,8 @@ export function ProfilesWorkspace({
   const [renameFreshDevice, setRenameFreshDevice] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferAll, setTransferAll] = useState(false);
-  // A built-in mouse has three tabs: its buttons, its performance, its memory.
-  const [deviceTab, setDeviceTab] = useState<"buttons" | "performance" | "memory" | "stats">("buttons");
+  // A built-in mouse has four tabs: buttons, performance, memory, statistics.
+  const [deviceTab, setDeviceTab] = useState<(typeof DEVICE_TABS)[number]>("buttons");
   // Bumped after a write from the Performance tab so the mouse cards re-read.
   const [cardsToken, setCardsToken] = useState(0);
   const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
@@ -405,7 +414,11 @@ export function ProfilesWorkspace({
   const [searchAllProfiles, setSearchAllProfiles] = useState(false);
   // "Swap with…": the button whose assignments trade places with the next one clicked.
   const [swapFrom, setSwapFrom] = useState<Slot | null>(null);
-  const [copyDialog, setCopyDialog] = useState(false);
+  // "Copy assignments…": the layer it starts from, null = closed.
+  const [copyDialog, setCopyDialog] = useState<Layer | null>(null);
+  const [deviceCtxMenu, setDeviceCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  // A layer pill's menu opens "Copy assignments…" from that layer.
+  const copyLayer = activeProfile ? (layer: Layer) => setCopyDialog(layer) : undefined;
   const [compareOpen, setCompareOpen] = useState(false);
 
   useEffect(() => {
@@ -885,18 +898,14 @@ export function ProfilesWorkspace({
         refreshToken={cardsToken}
         onSelect={onSelectDevice}
         onAdd={handleAddDevice}
+        onContextMenu={(x, y) => setDeviceCtxMenu({ x, y })}
       />
       {activeDevice?.builtin && deviceLayout(activeDevice.id) ? (
         <div className="device-panel__header">
           <h3 className="device-panel__title">{activeDevice.name}</h3>
         <PillTrack
           className="device-tabs"
-          items={[
-            { key: "buttons", label: t("device.tabButtons") },
-            { key: "performance", label: t("device.tabPerformance") },
-            { key: "memory", label: t("device.tabMemory") },
-            { key: "stats", label: t("device.tabStats") },
-          ]}
+          items={DEVICE_TABS.map((tab) => ({ key: tab, label: t(DEVICE_TAB_LABEL[tab]) }))}
           active={mouseTab}
           onSelect={setDeviceTab}
         />
@@ -1150,6 +1159,7 @@ export function ProfilesWorkspace({
               setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
             }
             onSelectLayer={onSelectLayer}
+            onCopyLayer={copyLayer}
             executionCounts={heatCounts}
             executionHistory={executionHistory}
             throttledControlIds={throttledControlIds}
@@ -1184,6 +1194,7 @@ export function ProfilesWorkspace({
               setBindingCtxMenu({ x, y, controlId: id, bindingId: binding?.id ?? null })
             }
             onSelectLayer={onSelectLayer}
+            onCopyLayer={copyLayer}
             layers={deviceLayers(activeConfig, effectiveProfileId, activeDevice?.id, selectedLayer)}
             executionCounts={heatCounts}
             executionHistory={executionHistory}
@@ -1308,7 +1319,7 @@ export function ProfilesWorkspace({
               {t("transfer.open")}
             </button>
           ) : null}
-          <button type="button" className="action-button action-button--small" onClick={() => setCopyDialog(true)}>
+          <button type="button" className="action-button action-button--small" onClick={() => setCopyDialog(selectedLayer)}>
             {t("copyLayer.open")}
           </button>
           {activeConfig.profiles.length > 1 ? (
@@ -1329,11 +1340,11 @@ export function ProfilesWorkspace({
         <CopyAssignmentsModal
           config={activeConfig}
           profileId={activeProfile.id}
-          layer={selectedLayer}
-          onClose={() => setCopyDialog(false)}
+          layer={copyDialog}
+          onClose={() => setCopyDialog(null)}
           onApply={(next, copied) => {
             updateDraft(() => next);
-            setCopyDialog(false);
+            setCopyDialog(null);
             showToast(t("transfer.done", { count: copied }), "success");
           }}
         />
@@ -1575,10 +1586,43 @@ export function ProfilesWorkspace({
                   if (binding) updateDraft((c) => clearControl(c, binding));
                 },
               },
+              // A user device's button itself (its ✎ and × in the grid).
+              ...(activeDevice && !activeDevice.builtin
+                ? [
+                    null,
+                    { label: t("device.editControlTitle"), onClick: () => handleEditControl(cid) },
+                    { label: t("device.deleteControl"), danger: true, onClick: () => handleRemoveControl(cid) },
+                  ]
+                : []),
             ]}
           />
         );
       })() : null}
+      {/* ── Device card menu (the right-clicked card is the selected one) ── */}
+      {deviceCtxMenu && activeDevice ? (
+        <ContextMenu
+          x={deviceCtxMenu.x}
+          y={deviceCtxMenu.y}
+          onClose={() => setDeviceCtxMenu(null)}
+          items={activeDevice.builtin
+            ? [
+                ...(deviceLayout(activeDevice.id)
+                  ? DEVICE_TABS.map((tab) => ({
+                      label: t(DEVICE_TAB_LABEL[tab]),
+                      disabled: mouseTab === tab,
+                      onClick: () => setDeviceTab(tab),
+                    }))
+                  : []),
+                ...(builtinMice > 1 ? [null, { label: t("transfer.open"), onClick: () => setShowTransfer(true) }] : []),
+              ]
+            : [
+                { label: t("device.rename"), onClick: () => setRenameFreshDevice(true) },
+                { label: activeDevice.image ? t("device.replacePhoto") : t("device.addPhoto"), onClick: () => void handlePickImage() },
+                null,
+                { label: t("device.delete"), danger: true, disabled: devices.length <= 1, onClick: handleDeleteDevice },
+              ]}
+        />
+      ) : null}
     </div>
   );
 }

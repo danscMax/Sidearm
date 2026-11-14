@@ -36,6 +36,7 @@ export function MouseVisualization({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  onCopyLayer,
   layers,
   onContextMenu,
   executionCounts,
@@ -90,6 +91,7 @@ export function MouseVisualization({
           onToggleMultiSelect={onToggleMultiSelect}
           onOpenActionPicker={onOpenActionPicker}
           onSelectLayer={onSelectLayer}
+          onCopyLayer={onCopyLayer}
           layers={layers}
           onContextMenu={onContextMenu}
           executionCounts={executionCounts}
@@ -227,7 +229,6 @@ export function MouseVisualization({
                     executionCounts?.get(controlId) ?? 0,
                   )}
                   nativeTooltip
-                  contextMenu={false}
                   dimmed={dimmed}
                   conflict={conflict}
                   executionCounts={executionCounts}
@@ -247,7 +248,7 @@ export function MouseVisualization({
   return (
     <div className={layout.bottom ? "mouse-visual-tabs naga-v3" : "mouse-visual-tabs"} data-layer={selectedLayer}>
       <div className="mouse-visual-tabs__nav">
-        <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} layers={layers} />
+        <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} onCopyLayer={onCopyLayer} layers={layers} />
         {layout.schematic && <button
           type="button"
           className="view-mode-toggle view-mode-toggle--icon"

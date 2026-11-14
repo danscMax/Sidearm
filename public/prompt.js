@@ -58,6 +58,11 @@
     setTimeout(function () { if (inputs[0]) inputs[0].focus(); }, 0);
   }
 
+  // Never the browser's own menu (back, reload, print…); the fields keep cut / copy / paste.
+  document.addEventListener("contextmenu", function (event) {
+    if (!(event.target.closest && event.target.closest("input, textarea"))) event.preventDefault();
+  });
+
   // Another window in front: the question goes (a late blur of an answered one is ignored by Rust).
   window.addEventListener("blur", function () {
     if (view) invoke("prompt_cancel", { generation: view.generation });

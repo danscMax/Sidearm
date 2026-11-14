@@ -240,6 +240,7 @@ export function MouseVisualizationSvg({
   onToggleMultiSelect,
   onOpenActionPicker,
   onSelectLayer,
+  onCopyLayer,
   layers,
   onContextMenu,
   executionCounts,
@@ -562,7 +563,7 @@ export function MouseVisualizationSvg({
         )}
       </div>
 
-      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} layers={layers} />
+      <LayerPills selectedLayer={selectedLayer} onSelectLayer={onSelectLayer} onCopyLayer={onCopyLayer} layers={layers} />
     </div>
   );
 }

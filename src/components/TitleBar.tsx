@@ -2,11 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 
+import { ContextMenu } from "./ContextMenu";
 import { PortableBadge } from "./PortableBadge";
 
 export function TitleBar({ onReRunOnboarding }: { onReRunOnboarding?: () => void }) {
   const { t } = useTranslation();
   const [maximized, setMaximized] = useState(false);
+  // The window menu a title bar has: minimize, maximize / restore, close.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const appWindow = getCurrentWindow();
 
   useEffect(() => {
@@ -42,7 +45,14 @@ export function TitleBar({ onReRunOnboarding }: { onReRunOnboarding?: () => void
   }, []);
 
   return (
-    <div className="titlebar" data-tauri-drag-region>
+    <div
+      className="titlebar"
+      data-tauri-drag-region
+      onContextMenu={(e) => {
+        e.preventDefault();
+        setMenu({ x: e.clientX, y: e.clientY });
+      }}
+    >
       <span className="titlebar__title" data-tauri-drag-region>
         {t("app.name")}
       </span>
@@ -102,6 +112,19 @@ export function TitleBar({ onReRunOnboarding }: { onReRunOnboarding?: () => void
           </svg>
         </button>
       </div>
+      {menu ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[
+            { label: t("titlebar.minimize"), onClick: handleMinimize },
+            { label: maximized ? t("titlebar.restore") : t("titlebar.maximize"), onClick: handleMaximize },
+            null,
+            { label: t("titlebar.close"), onClick: handleClose },
+          ]}
+        />
+      ) : null}
     </div>
   );
 }

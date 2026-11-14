@@ -8,7 +8,10 @@ import { resolveInitialControlId } from "../lib/helpers";
 import { makeAction, makeConfig } from "../lib/test-fixtures";
 import { ProfilesWorkspace, type ProfilesWorkspaceProps } from "./ProfilesWorkspace";
 
-vi.mock("./DeviceCards", () => ({ DeviceCards: () => null }));
+vi.mock("./DeviceCards", () => ({
+  DeviceCards: ({ onContextMenu }: { onContextMenu?: (x: number, y: number) => void }) =>
+    <button type="button" onClick={() => onContextMenu?.(0, 0)}>device card menu</button>,
+}));
 vi.mock("./MouseVisualization", () => ({ MouseVisualization: () => null }));
 vi.mock("./ExeIcon", () => ({ ExeIcon: () => null }));
 vi.mock("./AppMappingModal", () => ({ AppMappingModal: () => null }));
@@ -150,4 +153,42 @@ it("selects a foreign rule's owning profile when opening its editor", () => {
   fireEvent.contextMenu(screen.getByText("python").closest("button")!);
   fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
   expect(props.setSelectedProfileId).toHaveBeenCalledWith("p2");
+});
+
+function withUserDevice() {
+  const config = makeConfig();
+  config.devices.push({ id: "pad", name: "Pad", builtin: false });
+  config.physicalControls.push({ ...config.physicalControls[0], id: "pad_1", deviceId: "pad", defaultName: "Key 1" });
+  return config;
+}
+
+it("offers a user device's rename, photo and delete in its card menu, a built-in mouse its tabs", () => {
+  const config = withUserDevice();
+  const props = show(config, { activeDeviceId: "pad" });
+  fireEvent.click(screen.getByRole("button", { name: "device card menu" }));
+  expect(screen.getByRole("menuitem", { name: i18n.t("device.rename") })).toBeTruthy();
+  expect(screen.getByRole("menuitem", { name: i18n.t("device.addPhoto") })).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("device.delete") }));
+  expect(props.setConfirmModal).toHaveBeenCalledWith(expect.objectContaining({ title: i18n.t("device.deleteTitle") }));
+  cleanup();
+
+  show(config);
+  fireEvent.click(screen.getByRole("button", { name: "device card menu" }));
+  expect((screen.getByRole("menuitem", { name: i18n.t("device.tabButtons") }) as HTMLButtonElement).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("device.tabStats") }));
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.getByRole("button", { name: i18n.t("device.tabStats"), pressed: true })).toBeTruthy();
+});
+
+it("a user device's button menu also edits and deletes the button itself", () => {
+  const config = withUserDevice();
+  const control = config.physicalControls.find((entry) => entry.id === "pad_1")!;
+  const props = show(config, {
+    activeDeviceId: "pad",
+    familySections: [{ family: control.family, entries: [{ control, binding: null, action: null, mapping: null, isSelected: false }] }] as unknown as ProfilesWorkspaceProps["familySections"],
+  });
+  fireEvent.contextMenu(screen.getByText(/Key 1/).closest("button")!);
+  expect(screen.getByRole("menuitem", { name: i18n.t("device.editControlTitle") })).toBeTruthy();
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("device.deleteControl") }));
+  expect(props.setConfirmModal).toHaveBeenCalledWith(expect.objectContaining({ title: i18n.t("device.deleteControlTitle") }));
 });

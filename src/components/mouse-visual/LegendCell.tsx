@@ -23,8 +23,6 @@ interface LegendCellProps {
   tooltip: string;
   /** Use the native `title` attribute (side grid) instead of the data-tooltip CSS bubble. */
   nativeTooltip?: boolean;
-  /** Whether right-click opens the context menu. False for the side grid. */
-  contextMenu?: boolean;
   /** Photo mode only: dim controls outside the match set. */
   dimmed?: boolean;
   /** Photo mode only: flag a conflicting binding. */
@@ -42,7 +40,6 @@ export function LegendCell({
   label,
   tooltip,
   nativeTooltip,
-  contextMenu = true,
   dimmed,
   conflict,
   executionCounts,
@@ -62,7 +59,7 @@ export function LegendCell({
       {...(nativeTooltip ? { title: tooltip } : { "data-tooltip": tooltip })}
       ref={(el) => applyHeatBg(el, controlId)}
       draggable={!!entry.binding && !!entry.action}
-      {...getInteractionProps(controlId, { contextMenu })}
+      {...getInteractionProps(controlId)}
     >
       <span className="btn-legend__badge">{badge}</span>
       <span className="btn-legend__text">

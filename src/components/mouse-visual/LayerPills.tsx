@@ -1,10 +1,11 @@
 // The layer-select pill strip rendered in the footer of both visualizers.
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { Layer } from "../../lib/config";
 import { layerCopy } from "../../lib/constants";
 import { isBindingDrag } from "../../lib/mouse-visual";
+import { ContextMenu } from "../ContextMenu";
 import { PillTrack } from "../PillTrack";
 
 const LAYER_HOVER_MS = 450;
@@ -12,6 +13,8 @@ const LAYER_HOVER_MS = 450;
 interface LayerPillsProps {
   selectedLayer: Layer;
   onSelectLayer: (layer: Layer) => void;
+  /** Right click on a pill: "Copy assignments…" from that layer. */
+  onCopyLayer?: (layer: Layer) => void;
   /** Generic (non-Razer) devices label the layers neutrally — "Hypershift"
    *  is Naga vocabulary (UI-review U4/UX7). */
   neutralLabels?: boolean;
@@ -19,8 +22,9 @@ interface LayerPillsProps {
   layers?: readonly Layer[];
 }
 
-export function LayerPills({ selectedLayer, onSelectLayer, neutralLabels, layers = ["standard", "hypershift"] }: LayerPillsProps) {
+export function LayerPills({ selectedLayer, onSelectLayer, onCopyLayer, neutralLabels, layers = ["standard", "hypershift"] }: LayerPillsProps) {
   const { t } = useTranslation();
+  const [menu, setMenu] = useState<{ x: number; y: number; layer: Layer } | null>(null);
   // A button dragged over a pill opens that layer after a short hover, so it
   // can be dropped onto a button of another layer.
   const hoverTimer = useRef<number | null>(null);
@@ -44,12 +48,25 @@ export function LayerPills({ selectedLayer, onSelectLayer, neutralLabels, layers
           onDragOver: (e) => { if (isBindingDrag(e)) e.preventDefault(); },
           onDragLeave: stopHover,
           onDrop: stopHover,
+          onContextMenu: (e) => {
+            if (!onCopyLayer) return;
+            e.preventDefault();
+            setMenu({ x: e.clientX, y: e.clientY, layer: item.key });
+          },
         })}
         items={layerCopy.filter((layer) => layers.includes(layer.value)).map((layer, index) => ({
           key: layer.value,
           label: neutralLabels ? t("layer.neutral", { n: index + 1 }) : t(layer.label),
         }))}
       />
+      {menu && onCopyLayer ? (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          items={[{ label: t("copyLayer.open"), onClick: () => onCopyLayer(menu.layer) }]}
+        />
+      ) : null}
     </div>
   );
 }

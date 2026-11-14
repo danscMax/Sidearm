@@ -1747,6 +1747,7 @@ input[type="radio"] {
 /* ── Macro steps: one row each, the open one shows its fields ── */
 .seq-where { margin: -4px 0 0; font-size: var(--fs-caption); }
 .seq-list { display: grid; gap: 4px; }
+.seq-total { margin: 0; font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
 .seq-row { border: 1px solid var(--c-card-border); border-radius: var(--radius-md); background: var(--c-card-bg); }
 .seq-row--open { border-color: color-mix(in srgb, var(--c-accent) 45%, transparent); background: var(--c-menu-selected); }
 .seq-row--drop { outline: 2px dashed var(--c-accent); outline-offset: 2px; }

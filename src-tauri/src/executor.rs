@@ -2664,9 +2664,9 @@ mod edge_proptests {
     fn recorded_inputs_keep_their_schedule_in_the_live_repeat_loop() {
         let mut recorder = crate::recorder::MacroRecorder::new();
         recorder.start(0).unwrap();
-        recorder.record_keystroke("Ctrl+C".into(), 0);
-        recorder.record_keystroke("Ctrl+V".into(), 2000);
-        recorder.record_keystroke("Enter".into(), 2100);
+        recorder.record_keystroke("Ctrl+C".into(), None, 0);
+        recorder.record_keystroke("Ctrl+V".into(), None, 2000);
+        recorder.record_keystroke("Enter".into(), None, 2100);
         let recording = recorder.stop(4000).unwrap();
         let clock = std::cell::Cell::new(0u64);
         let mut sent = Vec::new();

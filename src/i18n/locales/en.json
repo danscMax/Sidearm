@@ -1118,7 +1118,7 @@
     "addSleep": "Delay",
     "addLaunch": "Launch",
     "recordingNotice": "Recording macro...",
-    "recordingHint": "Press keys. Each keystroke will be recorded as a sequence step.",
+    "recordingHint": "Press keys. A typed word becomes one text step; shortcuts and special keys (Enter, arrows) become key steps.",
     "recordingCount": "({{count}} / {{max}})",
     "recordLimitReached": "Recording limit of {{max}} steps reached — stopped automatically. Remove unwanted steps or save as-is.",
     "sequenceLaunchRollbackWarning": "If a launch step opens a program and a later step fails, Sidearm cannot automatically close the program it already launched.",
@@ -1185,7 +1185,14 @@
     "syncOther": "The same on {{mice}}",
     "syncOtherHint": "This button is alike on both mice: an edit here is repeated on the same button of the other mouse (and back). Turning it on copies this assignment there. The general “Keep the mice alike” setting is the default.",
     "sendStepEmpty": "Step {{index}} has nothing to press: type a shortcut, e.g. Ctrl+L.",
-    "sendStepPlaceholder": "e.g. Ctrl+L or Enter"
+    "sendStepPlaceholder": "e.g. Ctrl+L or Enter",
+    "sendStepRecord": "Record the keys of step {{index}}",
+    "sendStepCapturing": "Press the keys… Esc cancels",
+    "stepDuplicate": "Duplicate step {{index}}",
+    "sequenceTotal_one": "{{count}} step · ≈ {{seconds}} s",
+    "sequenceTotal_other": "{{count}} steps · ≈ {{seconds}} s",
+    "sequenceTotalWithWait_one": "{{count}} step · ≈ {{seconds}} s, up to {{max}} s with the window waits",
+    "sequenceTotalWithWait_other": "{{count}} steps · ≈ {{seconds}} s, up to {{max}} s with the window waits"
   },
   "assignments": {
     "copyBinding": "Copy binding",

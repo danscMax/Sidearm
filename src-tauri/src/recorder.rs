@@ -6,6 +6,13 @@ use crate::config::{MAX_SEQUENCE_STEPS, SequenceStep};
 
 const MAX_STEP_DELAY_MS: u32 = 30_000;
 
+/// Typed characters at most this far apart belong to one text step.
+const TYPING_GAP_MS: u64 = 1_000;
+
+/// Defence-in-depth bound on stored keystrokes: a typed text is one step but
+/// many keys, so the step cap alone does not bound memory.
+const MAX_RECORDED_KEYS: usize = 20_000;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MacroRecording {
@@ -22,6 +29,8 @@ enum RecorderState {
         started_at: u64,
         last_event_at: u64,
         steps: Vec<RecordedEvent>,
+        /// How many sequence steps `steps` makes (`convert_to_sequence_steps`).
+        step_count: usize,
     },
     Stopped(MacroRecording),
 }
@@ -30,8 +39,18 @@ enum RecorderState {
 struct RecordedEvent {
     /// Key combination string (e.g., "Ctrl+C", "F13", "A")
     key: String,
+    /// The character the key typed in the active layout (`event.key`), for a
+    /// printable key pressed without Ctrl/Alt/Win; None for chords and special keys.
+    text: Option<String>,
     /// Timestamp in milliseconds
     timestamp: u64,
+}
+
+/// `next` continues the text typed up to `prev`.
+fn same_text_run(prev: &RecordedEvent, next: &RecordedEvent) -> bool {
+    prev.text.is_some()
+        && next.text.is_some()
+        && next.timestamp.saturating_sub(prev.timestamp) <= TYPING_GAP_MS
 }
 
 #[derive(Debug, Default)]
@@ -54,6 +73,7 @@ impl MacroRecorder {
                     started_at: now,
                     last_event_at: now,
                     steps: Vec::new(),
+                    step_count: 0,
                 });
                 Ok(())
             }
@@ -61,25 +81,34 @@ impl MacroRecorder {
         }
     }
 
-    /// Record a keystroke. The `key` is a formatted string like "Ctrl+C" or "F13".
-    /// Silently drops events once `MAX_SEQUENCE_STEPS` is reached so a runaway
-    /// recording can't grow unboundedly (defence-in-depth alongside the UI cap).
-    pub fn record_keystroke(&mut self, key: String, now: u64) {
-        if let Some(RecorderState::Recording {
+    /// Record a keystroke. The `key` is a formatted string like "Ctrl+C" or "F13";
+    /// `text` is the character it typed (a printable key without Ctrl/Alt/Win).
+    /// Returns how many steps the recording makes so far. Silently drops a key
+    /// that would start a step past `MAX_SEQUENCE_STEPS` (or past
+    /// `MAX_RECORDED_KEYS` keys) so a runaway recording can't grow unboundedly.
+    pub fn record_keystroke(&mut self, key: String, text: Option<String>, now: u64) -> usize {
+        let Some(RecorderState::Recording {
             last_event_at,
             steps,
+            step_count,
             ..
         }) = &mut self.state
-        {
-            if steps.len() >= MAX_SEQUENCE_STEPS {
-                return;
-            }
-            steps.push(RecordedEvent {
-                key,
-                timestamp: now,
-            });
-            *last_event_at = now;
+        else {
+            return 0;
+        };
+        let event = RecordedEvent {
+            key,
+            text: text.filter(|text| !text.is_empty() && !text.contains('\0')),
+            timestamp: now,
+        };
+        let new_step = steps.last().is_none_or(|prev| !same_text_run(prev, &event));
+        if steps.len() >= MAX_RECORDED_KEYS || (new_step && *step_count >= MAX_SEQUENCE_STEPS) {
+            return *step_count;
         }
+        steps.push(event);
+        *step_count += usize::from(new_step);
+        *last_event_at = now;
+        *step_count
     }
 
     /// Stop recording and produce the MacroRecording.
@@ -117,24 +146,47 @@ impl MacroRecorder {
     }
 }
 
+/// One step per key, except that characters typed close together become one
+/// Text step with what they typed (in any layout). A lone typed key stays a
+/// key press: a game or a one-key shortcut wants the key, not a character.
 fn convert_to_sequence_steps(events: &[RecordedEvent]) -> Vec<SequenceStep> {
-    events
-        .iter()
+    let runs: Vec<&[RecordedEvent]> = events.chunk_by(same_text_run).collect();
+    runs.iter()
         .enumerate()
-        .map(|(i, event)| {
-            // Send waits after input, so each input owns the gap before the next.
-            let delay_ms = events.get(i + 1).and_then(|next| {
-                let delta = next.timestamp.saturating_sub(event.timestamp);
+        .map(|(i, run)| {
+            let last = &run[run.len() - 1];
+            // A step waits after its input, so each step owns the gap before the next.
+            let delay_ms = runs.get(i + 1).and_then(|next| {
+                let delta = next[0].timestamp.saturating_sub(last.timestamp);
                 let capped = delta.min(MAX_STEP_DELAY_MS as u64) as u32;
                 (capped > 0).then_some(capped)
             });
-            SequenceStep::Send {
-                value: event.key.clone(),
-                delay_ms,
-                repeat: None,
+            if run.len() > 1 {
+                SequenceStep::Text {
+                    value: literal_text(run.iter().filter_map(|event| event.text.as_deref()).collect()),
+                    delay_ms,
+                    repeat: None,
+                }
+            } else {
+                SequenceStep::Send {
+                    value: run[0].key.clone(),
+                    delay_ms,
+                    repeat: None,
+                }
             }
         })
         .collect()
+}
+
+/// Typed text is sent as typed: braces that would form a snippet token
+/// (`{date}`…) or an input field (`{input:…}`) are escaped, other text is left
+/// alone (it is sent verbatim).
+fn literal_text(text: String) -> String {
+    if crate::input_synthesis::has_snippet_token(&text) || text.contains("{input:") {
+        text.replace('{', "{{").replace('}', "}}")
+    } else {
+        text
+    }
 }
 
 #[cfg(test)]
@@ -147,7 +199,7 @@ mod tests {
         for count in [200, 201, 1000] {
             let mut recorder = MacroRecorder::new();
             recorder.start(0).unwrap();
-            for i in 0..count { recorder.record_keystroke("A".into(), i); }
+            for i in 0..count { recorder.record_keystroke("A".into(), None, i); }
             let recording = recorder.stop(count).unwrap();
             assert_eq!(recording.steps.len(), 200, "recorded {count} inputs");
             let mut config = crate::config::default_seed_config();
@@ -180,7 +232,7 @@ mod tests {
     fn records_single_keystroke() {
         let mut recorder = MacroRecorder::new();
         recorder.start(1000).unwrap();
-        recorder.record_keystroke("F13".into(), 1100);
+        recorder.record_keystroke("F13".into(), None, 1100);
         let recording = recorder.stop(1200).unwrap();
 
         assert_eq!(recording.steps.len(), 1);
@@ -199,9 +251,9 @@ mod tests {
     fn records_multiple_keystrokes_with_timing() {
         let mut recorder = MacroRecorder::new();
         recorder.start(1000).unwrap();
-        recorder.record_keystroke("Ctrl+C".into(), 1000);
-        recorder.record_keystroke("Ctrl+V".into(), 3000);
-        recorder.record_keystroke("Enter".into(), 3100);
+        recorder.record_keystroke("Ctrl+C".into(), None, 1000);
+        recorder.record_keystroke("Ctrl+V".into(), None, 3000);
+        recorder.record_keystroke("Enter".into(), None, 3100);
         let recording = recorder.stop(4000).unwrap();
 
         assert_eq!(recording.steps.len(), 3);
@@ -241,8 +293,8 @@ mod tests {
     fn caps_delay_at_30_seconds() {
         let mut recorder = MacroRecorder::new();
         recorder.start(0).unwrap();
-        recorder.record_keystroke("A".into(), 0);
-        recorder.record_keystroke("B".into(), 60_000); // 60s gap
+        recorder.record_keystroke("A".into(), None, 0);
+        recorder.record_keystroke("B".into(), None, 60_000); // 60s gap
         let recording = recorder.stop(60_001).unwrap();
 
         match &recording.steps[0] {
@@ -251,6 +303,102 @@ mod tests {
             }
             _ => panic!("Expected Send step"),
         }
+    }
+
+    fn typed(recorder: &mut MacroRecorder, key: &str, text: &str, now: u64) -> usize {
+        recorder.record_keystroke(key.into(), Some(text.into()), now)
+    }
+
+    fn send(value: &str, delay_ms: Option<u32>) -> SequenceStep {
+        SequenceStep::Send { value: value.into(), delay_ms, repeat: None }
+    }
+
+    fn text(value: &str, delay_ms: Option<u32>) -> SequenceStep {
+        SequenceStep::Text { value: value.into(), delay_ms, repeat: None }
+    }
+
+    #[test]
+    fn a_typed_word_is_one_text_step_in_the_layout_it_was_typed_in() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        // "блокнот" on the Russian layout: "б" is the comma key.
+        for (i, (key, ch)) in [(",", "б"), ("Л", "л"), ("О", "о"), ("К", "к"), ("Н", "н"), ("О", "о"), ("Т", "т")]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(typed(&mut recorder, key, ch, i as u64 * 100), 1);
+        }
+        assert_eq!(recorder.record_keystroke("Enter".into(), None, 1600), 2);
+        assert_eq!(recorder.record_keystroke("Ctrl+L".into(), None, 1700), 3);
+        let recording = recorder.stop(2000).unwrap();
+        assert_eq!(
+            recording.steps,
+            vec![text("блокнот", Some(1000)), send("Enter", Some(100)), send("Ctrl+L", None)]
+        );
+    }
+
+    #[test]
+    fn shift_capitals_and_spaces_stay_in_the_text() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        typed(&mut recorder, "Shift+H", "H", 0);
+        typed(&mut recorder, "I", "i", 80);
+        typed(&mut recorder, "Space", " ", 160);
+        typed(&mut recorder, "Shift+1", "!", 240);
+        let recording = recorder.stop(1000).unwrap();
+        assert_eq!(recording.steps, vec![text("Hi !", None)]);
+    }
+
+    #[test]
+    fn a_long_pause_or_a_chord_ends_the_text() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        typed(&mut recorder, "A", "a", 0);
+        typed(&mut recorder, "B", "b", 100);
+        typed(&mut recorder, "C", "c", 100 + TYPING_GAP_MS + 1);
+        typed(&mut recorder, "D", "d", 200 + TYPING_GAP_MS);
+        recorder.record_keystroke("Ctrl+A".into(), None, 300 + TYPING_GAP_MS);
+        typed(&mut recorder, "E", "e", 400 + TYPING_GAP_MS);
+        let recording = recorder.stop(5000).unwrap();
+        assert_eq!(
+            recording.steps,
+            vec![
+                text("ab", Some(TYPING_GAP_MS as u32 + 1)),
+                text("cd", Some(100)),
+                send("Ctrl+A", Some(100)),
+                // A lone key stays a key press (games, one-key shortcuts).
+                send("E", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn typed_braces_never_become_a_token() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        for (i, ch) in "{date} a{b".chars().enumerate() {
+            typed(&mut recorder, "X", &ch.to_string(), i as u64 * 10);
+        }
+        let recording = recorder.stop(1000).unwrap();
+        assert_eq!(recording.steps, vec![text("{{date}} a{{b", None)]);
+        assert_eq!(literal_text("a{b}".into()), "a{b}", "no token: verbatim");
+        assert_eq!(literal_text("{input:host}".into()), "{{input:host}}");
+    }
+
+    #[test]
+    fn the_step_cap_counts_steps_not_keys() {
+        let mut recorder = MacroRecorder::new();
+        recorder.start(0).unwrap();
+        for i in 0..300u64 {
+            assert_eq!(typed(&mut recorder, "A", "a", i), 1);
+        }
+        for i in 0..250u64 {
+            recorder.record_keystroke("Enter".into(), None, 10_000 + i);
+        }
+        assert_eq!(recorder.record_keystroke("Enter".into(), None, 20_000), MAX_SEQUENCE_STEPS);
+        let recording = recorder.stop(30_000).unwrap();
+        assert_eq!(recording.steps.len(), MAX_SEQUENCE_STEPS);
+        assert!(matches!(&recording.steps[0], SequenceStep::Text { value, .. } if value.len() == 300));
     }
 
     #[test]
@@ -270,12 +418,12 @@ mod tests {
     fn can_restart_after_stop() {
         let mut recorder = MacroRecorder::new();
         recorder.start(0).unwrap();
-        recorder.record_keystroke("A".into(), 50);
+        recorder.record_keystroke("A".into(), None, 50);
         recorder.stop(100).unwrap();
 
         // Start a new recording
         recorder.start(200).unwrap();
-        recorder.record_keystroke("B".into(), 250);
+        recorder.record_keystroke("B".into(), None, 250);
         let recording = recorder.stop(300).unwrap();
 
         assert_eq!(recording.steps.len(), 1);
@@ -291,7 +439,7 @@ mod tests {
         assert!(recorder.last_recording().is_none());
 
         recorder.start(0).unwrap();
-        recorder.record_keystroke("X".into(), 50);
+        recorder.record_keystroke("X".into(), None, 50);
         recorder.stop(100).unwrap();
 
         let last = recorder.last_recording().unwrap();
@@ -310,8 +458,8 @@ mod tests {
     fn zero_delay_between_simultaneous_keys_is_none() {
         let mut recorder = MacroRecorder::new();
         recorder.start(0).unwrap();
-        recorder.record_keystroke("A".into(), 100);
-        recorder.record_keystroke("B".into(), 100); // same timestamp
+        recorder.record_keystroke("A".into(), None, 100);
+        recorder.record_keystroke("B".into(), None, 100); // same timestamp
         let recording = recorder.stop(200).unwrap();
 
         match &recording.steps[0] {
@@ -353,7 +501,7 @@ mod edge_proptests {
             let mut recorder = MacroRecorder::new();
             recorder.start(0).unwrap();
             for i in 0u64..count as u64 {
-                recorder.record_keystroke(format!("K{i}"), i * 10);
+                recorder.record_keystroke(format!("K{i}"), None, i * 10);
             }
             let recording = recorder.stop(count as u64 * 10 + 1).unwrap();
             prop_assert!(
@@ -376,8 +524,8 @@ mod edge_proptests {
         ) {
             let mut recorder = MacroRecorder::new();
             recorder.start(0).unwrap();
-            recorder.record_keystroke("A".into(), 0);
-            recorder.record_keystroke("B".into(), gap_ms);
+            recorder.record_keystroke("A".into(), None, 0);
+            recorder.record_keystroke("B".into(), None, gap_ms);
             let recording = recorder.stop(gap_ms + 1).unwrap();
 
             let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] else {
@@ -396,8 +544,8 @@ mod edge_proptests {
         ) {
             let mut recorder = MacroRecorder::new();
             recorder.start(0).unwrap();
-            recorder.record_keystroke("A".into(), ts);
-            recorder.record_keystroke("B".into(), ts); // same timestamp
+            recorder.record_keystroke("A".into(), None, ts);
+            recorder.record_keystroke("B".into(), None, ts); // same timestamp
             let recording = recorder.stop(ts + 1).unwrap();
 
             if let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] {
@@ -414,7 +562,7 @@ mod edge_proptests {
             let mut recorder = MacroRecorder::new();
             recorder.start(start_ts).unwrap();
             // key_ts could be before or after start_ts; recorder doesn't validate ordering
-            recorder.record_keystroke("X".into(), key_ts);
+            recorder.record_keystroke("X".into(), None, key_ts);
             let recording = recorder.stop(key_ts.saturating_add(1)).unwrap();
             if let SequenceStep::Send { delay_ms, .. } = &recording.steps[0] {
                 prop_assert_eq!(*delay_ms, None, "single input must have no trailing delay");
@@ -443,7 +591,7 @@ mod edge_proptests {
     fn unit_no_keystrokes_while_idle_noop() {
         let mut recorder = MacroRecorder::new();
         // record_keystroke while Idle (not recording) must silently do nothing
-        recorder.record_keystroke("X".into(), 100);
+        recorder.record_keystroke("X".into(), None, 100);
         assert!(!recorder.is_recording(), "recorder must still be Idle");
         assert!(recorder.last_recording().is_none());
     }
@@ -482,11 +630,11 @@ mod edge_proptests {
     fn unit_delay_saturating_sub_no_underflow() {
         // We can test convert_to_sequence_steps directly since it's in the same module
         let events = vec![
-            RecordedEvent {
+            RecordedEvent { text: None,
                 key: "A".into(),
                 timestamp: 1000,
             },
-            RecordedEvent {
+            RecordedEvent { text: None,
                 key: "B".into(),
                 timestamp: 0,
             }, // earlier timestamp (pathological)
@@ -514,9 +662,9 @@ mod edge_proptests {
             t2 in any::<u64>(),
         ) {
             let events = vec![
-                RecordedEvent { key: "A".into(), timestamp: t0 },
-                RecordedEvent { key: "B".into(), timestamp: t1 },
-                RecordedEvent { key: "C".into(), timestamp: t2 },
+                RecordedEvent { text: None, key: "A".into(), timestamp: t0 },
+                RecordedEvent { text: None, key: "B".into(), timestamp: t1 },
+                RecordedEvent { text: None, key: "C".into(), timestamp: t2 },
             ];
             // Must not panic; delay caps must be respected
             let steps = convert_to_sequence_steps(&events);
@@ -536,7 +684,7 @@ mod edge_proptests {
             let mut recorder = MacroRecorder::new();
             recorder.start(0).unwrap();
             for i in 0u64..(MAX_SEQUENCE_STEPS + extra) as u64 {
-                recorder.record_keystroke(format!("K{i}"), i);
+                recorder.record_keystroke(format!("K{i}"), None, i);
             }
             let recording = recorder.stop(10_000_000).unwrap();
             prop_assert_eq!(
@@ -581,8 +729,8 @@ mod edge_proptests {
             t1 in (u64::MAX - 1_000)..=u64::MAX,
         ) {
             let events = vec![
-                RecordedEvent { key: "A".into(), timestamp: t0 },
-                RecordedEvent { key: "B".into(), timestamp: t1 },
+                RecordedEvent { text: None, key: "A".into(), timestamp: t0 },
+                RecordedEvent { text: None, key: "B".into(), timestamp: t1 },
             ];
             let steps = convert_to_sequence_steps(&events);
             let SequenceStep::Send { delay_ms, .. } = &steps[0] else {

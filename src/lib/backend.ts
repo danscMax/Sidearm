@@ -696,8 +696,11 @@ export async function startMacroRecording(): Promise<void> {
   return invoke<void>("start_macro_recording");
 }
 
-export async function recordKeystroke(key: string): Promise<void> {
-  return invoke<void>("record_keystroke", { key });
+/** `text`: the character a printable key typed (`event.key`), so a typed word
+ *  becomes one text step in the layout it was typed in. Resolves to the number
+ *  of steps recorded so far. */
+export async function recordKeystroke(key: string, text?: string): Promise<number> {
+  return invoke<number>("record_keystroke", { key, text });
 }
 
 export interface MacroRecording {

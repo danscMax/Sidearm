@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Action, Binding } from "./config";
-import { checkProfile, duplicatesOnDevice, duplicatesSignature, sameAsByControl } from "./config-check";
-import { controlWithGesture } from "./labels";
+import { checkProfile, duplicateKeys, duplicatesOnDevice, sameAsByControl } from "./config-check";
+import { controlWithGesture, gestureLabel } from "./labels";
 import { findShortcutConflicts } from "./conflict-detection";
 import { makeConfig } from "./test-fixtures";
 
@@ -95,10 +95,12 @@ describe("checkProfile", () => {
 
     const sameAs = sameAsByControl(shown, "standard");
     expect(sameAs.get("thumb_01")).toEqual([controlWithGesture("mouse_4", "longPress")]);
-    expect(sameAs.get("mouse_4")).toEqual([controlWithGesture("thumb_01")]);
+    expect(sameAs.get("mouse_4")).toEqual([`${gestureLabel("longPress")} = ${controlWithGesture("thumb_01")}`]);
     expect(sameAsByControl(shown, "hypershift").size).toBe(0);
 
-    expect(duplicatesSignature(shown)).toBe(duplicatesSignature([...shown].reverse()));
-    expect(duplicatesSignature(shown)).not.toBe(duplicatesSignature(duplicatesOnDevice(issues, config, "v3")));
+    expect(duplicateKeys([...shown].reverse())).toEqual([...duplicateKeys(shown)].reverse());
+    expect(duplicateKeys(shown)).not.toEqual(duplicateKeys(duplicatesOnDevice(issues, config, "v3")));
+    const renamed = shown.map((group) => ({ ...group, name: "renamed" }));
+    expect(duplicateKeys(renamed)).toEqual(duplicateKeys(shown));
   });
 });

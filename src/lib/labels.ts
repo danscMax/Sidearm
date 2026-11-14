@@ -155,12 +155,16 @@ export function labelForCapability(controlStatus: PhysicalControl["capabilitySta
 }
 
 /** "Thumb 3 · Hold": a control and, past a plain press, its press pattern. */
-export function controlWithGesture(controlId: ControlId, triggerMode?: TriggerMode): string {
+/** The name of a hold / double / triple press; null for a plain press (and chords). */
+export function gestureLabel(triggerMode?: TriggerMode): string | null {
   const keys = { longPress: "picker.gestureLongPress", doublePress: "picker.gestureDoublePress", triplePress: "picker.gestureTriplePress" } as const;
+  return triggerMode === "longPress" || triggerMode === "doublePress" || triggerMode === "triplePress" ? i18n.t(keys[triggerMode]) : null;
+}
+
+export function controlWithGesture(controlId: ControlId, triggerMode?: TriggerMode): string {
   const name = displayNameForControlId(controlId);
-  return triggerMode === "longPress" || triggerMode === "doublePress" || triggerMode === "triplePress"
-    ? `${name} · ${i18n.t(keys[triggerMode])}`
-    : name;
+  const gesture = gestureLabel(triggerMode);
+  return gesture ? `${name} · ${gesture}` : name;
 }
 
 export function labelForLayer(layer: Layer): string {

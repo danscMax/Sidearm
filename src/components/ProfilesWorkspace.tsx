@@ -1035,7 +1035,6 @@ export function ProfilesWorkspace({
         </Notice>
       ) : null}
 
-
       {layerConflicts.length > 0 ? (
         <Notice variant="warning" className="profiles__conflict-banner">
           <strong>{t("conflict.banner", { count: layerConflicts.length })}</strong>

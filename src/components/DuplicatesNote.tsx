@@ -1,18 +1,18 @@
 // The same thing on several buttons of the mouse shown: one quiet folded line
-// under the mouse that opens the list; "Hide" remembers this very set of
-// groups, so a new duplicate brings the line back.
+// under the mouse that opens the list; "Hide" remembers each group shown, so
+// only a new duplicate brings the line back.
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { duplicatesSignature, type DuplicateIssue } from "../lib/config-check";
+import { duplicateKeys, type DuplicateIssue } from "../lib/config-check";
 import { controlWithGesture, labelForLayer } from "../lib/labels";
 import { ChevronIcon } from "./icons";
 
 const HIDDEN_KEY = "sidearm.duplicatesNote.hidden";
-// shortcut: keeps only the last hidden sets, an older one hidden long ago shows again.
-const KEEP_HIDDEN = 20;
+// shortcut: keeps only the last hidden groups, one hidden long ago may show again.
+const KEEP_HIDDEN = 200;
 
-function hiddenSignatures(): string[] {
+function hiddenKeys(): string[] {
   try {
     const raw = JSON.parse(localStorage.getItem(HIDDEN_KEY) ?? "[]") as unknown;
     return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : [];
@@ -24,12 +24,12 @@ function hiddenSignatures(): string[] {
 export function DuplicatesNote({ duplicates }: { duplicates: DuplicateIssue[] }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [hidden, setHidden] = useState(hiddenSignatures);
-  const signature = duplicatesSignature(duplicates);
-  if (duplicates.length === 0 || hidden.includes(signature)) return null;
+  const [hidden, setHidden] = useState(hiddenKeys);
+  const keys = duplicateKeys(duplicates);
+  if (keys.every((key) => hidden.includes(key))) return null;
 
   const hide = () => {
-    const next = [...hidden, signature].slice(-KEEP_HIDDEN);
+    const next = [...new Set([...hidden, ...keys])].slice(-KEEP_HIDDEN);
     setHidden(next);
     try {
       localStorage.setItem(HIDDEN_KEY, JSON.stringify(next));

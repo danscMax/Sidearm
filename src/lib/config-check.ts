@@ -8,7 +8,7 @@
 
 import { isMenuMark, type Action, type AppConfig, type Binding, type ControlId, type Layer, type MenuItem } from "./config";
 import { conflictingBindingIds, shortcutSignature } from "./conflict-detection";
-import { controlWithGesture } from "./labels";
+import { controlWithGesture, gestureLabel } from "./labels";
 
 export type ConfigIssue =
   | { kind: "missingAction"; where: string }
@@ -140,18 +140,21 @@ export function sameAsByControl(duplicates: DuplicateIssue[], layer: Layer): Map
   const sameAs = new Map<ControlId, string[]>();
   for (const group of duplicates) {
     if (group.bindings[0]!.layer !== layer) continue;
-    for (const { controlId } of group.bindings) {
-      const others = group.bindings.filter((other) => other.controlId !== controlId).map((other) => controlWithGesture(other.controlId, other.triggerMode));
+    for (const { controlId, triggerMode } of group.bindings) {
+      // "Hold = Button 12": which of this button's press patterns is the repeated one.
+      const own = gestureLabel(triggerMode);
+      const others = group.bindings.filter((other) => other.controlId !== controlId)
+        .map((other) => `${own ? `${own} = ` : ""}${controlWithGesture(other.controlId, other.triggerMode)}`);
       sameAs.set(controlId, [...new Set([...(sameAs.get(controlId) ?? []), ...others])]);
     }
   }
   return sameAs;
 }
 
-/** Identifies a set of duplicate groups: a hidden set stays hidden, a new group shows the line again. */
-export function duplicatesSignature(duplicates: DuplicateIssue[]): string {
-  return duplicates
-    .map((group) => [group.name, group.bindings[0]!.layer, ...group.bindings.map((b) => `${b.controlId}:${b.triggerMode ?? "press"}`).sort()].join("\u0001"))
-    .sort()
-    .join("\u0002");
+/** One key per duplicate group (its layer and places, not the action's name):
+ *  a hidden group stays hidden when another one is fixed or the action renamed,
+ *  a new group shows the line again. */
+export function duplicateKeys(duplicates: DuplicateIssue[]): string[] {
+  return duplicates.map((group) =>
+    [group.bindings[0]!.layer, ...group.bindings.map((b) => `${b.controlId}:${b.triggerMode ?? "press"}`).sort()].join("\u0001"));
 }

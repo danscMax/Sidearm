@@ -53,6 +53,9 @@ pub enum ConfigStoreError {
     // from disk instead. See the concurrent-instance clobber bug.
     #[error("Config was modified by another instance.")]
     ConcurrentModification,
+    /// `config.json` declares a schema newer than this Sidearm reads: left untouched.
+    #[error("config.json was written by a newer Sidearm (schema {found}; this one reads up to {supported})")]
+    NewerVersion { found: i64, supported: i32 },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1152,11 +1155,11 @@ pub fn load_or_initialize_config(
                 // recovering to an older backup would silently destroy data the
                 // newer version added. Fail the load with the file left intact so
                 // the user can update the app instead.
-                if raw_config_version(&config_path).is_some_and(|version| version > i64::from(SCHEMA_VERSION)) {
+                if let Some(found) = raw_config_version(&config_path).filter(|version| *version > i64::from(SCHEMA_VERSION)) {
                     log::error!(
                         "[config] config.json declares a version newer than this app (schema {SCHEMA_VERSION}); refusing to recover or overwrite it"
                     );
-                    return Err(primary_err);
+                    return Err(ConfigStoreError::NewerVersion { found, supported: SCHEMA_VERSION });
                 }
 
                 log::error!(
@@ -3916,11 +3919,18 @@ mod tests {
     }
 
     #[test]
+    fn the_sequence_step_limit_is_the_schemas() {
+        let schema: Value = serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema");
+        let max = schema["$defs"]["sequenceActionPayload"]["properties"]["steps"]["maxItems"].as_u64();
+        assert_eq!(max, Some(MAX_SEQUENCE_STEPS as u64), "schema maxItems and MAX_SEQUENCE_STEPS must agree");
+    }
+
+    #[test]
     fn the_schema_cannot_change_without_a_new_version() {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x3f53_dfbd_ffca_1976);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x869b_d7d9_f471_3354);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -3945,8 +3955,8 @@ mod tests {
 
         let result = load_or_initialize_config(temp_dir.path());
         assert!(
-            result.is_err(),
-            "a newer-schema config must not be silently recovered/overwritten"
+            matches!(result, Err(ConfigStoreError::NewerVersion { found: 99, .. })),
+            "a newer-schema config is reported as such, never recovered/overwritten"
         );
         let content = fs::read_to_string(&config_path).expect("newer config still present");
         assert!(

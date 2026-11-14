@@ -37,6 +37,12 @@ impl CommandError {
         Self { code: code.into(), message: text.text, details: None, key: text.key, params: text.params }
     }
 
+    /// The same error with technical details (paths, schema errors) shown apart.
+    pub fn with_details(mut self, details: Vec<String>) -> Self {
+        self.details = Some(details);
+        self
+    }
+
     pub fn internal(message: impl Into<String>) -> Self {
         Self {
             code: "internal_error".into(),
@@ -75,11 +81,11 @@ impl From<ConfigStoreError> for CommandError {
                 key: None,
                 params: Default::default(),
             },
-            ConfigStoreError::SchemaViolation { errors } => Self { key: None, params: Default::default(),
-                code: "schema_violation".into(),
-                message: "Config schema validation failed.".into(),
-                details: Some(errors),
-            },
+            ConfigStoreError::SchemaViolation { errors } => Self::from_ui(
+                "schema_violation",
+                crate::ui_text!("error.configSchema", "The settings file does not match the expected format."),
+            )
+            .with_details(errors),
             ConfigStoreError::Serialize(message) => Self {
                 code: "serialize_error".into(),
                 message,
@@ -87,19 +93,24 @@ impl From<ConfigStoreError> for CommandError {
                 key: None,
                 params: Default::default(),
             },
-            ConfigStoreError::InvalidConfig { errors } => Self { key: None, params: Default::default(),
-                code: "invalid_config".into(),
-                message: "Config validation failed.".into(),
-                details: Some(errors),
-            },
-            ConfigStoreError::ConcurrentModification => Self {
-                code: "config_changed_on_disk".into(),
-                message: "Settings were changed by another Sidearm instance; reloading from disk."
-                    .into(),
-                details: None,
-                key: None,
-                params: Default::default(),
-            },
+            ConfigStoreError::InvalidConfig { errors } => Self::from_ui(
+                "invalid_config",
+                crate::ui_text!("error.configInvalid", "Some settings contradict each other."),
+            )
+            .with_details(errors),
+            ConfigStoreError::ConcurrentModification => Self::from_ui(
+                "config_changed_on_disk",
+                crate::ui_text!("error.configChangedOnDisk", "Settings were changed by another Sidearm; reloading them from disk."),
+            ),
+            ConfigStoreError::NewerVersion { found, supported } => Self::from_ui(
+                "config_newer_version",
+                crate::ui_text!(
+                    "error.configNewer",
+                    "These settings were saved by a newer Sidearm (format {found}; this one reads up to {supported}). Update Sidearm to open them — the file was left as it is.",
+                    found = found,
+                    supported = supported
+                ),
+            ),
         }
     }
 }

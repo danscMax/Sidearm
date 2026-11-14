@@ -40,6 +40,19 @@ describe("complete locale catalogues", () => {
   });
 });
 
+describe("natural counts", () => {
+  it("declines counts instead of writing (s) or cutting a word short", () => {
+    const englishS = Object.entries(locales.en).filter(([, text]) => /\w\(s\)/.test(text));
+    // "шаг.)", "пункт.)": a word cut short before a count's closing bracket
+    // (standard abbreviations such as "симв." stay allowed).
+    const standard = new Set(["симв"]);
+    const russianCut = Object.entries(locales.ru).filter(([, text]) =>
+      [...text.matchAll(/([а-яё]{3,})\.\)/gi)].some((match) => !standard.has(match[1].toLowerCase())));
+    expect(englishS).toEqual([]);
+    expect(russianCut).toEqual([]);
+  });
+});
+
 describe("configuration-aware recovery instructions", () => {
   it("does not ask for HyperShift when it is off", () => {
     expect(recoveryTestInstruction("none")).not.toMatch(/HyperShift|ПКМ|ЛКМ/);

@@ -866,7 +866,6 @@
     "menuChipLibrary": "Library: {{name}}",
     "menuChipPlaces": "Also on: {{places}}",
     "menuChipMenus": "Also in: {{places}}",
-    "menuSharedChip": "Shared · {{count}} more button(s)",
     "menuMoreShort": "More",
     "menuPinShort": "Pin",
     "menuFolderFailed": "The folder could not be read: {{reason}}",
@@ -877,7 +876,9 @@
       "notUtf8": "not UTF-8 text",
       "unreadable": "could not be read",
       "overLimit": "past the first 200 files"
-    }
+    },
+    "menuSharedChip_one": "Shared · {{count}} more button",
+    "menuSharedChip_other": "Shared · {{count}} more buttons"
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -1031,11 +1032,9 @@
     "previewShortcut": "Presses {{combo}}",
     "previewMouse": "Performs {{combo}}",
     "previewText": "Types “{{text}}”",
-    "previewSequence": "Runs a macro ({{count}} steps)",
     "previewLaunch": "Launches {{target}}",
     "previewMedia": "Media key: {{key}}",
     "previewProfile": "Switches to profile “{{name}}”",
-    "previewMenu": "Opens a menu ({{count}} items)",
     "previewDisabled": "Nothing — the button is disabled",
     "previewRepair": "Re-encodes the clipboard",
     "categoryDesc": {
@@ -1123,7 +1122,11 @@
     "menuShared": "This menu is also on other buttons ({{count}}): editing it changes it there too. Choosing another kind of action changes this button only.",
     "tokenSelectionDesc": "Puts in the text selected in the window in front (copied with Ctrl+Insert, the clipboard is put back).",
     "alsoUsed": "Also here: {{places}}",
-    "alsoUsedMore": "and {{count}} more"
+    "alsoUsedMore": "and {{count}} more",
+    "previewSequence_one": "Runs a macro ({{count}} step)",
+    "previewSequence_other": "Runs a macro ({{count}} steps)",
+    "previewMenu_one": "Opens a menu ({{count}} item)",
+    "previewMenu_other": "Opens a menu ({{count}} items)"
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1435,6 +1438,10 @@
     "unknown": {
       "title": "An unexpected error occurred",
       "hint": "Copy the details and attach them to a report if the error persists."
+    },
+    "configNewer": {
+      "title": "Settings from a newer Sidearm",
+      "hint": "Install the latest Sidearm. To go back to this version instead, restore a backup made before the update."
     }
   },
   "onboarding": {
@@ -1622,7 +1629,7 @@
       "alreadyElevated": "Sidearm is already running with administrator rights."
     },
     "input": {
-      "modifiersReused": "Shortcut reused already pressed modifier(s): {{modifiers}}."
+      "modifiersReused": "The shortcut reused modifiers already held: {{modifiers}}."
     },
     "capture": {
       "actionDone": "Ran `{{action}}` for `{{key}}`.",
@@ -1813,6 +1820,43 @@
     },
     "cheatsheet": {
       "title": "{{profile}} · HyperShift 2"
+    },
+    "error": {
+      "adminAutostart": "Could not change starting as administrator: {{reason}}",
+      "adminWindowsOnly": "Restarting as administrator is only supported on Windows.",
+      "backupOutside": "Backup path must point to a file inside the config directory.",
+      "backupUnreachable": "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.",
+      "configChangedOnDisk": "Settings were changed by another Sidearm; reloading them from disk.",
+      "configInvalid": "Some settings contradict each other.",
+      "configNewer": "These settings were saved by a newer Sidearm (format {{found}}; this one reads up to {{supported}}). Update Sidearm to open them — the file was left as it is.",
+      "configSchema": "The settings file does not match the expected format.",
+      "exportNameEmpty": "Export filename must not be empty.",
+      "exportNameJson": "Export filename must end with .json.",
+      "exportNamePath": "Export filename must not contain path separators or '..' segments.",
+      "extHtml": "The layout page must be an .html file.",
+      "extJson": "File must have a .json extension.",
+      "extSnippets": "Snippet export must be a .json, .md, or .txt file.",
+      "imageName": "`{{file_name}}` is not a bare file name.",
+      "imageStoredTooLarge": "Stored image exceeds the size limit.",
+      "imageTooLarge": "Image is {{size}} MB; the limit is {{limit}} MB.",
+      "imageType": "`{{extension}}` is not a supported image type (png/jpg/webp/gif/bmp).",
+      "imageTypeStored": "`{{file_name}}` is not a supported image type.",
+      "importParse": "Failed to parse import JSON: {{reason}}",
+      "importRead": "Failed to read import file: {{reason}}",
+      "importSchema": "Imported config does not match the expected schema.",
+      "importTooLarge": "File exceeds the {{max_bytes}}-byte import limit.",
+      "noConfigToExport": "No config.json to export — save the app at least once first.",
+      "notAFolder": "The chosen path is not a folder.",
+      "onboardModeStuck": "The mouse did not return to its normal mode: {{reason}}",
+      "onboardUnconfirmed": "The mouse did not confirm the write: {{reason}}",
+      "pathDotDot": "File path must not contain `..` segments.",
+      "pathNotAbsolute": "File path must be absolute.",
+      "recording": "Recording failed: {{reason}}",
+      "rehook": "Could not reconnect the keyboard hook: {{reason}}",
+      "runtimeReload": "Could not restart capture: {{reason}}",
+      "runtimeStart": "Could not start capture: {{reason}}",
+      "runtimeStop": "Could not stop capture: {{reason}}",
+      "windowCapture": "Could not read the window in front: {{reason}}"
     }
   },
   "newMouse": {
@@ -1938,12 +1982,13 @@
     "profile": "Profile"
   },
   "configCheck": {
-    "banner": "This profile has {{count}} problem(s) to look at:",
     "missingAction": "«{{where}}» points at an action that no longer exists — it does nothing.",
     "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
     "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one.",
     "duplicate": "“{{name}}” ({{layer}}): {{buttons}}.",
-    "duplicatesBanner": "The same thing on several buttons:"
+    "duplicatesBanner": "The same thing on several buttons:",
+    "banner_one": "This profile has {{count}} problem to look at:",
+    "banner_other": "This profile has {{count}} problems to look at:"
   },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm."

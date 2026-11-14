@@ -100,6 +100,11 @@ const ERROR_MAP: Record<string, ErrorMapEntry> = {
     hintKey: "errors.invalidPath.hint",
     actions: [DISMISS, COPY_DETAILS],
   },
+  config_newer_version: {
+    titleKey: "errors.configNewer.title",
+    hintKey: "errors.configNewer.hint",
+    actions: [OPEN_CONFIG_FOLDER, DISMISS],
+  },
   runtime_reload_failed: {
     titleKey: "errors.runtimeReload.title",
     hintKey: "errors.runtimeReload.hint",

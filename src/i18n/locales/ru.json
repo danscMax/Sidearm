@@ -876,7 +876,6 @@
     "menuChipLibrary": "Библиотека: {{name}}",
     "menuChipPlaces": "Ещё на: {{places}}",
     "menuChipMenus": "Ещё в: {{places}}",
-    "menuSharedChip": "Общее · ещё кнопок: {{count}}",
     "menuMoreShort": "Ещё",
     "menuPinShort": "Закрепить",
     "menuFolderFailed": "Не удалось прочитать папку: {{reason}}",
@@ -887,7 +886,11 @@
       "notUtf8": "не текст в UTF-8",
       "unreadable": "не читается",
       "overLimit": "после первых 200 файлов"
-    }
+    },
+    "menuSharedChip_one": "Общее · ещё {{count}} кнопка",
+    "menuSharedChip_few": "Общее · ещё {{count}} кнопки",
+    "menuSharedChip_many": "Общее · ещё {{count}} кнопок",
+    "menuSharedChip_other": "Общее · ещё {{count}} кнопки"
   },
   "properties": {
     "empty": "Выберите кнопку, чтобы увидеть свойства",
@@ -1041,11 +1044,9 @@
     "previewShortcut": "Нажмёт {{combo}}",
     "previewMouse": "Выполнит {{combo}}",
     "previewText": "Наберёт «{{text}}»",
-    "previewSequence": "Выполнит макрос ({{count}} шаг.)",
     "previewLaunch": "Запустит {{target}}",
     "previewMedia": "Медиа-клавиша: {{key}}",
     "previewProfile": "Переключит на профиль «{{name}}»",
-    "previewMenu": "Откроет меню ({{count}} пункт.)",
     "previewDisabled": "Ничего — кнопка отключена",
     "previewRepair": "Перекодирует буфер обмена",
     "categoryDesc": {
@@ -1133,7 +1134,15 @@
     "menuShared": "Это меню стоит и на других кнопках ({{count}}): правка меняет его и там. Другой тип действия изменит только эту кнопку.",
     "tokenSelectionDesc": "Подставит текст, выделенный в окне (копируется через Ctrl+Insert, буфер потом возвращается).",
     "alsoUsed": "Это же действие ещё здесь: {{places}}",
-    "alsoUsedMore": "и ещё {{count}}"
+    "alsoUsedMore": "и ещё {{count}}",
+    "previewSequence_one": "Выполнит макрос ({{count}} шаг)",
+    "previewSequence_few": "Выполнит макрос ({{count}} шага)",
+    "previewSequence_many": "Выполнит макрос ({{count}} шагов)",
+    "previewSequence_other": "Выполнит макрос ({{count}} шага)",
+    "previewMenu_one": "Откроет меню ({{count}} пункт)",
+    "previewMenu_few": "Откроет меню ({{count}} пункта)",
+    "previewMenu_many": "Откроет меню ({{count}} пунктов)",
+    "previewMenu_other": "Откроет меню ({{count}} пункта)"
   },
   "assignments": {
     "copyBinding": "Копировать назначение",
@@ -1463,6 +1472,10 @@
     "unknown": {
       "title": "Произошла неожиданная ошибка",
       "hint": "Скопируйте детали и приложите к отчёту, если ошибка повторяется."
+    },
+    "configNewer": {
+      "title": "Настройки от более новой версии",
+      "hint": "Установите последнюю версию Sidearm. Чтобы остаться на этой, восстановите резервную копию, сделанную до обновления."
     }
   },
   "onboarding": {
@@ -1841,6 +1854,43 @@
     },
     "cheatsheet": {
       "title": "{{profile}} · HyperShift 2"
+    },
+    "error": {
+      "adminAutostart": "Не удалось изменить запуск от имени администратора: {{reason}}",
+      "adminWindowsOnly": "Перезапуск от имени администратора есть только в Windows.",
+      "backupOutside": "Резервная копия должна быть файлом в папке настроек.",
+      "backupUnreachable": "Нет доступа к резервной копии. Возможно, она на отключённом сетевом диске или ещё синхронизируется (например, OneDrive). Попробуйте ещё раз.",
+      "configChangedOnDisk": "Настройки изменил другой Sidearm; загружаю их с диска заново.",
+      "configInvalid": "Часть настроек противоречит друг другу.",
+      "configNewer": "Эти настройки сохранены более новым Sidearm (формат {{found}}, этот читает до {{supported}}). Обновите Sidearm, чтобы открыть их, — файл оставлен как есть.",
+      "configSchema": "Файл настроек не соответствует ожидаемому формату.",
+      "exportNameEmpty": "Имя файла для экспорта не может быть пустым.",
+      "exportNameJson": "Имя файла для экспорта должно заканчиваться на .json.",
+      "exportNamePath": "Имя файла для экспорта не должно содержать разделители пути и «..».",
+      "extHtml": "Страница раскладки должна быть файлом .html.",
+      "extJson": "Нужен файл с расширением .json.",
+      "extSnippets": "Фрагменты экспортируются только в файл .json, .md или .txt.",
+      "imageName": "«{{file_name}}» — не просто имя файла.",
+      "imageStoredTooLarge": "Сохранённое изображение больше допустимого размера.",
+      "imageTooLarge": "Изображение весит {{size}} МБ, а можно не больше {{limit}} МБ.",
+      "imageType": "Формат «{{extension}}» не поддерживается (подходят png, jpg, webp, gif, bmp).",
+      "imageTypeStored": "Формат файла «{{file_name}}» не поддерживается.",
+      "importParse": "Не удалось разобрать JSON импорта: {{reason}}",
+      "importRead": "Не удалось прочитать файл импорта: {{reason}}",
+      "importSchema": "Импортируемые настройки не соответствуют ожидаемому формату.",
+      "importTooLarge": "Файл больше предела импорта ({{max_bytes}} байт).",
+      "noConfigToExport": "Нечего экспортировать: config.json ещё нет — сохраните настройки хотя бы раз.",
+      "notAFolder": "Выбранный путь — не папка.",
+      "onboardModeStuck": "Мышь не вернулась в обычный режим: {{reason}}",
+      "onboardUnconfirmed": "Мышь не подтвердила запись: {{reason}}",
+      "pathDotDot": "Путь к файлу не должен содержать «..».",
+      "pathNotAbsolute": "Путь к файлу должен быть полным.",
+      "recording": "Запись не удалась: {{reason}}",
+      "rehook": "Не удалось заново подключить перехват клавиатуры: {{reason}}",
+      "runtimeReload": "Не удалось перезапустить захват: {{reason}}",
+      "runtimeStart": "Не удалось запустить захват: {{reason}}",
+      "runtimeStop": "Не удалось остановить захват: {{reason}}",
+      "windowCapture": "Не удалось прочитать окно на переднем плане: {{reason}}"
     }
   },
   "newMouse": {
@@ -1968,12 +2018,15 @@
     "profile": "Профиль"
   },
   "configCheck": {
-    "banner": "В этом профиле есть что проверить ({{count}}):",
     "missingAction": "«{{where}}» ссылается на удалённое действие и ничего не делает.",
     "missingSnippet": "«{{where}}» ссылается на удалённый текст библиотеки и ничего не печатает.",
     "enterNextToClose": "{{button}} ({{layer}}): один способ нажатия отправляет Enter, другой закрывает окно — легко промахнуться.",
     "duplicate": "«{{name}}» ({{layer}}): {{buttons}}.",
-    "duplicatesBanner": "Одно и то же на нескольких кнопках:"
+    "duplicatesBanner": "Одно и то же на нескольких кнопках:",
+    "banner_one": "В этом профиле {{count}} проблема, проверьте:",
+    "banner_few": "В этом профиле {{count}} проблемы, проверьте:",
+    "banner_many": "В этом профиле {{count}} проблем, проверьте:",
+    "banner_other": "В этом профиле {{count}} проблемы, проверьте:"
   },
   "mouseVisual": {
     "sidearmOnly": "Работает только при запущенном Sidearm: в память мыши для работы без Sidearm не записывается."

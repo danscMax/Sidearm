@@ -221,7 +221,7 @@ pub fn send_shortcut(
         let modifiers = reused_modifiers.iter().map(|modifier| modifier.label()).collect::<Vec<_>>().join(", ");
         vec![crate::ui_text!(
             "input.modifiersReused",
-            "Shortcut reused already pressed modifier(s): {modifiers}.",
+            "The shortcut reused modifiers already held: {modifiers}.",
             modifiers = modifiers
         )]
     };

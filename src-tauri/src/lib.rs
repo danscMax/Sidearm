@@ -816,21 +816,13 @@ fn resolve_log_dir(app: &AppHandle) -> PathBuf {
 fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
     let path = PathBuf::from(path);
     if !path.is_absolute() {
-        return Err(CommandError::new(
-            "invalid_path",
-            "File path must be absolute.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.pathNotAbsolute", "File path must be absolute.")));
     }
     if path
         .components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
     {
-        return Err(CommandError::new(
-            "invalid_path",
-            "File path must not contain `..` segments.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.pathDotDot", "File path must not contain `..` segments.")));
     }
     Ok(path)
 }
@@ -850,7 +842,7 @@ const MAX_FULL_CONFIG_IMPORT_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 /// profiles, autostart scripts, or `.lnk`/`.ps1` files now that the path is no
 /// longer confined to the home directory (preserves the P2-2 fix).
 fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
-    validate_user_path_with_ext(path, &["json"], "File must have a .json extension.")
+    validate_user_path_with_ext(path, &["json"], crate::ui_text!("error.extJson", "File must have a .json extension."))
 }
 
 /// As [`validate_user_file_path`], plus a case-insensitive extension whitelist.
@@ -859,7 +851,7 @@ fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
 fn validate_user_path_with_ext(
     path: &str,
     allowed: &[&str],
-    reject_message: &'static str,
+    reject: crate::ui_text::UiText,
 ) -> Result<PathBuf, CommandError> {
     let validated = validate_user_file_path(path)?;
     let ext_ok = validated
@@ -867,7 +859,7 @@ fn validate_user_path_with_ext(
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| allowed.iter().any(|a| extension.eq_ignore_ascii_case(a)));
     if !ext_ok {
-        return Err(CommandError::new("invalid_path", reject_message, None));
+        return Err(CommandError::from_ui("invalid_path", reject));
     }
     Ok(validated)
 }
@@ -903,10 +895,9 @@ fn check_import_size(path: &Path, max_bytes: u64, code: &'static str) -> Result<
         .map_err(|e| CommandError::internal(format!("Failed to stat import file: {e}")))?
         .len();
     if len > max_bytes {
-        return Err(CommandError::new(
+        return Err(CommandError::from_ui(
             code,
-            format!("File exceeds the {max_bytes}-byte import limit."),
-            None,
+            crate::ui_text!("error.importTooLarge", "File exceeds the {max_bytes}-byte import limit.", max_bytes = max_bytes),
         ));
     }
     Ok(())
@@ -1017,7 +1008,7 @@ async fn read_text_folder(path: String) -> Result<TextFolder, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let dir = PathBuf::from(&path);
         if !dir.is_dir() {
-            return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
+            return Err(CommandError::from_ui("not_a_folder", crate::ui_text!("error.notAFolder", "The chosen path is not a folder.")));
         }
         let files: Vec<PathBuf> = fs::read_dir(&dir)
             .map_err(|e| CommandError::internal(format!("Failed to read the folder: {e}")))?
@@ -1044,7 +1035,7 @@ async fn export_snippets(path: String, contents: String) -> Result<(), CommandEr
     let validated_path = validate_user_path_with_ext(
         &path,
         &["json", "md", "txt"],
-        "Snippet export must be a .json, .md, or .txt file.",
+        crate::ui_text!("error.extSnippets", "Snippet export must be a .json, .md, or .txt file."),
     )?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = validated_path.parent() {
@@ -1065,7 +1056,7 @@ async fn export_snippets(path: String, contents: String) -> Result<(), CommandEr
 /// then opened in the default browser (print or save as PDF there).
 #[tauri::command]
 async fn export_layout_html(path: String, contents: String) -> Result<(), CommandError> {
-    let validated_path = validate_user_path_with_ext(&path, &["html", "htm"], "The layout page must be an .html file.")?;
+    let validated_path = validate_user_path_with_ext(&path, &["html", "htm"], crate::ui_text!("error.extHtml", "The layout page must be an .html file."))?;
     tauri::async_runtime::spawn_blocking(move || {
         config::persist_atomically(&validated_path, |file| {
             use std::io::Write as _;
@@ -1090,25 +1081,13 @@ async fn export_verification_session(
 
     // Validate filename: must not be empty, must end with .json, must not contain path separators or traversal
     if filename.is_empty() {
-        return Err(CommandError::new(
-            "invalid_request",
-            "Export filename must not be empty.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_request", crate::ui_text!("error.exportNameEmpty", "Export filename must not be empty.")));
     }
     if !filename.ends_with(".json") {
-        return Err(CommandError::new(
-            "invalid_request",
-            "Export filename must end with .json.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_request", crate::ui_text!("error.exportNameJson", "Export filename must end with .json.")));
     }
     if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
-        return Err(CommandError::new(
-            "invalid_request",
-            "Export filename must not contain path separators or '..' segments.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_request", crate::ui_text!("error.exportNamePath", "Export filename must not contain path separators or '..' segments.")));
     }
 
     // Construct the export path under config_dir/exports/ — this is under the
@@ -1268,7 +1247,7 @@ fn reload_active_config(
         Some(Err(message)) => {
             let summary = store.lock().recover_poison().stop();
             let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
-            Err(CommandError::new("runtime_reload_failed", message, None))
+            Err(CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))
         }
     })?
 }
@@ -1303,10 +1282,9 @@ fn validated_device_image_path(app: &AppHandle, file_name: &str) -> Result<PathB
         .and_then(device_image_mime)
         .is_some();
     if !config::is_bare_file_name(file_name) || !is_image {
-        return Err(CommandError::new(
+        return Err(CommandError::from_ui(
             "device_image_invalid_name",
-            format!("`{file_name}` is not a bare file name."),
-            None,
+            crate::ui_text!("error.imageName", "`{file_name}` is not a bare file name.", file_name = file_name),
         ));
     }
     Ok(resolve_config_dir(app)?
@@ -1325,10 +1303,9 @@ async fn import_device_image(app: AppHandle, source_path: String) -> Result<Stri
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     if device_image_mime(&extension).is_none() {
-        return Err(CommandError::new(
+        return Err(CommandError::from_ui(
             "device_image_unsupported",
-            format!("`{extension}` is not a supported image type (png/jpg/webp/gif/bmp)."),
-            None,
+            crate::ui_text!("error.imageType", "`{extension}` is not a supported image type (png/jpg/webp/gif/bmp).", extension = extension),
         ));
     }
 
@@ -1338,14 +1315,14 @@ async fn import_device_image(app: AppHandle, source_path: String) -> Result<Stri
             CommandError::internal(format!("Failed to read `{}`: {error}", source.display()))
         })?;
         if metadata.len() > DEVICE_IMAGE_MAX_BYTES {
-            return Err(CommandError::new(
+            return Err(CommandError::from_ui(
                 "device_image_too_large",
-                format!(
-                    "Image is {} MB; the limit is {} MB.",
-                    metadata.len() / (1024 * 1024),
-                    DEVICE_IMAGE_MAX_BYTES / (1024 * 1024)
+                crate::ui_text!(
+                    "error.imageTooLarge",
+                    "Image is {size} MB; the limit is {limit} MB.",
+                    size = metadata.len() / (1024 * 1024),
+                    limit = DEVICE_IMAGE_MAX_BYTES / (1024 * 1024)
                 ),
-                None,
             ));
         }
         fs::create_dir_all(&devices_dir).map_err(|error| {
@@ -1378,10 +1355,9 @@ async fn read_device_image(app: AppHandle, file_name: String) -> Result<String, 
         .and_then(|ext| ext.to_str())
         .and_then(device_image_mime)
         .ok_or_else(|| {
-            CommandError::new(
+            CommandError::from_ui(
                 "device_image_unsupported",
-                format!("`{file_name}` is not a supported image type."),
-                None,
+                crate::ui_text!("error.imageTypeStored", "`{file_name}` is not a supported image type.", file_name = file_name),
             )
         })?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -1389,10 +1365,9 @@ async fn read_device_image(app: AppHandle, file_name: String) -> Result<String, 
             CommandError::internal(format!("Failed to read `{}`: {error}", path.display()))
         })?;
         if metadata.len() > DEVICE_IMAGE_MAX_BYTES {
-            return Err(CommandError::new(
+            return Err(CommandError::from_ui(
                 "device_image_too_large",
-                "Stored image exceeds the size limit.".to_string(),
-                None,
+                crate::ui_text!("error.imageStoredTooLarge", "Stored image exceeds the size limit."),
             ));
         }
         let bytes = fs::read(&path).map_err(|error| {
@@ -1583,19 +1558,11 @@ async fn restore_config_from_backup_impl(
     match backup::check_backup_location(&config_dir, &backup_pb) {
         backup::BackupLocationCheck::Inside => {}
         backup::BackupLocationCheck::Outside => {
-            return Err(CommandError::new(
-                "invalid_backup_path",
-                "Backup path must point to a file inside the config directory.",
-                Some(vec![backup_path]),
-            ));
+            return Err(CommandError::from_ui("invalid_backup_path", crate::ui_text!("error.backupOutside", "Backup path must point to a file inside the config directory.")).with_details(vec![backup_path]));
         }
         backup::BackupLocationCheck::Unresolvable(detail) => {
             log::warn!("[restore] backup path unresolvable: {detail}");
-            return Err(CommandError::new(
-                "backup_path_unresolvable",
-                "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.",
-                Some(vec![backup_path]),
-            ));
+            return Err(CommandError::from_ui("backup_path_unresolvable", crate::ui_text!("error.backupUnreachable", "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.")).with_details(vec![backup_path]));
         }
     }
 
@@ -1633,11 +1600,11 @@ async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<Stri
         let parent = PathBuf::from(&target_dir);
         let plain = parent.is_absolute() && !parent.components().any(|part| matches!(part, std::path::Component::ParentDir));
         if !plain || !parent.is_dir() {
-            return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
+            return Err(CommandError::from_ui("not_a_folder", crate::ui_text!("error.notAFolder", "The chosen path is not a folder.")));
         }
         let source = config_dir.join("config.json");
         if !source.is_file() {
-            return Err(CommandError::new("io_error", "No config.json to export — save the app at least once first.", None));
+            return Err(CommandError::from_ui("io_error", crate::ui_text!("error.noConfigToExport", "No config.json to export — save the app at least once first.")));
         }
         press_log::flush();
         let base = format!("Sidearm-layout-{}", backup::local_date_string());
@@ -1677,11 +1644,7 @@ async fn export_full_config_to(app: AppHandle, target_path: String) -> Result<St
     let source = config_dir.join("config.json");
     tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
         if !source.is_file() {
-            return Err(CommandError::new(
-                "io_error",
-                "No config.json to export — save the app at least once first.",
-                None,
-            ));
+            return Err(CommandError::from_ui("io_error", crate::ui_text!("error.noConfigToExport", "No config.json to export — save the app at least once first.")));
         }
         if let Some(parent) = validated.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -1714,17 +1677,16 @@ async fn import_full_config_preview(source_path: String) -> Result<ImportPreview
     tauri::async_runtime::spawn_blocking(move || -> Result<ImportPreview, CommandError> {
         ensure_full_config_import_size(&validated)?;
         let raw = fs::read_to_string(&validated).map_err(|e| {
-            CommandError::new(
+            CommandError::from_ui(
                 "io_error",
-                format!("Failed to read import file: {e}"),
-                Some(vec![validated.to_string_lossy().into_owned()]),
+                crate::ui_text!("error.importRead", "Failed to read import file: {reason}", reason = e),
             )
+            .with_details(vec![validated.to_string_lossy().into_owned()])
         })?;
         let raw_value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-            CommandError::new(
+            CommandError::from_ui(
                 "parse_error",
-                format!("Failed to parse import JSON: {e}"),
-                None,
+                crate::ui_text!("error.importParse", "Failed to parse import JSON: {reason}", reason = e),
             )
         })?;
 
@@ -1972,11 +1934,7 @@ async fn import_synapse_into_config(
                 .map_err(|e| CommandError::internal(format!("serialize failed: {e}")))?;
             let schema_errors = config::collect_schema_errors(&value);
             if !schema_errors.is_empty() {
-                return Err(CommandError::new(
-                    "schema_violation",
-                    "Imported config does not match the expected schema.",
-                    Some(schema_errors),
-                ));
+                return Err(CommandError::from_ui("schema_violation", crate::ui_text!("error.importSchema", "Imported config does not match the expected schema.")).with_details(schema_errors));
             }
             config::validate_config(&result.config).map_err(CommandError::from)?;
             Ok(result)
@@ -2037,7 +1995,7 @@ async fn set_input_capture_mode(app: AppHandle, enabled: bool, check_extra_contr
                     let config = load_or_initialize_config(&resolve_config_dir(&app)?)
                         .map_err(CommandError::from)?.config;
                     controller.reload_saved_config(app.clone(), store.inner().clone(), config, app.package_info().name.clone())
-                        .map_err(|message| CommandError::new("runtime_reload_failed", message, None))
+                        .map_err(|message| CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))
                 })();
                 if let Err(error) = reload {
                     mouse_memory::live_overlay::CHECK_EXTRA_CONTROLS.store(false, Ordering::Release);
@@ -2118,7 +2076,7 @@ async fn start_runtime(
             )
             .map(|()| true)
     }, |result| {
-        let started = result.map_err(|message| CommandError::new("runtime_start_failed", message, None))?;
+        let started = result.map_err(|message| CommandError::from_ui("runtime_start_failed", crate::ui_text!("error.runtimeStart", "Could not start capture: {reason}", reason = message)))?;
         let summary = {
             let mut store = runtime_store.lock().recover_poison();
             if started { store.start(load_response.config.version, load_response.warnings.len()) }
@@ -2146,7 +2104,7 @@ async fn stop_runtime(
     runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
 ) -> Result<RuntimeStateSummary, CommandError> {
     let summary = runtime_transition(&runtime_controller, |controller| controller.stop(), |result| {
-        result.map_err(|message| CommandError::new("runtime_stop_failed", message, None))?;
+        result.map_err(|message| CommandError::from_ui("runtime_stop_failed", crate::ui_text!("error.runtimeStop", "Could not stop capture: {reason}", reason = message)))?;
         let summary = runtime_store.lock().recover_poison().stop();
         app.emit(EVENT_RUNTIME_STOPPED, &summary).map_err(|error| {
             CommandError::internal(format!("Failed to emit runtime_stopped event: {error}"))
@@ -2348,7 +2306,7 @@ async fn reload_runtime(
             store.stop()
         };
         let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
-        return Err(CommandError::new("runtime_reload_failed", message, None));
+        return Err(CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)));
     }
 
     let summary = {
@@ -2376,7 +2334,7 @@ async fn rehook_capture(
         .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
     controller
         .rehook()
-        .map_err(|message| CommandError::new("rehook_failed", message, None))
+        .map_err(|message| CommandError::from_ui("rehook_failed", crate::ui_text!("error.rehook", "Could not reconnect the keyboard hook: {reason}", reason = message)))
 }
 
 #[tauri::command]
@@ -2426,7 +2384,7 @@ async fn set_admin_autostart(
             admin_autostart::disable()
         };
         if let Err(message) = result {
-            return Err(CommandError::new("admin_autostart_failed", message, None));
+            return Err(CommandError::from_ui("admin_autostart_failed", crate::ui_text!("error.adminAutostart", "Could not change starting as administrator: {reason}", reason = message)));
         }
         Ok(admin_autostart::query())
     })
@@ -2500,11 +2458,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = app;
-        Err(CommandError::new(
-            "unsupported_platform",
-            "Restarting as administrator is only supported on Windows.",
-            None,
-        ))
+        Err(CommandError::from_ui("unsupported_platform", crate::ui_text!("error.adminWindowsOnly", "Restarting as administrator is only supported on Windows.")))
     }
 }
 
@@ -2558,7 +2512,7 @@ async fn capture_active_window(
                 &app_name,
                 delay_ms,
             )
-            .map_err(|message| CommandError::new("window_capture_error", message, None))?;
+            .map_err(|message| CommandError::from_ui("window_capture_error", crate::ui_text!("error.windowCapture", "Could not read the window in front: {reason}", reason = message)))?;
             Ok::<_, CommandError>((capture, settings))
         })
         .await
@@ -3115,7 +3069,7 @@ async fn start_macro_recording(
         .lock()
         .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
     rec.start(runtime::timestamp_millis())
-        .map_err(|msg| CommandError::new("recording_error", msg, None))
+        .map_err(|msg| CommandError::from_ui("recording_error", crate::ui_text!("error.recording", "Recording failed: {reason}", reason = msg)))
 }
 
 #[tauri::command]
@@ -3138,7 +3092,7 @@ async fn stop_macro_recording(
         .lock()
         .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
     rec.stop(runtime::timestamp_millis())
-        .map_err(|msg| CommandError::new("recording_error", msg, None))
+        .map_err(|msg| CommandError::from_ui("recording_error", crate::ui_text!("error.recording", "Recording failed: {reason}", reason = msg)))
 }
 
 /// No onboard-path mouse plugged in is `onboard_not_connected` (the guard
@@ -3162,7 +3116,7 @@ async fn apply_onboard_mapping(
         let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
         device
             .apply_bindings(&bindings)
-            .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
+            .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))
     })
     .await
     .map_err(|e| CommandError::internal(format!("apply_onboard_mapping task failed: {e}")))?
@@ -3180,7 +3134,7 @@ async fn verify_onboard_mapping(
         let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
         device
             .verify(&bindings)
-            .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
+            .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))
     })
     .await
     .map_err(|e| CommandError::internal(format!("verify_onboard_mapping task failed: {e}")))?
@@ -3206,9 +3160,9 @@ async fn restore_onboard_control(app: AppHandle) -> Result<(), CommandError> {
 fn restore_and_verify_onboard(config: &AppConfig) -> Result<(), CommandError> {
     let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
     device.ensure_normal_mode()
-        .map_err(|msg| CommandError::new("onboard_mode_stuck", msg, None))?;
+        .map_err(|msg| CommandError::from_ui("onboard_mode_stuck", crate::ui_text!("error.onboardModeStuck", "The mouse did not return to its normal mode: {reason}", reason = msg)))?;
     mouse_offline::write_signals(&device, config)
-        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
+        .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))?;
     let bindings = mouse_memory::onboard_bindings(config);
     if device.mode().map_err(CommandError::internal)? != mouse_memory::MODE_NORMAL
         || !device.drifted_bindings(&bindings).map_err(CommandError::internal)?.is_empty()
@@ -3570,7 +3524,7 @@ fn switch_key_signals(app: &AppHandle, consumer: bool) -> Result<(), CommandErro
         log::info!("[onboard] signal switch left to the guard: {message}");
         onboard_guard::request_check();
     }
-    restart_capture(app, || true).map_err(|message| CommandError::new("runtime_reload_failed", message, None))?;
+    restart_capture(app, || true).map_err(|message| CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))?;
     Ok(())
 }
 
@@ -4648,6 +4602,15 @@ mod tests {
             apply_config_shortcut(&config, |shortcut| desired = Some(shortcut.to_owned()));
             assert_eq!(desired.as_deref(), Some("ctrl+alt+n"));
         }
+    }
+
+    /// Errors the UI shows go through `CommandError::from_ui` (translated); the
+    /// untranslated constructor is left only where the text is internal. A ratchet:
+    /// lower the number when one goes, never raise it.
+    #[test]
+    fn untranslated_command_errors_do_not_grow() {
+        let count = include_str!("lib.rs").matches(concat!("CommandError::", "new(")).count();
+        assert!(count <= 8, "{count} untranslated CommandError::new calls: use CommandError::from_ui with ui_text!");
     }
 
     #[test]

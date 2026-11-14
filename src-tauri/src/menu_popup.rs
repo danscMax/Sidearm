@@ -78,6 +78,8 @@ pub(crate) struct Model {
     others: Vec<(String, String, Vec<MenuItem>)>,
     /// Ids of menu actions: a link to another menu is no search result there.
     menu_ids: HashSet<String>,
+    /// The search looks only in this menu, not in the others too.
+    only_this: bool,
 }
 
 /// One row of the level shown: the item, the block it sits in, and for a
@@ -130,6 +132,12 @@ pub(crate) struct View {
     pub generation: u64,
     /// Available physical height on the opening cursor's monitor, excluding the taskbar.
     pub max_height: u32,
+    /// The search also looks in the other menus (the scope switch shows when there are any).
+    pub search_all: bool,
+    pub has_others: bool,
+    /// The scope switch's two names, in the UI language.
+    pub scope_all: String,
+    pub scope_this: String,
 }
 
 fn item_enabled(item: &MenuItem) -> bool {
@@ -159,6 +167,7 @@ impl Model {
             text_actions: HashSet::new(),
             others: Vec::new(),
             menu_ids: HashSet::new(),
+            only_this: false,
         };
         model.highlight = model.first_enabled().unwrap_or(0);
         model
@@ -205,6 +214,27 @@ impl Model {
     /// The name or the sent text contains the query — also when it was typed
     /// in the other keyboard layout ("ghbyz" finds "Принял", "руддщ" "hello"):
     /// both sides compared as the keys pressed on a ЙЦУКЕН/QWERTY keyboard.
+    /// How well `item` matches: 0 its name starts with the query, 1 its name
+    /// holds it, 2 only its text does (the same layout-insensitive comparison).
+    fn rank(item: &MenuItem, needle: &str) -> u8 {
+        let MenuItem::Action { label, .. } = item else { return 2 };
+        let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
+        let (label, label_keys, needle_keys) = (label.to_lowercase(), keys(label), keys(needle));
+        if label.starts_with(needle) || label_keys.starts_with(&needle_keys) {
+            0
+        } else if label.contains(needle) || label_keys.contains(&needle_keys) {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// Search only this menu (`true`) or the others too.
+    pub(crate) fn set_scope(&mut self, only_this: bool) {
+        self.only_this = only_this;
+        self.highlight = self.first_enabled().unwrap_or(0);
+    }
+
     fn matches(&self, item: &MenuItem, needle: &str) -> bool {
         let MenuItem::Action { label, action_id, .. } = item else { return false };
         let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
@@ -251,10 +281,22 @@ impl Model {
             }
             let mut state = Search { model: self, needle: &needle, seen: HashSet::new(), found: Vec::new() };
             search(&mut state, &self.root, None, None);
-            for (id, name, items) in &self.others {
-                search(&mut state, items, Some(name), Some((id, name)));
+            if !self.only_this {
+                for (id, name, items) in &self.others {
+                    search(&mut state, items, Some(name), Some((id, name)));
+                }
             }
-            return (state.found, Vec::new());
+            // Names before texts, but only within a group: a sort across them would
+            // split a block or menu into several headings. Stable: ties keep the tree order.
+            let mut found = state.found;
+            let mut start = 0;
+            while start < found.len() {
+                let (group, menu) = (found[start].group, found[start].menu);
+                let end = start + found[start..].iter().take_while(|entry| entry.group == group && entry.menu == menu).count();
+                found[start..end].sort_by_key(|entry| Self::rank(entry.item, &needle));
+                start = end;
+            }
+            return (found, Vec::new());
         }
         // Pinned items first, in their own block, and only there.
         let mut level: Vec<Entry<'_>> = Vec::new();
@@ -439,6 +481,10 @@ impl Model {
             pick_modes: Vec::new(),
             generation,
             max_height: u32::MAX,
+            search_all: !self.only_this,
+            has_others: !self.others.is_empty(),
+            scope_all: String::new(),
+            scope_this: String::new(),
         }
     }
 }
@@ -600,6 +646,8 @@ fn view_of(menu: &OpenMenu) -> View {
     let mut view = menu.model.view(&menu.title, menu.generation);
     view.max_height = menu.max_height;
     view.placeholder = crate::ui_text::native(&crate::ui_text!("menu.searchPlaceholder", "Search phrases…"));
+    view.scope_all = crate::ui_text::native(&crate::ui_text!("menu.scopeAll", "All menus"));
+    view.scope_this = crate::ui_text::native(&crate::ui_text!("menu.scopeThis", "This menu"));
     view.empty = crate::ui_text::native(&crate::ui_text!("menu.noResults", "Nothing found"));
     view.pick_modes = vec![
         crate::ui_text::native(&crate::ui_text!("menu.pickRun", "Insert")),
@@ -899,6 +947,14 @@ pub(crate) fn hover_from_window(app: &AppHandle, index: usize) {
 }
 
 /// The search box changed.
+/// The scope switch of the search box: this menu only, or the others too.
+pub(crate) fn search_scope_from_window(app: &AppHandle, all: bool) {
+    drive(app, |model| {
+        model.set_scope(!all);
+        Step::Stay
+    });
+}
+
 pub(crate) fn search_from_window(app: &AppHandle, query: &str) {
     drive(app, |model| {
         model.set_query(query);
@@ -1311,6 +1367,21 @@ mod tests {
         assert_eq!(model.view("Phrases", 1).items.len(), 6);
         model.set_query("Вуу");
         assert_eq!(labels(&model.view("Phrases", 1)), ["Deep"], "typed in the Russian layout");
+    }
+
+    #[test]
+    fn search_ranks_names_above_texts_within_a_group_and_can_stay_in_this_menu() {
+        let items = vec![action("a", "Reply politely"), action("b", "Polite"), action("c", "Thanks")];
+        let details: HashMap<String, String> = [("act-c".to_owned(), "very polite text".to_owned())].into();
+        let other = vec![("menu-2".to_owned(), "Work".to_owned(), vec![action("w", "Polish")])];
+        let mut model = Model::new(items, details).with_others(other, HashSet::new());
+        model.set_query("pol");
+        assert_eq!(labels(&model.view("Phrases", 1)), ["Polite", "Reply politely", "Thanks", "Polish"],
+            "name start, then name, then text; another menu stays its own group");
+        model.set_scope(true);
+        let view = model.view("Phrases", 1);
+        assert_eq!(labels(&view), ["Polite", "Reply politely", "Thanks"], "this menu only");
+        assert!(!view.search_all && view.has_others);
     }
 
     #[test]

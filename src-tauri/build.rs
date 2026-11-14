@@ -20,6 +20,7 @@ const APP_COMMANDS: &[&str] = &[
     "get_press_log",
     "menu_wheel",
     "menu_search",
+    "menu_search_scope",
     "menu_confirm",
     "menu_close",
     "menu_back",

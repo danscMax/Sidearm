@@ -2251,6 +2251,12 @@ fn menu_search(app: AppHandle, query: String) {
     menu_popup::search_from_window(&app, &query);
 }
 
+/// The menu popup's search scope switch: `all` menus or only this one.
+#[tauri::command]
+fn menu_search_scope(app: AppHandle, all: bool) {
+    menu_popup::search_scope_from_window(&app, all);
+}
+
 /// Enter in the menu popup.
 #[tauri::command]
 fn menu_confirm(app: AppHandle) {
@@ -4425,6 +4431,7 @@ pub fn run() {
             get_press_log,
             menu_wheel,
             menu_search,
+            menu_search_scope,
             menu_confirm,
             menu_close,
             menu_back,

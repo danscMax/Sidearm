@@ -13,6 +13,7 @@
   var items = []; // the row elements of the level shown
   var highlight = -1;
   var search = null;
+  var scope = null;
   var tip = null;
   var lastLayout = "";
   // The pointer's last screen position: a highlight follows the mouse only
@@ -45,6 +46,12 @@
     search.addEventListener("input", function () { invoke("menu_search", { query: search.value }); });
     search.addEventListener("keydown", onKey);
     box.appendChild(search);
+    // This menu or all menus; Tab switches it too. The click keeps the focus in the box.
+    scope = el("button", "scope");
+    scope.type = "button";
+    scope.addEventListener("mousedown", function (event) { event.preventDefault(); });
+    scope.addEventListener("click", toggleScope);
+    box.appendChild(scope);
     list.appendChild(box);
     list.appendChild(el("div", "rows"));
     root.appendChild(list);
@@ -52,6 +59,26 @@
     tip = el("div", "tip");
     side.appendChild(tip);
     root.appendChild(side);
+  }
+
+  function toggleScope() {
+    if (view && view.hasOthers) invoke("menu_search_scope", { all: !view.searchAll });
+  }
+
+  /** The label with the part the query matched marked (a match only through
+   *  the other keyboard layout stays unmarked). */
+  function labelNode(text, query) {
+    var node = el("span", "label");
+    var needle = (query || "").trim();
+    var at = needle ? text.toLowerCase().indexOf(needle.toLowerCase()) : -1;
+    if (at < 0) {
+      node.textContent = text;
+      return node;
+    }
+    node.appendChild(document.createTextNode(text.slice(0, at)));
+    node.appendChild(el("mark", null, text.slice(at, at + needle.length)));
+    node.appendChild(document.createTextNode(text.slice(at + needle.length)));
+    return node;
   }
 
   function buildRows() {
@@ -75,7 +102,7 @@
       var row = el("div", "row" + (item.enabled ? "" : " item--off"));
       var keyClass = item.number == null ? "key key--none" : item.number > 12 ? "key key--extra" : "key";
       row.appendChild(el("span", keyClass, item.number != null ? String(item.number) : "0"));
-      row.appendChild(el("span", "label", item.label));
+      row.appendChild(labelNode(item.label, view.query));
       if (item.submenu) row.appendChild(el("span", "mark", "›"));
       if (item.enabled) row.addEventListener("click", function () { invoke("menu_pick", { index: index }); });
       // Right click: on a phrase how to use it (insert, insert + Enter, only
@@ -218,6 +245,9 @@
       search.placeholder = view.placeholder;
     }
     if (search.value !== view.query) search.value = view.query;
+    scope.hidden = !view.hasOthers;
+    scope.textContent = view.searchAll ? view.scopeAll : view.scopeThis;
+    scope.classList.toggle("scope--this", !view.searchAll);
     var key = JSON.stringify([view.generation, view.title, view.parent, view.query, view.items]);
     if (key !== levelKey) {
       levelKey = key;
@@ -235,6 +265,7 @@
     else if (event.key === "ArrowUp") invoke("menu_wheel", { down: false });
     else if (event.key === "Enter") invoke("menu_confirm");
     else if (event.key === "Escape") invoke("menu_close");
+    else if (event.key === "Tab" && view.hasOthers) toggleScope();
     else if (event.key === "Backspace" && search.value === "") invoke("menu_back");
     // The whole text of a long phrase scrolls with PageUp / PageDown.
     else if (event.key === "PageDown" || event.key === "PageUp") {

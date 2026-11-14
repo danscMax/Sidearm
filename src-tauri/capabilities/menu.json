@@ -16,6 +16,7 @@
     "allow-menu-edit",
     "allow-menu-wheel",
     "allow-menu-search",
+    "allow-menu-search-scope",
     "allow-menu-confirm",
     "allow-menu-close",
     "allow-menu-back"

@@ -5,14 +5,14 @@ import { nextUniqueId } from "../lib/config-editing";
 import { displayNameForControlId } from "../lib/labels";
 import { appendMenuItem, collectMenuItemIds, removeMenuItem, updateMenuItem } from "../lib/menu-helpers";
 import {
-  editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withPhrase,
+  editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withKeyboardOnly, withPhrase,
   type ItemKind, type MenuEdits,
 } from "../lib/menu-phrase";
 import { addTemplate, menuTemplates, type MenuTemplate } from "../lib/menu-templates";
 import {
   cloneMenuItem, indentMenuItem, otherMenuUses, outdentMenuItem, placeMenuItem, promptsFromFile, searchMenus, type DropPlace,
 } from "../lib/menu-arrange";
-import { getMenuUsage, getPressLog, pickTextFolder } from "../lib/backend";
+import { getMenuUsage, getPressLog, normalizeCommandError, pickTextFolder } from "../lib/backend";
 import { sumDays, unpickedItems, type PressLog } from "../lib/press-stats";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { PillTrack } from "./PillTrack";
@@ -134,7 +134,10 @@ export function MenuItemsEditor({
   const [drop, setDrop] = useState<{ id: string; place: DropPlace } | null>(null);
   const [query, setQuery] = useState("");
   // The last removal, offered back while neither draft changed since.
-  const [removed, setRemoved] = useState<{ before: MenuItem[]; after: MenuItem[]; editsBefore: MenuEdits; editsAfter: MenuEdits; label: string } | null>(null);
+  const [removed, setRemoved] = useState<{ before: MenuItem[]; after: MenuItem[]; editsBefore: MenuEdits; editsAfter: MenuEdits; message: string } | null>(null);
+  // Items picked together (Ctrl / Shift click), handled as one by the group pane.
+  const [marked, setMarked] = useState<ReadonlySet<string>>(new Set());
+  const [groupMoveAt, setGroupMoveAt] = useState<{ x: number; y: number } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   // The item's menu (right click or ⋯); `to`: the menus to copy or move it to.
   const [ctx, setCtx] = useState<{ x: number; y: number; id: string; to?: "copy" | "move" } | null>(null);
@@ -345,10 +348,10 @@ export function MenuItemsEditor({
       <div key={item.id}>
         <button
           type="button"
-          className={`menu-ed__row${nested ? " menu-ed__row--nested" : ""}${on ? " menu-ed__row--on" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dragId === item.id ? " menu-ed__row--dragging" : ""}${dropClass}`}
-          aria-pressed={on}
+          className={`menu-ed__row${nested ? " menu-ed__row--nested" : ""}${on ? " menu-ed__row--on" : ""}${marked.has(item.id) ? " menu-ed__row--marked" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dragId === item.id ? " menu-ed__row--dragging" : ""}${dropClass}`}
+          aria-pressed={on || marked.has(item.id)}
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
-          onClick={() => setSelectedId(item.id)}
+          onClick={(event) => pick(event, item)}
           onContextMenu={(event) => openCtx(event, item)}
           {...arrange}
         >
@@ -387,10 +390,10 @@ export function MenuItemsEditor({
                 </button>
                 <button
                   type="button"
-                  className={`menu-ed__group${selected?.id === item.id ? " menu-ed__group--on" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dropClass}`}
-                  aria-pressed={selected?.id === item.id}
+                  className={`menu-ed__group${selected?.id === item.id ? " menu-ed__group--on" : ""}${marked.has(item.id) ? " menu-ed__row--marked" : ""}${item.enabled ? "" : " menu-ed__row--off"}${dropClass}`}
+                  aria-pressed={selected?.id === item.id || marked.has(item.id)}
                   aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
-                  onClick={() => setSelectedId(item.id)}
+                  onClick={(event) => pick(event, item)}
                   onContextMenu={(event) => openCtx(event, item)}
                   {...arrange}
                 >
@@ -466,7 +469,7 @@ export function MenuItemsEditor({
 
   function remove(item: MenuItem, after = removeMenuItem(items, item.id), editsAfter = edits) {
     const { parentId, siblings, index } = placeOf(item);
-    setRemoved({ before: items, after, editsBefore: edits, editsAfter, label: item.label });
+    setRemoved({ before: items, after, editsBefore: edits, editsAfter, message: t("inspector.menuRemoved", { name: item.label }) });
     onChange(after);
     // Stay where you were: the next item, else the one before, else its list.
     const near = siblings[index + 1] ?? siblings[index - 1];
@@ -475,19 +478,111 @@ export function MenuItemsEditor({
 
   /** The item itself (same actions, the same phrases) at the end of another menu. */
   function moveToMenu(item: MenuItem, menuId: string) {
+    const menu = appendToMenu([item], menuId);
+    if (!menu) return;
+    remove(item, undefined, menu.edits);
+    setNotice(t("inspector.menuMoved", { name: item.label, menu: menu.name }));
+  }
+
+  /** `list` at the end of menu `menuId` (fresh ids there): the edits that save it. */
+  function appendToMenu(list: MenuItem[], menuId: string): { edits: MenuEdits; name: string } | null {
     const menu = actions.find((action) => action.id === menuId);
-    if (menu?.type !== "menu") return;
+    if (menu?.type !== "menu") return null;
     const ids = new Set(collectMenuItemIds(menu.payload.items));
     const fresh = (current: MenuItem): MenuItem => {
       const id = ids.has(current.id) ? nextUniqueId(ids, current.id) : current.id;
       ids.add(id);
       return current.kind === "submenu" ? { ...current, id, items: current.items.map(fresh) } : { ...current, id };
     };
-    const target: Action = { ...menu, payload: { ...menu.payload, items: [...menu.payload.items, fresh(item)] } };
+    const target: Action = { ...menu, payload: { ...menu.payload, items: [...menu.payload.items, ...list.map(fresh)] } };
     const nextEdits = { ...edits, actions: { ...edits.actions, [menuId]: target } };
     onEditsChange(nextEdits);
-    remove(item, undefined, nextEdits);
-    setNotice(t("inspector.menuMoved", { name: item.label, menu: menu.displayName }));
+    return { edits: nextEdits, name: menu.displayName };
+  }
+
+  /** A click on a row: Ctrl adds it to (or takes it from) the picked ones, Shift
+   *  picks the run of its list up to the selected one, a plain click selects it. */
+  function pick(event: React.MouseEvent, item: MenuItem) {
+    if (event.ctrlKey || event.metaKey) {
+      // The selected row joins the picked ones, unless it is a list holding this item.
+      const holds = (ancestor: string, id: string): boolean => {
+        const parent = parentOf(items, id);
+        return parent ? parent === ancestor || holds(ancestor, parent) : false;
+      };
+      const start = selected && !holds(selected.id, item.id) ? [selected.id] : [];
+      const next = new Set(marked.size > 0 ? marked : start);
+      if (next.has(item.id)) next.delete(item.id);
+      else next.add(item.id);
+      setMarked(next);
+      return;
+    }
+    if (event.shiftKey && selected) {
+      const { siblings } = placeOf(item);
+      const from = siblings.findIndex((sibling) => sibling.id === selected.id);
+      const to = siblings.findIndex((sibling) => sibling.id === item.id);
+      if (from >= 0 && to >= 0) {
+        setMarked(new Set(siblings.slice(Math.min(from, to), Math.max(from, to) + 1).map((sibling) => sibling.id)));
+        return;
+      }
+    }
+    setMarked(new Set());
+    setSelectedId(item.id);
+  }
+
+  /** The picked items still there, without those inside another picked one (it carries them). */
+  function markedItems(): MenuItem[] {
+    const inMarked = (id: string): boolean => {
+      const parent = parentOf(items, id);
+      return parent ? marked.has(parent) || inMarked(parent) : false;
+    };
+    return [...marked].filter((id) => !inMarked(id)).map((id) => findItem(items, id)).filter((item): item is MenuItem => Boolean(item));
+  }
+
+  function setMarkedEnabled(list: MenuItem[], enabled: boolean) {
+    onChange(list.reduce((current, item) => updateMenuItem(current, item.id, (found) => ({ ...found, enabled })), items));
+  }
+
+  /** Deletes the picked items with one Restore; `editsAfter` when they went to another menu. */
+  function removeMarked(list: MenuItem[], editsAfter = edits, message = t("inspector.menuRemovedMany", { count: list.length })) {
+    const after = list.reduce((current, item) => removeMenuItem(current, item.id), items);
+    setRemoved({ before: items, after, editsBefore: edits, editsAfter, message });
+    onChange(after);
+    setMarked(new Set());
+    setSelectedId(after[0]?.id ?? null);
+  }
+
+  function moveMarked(list: MenuItem[], menuId: string) {
+    const menu = appendToMenu(list, menuId);
+    if (!menu) return;
+    removeMarked(list, menu.edits, t("inspector.menuMovedMany", { count: list.length, menu: menu.name }));
+  }
+
+  function renderGroupPane(list: MenuItem[]) {
+    const button = (icon: string, label: string, onClick: (event: React.MouseEvent<HTMLButtonElement>) => void, extra = "", off = false) => (
+      <button type="button" className={`menu-ed__tool${extra}`} disabled={disabled || off} title={label} onClick={onClick}>
+        <span className="menu-ed__tool-icon" aria-hidden="true">{icon}</span>
+        {label}
+      </button>
+    );
+    return (
+      <div className="menu-ed__pane">
+        <div className="menu-ed__pane-head">
+          <span className="field__label menu-ed__pane-title">{t("inspector.menuMarked", { count: list.length })}</span>
+        </div>
+        <div className="menu-ed__tools" role="toolbar" aria-label={t("inspector.menuMarkedTools")}>
+          {button("●", t("inspector.menuMarkedOn"), () => setMarkedEnabled(list, true))}
+          {button("○", t("inspector.menuMarkedOff"), () => setMarkedEnabled(list, false))}
+          {button("→", t("inspector.menuMoveTo"), (event) => {
+            const box = event.currentTarget.getBoundingClientRect();
+            setGroupMoveAt({ x: box.left, y: box.bottom + 4 });
+          }, "", otherMenus.length === 0)}
+          <span className="menu-ed__tools-gap" />
+          {button("✕", t("common.delete"), () => removeMarked(list), " menu-ed__tool--danger")}
+          {button("⨯", t("inspector.menuMarkedClear"), () => setMarked(new Set()))}
+        </div>
+        <p className="panel__muted">{t("inspector.menuMarkedHint")}</p>
+      </div>
+    );
   }
 
   /** Right click on a row, or ⋯: the item's actions, or the menus to copy / move it to. */
@@ -537,11 +632,22 @@ export function MenuItemsEditor({
 
   /** "Add from folder": a list of the folder's prompts, their text copied in. */
   async function addFromFolder() {
-    const picked = await pickTextFolder(t("inspector.menuFolderTitle")).catch(() => null);
-    if (!picked) return;
+    let picked: Awaited<ReturnType<typeof pickTextFolder>>;
+    try {
+      picked = await pickTextFolder(t("inspector.menuFolderTitle"));
+    } catch (error) {
+      setNotice(t("inspector.menuFolderFailed", { reason: normalizeCommandError(error).message }));
+      return;
+    }
+    if (!picked) return; // the dialog was cancelled
+    // Files left out are named, so a partial import is never mistaken for a whole one.
+    const skipped = picked.skipped.length === 0 ? "" : " " + t("inspector.menuFolderSkipped", {
+      count: picked.skipped.length,
+      list: picked.skipped.map((file) => t("inspector.menuFolderSkippedFile", { name: file.name, reason: t(`inspector.menuFolderReason.${file.reason}`) })).join(", "),
+    });
     const prompts = picked.files.flatMap((file) => promptsFromFile(file.name, file.text));
     if (prompts.length === 0) {
-      setNotice(t("inspector.menuFolderEmpty", { name: picked.folder }));
+      setNotice(t("inspector.menuFolderEmpty", { name: picked.folder }) + skipped);
       return;
     }
     let nextEdits = edits;
@@ -564,7 +670,7 @@ export function MenuItemsEditor({
     onEditsChange(nextEdits);
     onChange(appendMenuItem(nextItems, parentId, { kind: "submenu", id: listId, label: picked.folder, enabled: true, items: children }));
     setSelectedId(listId);
-    setNotice(t("inspector.menuFolderAdded", { count: children.length, name: picked.folder }));
+    setNotice(t("inspector.menuFolderAdded", { count: children.length, name: picked.folder }) + skipped);
   }
 
   function renderPane(item: MenuItem) {
@@ -615,6 +721,7 @@ export function MenuItemsEditor({
             ]}
             onSelect={(next) => setKind(item, next)}
           />
+          <div className="menu-ed__switches">
           {kind === "phrase" && action && phrase ? (
             <label className="menu-ed__switch">
               {t("inspector.menuPhraseEnter")}
@@ -628,6 +735,23 @@ export function MenuItemsEditor({
                 }} />
             </label>
           ) : null}
+          {/* A phrase with Enter is a macro, whose text step has no input mode. A
+              library phrase keeps its mode in the library item (all its uses). */}
+          {kind === "phrase" && action?.type === "textSnippet" ? (() => {
+            const linked = action.payload.source === "libraryRef" ? library.find((item) => action.payload.source === "libraryRef" && item.id === action.payload.snippetId) : undefined;
+            const mode = action.payload.source === "inline" ? action.payload.pasteMode : linked?.pasteMode;
+            if (!mode) return null;
+            return (
+              <label className="menu-ed__switch" title={t(linked ? "picker.keyboardOnlyLibraryHint" : "picker.keyboardOnlyHint")}>
+                {t("picker.keyboardOnly")}
+                <Toggle checked={mode === "keyboardOnly"} disabled={disabled} ariaLabel={t("picker.keyboardOnly")}
+                  onChange={(on) => linked
+                    ? onEditsChange({ ...edits, libraryModes: { ...edits.libraryModes, [linked.id]: on ? "keyboardOnly" : "sendText" } })
+                    : onEditsChange(putAction(withKeyboardOnly(action, on)))} />
+              </label>
+            );
+          })() : null}
+          </div>
         </div>
         {kind === "phrase" && action && phrase ? (
           <textarea className="input menu-ed__text" value={phrase.text} disabled={disabled}
@@ -742,7 +866,7 @@ export function MenuItemsEditor({
           ) : renderList()}
           {removed && removed.after === items && removed.editsAfter === edits ? (
             <p className="menu-ed__note">
-              {t("inspector.menuRemoved", { name: removed.label })}{" "}
+              {removed.message}{" "}
               <button type="button" className="menu-ed__link" onClick={() => { onChange(removed.before); onEditsChange(removed.editsBefore); setRemoved(null); setNotice(null); }}>
                 {t("inspector.menuRestore")}
               </button>
@@ -767,6 +891,8 @@ export function MenuItemsEditor({
             </div>
             {renderTemplates()}
           </div>
+        ) : markedItems().length > 1 ? (
+          renderGroupPane(markedItems())
         ) : selected ? (
           renderPane(selected)
         ) : null}
@@ -785,6 +911,18 @@ export function MenuItemsEditor({
             null,
             { label: t("inspector.menuTemplates"), onClick: () => setTemplatesOpen(true) },
             { label: `+ ${t("inspector.menuFromFolder")}`, onClick: () => void addFromFolder() },
+          ]}
+        />
+      ) : null}
+      {groupMoveAt ? (
+        <ContextMenu
+          x={groupMoveAt.x}
+          y={groupMoveAt.y}
+          onClose={() => setGroupMoveAt(null)}
+          items={[
+            { label: t("inspector.menuMoveTo"), disabled: true, onClick: () => {} },
+            null,
+            ...otherMenus.map((menu) => ({ label: menu.displayName, onClick: () => moveMarked(markedItems(), menu.id) })),
           ]}
         />
       ) : null}

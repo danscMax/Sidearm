@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import source from "../public/menu.js?raw";
 
 type Item = { label: string; number: number; enabled: boolean; submenu: boolean; detail?: string; text?: boolean; children?: string[]; textChildren?: boolean[] };
-type View = { generation: number; title: string; query: string; highlight: number; items: Item[]; parent?: string; placeholder: string; empty: string; pickModes: string[]; maxHeight: number };
+type View = { generation: number; title: string; query: string; highlight: number; items: Item[]; parent?: string; placeholder: string; empty: string; pickModes: string[]; maxHeight: number; searchAll?: boolean; hasOthers?: boolean; scopeAll?: string; scopeThis?: string };
 let render: (event: { payload: View }) => void;
 const calls: { command: string; args: Record<string, unknown> }[] = [];
 const row = (label: string, extra: Partial<Item> = {}): Item => ({ label, number: 1, enabled: true, submenu: false, ...extra });
@@ -71,4 +71,17 @@ it("keeps the active row visible when a scale change shrinks the list", () => {
   Object.defineProperty(window, "devicePixelRatio", { value: 2.25, configurable: true });
   window.dispatchEvent(new Event("resize"));
   expect(document.querySelectorAll(".row")[79].scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
+});
+
+it("marks the matched part of a result and switches the search scope", () => {
+  render({ payload: { ...view([row("Reply politely")]), query: "pol", hasOthers: true, searchAll: true, scopeAll: "All menus", scopeThis: "This menu" } as View });
+  expect(document.querySelector(".label mark")?.textContent).toBe("pol");
+  const scope = document.querySelector<HTMLButtonElement>(".scope")!;
+  expect(scope.hidden).toBe(false);
+  expect(scope.textContent).toBe("All menus");
+  scope.click();
+  expect(calls.at(-1)).toEqual({ command: "menu_search_scope", args: { all: false } });
+  render({ payload: { ...view([row("Reply politely")]), query: "", hasOthers: false } as View });
+  expect(document.querySelector(".label mark")).toBeNull();
+  expect(document.querySelector<HTMLButtonElement>(".scope")!.hidden).toBe(true);
 });

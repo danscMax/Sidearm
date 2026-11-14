@@ -63,6 +63,8 @@ const ALL_ACTION_TYPES: ActionType[] = [
   "profileSwitch",
   "disabled",
   "repairClipboard",
+  "stopMacros",
+  "cheatSheet",
 ];
 
 // ---------------------------------------------------------------------------

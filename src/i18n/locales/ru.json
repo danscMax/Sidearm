@@ -18,7 +18,9 @@
     "menu_many": "Меню из {{count}} пунктов",
     "menu_other": "Меню из {{count}} пунктов",
     "disabledFallback": "Отключённое действие-заглушка.",
-    "repairClipboard": "Чинит кодировку буфера обмена (UTF-8 ↔ Latin-1)."
+    "repairClipboard": "Чинит кодировку буфера обмена (UTF-8 ↔ Latin-1).",
+    "stopMacros": "Останавливает идущие и ждущие макросы",
+    "cheatSheet": "Шпаргалка слоя «{{layer}}»"
   },
   "common": {
     "na": "н/д",
@@ -228,7 +230,9 @@
       "profileSwitch": "Переключить профиль",
       "menu": "Меню",
       "disabled": "Отключено",
-      "repairClipboard": "Починить буфер"
+      "repairClipboard": "Починить буфер",
+      "stopMacros": "Остановить макросы",
+      "cheatSheet": "Шпаргалка"
     }
   },
   "mouseAction": {
@@ -284,7 +288,8 @@
     "sleep": "Пауза",
     "launch": "Запуск",
     "defaultText": "Замените этот текст",
-    "defaultLaunch": "C:\\Путь\\К\\Программе.exe"
+    "defaultLaunch": "C:\\Путь\\К\\Программе.exe",
+    "waitWindow": "Ждать окно"
   },
   "configWaiting": {
     "eyebrow": "Ожидание конфигурации",
@@ -496,7 +501,8 @@
     "delayLabel": "Задержка:",
     "captureHelp": "Нажмите кнопку и переключитесь на нужное окно за выбранное время. После задержки программа определит приложение и заполнит поля.",
     "titleFilter": "Фильтр по заголовку",
-    "titleFilterHelp": "Правило сработает только если заголовок окна содержит этот текст. Без фильтра — сработает для любого окна этого приложения."
+    "titleFilterHelp": "Правило сработает только если заголовок окна содержит этот текст. Без фильтра — сработает для любого окна этого приложения.",
+    "exeOrShortcut": "Выберите файл .exe программы или её ярлык, либо захватите её открытое окно."
   },
   "ruleModal": {
     "profileLabel": "Профиль: {{name}}",
@@ -876,9 +882,38 @@
     "menuChipLibrary": "Библиотека: {{name}}",
     "menuChipPlaces": "Ещё на: {{places}}",
     "menuChipMenus": "Ещё в: {{places}}",
-    "menuSharedChip": "Общее · ещё кнопок: {{count}}",
     "menuMoreShort": "Ещё",
-    "menuPinShort": "Закрепить"
+    "menuPinShort": "Закрепить",
+    "menuFolderFailed": "Не удалось прочитать папку: {{reason}}",
+    "menuFolderSkipped": "Не добавлено файлов: {{count}} — {{list}}.",
+    "menuFolderSkippedFile": "{{name}} ({{reason}})",
+    "menuFolderReason": {
+      "tooLarge": "больше 1 МБ",
+      "notUtf8": "не текст в UTF-8",
+      "unreadable": "не читается",
+      "overLimit": "после первых 200 файлов"
+    },
+    "menuSharedChip_one": "Общее · ещё {{count}} кнопка",
+    "menuSharedChip_few": "Общее · ещё {{count}} кнопки",
+    "menuSharedChip_many": "Общее · ещё {{count}} кнопок",
+    "menuSharedChip_other": "Общее · ещё {{count}} кнопки",
+    "menuRemovedMany_one": "Удалён {{count}} пункт.",
+    "menuRemovedMany_few": "Удалено {{count}} пункта.",
+    "menuRemovedMany_many": "Удалено {{count}} пунктов.",
+    "menuRemovedMany_other": "Удалено {{count}} пункта.",
+    "menuMovedMany_one": "{{count}} пункт перенесён в конец меню «{{menu}}»; сохранится вместе с этим меню.",
+    "menuMovedMany_few": "{{count}} пункта перенесены в конец меню «{{menu}}»; сохранится вместе с этим меню.",
+    "menuMovedMany_many": "{{count}} пунктов перенесены в конец меню «{{menu}}»; сохранится вместе с этим меню.",
+    "menuMovedMany_other": "{{count}} пункта перенесены в конец меню «{{menu}}»; сохранится вместе с этим меню.",
+    "menuMarked_one": "Выбран {{count}} пункт",
+    "menuMarked_few": "Выбрано {{count}} пункта",
+    "menuMarked_many": "Выбрано {{count}} пунктов",
+    "menuMarked_other": "Выбрано {{count}} пункта",
+    "menuMarkedTools": "Что сделать с выбранными пунктами",
+    "menuMarkedOn": "Включить",
+    "menuMarkedOff": "Выключить",
+    "menuMarkedClear": "Снять выбор",
+    "menuMarkedHint": "Ctrl+щелчок добавляет или убирает пункт, Shift+щелчок выбирает подряд в одном списке. Простой щелчок снова выбирает один."
   },
   "properties": {
     "empty": "Выберите кнопку, чтобы увидеть свойства",
@@ -1032,11 +1067,9 @@
     "previewShortcut": "Нажмёт {{combo}}",
     "previewMouse": "Выполнит {{combo}}",
     "previewText": "Наберёт «{{text}}»",
-    "previewSequence": "Выполнит макрос ({{count}} шаг.)",
     "previewLaunch": "Запустит {{target}}",
     "previewMedia": "Медиа-клавиша: {{key}}",
     "previewProfile": "Переключит на профиль «{{name}}»",
-    "previewMenu": "Откроет меню ({{count}} пункт.)",
     "previewDisabled": "Ничего — кнопка отключена",
     "previewRepair": "Перекодирует буфер обмена",
     "categoryDesc": {
@@ -1052,7 +1085,9 @@
       "profileSwitch": "Переключает активный профиль привязок.",
       "menu": "Показывает всплывающее меню с несколькими действиями.",
       "disabled": "Кнопка не делает ничего.",
-      "repairClipboard": "Чинит испорченную кодировку буфера обмена."
+      "repairClipboard": "Чинит испорченную кодировку буфера обмена.",
+      "stopMacros": "Завершает идущий макрос и те, что ждут за ним.",
+      "cheatSheet": "Показывает у курсора боковые кнопки этой мыши на одном слое."
     },
     "conditionsLabel": "Условия выполнения",
     "conditionsHelp": "Действие сработает, только если ВСЕ условия выполнены одновременно (логика «И»). Без условий — выполняется всегда.",
@@ -1124,7 +1159,32 @@
     "menuShared": "Это меню стоит и на других кнопках ({{count}}): правка меняет его и там. Другой тип действия изменит только эту кнопку.",
     "tokenSelectionDesc": "Подставит текст, выделенный в окне (копируется через Ctrl+Insert, буфер потом возвращается).",
     "alsoUsed": "Это же действие ещё здесь: {{places}}",
-    "alsoUsedMore": "и ещё {{count}}"
+    "alsoUsedMore": "и ещё {{count}}",
+    "previewSequence_one": "Выполнит макрос ({{count}} шаг)",
+    "previewSequence_few": "Выполнит макрос ({{count}} шага)",
+    "previewSequence_many": "Выполнит макрос ({{count}} шагов)",
+    "previewSequence_other": "Выполнит макрос ({{count}} шага)",
+    "previewMenu_one": "Откроет меню ({{count}} пункт)",
+    "previewMenu_few": "Откроет меню ({{count}} пункта)",
+    "previewMenu_many": "Откроет меню ({{count}} пунктов)",
+    "previewMenu_other": "Откроет меню ({{count}} пункта)",
+    "stopMacrosHint": "Завершает макрос, который идёт сейчас, и убирает те, что ждут за ним. Остальные кнопки работают как обычно; ничего не печатается.",
+    "previewStopMacros": "Остановит идущий макрос и очередь",
+    "keyboardOnly": "Только клавиатура",
+    "keyboardOnlyHint": "Печатает текст клавишами, никогда через буфер обмена, — для терминала или удалённого сеанса, куда вставлять нельзя. Без этого текст длиннее 100 символов вставляется. Для фразы с Enter (это макрос) не действует.",
+    "cheatSheetLayer": "Какой слой показать",
+    "cheatSheetHint": "Показывает у курсора боковые кнопки той мыши, на которой нажали, на этом слое действующего профиля. Следующее нажатие её убирает (и всё равно срабатывает); через 10 секунд она уходит сама.",
+    "defaultCheatSheet": "Шпаргалка · {{layer}}",
+    "previewCheatSheet": "Покажет кнопки слоя «{{layer}}»",
+    "addWaitWindow": "Ждать окно",
+    "stepWaitWindow": "Ждать окно",
+    "waitWindowExe": "Программа на переднем плане (.exe)",
+    "waitWindowTitle": "Её заголовок содержит (необязательно)",
+    "waitWindowTimeout": "Ждать не дольше, мс (до 30000)",
+    "tokenInputDesc": "Поле, которое спросят в маленьком окне перед вставкой фразы: {input:хост} — Enter вставляет, Esc отменяет. После вставки переименуйте поле.",
+    "tokenInputName": "поле",
+    "waitWindowExeMissing": "Шагу «Ждать окно» нужна программа, которую ждать (имя её .exe).",
+    "keyboardOnlyLibraryHint": "Этот текст из библиотеки печатается клавишами, никогда через буфер обмена, — везде, где он используется."
   },
   "assignments": {
     "copyBinding": "Копировать назначение",
@@ -1332,14 +1392,30 @@
     "bindingCount_other": "{{count}} назначения",
     "submitting": "Импорт…",
     "configChanged": "Настройки изменились во время импорта. Импорт не применён. Повторите попытку.",
-    "summaryToast": "Импортировано: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{macros}} макросов",
+    "summaryToast": "Импортировано: {{profiles}}, {{bindings}}, {{actions}}, {{macros}}",
     "strategy": {
       "legend": "Стратегия слияния",
       "append": "Добавить как новые",
       "appendHint": "Имена-коллизии получат суффикс (импорт).",
       "replaceByName": "Заменить по имени",
       "replaceByNameHint": "Если профиль с таким именем уже есть — он будет удалён вместе со своими назначениями."
-    }
+    },
+    "summarySkipped": "{{summary}} · пропущено: {{count}}",
+    "profileCount_one": "{{count}} профиль",
+    "profileCount_few": "{{count}} профиля",
+    "profileCount_many": "{{count}} профилей",
+    "profileCount_other": "{{count}} профиля",
+    "actionCount_one": "{{count}} действие",
+    "actionCount_few": "{{count}} действия",
+    "actionCount_many": "{{count}} действий",
+    "actionCount_other": "{{count}} действия",
+    "macroCount_one": "{{count}} макрос",
+    "macroCount_few": "{{count}} макроса",
+    "macroCount_many": "{{count}} макросов",
+    "macroCount_other": "{{count}} макроса",
+    "warningRepeat": "×{{count}}",
+    "notesTitle": "Что импорт пропустил",
+    "notesShow": "Подробнее"
   },
   "portable": {
     "badge": {
@@ -1438,6 +1514,10 @@
     "unknown": {
       "title": "Произошла неожиданная ошибка",
       "hint": "Скопируйте детали и приложите к отчёту, если ошибка повторяется."
+    },
+    "configNewer": {
+      "title": "Настройки от более новой версии",
+      "hint": "Установите последнюю версию Sidearm. Чтобы остаться на этой, восстановите резервную копию, сделанную до обновления."
     }
   },
   "onboarding": {
@@ -1478,7 +1558,8 @@
       "unverified": "подключена, но ещё не проверена с Sidearm: проверка кнопок пропускается",
       "choose": "Подключены две мыши. Какую настроить сейчас?",
       "later": "Вторую можно настроить позже: Настройки → Пройти настройку заново.",
-      "noneNote": "Поддерживаемая Razer Naga не подключена. Вставьте её приёмник или кабель — Sidearm сразу её увидит. Можно продолжить и подключить мышь позже."
+      "noneNote": "Поддерживаемая Razer Naga не подключена. Вставьте её приёмник или кабель — Sidearm сразу её увидит. Можно продолжить и подключить мышь позже.",
+      "checkFailed": "Не удалось проверить мыши: {{reason}}"
     },
     "synapse": {
       "label": "Razer Synapse",
@@ -1710,7 +1791,15 @@
       "dpiFailed": "Не удалось изменить DPI: {{detail}}",
       "dpiStagesOtherMouse": "В этом профиле ступени DPI заданы только для мыши, которая не подключена.",
       "enterSkippedWindowChanged": "Enter не отправлен: пока печатался текст, впереди оказалось другое окно.",
-      "sequenceCancelled": "Последовательность остановлена: захват выключен или профиль переключён вручную."
+      "sequenceCancelled": "Последовательность остановлена: захват выключен или профиль переключён вручную.",
+      "macrosStopped": "Макросы остановлены: идущий завершается, очередь убрана.",
+      "stopMacrosPreview": "Остановит идущий макрос и уберёт очередь.",
+      "sequenceQueued": "Макрос ждёт: перед ним {{ahead}}.",
+      "sequenceDropped": "Макрос не запущен: уже ждут {{count}}. «Остановить макросы» их уберёт.",
+      "pasteModeKeyboard": "только клавиатура",
+      "cheatSheetPreview": "Покажет сетку кнопок у курсора.",
+      "stepWaitWindow": "ждать «{{exe}}»",
+      "waitWindowTimeout": "«{{exe}}» не вышла на передний план за {{seconds}} с: остальная последовательность не отправлена."
     },
     "synapse": {
       "v3MacroParseFailed": "Не удалось разобрать макрос `{{name}}`: {{error}}",
@@ -1788,7 +1877,11 @@
       "trayPaused": "приостановлен",
       "trayQuit": "Выход",
       "trayRelaunchAsAdmin": "Перезапустить от администратора",
-      "trayTooltip": "Sidearm — {{state_label}}\nПрофиль: {{profile_name}}{{battery_line}}"
+      "trayTooltip": "Sidearm — {{state_label}}\nПрофиль: {{profile_name}}{{battery_line}}",
+      "trayStopMacros": "Остановить макросы",
+      "trayRulesBack": "Вернуться к правилам приложений",
+      "trayRulesNow": "Сейчас",
+      "trayRulesAfter": "Через {{minutes}} мин"
     },
     "window": {
       "captured": "Захвачено `{{exe}}`, профиль `{{profile_id}}`.",
@@ -1811,10 +1904,61 @@
       "pickRun": "Вставить",
       "pickEnter": "Вставить и нажать Enter",
       "pickCopy": "Только скопировать в буфер",
-      "pickEdit": "Редактировать в Sidearm"
+      "pickEdit": "Редактировать в Sidearm",
+      "scopeAll": "Все меню",
+      "scopeThis": "Это меню"
     },
     "cheatsheet": {
-      "title": "{{profile}} · HyperShift 2"
+      "title": "{{profile}} · HyperShift 2",
+      "layerStandard": "обычный",
+      "layerHypershift": "HyperShift",
+      "layerHypershift2": "HyperShift 2",
+      "layerBoth": "HS + HS2",
+      "layerTitle": "{{profile}} · {{layer}}"
+    },
+    "error": {
+      "adminAutostart": "Не удалось изменить запуск от имени администратора: {{reason}}",
+      "adminWindowsOnly": "Перезапуск от имени администратора есть только в Windows.",
+      "backupOutside": "Резервная копия должна быть файлом в папке настроек.",
+      "backupUnreachable": "Нет доступа к резервной копии. Возможно, она на отключённом сетевом диске или ещё синхронизируется (например, OneDrive). Попробуйте ещё раз.",
+      "configChangedOnDisk": "Настройки изменил другой Sidearm; загружаю их с диска заново.",
+      "configInvalid": "Часть настроек противоречит друг другу.",
+      "configNewer": "Эти настройки сохранены более новым Sidearm (формат {{found}}, этот читает до {{supported}}). Обновите Sidearm, чтобы открыть их, — файл оставлен как есть.",
+      "configSchema": "Файл настроек не соответствует ожидаемому формату.",
+      "exportNameEmpty": "Имя файла для экспорта не может быть пустым.",
+      "exportNameJson": "Имя файла для экспорта должно заканчиваться на .json.",
+      "exportNamePath": "Имя файла для экспорта не должно содержать разделители пути и «..».",
+      "extHtml": "Страница раскладки должна быть файлом .html.",
+      "extJson": "Нужен файл с расширением .json.",
+      "extSnippets": "Фрагменты экспортируются только в файл .json, .md или .txt.",
+      "imageName": "«{{file_name}}» — не просто имя файла.",
+      "imageStoredTooLarge": "Сохранённое изображение больше допустимого размера.",
+      "imageTooLarge": "Изображение весит {{size}} МБ, а можно не больше {{limit}} МБ.",
+      "imageType": "Формат «{{extension}}» не поддерживается (подходят png, jpg, webp, gif, bmp).",
+      "imageTypeStored": "Формат файла «{{file_name}}» не поддерживается.",
+      "importParse": "Не удалось разобрать JSON импорта: {{reason}}",
+      "importRead": "Не удалось прочитать файл импорта: {{reason}}",
+      "importSchema": "Импортируемые настройки не соответствуют ожидаемому формату.",
+      "importTooLarge": "Файл больше предела импорта ({{max_bytes}} байт).",
+      "noConfigToExport": "Нечего экспортировать: config.json ещё нет — сохраните настройки хотя бы раз.",
+      "notAFolder": "Выбранный путь — не папка.",
+      "onboardModeStuck": "Мышь не вернулась в обычный режим: {{reason}}",
+      "onboardUnconfirmed": "Мышь не подтвердила запись: {{reason}}",
+      "pathDotDot": "Путь к файлу не должен содержать «..».",
+      "pathNotAbsolute": "Путь к файлу должен быть полным.",
+      "recording": "Запись не удалась: {{reason}}",
+      "rehook": "Не удалось заново подключить перехват клавиатуры: {{reason}}",
+      "runtimeReload": "Не удалось перезапустить захват: {{reason}}",
+      "runtimeStart": "Не удалось запустить захват: {{reason}}",
+      "runtimeStop": "Не удалось остановить захват: {{reason}}",
+      "windowCapture": "Не удалось прочитать окно на переднем плане: {{reason}}",
+      "shortcutUnreadable": "Не удалось прочитать ярлык: {{reason}}",
+      "shortcutNotExe": "Ярлык запускает не программу .exe, а «{{target}}».",
+      "shortcutWindowsOnly": "Ярлыки читаются только в Windows.",
+      "shortcutLocalOnly": "Читается только ярлык .lnk на локальном диске."
+    },
+    "prompt": {
+      "hint": "Enter — следующее поле, потом вставка · Esc — отмена"
     }
   },
   "newMouse": {
@@ -1843,7 +1987,6 @@
     "reasonNoMatch": "у другой мыши нет такой кнопки",
     "apply": "Скопировать ({{count}})",
     "done": "Назначений скопировано: {{count}}",
-    "importDropped": "Не импортировано, нет такой кнопки на этой мыши: {{count}}",
     "shareMenus": "Общие меню для обеих мышей",
     "shareMenusHelp": "Меню не копируются: обе мыши открывают одно и то же меню, правка на одной меняет его и на другой. Выключено: у каждой мыши своя копия.",
     "reasonNoLayer": "у другой мыши нет слоя HyperShift 2",
@@ -1851,7 +1994,14 @@
     "syncMiceHelp": "Дальше назначение, изменённое на одной мыши, сразу меняется на той же кнопке другой (HyperShift 2 — только там, где он есть). Сначала скопируй один раз, чтобы мыши совпадали. Для своих мышей, по умолчанию выключено.",
     "holdsTitle": "Второй гипершифт на удержания (подходит: {{count}})",
     "holdsHelp": "У другой мыши нет второго гипершифта. Отметь, что повесить ей на удержание той же кнопки (обычное нажатие этой кнопки станет срабатывать при отпускании). При «Держать мыши одинаковыми» это получат обе мыши.",
-    "holdsApply": "Повесить на удержания ({{count}})"
+    "holdsApply": "Повесить на удержания ({{count}})",
+    "importDroppedTitle_one": "Для {{count}} назначения нет места на этой мыши",
+    "importDroppedTitle_few": "Для {{count}} назначений нет места на этой мыши",
+    "importDroppedTitle_many": "Для {{count}} назначений нет места на этой мыши",
+    "importDroppedTitle_other": "Для {{count}} назначения нет места на этой мыши",
+    "importDroppedIntro": "Этих кнопок нет на показанной мыши, поэтому они не импортируются:",
+    "importDroppedItem": "{{button}} · {{layer}} — {{label}}",
+    "importAnyway": "Импортировать остальное"
   },
   "menuTemplates": {
     "agent": "Фразы для ИИ-агента",
@@ -1936,12 +2086,15 @@
     "profile": "Профиль"
   },
   "configCheck": {
-    "banner": "В этом профиле есть что проверить ({{count}}):",
     "missingAction": "«{{where}}» ссылается на удалённое действие и ничего не делает.",
     "missingSnippet": "«{{where}}» ссылается на удалённый текст библиотеки и ничего не печатает.",
     "enterNextToClose": "{{button}} ({{layer}}): один способ нажатия отправляет Enter, другой закрывает окно — легко промахнуться.",
     "duplicate": "«{{name}}» ({{layer}}): {{buttons}}.",
-    "duplicatesBanner": "Одно и то же на нескольких кнопках:"
+    "duplicatesBanner": "Одно и то же на нескольких кнопках:",
+    "banner_one": "В этом профиле {{count}} проблема, проверьте:",
+    "banner_few": "В этом профиле {{count}} проблемы, проверьте:",
+    "banner_many": "В этом профиле {{count}} проблем, проверьте:",
+    "banner_other": "В этом профиле {{count}} проблемы, проверьте:"
   },
   "mouseVisual": {
     "sidearmOnly": "Работает только при запущенном Sidearm: в память мыши для работы без Sidearm не записывается."

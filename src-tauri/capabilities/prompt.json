@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "prompt",
+  "description": "Minimal capability for the input-field window of a phrase with {input:…} fields",
+  "windows": [
+    "prompt"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-prompt-ready",
+    "allow-prompt-layout",
+    "allow-prompt-submit",
+    "allow-prompt-cancel"
+  ]
+}

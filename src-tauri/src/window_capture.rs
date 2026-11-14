@@ -178,7 +178,7 @@ fn is_shell_chrome_window(exe: &str, title: &str) -> bool {
     exe == "explorer.exe" && title.trim().is_empty()
 }
 
-fn capture_foreground_window() -> Result<RawWindowCapture, String> {
+pub(crate) fn capture_foreground_window() -> Result<RawWindowCapture, String> {
     #[cfg(target_os = "windows")]
     return crate::platform::window::capture_foreground_window();
     #[cfg(target_os = "linux")]

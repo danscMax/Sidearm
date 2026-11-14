@@ -155,6 +155,16 @@ describe("the setup wizard", () => {
     expect(onClose).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID);
   });
 
+  it("says the mouse check failed instead of that no mouse is there", async () => {
+    vi.mocked(backend.listNativeMice).mockRejectedValue("Device list unavailable");
+    render(<OnboardingWizard config={configWithV3()} applyConfig={vi.fn()} onClose={vi.fn()} />);
+    await screen.findByText("Could not check the mice: Device list unavailable");
+    vi.mocked(backend.listNativeMice).mockResolvedValue([V3]);
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    await screen.findByText("Razer Naga V3 Pro");
+    expect(screen.queryByText(/Could not check the mice/)).toBeNull();
+  });
+
   it("goes on without a mouse and skips the checks", async () => {
     vi.mocked(backend.listNativeMice).mockResolvedValue([]);
     render(<OnboardingWizard config={makeConfig()} applyConfig={vi.fn()} onClose={vi.fn()} />);

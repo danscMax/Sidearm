@@ -87,11 +87,23 @@ export interface TextFile {
 
 /** Pick a folder and read its .txt / .md files (copied in, never linked).
  *  Null when the user cancels. */
-export async function pickTextFolder(title: string): Promise<{ folder: string; files: TextFile[] } | null> {
+/** A `.txt` / `.md` file the folder read left out (Rust `SkippedTextFile`). */
+export interface SkippedTextFile {
+  name: string;
+  reason: "tooLarge" | "notUtf8" | "unreadable" | "overLimit";
+}
+
+/** The `.exe` a Windows shortcut starts; throws when it starts something else. */
+export async function resolveShortcutTarget(path: string): Promise<string> {
+  return invoke<string>("resolve_shortcut_target", { path });
+}
+
+/** `null` when the dialog was cancelled; a failed read throws. */
+export async function pickTextFolder(title: string): Promise<{ folder: string; files: TextFile[]; skipped: SkippedTextFile[] } | null> {
   const selected = await open({ title, directory: true, multiple: false });
   if (typeof selected !== "string") return null;
-  const files = await invoke<TextFile[]>("read_text_folder", { path: selected });
-  return { folder: selected.split(/[/\\]/).filter(Boolean).pop() ?? selected, files };
+  const read = await invoke<{ files: TextFile[]; skipped: SkippedTextFile[] }>("read_text_folder", { path: selected });
+  return { folder: selected.split(/[/\\]/).filter(Boolean).pop() ?? selected, ...read };
 }
 
 export async function loadConfig(): Promise<LoadConfigResponse> {

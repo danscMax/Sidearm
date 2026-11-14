@@ -189,12 +189,12 @@ export function applyHoldOffers(config: AppConfig, offers: readonly HoldOffer[])
 
 /** Moves imported bindings for controls this config does not have onto the
  *  same places of `toDevice` (a profile exported from another mouse). Returns
- *  the config and how many bindings found no place. */
+ *  the config and the bindings that found no place. */
 export function retargetImportedBindings(
   config: AppConfig,
   bindingIds: ReadonlySet<string>,
   toDevice: string,
-): { config: AppConfig; dropped: number } {
+): { config: AppConfig; dropped: number; droppedBindings: Binding[] } {
   const layout = deviceLayout(toDevice);
   const known = (id: ControlId) => config.physicalControls.some((control) => control.id === id);
   const place = (id: ControlId): ControlId | null => {
@@ -207,7 +207,7 @@ export function retargetImportedBindings(
     }
     return null;
   };
-  let dropped = 0;
+  const droppedBindings: Binding[] = [];
   const bindings = config.bindings.flatMap((binding) => {
     if (!bindingIds.has(binding.id) || (known(binding.controlId) && (!binding.chordPartner || known(binding.chordPartner)))) {
       return [binding];
@@ -215,13 +215,13 @@ export function retargetImportedBindings(
     const controlId = place(binding.controlId);
     const chordPartner = binding.chordPartner ? place(binding.chordPartner) : undefined;
     if (!controlId || chordPartner === null) {
-      dropped += 1;
+      droppedBindings.push(binding);
       return [];
     }
     return [{ ...binding, controlId, chordPartner: chordPartner ?? undefined }];
   });
   const encoderMappings = config.encoderMappings.filter((mapping) => known(mapping.controlId));
-  return { config: { ...config, bindings, encoderMappings }, dropped };
+  return { config: { ...config, bindings, encoderMappings }, dropped: droppedBindings.length, droppedBindings };
 }
 
 /* ── Keeping the mice alike (`Settings.syncMice`) ── */

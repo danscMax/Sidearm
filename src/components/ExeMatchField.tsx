@@ -1,7 +1,7 @@
 import { useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
-import { pickExecutablePath } from "../lib/backend";
+import { normalizeCommandError, pickExecutablePath, resolveShortcutTarget } from "../lib/backend";
 
 interface ExeMatchFieldProps {
   /** Visible field label. */
@@ -60,7 +60,8 @@ export function ExeMatchField({
   showProcessPath,
 }: ExeMatchFieldProps) {
   const { t } = useTranslation();
-  const [invalidFile, setInvalidFile] = useState(false);
+  // Why the picked file cannot be a rule's program (not an .exe, a shortcut to something else).
+  const [pickError, setPickError] = useState<string | null>(null);
   return (
     <div className="field">
       <span className="field__label">{label}</span>
@@ -89,14 +90,24 @@ export function ExeMatchField({
               const pick = await pickExecutablePath({
                 title: browseTitle,
                 filterName: browseFilter,
-                extensions: ["exe"],
+                extensions: ["exe", "lnk"],
               });
-              if (pick) {
-                const valid = pick.name.toLowerCase().endsWith(".exe");
-                setInvalidFile(!valid);
-                if (!valid) return;
-                onChange(pick.name, pick.path);
+              if (!pick) return;
+              const lower = pick.name.toLowerCase();
+              if (lower.endsWith(".lnk")) {
+                // A shortcut (a Start menu entry): the rule matches the program it starts.
+                try {
+                  const target = await resolveShortcutTarget(pick.path);
+                  setPickError(null);
+                  onChange(target.split(/[\\/]/).pop() ?? target, target);
+                } catch (error) {
+                  setPickError(normalizeCommandError(error).message);
+                }
+                return;
               }
+              const valid = lower.endsWith(".exe");
+              setPickError(valid ? null : t("newRule.exeOrShortcut"));
+              if (valid) onChange(pick.name, pick.path);
             } catch {
               // Dialog plugin failure: treat like a cancelled pick instead of
               // an unhandled rejection (audit honorable mention).
@@ -116,7 +127,7 @@ export function ExeMatchField({
           </button>
         ) : null}
       </div>
-      {invalidFile ? <p role="alert" className="panel__muted">{t("newRule.exeOnly")}</p> : null}
+      {pickError ? <p role="alert" className="panel__muted">{pickError}</p> : null}
       {showProcessPath && processPath ? (
         <p
           className="field__description field__description--mono"

@@ -75,6 +75,8 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
   menu: "action.type.menu",
   disabled: "action.type.disabled",
   repairClipboard: "action.type.repairClipboard",
+  stopMacros: "action.type.stopMacros",
+  cheatSheet: "action.type.cheatSheet",
 };
 
 /** All action-type discriminators, derived from the SoT label map so a new
@@ -97,6 +99,8 @@ const ACTION_TYPE_ICONS: Record<ActionType, string> = {
   menu: "Mn",
   disabled: "—",
   repairClipboard: "Rb",
+  stopMacros: "St",
+  cheatSheet: "Ch",
 };
 
 /** Derived from `ALL_ACTION_TYPES` — structurally cannot drift from the type set. */

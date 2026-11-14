@@ -113,6 +113,7 @@ export function labelForExecutionMode(mode: ActionExecutionEvent["mode"]): strin
 }
 
 export function labelForPasteMode(mode: PasteMode): string {
+  if (mode === "keyboardOnly") return i18n.t("picker.keyboardOnly");
   return mode === "clipboardPaste" ? i18n.t("paste.clipboard") : i18n.t("paste.direct");
 }
 
@@ -126,6 +127,8 @@ export function labelForSequenceStep(stepType: SequenceStep["type"]): string {
       return i18n.t("sequence.sleep");
     case "launch":
       return i18n.t("sequence.launch");
+    case "waitWindow":
+      return i18n.t("sequence.waitWindow");
   }
 }
 

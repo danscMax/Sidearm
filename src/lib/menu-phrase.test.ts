@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Action, AppConfig, MenuItem } from "./config";
-import { applyMenuEdits, isMenuIncomplete, moveMenuItem, moveMenuItemTo, newPhrase, NO_MENU_EDITS, parentOf, phraseOf, withPhrase } from "./menu-phrase";
+import { applyMenuEdits, isMenuIncomplete, moveMenuItem, moveMenuItemTo, newPhrase, NO_MENU_EDITS, parentOf, phraseOf, withKeyboardOnly, withPhrase } from "./menu-phrase";
 
 const inline = (id: string, text: string): Action => ({
   id, displayName: id, type: "textSnippet", payload: { source: "inline", text, pasteMode: "clipboardPaste", tags: ["t"] },
@@ -106,5 +106,33 @@ describe("moveMenuItemTo / parentOf", () => {
   it("an unnamed item makes the menu incomplete", () => {
     const base = { actions: [], snippetLibrary: [], bindings: [], profiles: [] } as unknown as AppConfig;
     expect(isMenuIncomplete(base, NO_MENU_EDITS, [{ kind: "action", id: "a", label: " ", actionId: "x", enabled: true }])).toBe(true);
+  });
+});
+
+describe("withKeyboardOnly", () => {
+  it("switches an inline phrase between typed and automatic, and an edit keeps the mode", () => {
+    const typed = withKeyboardOnly(inline("a", "hi"), true);
+    expect(typed.type === "textSnippet" && typed.payload.source === "inline" && typed.payload.pasteMode).toBe("keyboardOnly");
+    const edited = withPhrase(typed, "hello", false);
+    expect(edited.type === "textSnippet" && edited.payload.source === "inline" && edited.payload.pasteMode).toBe("keyboardOnly");
+    const auto = withKeyboardOnly(typed, false);
+    expect(auto.type === "textSnippet" && auto.payload.source === "inline" && auto.payload.pasteMode).toBe("sendText");
+  });
+
+  it("leaves anything that is not an inline phrase alone", () => {
+    const macro = withPhrase(inline("a", "hi"), "hi", true);
+    expect(withKeyboardOnly(macro, true)).toBe(macro);
+  });
+});
+
+describe("library input modes", () => {
+  it("a library phrase's keyboard-only switch is saved into its library item, the others untouched", () => {
+    const base = { actions: [], snippetLibrary: [
+      { id: "s1", name: "One", text: "a", pasteMode: "sendText", tags: [] },
+      { id: "s2", name: "Two", text: "b", pasteMode: "sendText", tags: [] },
+    ] } as unknown as AppConfig;
+    const next = applyMenuEdits(base, { ...NO_MENU_EDITS, libraryModes: { s1: "keyboardOnly" } }, []);
+    expect(next.snippetLibrary.map((item) => item.pasteMode)).toEqual(["keyboardOnly", "sendText"]);
+    expect(next.snippetLibrary[1]).toBe(base.snippetLibrary[1]);
   });
 });

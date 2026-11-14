@@ -1,4 +1,4 @@
-import type { Action, AppConfig, MenuItem, SnippetLibraryItem } from "./config";
+import type { Action, AppConfig, MenuItem, PasteMode, SnippetLibraryItem } from "./config";
 import { nextUniqueId, upsertAction } from "./config-editing";
 import { appendMenuItem, collectMenuItemIds, removeMenuItem } from "./menu-helpers";
 
@@ -64,12 +64,20 @@ export function withPhrase(action: Action, text: string, enter: boolean): Action
   };
 }
 
+/** An inline phrase typed key by key (`keyboardOnly`) or in the automatic mode. */
+export function withKeyboardOnly(action: Action, keyboardOnly: boolean): Action {
+  if (action.type !== "textSnippet" || action.payload.source !== "inline") return action;
+  return { ...action, payload: { ...action.payload, pasteMode: keyboardOnly ? "keyboardOnly" : "sendText" } };
+}
+
 /** Changes the menu editor made to other actions and the library, applied on Save. */
 export interface MenuEdits {
   /** Edited or new actions, by id. */
   actions: Record<string, Action>;
   /** New text of library snippets, by snippet id. */
   library: Record<string, string>;
+  /** New input mode of library snippets (`keyboardOnly` or automatic), by snippet id. */
+  libraryModes?: Record<string, PasteMode>;
 }
 
 export const NO_MENU_EDITS: MenuEdits = { actions: {}, library: {} };
@@ -84,9 +92,13 @@ export function editedActions(config: AppConfig, edits: MenuEdits): Action[] {
 }
 
 export function editedLibrary(config: AppConfig, edits: MenuEdits): SnippetLibraryItem[] {
-  return config.snippetLibrary.map((item) =>
-    edits.library[item.id] != null ? { ...item, text: edits.library[item.id] } : item,
-  );
+  return config.snippetLibrary.map((item) => {
+    const text = edits.library[item.id];
+    const pasteMode = edits.libraryModes?.[item.id];
+    // An item nobody edited stays the same object.
+    if (text == null && !pasteMode) return item;
+    return { ...item, ...(text != null ? { text } : {}), ...(pasteMode ? { pasteMode } : {}) };
+  });
 }
 
 function referencedActionIds(items: MenuItem[]): Set<string> {
@@ -110,7 +122,9 @@ export function applyMenuEdits(config: AppConfig, edits: MenuEdits, items: MenuI
   for (const action of Object.values(edits.actions)) {
     if (known.has(action.id) || used.has(action.id)) next = upsertAction(next, action);
   }
-  if (Object.keys(edits.library).length > 0) next = { ...next, snippetLibrary: editedLibrary(next, edits) };
+  if (Object.keys(edits.library).length > 0 || Object.keys(edits.libraryModes ?? {}).length > 0) {
+    next = { ...next, snippetLibrary: editedLibrary(next, edits) };
+  }
   return next;
 }
 

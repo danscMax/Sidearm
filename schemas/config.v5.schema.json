@@ -158,14 +158,17 @@
         "mediaKey",
         "profileSwitch",
         "disabled",
-        "repairClipboard"
+        "repairClipboard",
+        "stopMacros",
+        "cheatSheet"
       ]
     },
     "pasteMode": {
       "type": "string",
       "enum": [
         "clipboardPaste",
-        "sendText"
+        "sendText",
+        "keyboardOnly"
       ]
     },
     "controlId": {
@@ -834,6 +837,38 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "stopMacros"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/stopMacrosPayload"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cheatSheet"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/cheatSheetPayload"
+              }
+            }
+          }
         }
       ]
     },
@@ -971,6 +1006,7 @@
         "steps": {
           "type": "array",
           "minItems": 1,
+          "maxItems": 200,
           "items": {
             "$ref": "#/$defs/sequenceStep"
           }
@@ -990,6 +1026,9 @@
         },
         {
           "$ref": "#/$defs/launchSequenceStep"
+        },
+        {
+          "$ref": "#/$defs/waitWindowSequenceStep"
         }
       ]
     },
@@ -1038,6 +1077,29 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 100
+        }
+      }
+    },
+    "waitWindowSequenceStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "exe",
+        "timeoutMs"
+      ],
+      "properties": {
+        "type": {
+          "const": "waitWindow"
+        },
+        "exe": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "title": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "$ref": "#/$defs/uint32"
         }
       }
     },
@@ -1302,6 +1364,32 @@
         "strategy": {
           "enum": [
             "latin1"
+          ]
+        }
+      }
+    },
+    "cheatSheetPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer"
+      ],
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/layer"
+        }
+      }
+    },
+    "stopMacrosPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope"
+      ],
+      "properties": {
+        "scope": {
+          "enum": [
+            "all"
           ]
         }
       }

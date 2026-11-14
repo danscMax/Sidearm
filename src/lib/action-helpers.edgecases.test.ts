@@ -267,7 +267,7 @@ describe("boundary: setSequenceStepDelay — extreme delay values", () => {
   it("setSequenceStepDelay with delay=0 on non-sleep step sets delayMs=0 (falsy but valid)", () => {
     const step: SequenceStep = { type: "send", value: "Ctrl+C" };
     const result = setSequenceStepDelay(step, 0);
-    if (result.type !== "sleep") {
+    if (result.type === "send") {
       expect(result.delayMs).toBe(0);
     }
   });

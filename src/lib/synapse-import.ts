@@ -73,10 +73,21 @@ export function describeParsedAction(action: ParsedAction, macros: ParsedMacro[]
   }
 }
 
-interface ImportWarning {
+export interface ImportWarning {
   code: string;
   message: string;
   context?: string;
+}
+
+/** Each distinct message once, in first-seen order, with how often it came. */
+export function groupWarnings(warnings: readonly ImportWarning[]): { code: string; message: string; count: number }[] {
+  const groups = new Map<string, { code: string; message: string; count: number }>();
+  for (const warning of warnings) {
+    const group = groups.get(warning.message);
+    if (group) group.count += 1;
+    else groups.set(warning.message, { code: warning.code, message: warning.message, count: 1 });
+  }
+  return [...groups.values()];
 }
 
 export type MergeStrategy = "append" | "replaceByName";

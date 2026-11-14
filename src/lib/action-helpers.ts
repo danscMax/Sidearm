@@ -88,6 +88,14 @@ export function describeActionSummary(
     return i18n.t("actionSummary.repairClipboard");
   }
 
+  if (action.type === "stopMacros") {
+    return i18n.t("actionSummary.stopMacros");
+  }
+
+  if (action.type === "cheatSheet") {
+    return i18n.t("actionSummary.cheatSheet", { layer: i18n.t(`layer.${action.payload.layer}`) });
+  }
+
   return action.notes ?? i18n.t("actionSummary.disabledFallback");
 }
 
@@ -148,7 +156,7 @@ export function isActionLiveRunnable(config: AppConfig, actionId: string): boole
     return true;
   }
 
-  if (action.type === "repairClipboard") {
+  if (action.type === "repairClipboard" || action.type === "stopMacros") {
     return true;
   }
 
@@ -228,6 +236,8 @@ export function withMenuPayload(
 /** Default payloads for a new/converted sequence step (single source). */
 const SEQUENCE_STEP_DEFAULT_SEND = "Ctrl+C";
 const SEQUENCE_STEP_DEFAULT_SLEEP_MS = 100;
+/** How long a new "wait for a window" step waits (the backend caps it at 30 s). */
+const SEQUENCE_STEP_DEFAULT_WAIT_MS = 10_000;
 
 export function createDefaultSequenceStep(stepType: SequenceStep["type"]): SequenceStep {
   switch (stepType) {
@@ -239,6 +249,8 @@ export function createDefaultSequenceStep(stepType: SequenceStep["type"]): Seque
       return { type: "sleep", delayMs: SEQUENCE_STEP_DEFAULT_SLEEP_MS };
     case "launch":
       return { type: "launch", value: i18n.t("sequence.defaultLaunch") };
+    case "waitWindow":
+      return { type: "waitWindow", exe: "", timeoutMs: SEQUENCE_STEP_DEFAULT_WAIT_MS };
   }
 }
 
@@ -276,6 +288,10 @@ export function defaultPayloadFor(actionType: ActionType): Action["payload"] {
       return {} as Record<string, never>;
     case "repairClipboard":
       return { strategy: "latin1" };
+    case "stopMacros":
+      return { scope: "all" };
+    case "cheatSheet":
+      return { layer: "hypershift" };
   }
 }
 
@@ -316,6 +332,13 @@ export function coerceSequenceStepType(
         workingDir: step.type === "launch" ? step.workingDir : undefined,
         delayMs: "delayMs" in step ? step.delayMs : undefined,
       };
+    case "waitWindow":
+      // After a launch, the program it started is what to wait for.
+      return {
+        type: "waitWindow",
+        exe: step.type === "launch" ? step.value.split(/[\\/]/).pop() ?? "" : "",
+        timeoutMs: SEQUENCE_STEP_DEFAULT_WAIT_MS,
+      };
   }
 }
 
@@ -326,6 +349,7 @@ export function setSequenceStepDelay(
   // Clamp negative delays to 0 — a negative delayMs would serialize to a
   // negative JSON number and fail Rust's u32 deserialization on save/load.
   const clamped = nextDelay === undefined ? undefined : Math.max(0, nextDelay);
+  if (step.type === "waitWindow") return step; // its wait is `timeoutMs`
   if (step.type === "sleep") {
     return {
       ...step,

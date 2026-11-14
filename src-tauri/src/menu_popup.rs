@@ -78,6 +78,8 @@ pub(crate) struct Model {
     others: Vec<(String, String, Vec<MenuItem>)>,
     /// Ids of menu actions: a link to another menu is no search result there.
     menu_ids: HashSet<String>,
+    /// The search looks only in this menu, not in the others too.
+    only_this: bool,
 }
 
 /// One row of the level shown: the item, the block it sits in, and for a
@@ -130,6 +132,12 @@ pub(crate) struct View {
     pub generation: u64,
     /// Available physical height on the opening cursor's monitor, excluding the taskbar.
     pub max_height: u32,
+    /// The search also looks in the other menus (the scope switch shows when there are any).
+    pub search_all: bool,
+    pub has_others: bool,
+    /// The scope switch's two names, in the UI language.
+    pub scope_all: String,
+    pub scope_this: String,
 }
 
 fn item_enabled(item: &MenuItem) -> bool {
@@ -159,6 +167,7 @@ impl Model {
             text_actions: HashSet::new(),
             others: Vec::new(),
             menu_ids: HashSet::new(),
+            only_this: false,
         };
         model.highlight = model.first_enabled().unwrap_or(0);
         model
@@ -205,6 +214,27 @@ impl Model {
     /// The name or the sent text contains the query — also when it was typed
     /// in the other keyboard layout ("ghbyz" finds "Принял", "руддщ" "hello"):
     /// both sides compared as the keys pressed on a ЙЦУКЕН/QWERTY keyboard.
+    /// How well `item` matches: 0 its name starts with the query, 1 its name
+    /// holds it, 2 only its text does (the same layout-insensitive comparison).
+    fn rank(item: &MenuItem, needle: &str) -> u8 {
+        let MenuItem::Action { label, .. } = item else { return 2 };
+        let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
+        let (label, label_keys, needle_keys) = (label.to_lowercase(), keys(label), keys(needle));
+        if label.starts_with(needle) || label_keys.starts_with(&needle_keys) {
+            0
+        } else if label.contains(needle) || label_keys.contains(&needle_keys) {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// Search only this menu (`true`) or the others too.
+    pub(crate) fn set_scope(&mut self, only_this: bool) {
+        self.only_this = only_this;
+        self.highlight = self.first_enabled().unwrap_or(0);
+    }
+
     fn matches(&self, item: &MenuItem, needle: &str) -> bool {
         let MenuItem::Action { label, action_id, .. } = item else { return false };
         let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
@@ -251,10 +281,22 @@ impl Model {
             }
             let mut state = Search { model: self, needle: &needle, seen: HashSet::new(), found: Vec::new() };
             search(&mut state, &self.root, None, None);
-            for (id, name, items) in &self.others {
-                search(&mut state, items, Some(name), Some((id, name)));
+            if !self.only_this {
+                for (id, name, items) in &self.others {
+                    search(&mut state, items, Some(name), Some((id, name)));
+                }
             }
-            return (state.found, Vec::new());
+            // Names before texts, but only within a group: a sort across them would
+            // split a block or menu into several headings. Stable: ties keep the tree order.
+            let mut found = state.found;
+            let mut start = 0;
+            while start < found.len() {
+                let (group, menu) = (found[start].group, found[start].menu);
+                let end = start + found[start..].iter().take_while(|entry| entry.group == group && entry.menu == menu).count();
+                found[start..end].sort_by_key(|entry| Self::rank(entry.item, &needle));
+                start = end;
+            }
+            return (found, Vec::new());
         }
         // Pinned items first, in their own block, and only there.
         let mut level: Vec<Entry<'_>> = Vec::new();
@@ -439,6 +481,10 @@ impl Model {
             pick_modes: Vec::new(),
             generation,
             max_height: u32::MAX,
+            search_all: !self.only_this,
+            has_others: !self.others.is_empty(),
+            scope_all: String::new(),
+            scope_this: String::new(),
         }
     }
 }
@@ -588,7 +634,7 @@ pub(crate) fn open(
     *OPEN.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(menu);
     IS_OPEN.store(true, Ordering::Release);
     log::info!("[menu] opened `{title}` ({} items)", view.items.len());
-    if crate::fake_mode() {
+    if crate::fake_mode() && !crate::fake_popups() {
         return; // A test run has no windows; the model still answers presses.
     }
     show(app, &view, anchor);
@@ -600,6 +646,8 @@ fn view_of(menu: &OpenMenu) -> View {
     let mut view = menu.model.view(&menu.title, menu.generation);
     view.max_height = menu.max_height;
     view.placeholder = crate::ui_text::native(&crate::ui_text!("menu.searchPlaceholder", "Search phrases…"));
+    view.scope_all = crate::ui_text::native(&crate::ui_text!("menu.scopeAll", "All menus"));
+    view.scope_this = crate::ui_text::native(&crate::ui_text!("menu.scopeThis", "This menu"));
     view.empty = crate::ui_text::native(&crate::ui_text!("menu.noResults", "Nothing found"));
     view.pick_modes = vec![
         crate::ui_text::native(&crate::ui_text!("menu.pickRun", "Insert")),
@@ -772,7 +820,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
         Step::Stay => {
             let view = view_of(menu);
             drop(guard);
-            if !crate::fake_mode() {
+            if !crate::fake_mode() || crate::fake_popups() {
                 let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &view);
             }
         }
@@ -899,6 +947,14 @@ pub(crate) fn hover_from_window(app: &AppHandle, index: usize) {
 }
 
 /// The search box changed.
+/// The scope switch of the search box: this menu only, or the others too.
+pub(crate) fn search_scope_from_window(app: &AppHandle, all: bool) {
+    drive(app, |model| {
+        model.set_scope(!all);
+        Step::Stay
+    });
+}
+
 pub(crate) fn search_from_window(app: &AppHandle, query: &str) {
     drive(app, |model| {
         model.set_query(query);
@@ -967,7 +1023,10 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
             std::thread::sleep(std::time::Duration::from_millis(200));
             if SHOWN.load(Ordering::Acquire) != generation {
                 log::warn!("[menu] the page did not measure again: its size rescaled to the monitor");
-                page_layout(&app, generation, width / now * scale, height / now * scale);
+                // On the main thread like every other layout: a close queues its hide
+                // behind it there, so a menu closed meanwhile never comes back.
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || page_layout(&handle, generation, width / now * scale, height / now * scale));
             }
         });
         return;
@@ -982,6 +1041,7 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
     // on its event thread, and a `set_focus()` before it lands does nothing
     // (the keys then went to the app under the popup — measured 2026-11-12).
     platform::show_focused(&window);
+    log::info!("[menu] shown ({w}x{h})");
 }
 
 /// Whether the open menu (if any) is `generation`.
@@ -993,7 +1053,7 @@ fn is_generation(generation: u64) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-mod platform {
+pub(crate) mod platform {
     use std::time::Duration;
 
     use tauri::AppHandle;
@@ -1012,9 +1072,9 @@ mod platform {
         },
     };
 
-    pub(super) use crate::platform::display::{cursor_position, dpi_scale_at, position_near};
+    pub(crate) use crate::platform::display::{cursor_position, dpi_scale_at, position_near};
 
-    pub(super) fn foreground_window() -> isize {
+    pub(crate) fn foreground_window() -> isize {
         unsafe { GetForegroundWindow() as isize }
     }
 
@@ -1040,7 +1100,7 @@ mod platform {
     }
 
     /// Show the popup and give it the keyboard focus.
-    pub(super) fn show_focused(window: &tauri::WebviewWindow) {
+    pub(crate) fn show_focused(window: &tauri::WebviewWindow) {
         match window.hwnd() {
             Ok(hwnd) => {
                 let hwnd = hwnd.0 as HWND;
@@ -1062,7 +1122,7 @@ mod platform {
     /// Move, size 1×1 and show without activating, in one call (no frame of
     /// the old menu at the old place): visible, the window takes the scale of
     /// the monitor it is on. Transparent and 1 px, it is not seen.
-    pub(super) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+    pub(crate) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowPos};
         let Ok(hwnd) = window.hwnd() else { return };
         unsafe {
@@ -1071,7 +1131,7 @@ mod platform {
     }
 
     /// Hidden the way it was shown (Tauri's own state never saw it shown).
-    pub(super) fn hide_window(window: &tauri::WebviewWindow) {
+    pub(crate) fn hide_window(window: &tauri::WebviewWindow) {
         match window.hwnd() {
             Ok(hwnd) => unsafe {
                 ShowWindow(hwnd.0 as HWND, SW_HIDE);
@@ -1083,7 +1143,7 @@ mod platform {
     }
 
     /// Give the focus back to the window the menu opened over (the popup had it).
-    pub(super) fn restore_foreground(target: isize) {
+    pub(crate) fn restore_foreground(target: isize) {
         if target == 0 || foreground_window() == target {
             return;
         }
@@ -1110,7 +1170,7 @@ mod platform {
 
     /// Close the menu when the user goes elsewhere: a click outside it, another
     /// window coming to the front, or [`MAX_OPEN`] without a choice.
-    pub(super) fn spawn_watch(app: AppHandle, generation: u64) {
+    pub(crate) fn spawn_watch(app: AppHandle, generation: u64) {
         let target = foreground_window();
         let _ = std::thread::Builder::new().name("menu-watch".into()).spawn(move || {
             use tauri::Manager;
@@ -1144,33 +1204,33 @@ mod platform {
 }
 
 #[cfg(not(target_os = "windows"))]
-mod platform {
+pub(crate) mod platform {
     use tauri::AppHandle;
 
-    pub(super) fn foreground_window() -> isize {
+    pub(crate) fn foreground_window() -> isize {
         0
     }
-    pub(super) fn cursor_position() -> (i32, i32) {
+    pub(crate) fn cursor_position() -> (i32, i32) {
         (100, 100)
     }
-    pub(super) fn dpi_scale_at(_: (i32, i32)) -> f64 {
+    pub(crate) fn dpi_scale_at(_: (i32, i32)) -> f64 {
         1.0
     }
-    pub(super) fn position_near(point: (i32, i32), _: i32, _: i32, gap: i32) -> (i32, i32) {
+    pub(crate) fn position_near(point: (i32, i32), _: i32, _: i32, gap: i32) -> (i32, i32) {
         (point.0 + gap, point.1 + gap)
     }
-    pub(super) fn restore_foreground(_: isize) {}
-    pub(super) fn show_focused(window: &tauri::WebviewWindow) {
+    pub(crate) fn restore_foreground(_: isize) {}
+    pub(crate) fn show_focused(window: &tauri::WebviewWindow) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-    pub(super) fn hide_window(window: &tauri::WebviewWindow) {
+    pub(crate) fn hide_window(window: &tauri::WebviewWindow) {
         let _ = window.hide();
     }
-    pub(super) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+    pub(crate) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: anchor.0, y: anchor.1 }));
     }
-    pub(super) fn spawn_watch(_: AppHandle, _: u64) {}
+    pub(crate) fn spawn_watch(_: AppHandle, _: u64) {}
 }
 
 #[cfg(test)]
@@ -1308,6 +1368,21 @@ mod tests {
         assert_eq!(model.view("Phrases", 1).items.len(), 6);
         model.set_query("Вуу");
         assert_eq!(labels(&model.view("Phrases", 1)), ["Deep"], "typed in the Russian layout");
+    }
+
+    #[test]
+    fn search_ranks_names_above_texts_within_a_group_and_can_stay_in_this_menu() {
+        let items = vec![action("a", "Reply politely"), action("b", "Polite"), action("c", "Thanks")];
+        let details: HashMap<String, String> = [("act-c".to_owned(), "very polite text".to_owned())].into();
+        let other = vec![("menu-2".to_owned(), "Work".to_owned(), vec![action("w", "Polish")])];
+        let mut model = Model::new(items, details).with_others(other, HashSet::new());
+        model.set_query("pol");
+        assert_eq!(labels(&model.view("Phrases", 1)), ["Polite", "Reply politely", "Thanks", "Polish"],
+            "name start, then name, then text; another menu stays its own group");
+        model.set_scope(true);
+        let view = model.view("Phrases", 1);
+        assert_eq!(labels(&view), ["Polite", "Reply politely", "Thanks"], "this menu only");
+        assert!(!view.search_all && view.has_others);
     }
 
     #[test]

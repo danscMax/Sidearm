@@ -262,6 +262,7 @@ export function SequenceStepEditor({
                   ["text", t("picker.addText")],
                   ["sleep", t("picker.addSleep")],
                   ["launch", t("picker.addLaunch")],
+                  ["waitWindow", t("picker.addWaitWindow")],
                 ] as Array<[SequenceStep["type"], string]>
               ).map(([stepType, label]) => (
                 <button
@@ -303,6 +304,10 @@ export function SequenceStepEditor({
         <Notice variant="warning" className="mb-8">
           <strong>{t("picker.sequenceEmpty")}</strong>
         </Notice>
+      ) : steps.some((step) => step.type === "waitWindow" && !step.exe.trim()) ? (
+        <Notice variant="warning" className="mb-8">
+          <strong>{t("picker.waitWindowExeMissing")}</strong>
+        </Notice>
       ) : null}
       {recordingError ? (
         <Notice variant="error" className="mb-8">
@@ -341,8 +346,48 @@ export function SequenceStepEditor({
                   { value: "text", label: t("picker.stepText") },
                   { value: "sleep", label: t("picker.stepSleep") },
                   { value: "launch", label: t("picker.stepLaunch") },
+                  { value: "waitWindow", label: t("picker.stepWaitWindow") },
                 ]}
               />
+
+              {step.type === "waitWindow" ? (
+                <>
+                  <label className="field">
+                    <span className="field__label">{t("picker.waitWindowExe")}</span>
+                    <input
+                      className="input"
+                      type="text"
+                      value={step.exe}
+                      placeholder="notepad.exe"
+                      onChange={(e) => updateStep(index, { ...step, exe: e.target.value })}
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field__label">{t("picker.waitWindowTitle")}</span>
+                    <input
+                      className="input"
+                      type="text"
+                      value={step.title ?? ""}
+                      onChange={(e) => updateStep(index, { ...step, title: e.target.value || undefined })}
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field__label">{t("picker.waitWindowTimeout")}</span>
+                    <input
+                      className="input"
+                      type="number"
+                      min={100}
+                      max={30000}
+                      value={step.timeoutMs}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value);
+                        const timeoutMs = Number.isFinite(raw) ? Math.max(100, Math.min(30000, Math.round(raw))) : 10000;
+                        updateStep(index, { ...step, timeoutMs });
+                      }}
+                    />
+                  </label>
+                </>
+              ) : null}
 
               {step.type === "send" || step.type === "text" ? (
                 <label className="field">
@@ -398,6 +443,7 @@ export function SequenceStepEditor({
                 </>
               ) : null}
 
+              {step.type === "waitWindow" ? null : (
               <label className="field">
                 <span className="field__label">{t("picker.stepDelay")}</span>
                 <input
@@ -416,6 +462,7 @@ export function SequenceStepEditor({
                   }}
                 />
               </label>
+              )}
 
               {(step.type === "send" || step.type === "text") && (
                 <label className="field">

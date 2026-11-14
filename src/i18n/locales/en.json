@@ -14,7 +14,9 @@
     "menu_one": "Menu of {{count}} item",
     "menu_other": "Menu of {{count}} items",
     "disabledFallback": "Disabled placeholder action.",
-    "repairClipboard": "Repair clipboard encoding (UTF-8 ↔ Latin-1)."
+    "repairClipboard": "Repair clipboard encoding (UTF-8 ↔ Latin-1).",
+    "stopMacros": "Stops running and queued macros",
+    "cheatSheet": "Cheat sheet of the {{layer}} layer"
   },
   "common": {
     "na": "N/A",
@@ -222,7 +224,9 @@
       "profileSwitch": "Switch profile",
       "menu": "Menu",
       "disabled": "Disabled",
-      "repairClipboard": "Repair clipboard"
+      "repairClipboard": "Repair clipboard",
+      "stopMacros": "Stop macros",
+      "cheatSheet": "Cheat sheet"
     }
   },
   "mouseAction": {
@@ -278,7 +282,8 @@
     "sleep": "Delay",
     "launch": "Launch",
     "defaultText": "Replace this text",
-    "defaultLaunch": "C:\\Path\\To\\Program.exe"
+    "defaultLaunch": "C:\\Path\\To\\Program.exe",
+    "waitWindow": "Wait for a window"
   },
   "configWaiting": {
     "eyebrow": "Waiting for config",
@@ -490,7 +495,8 @@
     "delayLabel": "Delay:",
     "captureHelp": "Click the button and switch to the target window within the selected time. After the delay, the app will detect the application and fill in the fields.",
     "titleFilter": "Title filter",
-    "titleFilterHelp": "The rule will only trigger if the window title contains this text. Without a filter — triggers for any window of this application."
+    "titleFilterHelp": "The rule will only trigger if the window title contains this text. Without a filter — triggers for any window of this application.",
+    "exeOrShortcut": "Choose the program's .exe file or its shortcut, or capture its running window."
   },
   "ruleModal": {
     "profileLabel": "Profile: {{name}}",
@@ -866,9 +872,30 @@
     "menuChipLibrary": "Library: {{name}}",
     "menuChipPlaces": "Also on: {{places}}",
     "menuChipMenus": "Also in: {{places}}",
-    "menuSharedChip": "Shared · {{count}} more button(s)",
     "menuMoreShort": "More",
-    "menuPinShort": "Pin"
+    "menuPinShort": "Pin",
+    "menuFolderFailed": "The folder could not be read: {{reason}}",
+    "menuFolderSkipped": "Left out {{count}}: {{list}}.",
+    "menuFolderSkippedFile": "{{name}} ({{reason}})",
+    "menuFolderReason": {
+      "tooLarge": "over 1 MB",
+      "notUtf8": "not UTF-8 text",
+      "unreadable": "could not be read",
+      "overLimit": "past the first 200 files"
+    },
+    "menuSharedChip_one": "Shared · {{count}} more button",
+    "menuSharedChip_other": "Shared · {{count}} more buttons",
+    "menuRemovedMany_one": "{{count}} item deleted.",
+    "menuRemovedMany_other": "{{count}} items deleted.",
+    "menuMovedMany_one": "{{count}} item moved to the end of the “{{menu}}” menu; saved with this menu.",
+    "menuMovedMany_other": "{{count}} items moved to the end of the “{{menu}}” menu; saved with this menu.",
+    "menuMarked_one": "{{count}} item picked",
+    "menuMarked_other": "{{count}} items picked",
+    "menuMarkedTools": "What to do with the picked items",
+    "menuMarkedOn": "Turn on",
+    "menuMarkedOff": "Turn off",
+    "menuMarkedClear": "Unpick",
+    "menuMarkedHint": "Ctrl+click adds or removes an item, Shift+click picks a run of one list. A plain click picks one again."
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -1022,11 +1049,9 @@
     "previewShortcut": "Presses {{combo}}",
     "previewMouse": "Performs {{combo}}",
     "previewText": "Types “{{text}}”",
-    "previewSequence": "Runs a macro ({{count}} steps)",
     "previewLaunch": "Launches {{target}}",
     "previewMedia": "Media key: {{key}}",
     "previewProfile": "Switches to profile “{{name}}”",
-    "previewMenu": "Opens a menu ({{count}} items)",
     "previewDisabled": "Nothing — the button is disabled",
     "previewRepair": "Re-encodes the clipboard",
     "categoryDesc": {
@@ -1042,7 +1067,9 @@
       "profileSwitch": "Switches the active bindings profile.",
       "menu": "Shows a popup menu of several actions.",
       "disabled": "The button does nothing.",
-      "repairClipboard": "Fixes a corrupted clipboard encoding."
+      "repairClipboard": "Fixes a corrupted clipboard encoding.",
+      "stopMacros": "Ends the running macro and the ones waiting behind it.",
+      "cheatSheet": "Shows this mouse's side buttons of one layer at the cursor."
     },
     "conditionsLabel": "Execution conditions",
     "conditionsHelp": "The action runs only when ALL conditions are met at once (AND logic). With no conditions it always runs.",
@@ -1114,7 +1141,28 @@
     "menuShared": "This menu is also on other buttons ({{count}}): editing it changes it there too. Choosing another kind of action changes this button only.",
     "tokenSelectionDesc": "Puts in the text selected in the window in front (copied with Ctrl+Insert, the clipboard is put back).",
     "alsoUsed": "Also here: {{places}}",
-    "alsoUsedMore": "and {{count}} more"
+    "alsoUsedMore": "and {{count}} more",
+    "previewSequence_one": "Runs a macro ({{count}} step)",
+    "previewSequence_other": "Runs a macro ({{count}} steps)",
+    "previewMenu_one": "Opens a menu ({{count}} item)",
+    "previewMenu_other": "Opens a menu ({{count}} items)",
+    "stopMacrosHint": "Ends the macro that is running now and drops the ones waiting behind it. Other buttons keep working; nothing is typed.",
+    "previewStopMacros": "Stops the running macro and the queued ones",
+    "keyboardOnly": "Keyboard only",
+    "keyboardOnlyHint": "Types the text key by key, never through the clipboard — for a terminal or a remote session that must not get a paste. Without it, a text over 100 characters is pasted. Not for a phrase with Enter (a macro).",
+    "cheatSheetLayer": "Layer to show",
+    "cheatSheetHint": "Shows the side buttons of the mouse you pressed, on this layer of the profile in effect, at the cursor. The next press puts it away (and still runs); after 10 seconds it goes by itself.",
+    "defaultCheatSheet": "Cheat sheet · {{layer}}",
+    "previewCheatSheet": "Shows the {{layer}} button grid",
+    "addWaitWindow": "Wait for window",
+    "stepWaitWindow": "Wait for a window",
+    "waitWindowExe": "Program in front (.exe)",
+    "waitWindowTitle": "Its title contains (optional)",
+    "waitWindowTimeout": "Wait at most, ms (up to 30000)",
+    "tokenInputDesc": "A field asked for in a small window before the phrase is typed: {input:host} — Enter inserts, Esc cancels. Rename the field after inserting it.",
+    "tokenInputName": "field",
+    "waitWindowExeMissing": "A \"Wait for window\" step needs the program to wait for (its .exe name).",
+    "keyboardOnlyLibraryHint": "Types this library text key by key, never through the clipboard — everywhere it is used."
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1310,14 +1358,24 @@
     "bindingCount_other": "{{count}} bindings",
     "submitting": "Importing…",
     "configChanged": "Settings changed during import. The import was not applied. Try again.",
-    "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros",
+    "summaryToast": "Imported: {{profiles}}, {{bindings}}, {{actions}}, {{macros}}",
     "strategy": {
       "legend": "Merge strategy",
       "append": "Append as new",
       "appendHint": "Name collisions get an (import) suffix.",
       "replaceByName": "Replace by name",
       "replaceByNameHint": "Any existing profile with the same name is deleted along with its bindings."
-    }
+    },
+    "summarySkipped": "{{summary}} · skipped: {{count}}",
+    "profileCount_one": "{{count}} profile",
+    "profileCount_other": "{{count}} profiles",
+    "actionCount_one": "{{count}} action",
+    "actionCount_other": "{{count}} actions",
+    "macroCount_one": "{{count}} macro",
+    "macroCount_other": "{{count}} macros",
+    "warningRepeat": "×{{count}}",
+    "notesTitle": "What the import left out",
+    "notesShow": "Details"
   },
   "portable": {
     "badge": {
@@ -1416,6 +1474,10 @@
     "unknown": {
       "title": "An unexpected error occurred",
       "hint": "Copy the details and attach them to a report if the error persists."
+    },
+    "configNewer": {
+      "title": "Settings from a newer Sidearm",
+      "hint": "Install the latest Sidearm. To go back to this version instead, restore a backup made before the update."
     }
   },
   "onboarding": {
@@ -1456,7 +1518,8 @@
       "unverified": "connected, not tested with Sidearm yet: the button check is skipped",
       "choose": "Two mice are connected. Which one do you want to set up now?",
       "later": "You can set up the other one later: Settings → Run setup again.",
-      "noneNote": "No supported Razer Naga is connected. Plug in its receiver or cable: Sidearm notices it at once. You can also continue and connect the mouse later."
+      "noneNote": "No supported Razer Naga is connected. Plug in its receiver or cable: Sidearm notices it at once. You can also continue and connect the mouse later.",
+      "checkFailed": "Could not check the mice: {{reason}}"
     },
     "synapse": {
       "label": "Razer Synapse",
@@ -1602,7 +1665,7 @@
       "alreadyElevated": "Sidearm is already running with administrator rights."
     },
     "input": {
-      "modifiersReused": "Shortcut reused already pressed modifier(s): {{modifiers}}."
+      "modifiersReused": "The shortcut reused modifiers already held: {{modifiers}}."
     },
     "capture": {
       "actionDone": "Ran `{{action}}` for `{{key}}`.",
@@ -1688,7 +1751,15 @@
       "dpiFailed": "Could not change DPI: {{detail}}",
       "dpiStagesOtherMouse": "This profile has DPI stages only for a mouse that is not connected.",
       "enterSkippedWindowChanged": "Enter was not sent: another window came to the front while the text was typed.",
-      "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched."
+      "sequenceCancelled": "The sequence was stopped: capture stopped or the profile was switched.",
+      "macrosStopped": "Macros stopped: the running one ends, the queued ones are dropped.",
+      "stopMacrosPreview": "Will stop the running macro and drop the queued ones.",
+      "sequenceQueued": "Macro waits: {{ahead}} ahead of it.",
+      "sequenceDropped": "Macro not started: {{count}} are already waiting. \"Stop macros\" ends them.",
+      "pasteModeKeyboard": "keyboard only",
+      "cheatSheetPreview": "Will show the button grid at the cursor.",
+      "stepWaitWindow": "wait for `{{exe}}`",
+      "waitWindowTimeout": "`{{exe}}` did not come to the front within {{seconds}} s: the rest of the sequence was not sent."
     },
     "synapse": {
       "v3MacroParseFailed": "Could not parse macro `{{name}}`: {{error}}",
@@ -1766,7 +1837,11 @@
       "trayPaused": "paused",
       "trayQuit": "Quit",
       "trayRelaunchAsAdmin": "Restart as administrator",
-      "trayTooltip": "Sidearm — {{state_label}}\nProfile: {{profile_name}}{{battery_line}}"
+      "trayTooltip": "Sidearm — {{state_label}}\nProfile: {{profile_name}}{{battery_line}}",
+      "trayStopMacros": "Stop macros",
+      "trayRulesBack": "Back to the app rules",
+      "trayRulesNow": "Now",
+      "trayRulesAfter": "In {{minutes}} minutes"
     },
     "window": {
       "captured": "Captured `{{exe}}`, profile `{{profile_id}}`.",
@@ -1789,10 +1864,61 @@
       "pickRun": "Insert",
       "pickEnter": "Insert and press Enter",
       "pickCopy": "Only copy to the clipboard",
-      "pickEdit": "Edit in Sidearm"
+      "pickEdit": "Edit in Sidearm",
+      "scopeAll": "All menus",
+      "scopeThis": "This menu"
     },
     "cheatsheet": {
-      "title": "{{profile}} · HyperShift 2"
+      "title": "{{profile}} · HyperShift 2",
+      "layerStandard": "standard",
+      "layerHypershift": "HyperShift",
+      "layerHypershift2": "HyperShift 2",
+      "layerBoth": "HS + HS2",
+      "layerTitle": "{{profile}} · {{layer}}"
+    },
+    "error": {
+      "adminAutostart": "Could not change starting as administrator: {{reason}}",
+      "adminWindowsOnly": "Restarting as administrator is only supported on Windows.",
+      "backupOutside": "Backup path must point to a file inside the config directory.",
+      "backupUnreachable": "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.",
+      "configChangedOnDisk": "Settings were changed by another Sidearm; reloading them from disk.",
+      "configInvalid": "Some settings contradict each other.",
+      "configNewer": "These settings were saved by a newer Sidearm (format {{found}}; this one reads up to {{supported}}). Update Sidearm to open them — the file was left as it is.",
+      "configSchema": "The settings file does not match the expected format.",
+      "exportNameEmpty": "Export filename must not be empty.",
+      "exportNameJson": "Export filename must end with .json.",
+      "exportNamePath": "Export filename must not contain path separators or '..' segments.",
+      "extHtml": "The layout page must be an .html file.",
+      "extJson": "File must have a .json extension.",
+      "extSnippets": "Snippet export must be a .json, .md, or .txt file.",
+      "imageName": "`{{file_name}}` is not a bare file name.",
+      "imageStoredTooLarge": "Stored image exceeds the size limit.",
+      "imageTooLarge": "Image is {{size}} MB; the limit is {{limit}} MB.",
+      "imageType": "`{{extension}}` is not a supported image type (png/jpg/webp/gif/bmp).",
+      "imageTypeStored": "`{{file_name}}` is not a supported image type.",
+      "importParse": "Failed to parse import JSON: {{reason}}",
+      "importRead": "Failed to read import file: {{reason}}",
+      "importSchema": "Imported config does not match the expected schema.",
+      "importTooLarge": "File exceeds the {{max_bytes}}-byte import limit.",
+      "noConfigToExport": "No config.json to export — save the app at least once first.",
+      "notAFolder": "The chosen path is not a folder.",
+      "onboardModeStuck": "The mouse did not return to its normal mode: {{reason}}",
+      "onboardUnconfirmed": "The mouse did not confirm the write: {{reason}}",
+      "pathDotDot": "File path must not contain `..` segments.",
+      "pathNotAbsolute": "File path must be absolute.",
+      "recording": "Recording failed: {{reason}}",
+      "rehook": "Could not reconnect the keyboard hook: {{reason}}",
+      "runtimeReload": "Could not restart capture: {{reason}}",
+      "runtimeStart": "Could not start capture: {{reason}}",
+      "runtimeStop": "Could not stop capture: {{reason}}",
+      "windowCapture": "Could not read the window in front: {{reason}}",
+      "shortcutUnreadable": "The shortcut could not be read: {{reason}}",
+      "shortcutNotExe": "The shortcut does not start an .exe program (it starts `{{target}}`).",
+      "shortcutWindowsOnly": "Shortcuts are read only on Windows.",
+      "shortcutLocalOnly": "Only a .lnk shortcut on a local drive can be read."
+    },
+    "prompt": {
+      "hint": "Enter: next field, then insert · Esc: cancel"
     }
   },
   "newMouse": {
@@ -1821,7 +1947,6 @@
     "reasonNoMatch": "the other mouse has no such button",
     "apply": "Copy ({{count}})",
     "done": "Assignments copied: {{count}}",
-    "importDropped": "Not imported, no matching button on this mouse: {{count}}",
     "shareMenus": "One menu for both mice",
     "shareMenusHelp": "Menus are not copied: both mice open the same menu, and editing it on one changes it on the other. Off: each mouse gets its own copy.",
     "reasonNoLayer": "the other mouse has no HyperShift 2 layer",
@@ -1829,7 +1954,12 @@
     "syncMiceHelp": "From now on, an assignment changed on one mouse changes the same button on the other (HyperShift 2 only where the mouse has it). Copy once first so they start alike. For your own mice; off by default.",
     "holdsTitle": "HyperShift 2 onto holds ({{count}} fit)",
     "holdsHelp": "The other mouse has no HyperShift 2. Tick what it should get as a long press of the same button (the button's plain press then fires on release). With \"Keep the mice alike\" on, both mice get it.",
-    "holdsApply": "Put on holds ({{count}})"
+    "holdsApply": "Put on holds ({{count}})",
+    "importDroppedTitle_one": "{{count}} assignment has no place on this mouse",
+    "importDroppedTitle_other": "{{count}} assignments have no place on this mouse",
+    "importDroppedIntro": "These buttons do not exist on the mouse shown, so they would not be imported:",
+    "importDroppedItem": "{{button}} · {{layer}} — {{label}}",
+    "importAnyway": "Import the rest"
   },
   "menuTemplates": {
     "agent": "Phrases for an AI agent",
@@ -1914,12 +2044,13 @@
     "profile": "Profile"
   },
   "configCheck": {
-    "banner": "This profile has {{count}} problem(s) to look at:",
     "missingAction": "«{{where}}» points at an action that no longer exists — it does nothing.",
     "missingSnippet": "«{{where}}» types a library text that was deleted — it types nothing.",
     "enterNextToClose": "{{button}} ({{layer}}): one press pattern sends Enter, another closes the window — easy to hit the wrong one.",
     "duplicate": "“{{name}}” ({{layer}}): {{buttons}}.",
-    "duplicatesBanner": "The same thing on several buttons:"
+    "duplicatesBanner": "The same thing on several buttons:",
+    "banner_one": "This profile has {{count}} problem to look at:",
+    "banner_other": "This profile has {{count}} problems to look at:"
   },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm."

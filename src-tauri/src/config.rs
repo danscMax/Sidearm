@@ -53,6 +53,9 @@ pub enum ConfigStoreError {
     // from disk instead. See the concurrent-instance clobber bug.
     #[error("Config was modified by another instance.")]
     ConcurrentModification,
+    /// `config.json` declares a schema newer than this Sidearm reads: left untouched.
+    #[error("config.json was written by a newer Sidearm (schema {found}; this one reads up to {supported})")]
+    NewerVersion { found: i64, supported: i32 },
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -667,6 +670,10 @@ pub enum ActionType {
     ProfileSwitch,
     Disabled,
     RepairClipboard,
+    /// Ends the running macro and drops the queued ones.
+    StopMacros,
+    /// Shows the side-button grid of the pressed mouse on one layer.
+    CheatSheet,
 }
 
 impl ActionType {
@@ -682,6 +689,8 @@ impl ActionType {
             ActionType::ProfileSwitch => "profileSwitch",
             ActionType::Disabled => "disabled",
             ActionType::RepairClipboard => "repairClipboard",
+            ActionType::StopMacros => "stopMacros",
+            ActionType::CheatSheet => "cheatSheet",
         }
     }
 
@@ -691,7 +700,7 @@ impl ActionType {
     /// `match` below forces a new variant to be added here and to the schema
     /// (a missed schema entry is a save-breaker).
     #[cfg(test)]
-    const ALL: [ActionType; 10] = [
+    const ALL: [ActionType; 12] = [
         ActionType::Shortcut,
         ActionType::TextSnippet,
         ActionType::Sequence,
@@ -702,6 +711,8 @@ impl ActionType {
         ActionType::ProfileSwitch,
         ActionType::Disabled,
         ActionType::RepairClipboard,
+        ActionType::StopMacros,
+        ActionType::CheatSheet,
     ];
 }
 
@@ -719,7 +730,9 @@ const _: fn(ActionType) = |a| match a {
     | ActionType::MediaKey
     | ActionType::ProfileSwitch
     | ActionType::Disabled
-    | ActionType::RepairClipboard => {}
+    | ActionType::RepairClipboard
+    | ActionType::StopMacros
+    | ActionType::CheatSheet => {}
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -764,6 +777,8 @@ pub enum ActionPayload {
     ProfileSwitch(ProfileSwitchPayload),
     Disabled(DisabledActionPayload),
     RepairClipboard(RepairClipboardActionPayload),
+    StopMacros(StopMacrosPayload),
+    CheatSheet(CheatSheetPayload),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -782,8 +797,12 @@ pub struct ShortcutActionPayload {
 #[serde(rename_all = "camelCase")]
 pub enum PasteMode {
     ClipboardPaste,
+    /// Automatic: typed, a long text (over 100 characters) pasted through the clipboard.
     #[default]
     SendText,
+    /// Always typed key by key, never through the clipboard (a terminal or a
+    /// remote session that must not get a paste).
+    KeyboardOnly,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -837,6 +856,15 @@ pub enum SequenceStep {
         working_dir: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delay_ms: Option<u32>,
+    },
+    /// Waits until a window of `exe` (and with `title` in its title, when set)
+    /// is in front; past `timeout_ms` the sequence stops instead of typing elsewhere.
+    #[serde(rename_all = "camelCase")]
+    WaitWindow {
+        exe: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        timeout_ms: u32,
     },
 }
 
@@ -1026,6 +1054,30 @@ pub struct RepairClipboardActionPayload {
     pub strategy: RepairStrategy,
 }
 
+/// What [`StopMacrosPayload`] stops. A required field, like `strategy` above:
+/// the payload is `{"scope":"all"}`, never the empty disabled one.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "camelCase")]
+pub enum StopScope {
+    /// The running macro and every queued one.
+    #[default]
+    All,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StopMacrosPayload {
+    pub scope: StopScope,
+}
+
+/// Which layer's grid [`ActionType::CheatSheet`] shows (a required field: the
+/// payload is never the empty disabled one).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CheatSheetPayload {
+    pub layer: Layer,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SnippetLibraryItem {
@@ -1152,11 +1204,11 @@ pub fn load_or_initialize_config(
                 // recovering to an older backup would silently destroy data the
                 // newer version added. Fail the load with the file left intact so
                 // the user can update the app instead.
-                if raw_config_version(&config_path).is_some_and(|version| version > i64::from(SCHEMA_VERSION)) {
+                if let Some(found) = raw_config_version(&config_path).filter(|version| *version > i64::from(SCHEMA_VERSION)) {
                     log::error!(
                         "[config] config.json declares a version newer than this app (schema {SCHEMA_VERSION}); refusing to recover or overwrite it"
                     );
-                    return Err(primary_err);
+                    return Err(ConfigStoreError::NewerVersion { found, supported: SCHEMA_VERSION });
                 }
 
                 log::error!(
@@ -1939,6 +1991,8 @@ fn validate_action(
         // (Audit F001: a missing arm here sent every repairClipboard action to the
         // catch-all below, so validate_config rejected save/load of any config using it.)
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {}
+        (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {}
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => {}
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
@@ -3523,6 +3577,24 @@ mod tests {
     }
 
     #[test]
+    fn stop_macros_has_its_own_payload_and_passes_validation() {
+        let payload = ActionPayload::StopMacros(StopMacrosPayload { scope: StopScope::All });
+        let json = serde_json::to_string(&payload).expect("serialize");
+        assert_eq!(json, r#"{"scope":"all"}"#);
+        assert_eq!(serde_json::from_str::<ActionPayload>(&json).expect("roundtrip"), payload);
+        let mut config = default_seed_config();
+        let mut action = config.actions[0].clone();
+        action.id = "stop".into();
+        action.action_type = ActionType::StopMacros;
+        action.payload = payload;
+        action.conditions = Vec::new();
+        config.actions.push(action);
+        let value = serde_json::to_value(&config).expect("config json");
+        assert!(validate_config_schema_value(&value).is_ok(), "schema accepts stopMacros: {:?}", collect_schema_errors(&value));
+        assert!(validate_config(&config).is_ok(), "semantic validation accepts stopMacros");
+    }
+
+    #[test]
     fn sequence_step_repeat_is_optional_and_roundtrips() {
         // Backward compat: a step without `repeat` deserializes with repeat = None.
         let legacy: SequenceStep =
@@ -3916,11 +3988,18 @@ mod tests {
     }
 
     #[test]
+    fn the_sequence_step_limit_is_the_schemas() {
+        let schema: Value = serde_json::from_str(CONFIG_SCHEMA_JSON).expect("schema");
+        let max = schema["$defs"]["sequenceActionPayload"]["properties"]["steps"]["maxItems"].as_u64();
+        assert_eq!(max, Some(MAX_SEQUENCE_STEPS as u64), "schema maxItems and MAX_SEQUENCE_STEPS must agree");
+    }
+
+    #[test]
     fn the_schema_cannot_change_without_a_new_version() {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x3f53_dfbd_ffca_1976);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xe1d4_6b69_8f53_7479);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -3945,8 +4024,8 @@ mod tests {
 
         let result = load_or_initialize_config(temp_dir.path());
         assert!(
-            result.is_err(),
-            "a newer-schema config must not be silently recovered/overwritten"
+            matches!(result, Err(ConfigStoreError::NewerVersion { found: 99, .. })),
+            "a newer-schema config is reported as such, never recovered/overwritten"
         );
         let content = fs::read_to_string(&config_path).expect("newer config still present");
         assert!(
@@ -4484,6 +4563,7 @@ mod edge_proptests {
             paste_mode in prop_oneof![
                 Just(PasteMode::ClipboardPaste),
                 Just(PasteMode::SendText),
+                Just(PasteMode::KeyboardOnly),
             ],
             tags in prop::collection::vec("[a-z]{1,10}", 0..5),
         ) {

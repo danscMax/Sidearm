@@ -8,12 +8,15 @@ type TextDraft = { text: string; pasteMode: PasteMode; snippetId?: string };
 // The template tokens the backend expands at send time (see
 // input_synthesis::expand_snippet_tokens; `{|}` is a short `{cursor}`). Kept in
 // sync with that Rust list.
-const TOKEN_RE = /\{(?:date|clipboard|selection|cursor|\|)\}/g;
+// `{input:name}` is asked for in a small window before the phrase runs (input_prompt.rs).
+const TOKEN_RE = /\{(?:date|clipboard|selection|cursor|\||input:[^{}]+)\}/g;
+const INPUT_TOKEN = "{input:…}";
 const TOKENS: { token: string; descKey: string }[] = [
   { token: "{date}", descKey: "picker.tokenDateDesc" },
   { token: "{clipboard}", descKey: "picker.tokenClipboardDesc" },
   { token: "{selection}", descKey: "picker.tokenSelectionDesc" },
   { token: "{cursor}", descKey: "picker.tokenCursorDesc" },
+  { token: INPUT_TOKEN, descKey: "picker.tokenInputDesc" },
 ];
 
 /** Split the text into plain runs and <mark>ed token runs for the highlight
@@ -60,7 +63,9 @@ export function TextSnippetEditor({
   // button into its own inline copy (link-vs-copy semantics).
   const linked = Boolean(draft.snippetId);
   const linkedSnippet = linked ? library.find((s) => s.id === draft.snippetId) : undefined;
-  const usesClipboardFastPath = draft.text.length > 100;
+  const keyboardOnly = draft.pasteMode === "keyboardOnly";
+  // Mirrors input_synthesis::CLIPBOARD_PASTE_THRESHOLD; never in keyboard-only mode.
+  const usesClipboardFastPath = draft.text.length > 100 && !keyboardOnly;
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -159,7 +164,7 @@ export function TextSnippetEditor({
             key={token}
             type="button"
             className="token-chip"
-            onClick={() => insertToken(token)}
+            onClick={() => insertToken(token === INPUT_TOKEN ? `{input:${t("picker.tokenInputName")}}` : token)}
             title={t(descKey)}
             aria-label={t("picker.tokenInsertAria", { token })}
           >
@@ -175,6 +180,17 @@ export function TextSnippetEditor({
       {/* The save-to-library toggle only applies to an inline snippet; a linked
           one is already in the library. Outer wrapper is a <div> (not <label>)
           because Toggle renders its own <label>. */}
+      {linked ? null : (
+        <div className="snippet-save-toggle">
+          <Toggle
+            checked={keyboardOnly}
+            onChange={(on) => onChange({ ...draft, pasteMode: on ? "keyboardOnly" : "sendText" })}
+            ariaLabel={t("picker.keyboardOnly")}
+          />
+          <span>{t("picker.keyboardOnly")}</span>
+          <HelpTip text={t("picker.keyboardOnlyHint")} />
+        </div>
+      )}
       {linked ? null : (
         <div className="snippet-save-toggle">
           <Toggle

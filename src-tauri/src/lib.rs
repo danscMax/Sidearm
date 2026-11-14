@@ -19,6 +19,7 @@ mod machine_files;
 mod menu_usage;
 mod press_log;
 mod cheatsheet;
+mod input_prompt;
 mod mouse_memory;
 #[cfg(target_os = "windows")]
 mod mouse_settings;
@@ -95,7 +96,7 @@ use runtime::{
     EVENT_QUICK_RULE_START, EVENT_RUNTIME_ERROR, EVENT_RUNTIME_STARTED, EVENT_RUNTIME_STOPPED,
     EVENT_SINGLE_INSTANCE_BLOCKED, EVENT_TRAY_PROFILE_CHANGED, RuntimeStateSummary, RuntimeStore,
 };
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -178,27 +179,81 @@ fn is_foreground_fullscreen() -> bool {
     return false;
 }
 
+/// Logs when the main thread stops answering (a deadlock or a long block
+/// there freezes the window, the tray and every popup) and when it is back:
+/// a hang is otherwise invisible, the process stays alive.
+#[cfg(target_os = "windows")]
+fn spawn_main_thread_watch(app: AppHandle) {
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+    let _ = std::thread::Builder::new().name("main-thread-watch".into()).spawn(move || loop {
+        let (answered, answer) = std::sync::mpsc::channel::<()>();
+        let asked = std::time::Instant::now();
+        if app.run_on_main_thread(move || { let _ = answered.send(()); }).is_err() {
+            return; // the event loop is gone
+        }
+        match answer.recv_timeout(LIMIT) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                log::error!("[system] the main thread has not answered for {LIMIT:?}: the window, tray and popups are frozen");
+                if answer.recv().is_err() {
+                    return;
+                }
+                log::warn!("[system] the main thread answered again after {:?}", asked.elapsed());
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return, // shutting down
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    });
+}
+
+/// The OSD page listens for `osd-show` (it said so through `osd_ready`).
+static OSD_READY: AtomicBool = AtomicBool::new(false);
+/// The latest bubble asked for while the page was still loading.
+static OSD_PENDING: Mutex<Option<(String, String, config::Settings)>> = Mutex::new(None);
+
+/// The OSD page registered its listener: show the bubble that waited for it.
+#[tauri::command]
+fn osd_ready(app: AppHandle) {
+    let pending = {
+        let mut pending = OSD_PENDING.lock().recover_poison();
+        OSD_READY.store(true, Ordering::Release);
+        pending.take()
+    };
+    if let Some((label, name, settings)) = pending {
+        show_osd(&app, &label, &name, &settings);
+    }
+}
+
 /// Show the OSD notification bubble with the profile name.
 ///
-/// OSD window lifecycle (lazy creation):
-/// 1. First call: create the window and return without showing (let WebView load JS).
-/// 2. Subsequent calls: window exists, emit event + position + show + auto-hide.
-///
-/// This avoids startup flash, event loss, and foreground watcher interference.
+/// OSD window lifecycle (lazy creation): the first call creates the window and
+/// keeps the bubble pending; the page asks for it once it listens
+/// (`osd_ready`). Later calls emit the event, position, show and auto-hide.
 /// Shows the OSD bubble: `label` (bold-less, may be empty) then `profile_name`.
 pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, settings: &config::Settings) {
     if !settings.osd_enabled {
         return;
     }
     if is_foreground_fullscreen() {
+        log::info!("[osd] skipped: a fullscreen window is in front");
         return;
     }
 
-    let w = match app.get_webview_window("osd") {
-        Some(w) => w,
-        None => {
-            create_osd_window(app);
-            return; // WebView loading; next call will show
+    let existing = app.get_webview_window("osd");
+    let w = {
+        // Checked and kept under one lock with `osd_ready`: a bubble asked for
+        // while the page loads waits there and is shown once it listens.
+        let mut pending = OSD_PENDING.lock().recover_poison();
+        match existing {
+            Some(w) if OSD_READY.load(Ordering::Acquire) => w,
+            existing => {
+                *pending = Some((label.to_owned(), profile_name.to_owned(), settings.clone()));
+                drop(pending);
+                if existing.is_none() {
+                    create_osd_window(app);
+                }
+                return;
+            }
         }
     };
 
@@ -293,6 +348,7 @@ pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, setting
     }
 
     let _ = w.show();
+    log::info!("[osd] shown");
 
     // Emit for JS to update text and animate (no sizing/positioning in JS)
     let font_size_str = match settings.osd_font_size {
@@ -350,7 +406,30 @@ fn measure_text_width(text: &str, font_family: &str, font_size_px: i32, font_wei
 
 /// Create the hidden OSD window (called lazily on first show_osd).
 /// Positioned off-screen and explicitly hidden to prevent any flash.
+/// Builds a window on a thread of its own. `WebviewWindowBuilder::build` waits
+/// for the main thread, so on the main thread itself (a sync command such as a
+/// menu pick) it deadlocks; `creating` keeps a second build of it from starting.
+pub(crate) fn spawn_window_build(creating: &'static AtomicBool, build: impl FnOnce() -> bool + Send + 'static) {
+    if creating.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let started = std::thread::Builder::new().name("window-build".into()).spawn(move || {
+        if !build() {
+            creating.store(false, Ordering::Release); // the next call may try again
+        }
+    });
+    if started.is_err() {
+        creating.store(false, Ordering::Release);
+    }
+}
+
 fn create_osd_window(app: &AppHandle) {
+    static CREATING: AtomicBool = AtomicBool::new(false);
+    let app = app.clone();
+    spawn_window_build(&CREATING, move || build_osd_window(&app));
+}
+
+fn build_osd_window(app: &AppHandle) -> bool {
     use tauri::WebviewUrl;
     use tauri::WebviewWindowBuilder;
 
@@ -369,7 +448,10 @@ fn create_osd_window(app: &AppHandle) {
     {
         // Belt-and-suspenders: force hide even if visible(false) is ignored
         let _ = w.hide();
+        return true;
     }
+    log::warn!("[osd] could not create the window");
+    false
 }
 
 fn resolve_app_paths(app: &AppHandle) -> Arc<paths::AppPaths> {
@@ -388,6 +470,7 @@ fn build_tray_menu(
     app: &AppHandle,
     profiles: &[config::Profile],
     active_profile_id: Option<&str>,
+    manual_override: bool,
     is_running: bool,
     is_elevated: bool,
 ) -> tauri::Result<Menu<tauri::Wry>> {
@@ -420,6 +503,26 @@ fn build_tray_menu(
         )?)?;
     }
 
+    // A profile chosen by hand holds until changed: offer the way back to the rules.
+    if manual_override {
+        let later = |minutes: u64| -> tauri::Result<MenuItem<tauri::Wry>> {
+            MenuItem::with_id(
+                app,
+                format!("rules_after:{minutes}"),
+                crate::ui_text::native(&crate::ui_text!("runtime.trayRulesAfter", "In {minutes} minutes", minutes = minutes)),
+                true,
+                None::<&str>,
+            )
+        };
+        let now = MenuItem::with_id(app, "rules_now", crate::ui_text::native(&crate::ui_text!("runtime.trayRulesNow", "Now")), true, None::<&str>)?;
+        let (ten, thirty, sixty) = (later(10)?, later(30)?, later(60)?);
+        menu.append(&Submenu::with_items(
+            app,
+            crate::ui_text::native(&crate::ui_text!("runtime.trayRulesBack", "Back to the app rules")),
+            true,
+            &[&now, &ten, &thirty, &sixty],
+        )?)?;
+    }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&MenuItem::with_id(
         app,
@@ -436,6 +539,13 @@ fn build_tray_menu(
         } else {
             crate::ui_text::native(&crate::ui_text!("runtime.trayListen", "Listen to the mouse"))
         },
+        true,
+        None::<&str>,
+    )?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        "stop_macros",
+        crate::ui_text::native(&crate::ui_text!("runtime.trayStopMacros", "Stop macros")),
         true,
         None::<&str>,
     )?)?;
@@ -469,22 +579,37 @@ fn build_tray_menu(
 #[cfg(target_os = "windows")]
 fn update_tray_icon(app: &AppHandle, tray: &tauri::tray::TrayIcon, badge: Option<u8>) {
     static SHOWN: Mutex<Option<Option<u8>>> = Mutex::new(None);
-    let mut shown = SHOWN.lock().recover_poison();
+    let (handle, tray) = (app.clone(), tray.clone());
+    // `set_icon` waits for the main thread, which may itself wait for SHOWN
+    // (`set_native_texts` is a sync command there): decide and set on the main
+    // thread, so SHOWN is never held across that wait.
+    let scheduled = app.run_on_main_thread(move || {
+        settle_tray_icon(&SHOWN, badge, || {
+            let Some(base) = handle.default_window_icon() else { return Ok(()) };
+            let icon = match badge {
+                Some(percent) => tauri::image::Image::new_owned(
+                    tray_badge::compose(base.rgba(), base.width(), base.height(), percent),
+                    tray_badge::SIZE,
+                    tray_badge::SIZE,
+                ),
+                None => base.clone().to_owned(),
+            };
+            tray.set_icon(Some(icon))
+        });
+    });
+    if let Err(error) = scheduled {
+        log::warn!("[tray] icon update not scheduled: {error}");
+    }
+}
+
+/// Sets the icon for `badge` unless it already shows it; remembers it only once set.
+#[cfg(target_os = "windows")]
+fn settle_tray_icon<E: std::fmt::Display>(shown: &Mutex<Option<Option<u8>>>, badge: Option<u8>, set: impl FnOnce() -> Result<(), E>) {
+    let mut shown = shown.lock().recover_poison();
     if *shown == Some(badge) {
         return;
     }
-    let Some(base) = app.default_window_icon() else {
-        return;
-    };
-    let icon = match badge {
-        Some(percent) => tauri::image::Image::new_owned(
-            tray_badge::compose(base.rgba(), base.width(), base.height(), percent),
-            tray_badge::SIZE,
-            tray_badge::SIZE,
-        ),
-        None => base.clone().to_owned(),
-    };
-    match tray.set_icon(Some(icon)) {
+    match set() {
         Ok(()) => *shown = Some(badge),
         Err(error) => log::warn!("[tray] set_icon failed: {error}"),
     }
@@ -503,6 +628,7 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         ),
         Err(_) => (false, None),
     };
+    let has_manual = manual_override.is_some();
     let active = manual_override
         .or_else(|| Some(config.settings.fallback_profile_id.clone()))
         .filter(|id| !id.is_empty());
@@ -557,6 +683,7 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         app,
         &config.profiles,
         active.as_deref(),
+        has_manual,
         is_running,
         is_elevated,
     ) {
@@ -567,6 +694,47 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
         }
         Err(error) => log::warn!("[tray] build_tray_menu failed: {error}"),
     }
+}
+
+/// Bumped by every "back to the app rules" choice: only the latest one acts.
+static RULES_BACK: AtomicU64 = AtomicU64::new(0);
+
+/// After `delay`, the profile chosen by hand gives way to the app rules — unless
+/// another profile was chosen meanwhile, or a later choice replaced this one.
+fn schedule_rules_back(app: &AppHandle, delay: std::time::Duration) {
+    let generation = RULES_BACK.fetch_add(1, Ordering::SeqCst) + 1;
+    let held = app.state::<Arc<Mutex<RuntimeStore>>>().lock().ok().and_then(|store| store.manual_profile_override().map(str::to_owned));
+    let Some(held) = held else { return };
+    log::info!("[tray] back to the app rules in {delay:?} (now `{held}`)");
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("rules-back".into()).spawn(move || {
+        std::thread::sleep(delay);
+        if RULES_BACK.load(Ordering::SeqCst) == generation {
+            release_manual_profile(&app, Some(&held));
+        }
+    });
+}
+
+/// Drops the profile chosen by hand (only while it is still `expected`, when
+/// given) and resolves the window in front by the app rules at once.
+fn release_manual_profile(app: &AppHandle, expected: Option<&str>) {
+    RULES_BACK.fetch_add(1, Ordering::SeqCst);
+    let store = app.state::<Arc<Mutex<RuntimeStore>>>().inner().clone();
+    {
+        let Ok(mut runtime) = store.lock() else { return };
+        if expected.is_some_and(|expected| runtime.manual_profile_override() != Some(expected)) {
+            return; // another profile was chosen by hand meanwhile
+        }
+        runtime.set_manual_profile_override(None);
+    }
+    log::info!("[tray] back to the app rules");
+    if let Ok(config_dir) = resolve_config_dir(app)
+        && let Ok(load) = load_or_initialize_config(&config_dir)
+        && let Ok(result) = window_capture::capture_active_window_with_resolution(&load.config, &app.package_info().name, None)
+    {
+        capture_backend::emit_profile_resolved_and_notify(app, &store, &result, &load.config);
+    }
+    rebuild_tray_menu(app);
 }
 
 /// Reload config from disk and rebuild the tray menu. Use this from triggers
@@ -748,21 +916,13 @@ fn resolve_log_dir(app: &AppHandle) -> PathBuf {
 fn validate_user_file_path(path: &str) -> Result<PathBuf, CommandError> {
     let path = PathBuf::from(path);
     if !path.is_absolute() {
-        return Err(CommandError::new(
-            "invalid_path",
-            "File path must be absolute.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.pathNotAbsolute", "File path must be absolute.")));
     }
     if path
         .components()
         .any(|component| matches!(component, std::path::Component::ParentDir))
     {
-        return Err(CommandError::new(
-            "invalid_path",
-            "File path must not contain `..` segments.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.pathDotDot", "File path must not contain `..` segments.")));
     }
     Ok(path)
 }
@@ -782,7 +942,7 @@ const MAX_FULL_CONFIG_IMPORT_BYTES: u64 = 16 * 1024 * 1024; // 16 MiB
 /// profiles, autostart scripts, or `.lnk`/`.ps1` files now that the path is no
 /// longer confined to the home directory (preserves the P2-2 fix).
 fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
-    validate_user_path_with_ext(path, &["json"], "File must have a .json extension.")
+    validate_user_path_with_ext(path, &["json"], crate::ui_text!("error.extJson", "File must have a .json extension."))
 }
 
 /// As [`validate_user_file_path`], plus a case-insensitive extension whitelist.
@@ -791,7 +951,7 @@ fn validate_user_json_path(path: &str) -> Result<PathBuf, CommandError> {
 fn validate_user_path_with_ext(
     path: &str,
     allowed: &[&str],
-    reject_message: &'static str,
+    reject: crate::ui_text::UiText,
 ) -> Result<PathBuf, CommandError> {
     let validated = validate_user_file_path(path)?;
     let ext_ok = validated
@@ -799,7 +959,7 @@ fn validate_user_path_with_ext(
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| allowed.iter().any(|a| extension.eq_ignore_ascii_case(a)));
     if !ext_ok {
-        return Err(CommandError::new("invalid_path", reject_message, None));
+        return Err(CommandError::from_ui("invalid_path", reject));
     }
     Ok(validated)
 }
@@ -835,10 +995,9 @@ fn check_import_size(path: &Path, max_bytes: u64, code: &'static str) -> Result<
         .map_err(|e| CommandError::internal(format!("Failed to stat import file: {e}")))?
         .len();
     if len > max_bytes {
-        return Err(CommandError::new(
+        return Err(CommandError::from_ui(
             code,
-            format!("File exceeds the {max_bytes}-byte import limit."),
-            None,
+            crate::ui_text!("error.importTooLarge", "File exceeds the {max_bytes}-byte import limit.", max_bytes = max_bytes),
         ));
     }
     Ok(())
@@ -892,20 +1051,132 @@ struct TextFile {
     text: String,
 }
 
+/// A `.txt` / `.md` file "Add from folder" did not take, and why.
+#[derive(Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkippedTextFile {
+    /// File name with its extension.
+    name: String,
+    /// `tooLarge` (over 1 MiB), `notUtf8`, `unreadable`, `overLimit` (past the first 200).
+    reason: &'static str,
+}
+
+#[derive(serde::Serialize)]
+struct TextFolder {
+    files: Vec<TextFile>,
+    skipped: Vec<SkippedTextFile>,
+}
+
+/// Reads the text files of a folder listing, saying why each one left out was.
+fn read_text_files(mut files: Vec<PathBuf>, max_file: u64, max_files: usize) -> TextFolder {
+    files.sort();
+    let name_of = |file: &Path| file.file_name().map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let mut folder = TextFolder { files: Vec::new(), skipped: Vec::new() };
+    for (index, file) in files.into_iter().enumerate() {
+        let reason = if index >= max_files {
+            Some("overLimit")
+        } else if file.metadata().is_ok_and(|meta| meta.len() > max_file) {
+            Some("tooLarge")
+        } else {
+            match fs::read(&file) {
+                Err(_) => Some("unreadable"),
+                Ok(bytes) => match String::from_utf8(bytes) {
+                    Err(_) => Some("notUtf8"),
+                    Ok(text) => {
+                        let name = file.file_stem().map_or_else(String::new, |stem| stem.to_string_lossy().into_owned());
+                        folder.files.push(TextFile { name, text });
+                        None
+                    }
+                },
+            }
+        };
+        if let Some(reason) = reason {
+            folder.skipped.push(SkippedTextFile { name: name_of(&file), reason });
+        }
+    }
+    folder
+}
+
+/// The file a Windows shortcut (`.lnk`) starts, as stored in it (environment
+/// variables expanded). An app rule matches that exe, not the shortcut.
+#[cfg(target_os = "windows")]
+fn shortcut_target(path: &Path) -> Result<PathBuf, String> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, STGM_READ};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{HSTRING, Interface};
+    // SAFETY: COM is initialized on this (blocking) thread and uninitialized only
+    // when this call initialized it; the buffer outlives GetPath.
+    unsafe {
+        let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let target = (|| {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+            let file: IPersistFile = link.cast().map_err(|e| e.to_string())?;
+            file.Load(&HSTRING::from(path.as_os_str()), STGM_READ).map_err(|e| e.to_string())?;
+            let mut buffer = vec![0u16; 32_768];
+            link.GetPath(&mut buffer, std::ptr::null_mut(), 0).map_err(|e| e.to_string())?;
+            let length = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
+            Ok(PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
+        })();
+        if initialized {
+            CoUninitialize();
+        }
+        target
+    }
+}
+
+/// A `.lnk` on a drive letter (`C:\…` or `\\?\C:\…`), never a UNC or device path.
+#[cfg(target_os = "windows")]
+fn is_local_shortcut(path: &Path) -> bool {
+    use std::path::{Component, Prefix};
+    let local = matches!(path.components().next(), Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_)));
+    local && path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("lnk"))
+}
+
+/// An app rule picked from a shortcut: the `.exe` it starts. Anything else (a
+/// shortcut to a document, a folder or a store app) is refused.
+#[tauri::command]
+async fn resolve_shortcut_target(path: String) -> Result<String, CommandError> {
+    #[cfg(target_os = "windows")]
+    {
+        let source = validate_user_file_path(&path)?;
+        // Only a .lnk on a local drive: loading a UNC path would make Windows
+        // contact that server (and offer it the user's NTLM credentials).
+        if !is_local_shortcut(&source) {
+            return Err(CommandError::from_ui("invalid_path", crate::ui_text!("error.shortcutLocalOnly", "Only a .lnk shortcut on a local drive can be read.")));
+        }
+        let target = tauri::async_runtime::spawn_blocking(move || shortcut_target(&source))
+            .await
+            .map_err(|e| CommandError::internal(format!("resolve_shortcut_target task failed: {e}")))?
+            .map_err(|reason| CommandError::from_ui("shortcut_unreadable", crate::ui_text!("error.shortcutUnreadable", "The shortcut could not be read: {reason}", reason = reason)))?;
+        if !target.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+            return Err(CommandError::from_ui(
+                "shortcut_not_exe",
+                crate::ui_text!("error.shortcutNotExe", "The shortcut does not start an .exe program (it starts `{target}`).", target = target.display()),
+            ));
+        }
+        Ok(target.to_string_lossy().into_owned())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err(CommandError::from_ui("unsupported_platform", crate::ui_text!("error.shortcutWindowsOnly", "Shortcuts are read only on Windows.")))
+    }
+}
+
 /// The `.txt` / `.md` files directly in a user-chosen folder, sorted by name,
 /// for the menu editor's "Add from folder". Their text is copied into the
 /// config; the folder is not referenced afterwards. Files over 1 MiB, files
-/// that are not UTF-8 and everything past the first 200 are skipped.
+/// that are not UTF-8 and everything past the first 200 are skipped and named.
 #[tauri::command]
-async fn read_text_folder(path: String) -> Result<Vec<TextFile>, CommandError> {
+async fn read_text_folder(path: String) -> Result<TextFolder, CommandError> {
     const MAX_FILE: u64 = 1024 * 1024;
     const MAX_FILES: usize = 200;
     tauri::async_runtime::spawn_blocking(move || {
         let dir = PathBuf::from(&path);
         if !dir.is_dir() {
-            return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
+            return Err(CommandError::from_ui("not_a_folder", crate::ui_text!("error.notAFolder", "The chosen path is not a folder.")));
         }
-        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+        let files: Vec<PathBuf> = fs::read_dir(&dir)
             .map_err(|e| CommandError::internal(format!("Failed to read the folder: {e}")))?
             .filter_map(|entry| entry.ok().map(|entry| entry.path()))
             .filter(|file| {
@@ -914,19 +1185,9 @@ async fn read_text_folder(path: String) -> Result<Vec<TextFile>, CommandError> {
                         .extension()
                         .and_then(|ext| ext.to_str())
                         .is_some_and(|ext| ext.eq_ignore_ascii_case("txt") || ext.eq_ignore_ascii_case("md"))
-                    && file.metadata().is_ok_and(|meta| meta.len() <= MAX_FILE)
             })
             .collect();
-        files.sort();
-        Ok(files
-            .into_iter()
-            .take(MAX_FILES)
-            .filter_map(|file| {
-                let text = fs::read_to_string(&file).ok()?;
-                let name = file.file_stem()?.to_string_lossy().into_owned();
-                Some(TextFile { name, text })
-            })
-            .collect())
+        Ok(read_text_files(files, MAX_FILE, MAX_FILES))
     })
     .await
     .map_err(|e| CommandError::internal(format!("read_text_folder task failed: {e}")))?
@@ -940,7 +1201,7 @@ async fn export_snippets(path: String, contents: String) -> Result<(), CommandEr
     let validated_path = validate_user_path_with_ext(
         &path,
         &["json", "md", "txt"],
-        "Snippet export must be a .json, .md, or .txt file.",
+        crate::ui_text!("error.extSnippets", "Snippet export must be a .json, .md, or .txt file."),
     )?;
     tauri::async_runtime::spawn_blocking(move || {
         if let Some(parent) = validated_path.parent() {
@@ -961,7 +1222,7 @@ async fn export_snippets(path: String, contents: String) -> Result<(), CommandEr
 /// then opened in the default browser (print or save as PDF there).
 #[tauri::command]
 async fn export_layout_html(path: String, contents: String) -> Result<(), CommandError> {
-    let validated_path = validate_user_path_with_ext(&path, &["html", "htm"], "The layout page must be an .html file.")?;
+    let validated_path = validate_user_path_with_ext(&path, &["html", "htm"], crate::ui_text!("error.extHtml", "The layout page must be an .html file."))?;
     tauri::async_runtime::spawn_blocking(move || {
         config::persist_atomically(&validated_path, |file| {
             use std::io::Write as _;
@@ -986,25 +1247,13 @@ async fn export_verification_session(
 
     // Validate filename: must not be empty, must end with .json, must not contain path separators or traversal
     if filename.is_empty() {
-        return Err(CommandError::new(
-            "invalid_request",
-            "Export filename must not be empty.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_request", crate::ui_text!("error.exportNameEmpty", "Export filename must not be empty.")));
     }
     if !filename.ends_with(".json") {
-        return Err(CommandError::new(
-            "invalid_request",
-            "Export filename must end with .json.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_request", crate::ui_text!("error.exportNameJson", "Export filename must end with .json.")));
     }
     if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
-        return Err(CommandError::new(
-            "invalid_request",
-            "Export filename must not contain path separators or '..' segments.",
-            None,
-        ));
+        return Err(CommandError::from_ui("invalid_request", crate::ui_text!("error.exportNamePath", "Export filename must not contain path separators or '..' segments.")));
     }
 
     // Construct the export path under config_dir/exports/ — this is under the
@@ -1164,7 +1413,7 @@ fn reload_active_config(
         Some(Err(message)) => {
             let summary = store.lock().recover_poison().stop();
             let _ = app.emit(EVENT_RUNTIME_STOPPED, &summary);
-            Err(CommandError::new("runtime_reload_failed", message, None))
+            Err(CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))
         }
     })?
 }
@@ -1199,10 +1448,9 @@ fn validated_device_image_path(app: &AppHandle, file_name: &str) -> Result<PathB
         .and_then(device_image_mime)
         .is_some();
     if !config::is_bare_file_name(file_name) || !is_image {
-        return Err(CommandError::new(
+        return Err(CommandError::from_ui(
             "device_image_invalid_name",
-            format!("`{file_name}` is not a bare file name."),
-            None,
+            crate::ui_text!("error.imageName", "`{file_name}` is not a bare file name.", file_name = file_name),
         ));
     }
     Ok(resolve_config_dir(app)?
@@ -1221,10 +1469,9 @@ async fn import_device_image(app: AppHandle, source_path: String) -> Result<Stri
         .map(str::to_ascii_lowercase)
         .unwrap_or_default();
     if device_image_mime(&extension).is_none() {
-        return Err(CommandError::new(
+        return Err(CommandError::from_ui(
             "device_image_unsupported",
-            format!("`{extension}` is not a supported image type (png/jpg/webp/gif/bmp)."),
-            None,
+            crate::ui_text!("error.imageType", "`{extension}` is not a supported image type (png/jpg/webp/gif/bmp).", extension = extension),
         ));
     }
 
@@ -1234,14 +1481,14 @@ async fn import_device_image(app: AppHandle, source_path: String) -> Result<Stri
             CommandError::internal(format!("Failed to read `{}`: {error}", source.display()))
         })?;
         if metadata.len() > DEVICE_IMAGE_MAX_BYTES {
-            return Err(CommandError::new(
+            return Err(CommandError::from_ui(
                 "device_image_too_large",
-                format!(
-                    "Image is {} MB; the limit is {} MB.",
-                    metadata.len() / (1024 * 1024),
-                    DEVICE_IMAGE_MAX_BYTES / (1024 * 1024)
+                crate::ui_text!(
+                    "error.imageTooLarge",
+                    "Image is {size} MB; the limit is {limit} MB.",
+                    size = metadata.len() / (1024 * 1024),
+                    limit = DEVICE_IMAGE_MAX_BYTES / (1024 * 1024)
                 ),
-                None,
             ));
         }
         fs::create_dir_all(&devices_dir).map_err(|error| {
@@ -1274,10 +1521,9 @@ async fn read_device_image(app: AppHandle, file_name: String) -> Result<String, 
         .and_then(|ext| ext.to_str())
         .and_then(device_image_mime)
         .ok_or_else(|| {
-            CommandError::new(
+            CommandError::from_ui(
                 "device_image_unsupported",
-                format!("`{file_name}` is not a supported image type."),
-                None,
+                crate::ui_text!("error.imageTypeStored", "`{file_name}` is not a supported image type.", file_name = file_name),
             )
         })?;
     tauri::async_runtime::spawn_blocking(move || {
@@ -1285,10 +1531,9 @@ async fn read_device_image(app: AppHandle, file_name: String) -> Result<String, 
             CommandError::internal(format!("Failed to read `{}`: {error}", path.display()))
         })?;
         if metadata.len() > DEVICE_IMAGE_MAX_BYTES {
-            return Err(CommandError::new(
+            return Err(CommandError::from_ui(
                 "device_image_too_large",
-                "Stored image exceeds the size limit.".to_string(),
-                None,
+                crate::ui_text!("error.imageStoredTooLarge", "Stored image exceeds the size limit."),
             ));
         }
         let bytes = fs::read(&path).map_err(|error| {
@@ -1479,19 +1724,11 @@ async fn restore_config_from_backup_impl(
     match backup::check_backup_location(&config_dir, &backup_pb) {
         backup::BackupLocationCheck::Inside => {}
         backup::BackupLocationCheck::Outside => {
-            return Err(CommandError::new(
-                "invalid_backup_path",
-                "Backup path must point to a file inside the config directory.",
-                Some(vec![backup_path]),
-            ));
+            return Err(CommandError::from_ui("invalid_backup_path", crate::ui_text!("error.backupOutside", "Backup path must point to a file inside the config directory.")).with_details(vec![backup_path]));
         }
         backup::BackupLocationCheck::Unresolvable(detail) => {
             log::warn!("[restore] backup path unresolvable: {detail}");
-            return Err(CommandError::new(
-                "backup_path_unresolvable",
-                "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.",
-                Some(vec![backup_path]),
-            ));
+            return Err(CommandError::from_ui("backup_path_unresolvable", crate::ui_text!("error.backupUnreachable", "Could not access the backup path. It may be on a disconnected network drive or still syncing (e.g. OneDrive). Please try again.")).with_details(vec![backup_path]));
         }
     }
 
@@ -1529,11 +1766,11 @@ async fn export_layout_folder(app: AppHandle, target_dir: String) -> Result<Stri
         let parent = PathBuf::from(&target_dir);
         let plain = parent.is_absolute() && !parent.components().any(|part| matches!(part, std::path::Component::ParentDir));
         if !plain || !parent.is_dir() {
-            return Err(CommandError::new("not_a_folder", "The chosen path is not a folder.", None));
+            return Err(CommandError::from_ui("not_a_folder", crate::ui_text!("error.notAFolder", "The chosen path is not a folder.")));
         }
         let source = config_dir.join("config.json");
         if !source.is_file() {
-            return Err(CommandError::new("io_error", "No config.json to export — save the app at least once first.", None));
+            return Err(CommandError::from_ui("io_error", crate::ui_text!("error.noConfigToExport", "No config.json to export — save the app at least once first.")));
         }
         press_log::flush();
         let base = format!("Sidearm-layout-{}", backup::local_date_string());
@@ -1573,11 +1810,7 @@ async fn export_full_config_to(app: AppHandle, target_path: String) -> Result<St
     let source = config_dir.join("config.json");
     tauri::async_runtime::spawn_blocking(move || -> Result<String, CommandError> {
         if !source.is_file() {
-            return Err(CommandError::new(
-                "io_error",
-                "No config.json to export — save the app at least once first.",
-                None,
-            ));
+            return Err(CommandError::from_ui("io_error", crate::ui_text!("error.noConfigToExport", "No config.json to export — save the app at least once first.")));
         }
         if let Some(parent) = validated.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -1610,17 +1843,16 @@ async fn import_full_config_preview(source_path: String) -> Result<ImportPreview
     tauri::async_runtime::spawn_blocking(move || -> Result<ImportPreview, CommandError> {
         ensure_full_config_import_size(&validated)?;
         let raw = fs::read_to_string(&validated).map_err(|e| {
-            CommandError::new(
+            CommandError::from_ui(
                 "io_error",
-                format!("Failed to read import file: {e}"),
-                Some(vec![validated.to_string_lossy().into_owned()]),
+                crate::ui_text!("error.importRead", "Failed to read import file: {reason}", reason = e),
             )
+            .with_details(vec![validated.to_string_lossy().into_owned()])
         })?;
         let raw_value: serde_json::Value = serde_json::from_str(&raw).map_err(|e| {
-            CommandError::new(
+            CommandError::from_ui(
                 "parse_error",
-                format!("Failed to parse import JSON: {e}"),
-                None,
+                crate::ui_text!("error.importParse", "Failed to parse import JSON: {reason}", reason = e),
             )
         })?;
 
@@ -1868,11 +2100,7 @@ async fn import_synapse_into_config(
                 .map_err(|e| CommandError::internal(format!("serialize failed: {e}")))?;
             let schema_errors = config::collect_schema_errors(&value);
             if !schema_errors.is_empty() {
-                return Err(CommandError::new(
-                    "schema_violation",
-                    "Imported config does not match the expected schema.",
-                    Some(schema_errors),
-                ));
+                return Err(CommandError::from_ui("schema_violation", crate::ui_text!("error.importSchema", "Imported config does not match the expected schema.")).with_details(schema_errors));
             }
             config::validate_config(&result.config).map_err(CommandError::from)?;
             Ok(result)
@@ -1933,7 +2161,7 @@ async fn set_input_capture_mode(app: AppHandle, enabled: bool, check_extra_contr
                     let config = load_or_initialize_config(&resolve_config_dir(&app)?)
                         .map_err(CommandError::from)?.config;
                     controller.reload_saved_config(app.clone(), store.inner().clone(), config, app.package_info().name.clone())
-                        .map_err(|message| CommandError::new("runtime_reload_failed", message, None))
+                        .map_err(|message| CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))
                 })();
                 if let Err(error) = reload {
                     mouse_memory::live_overlay::CHECK_EXTRA_CONTROLS.store(false, Ordering::Release);
@@ -2014,7 +2242,7 @@ async fn start_runtime(
             )
             .map(|()| true)
     }, |result| {
-        let started = result.map_err(|message| CommandError::new("runtime_start_failed", message, None))?;
+        let started = result.map_err(|message| CommandError::from_ui("runtime_start_failed", crate::ui_text!("error.runtimeStart", "Could not start capture: {reason}", reason = message)))?;
         let summary = {
             let mut store = runtime_store.lock().recover_poison();
             if started { store.start(load_response.config.version, load_response.warnings.len()) }
@@ -2042,7 +2270,7 @@ async fn stop_runtime(
     runtime_controller: State<'_, Arc<Mutex<RuntimeController>>>,
 ) -> Result<RuntimeStateSummary, CommandError> {
     let summary = runtime_transition(&runtime_controller, |controller| controller.stop(), |result| {
-        result.map_err(|message| CommandError::new("runtime_stop_failed", message, None))?;
+        result.map_err(|message| CommandError::from_ui("runtime_stop_failed", crate::ui_text!("error.runtimeStop", "Could not stop capture: {reason}", reason = message)))?;
         let summary = runtime_store.lock().recover_poison().stop();
         app.emit(EVENT_RUNTIME_STOPPED, &summary).map_err(|error| {
             CommandError::internal(format!("Failed to emit runtime_stopped event: {error}"))
@@ -2116,6 +2344,36 @@ fn menu_layout(app: AppHandle, generation: u64, width: f64, height: f64) {
 #[tauri::command]
 fn menu_search(app: AppHandle, query: String) {
     menu_popup::search_from_window(&app, &query);
+}
+
+/// The input-field window loaded and listens.
+#[tauri::command]
+fn prompt_ready(app: AppHandle) {
+    input_prompt::page_ready(&app);
+}
+
+/// The input-field window measured itself (physical pixels).
+#[tauri::command]
+fn prompt_layout(app: AppHandle, generation: u64, width: f64, height: f64) {
+    input_prompt::page_layout(&app, generation, width, height);
+}
+
+/// Enter in the input-field window: run the phrase with these values.
+#[tauri::command]
+fn prompt_submit(app: AppHandle, generation: u64, values: std::collections::HashMap<String, String>) {
+    input_prompt::submit(&app, generation, values);
+}
+
+/// Esc or a click elsewhere: the phrase does not run.
+#[tauri::command]
+fn prompt_cancel(app: AppHandle, generation: u64) {
+    input_prompt::cancel(&app, generation);
+}
+
+/// The menu popup's search scope switch: `all` menus or only this one.
+#[tauri::command]
+fn menu_search_scope(app: AppHandle, all: bool) {
+    menu_popup::search_scope_from_window(&app, all);
 }
 
 /// Enter in the menu popup.
@@ -2244,7 +2502,7 @@ async fn reload_runtime(
             store.stop()
         };
         let _ = app.emit(EVENT_RUNTIME_STOPPED, &stopped_summary);
-        return Err(CommandError::new("runtime_reload_failed", message, None));
+        return Err(CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)));
     }
 
     let summary = {
@@ -2272,7 +2530,7 @@ async fn rehook_capture(
         .map_err(|_| CommandError::internal("runtime controller lock poisoned"))?;
     controller
         .rehook()
-        .map_err(|message| CommandError::new("rehook_failed", message, None))
+        .map_err(|message| CommandError::from_ui("rehook_failed", crate::ui_text!("error.rehook", "Could not reconnect the keyboard hook: {reason}", reason = message)))
 }
 
 #[tauri::command]
@@ -2322,7 +2580,7 @@ async fn set_admin_autostart(
             admin_autostart::disable()
         };
         if let Err(message) = result {
-            return Err(CommandError::new("admin_autostart_failed", message, None));
+            return Err(CommandError::from_ui("admin_autostart_failed", crate::ui_text!("error.adminAutostart", "Could not change starting as administrator: {reason}", reason = message)));
         }
         Ok(admin_autostart::query())
     })
@@ -2396,11 +2654,7 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
     #[cfg(not(target_os = "windows"))]
     {
         let _ = app;
-        Err(CommandError::new(
-            "unsupported_platform",
-            "Restarting as administrator is only supported on Windows.",
-            None,
-        ))
+        Err(CommandError::from_ui("unsupported_platform", crate::ui_text!("error.adminWindowsOnly", "Restarting as administrator is only supported on Windows.")))
     }
 }
 
@@ -2454,7 +2708,7 @@ async fn capture_active_window(
                 &app_name,
                 delay_ms,
             )
-            .map_err(|message| CommandError::new("window_capture_error", message, None))?;
+            .map_err(|message| CommandError::from_ui("window_capture_error", crate::ui_text!("error.windowCapture", "Could not read the window in front: {reason}", reason = message)))?;
             Ok::<_, CommandError>((capture, settings))
         })
         .await
@@ -3011,7 +3265,7 @@ async fn start_macro_recording(
         .lock()
         .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
     rec.start(runtime::timestamp_millis())
-        .map_err(|msg| CommandError::new("recording_error", msg, None))
+        .map_err(|msg| CommandError::from_ui("recording_error", crate::ui_text!("error.recording", "Recording failed: {reason}", reason = msg)))
 }
 
 #[tauri::command]
@@ -3034,7 +3288,7 @@ async fn stop_macro_recording(
         .lock()
         .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
     rec.stop(runtime::timestamp_millis())
-        .map_err(|msg| CommandError::new("recording_error", msg, None))
+        .map_err(|msg| CommandError::from_ui("recording_error", crate::ui_text!("error.recording", "Recording failed: {reason}", reason = msg)))
 }
 
 /// No onboard-path mouse plugged in is `onboard_not_connected` (the guard
@@ -3058,7 +3312,7 @@ async fn apply_onboard_mapping(
         let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
         device
             .apply_bindings(&bindings)
-            .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
+            .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))
     })
     .await
     .map_err(|e| CommandError::internal(format!("apply_onboard_mapping task failed: {e}")))?
@@ -3076,7 +3330,7 @@ async fn verify_onboard_mapping(
         let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
         device
             .verify(&bindings)
-            .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))
+            .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))
     })
     .await
     .map_err(|e| CommandError::internal(format!("verify_onboard_mapping task failed: {e}")))?
@@ -3102,9 +3356,9 @@ async fn restore_onboard_control(app: AppHandle) -> Result<(), CommandError> {
 fn restore_and_verify_onboard(config: &AppConfig) -> Result<(), CommandError> {
     let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
     device.ensure_normal_mode()
-        .map_err(|msg| CommandError::new("onboard_mode_stuck", msg, None))?;
+        .map_err(|msg| CommandError::from_ui("onboard_mode_stuck", crate::ui_text!("error.onboardModeStuck", "The mouse did not return to its normal mode: {reason}", reason = msg)))?;
     mouse_offline::write_signals(&device, config)
-        .map_err(|msg| CommandError::new("onboard_write_unconfirmed", msg, None))?;
+        .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))?;
     let bindings = mouse_memory::onboard_bindings(config);
     if device.mode().map_err(CommandError::internal)? != mouse_memory::MODE_NORMAL
         || !device.drifted_bindings(&bindings).map_err(CommandError::internal)?.is_empty()
@@ -3208,6 +3462,13 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// A `fake-mice` test build running against virtual mice (`SIDEARM_FAKE_MICE`):
 /// no USB, and no input sent to the desktop.
+/// A fake-mice run that also opens the real popup windows (menu, cheat sheet,
+/// OSD, input fields): `npm run e2e -- --popups`. They show on screen and the
+/// menu takes the keyboard focus, so it is never the default run.
+pub(crate) fn fake_popups() -> bool {
+    fake_mode() && std::env::var_os("SIDEARM_FAKE_POPUPS").is_some()
+}
+
 pub(crate) fn fake_mode() -> bool {
     #[cfg(all(target_os = "windows", feature = "fake-mice"))]
     if mouse_memory::fake::files::dir().is_some() {
@@ -3466,7 +3727,7 @@ fn switch_key_signals(app: &AppHandle, consumer: bool) -> Result<(), CommandErro
         log::info!("[onboard] signal switch left to the guard: {message}");
         onboard_guard::request_check();
     }
-    restart_capture(app, || true).map_err(|message| CommandError::new("runtime_reload_failed", message, None))?;
+    restart_capture(app, || true).map_err(|message| CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))?;
     Ok(())
 }
 
@@ -3962,6 +4223,7 @@ pub fn run() {
                 Ok(config_dir) => {
                     // Restores the mice should this Sidearm be killed with its helper.
                     mouse_restore::spawn_watchdog(&config_dir);
+                    spawn_main_thread_watch(app.handle().clone());
                     spawn_config_watch(app.handle().clone(), config_dir.clone());
                     // Before the guard and the capture runtime read it.
                     let key_signals = config_dir.join(mouse_memory::KEY_SIGNALS_FILE).exists();
@@ -4057,7 +4319,7 @@ pub fn run() {
             // Initial menu has no profile rows yet — rebuild_tray_menu (called
             // right after build, below) loads config and populates them. Keeping
             // one menu-construction path (build_tray_menu) avoids drift.
-            let tray_menu = build_tray_menu(app.handle(), &[], None, false, is_elevated)?;
+            let tray_menu = build_tray_menu(app.handle(), &[], None, false, false, is_elevated)?;
 
             let mut tray_builder = TrayIconBuilder::with_id("sidearm-tray");
             match app.default_window_icon() {
@@ -4109,6 +4371,8 @@ pub fn run() {
                             if let Ok(mut store) = app.state::<Arc<Mutex<RuntimeStore>>>().lock() {
                                 store.set_manual_profile_override(Some(profile_id.clone()));
                             }
+                            // Chosen by hand again: a pending way back to the rules is off.
+                            RULES_BACK.fetch_add(1, Ordering::SeqCst);
                             capture_backend::follow_manual_profile(&profile_id);
                             let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
                             rebuild_tray_menu(&app);
@@ -4165,6 +4429,19 @@ pub fn run() {
                         });
                     }
                     "quit" => app.exit(0),
+                    "rules_now" => {
+                        let app = app.clone();
+                        tauri::async_runtime::spawn_blocking(move || release_manual_profile(&app, None));
+                    }
+                    other if other.starts_with("rules_after:") => {
+                        if let Some(minutes) = other.strip_prefix("rules_after:").and_then(|m| m.parse::<u64>().ok()) {
+                            schedule_rules_back(app, std::time::Duration::from_secs(minutes * 60));
+                        }
+                    }
+                    "stop_macros" => {
+                        executor::cancel_live_sequences();
+                        log::info!("[tray] macros stopped");
+                    }
                     "relaunch_as_admin" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -4276,11 +4553,18 @@ pub fn run() {
             set_key_recording,
             cheatsheet_layout,
             cheatsheet_ready,
+            osd_ready,
             export_layout_html,
             export_layout_folder,
             get_press_log,
             menu_wheel,
             menu_search,
+            menu_search_scope,
+            prompt_ready,
+            prompt_layout,
+            prompt_submit,
+            prompt_cancel,
+            resolve_shortcut_target,
             menu_confirm,
             menu_close,
             menu_back,
@@ -4544,6 +4828,80 @@ mod tests {
         }
     }
 
+    /// Errors the UI shows go through `CommandError::from_ui` (translated); the
+    /// untranslated constructor is left only where the text is internal. A ratchet:
+    /// lower the number when one goes, never raise it.
+    #[test]
+    fn untranslated_command_errors_do_not_grow() {
+        let count = include_str!("lib.rs").matches(concat!("CommandError::", "new(")).count();
+        assert!(count <= 8, "{count} untranslated CommandError::new calls: use CommandError::from_ui with ui_text!");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn only_a_local_lnk_is_read() {
+        assert!(is_local_shortcut(Path::new(r"C:\Users\me\Desktop\Editor.lnk")));
+        assert!(is_local_shortcut(Path::new(r"\\?\C:\Editor.LNK")));
+        assert!(!is_local_shortcut(Path::new(r"\\attacker\share\x.lnk")), "UNC: would leak NTLM");
+        assert!(!is_local_shortcut(Path::new(r"\\?\UNC\attacker\share\x.lnk")));
+        assert!(!is_local_shortcut(Path::new(r"C:\Users\me\notes.txt")));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_shortcut_resolves_to_the_exe_it_starts() {
+        use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile};
+        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+        use windows::core::{HSTRING, Interface};
+        let notepad = PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())).join("System32").join("notepad.exe");
+        let link_path = std::env::temp_dir().join(format!("sidearm-shortcut-{}.lnk", std::process::id()));
+        // SAFETY: COM initialized on this test thread; the strings outlive the calls.
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).expect("shell link");
+            link.SetPath(&HSTRING::from(notepad.as_os_str())).expect("set path");
+            link.cast::<IPersistFile>().expect("persist").Save(&HSTRING::from(link_path.as_os_str()), true).expect("save");
+        }
+        let target = shortcut_target(&link_path);
+        let _ = fs::remove_file(&link_path);
+        assert_eq!(target.expect("resolved").to_string_lossy().to_lowercase(), notepad.to_string_lossy().to_lowercase());
+        assert!(shortcut_target(&link_path).is_err(), "a missing shortcut is an error");
+    }
+
+    #[test]
+    fn a_text_folder_names_every_file_it_left_out_and_why() {
+        let dir = std::env::temp_dir().join(format!("sidearm-text-folder-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("a.txt"), "first").unwrap();
+        fs::write(dir.join("b.md"), [0xff, 0xfe, 0x00]).unwrap();
+        fs::write(dir.join("c.txt"), "x".repeat(20)).unwrap();
+        fs::write(dir.join("d.txt"), "late").unwrap();
+        let files = ["d.txt", "c.txt", "b.md", "a.txt"].map(|name| dir.join(name)).to_vec();
+        let folder = read_text_files(files, 10, 3);
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(folder.files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["a"]);
+        assert_eq!(folder.skipped, [
+            SkippedTextFile { name: "b.md".into(), reason: "notUtf8" },
+            SkippedTextFile { name: "c.txt".into(), reason: "tooLarge" },
+            SkippedTextFile { name: "d.txt".into(), reason: "overLimit" },
+        ]);
+        assert_eq!(read_text_files(vec![dir.join("gone.txt")], 10, 3).skipped[0].reason, "unreadable");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn tray_icon_is_set_once_per_state_and_retried_after_a_failure() {
+        let shown = Mutex::new(None);
+        let mut sets = 0;
+        settle_tray_icon(&shown, Some(40), || { sets += 1; Err("busy") });
+        settle_tray_icon(&shown, Some(40), || { sets += 1; Ok::<(), &str>(()) });
+        settle_tray_icon(&shown, Some(40), || { sets += 1; Ok::<(), &str>(()) });
+        assert_eq!(sets, 2, "a failed set is retried, a shown state is not set again");
+        settle_tray_icon(&shown, None, || { sets += 1; Ok::<(), &str>(()) });
+        assert_eq!(sets, 3);
+    }
+
     /// The app ACL (build.rs `APP_COMMANDS` + capabilities) must cover exactly the
     /// registered commands, and each popup window only its own: a command added to
     /// the handler but not to build.rs is rejected in every window.
@@ -4576,14 +4934,19 @@ mod tests {
         let menu = allowed(include_str!("../capabilities/menu.json"));
         let sheet = allowed(include_str!("../capabilities/cheatsheet.json"));
         let main = allowed(include_str!("../capabilities/default.json"));
-        assert!(allowed(include_str!("../capabilities/osd.json")).is_empty(), "the OSD calls no command");
+        let osd = allowed(include_str!("../capabilities/osd.json"));
+        assert!(osd.iter().all(|c| c.starts_with("osd_")), "OSD window: only osd_* ({osd:?})");
+        let prompt = allowed(include_str!("../capabilities/prompt.json"));
+        assert!(prompt.iter().all(|c| c.starts_with("prompt_")), "input-field window: only prompt_* ({prompt:?})");
         assert!(menu.iter().all(|c| c.starts_with("menu_")), "menu window: only menu_* ({menu:?})");
         assert!(sheet.iter().all(|c| c.starts_with("cheatsheet_")), "cheat sheet: only cheatsheet_*");
         let mut every: std::collections::BTreeSet<String> = main.clone();
         every.extend(menu.iter().cloned());
         every.extend(sheet.iter().cloned());
+        every.extend(osd.iter().cloned());
+        every.extend(prompt.iter().cloned());
         assert_eq!(every, handler, "every command is allowed in some window");
-        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c)), "main gets no popup command");
+        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c) && !osd.contains(c) && !prompt.contains(c)), "main gets no popup command");
     }
 
     /// Merge-import must not orphan the base config's user devices: since v3

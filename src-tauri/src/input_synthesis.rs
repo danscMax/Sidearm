@@ -221,7 +221,7 @@ pub fn send_shortcut(
         let modifiers = reused_modifiers.iter().map(|modifier| modifier.label()).collect::<Vec<_>>().join(", ");
         vec![crate::ui_text!(
             "input.modifiersReused",
-            "Shortcut reused already pressed modifier(s): {modifiers}.",
+            "The shortcut reused modifiers already held: {modifiers}.",
             modifiers = modifiers
         )]
     };
@@ -1418,6 +1418,16 @@ const CLIPBOARD_PASTE_THRESHOLD: usize = 100;
 /// GDI-object format, avoiding the access-violation crashes that plagued the
 /// original implementation.
 pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), String> {
+    send_text_as(text, inter_key_delay_ms, true)
+}
+
+/// Types `text` key by key, never through the clipboard (`PasteMode::KeyboardOnly`).
+pub fn send_text_typed(text: &str) -> Result<(), String> {
+    send_text_as(text, 0, false)
+}
+
+/// `allow_clipboard`: a long text may be pasted through the clipboard instead.
+fn send_text_as(text: &str, inter_key_delay_ms: u32, allow_clipboard: bool) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
     }
@@ -1425,7 +1435,7 @@ pub fn send_text_with_delay(text: &str, inter_key_delay_ms: u32) -> Result<(), S
     log::debug!("[input] Text input: {} chars", text.chars().count());
 
     // For long text, attempt lightweight clipboard-paste (preserves newlines correctly).
-    if text.chars().count() > CLIPBOARD_PASTE_THRESHOLD {
+    if allow_clipboard && text.chars().count() > CLIPBOARD_PASTE_THRESHOLD {
         match paste_via_clipboard(text) {
             Ok(()) => return Ok(()),
             Err(e) => {

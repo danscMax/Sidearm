@@ -4,6 +4,7 @@ import en from "../i18n/locales/en.json";
 import ru from "../i18n/locales/ru.json";
 import { recoveryTestInstruction } from "./labels";
 import type { HypershiftTrigger } from "./config";
+import { ALL_ACTION_TYPES } from "./constants/ui-copy";
 
 function flatten(value: unknown, prefix = ""): Record<string, string> {
   if (typeof value !== "object" || !value) return {};
@@ -37,6 +38,27 @@ describe("complete locale catalogues", () => {
         expect(parameters(text), `${language}: ${key}`).toEqual(parameters(counterpart));
       }
     }
+  });
+});
+
+describe("every action type is described", () => {
+  it("has its picker category description in both languages", () => {
+    const missing = ALL_ACTION_TYPES.flatMap((type) =>
+      (["en", "ru"] as const).filter((lang) => !locales[lang][`picker.categoryDesc.${type}`]).map((lang) => `${lang}:${type}`));
+    expect(missing).toEqual([]);
+  });
+});
+
+describe("natural counts", () => {
+  it("declines counts instead of writing (s) or cutting a word short", () => {
+    const englishS = Object.entries(locales.en).filter(([, text]) => /\w\(s\)/.test(text));
+    // "шаг.)", "пункт.)": a word cut short before a count's closing bracket
+    // (standard abbreviations such as "симв." stay allowed).
+    const standard = new Set(["симв"]);
+    const russianCut = Object.entries(locales.ru).filter(([, text]) =>
+      [...text.matchAll(/([а-яё]{3,})\.\)/gi)].some((match) => !standard.has(match[1].toLowerCase())));
+    expect(englishS).toEqual([]);
+    expect(russianCut).toEqual([]);
   });
 });
 

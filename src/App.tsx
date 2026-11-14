@@ -25,7 +25,7 @@ import { ErrorModal } from "./components/ErrorModal";
 import { PortableMigrationDialog } from "./components/PortableMigrationDialog";
 import { PresetsModal } from "./components/PresetsModal";
 import { OnboardingWizard } from "./components/onboarding/OnboardingWizard";
-import { SynapseImportModal } from "./components/SynapseImportModal";
+import { importSummaryMessage, SynapseImportModal, SynapseImportNotesModal } from "./components/SynapseImportModal";
 import { Toast, type ToastState } from "./components/Toast";
 import { SynapseNotice } from "./components/SynapseNotice";
 import { NewMouseNotice } from "./components/NewMouseNotice";
@@ -73,7 +73,7 @@ import { isBuiltinControl, offlineProfileId, playsWithoutSidearm } from "./lib/o
 import { describeConfigChange } from "./lib/config-diff";
 import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
-import type { ParsedSynapseProfiles } from "./lib/synapse-import";
+import type { ImportWarning, ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
   createProfile,
   clearControl,
@@ -132,6 +132,7 @@ function App() {
   const [toasts, setToasts] = useState<ToastState[]>([]);
   const toastSeqRef = useRef(0);
   const [synapseParsed, setSynapseParsed] = useState<ParsedSynapseProfiles | null>(null);
+  const [importNotes, setImportNotes] = useState<ImportWarning[] | null>(null);
   const [settingsDeepLink, setSettingsDeepLink] = useState<SettingsDeepLink | null>(null);
   const [presetsOpen, setPresetsOpen] = useState(false);
 
@@ -1513,23 +1514,21 @@ function App() {
           parsed={synapseParsed}
           activeConfig={activeConfig}
           getConfigRevision={persistence.getConfigRevision}
-          onImported={(next, summary) => {
+          onImported={(next, summary, warnings) => {
             updateDraft(() => next, { immediate: true });
             setSynapseParsed(null);
+            const noted = warnings.length > 0 || summary.skipped > 0;
             showToast(
-              t("synapseImport.summaryToast", {
-                profiles: summary.profilesAdded,
-                bindings: summary.bindingsAdded,
-                actions: summary.actionsAdded,
-                macros: summary.macrosAdded,
-              }),
-              "success",
+              importSummaryMessage(t, summary),
+              noted ? "warning" : "success",
+              warnings.length > 0 ? { label: t("synapseImport.notesShow"), onClick: () => setImportNotes(warnings) } : undefined,
             );
           }}
           onCancel={() => setSynapseParsed(null)}
           setError={setError}
         />
       ) : null}
+      {importNotes ? <SynapseImportNotesModal warnings={importNotes} onClose={() => setImportNotes(null)} /> : null}
       <div className="toast-stack">
         <SynapseNotice
           enabled={runtimeSummary.status === "running" && !!activeConfig?.devices.some((device) => device.builtin)}

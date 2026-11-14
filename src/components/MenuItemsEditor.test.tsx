@@ -37,6 +37,40 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: /^Start\s*1$/ }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("picks several items with Ctrl / Shift and turns them off or deletes them with one Restore", () => {
+    const three: MenuItem[] = ["One", "Two", "Three"].map((label, i) => ({ kind: "action", id: `i${i}`, label, actionId: "a1", enabled: true }));
+    function Host() {
+      const [list, setList] = useState(three);
+      return <MenuItemsEditor items={list} onChange={setList} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />;
+    }
+    render(<Host />);
+    fireEvent.click(screen.getByRole("button", { name: /1\s*One/ }));
+    fireEvent.click(screen.getByRole("button", { name: /3\s*Three/ }), { shiftKey: true });
+    expect(screen.getByText(/3 items picked|Выбрано 3 пункта/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /2\s*Two/ }), { ctrlKey: true });
+    expect(screen.getByText(/2 items picked|Выбрано 2 пункта/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /^(Turn off|Выключить)$/ }));
+    expect(screen.getByRole("button", { name: /1\s*One/ }).className).toContain("menu-ed__row--off");
+    expect(screen.getByRole("button", { name: /2\s*Two/ }).className).not.toContain("menu-ed__row--off");
+    fireEvent.click(screen.getByRole("button", { name: /^(Delete|Удалить)$/ }));
+    expect(screen.queryByRole("button", { name: /One/ })).toBeNull();
+    expect(screen.getByText(/2 items deleted|Удалено 2 пункта/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Restore|Вернуть/ }));
+    expect(screen.getByRole("button", { name: /1\s*One/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /3\s*Three/ })).toBeTruthy();
+  });
+
+  it("Ctrl+click inside the selected list picks those items, not the list", () => {
+    const nested: MenuItem[] = [{ kind: "submenu", id: "list", label: "List", enabled: true, items: [
+      { kind: "action", id: "one", label: "One", actionId: "a1", enabled: true },
+      { kind: "action", id: "two", label: "Two", actionId: "a1", enabled: true },
+    ] }];
+    render(<MenuItemsEditor items={nested} initialSelectedId="list" onChange={vi.fn()} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /One/ }), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /Two/ }), { ctrlKey: true });
+    expect(screen.getByText(/2 items picked|Выбрано 2 пункта/)).toBeTruthy();
+  });
+
   it("after deleting an item of a list, the next item of that list is selected", () => {
     const onChange = vi.fn();
     const nested: MenuItem[] = [{ kind: "submenu", id: "b", label: "Block", enabled: true, items: [

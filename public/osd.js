@@ -40,5 +40,8 @@ if (window.__TAURI_INTERNALS__) {
         osd.classList.add("osd--slide-in");
       }
     }),
+  }).then(function () {
+    // Listening now: the bubble asked for while this page loaded comes next.
+    window.__TAURI_INTERNALS__.invoke("osd_ready");
   });
 }

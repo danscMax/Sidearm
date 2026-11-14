@@ -100,7 +100,7 @@ describe("config revision for asynchronous imports", () => {
       onImported={onImported} setError={setError} onCancel={vi.fn()} />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /Import.*1|Импорт.*1/i })));
     expect(importSynapseIntoConfig).toHaveBeenCalledWith(parsed, expect.anything(), current);
-    expect(onImported).toHaveBeenCalledWith(current, summary);
+    expect(onImported).toHaveBeenCalledWith(current, summary, []);
     expect(setError).not.toHaveBeenCalled();
   });
 

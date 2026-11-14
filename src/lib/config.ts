@@ -28,11 +28,13 @@ export type ActionType =
   | "mediaKey"
   | "profileSwitch"
   | "disabled"
-  | "repairClipboard";
+  | "repairClipboard"
+  | "stopMacros"
+  | "cheatSheet";
 
 export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord" | "longPress";
 
-export type PasteMode = "clipboardPaste" | "sendText";
+export type PasteMode = "clipboardPaste" | "sendText" | "keyboardOnly";
 
 type ValidationSeverity = "warning";
 
@@ -212,7 +214,9 @@ export type SequenceStep =
       args?: string[];
       workingDir?: string;
       delayMs?: number;
-    };
+    }
+  /** Waits until a window of `exe` (with `title` in its title, when set) is in front. */
+  | { type: "waitWindow"; exe: string; title?: string; timeoutMs: number };
 
 /** Most steps one sequence may hold: editor, recorder and imports (Rust `config::MAX_SEQUENCE_STEPS`). */
 export const MAX_SEQUENCE_STEPS = 200;
@@ -297,6 +301,17 @@ interface RepairClipboardPayload {
   strategy: "latin1";
 }
 
+/** Stop-macros payload (Rust `StopMacrosPayload`): a required `scope`, so it is
+ *  `{"scope":"all"}` and never the empty disabled payload. */
+interface StopMacrosPayload {
+  scope: "all";
+}
+
+/** Cheat-sheet payload (Rust `CheatSheetPayload`): the layer whose side-button grid shows. */
+interface CheatSheetPayload {
+  layer: Layer;
+}
+
 export type ActionCondition =
   | { type: "windowTitleContains"; value: string }
   | { type: "windowTitleNotContains"; value: string }
@@ -322,6 +337,8 @@ export type Action = ActionBase &
     | { type: "profileSwitch"; payload: ProfileSwitchPayload }
     | { type: "disabled"; payload: DisabledActionPayload }
     | { type: "repairClipboard"; payload: RepairClipboardPayload }
+    | { type: "stopMacros"; payload: StopMacrosPayload }
+    | { type: "cheatSheet"; payload: CheatSheetPayload }
   );
 
 export interface SnippetLibraryItem {

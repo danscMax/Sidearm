@@ -310,6 +310,47 @@ pub fn run_preview_action(
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {
             run_live_repair_clipboard_action(action, preview, Some(action_id))
         }
+        // Shown by the capture dispatch (it has the window); a Test run only names it.
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => Ok(ActionExecutionEvent {
+            encoded_key: preview.encoded_key.clone(),
+            action_id: action.id.clone(),
+            action_type: action.action_type.as_str().into(),
+            action_pretty: action.display_name.clone(),
+            resolved_profile_id: preview.resolved_profile_id.clone(),
+            resolved_profile_name: preview.resolved_profile_name.clone(),
+            matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+            control_id: preview.control_id.clone(),
+            layer: preview.layer.clone(),
+            binding_id: preview.binding_id.clone(),
+            mode: ExecutionMode::Live,
+            outcome: ExecutionOutcome::Noop,
+            process_id: None,
+            summary: crate::ui_text!("execution.cheatSheetPreview", "Will show the button grid at the cursor."),
+            warnings: Vec::new(),
+            executed_at: timestamp_millis(),
+        }),
+        // Runs on the capture worker, never queued behind the macro it stops.
+        (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {
+            cancel_live_sequences();
+            Ok(ActionExecutionEvent {
+                encoded_key: preview.encoded_key.clone(),
+                action_id: action.id.clone(),
+                action_type: action.action_type.as_str().into(),
+                action_pretty: action.display_name.clone(),
+                resolved_profile_id: preview.resolved_profile_id.clone(),
+                resolved_profile_name: preview.resolved_profile_name.clone(),
+                matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+                control_id: preview.control_id.clone(),
+                layer: preview.layer.clone(),
+                binding_id: preview.binding_id.clone(),
+                mode: ExecutionMode::Live,
+                outcome: ExecutionOutcome::Noop,
+                process_id: None,
+                summary: crate::ui_text!("execution.macrosStopped", "Macros stopped: the running one ends, the queued ones are dropped."),
+                warnings: Vec::new(),
+                executed_at: timestamp_millis(),
+            })
+        }
         // Audit F003: ProfileSwitch sets the sticky runtime profile override. The
         // override WRITE happens in the live dispatch path (capture_backend), which
         // owns the RuntimeStore; here we only report the switch so the Test/dry-run
@@ -520,6 +561,16 @@ fn summarize_action(
             ),
             Vec::new(),
         )),
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => Ok((
+            ExecutionOutcome::Simulated,
+            crate::ui_text!("execution.cheatSheetPreview", "Will show the button grid at the cursor."),
+            Vec::new(),
+        )),
+        (ActionType::StopMacros, ActionPayload::StopMacros(_)) => Ok((
+            ExecutionOutcome::Simulated,
+            crate::ui_text!("execution.stopMacrosPreview", "Will stop the running macro and drop the queued ones."),
+            Vec::new(),
+        )),
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => Ok((
             ExecutionOutcome::Simulated,
             crate::ui_text!(
@@ -723,6 +774,32 @@ fn run_live_sequence_action(
         typed_text |= matches!(step, SequenceStep::Text { .. });
         match step {
             SequenceStep::Sleep { delay_ms } => wait(*delay_ms)?,
+            SequenceStep::WaitWindow { exe, title, timeout_ms } => {
+                let limit = sequence_delay_ms(*timeout_ms);
+                let deadline = std::time::Instant::now() + Duration::from_millis(limit);
+                loop {
+                    if foreground_matches(exe, title.as_deref()) {
+                        break;
+                    }
+                    if std::time::Instant::now() >= deadline {
+                        return Err(execution_error(
+                            "execution_failed",
+                            "execution",
+                            crate::ui_text!(
+                                "execution.waitWindowTimeout",
+                                "`{exe}` did not come to the front within {seconds} s: the rest of the sequence was not sent.",
+                                exe = exe,
+                                seconds = limit / 1000
+                            ),
+                            Some(preview.encoded_key.clone()),
+                            action_id.clone(),
+                        ));
+                    }
+                    if !pause(100, started) {
+                        return Err(cancelled());
+                    }
+                }
+            }
             SequenceStep::Launch {
                 value,
                 args,
@@ -842,7 +919,7 @@ fn validate_live_sequence(
 ) -> Result<(), crate::ui_text::UiText> {
     for step in &payload.steps {
         match step {
-            SequenceStep::Sleep { .. } => {}
+            SequenceStep::Sleep { .. } | SequenceStep::WaitWindow { .. } => {}
             SequenceStep::Launch {
                 value,
                 args,
@@ -1203,16 +1280,21 @@ fn run_live_text_snippet_action(
     })?;
 
     let mut warnings = live_text.warnings;
-    // Always use SendInput (sendText) regardless of paste_mode setting.
-    // clipboardPaste causes COM/OLE crashes in debug builds and is
-    // unreliable. SendInput + KEYEVENTF_UNICODE works universally.
+    // Typed through SendInput (KEYEVENTF_UNICODE); a long text in the automatic
+    // mode goes through the clipboard, `KeyboardOnly` never does.
     log::info!(
-        "[executor] TextSnippet sendText: {} chars for key {}",
+        "[executor] TextSnippet sendText: {} chars for key {} ({:?})",
         live_text.text.chars().count(),
-        preview.encoded_key
+        preview.encoded_key,
+        live_text.paste_mode
     );
     let (expanded, cursor_back) = input_synthesis::expand_snippet_tokens(&live_text.text);
-    input_synthesis::send_text(&expanded).map_err(|message| {
+    let sent = if live_text.paste_mode == PasteMode::KeyboardOnly {
+        input_synthesis::send_text_typed(&expanded)
+    } else {
+        input_synthesis::send_text(&expanded)
+    };
+    sent.map_err(|message| {
         log::error!(
             "[executor] TextSnippet sendText failed for key {}: {message}",
             preview.encoded_key
@@ -1540,7 +1622,21 @@ fn sequence_step_summary(step: &SequenceStep) -> crate::ui_text::UiText {
         SequenceStep::Launch { value, .. } => {
             crate::ui_text!("execution.stepLaunch", "launch `{value}`", value = value)
         }
+        SequenceStep::WaitWindow { exe, .. } => {
+            crate::ui_text!("execution.stepWaitWindow", "wait for `{exe}`", exe = exe)
+        }
     }
+}
+
+/// The window in front is `exe` (file name, any case; `notepad` matches
+/// `notepad.exe`) and, when given, holds `title` in its title (any case).
+fn foreground_matches(exe: &str, title: Option<&str>) -> bool {
+    let Ok(window) = crate::window_capture::capture_foreground_window() else { return false };
+    let path = std::path::Path::new(&window.exe);
+    let wanted = exe.trim();
+    let same = |part: Option<&std::ffi::OsStr>| part.and_then(|part| part.to_str()).is_some_and(|part| part.eq_ignore_ascii_case(wanted));
+    (same(path.file_name()) || same(path.file_stem()))
+        && title.is_none_or(|title| window.title.to_lowercase().contains(&title.trim().to_lowercase()))
 }
 
 fn format_shortcut(payload: &crate::config::ShortcutActionPayload) -> String {
@@ -1569,6 +1665,7 @@ fn paste_mode_text(paste_mode: PasteMode) -> crate::ui_text::UiText {
             crate::ui_text!("execution.pasteModeClipboard", "clipboard paste")
         }
         PasteMode::SendText => crate::ui_text!("execution.pasteModeText", "text input"),
+        PasteMode::KeyboardOnly => crate::ui_text!("execution.pasteModeKeyboard", "keyboard only"),
     }
 }
 
@@ -1659,6 +1756,33 @@ mod tests {
         assert_eq!(missing.event.message.key, Some("execution.dpiProfileMissing"));
         let no_stages = live_test_action(&config, &action, Some(&config.profiles[0].id)).expect_err("stages required");
         assert_eq!(no_stages.event.message.key, Some("execution.dpiStagesMissing"));
+    }
+
+    #[test]
+    fn a_window_that_never_comes_stops_the_sequence_at_its_timeout() {
+        let config = default_seed_config();
+        let preview = resolve_input_preview(&config, "F13", "WINWORD.EXE", "Document", None);
+        let payload = crate::config::SequenceActionPayload { steps: vec![
+            SequenceStep::WaitWindow { exe: "no-such-program-for-sidearm.exe".into(), title: None, timeout_ms: 300 },
+            SequenceStep::Text { value: "must not be typed".into(), delay_ms: None, repeat: None },
+        ] };
+        let action = Action {
+            id: "test-wait".into(), action_type: ActionType::Sequence,
+            payload: ActionPayload::Sequence(payload.clone()), display_name: "Wait".into(),
+            notes: None, conditions: Vec::new(),
+        };
+        // Other tests cancel live sequences (a global generation): an attempt they cut short is retried.
+        let (error, elapsed) = (0..5)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                let error = run_live_sequence_action(&action, &preview, &payload, Some(action.id.clone())).expect_err("stopped");
+                (error, started.elapsed())
+            })
+            .find(|(error, _)| error.event.message.key != Some("execution.sequenceCancelled"))
+            .expect("one attempt ran to its timeout");
+        assert_eq!(error.event.message.key, Some("execution.waitWindowTimeout"));
+        assert!(elapsed >= Duration::from_millis(300) && elapsed < Duration::from_secs(3));
+        assert!(!foreground_matches("no-such-program-for-sidearm.exe", None));
     }
 
     #[test]
@@ -2545,7 +2669,7 @@ mod edge_proptests {
 
     #[test]
     fn paste_mode_text_total_coverage() {
-        for mode in [PasteMode::ClipboardPaste, PasteMode::SendText] {
+        for mode in [PasteMode::ClipboardPaste, PasteMode::SendText, PasteMode::KeyboardOnly] {
             let name = paste_mode_text(mode).text;
             assert!(
                 !name.is_empty(),

@@ -1138,7 +1138,7 @@
     "addSleep": "Пауза",
     "addLaunch": "Запуск",
     "recordingNotice": "Запись макроса...",
-    "recordingHint": "Нажимайте клавиши. Каждое нажатие будет записано как шаг последовательности.",
+    "recordingHint": "Нажимайте клавиши. Набранное слово станет одним шагом «Текст», сочетания и особые клавиши (Enter, стрелки) — шагами-нажатиями.",
     "recordingCount": "({{count}} / {{max}})",
     "recordLimitReached": "Достигнут лимит записи в {{max}} шагов — запись остановлена автоматически. Удалите ненужные шаги или сохраните как есть.",
     "sequenceLaunchRollbackWarning": "Если шаг запуска откроет программу, а следующий шаг завершится ошибкой, Sidearm не сможет автоматически закрыть уже запущенную программу.",
@@ -1209,7 +1209,18 @@
     "syncOther": "Так же на {{mice}}",
     "syncOtherHint": "Эта кнопка одинакова на обеих мышах: правка здесь сразу повторяется на той же кнопке другой мыши (и наоборот). Включение копирует туда это назначение. Общая настройка «Держать мыши одинаковыми» задаёт, как по умолчанию.",
     "sendStepEmpty": "В шаге {{index}} не задано, что нажать: впишите сочетание, например Ctrl+L.",
-    "sendStepPlaceholder": "например, Ctrl+L или Enter"
+    "sendStepPlaceholder": "например, Ctrl+L или Enter",
+    "sendStepRecord": "Записать клавиши шага {{index}}",
+    "sendStepCapturing": "Нажмите сочетание… Esc — отмена",
+    "stepDuplicate": "Дублировать шаг {{index}}",
+    "sequenceTotal_one": "{{count}} шаг · ≈ {{seconds}} с",
+    "sequenceTotal_few": "{{count}} шага · ≈ {{seconds}} с",
+    "sequenceTotal_many": "{{count}} шагов · ≈ {{seconds}} с",
+    "sequenceTotal_other": "{{count}} шагов · ≈ {{seconds}} с",
+    "sequenceTotalWithWait_one": "{{count}} шаг · ≈ {{seconds}} с, с ожиданием окна — до {{max}} с",
+    "sequenceTotalWithWait_few": "{{count}} шага · ≈ {{seconds}} с, с ожиданием окна — до {{max}} с",
+    "sequenceTotalWithWait_many": "{{count}} шагов · ≈ {{seconds}} с, с ожиданием окна — до {{max}} с",
+    "sequenceTotalWithWait_other": "{{count}} шагов · ≈ {{seconds}} с, с ожиданием окна — до {{max}} с"
   },
   "assignments": {
     "copyBinding": "Копировать назначение",

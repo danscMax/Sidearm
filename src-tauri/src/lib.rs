@@ -3307,12 +3307,12 @@ async fn start_macro_recording(
 async fn record_keystroke(
     recorder: State<'_, Arc<Mutex<MacroRecorder>>>,
     key: String,
-) -> Result<(), CommandError> {
+    text: Option<String>,
+) -> Result<usize, CommandError> {
     let mut rec = recorder
         .lock()
         .map_err(|_| CommandError::internal("recorder lock poisoned"))?;
-    rec.record_keystroke(key, runtime::timestamp_millis());
-    Ok(())
+    Ok(rec.record_keystroke(key, text, runtime::timestamp_millis()))
 }
 
 #[tauri::command]

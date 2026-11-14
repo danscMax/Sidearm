@@ -14,7 +14,7 @@ vi.mock("../../lib/backend", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/backend")>();
   return {
     ...actual,
-    recordKeystroke: vi.fn(() => Promise.resolve()),
+    recordKeystroke: vi.fn(() => Promise.resolve(1)),
     startMacroRecording: vi.fn(() => Promise.resolve()),
     stopMacroRecording: vi.fn(() => Promise.resolve({ steps: [], startedAt: 0, stoppedAt: 1 })),
     setKeyRecording: vi.fn(() => Promise.resolve()),
@@ -22,7 +22,7 @@ vi.mock("../../lib/backend", async (importOriginal) => {
 });
 
 beforeEach(() => {
-  vi.mocked(backend.recordKeystroke).mockReset().mockResolvedValue(undefined);
+  vi.mocked(backend.recordKeystroke).mockReset().mockResolvedValue(1);
   vi.mocked(backend.startMacroRecording).mockReset().mockResolvedValue(undefined);
   vi.mocked(backend.stopMacroRecording).mockReset().mockResolvedValue({ steps: [], startedAt: 0, stoppedAt: 1 });
   vi.mocked(backend.setKeyRecording).mockReset().mockResolvedValue(undefined);
@@ -64,6 +64,7 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
     await act(async () => {});
     expect(backend.recordKeystroke).toHaveBeenCalledWith(
       expect.stringMatching(/^Ctrl\+Shift\+Alt\+Win\+/),
+      undefined,
     );
   });
 
@@ -73,7 +74,7 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
       new KeyboardEvent("keydown", { key: "a", code: "KeyA", metaKey: true }),
     );
     await act(async () => {});
-    expect(backend.recordKeystroke).toHaveBeenCalledWith(expect.stringMatching(/^Win\+/));
+    expect(backend.recordKeystroke).toHaveBeenCalledWith(expect.stringMatching(/^Win\+/), undefined);
   });
 
   it("ignores bare modifier presses (no chord recorded)", async () => {
@@ -140,7 +141,7 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
   });
 
   it("waits for pending writes before stopping and never applies a result after unmount", async () => {
-    const write = deferred<void>();
+    const write = deferred<number>();
     vi.mocked(backend.recordKeystroke).mockReturnValueOnce(write.promise);
     const { unmount, onChange } = await startRecording();
     fireEvent.keyDown(window, { key: "a", code: "KeyA" });
@@ -148,7 +149,7 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
     await act(async () => {});
     expect(backend.stopMacroRecording).not.toHaveBeenCalled();
     unmount();
-    await act(async () => { write.resolve(); });
+    await act(async () => { write.resolve(1); });
     expect(backend.stopMacroRecording).toHaveBeenCalledOnce();
     expect(backend.setKeyRecording).toHaveBeenLastCalledWith(false);
     expect(onChange).not.toHaveBeenCalled();
@@ -210,6 +211,9 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
   it("stops at 200 steps even when more keys arrive in one event batch", async () => {
     const steps: SequenceStep[] = Array.from({ length: 200 }, () => ({ type: "send", value: "A" }));
     vi.mocked(backend.stopMacroRecording).mockResolvedValueOnce({ steps, startedAt: 0, stoppedAt: 1 });
+    // The backend answers how many steps it holds: every chord is one.
+    let held = 0;
+    vi.mocked(backend.recordKeystroke).mockImplementation(() => Promise.resolve(++held));
     const { onChange } = await startRecording();
     await act(async () => {
       for (let index = 0; index < 205; index += 1) {
@@ -245,6 +249,24 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
     expect(onChange).toHaveBeenLastCalledWith([existing[0], recorded[0], existing[1]]);
   });
 
+  it("forwards what a printable key typed, in the active layout, and none for a chord", async () => {
+    vi.mocked(backend.recordKeystroke).mockResolvedValueOnce(1).mockResolvedValueOnce(1).mockResolvedValueOnce(2);
+    await startRecording();
+    await act(async () => {
+      // "б" sits on the comma key of the Russian layout.
+      fireEvent.keyDown(window, { key: "б", code: "Comma" });
+      fireEvent.keyDown(window, { key: "Л", code: "KeyK", shiftKey: true });
+      fireEvent.keyDown(window, { key: "l", code: "KeyL", ctrlKey: true });
+    });
+    expect(vi.mocked(backend.recordKeystroke).mock.calls).toEqual([
+      [",", "б"],
+      ["Shift+Л", "Л"],
+      ["Ctrl+L", undefined],
+    ]);
+    // The counter shows the backend's step count, not the keys pressed.
+    expect(screen.getByText(i18n.t("picker.recordingCount", { count: 2, max: 200 }))).toBeTruthy();
+  });
+
   it("blocks manual additions at 200 steps and explains the limit", () => {
     const steps: SequenceStep[] = Array.from({ length: 200 }, () => ({ type: "send", value: "A" }));
     const onChange = vi.fn();
@@ -274,5 +296,75 @@ describe("SequenceStepEditor rows", () => {
     rerender(<SequenceStepEditor steps={[steps[0]!]} onChange={onChange} />);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.stepDelete", { index: 1 }) }));
     expect(onChange).toHaveBeenLastCalledWith([]);
+  });
+
+  it("duplicates a step right after it and opens the copy", () => {
+    const steps: SequenceStep[] = [
+      { type: "launch", value: "C:\\a.exe", args: ["-x"] },
+      { type: "text", value: "x" },
+    ];
+    const onChange = vi.fn();
+    const { rerender } = render(<SequenceStepEditor steps={steps} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.stepDuplicate", { index: 1 }) }));
+    const next = onChange.mock.lastCall?.[0] as SequenceStep[];
+    expect(next).toEqual([steps[0], steps[0], steps[1]]);
+    // A copy, not the same object: editing one leaves the other alone.
+    expect(next[1]).not.toBe(steps[0]);
+    expect((next[1] as { args: string[] }).args).not.toBe((steps[0] as { args: string[] }).args);
+    rerender(<SequenceStepEditor steps={next} onChange={onChange} />);
+    const rows = screen.getAllByRole("button", { expanded: true });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.textContent).toContain("2");
+  });
+
+  it("shows the step count and the estimated length, a window wait as up to its timeout", () => {
+    const seconds = (value: number) => new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 }).format(value);
+    const steps: SequenceStep[] = [
+      { type: "send", value: "A", delayMs: 100, repeat: 3 },
+      { type: "sleep", delayMs: 1000 },
+      { type: "text", value: "x", delayMs: 200 },
+      { type: "send", value: "B", delayMs: 500, repeat: 0 },
+    ];
+    const { rerender } = render(<SequenceStepEditor steps={steps} onChange={vi.fn()} />);
+    expect(screen.getByText(i18n.t("picker.sequenceTotal", { count: 4, seconds: seconds(1.5) }))).toBeTruthy();
+    rerender(<SequenceStepEditor steps={[...steps, { type: "waitWindow", exe: "a.exe", timeoutMs: 5000 }]} onChange={vi.fn()} />);
+    expect(
+      screen.getByText(i18n.t("picker.sequenceTotalWithWait", { count: 5, seconds: seconds(1.5), max: seconds(6.5) })),
+    ).toBeTruthy();
+  });
+});
+
+describe("SequenceStepEditor Send step Record", () => {
+  function renderSend(onChange = vi.fn()) {
+    render(<SequenceStepEditor steps={[{ type: "send", value: "" }, { type: "text", value: "x" }]} onChange={onChange} />);
+    fireEvent.click(screen.getByText(i18n.t("picker.stepNoValue")));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.sendStepRecord", { index: 1 }) }));
+    return onChange;
+  }
+
+  it("puts one chord into the field, as the recorder writes it, and ends the capture", async () => {
+    const onChange = renderSend();
+    await act(async () => {});
+    expect(backend.setKeyRecording).toHaveBeenLastCalledWith(true);
+    fireEvent.keyDown(window, { key: "Control", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Unidentified", keyCode: 232 });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: "l", code: "KeyL", ctrlKey: true, shiftKey: true });
+    expect(onChange).toHaveBeenLastCalledWith([{ type: "send", value: "Ctrl+Shift+L" }, { type: "text", value: "x" }]);
+    await act(async () => {});
+    expect(backend.setKeyRecording).toHaveBeenLastCalledWith(false);
+    // Captured once: the next key is ordinary typing again.
+    fireEvent.keyDown(window, { key: "Enter", code: "Enter" });
+    expect(onChange).toHaveBeenCalledOnce();
+  });
+
+  it("Esc cancels without changing the step", async () => {
+    const onChange = renderSend();
+    await act(async () => {});
+    fireEvent.keyDown(window, { key: "Escape", code: "Escape" });
+    await act(async () => {});
+    expect(onChange).not.toHaveBeenCalled();
+    expect(backend.setKeyRecording).toHaveBeenLastCalledWith(false);
+    expect(screen.getByRole("button", { name: i18n.t("picker.sendStepRecord", { index: 1 }) })).toBeTruthy();
   });
 });

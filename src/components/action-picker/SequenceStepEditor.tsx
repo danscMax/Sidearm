@@ -41,6 +41,41 @@ interface RecordingSession {
   stop?: Promise<MacroRecording | undefined>;
 }
 
+/** The chord a keydown makes, as the recorder and the Send field store it;
+ *  null for a bare modifier and Sidearm's own mask key (VK_232). */
+function chordOf(e: KeyboardEvent): string | null {
+  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return null;
+  const rawKey = resolveKeyName(e);
+  if (rawKey === "VK_232") return null;
+  // Canonical Ctrl→Shift→Alt→Win order via the shared modifierLabels helper,
+  // so recorded chords match the rest of the UI.
+  const mods = modifierLabels({ ctrl: e.ctrlKey, shift: e.shiftKey, alt: e.altKey, win: e.metaKey });
+  return [...mods, normalizeKeyName(rawKey)].join("+");
+}
+
+/** The character a printable key typed in the active layout (Shift and AltGr
+ *  included); undefined for a chord or a special key. */
+function typedText(e: KeyboardEvent): string | undefined {
+  const altGr = e.getModifierState?.("AltGraph") ?? false;
+  if (e.metaKey || ((e.ctrlKey || e.altKey) && !altGr)) return undefined;
+  return [...e.key].length === 1 ? e.key : undefined;
+}
+
+/** The waits a macro has, in ms: `fixed` always; `windows` at most, while
+ *  its "wait for window" steps wait up to their timeout. Typing time is not counted. */
+function sequenceWaits(steps: SequenceStep[]): { fixed: number; windows: number } {
+  let fixed = 0;
+  let windows = 0;
+  for (const step of steps) {
+    if (step.type === "waitWindow") windows += step.timeoutMs;
+    else if (step.type === "send" || step.type === "text") {
+      // The executor waits after every repeat (repeat 0 skips the step, at most 100).
+      fixed += (step.delayMs ?? 0) * Math.min(100, Math.max(0, step.repeat ?? 1));
+    } else fixed += step.delayMs ?? 0;
+  }
+  return { fixed, windows };
+}
+
 function finishRecording(session: RecordingSession): Promise<MacroRecording | undefined> {
   if (!session.stop) {
     session.stop = (async () => {
@@ -64,7 +99,7 @@ export function SequenceStepEditor({
   steps: SequenceStep[];
   onChange: (steps: SequenceStep[]) => void;
 }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [isRecording, setIsRecording] = useState(false);
   const [recordedCount, setRecordedCount] = useState(0);
   const [limitReached, setLimitReached] = useState(false);
@@ -122,43 +157,66 @@ export function SequenceStepEditor({
     if (!isRecording) return;
 
     function handleRecordKey(e: KeyboardEvent) {
-      // Ignore bare modifiers
-      if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
-      const rawKey = resolveKeyName(e);
-      if (rawKey === "VK_232") return;
+      const formatted = chordOf(e);
+      if (!formatted) return;
       e.preventDefault();
       e.stopPropagation();
 
       const session = recordingRef.current;
       if (!session || session.cancelled || session.stop || session.count >= session.limit) return;
-      // Canonical Ctrl→Shift→Alt→Win order (+ Win, previously missing) via the
-      // shared modifierLabels helper, so recorded chords match the rest of the UI.
-      const mods = modifierLabels({
-        ctrl: e.ctrlKey,
-        shift: e.shiftKey,
-        alt: e.altKey,
-        win: e.metaKey,
-      });
-      const keyName = normalizeKeyName(rawKey);
-      const formatted = [...mods, keyName].join("+");
-
-      session.pending = session.pending.then(() => recordKeystroke(formatted)).catch((error) => {
-        if (!session.cancelled) {
-          setRecordingError(normalizeCommandError(error).message);
-          void handleStopRecording();
-        }
-      });
-      session.count += 1;
-      setRecordedCount(session.count);
-      if (session.count >= session.limit) {
-        setLimitReached(true);
-        void handleStopRecording();
-      }
+      const text = typedText(e);
+      // The backend merges typed characters into one text step, so it counts the
+      // steps; a key queued behind the one that filled the macro is not sent.
+      session.pending = session.pending
+        .then(() => (session.count >= session.limit ? session.count : recordKeystroke(formatted, text)))
+        .then((count) => {
+          if (session.cancelled || session.stop) return;
+          session.count = count;
+          setRecordedCount(count);
+          if (count >= session.limit) {
+            setLimitReached(true);
+            void handleStopRecording();
+          }
+        })
+        .catch((error) => {
+          if (!session.cancelled) {
+            setRecordingError(normalizeCommandError(error).message);
+            void handleStopRecording();
+          }
+        });
     }
 
     window.addEventListener("keydown", handleRecordKey, true);
     return () => window.removeEventListener("keydown", handleRecordKey, true);
   }, [isRecording]);
+
+  // A Send step's Record button: the next chord goes into that step (its key); Esc cancels.
+  const [chordFor, setChordFor] = useState<string | null>(null);
+  useEffect(() => {
+    if (!chordFor) return;
+    const target = chordFor;
+    // As in CaptureRow: while it is held, the mouse runs nothing here and Alt+F4 can be recorded.
+    const lease = acquireKeyRecording();
+    void lease.ready.catch(() => {});
+    function handleChordKey(e: KeyboardEvent) {
+      const cancel = e.key === "Escape" && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
+      const chord = cancel ? null : chordOf(e);
+      if (!cancel && !chord) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const index = stepKeysRef.current.indexOf(target);
+      const step = stepsRef.current[index];
+      if (chord && step?.type === "send") {
+        onChange(stepsRef.current.map((s, i) => (i === index ? { ...step, value: chord } : s)));
+      }
+      setChordFor(null);
+    }
+    window.addEventListener("keydown", handleChordKey, true);
+    return () => {
+      window.removeEventListener("keydown", handleChordKey, true);
+      void lease.release().catch(() => {});
+    };
+  }, [chordFor]);
 
   async function handleStartRecording() {
     if (recordingRef.current) return;
@@ -172,6 +230,7 @@ export function SequenceStepEditor({
       start: Promise.resolve(), pending: Promise.resolve(),
     };
     recordingRef.current = session;
+    setChordFor(null);
     setRecordingBusy(true);
     setRecordedCount(0);
     setLimitReached(false);
@@ -297,6 +356,7 @@ export function SequenceStepEditor({
   };
 
   function renderFields(step: SequenceStep, index: number) {
+    const capturing = step.type === "send" && chordFor === stepKeys[index];
     return (
       <>
         <SelectField
@@ -351,19 +411,44 @@ export function SequenceStepEditor({
           </>
         ) : null}
 
-        {step.type === "send" || step.type === "text" ? (
+        {step.type === "text" ? (
           <label className="field">
             <span className="field__label">{t("picker.stepValue")}</span>
             <input
               className="input"
               type="text"
               value={step.value}
-              placeholder={step.type === "send" ? t("picker.sendStepPlaceholder") : undefined}
-              onChange={(e) =>
-                updateStep(index, { ...step, value: e.target.value } as SequenceStep)
-              }
+              onChange={(e) => updateStep(index, { ...step, value: e.target.value })}
             />
           </label>
+        ) : null}
+
+        {step.type === "send" ? (
+            <div className="field">
+              <span className="field__label">{t("picker.stepValue")}</span>
+              <div className="capture-row">
+                <input
+                  className={`input${capturing ? " capture-active" : ""}`}
+                  type="text"
+                  aria-label={t("picker.stepValue")}
+                  readOnly={capturing}
+                  value={capturing ? "" : step.value}
+                  placeholder={t(capturing ? "picker.sendStepCapturing" : "picker.sendStepPlaceholder")}
+                  onChange={(e) => updateStep(index, { ...step, value: e.target.value })}
+                />
+                <button
+                  type="button"
+                  className="action-button"
+                  aria-pressed={capturing}
+                  aria-label={capturing ? t("picker.stopCapture") : t("picker.sendStepRecord", { index: index + 1 })}
+                  disabled={isRecording || recordingBusy}
+                  onClick={() => setChordFor(capturing ? null : stepKeys[index]!)}
+                >
+                  {capturing ? t("picker.stopCapture") : t("picker.record")}
+                </button>
+              </div>
+              <span className="sr-only" role="status">{capturing ? t("picker.sendStepCapturing") : ""}</span>
+            </div>
         ) : null}
 
         {step.type === "launch" ? (
@@ -457,6 +542,9 @@ export function SequenceStepEditor({
   }
 
   const selectedIndex = selectedKey ? stepKeys.indexOf(selectedKey) : -1;
+  const waits = sequenceWaits(steps);
+  const seconds = (ms: number) =>
+    new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 1 }).format(ms / 1000);
 
   return (
     <div className="editor-grid">
@@ -630,6 +718,16 @@ export function SequenceStepEditor({
                   </button>
                   <button
                     type="button"
+                    className="seq-row__tool"
+                    disabled={recordingBusy || steps.length >= MAX_SEQUENCE_STEPS}
+                    aria-label={t("picker.stepDuplicate", { index: index + 1 })}
+                    title={t("common.duplicate")}
+                    onClick={() => insertSteps([structuredClone(step)], key)}
+                  >
+                    ⧉
+                  </button>
+                  <button
+                    type="button"
                     className="seq-row__tool seq-row__tool--danger"
                     aria-label={t("picker.stepDelete", { index: index + 1 })}
                     title={t("common.delete")}
@@ -643,6 +741,13 @@ export function SequenceStepEditor({
             );
           })}
         </div>
+      ) : null}
+      {steps.length > 0 ? (
+        <p className="panel__muted seq-total">
+          {waits.windows > 0
+            ? t("picker.sequenceTotalWithWait", { count: steps.length, seconds: seconds(waits.fixed), max: seconds(waits.fixed + waits.windows) })
+            : t("picker.sequenceTotal", { count: steps.length, seconds: seconds(waits.fixed) })}
+        </p>
       ) : null}
       <p className="panel__muted">{t("picker.sequenceStopHint")}</p>
     </div>

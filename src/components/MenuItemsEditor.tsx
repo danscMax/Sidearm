@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { Action, AppConfig, MenuItem } from "../lib/config";
 import { nextUniqueId } from "../lib/config-editing";
 import { displayNameForControlId } from "../lib/labels";
-import { appendMenuItem, collectMenuItemIds, removeMenuItem, updateMenuItem } from "../lib/menu-helpers";
+import { appendMenuItem, collectMenuItemIds, insertMenuItemAfter, menuItemLabel, removeMenuItem, updateMenuItem } from "../lib/menu-helpers";
 import {
   editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withKeyboardOnly, withPhrase,
   type ItemKind, type MenuEdits,
@@ -50,18 +50,24 @@ export interface MenuItemsEditorProps {
  *  is its own level and counts from 1. */
 function numbering(items: MenuItem[]): Map<string, number> {
   const numbers = new Map<string, number>();
-  const level = (list: MenuItem[]) => list.forEach((item, index) => {
-    numbers.set(item.id, index + 1);
-    if (item.kind === "submenu") level(item.items);
-  });
+  // A line has no number (the popup's side button N is the Nth item, lines skipped).
+  const level = (list: MenuItem[]) => {
+    let next = 1;
+    for (const item of list) {
+      if (item.kind === "separator") continue;
+      numbers.set(item.id, next++);
+      if (item.kind === "submenu") level(item.items);
+    }
+  };
   let next = 1;
   for (const item of items) {
     if (item.kind === "submenu") {
       for (const inner of item.items) {
+        if (inner.kind === "separator") continue;
         numbers.set(inner.id, next++);
         if (inner.kind === "submenu") level(inner.items);
       }
-    } else {
+    } else if (item.kind !== "separator") {
       numbers.set(item.id, next++);
     }
   }
@@ -115,7 +121,7 @@ function ActionList({ actions, value, onChange, disabled }: { actions: Action[];
 /** The labels from the menu's top level down to item `id`. */
 function pathTo(items: MenuItem[], id: string, path: string[] = []): string[] {
   for (const item of items) {
-    if (item.id === id) return [...path, item.label];
+    if (item.id === id) return [...path, menuItemLabel(item)];
     if (item.kind === "submenu") {
       const inner = pathTo(item.items, id, [...path, item.label]);
       if (inner.length) return inner;
@@ -233,6 +239,13 @@ export function MenuItemsEditor({
     insert(item, targetParent(), putAction(action));
   }
 
+  /** A line right after the selected item (inside a selected block or list, at its end). */
+  function addSeparator() {
+    const line: MenuItem = { kind: "separator", id: nextUniqueId(collectMenuItemIds(items), "menu-line") };
+    onChange(selected?.kind === "submenu" ? appendMenuItem(items, selected.id, line) : insertMenuItemAfter(items, selected?.id ?? null, line));
+    setSelectedId(line.id);
+  }
+
   function addKeys() {
     const action: Action = { id: newActionId("action-menu-keys"), displayName: t("inspector.menuNewKeys"), type: "shortcut", payload: { key: "", ctrl: false, shift: false, alt: false, win: false } };
     insert({ kind: "action", id: nextUniqueId(collectMenuItemIds(items), "menu-item"), label: action.displayName, actionId: action.id, enabled: true }, targetParent(), putAction(action));
@@ -348,6 +361,24 @@ export function MenuItemsEditor({
   function renderRow(item: MenuItem, nested: boolean) {
     const number = numbers.get(item.id) ?? 0;
     const on = selected?.id === item.id;
+    if (item.kind === "separator") {
+      const { dropClass, ...arrange } = arrangeProps(item);
+      return (
+        <div key={item.id}>
+          <button
+            type="button"
+            className={`menu-ed__row menu-ed__row--line${nested ? " menu-ed__row--nested" : ""}${on ? " menu-ed__row--on" : ""}${marked.has(item.id) ? " menu-ed__row--marked" : ""}${dragId === item.id ? " menu-ed__row--dragging" : ""}${dropClass}`}
+            aria-pressed={on || marked.has(item.id)}
+            aria-label={t("inspector.menuSeparator")}
+            onClick={(event) => pick(event, item)}
+            onContextMenu={(event) => openCtx(event, item)}
+            {...arrange}
+          >
+            <span className="menu-ed__line" aria-hidden="true" />
+          </button>
+        </div>
+      );
+    }
     const open = item.kind === "submenu" && (on || (selected && parentOf(items, selected.id) === item.id));
     const { dropClass, ...arrange } = arrangeProps(item);
     return (
@@ -477,7 +508,7 @@ export function MenuItemsEditor({
 
   function remove(item: MenuItem, after = removeMenuItem(items, item.id), editsAfter = edits) {
     const { parentId, siblings, index } = placeOf(item);
-    setRemoved({ before: items, after, editsBefore: edits, editsAfter, message: t("inspector.menuRemoved", { name: item.label }) });
+    setRemoved({ before: items, after, editsBefore: edits, editsAfter, message: t("inspector.menuRemoved", { name: menuItemLabel(item) || t("inspector.menuSeparator") }) });
     onChange(after);
     // Stay where you were: the next item, else the one before, else its list.
     const near = siblings[index + 1] ?? siblings[index - 1];
@@ -489,7 +520,7 @@ export function MenuItemsEditor({
     const menu = appendToMenu([item], menuId);
     if (!menu) return;
     remove(item, undefined, menu.edits);
-    setNotice(t("inspector.menuMoved", { name: item.label, menu: menu.name }));
+    setNotice(t("inspector.menuMoved", { name: menuItemLabel(item) || t("inspector.menuSeparator"), menu: menu.name }));
   }
 
   /** `list` at the end of menu `menuId` (fresh ids there): the edits that save it. */
@@ -635,7 +666,7 @@ export function MenuItemsEditor({
     const copy = cloneMenuItem(config, edits, item, menu.payload.items);
     const target: Action = { ...menu, payload: { ...menu.payload, items: [...menu.payload.items, copy.item] } };
     onEditsChange({ ...copy.edits, actions: { ...copy.edits.actions, [menuId]: target } });
-    setNotice(t("inspector.menuCopied", { name: item.label, menu: menu.displayName }));
+    setNotice(t("inspector.menuCopied", { name: menuItemLabel(item) || t("inspector.menuSeparator"), menu: menu.displayName }));
   }
 
   /** "Add from folder": a list of the folder's prompts, their text copied in. */
@@ -682,6 +713,15 @@ export function MenuItemsEditor({
   }
 
   function renderPane(item: MenuItem) {
+    if (item.kind === "separator") {
+      return (
+        <div className="menu-ed__pane">
+          <div className="menu-ed__pane-head"><strong>{t("inspector.menuSeparator")}</strong></div>
+          {renderTools(item)}
+          <p className="menu-ed__note">{t("inspector.menuSeparatorHint")}</p>
+        </div>
+      );
+    }
     const rename = (label: string) => onChange(updateMenuItem(items, item.id, (current) => ({ ...current, label })));
     const parentId = parentOf(items, item.id) ?? null;
     const isBlock = item.kind === "submenu" && parentId === null;
@@ -819,7 +859,8 @@ export function MenuItemsEditor({
   }
 
   const target = targetParent();
-  const targetName = target ? findItem(items, target)?.label : null;
+  const target_ = target ? findItem(items, target) : undefined;
+  const targetName = target_ ? menuItemLabel(target_) : null;
   return (
     <div className="menu-ed-root">
       {/* The menu's own line: its name, search, filter, add — and the how-to in "?". */}
@@ -888,7 +929,10 @@ export function MenuItemsEditor({
           {missing.size > 0 ? (
             <p className="menu-ed__note menu-ed__note--warn">
               {t("inspector.menuIncomplete", {
-                names: [...missing].map((id) => `«${findItem(items, id)?.label || t("inspector.menuUnnamed")}»`).join(", "),
+                names: [...missing].map((id) => {
+                  const found = findItem(items, id);
+                  return `«${(found && menuItemLabel(found)) || t("inspector.menuUnnamed")}»`;
+                }).join(", "),
               })}
             </p>
           ) : null}
@@ -918,6 +962,7 @@ export function MenuItemsEditor({
             { label: `+ ${t("inspector.menuKindPhrase")}`, onClick: addPhrase },
             { label: `+ ${t("inspector.menuKindKeys")}`, onClick: addKeys },
             null,
+            { label: `+ ${t("inspector.menuSeparator")}`, onClick: addSeparator },
             { label: `+ ${t("inspector.menuNewBlock")}`, onClick: () => addGroup(false) },
             { label: `+ ${t("inspector.menuNewList")}`, onClick: () => addGroup(true) },
             null,

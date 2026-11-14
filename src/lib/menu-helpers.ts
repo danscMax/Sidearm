@@ -8,6 +8,26 @@ export function collectMenuItemIds(items: MenuItem[]): string[] {
   );
 }
 
+/** `nextItem` right after item `afterId` in that item's list (at the end of
+ *  the menu when there is no such item). */
+export function insertMenuItemAfter(items: MenuItem[], afterId: string | null, nextItem: MenuItem): MenuItem[] {
+  let placed = false;
+  const walk = (list: MenuItem[]): MenuItem[] => list.flatMap((item) => {
+    if (item.id === afterId) {
+      placed = true;
+      return [item, nextItem];
+    }
+    return [item.kind === "submenu" ? { ...item, items: walk(item.items) } : item];
+  });
+  const out = walk(items);
+  return placed ? out : [...items, nextItem];
+}
+
+/** A menu item's name; a line has none. */
+export function menuItemLabel(item: MenuItem): string {
+  return item.kind === "separator" ? "" : item.label;
+}
+
 export function appendMenuItem(
   items: MenuItem[],
   parentId: string | null,

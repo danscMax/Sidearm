@@ -917,7 +917,9 @@
     "menuUsesCount_one": "{{count}} раз",
     "menuUsesCount_few": "{{count}} раза",
     "menuUsesCount_many": "{{count}} раз",
-    "menuUsesCount_other": "{{count}} раза"
+    "menuUsesCount_other": "{{count}} раза",
+    "menuSeparator": "Разделитель",
+    "menuSeparatorHint": "Линия между пунктами в меню: без номера, мышью не выбирается. Перетащите её или двигайте кнопками ↑ ↓."
   },
   "properties": {
     "empty": "Выберите кнопку, чтобы увидеть свойства",

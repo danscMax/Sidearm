@@ -37,6 +37,34 @@ describe("MenuItemsEditor", () => {
     expect(screen.getByRole("button", { name: /^Start\s*1$/ }).getAttribute("aria-pressed")).toBe("false");
   });
 
+  it("adds a separator after the selected item; it takes no number, the next item does", () => {
+    const two: MenuItem[] = ["One", "Two"].map((label, i) => ({ kind: "action", id: `i${i}`, label, actionId: "a1", enabled: true }));
+    function Host() {
+      const [list, setList] = useState(two);
+      return <MenuItemsEditor items={list} onChange={setList} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} />;
+    }
+    const { container } = render(<Host />);
+    fireEvent.click(screen.getByRole("button", { name: /1\s*One/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Add|Добавить/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Separator|Разделитель/ }));
+    const rows = Array.from(container.querySelectorAll(".menu-ed__row")).map((row) => row.getAttribute("aria-label") ?? row.textContent ?? "");
+    expect(rows[0]).toMatch(/^1One/);
+    expect(rows[1]).toMatch(/Separator|Разделитель/);
+    expect(rows[2]).toMatch(/^2Two/);
+    expect(screen.getByRole("button", { name: /Separator|Разделитель/ }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /2\s*Two/ })).toBeTruthy();
+  });
+
+  it("folding a block hides all it holds and moves a selection inside onto the block", () => {
+    const blocks: MenuItem[] = [
+      { kind: "submenu", id: "b1", label: "Start", enabled: true, items: [{ kind: "action", id: "x1", label: "One", actionId: "a1", enabled: true }] },
+    ];
+    render(<MenuItemsEditor items={blocks} onChange={vi.fn()} config={config} edits={NO_MENU_EDITS} onEditsChange={vi.fn()} initialSelectedId="x1" />);
+    fireEvent.click(screen.getByRole("button", { name: /Fold|Свернуть/ }));
+    expect(screen.queryByRole("button", { name: /1\s*One/ })).toBeNull();
+    expect(screen.getByRole("button", { name: /^Start\s*1$/ }).getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("picks several items with Ctrl / Shift and turns them off or deletes them with one Restore", () => {
     const three: MenuItem[] = ["One", "Two", "Three"].map((label, i) => ({ kind: "action", id: `i${i}`, label, actionId: "a1", enabled: true }));
     function Host() {

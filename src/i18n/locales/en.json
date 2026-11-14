@@ -897,7 +897,9 @@
     "menuMarkedClear": "Unpick",
     "menuMarkedHint": "Ctrl+click adds or removes an item, Shift+click picks a run of one list. A plain click picks one again.",
     "menuUsesCount_one": "{{count}} time",
-    "menuUsesCount_other": "{{count}} times"
+    "menuUsesCount_other": "{{count}} times",
+    "menuSeparator": "Separator",
+    "menuSeparatorHint": "A line between items in the popup: no number, never picked. Drag it or move it with ↑ ↓."
   },
   "properties": {
     "empty": "Select a button to see properties",

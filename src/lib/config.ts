@@ -247,7 +247,9 @@ export type MenuItem =
       label: string;
       items: MenuItem[];
       enabled: boolean;
-    };
+    }
+  /** A line between items: no number, never picked. */
+  | { kind: "separator"; id: string };
 
 export interface MenuActionPayload {
   items: MenuItem[];

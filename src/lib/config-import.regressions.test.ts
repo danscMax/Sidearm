@@ -24,7 +24,7 @@ function expectMenuReferencesResolve(config: AppConfig) {
   const check = (items: MenuItem[]) => {
     for (const item of items) {
       if (item.kind === "submenu") check(item.items);
-      else expect(config.actions.some((action) => action.id === item.actionId)).toBe(true);
+      else if (item.kind === "action") expect(config.actions.some((action) => action.id === item.actionId)).toBe(true);
     }
   };
   for (const action of config.actions) if (action.type === "menu") check(action.payload.items);

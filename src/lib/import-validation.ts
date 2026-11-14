@@ -101,7 +101,8 @@ export function validActionReferences(actions: Action[], snippets: SnippetLibrar
   const ids = new Set(actions.map((action) => action.id));
   const snippetIds = new Set(snippets.map((snippet) => snippet.id));
   const menuRefs = (items: MenuItem[], ownId: string): boolean => uniqueIds(items) && items.every((item) => item.kind === "submenu"
-    ? menuRefs(item.items, ownId) : typeof item.actionId === "string" && item.actionId !== ownId && ids.has(item.actionId));
+    ? menuRefs(item.items, ownId)
+    : item.kind === "separator" || (typeof item.actionId === "string" && item.actionId !== ownId && ids.has(item.actionId)));
   return actions.every((action) => {
     if (typeof action.displayName !== "string") return false;
     if (action.type === "menu") return menuRefs(action.payload.items, action.id);

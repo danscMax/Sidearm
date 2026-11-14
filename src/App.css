@@ -1982,6 +1982,10 @@ input[type="radio"] {
 
 .menu-ed__row:hover { background: var(--c-card-bg); }
 .menu-ed__row--nested { padding-left: 22px; }
+/* A separator item: a line across the row, picked like any item to move or delete it. */
+.menu-ed__row--line { min-height: 18px; padding-block: 4px; }
+.menu-ed__line { flex: 1; height: 1px; background: var(--c-border); }
+.menu-ed__row--line:hover .menu-ed__line, .menu-ed__row--line.menu-ed__row--on .menu-ed__line { background: var(--c-accent); }
 .menu-ed__row--on { background: var(--c-menu-selected); }
 .menu-ed__row--on:hover { background: var(--c-menu-selected-hover); }
 .menu-ed__row--off { opacity: 0.45; }

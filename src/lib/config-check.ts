@@ -71,6 +71,7 @@ export function checkProfile(config: AppConfig, profileId: string): ConfigIssue[
     }
     if (action.type === "menu") {
       const walk = (items: MenuItem[], path: string) => items.forEach((item) => {
+        if (item.kind === "separator") return;
         const here = `${path} › ${item.label}`;
         if (item.kind === "submenu") return walk(item.items, here);
         const inner = actions.get(item.actionId);

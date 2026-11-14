@@ -126,7 +126,7 @@ export function unpickedItems(items: MenuItem[], sums: PressSums, actions: Map<s
   const ids = new Set<string>();
   const walk = (list: MenuItem[]) => list.forEach((item) => {
     if (item.kind === "submenu") walk(item.items);
-    else if (actions.get(item.actionId)?.type !== "menu" && !sums.actions.get(item.actionId)) ids.add(item.id);
+    else if (item.kind === "action" && actions.get(item.actionId)?.type !== "menu" && !sums.actions.get(item.actionId)) ids.add(item.id);
   });
   walk(items);
   return ids;

@@ -18,7 +18,8 @@ describe("describeConfigChange", () => {
     after.bindings[0]!.actionId = "b"; // thumb 1 now sends B
     after.bindings.push(bind("z", "thumb_01", "a", { triggerMode: "longPress" })); // a new hold
     const edited = after.actions.find((action) => action.id === "m")!;
-    if (edited.type === "menu") edited.payload.items[0]!.label = "A2";
+    const first = edited.type === "menu" ? edited.payload.items[0] : undefined;
+    if (first && first.kind !== "separator") first.label = "A2";
     const change = describeConfigChange(before, after);
     expect(change.places).toHaveLength(2);
     expect(change.menus).toEqual(["Phrases"]);

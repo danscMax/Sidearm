@@ -103,7 +103,10 @@ export function editedLibrary(config: AppConfig, edits: MenuEdits): SnippetLibra
 
 function referencedActionIds(items: MenuItem[]): Set<string> {
   const ids = new Set<string>();
-  const walk = (list: MenuItem[]) => list.forEach((item) => (item.kind === "action" ? ids.add(item.actionId) : walk(item.items)));
+  const walk = (list: MenuItem[]) => list.forEach((item) => {
+    if (item.kind === "action") ids.add(item.actionId);
+    else if (item.kind === "submenu") walk(item.items);
+  });
   walk(items);
   return ids;
 }
@@ -148,6 +151,7 @@ export function incompleteItems(config: AppConfig, edits: MenuEdits, items: Menu
   const actions = new Map(editedActions(config, edits).map((action) => [action.id, action]));
   const library = editedLibrary(config, edits);
   const empty = (item: MenuItem): boolean => {
+    if (item.kind === "separator") return false;
     if (item.label.trim() === "") return true;
     if (item.kind === "submenu") return false;
     const action = actions.get(item.actionId);

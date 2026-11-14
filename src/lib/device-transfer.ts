@@ -245,7 +245,7 @@ function signature(binding: Binding, actions: ReadonlyMap<string, Action>): stri
     const { id: _own, ...body } = action;
     if (action.type !== "menu") return body;
     const items = (list: MenuItem[]): unknown[] => list.map((item) =>
-      item.kind === "submenu" ? { ...item, items: items(item.items) } : { ...item, action: content(item.actionId) });
+      item.kind === "submenu" ? { ...item, items: items(item.items) } : item.kind === "separator" ? item : { ...item, action: content(item.actionId) });
     return { ...body, payload: { ...action.payload, items: items(action.payload.items) } };
   };
   return JSON.stringify([rest, partner, content(actionId)]);

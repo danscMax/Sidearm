@@ -30,6 +30,8 @@ const v3Usage = (thumb, layer) => V3_USAGES[2 * (thumb - 1) + layer];
 const v2Usage = v3Usage;
 // Mouse-hook button codes (`HYPER_TRIGGER_*` in capture_backend/windows.rs).
 const RIGHT = 2;
+/** `--popups`: the real menu, cheat sheet and OSD windows open (on screen; the menu takes the focus). */
+const POPUPS = process.argv.includes("--popups");
 
 const results = [];
 let failed = false;
@@ -59,7 +61,7 @@ class World {
     this.mice = path.join(this.root, "mice");
     fs.mkdirSync(this.data);
     fs.mkdirSync(this.mice);
-    this.env = { ...process.env, SIDEARM_DATA_DIR: this.data, SIDEARM_FAKE_MICE: this.mice };
+    this.env = { ...process.env, SIDEARM_DATA_DIR: this.data, SIDEARM_FAKE_MICE: this.mice, ...(POPUPS ? { SIDEARM_FAKE_POPUPS: "1" } : {}) };
     this.pipes = {};
     this.app = null;
   }
@@ -243,6 +245,8 @@ function addBindings(config) {
     config.bindings = config.bindings.filter((b) => !(b.profileId === profile.id && b.controlId === "v3_thumb_11" && b.layer === "hypershift2"));
     config.bindings.push({ id: `${base}-binding`, profileId: profile.id, layer: "hypershift2", controlId: "v3_thumb_11", label: "E2E menu", actionId: base, enabled: true });
   }
+  // With real popups: the HyperShift 2 cheat sheet, and an OSD bubble per action.
+  if (POPUPS) Object.assign(config.settings, { hs2CheatSheet: true, osdEnabled: true, osdActions: true });
   // The default profile lives in V3 bank 1 (written at exit).
   const fallback = config.profiles.find((p) => p.id === config.settings.fallbackProfileId);
   fallback.deviceSlots = { ...(fallback.deviceSlots ?? {}), [V3]: 1 };
@@ -450,6 +454,7 @@ async function main() {
     mark = world.log().length;
     await world.press(V3, v3Usage(11, 0));
     check("the opening button closes the menu", await world.waitFor(() => world.log(), /\[menu\] closed/, 5000, mark));
+    if (POPUPS) await popupScenarios(world, expectedAction);
 
     mark = world.log().length;
     await world.press(V3, v3Usage(6, 0));
@@ -527,6 +532,38 @@ async function main() {
 const gestureOf = (mode) => (mode === "longPress" || mode === "doublePress" || mode === "triplePress" ? mode : "press");
 
 /** Presses a V3 key button the way a gesture needs. */
+/** `--popups` only: the real windows show and hide, and releasing the HyperShift 2
+ *  trigger right as the cheat sheet appears freezes nothing (the main thread
+ *  keeps answering and the next press still runs). */
+async function popupScenarios(world, expectedAction) {
+  let mark = world.log().length;
+  world.nativeButton(V3, RIGHT, true);
+  await sleep(100);
+  await world.press(V3, v3Usage(11, 0));
+  world.nativeButton(V3, RIGHT, false);
+  check("popups: the menu window is shown", await world.waitFor(() => world.log(), /\[menu\] shown \(\d+x\d+\)/, 8000, mark));
+  mark = world.log().length;
+  await world.press(V3, v3Usage(11, 0));
+  check("popups: …and closed by its button", await world.waitFor(() => world.log(), /\[menu\] closed/, 5000, mark));
+  mark = world.log().length;
+  world.nativeButton(V3, RIGHT, true);
+  check("popups: the cheat sheet shows after a 1 s hold", await world.waitFor(() => world.log(), /\[cheatsheet\] shown/, 8000, mark));
+  world.nativeButton(V3, RIGHT, false);
+  check("popups: …and goes on release", await world.waitFor(() => world.log(), /\[cheatsheet\] hidden/, 5000, mark));
+  // Let go around the moment the sheet appears, again and again.
+  for (let i = 0; i < 8; i += 1) {
+    world.nativeButton(V3, RIGHT, true);
+    await sleep(940 + i * 15);
+    world.nativeButton(V3, RIGHT, false);
+    await sleep(150);
+  }
+  mark = world.log().length;
+  await world.press(V3, v3Usage(3, 0));
+  check("popups: a press still runs after the release race", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_03", "standard", "L")), 5000, mark));
+  check("popups: the main thread never stopped answering", !/main thread has not answered/.test(world.log()));
+  check("popups: an action's OSD bubble shows (or a fullscreen window holds it back)", /\[osd\] (shown|skipped: a fullscreen window is in front)/.test(world.log()));
+}
+
 async function pressAs(world, usage, gesture) {
   if (gesture === "longPress") return world.press(V3, usage, 450);
   const taps = gesture === "doublePress" ? 2 : gesture === "triplePress" ? 3 : 1;

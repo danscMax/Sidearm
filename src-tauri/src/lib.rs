@@ -235,6 +235,7 @@ pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, setting
         return;
     }
     if is_foreground_fullscreen() {
+        log::info!("[osd] skipped: a fullscreen window is in front");
         return;
     }
 
@@ -347,6 +348,7 @@ pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, setting
     }
 
     let _ = w.show();
+    log::info!("[osd] shown");
 
     // Emit for JS to update text and animate (no sizing/positioning in JS)
     let font_size_str = match settings.osd_font_size {
@@ -3434,6 +3436,13 @@ static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// A `fake-mice` test build running against virtual mice (`SIDEARM_FAKE_MICE`):
 /// no USB, and no input sent to the desktop.
+/// A fake-mice run that also opens the real popup windows (menu, cheat sheet,
+/// OSD, input fields): `npm run e2e -- --popups`. They show on screen and the
+/// menu takes the keyboard focus, so it is never the default run.
+pub(crate) fn fake_popups() -> bool {
+    fake_mode() && std::env::var_os("SIDEARM_FAKE_POPUPS").is_some()
+}
+
 pub(crate) fn fake_mode() -> bool {
     #[cfg(all(target_os = "windows", feature = "fake-mice"))]
     if mouse_memory::fake::files::dir().is_some() {

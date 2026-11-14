@@ -194,7 +194,10 @@ pub(crate) fn cancel(app: &AppHandle) {
         if let Err(error) = app.run_on_main_thread(hide_later) {
             log::warn!("[cheatsheet] hide not scheduled: {error}");
         }
-    }, move || hide(&handle));
+    }, move || {
+        hide(&handle);
+        log::info!("[cheatsheet] hidden");
+    });
 }
 
 /// Cancels at once and hands `schedule` the hide, which takes the lock again when
@@ -239,8 +242,10 @@ pub(crate) fn page_ready(app: &AppHandle) {
 /// it without taking the focus.
 pub(crate) fn page_layout(app: &AppHandle, width: f64, height: f64) {
     let Some(window) = app.get_webview_window(WINDOW_LABEL) else { return };
-    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
-        .layout(|| platform::place_and_show(&window, width.ceil() as i32, height.ceil() as i32));
+    LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).layout(|| {
+        platform::place_and_show(&window, width.ceil() as i32, height.ceil() as i32);
+        log::info!("[cheatsheet] shown");
+    });
 }
 
 fn hide(app: &AppHandle) {

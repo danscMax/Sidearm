@@ -634,7 +634,7 @@ pub(crate) fn open(
     *OPEN.lock().unwrap_or_else(|poison| poison.into_inner()) = Some(menu);
     IS_OPEN.store(true, Ordering::Release);
     log::info!("[menu] opened `{title}` ({} items)", view.items.len());
-    if crate::fake_mode() {
+    if crate::fake_mode() && !crate::fake_popups() {
         return; // A test run has no windows; the model still answers presses.
     }
     show(app, &view, anchor);
@@ -820,7 +820,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
         Step::Stay => {
             let view = view_of(menu);
             drop(guard);
-            if !crate::fake_mode() {
+            if !crate::fake_mode() || crate::fake_popups() {
                 let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &view);
             }
         }
@@ -1041,6 +1041,7 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
     // on its event thread, and a `set_focus()` before it lands does nothing
     // (the keys then went to the app under the popup — measured 2026-11-12).
     platform::show_focused(&window);
+    log::info!("[menu] shown ({w}x{h})");
 }
 
 /// Whether the open menu (if any) is `generation`.

@@ -2423,10 +2423,17 @@ fn menu_close(app: AppHandle) {
     menu_popup::close_from_window(&app);
 }
 
-/// A wheel tick over the menu popup (`down` = towards the user).
+/// A wheel tick over the menu popup (`down` = towards the user); `row`: an
+/// ↑/↓ arrow, a whole row in a cheat sheet's grid.
 #[tauri::command]
-fn menu_wheel(app: AppHandle, down: bool) {
-    menu_popup::wheel_from_window(&app, down);
+fn menu_wheel(app: AppHandle, down: bool, row: Option<bool>) {
+    menu_popup::wheel_from_window(&app, down, row.unwrap_or(false));
+}
+
+/// Tab in a cheat sheet: the same sheet on the other layer.
+#[tauri::command]
+fn menu_sheet_layer(app: AppHandle) {
+    menu_popup::switch_sheet_layer_from_window(&app);
 }
 
 /// A click on a menu item (index in the level shown).
@@ -4593,6 +4600,7 @@ pub fn run() {
             export_layout_folder,
             get_press_log,
             menu_wheel,
+            menu_sheet_layer,
             menu_search,
             menu_search_scope,
             prompt_ready,

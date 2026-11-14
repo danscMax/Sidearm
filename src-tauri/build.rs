@@ -23,6 +23,7 @@ const APP_COMMANDS: &[&str] = &[
     "export_layout_folder",
     "get_press_log",
     "menu_wheel",
+    "menu_sheet_layer",
     "menu_search",
     "menu_search_scope",
     "resolve_shortcut_target",

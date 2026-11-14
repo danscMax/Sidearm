@@ -15,6 +15,7 @@
     "allow-menu-pick-child",
     "allow-menu-edit",
     "allow-menu-wheel",
+    "allow-menu-sheet-layer",
     "allow-menu-search",
     "allow-menu-search-scope",
     "allow-menu-confirm",

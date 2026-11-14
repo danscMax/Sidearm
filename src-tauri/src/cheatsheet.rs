@@ -132,13 +132,17 @@ pub(crate) fn thumb_prefix(config: &AppConfig, control: Option<&str>) -> String 
 /// The title of a `cheatSheet` action's grid: the profile and the layer.
 pub(crate) fn layer_title(config: &AppConfig, profile_id: &str, layer: Layer) -> String {
     let name = config.profiles.iter().find(|p| p.id == profile_id).map_or(profile_id, |p| p.name.as_str());
-    let layer_name = crate::ui_text::native(&match layer {
+    crate::ui_text::native(&crate::ui_text!("cheatsheet.layerTitle", "{profile} · {layer}", profile = name, layer = layer_name(layer)))
+}
+
+/// A layer's name in the UI language.
+pub(crate) fn layer_name(layer: Layer) -> String {
+    crate::ui_text::native(&match layer {
         Layer::Standard => crate::ui_text!("cheatsheet.layerStandard", "standard"),
         Layer::Hypershift => crate::ui_text!("cheatsheet.layerHypershift", "HyperShift"),
         Layer::Hypershift2 => crate::ui_text!("cheatsheet.layerHypershift2", "HyperShift 2"),
         Layer::HypershiftBoth => crate::ui_text!("cheatsheet.layerBoth", "HS + HS2"),
-    });
-    crate::ui_text::native(&crate::ui_text!("cheatsheet.layerTitle", "{profile} · {layer}", profile = name, layer = layer_name))
+    })
 }
 
 /// A `cheatSheet` action's grid as the popup's items: the 12 side buttons of

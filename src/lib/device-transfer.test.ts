@@ -206,5 +206,6 @@ describe("what syncing a button reaches", () => {
     expect(syncedWith(on, "v2")).toEqual(["Razer Naga V3 Pro"]);
     expect(syncedWith(on, "v3")).toEqual(["Razer Naga V2 Hyperspeed"]);
     expect(syncedWith({ ...config, settings: { ...config.settings, syncMice: true } }, "alone")).toEqual([]);
+    expect(syncedWith({ ...config, settings: { ...config.settings, syncMice: true } }, "v2")).toEqual([]); // the general switch marks nothing
   });
 });

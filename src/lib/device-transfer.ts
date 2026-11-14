@@ -271,7 +271,9 @@ export function slotCounterparts(config: AppConfig, bindingId: string): Binding[
  *  its place is synced and assigned there too. */
 export function syncedWith(config: AppConfig, bindingId: string): string[] {
   const own = config.bindings.find((binding) => binding.id === bindingId);
-  if (!own || !slotSynced(config.settings, slotKey(own.profileId, own.layer, gestureOf(own.triggerMode), own.controlId))) return [];
+  // Only a button linked on its own: with "Keep the mice alike" on, every button
+  // is, and a mark on each of them said nothing (the setting says it).
+  if (!own || config.settings.syncSlots?.[slotKey(own.profileId, own.layer, gestureOf(own.triggerMode), own.controlId)] !== true) return [];
   const deviceOf = (id: ControlId) => config.physicalControls.find((control) => control.id === id)?.deviceId;
   const names = slotCounterparts(config, bindingId)
     .map((other) => config.devices.find((device) => device.id === deviceOf(other.controlId))?.name ?? "");

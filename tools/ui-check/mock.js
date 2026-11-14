@@ -35,6 +35,11 @@
       pathMismatch: false, supported: true, needsReconfirm: false,
     }),
     get_debug_log: () => [],
+    // The config's model, not plugged in (what the backend says with no mouse).
+    get_native_model: (args) => ({
+      name: "Razer Naga", deviceId: (args && args.deviceId) || "razer-naga", dpiMin: 100, dpiMax: 30000,
+      pollRates: [125, 500, 1000], verified: true, connected: false, banks: false, consumerSignals: null,
+    }),
   };
 
   const callbacks = new Map();

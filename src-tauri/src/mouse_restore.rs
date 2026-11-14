@@ -165,9 +165,43 @@ pub fn spawn_live_map_restore(config_dir: &Path, after_crash: bool) {
 pub fn spawn_watchdog(config_dir: &Path) {
     // A mark an earlier Sidearm left (its watchdog gone) must not pass for this one's.
     let _ = std::fs::remove_file(config_dir.join(CLEAN_EXIT_FILE));
-    let pid = std::process::id().to_string();
-    if let Err(error) = spawn_detached(&[SPAWN_WATCHDOG_ARG.as_ref(), config_dir.as_os_str(), WATCH_ARG.as_ref(), pid.as_ref()]) {
-        log::warn!("[system] mouse watchdog not started: {error}");
+    let pid = std::process::id();
+    let config_dir = config_dir.to_owned();
+    // The broker it goes through ends at once and has no log: a watchdog that
+    // never came up says so only by its missing mutex. Checked off the setup.
+    let _ = std::thread::Builder::new().name("watchdog-start".into()).spawn(move || {
+        for attempt in 1..=2 {
+            let pid_text = pid.to_string();
+            if let Err(error) = spawn_detached(&[SPAWN_WATCHDOG_ARG.as_ref(), config_dir.as_os_str(), WATCH_ARG.as_ref(), pid_text.as_ref()]) {
+                log::warn!("[system] mouse watchdog not started (attempt {attempt}): {error}");
+                continue;
+            }
+            if wait_for_mutex(&watchdog_mutex(pid), std::time::Duration::from_secs(5)) {
+                log::info!("[system] mouse watchdog running");
+                return;
+            }
+            log::warn!("[system] mouse watchdog did not come up (attempt {attempt})");
+        }
+        log::error!("[system] no mouse watchdog: a killed Sidearm will not restore the mice by itself");
+    });
+}
+
+/// Held by the watchdog of Sidearm `pid` while it waits for it.
+fn watchdog_mutex(pid: u32) -> String {
+    format!("Local\\Sidearm-watchdog-{pid}")
+}
+
+/// Whether mutex `name` appears within `limit`.
+fn wait_for_mutex(name: &str, limit: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + limit;
+    loop {
+        if mutex_exists(name) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
     }
 }
 
@@ -246,6 +280,8 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
     }
     let mut after_crash = after_crash;
     if let Some(pid) = watch {
+        // Tells Sidearm its watchdog is up; released when this process ends.
+        let _ready = create_mutex(&watchdog_mutex(pid));
         wait_for_exit(pid);
         if exited_cleanly(config_dir, pid) {
             return;
@@ -369,6 +405,16 @@ pub fn claim_app() -> Option<windows_sys::Win32::Foundation::HANDLE> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_watchdog_mutex_is_seen_once_it_exists() {
+        let pid = u32::MAX - std::process::id();
+        let name = watchdog_mutex(pid);
+        assert!(!wait_for_mutex(&name, std::time::Duration::from_millis(150)), "no watchdog yet");
+        let held = create_mutex(&name).expect("created");
+        assert!(wait_for_mutex(&name, std::time::Duration::from_secs(1)));
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(held) };
+    }
 
     /// The app mutex is held even when an exiting Sidearm still holds it: it
     /// stays while this one runs, after the other one let go.

@@ -178,6 +178,33 @@ fn is_foreground_fullscreen() -> bool {
     return false;
 }
 
+/// Logs when the main thread stops answering (a deadlock or a long block
+/// there freezes the window, the tray and every popup) and when it is back:
+/// a hang is otherwise invisible, the process stays alive.
+#[cfg(target_os = "windows")]
+fn spawn_main_thread_watch(app: AppHandle) {
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+    let _ = std::thread::Builder::new().name("main-thread-watch".into()).spawn(move || loop {
+        let (answered, answer) = std::sync::mpsc::channel::<()>();
+        let asked = std::time::Instant::now();
+        if app.run_on_main_thread(move || { let _ = answered.send(()); }).is_err() {
+            return; // the event loop is gone
+        }
+        match answer.recv_timeout(LIMIT) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                log::error!("[system] the main thread has not answered for {LIMIT:?}: the window, tray and popups are frozen");
+                if answer.recv().is_err() {
+                    return;
+                }
+                log::warn!("[system] the main thread answered again after {:?}", asked.elapsed());
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return, // shutting down
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    });
+}
+
 /// The OSD page listens for `osd-show` (it said so through `osd_ready`).
 static OSD_READY: AtomicBool = AtomicBool::new(false);
 /// The latest bubble asked for while the page was still loading.
@@ -4003,6 +4030,7 @@ pub fn run() {
                 Ok(config_dir) => {
                     // Restores the mice should this Sidearm be killed with its helper.
                     mouse_restore::spawn_watchdog(&config_dir);
+                    spawn_main_thread_watch(app.handle().clone());
                     spawn_config_watch(app.handle().clone(), config_dir.clone());
                     // Before the guard and the capture runtime read it.
                     let key_signals = config_dir.join(mouse_memory::KEY_SIGNALS_FILE).exists();

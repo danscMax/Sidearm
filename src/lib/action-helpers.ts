@@ -234,7 +234,8 @@ export function withMenuPayload(
 }
 
 /** Default payloads for a new/converted sequence step (single source). */
-const SEQUENCE_STEP_DEFAULT_SEND = "Ctrl+C";
+// Empty: the owner found a ready-made Ctrl+C step baffling; Save waits until it is filled.
+const SEQUENCE_STEP_DEFAULT_SEND = "";
 const SEQUENCE_STEP_DEFAULT_SLEEP_MS = 100;
 /** How long a new "wait for a window" step waits (the backend caps it at 30 s). */
 const SEQUENCE_STEP_DEFAULT_WAIT_MS = 10_000;

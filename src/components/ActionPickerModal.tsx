@@ -474,7 +474,7 @@ export function ActionPickerModal({
     ? false
     : isSaveDisabled(effectiveCategory, drafts)
       || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS
-        || sequenceDraft.some((step) => step.type === "waitWindow" && !step.exe.trim())))
+        || sequenceDraft.some((step) => (step.type === "waitWindow" && !step.exe.trim()) || (step.type === "send" && !step.value.trim()))))
       || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [

@@ -28,13 +28,21 @@ describe("useDraftHistory", () => {
     expect(result.current.history.canRedo).toBe(false);
   });
 
-  it("takes typing in one field in a row as one step", () => {
+  it("takes typing in one field in a row as one step, and quick clicks as steps of their own", () => {
     const { result } = renderHook(() => useForm());
+    act(() => result.current.setItems(["b", "a"]));
+    act(() => result.current.setItems(["a", "b", "c"]));
+    act(() => result.current.history.undo());
+    expect(result.current.items).toEqual(["b", "a"]); // one click undone, not both
+    act(() => result.current.history.undo());
+    const field = document.body.appendChild(document.createElement("input"));
+    field.focus();
     act(() => result.current.setName("h"));
     act(() => result.current.setName("he"));
     act(() => result.current.setName("hey"));
     act(() => result.current.history.undo());
     expect(result.current.name).toBe("");
     expect(result.current.history.canUndo).toBe(false);
+    field.remove();
   });
 });

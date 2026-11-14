@@ -525,7 +525,7 @@ describe("withMenuPayload", () => {
 describe("createDefaultSequenceStep", () => {
   it("creates default send step", () => {
     const step = createDefaultSequenceStep("send");
-    expect(step).toEqual({ type: "send", value: "Ctrl+C" });
+    expect(step).toEqual({ type: "send", value: "" });
   });
 
   it("creates default text step", () => {
@@ -583,7 +583,7 @@ describe("coerceSequenceStepType", () => {
   it("converts sleep to send without carrying the pause duration as a delay", () => {
     const step: SequenceStep = { type: "sleep", delayMs: 500 };
     const result = coerceSequenceStepType(step, "send");
-    expect(result).toEqual({ type: "send", value: "Ctrl+C", delayMs: undefined });
+    expect(result).toEqual({ type: "send", value: "", delayMs: undefined });
   });
 
   it("converts sleep to text without carrying the pause duration as a delay", () => {

@@ -120,7 +120,7 @@ describe("keeping the mice alike", () => {
     const one = withSlotSync(base, key, true);
     expect(one.settings.syncSlots).toEqual({ [key]: true });
     const next = edit(one, (draft) => draft.bindings.push(binding("new", "v3_wheel_left"), binding("other", "v3_thumb_01")));
-    expect(next.bindings.map((item) => item.controlId).sort()).toEqual(["mouse_4", "v3_thumb_01", "v3_wheel_left"], "only the synced button is repeated");
+    expect(next.bindings.map((item) => item.controlId).sort()).toEqual(["mouse_4", "v3_thumb_01", "v3_wheel_left"]); // only the synced button is repeated
     const apart = withSlotSync({ ...one, settings: { ...one.settings, syncMice: true } }, key, false);
     const skipped = edit(apart, (draft) => draft.bindings.push(binding("new", "v3_wheel_left")));
     expect(skipped.bindings.map((item) => item.controlId)).toEqual(["v3_wheel_left"]);

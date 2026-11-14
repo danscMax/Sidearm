@@ -320,8 +320,9 @@ describe("boundary: createDefaultSequenceStep — all types produce valid steps"
     }
   });
 
-  it("send/text/launch steps always have a non-empty default value", () => {
-    for (const type of ["send", "text", "launch"] as const) {
+  it("text/launch steps have a non-empty default value; a send step starts empty (Save waits for it)", () => {
+    expect(createDefaultSequenceStep("send")).toEqual({ type: "send", value: "" });
+    for (const type of ["text", "launch"] as const) {
       const step = createDefaultSequenceStep(type);
       if ("value" in step) {
         expect(step.value.trim().length).toBeGreaterThan(0);

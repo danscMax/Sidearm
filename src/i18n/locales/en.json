@@ -1183,7 +1183,9 @@
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Y)",
     "syncOther": "The same on {{mice}}",
-    "syncOtherHint": "This button is alike on both mice: an edit here is repeated on the same button of the other mouse (and back). Turning it on copies this assignment there. The general “Keep the mice alike” setting is the default."
+    "syncOtherHint": "This button is alike on both mice: an edit here is repeated on the same button of the other mouse (and back). Turning it on copies this assignment there. The general “Keep the mice alike” setting is the default.",
+    "sendStepEmpty": "Step {{index}} has nothing to press: type a shortcut, e.g. Ctrl+L.",
+    "sendStepPlaceholder": "e.g. Ctrl+L or Enter"
   },
   "assignments": {
     "copyBinding": "Copy binding",

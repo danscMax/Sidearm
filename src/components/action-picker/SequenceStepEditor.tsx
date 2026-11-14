@@ -358,6 +358,7 @@ export function SequenceStepEditor({
               className="input"
               type="text"
               value={step.value}
+              placeholder={step.type === "send" ? t("picker.sendStepPlaceholder") : undefined}
               onChange={(e) =>
                 updateStep(index, { ...step, value: e.target.value } as SequenceStep)
               }
@@ -536,6 +537,10 @@ export function SequenceStepEditor({
       ) : steps.some((step) => step.type === "waitWindow" && !step.exe.trim()) ? (
         <Notice variant="warning" className="mb-8">
           <strong>{t("picker.waitWindowExeMissing")}</strong>
+        </Notice>
+      ) : steps.some((step) => step.type === "send" && !step.value.trim()) ? (
+        <Notice variant="warning" className="mb-8">
+          <strong>{t("picker.sendStepEmpty", { index: steps.findIndex((step) => step.type === "send" && !step.value.trim()) + 1 })}</strong>
         </Notice>
       ) : null}
       {recordingError ? (

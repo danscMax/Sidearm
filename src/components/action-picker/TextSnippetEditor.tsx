@@ -178,7 +178,7 @@ export function TextSnippetEditor({
               } else insertToken(token === INPUT_TOKEN ? `{input:${t("picker.tokenInputName")}}` : token);
             }}
             title={t(descKey)}
-            aria-label={t("picker.tokenInsertAria", { token })}
+            aria-label={token === "{date}" ? t("picker.tokenDateChip") : t("picker.tokenInsertAria", { token })}
             aria-haspopup={token === "{date}" ? "menu" : undefined}
           >
             {token === "{date}" ? `${t("picker.tokenDateChip")} ▾` : token}

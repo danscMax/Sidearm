@@ -11,7 +11,8 @@ function changedKeys<T extends object>(before: T, after: T): string {
 /**
  * Undo / redo over a form's drafts: `current` is every draft value (each kept
  * immutable, as React state is), `restore` puts a snapshot back. A change is
- * recorded once React has drawn it; typing in one field in a row is one step.
+ * recorded once React has drawn it; typing in one field in a row is one step
+ * (a click is always a step of its own).
  */
 export function useDraftHistory<T extends object>(current: T, restore: (snapshot: T) => void) {
   const past = useRef<T[]>([]);
@@ -26,7 +27,9 @@ export function useDraftHistory<T extends object>(current: T, restore: (snapshot
     const keys = changedKeys(last.current, current);
     if (!keys) return;
     const now = performance.now();
-    const sameBurst = keys === burst.current.keys && now - burst.current.at < COALESCE_MS;
+    // Only typing runs together: a click (add a step, move an item) is a step of its own.
+    const typing = document.activeElement?.matches("input, textarea, [contenteditable='true']") ?? false;
+    const sameBurst = typing && keys === burst.current.keys && now - burst.current.at < COALESCE_MS;
     if (!sameBurst) {
       past.current = [...past.current, last.current].slice(-MAX_STEPS);
       future.current = [];

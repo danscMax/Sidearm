@@ -3505,6 +3505,16 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    /// Writes the seed config to `$SIDEARM_SEED_CONFIG_OUT` for the browser UI check
+    /// (`tools/ui-check/make-config.mjs` runs it); nothing without the variable.
+    #[test]
+    #[ignore = "a tool, run by tools/ui-check/make-config.mjs"]
+    fn write_seed_config_for_ui_check() {
+        let Some(out) = std::env::var_os("SIDEARM_SEED_CONFIG_OUT") else { return };
+        let json = serde_json::to_string_pretty(&default_seed_config()).expect("json");
+        std::fs::write(out, json).expect("write the seed config");
+    }
+
     #[test]
     fn a_phrase_keeps_its_enter_and_an_old_one_has_none() {
         let old: TextSnippetPayload = serde_json::from_str(r#"{"source":"libraryRef","snippetId":"s1"}"#).unwrap();

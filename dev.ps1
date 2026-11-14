@@ -14,6 +14,27 @@ chcp 65001 | Out-Null
 $ErrorActionPreference = "Stop"
 $host.UI.RawUI.WindowTitle = "Sidearm Dev (auto-restart)"
 
+# No QuickEdit in this console: a click into it starts a text selection, and
+# while one lasts Windows blocks every write to the console. The app logs to
+# stdout on each press, so its capture thread froze on the first log line and
+# every mouse button went silent (measured 2026-11-14: stacks stuck in
+# write_fmt<StdoutLock>). The app inherits this console, so this covers it.
+try {
+    Add-Type -Namespace SidearmDev -Name Console -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetStdHandle(int handle);
+[DllImport("kernel32.dll")] public static extern bool GetConsoleMode(IntPtr handle, out uint mode);
+[DllImport("kernel32.dll")] public static extern bool SetConsoleMode(IntPtr handle, uint mode);
+'@
+    $stdin = [SidearmDev.Console]::GetStdHandle(-10)
+    $mode = 0
+    if ([SidearmDev.Console]::GetConsoleMode($stdin, [ref]$mode)) {
+        # ENABLE_EXTENDED_FLAGS (0x80) on, ENABLE_QUICK_EDIT_MODE (0x40) off.
+        [void][SidearmDev.Console]::SetConsoleMode($stdin, ($mode -bor 0x80) -band (-bnot 0x40))
+    }
+} catch {
+    Write-Host "  QuickEdit not turned off: $($_.Exception.Message)" -ForegroundColor Yellow
+}
+
 # Shared console UI + helpers (banner glyphs, Write-Banner, Write-Ok/Fail/Warn/
 # Info, Get-AppVersion). Vendored at the repo root.
 $kit = Join-Path $PSScriptRoot 'ScriptKit.ps1'

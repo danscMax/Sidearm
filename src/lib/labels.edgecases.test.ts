@@ -64,6 +64,7 @@ const ALL_ACTION_TYPES: ActionType[] = [
   "disabled",
   "repairClipboard",
   "stopMacros",
+  "cheatSheet",
 ];
 
 // ---------------------------------------------------------------------------

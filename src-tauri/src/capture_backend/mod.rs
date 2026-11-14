@@ -321,7 +321,8 @@ fn gesture_target_is_current(
         Some(ActionPayload::MouseAction(mouse)) => !matches!(mouse.action, MouseActionKind::DpiUp | MouseActionKind::DpiDown),
         Some(ActionPayload::Sequence(sequence)) => sequence.steps.iter().any(|step| matches!(step, SequenceStep::Send { .. } | SequenceStep::Text { .. })),
         Some(ActionPayload::Launch(_) | ActionPayload::Menu(_) | ActionPayload::ProfileSwitch(_)
-            | ActionPayload::Disabled(_) | ActionPayload::RepairClipboard(_) | ActionPayload::StopMacros(_)) | None => false,
+            | ActionPayload::Disabled(_) | ActionPayload::RepairClipboard(_) | ActionPayload::StopMacros(_)
+            | ActionPayload::CheatSheet(_)) | None => false,
     };
     !sends_input || current_window.is_some_and(|current| {
         if !start_window.hwnd.is_empty() {
@@ -687,6 +688,10 @@ fn process_encoded_key_event(
     );
 
     let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
+    // A cheat sheet an action showed goes with the next press, which still runs.
+    if !event.is_repeat {
+        crate::cheatsheet::dismiss_shown(app);
+    }
     // An open menu owns the mouse's buttons: the press drives it, the app gets nothing.
     if crate::menu_popup::is_open() {
         if !event.is_repeat {
@@ -1050,6 +1055,16 @@ fn run_fire_and_forget(
         && let Some(physical) = config.physical_controls.iter().find(|physical| physical.id.as_str() == control)
     {
         crate::onboard_guard::note_device_used(app, &physical.device_id);
+    }
+    // A cheat sheet shows the pressed mouse's grid of that layer at the cursor.
+    if let Some(action) = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
+        && let crate::config::ActionPayload::CheatSheet(payload) = &action.payload
+    {
+        flush_log_entries(runtime_store, log_entries);
+        count_press(config, preview, &action.id, !menu_pick);
+        let profile = preview.resolved_profile_id.clone().unwrap_or_else(|| config.settings.fallback_profile_id.clone());
+        crate::cheatsheet::show_layer(app, config, &profile, preview.control_id.as_deref(), payload.layer);
+        return;
     }
     // A menu opens its popup; the item picked there runs through `run_menu_item`.
     if let Some(action) = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())

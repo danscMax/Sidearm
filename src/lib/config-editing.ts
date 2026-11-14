@@ -658,6 +658,12 @@ export function coerceActionType(
           type: "stopMacros",
           payload: defaultPayloadFor("stopMacros"),
         };
+      case "cheatSheet":
+        return {
+          ...action,
+          type: "cheatSheet",
+          payload: defaultPayloadFor("cheatSheet"),
+        };
     }
   })();
 

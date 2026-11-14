@@ -29,7 +29,8 @@ export type ActionType =
   | "profileSwitch"
   | "disabled"
   | "repairClipboard"
-  | "stopMacros";
+  | "stopMacros"
+  | "cheatSheet";
 
 export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord" | "longPress";
 
@@ -304,6 +305,11 @@ interface StopMacrosPayload {
   scope: "all";
 }
 
+/** Cheat-sheet payload (Rust `CheatSheetPayload`): the layer whose side-button grid shows. */
+interface CheatSheetPayload {
+  layer: Layer;
+}
+
 export type ActionCondition =
   | { type: "windowTitleContains"; value: string }
   | { type: "windowTitleNotContains"; value: string }
@@ -330,6 +336,7 @@ export type Action = ActionBase &
     | { type: "disabled"; payload: DisabledActionPayload }
     | { type: "repairClipboard"; payload: RepairClipboardPayload }
     | { type: "stopMacros"; payload: StopMacrosPayload }
+    | { type: "cheatSheet"; payload: CheatSheetPayload }
   );
 
 export interface SnippetLibraryItem {

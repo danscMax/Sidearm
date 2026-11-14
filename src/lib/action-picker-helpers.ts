@@ -5,6 +5,7 @@ import type {
   ActionCondition,
   ActionType,
   Binding,
+  Layer,
   MediaKeyKind,
   MenuItem,
   MouseActionKind,
@@ -138,6 +139,8 @@ export interface PickerDrafts {
   profile: string;
   sequence: SequenceStep[];
   menuItems: MenuItem[];
+  /** The `cheatSheet` action's layer; absent = HyperShift. */
+  cheatLayer?: Layer;
   name: string;
   conditions: ActionCondition[];
 }
@@ -186,6 +189,8 @@ export function autoName(
       return t("action.type.repairClipboard");
     case "stopMacros":
       return t("action.type.stopMacros");
+    case "cheatSheet":
+      return t("picker.defaultCheatSheet", { layer: t(`layer.${drafts.cheatLayer ?? "hypershift"}`) });
     default:
       return assertNever(actionType);
   }
@@ -237,6 +242,8 @@ export function describeAction(
       return t("picker.previewRepair");
     case "stopMacros":
       return t("picker.previewStopMacros");
+    case "cheatSheet":
+      return t("picker.previewCheatSheet", { layer: t(`layer.${drafts.cheatLayer ?? "hypershift"}`) });
     default:
       return assertNever(category.actionType);
   }
@@ -337,6 +344,8 @@ export function buildAction(params: {
         return { id: actionId, type: "repairClipboard" as const, payload: { strategy: "latin1" as const }, displayName };
       case "stopMacros":
         return { id: actionId, type: "stopMacros" as const, payload: { scope: "all" as const }, displayName: displayName || t("action.type.stopMacros") };
+      case "cheatSheet":
+        return { id: actionId, type: "cheatSheet" as const, payload: { layer: drafts.cheatLayer ?? "hypershift" }, displayName: displayName || t("action.type.cheatSheet") };
       default:
         return assertNever(actionType);
     }
@@ -422,6 +431,7 @@ export function createInitialDrafts(
         ? existingAction.payload.steps
         : [{ type: "send", value: "Ctrl+C" }],
     menuItems: existingAction?.type === "menu" ? existingAction.payload.items : [],
+    cheatLayer: existingAction?.type === "cheatSheet" ? existingAction.payload.layer : "hypershift",
     name: existingAction?.displayName ?? "",
     conditions: existingAction?.conditions ?? [],
     triggerMode: binding?.triggerMode ?? "press",

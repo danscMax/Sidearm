@@ -134,6 +134,12 @@ export function CategoryIcon({ id, fallback, size = 16 }: { id: string; fallback
         <rect x="5.5" y="5.5" width="5" height="5" rx="0.8" />
       </>
     ),
+    cheatSheet: (
+      <>
+        <rect x="2.5" y="2.5" width="11" height="11" rx="1.5" />
+        <path d="M6.2 2.5v11M9.8 2.5v11M2.5 6.2h11M2.5 9.8h11" />
+      </>
+    ),
   };
   const drawn = paths[id];
   if (!drawn) return <>{fallback}</>;

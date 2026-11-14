@@ -672,6 +672,8 @@ pub enum ActionType {
     RepairClipboard,
     /// Ends the running macro and drops the queued ones.
     StopMacros,
+    /// Shows the side-button grid of the pressed mouse on one layer.
+    CheatSheet,
 }
 
 impl ActionType {
@@ -688,6 +690,7 @@ impl ActionType {
             ActionType::Disabled => "disabled",
             ActionType::RepairClipboard => "repairClipboard",
             ActionType::StopMacros => "stopMacros",
+            ActionType::CheatSheet => "cheatSheet",
         }
     }
 
@@ -697,7 +700,7 @@ impl ActionType {
     /// `match` below forces a new variant to be added here and to the schema
     /// (a missed schema entry is a save-breaker).
     #[cfg(test)]
-    const ALL: [ActionType; 11] = [
+    const ALL: [ActionType; 12] = [
         ActionType::Shortcut,
         ActionType::TextSnippet,
         ActionType::Sequence,
@@ -709,6 +712,7 @@ impl ActionType {
         ActionType::Disabled,
         ActionType::RepairClipboard,
         ActionType::StopMacros,
+        ActionType::CheatSheet,
     ];
 }
 
@@ -727,7 +731,8 @@ const _: fn(ActionType) = |a| match a {
     | ActionType::ProfileSwitch
     | ActionType::Disabled
     | ActionType::RepairClipboard
-    | ActionType::StopMacros => {}
+    | ActionType::StopMacros
+    | ActionType::CheatSheet => {}
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -773,6 +778,7 @@ pub enum ActionPayload {
     Disabled(DisabledActionPayload),
     RepairClipboard(RepairClipboardActionPayload),
     StopMacros(StopMacrosPayload),
+    CheatSheet(CheatSheetPayload),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1053,6 +1059,14 @@ pub enum StopScope {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StopMacrosPayload {
     pub scope: StopScope,
+}
+
+/// Which layer's grid [`ActionType::CheatSheet`] shows (a required field: the
+/// payload is never the empty disabled one).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CheatSheetPayload {
+    pub layer: Layer,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1969,6 +1983,7 @@ fn validate_action(
         // catch-all below, so validate_config rejected save/load of any config using it.)
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {}
         (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {}
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => {}
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
@@ -3975,7 +3990,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xa8c9_72e8_5745_6bca);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xe2eb_39a0_cc29_c184);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

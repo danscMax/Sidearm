@@ -15,7 +15,8 @@
     "menu_other": "Menu of {{count}} items",
     "disabledFallback": "Disabled placeholder action.",
     "repairClipboard": "Repair clipboard encoding (UTF-8 ↔ Latin-1).",
-    "stopMacros": "Stops running and queued macros"
+    "stopMacros": "Stops running and queued macros",
+    "cheatSheet": "Cheat sheet of the {{layer}} layer"
   },
   "common": {
     "na": "N/A",
@@ -224,7 +225,8 @@
       "menu": "Menu",
       "disabled": "Disabled",
       "repairClipboard": "Repair clipboard",
-      "stopMacros": "Stop macros"
+      "stopMacros": "Stop macros",
+      "cheatSheet": "Cheat sheet"
     }
   },
   "mouseAction": {
@@ -1143,7 +1145,11 @@
     "stopMacrosHint": "Ends the macro that is running now and drops the ones waiting behind it. Other buttons keep working; nothing is typed.",
     "previewStopMacros": "Stops the running macro and the queued ones",
     "keyboardOnly": "Keyboard only",
-    "keyboardOnlyHint": "Types the text key by key, never through the clipboard — for a terminal or a remote session that must not get a paste. Without it, a text over 100 characters is pasted. Not for a phrase with Enter (a macro)."
+    "keyboardOnlyHint": "Types the text key by key, never through the clipboard — for a terminal or a remote session that must not get a paste. Without it, a text over 100 characters is pasted. Not for a phrase with Enter (a macro).",
+    "cheatSheetLayer": "Layer to show",
+    "cheatSheetHint": "Shows the side buttons of the mouse you pressed, on this layer of the profile in effect, at the cursor. The next press puts it away (and still runs); after 10 seconds it goes by itself.",
+    "defaultCheatSheet": "Cheat sheet · {{layer}}",
+    "previewCheatSheet": "Shows the {{layer}} button grid"
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1737,7 +1743,8 @@
       "stopMacrosPreview": "Will stop the running macro and drop the queued ones.",
       "sequenceQueued": "Macro waits: {{ahead}} ahead of it.",
       "sequenceDropped": "Macro not started: {{count}} are already waiting. \"Stop macros\" ends them.",
-      "pasteModeKeyboard": "keyboard only"
+      "pasteModeKeyboard": "keyboard only",
+      "cheatSheetPreview": "Will show the button grid at the cursor."
     },
     "synapse": {
       "v3MacroParseFailed": "Could not parse macro `{{name}}`: {{error}}",
@@ -1847,7 +1854,12 @@
       "scopeThis": "This menu"
     },
     "cheatsheet": {
-      "title": "{{profile}} · HyperShift 2"
+      "title": "{{profile}} · HyperShift 2",
+      "layerStandard": "standard",
+      "layerHypershift": "HyperShift",
+      "layerHypershift2": "HyperShift 2",
+      "layerBoth": "HS + HS2",
+      "layerTitle": "{{profile}} · {{layer}}"
     },
     "error": {
       "adminAutostart": "Could not change starting as administrator: {{reason}}",

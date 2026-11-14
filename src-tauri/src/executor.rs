@@ -310,6 +310,25 @@ pub fn run_preview_action(
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {
             run_live_repair_clipboard_action(action, preview, Some(action_id))
         }
+        // Shown by the capture dispatch (it has the window); a Test run only names it.
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => Ok(ActionExecutionEvent {
+            encoded_key: preview.encoded_key.clone(),
+            action_id: action.id.clone(),
+            action_type: action.action_type.as_str().into(),
+            action_pretty: action.display_name.clone(),
+            resolved_profile_id: preview.resolved_profile_id.clone(),
+            resolved_profile_name: preview.resolved_profile_name.clone(),
+            matched_app_mapping_id: preview.matched_app_mapping_id.clone(),
+            control_id: preview.control_id.clone(),
+            layer: preview.layer.clone(),
+            binding_id: preview.binding_id.clone(),
+            mode: ExecutionMode::Live,
+            outcome: ExecutionOutcome::Noop,
+            process_id: None,
+            summary: crate::ui_text!("execution.cheatSheetPreview", "Will show the button grid at the cursor."),
+            warnings: Vec::new(),
+            executed_at: timestamp_millis(),
+        }),
         // Runs on the capture worker, never queued behind the macro it stops.
         (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {
             cancel_live_sequences();
@@ -540,6 +559,11 @@ fn summarize_action(
                 "execution.disabledPreview",
                 "Disabled action — nothing will be executed."
             ),
+            Vec::new(),
+        )),
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => Ok((
+            ExecutionOutcome::Simulated,
+            crate::ui_text!("execution.cheatSheetPreview", "Will show the button grid at the cursor."),
             Vec::new(),
         )),
         (ActionType::StopMacros, ActionPayload::StopMacros(_)) => Ok((

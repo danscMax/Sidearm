@@ -92,6 +92,10 @@ export function describeActionSummary(
     return i18n.t("actionSummary.stopMacros");
   }
 
+  if (action.type === "cheatSheet") {
+    return i18n.t("actionSummary.cheatSheet", { layer: i18n.t(`layer.${action.payload.layer}`) });
+  }
+
   return action.notes ?? i18n.t("actionSummary.disabledFallback");
 }
 
@@ -282,6 +286,8 @@ export function defaultPayloadFor(actionType: ActionType): Action["payload"] {
       return { strategy: "latin1" };
     case "stopMacros":
       return { scope: "all" };
+    case "cheatSheet":
+      return { layer: "hypershift" };
   }
 }
 

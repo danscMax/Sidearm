@@ -159,7 +159,8 @@
         "profileSwitch",
         "disabled",
         "repairClipboard",
-        "stopMacros"
+        "stopMacros",
+        "cheatSheet"
       ]
     },
     "pasteMode": {
@@ -852,6 +853,22 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "cheatSheet"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "payload": {
+                "$ref": "#/$defs/cheatSheetPayload"
+              }
+            }
+          }
         }
       ]
     },
@@ -1322,6 +1339,18 @@
           "enum": [
             "latin1"
           ]
+        }
+      }
+    },
+    "cheatSheetPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "layer"
+      ],
+      "properties": {
+        "layer": {
+          "$ref": "#/$defs/layer"
         }
       }
     },

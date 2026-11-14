@@ -277,6 +277,15 @@ describe("buildAction", () => {
     }
   });
 
+  it("builds a stopMacros and a cheatSheet action with their required fields", () => {
+    const stop = buildAction({ effectiveCategory: "stopMacros", existingAction: null, drafts: makeDrafts(), t, profiles });
+    expect(stop.type === "stopMacros" && stop.payload).toEqual({ scope: "all" });
+    const sheet = buildAction({ effectiveCategory: "cheatSheet", existingAction: null, drafts: makeDrafts({ cheatLayer: "hypershift2" }), t, profiles });
+    expect(sheet.type === "cheatSheet" && sheet.payload).toEqual({ layer: "hypershift2" });
+    const fallback = buildAction({ effectiveCategory: "cheatSheet", existingAction: null, drafts: makeDrafts(), t, profiles });
+    expect(fallback.type === "cheatSheet" && fallback.payload).toEqual({ layer: "hypershift" });
+  });
+
   it("drops empty args/workingDir for launch", () => {
     const action = buildAction({
       effectiveCategory: "launch",

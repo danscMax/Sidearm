@@ -93,9 +93,14 @@ pub(crate) struct Sheet {
 /// The HyperShift 2 grid of a profile: the 12 side buttons of the V3 (layout
 /// ids `thumb_01`…`thumb_12` with the `v3_` prefix).
 pub(crate) fn sheet_of(config: &AppConfig, profile_id: &str, title: String) -> Sheet {
+    sheet_of_layer(config, profile_id, "v3_thumb_", Layer::Hypershift2, title)
+}
+
+/// The grid of one mouse's 12 side buttons (control ids `<thumbs>01`…`12`) on `layer`.
+pub(crate) fn sheet_of_layer(config: &AppConfig, profile_id: &str, thumbs: &str, layer: Layer, title: String) -> Sheet {
     let mut cells: Vec<Cell> = (1..=12).map(|number| Cell { number, ..Cell::default() }).collect();
-    for binding in config.bindings.iter().filter(|b| b.enabled && b.profile_id == profile_id && b.layer == Layer::Hypershift2) {
-        let Some(number) = binding.control_id.as_str().strip_prefix("v3_thumb_").and_then(|n| n.parse::<usize>().ok()) else {
+    for binding in config.bindings.iter().filter(|b| b.enabled && b.profile_id == profile_id && b.layer == layer) {
+        let Some(number) = binding.control_id.as_str().strip_prefix(thumbs).and_then(|n| n.parse::<usize>().ok()) else {
             continue;
         };
         let Some(cell) = cells.get_mut(number.wrapping_sub(1)) else { continue };
@@ -111,6 +116,51 @@ pub(crate) fn sheet_of(config: &AppConfig, profile_id: &str, title: String) -> S
         cell.extras.push(Extra { gesture, label: binding.label.clone() });
     }
     Sheet { title, cells }
+}
+
+/// The side-button prefix of the mouse `control` belongs to (`v3_thumb_`, `thumb_`).
+fn thumb_prefix(config: &AppConfig, control: Option<&str>) -> String {
+    let device = control.and_then(|id| config.physical_controls.iter().find(|c| c.id.as_str() == id)).map(|c| c.device_id.as_str());
+    config
+        .physical_controls
+        .iter()
+        .filter(|c| device.is_none_or(|device| c.device_id == device))
+        .find_map(|c| c.id.as_str().find("thumb_").map(|at| c.id.as_str()[..at + "thumb_".len()].to_owned()))
+        .unwrap_or_else(|| "v3_thumb_".to_owned())
+}
+
+/// A `cheatSheet` action's sheet is up: the next press puts it away.
+static ACTION_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// How long a sheet an action showed stays without a press.
+const ACTION_SHOWN_FOR: Duration = Duration::from_secs(10);
+
+/// The `cheatSheet` action: the pressed mouse's grid of `layer`, at once.
+pub(crate) fn show_layer(app: &AppHandle, config: &AppConfig, profile_id: &str, control: Option<&str>, layer: Layer) {
+    let generation = LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).begin();
+    ACTION_SHOWN.store(generation, std::sync::atomic::Ordering::SeqCst);
+    let name = config.profiles.iter().find(|p| p.id == profile_id).map_or(profile_id, |p| p.name.as_str());
+    let layer_name = crate::ui_text::native(&match layer {
+        Layer::Standard => crate::ui_text!("cheatsheet.layerStandard", "standard"),
+        Layer::Hypershift => crate::ui_text!("cheatsheet.layerHypershift", "HyperShift"),
+        Layer::Hypershift2 => crate::ui_text!("cheatsheet.layerHypershift2", "HyperShift 2"),
+        Layer::HypershiftBoth => crate::ui_text!("cheatsheet.layerBoth", "HS + HS2"),
+    });
+    let title = crate::ui_text::native(&crate::ui_text!("cheatsheet.layerTitle", "{profile} · {layer}", profile = name, layer = layer_name));
+    show(app, generation, sheet_of_layer(config, profile_id, &thumb_prefix(config, control), layer, title));
+    let app = app.clone();
+    let _ = std::thread::Builder::new().name("cheatsheet-timeout".into()).spawn(move || {
+        std::thread::sleep(ACTION_SHOWN_FOR);
+        if ACTION_SHOWN.compare_exchange(generation, 0, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_ok() {
+            cancel(&app);
+        }
+    });
+}
+
+/// A press while an action's sheet is up puts it away (one compare otherwise).
+pub(crate) fn dismiss_shown(app: &AppHandle) {
+    if ACTION_SHOWN.load(std::sync::atomic::Ordering::Relaxed) != 0 && ACTION_SHOWN.swap(0, std::sync::atomic::Ordering::SeqCst) != 0 {
+        cancel(app);
+    }
 }
 
 /// The helper says the HyperShift 2 trigger went down (`held`) or up.
@@ -268,6 +318,28 @@ mod platform {
 mod tests {
     use super::*;
     use crate::config::{Binding, ControlId, TriggerMode};
+
+    #[test]
+    fn any_mouse_and_layer_gets_its_own_grid() {
+        let mut config = crate::config::default_seed_config();
+        let profile = config.settings.fallback_profile_id.clone();
+        let template = config.bindings[0].clone();
+        for (control, layer, label) in [("thumb_03", Layer::Hypershift, "V2 HS"), ("v3_thumb_03", Layer::Hypershift, "V3 HS"), ("thumb_04", Layer::Standard, "V2 std")] {
+            let mut binding = template.clone();
+            binding.id = format!("{control}-{label}");
+            binding.profile_id = profile.clone();
+            binding.control_id = ControlId::new(control);
+            binding.layer = layer;
+            binding.label = label.into();
+            binding.trigger_mode = None;
+            binding.enabled = true;
+            config.bindings.push(binding);
+        }
+        let sheet = sheet_of_layer(&config, &profile, "thumb_", Layer::Hypershift, String::new());
+        assert_eq!(sheet.cells[2].label.as_deref(), Some("V2 HS"), "the V2's own thumbs on that layer only");
+        assert!(sheet.cells[3].label.as_deref() != Some("V2 std"));
+        assert_eq!(thumb_prefix(&config, Some("thumb_03")), "thumb_");
+    }
 
     #[test]
     fn stop_cancels_visible_pending_and_delayed_shows() {

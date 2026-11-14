@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
-import { displayNameForControlId } from "../lib/labels";
+import { displayNameForControlId, labelForLayer } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
@@ -27,7 +27,7 @@ import { MenuItemsEditor } from "./MenuItemsEditor";
 import { CategoryIcon } from "./icons";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
-import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice } from "./shared";
+import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice, SelectField } from "./shared";
 import {
   autoName,
   buildAction,
@@ -263,6 +263,7 @@ export function ActionPickerModal({
   const [throttleDraft, setThrottleDraft] = useState(initial.throttleMs);
   const [conditionsDraft, setConditionsDraft] = useState(initial.conditions);
   const [menuItemsDraft, setMenuItemsDraft] = useState(initial.menuItems);
+  const [cheatLayerDraft, setCheatLayerDraft] = useState<Layer>(initial.cheatLayer ?? "hypershift");
 
   // Advanced settings (trigger mode, throttle, conditions) collapse by default,
   // but open automatically when the edited action already has any of them set.
@@ -300,6 +301,7 @@ export function ActionPickerModal({
     profile: profileDraft,
     sequence: sequenceDraft,
     menuItems: menuItemsDraft,
+    cheatLayer: cheatLayerDraft,
     name: nameDraft,
     conditions: conditionsDraft,
   };
@@ -656,6 +658,18 @@ export function ActionPickerModal({
             {effectiveCategory === "stopMacros" ? (
               <div className="editor-grid">
                 <Notice variant="info">{t("picker.stopMacrosHint")}</Notice>
+              </div>
+            ) : null}
+
+            {effectiveCategory === "cheatSheet" ? (
+              <div className="editor-grid">
+                <SelectField<Layer>
+                  label={t("picker.cheatSheetLayer")}
+                  value={cheatLayerDraft}
+                  onChange={setCheatLayerDraft}
+                  options={(["standard", "hypershift", "hypershift2", "hypershiftBoth"] as const).map((layer) => ({ value: layer, label: labelForLayer(layer) }))}
+                />
+                <Notice variant="info">{t("picker.cheatSheetHint")}</Notice>
               </div>
             ) : null}
 

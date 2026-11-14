@@ -1,52 +1,73 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 /** Edits of the same fields closer together than this are one undo step (typing). */
 const COALESCE_MS = 800;
 const MAX_STEPS = 100;
 
-function changedKeys<T extends object>(before: T, after: T): string {
-  return (Object.keys(after) as Array<keyof T>).filter((key) => !Object.is(before[key], after[key])).join(",");
+function changedKeys<T extends object>(before: T, after: T, passive: ReadonlyArray<keyof T>): string {
+  return (Object.keys(after) as Array<keyof T>)
+    .filter((key) => !passive.includes(key) && !Object.is(before[key], after[key])).join(",");
+}
+
+/** The stacks of one history. Held by a parent, it outlives a remount of the
+ *  form (the picker's press-pattern tabs). */
+export interface DraftHistoryStore<T> {
+  past: T[];
+  future: T[];
+  /** The values as last drawn; null until the first draw. */
+  last: T | null;
+  burst: { keys: string; at: number };
+}
+
+export function createDraftHistoryStore<T>(): DraftHistoryStore<T> {
+  return { past: [], future: [], last: null, burst: { keys: "", at: 0 } };
 }
 
 /**
  * Undo / redo over a form's drafts: `current` is every draft value (each kept
  * immutable, as React state is), `restore` puts a snapshot back. A change is
  * recorded once React has drawn it; typing in one field in a row is one step
- * (a click is always a step of its own).
+ * (a click is always a step of its own). `passive` keys ride along in the
+ * snapshots but are no change of their own; `store` keeps the history across
+ * a remount.
  */
-export function useDraftHistory<T extends object>(current: T, restore: (snapshot: T) => void) {
-  const past = useRef<T[]>([]);
-  const future = useRef<T[]>([]);
-  const last = useRef(current);
-  const burst = useRef({ keys: "", at: 0 });
-  // Mirrors the stacks' sizes: the buttons read state, never a ref, while drawing.
-  const [sizes, setSizes] = useState({ past: 0, future: 0 });
-  const sync = () => setSizes({ past: past.current.length, future: future.current.length });
+export function useDraftHistory<T extends object>(
+  current: T,
+  restore: (snapshot: T) => void,
+  { store, passive = [] }: { store?: DraftHistoryStore<T>; passive?: ReadonlyArray<keyof T> } = {},
+) {
+  const [ownStore] = useState(createDraftHistoryStore<T>);
+  const history = store ?? ownStore;
+  // Mirrors the stacks' sizes: the buttons read state, never the store, while drawing.
+  const [sizes, setSizes] = useState(() => ({ past: history.past.length, future: history.future.length }));
+  const sync = () => setSizes({ past: history.past.length, future: history.future.length });
 
   useEffect(() => {
-    const keys = changedKeys(last.current, current);
+    const last = history.last;
+    history.last = current;
+    if (!last) return;
+    const keys = changedKeys(last, current, passive);
     if (!keys) return;
     const now = performance.now();
     // Only typing runs together: a click (add a step, move an item) is a step of its own.
     const typing = document.activeElement?.matches("input, textarea, [contenteditable='true']") ?? false;
-    const sameBurst = typing && keys === burst.current.keys && now - burst.current.at < COALESCE_MS;
+    const sameBurst = typing && keys === history.burst.keys && now - history.burst.at < COALESCE_MS;
     if (!sameBurst) {
-      past.current = [...past.current, last.current].slice(-MAX_STEPS);
-      future.current = [];
+      history.past = [...history.past, last].slice(-MAX_STEPS);
+      history.future = [];
       sync();
     }
-    burst.current = { keys, at: now };
-    last.current = current;
+    history.burst = { keys, at: now };
   });
 
-  function step(from: { current: T[] }, to: { current: T[] }) {
-    const snapshot = from.current.at(-1);
+  function step(from: "past" | "future", to: "past" | "future") {
+    const snapshot = history[from].at(-1);
     if (!snapshot) return;
-    from.current = from.current.slice(0, -1);
-    to.current = [...to.current, last.current];
+    history[from] = history[from].slice(0, -1);
+    history[to] = [...history[to], history.last ?? current];
     // Set before React draws it: the restored drafts are no new change.
-    last.current = snapshot;
-    burst.current = { keys: "", at: 0 };
+    history.last = snapshot;
+    history.burst = { keys: "", at: 0 };
     restore(snapshot);
     sync();
   }
@@ -54,8 +75,8 @@ export function useDraftHistory<T extends object>(current: T, restore: (snapshot
   return {
     canUndo: sizes.past > 0,
     canRedo: sizes.future > 0,
-    undo: () => step(past, future),
-    redo: () => step(future, past),
+    undo: () => step("past", "future"),
+    redo: () => step("future", "past"),
   };
 }
 

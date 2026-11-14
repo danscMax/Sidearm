@@ -14,6 +14,8 @@ export interface ConfirmModalRequest {
   title: string;
   message: ReactNode;
   confirmLabel?: string;
+  /** The dismiss button's label; "Cancel" when absent. */
+  cancelLabel?: string;
   danger?: boolean;
   onConfirm: () => void | Promise<void>;
   secondaryConfirmLabel?: string;
@@ -25,6 +27,7 @@ export function ConfirmModal({
   title,
   message,
   confirmLabel,
+  cancelLabel,
   danger,
   onConfirm,
   secondaryConfirmLabel,
@@ -90,7 +93,7 @@ export function ConfirmModal({
           onClick={onCancel}
           disabled={isBusy}
         >
-          {t("common.cancel")}
+          {cancelLabel ?? t("common.cancel")}
         </button>
         {onSecondaryConfirm ? (
           <button

@@ -2310,9 +2310,9 @@ input[type="radio"] {
 .btn-legend__gesture .gesture-icon { flex: none; color: var(--layer-accent, var(--c-accent)); }
 .btn-legend__gesture-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-legend__gesture:hover { background: rgba(var(--layer-rgb, 159, 202, 105), 0.2); color: var(--c-text-bright); }
-/* Works only while Sidearm runs: a quiet mark beside the label. */
-.btn-legend__live { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
-.btn-legend__live:hover { opacity: 1; color: var(--c-text-bright); }
+/* Quiet marks beside the label: works only while Sidearm runs; kept alike on the other mouse. */
+.btn-legend__live, .btn-legend__synced { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
+.btn-legend__live:hover, .btn-legend__synced:hover { opacity: 1; color: var(--c-text-bright); }
 
 /* ── Tooltip on legend cells ── */
 .btn-legend__cell {
@@ -2344,7 +2344,8 @@ input[type="radio"] {
 /* A chip's own bubble: what that press pattern does; the cell's bubble hides meanwhile. */
 .btn-legend__cell:has([data-tip]:hover)[data-tooltip]:hover::after { display: none; }
 .btn-legend__gesture[data-tip]:hover::after,
-.btn-legend__live[data-tip]:hover::after {
+.btn-legend__live[data-tip]:hover::after,
+.btn-legend__synced[data-tip]:hover::after {
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 6px);
@@ -5321,6 +5322,8 @@ code {
 .action-picker__test-result {
   padding: 0 20px 4px;
 }
+/* What turning "The same on" on overwrites on the other mouse, above the footer's switch. */
+.action-picker__sync-note { display: grid; gap: 6px; padding: 0 20px 8px; }
 
 /* ── Expert section density overrides ── */
 .expert-section .fact {

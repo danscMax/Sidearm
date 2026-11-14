@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import type { AppConfig, Binding, PhysicalControl } from "./config";
 import { RAZER_NAGA_DEVICE_ID } from "./config";
 import { NAGA_V3_DEVICE_ID } from "./devices";
-import { applyDeviceTransfer, applyHoldOffers, copySlotToOtherMice, mirrorMouseEdit, planDeviceTransfer, planHoldsFromHypershift2, retargetImportedBindings, slotKey, withSlotSync } from "./device-transfer";
+import { applyDeviceTransfer, applyHoldOffers, copySlotToOtherMice, mirrorMouseEdit, planDeviceTransfer, planHoldsFromHypershift2, retargetImportedBindings, slotCounterparts, slotKey, slotReplacements, syncedWith, withSlotSync } from "./device-transfer";
 import { makeAction, makeConfig } from "./test-fixtures";
+import { ensurePlaceholderBinding } from "./config-editing";
 
 const control = (id: string, deviceId: string): PhysicalControl => ({
   id, deviceId, family: "thumbGrid", defaultName: id, remappable: true, capabilityStatus: "verified",
@@ -180,5 +181,30 @@ describe("HyperShift 2 onto holds of a mouse without it", () => {
     expect(planHoldsFromHypershift2(config, RAZER_NAGA_DEVICE_ID, NAGA_V3_DEVICE_ID, ["p1"])).toEqual([]);
     const next = applyHoldOffers(config, offers);
     expect(next.bindings.at(-1)).toMatchObject({ controlId: "thumb_01", layer: "standard", triggerMode: "longPress", actionId: "a1" });
+  });
+});
+
+describe("what syncing a button reaches", () => {
+  it("names the other mouse's different assignment, not an equal one or an empty placeholder", () => {
+    const config = twoMice([
+      binding("b1", "thumb_01"), binding("other", "v3_thumb_01", { actionId: "a2" }),
+      binding("b2", "mouse_4"), binding("same", "v3_wheel_left", { label: "b2" }),
+      binding("b3", "thumb_01", { layer: "hypershift" }),
+    ]);
+    config.actions.push(makeAction({ id: "a2", type: "shortcut", payload: { key: "B", ctrl: true, shift: false, alt: false, win: false } }));
+    const seeded = ensurePlaceholderBinding(config, "p1", "hypershift", config.physicalControls.find((item) => item.id === "v3_thumb_01")!).config;
+    expect(slotReplacements(seeded, "b1").map((item) => item.id)).toEqual(["other"]);
+    expect(slotReplacements(seeded, "b2")).toEqual([]);
+    expect(slotCounterparts(seeded, "b3")).toHaveLength(1);
+    expect(slotReplacements(seeded, "b3")).toEqual([]);
+  });
+
+  it("names the mice a synced button is kept alike with, only when it is synced and assigned there", () => {
+    const config = twoMice([binding("v2", "thumb_01"), binding("v3", "v3_thumb_01"), binding("alone", "mouse_4")]);
+    expect(syncedWith(config, "v2")).toEqual([]);
+    const on = withSlotSync(config, slotKey("p1", "standard", "press", "thumb_01"), true);
+    expect(syncedWith(on, "v2")).toEqual(["Razer Naga V3 Pro"]);
+    expect(syncedWith(on, "v3")).toEqual(["Razer Naga V2 Hyperspeed"]);
+    expect(syncedWith({ ...config, settings: { ...config.settings, syncMice: true } }, "alone")).toEqual([]);
   });
 });

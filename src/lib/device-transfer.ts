@@ -1,5 +1,5 @@
 import type { Action, AppConfig, Binding, ControlId, Layer, MenuItem } from "./config";
-import { collectMenuActionRefs, computeReferencedActionIds, gestureOf, makeRandomId, rescueDroppedSnippets } from "./config-editing";
+import { collectMenuActionRefs, computeReferencedActionIds, gestureOf, isPlaceholderAction, makeRandomId, rescueDroppedSnippets } from "./config-editing";
 import { deviceControlId, deviceLayout, layoutControlId } from "./devices";
 import { cloneMenuItem } from "./menu-arrange";
 import { NO_MENU_EDITS } from "./menu-phrase";
@@ -250,6 +250,43 @@ export function withSlotSync(config: AppConfig, key: string, on: boolean): AppCo
 export function copySlotToOtherMice(config: AppConfig, bindingId: string): AppConfig {
   if (!config.bindings.some((binding) => binding.id === bindingId)) return config;
   return mirrorMouseEdit({ ...config, bindings: config.bindings.filter((binding) => binding.id !== bindingId) }, config);
+}
+
+/** The bindings at the place of `bindingId` (profile, layer, press pattern,
+ *  layout place) on the other built-in mice: what syncing that button reaches. */
+export function slotCounterparts(config: AppConfig, bindingId: string): Binding[] {
+  const own = config.bindings.find((binding) => binding.id === bindingId);
+  const deviceOf = new Map(config.physicalControls.map((control) => [control.id, control.deviceId]));
+  const builtin = new Set(config.devices.filter((device) => device.builtin && deviceLayout(device.id)).map((device) => device.id));
+  if (!own || !builtin.has(deviceOf.get(own.controlId) ?? "")) return [];
+  const key = slotKey(own.profileId, own.layer, gestureOf(own.triggerMode), own.controlId);
+  return config.bindings.filter((other) => {
+    const device = deviceOf.get(other.controlId);
+    return other.id !== own.id && device !== deviceOf.get(own.controlId) && builtin.has(device ?? "")
+      && slotKey(other.profileId, other.layer, gestureOf(other.triggerMode), other.controlId) === key;
+  });
+}
+
+/** The names of the other mice the button of `bindingId` is kept alike with:
+ *  its place is synced and assigned there too. */
+export function syncedWith(config: AppConfig, bindingId: string): string[] {
+  const own = config.bindings.find((binding) => binding.id === bindingId);
+  if (!own || !slotSynced(config.settings, slotKey(own.profileId, own.layer, gestureOf(own.triggerMode), own.controlId))) return [];
+  const deviceOf = (id: ControlId) => config.physicalControls.find((control) => control.id === id)?.deviceId;
+  const names = slotCounterparts(config, bindingId)
+    .map((other) => config.devices.find((device) => device.id === deviceOf(other.controlId))?.name ?? "");
+  return [...new Set(names)];
+}
+
+/** What {@link copySlotToOtherMice} of `bindingId` would overwrite: the other
+ *  mice's bindings at its place that do something else (not an empty placeholder). */
+export function slotReplacements(config: AppConfig, bindingId: string): Binding[] {
+  const own = config.bindings.find((binding) => binding.id === bindingId);
+  if (!own) return [];
+  const actions = new Map(config.actions.map((action) => [action.id, action]));
+  const sig = signature(own, actions);
+  return slotCounterparts(config, bindingId).filter((other) =>
+    !isPlaceholderAction(actions.get(other.actionId)) && signature(other, actions) !== sig);
 }
 
 /** Whether a layer exists on a mouse: HyperShift 2 and HS + HS2 need a HyperShift 2 button. */

@@ -34,6 +34,9 @@ export type ControlSurfaceEntry = {
   /** In the profile written into the mouse: its plain press is not stored
    *  there (text, macro, menu…), so without Sidearm the button does not do it. */
   sidearmOnly?: boolean;
+  /** The other mice whose same button this one is kept alike with (synced,
+   *  with an assignment there): marked with a link beside the label. */
+  syncedWith?: string[];
 };
 
 export type HotspotPosition = { left: number; top: number; label: string; size?: "sm" | "lg" };

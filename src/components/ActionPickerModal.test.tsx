@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { ActionPickerModal } from "./ActionPickerModal";
 import { makeConfig } from "../lib/test-fixtures";
 import type { AppConfig } from "../lib/config";
-import { ensurePlaceholderBinding, makeActionId, makeBindingId } from "../lib/config-editing";
+import { ensurePlaceholderBinding, findBinding, type Gesture, makeActionId, makeBindingId } from "../lib/config-editing";
+import { NAGA_V3_DEVICE_ID } from "../lib/devices";
 import * as backend from "../lib/backend";
 import i18n from "../i18n";
 
@@ -228,5 +230,106 @@ describe("press pattern tabs", () => {
     const applied = onApply.mock.calls[0][0];
     const long = applied.bindings.find((b) => b.controlId === "thumb_01" && b.triggerMode === "longPress");
     expect(applied.actions.find((a) => a.id === long?.actionId)?.type).toBe("disabled");
+  });
+});
+
+describe("leaving with edits", () => {
+  const picker = () => screen.getAllByRole("dialog")[0]!;
+  const undo = () => fireEvent.keyDown(picker(), { key: "z", ctrlKey: true });
+
+  it("asks before Cancel or Escape drop the edits: Keep editing stays, Discard closes", () => {
+    const { onCancel } = show("thumb_01");
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.getByText("Отбросить изменения?")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить правку" }));
+    expect(screen.queryByText("Отбросить изменения?")).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByText("Отбросить изменения?")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByText("Отбросить изменения?")).toBeNull();
+    expect(onCancel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Отбросить" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it.each<AppConfig["actions"][number]>([
+    { id: "a", type: "shortcut", displayName: "Copy", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } },
+    { id: "a", type: "textSnippet", displayName: "Hi", payload: { source: "libraryRef", snippetId: "s1" } },
+    { id: "a", type: "sequence", displayName: "Macro", payload: { steps: [{ type: "send", value: "Ctrl+L" }, { type: "sleep", delayMs: 80 }] } },
+    { id: "a", type: "menu", displayName: "Menu", payload: { items: [{ kind: "action", id: "i1", label: "Back", actionId: "back", enabled: true }] } },
+  ])("closes an untouched $type at once", (action) => {
+    const config = makeConfig();
+    config.snippetLibrary = [{ id: "s1", name: "Hi", text: "Hello", tags: [], pasteMode: "sendText" }];
+    config.actions = [action, { id: "back", type: "mouseAction", displayName: "Back", payload: { action: "mouseBack" } }];
+    config.bindings = [{ id: "b", profileId: "p1", controlId: "thumb_01", layer: "standard", actionId: "a", enabled: true, label: "A" }];
+    const { onCancel } = show("thumb_01", config, "b");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByText("Отбросить изменения?")).toBeNull();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("closes at once when nothing is left changed", () => {
+    const { onCancel } = show("thumb_01");
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    undo();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByText("Отбросить изменения?")).toBeNull();
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+});
+
+describe("undo across the press-pattern tabs", () => {
+  /** The picker as App drives it: a tab switch applies the tab's edit and opens the other pattern. */
+  function Tabs({ start, applied }: { start: AppConfig; applied: (config: AppConfig) => void }) {
+    const [config, setConfig] = useState(start);
+    const [gesture, setGesture] = useState<Gesture>("press");
+    return <ActionPickerModal config={config} bindingId={findBinding(config, "p1", "standard", "thumb_01", gesture)?.id ?? null}
+      profileId="p1" controlId="thumb_01" selectedLayer="standard" gesture={gesture} onGestureChange={setGesture}
+      onApply={(next) => { setConfig(next); applied(next); }} onSave={vi.fn()} onCancel={vi.fn()} />;
+  }
+  const pressed = (name: RegExp) => screen.getByRole("button", { name }).getAttribute("aria-pressed");
+  const current = (name: RegExp) => screen.getByRole("button", { name }).getAttribute("aria-current");
+  const dialog = () => screen.getAllByRole("dialog")[0]!;
+
+  it("takes back the tab before's edit after a switch, and redoes it", () => {
+    const start = makeConfig();
+    const applied = vi.fn<(config: AppConfig) => void>();
+    render(<Tabs start={start} applied={applied} />);
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Двойное/ }));
+    expect(applied.mock.lastCall![0].bindings).toHaveLength(1);
+    expect(pressed(/Двойное/)).toBe("true");
+
+    fireEvent.keyDown(dialog(), { key: "z", ctrlKey: true });
+    expect(pressed(/Нажатие/)).toBe("true");
+    expect(applied.mock.lastCall![0]).toBe(start);
+    expect(current(/Отключено/)).toBe("true");
+    fireEvent.keyDown(dialog(), { key: "z", ctrlKey: true });
+    expect(current(/Исходное действие/)).toBe("true");
+
+    fireEvent.keyDown(dialog(), { key: "y", ctrlKey: true });
+    fireEvent.keyDown(dialog(), { key: "y", ctrlKey: true });
+    expect(pressed(/Двойное/)).toBe("true");
+    expect(applied.mock.lastCall![0].bindings).toHaveLength(1);
+  });
+});
+
+describe("the same on the other mouse", () => {
+  it("says what turning it on replaces on the other mouse", () => {
+    const config = makeConfig();
+    config.devices.push({ id: NAGA_V3_DEVICE_ID, name: "Razer Naga V3 Pro", builtin: true });
+    config.physicalControls.push({ ...config.physicalControls[1]!, id: "v3_thumb_01", deviceId: NAGA_V3_DEVICE_ID });
+    config.actions = [{ id: "copy", type: "shortcut", displayName: "Copy", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } }];
+    config.bindings = [{ id: "v3", profileId: "p1", controlId: "v3_thumb_01", layer: "standard", actionId: "copy", enabled: true, label: "Copy" }];
+    show("thumb_01", config);
+    fireEvent.click(screen.getByRole("button", { name: /Отключено/ }));
+    const sync = screen.getByRole("checkbox", { name: "Так же на Razer Naga V3 Pro" });
+    expect(screen.queryByText("На Razer Naga V3 Pro это заменит «Copy»")).toBeNull();
+    fireEvent.click(sync);
+    expect(screen.getByText("На Razer Naga V3 Pro это заменит «Copy»")).toBeTruthy();
+    fireEvent.click(sync);
+    expect(screen.queryByText("На Razer Naga V3 Pro это заменит «Copy»")).toBeNull();
   });
 });

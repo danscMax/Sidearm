@@ -73,6 +73,11 @@ export function LegendCell({
               <GestureIcon mark="live" />
             </span>
           ) : null}
+          {entry.syncedWith?.length ? (
+            <span className="btn-legend__synced" {...tip(t("mouseVisual.syncedWith", { mice: entry.syncedWith.join(", ") }))}>
+              <GestureIcon mark="link" />
+            </span>
+          ) : null}
         </span>
         {/* The other press patterns, one chip each: what the hold / double / triple press does. */}
         {entry.extras?.length ? (

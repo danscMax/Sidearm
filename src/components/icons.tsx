@@ -8,6 +8,15 @@ interface IconProps {
   size?: number;
 }
 
+/** A fold mark: points right, and down when `open` (turned by `.chevron--open`). */
+export function ChevronIcon({ size = 12, open = false }: IconProps & { open?: boolean }) {
+  return (
+    <svg className={`chevron${open ? " chevron--open" : ""}`} width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M6 3.5 10.5 8 6 12.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 export function CopyIcon({ size = 14 }: IconProps) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none">

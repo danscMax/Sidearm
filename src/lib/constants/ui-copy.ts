@@ -69,14 +69,15 @@ export const ACTION_TYPE_LABELS: Record<ActionType, string> = {
   mouseAction: "action.type.mouseAction",
   textSnippet: "action.type.textSnippet",
   sequence: "action.type.sequence",
+  // Key order is the picker's sidebar order: stopping a macro sits by the macro.
+  stopMacros: "action.type.stopMacros",
   launch: "action.type.launch",
   mediaKey: "action.type.mediaKey",
   profileSwitch: "action.type.profileSwitch",
   menu: "action.type.menu",
+  cheatSheet: "action.type.cheatSheet",
   disabled: "action.type.disabled",
   repairClipboard: "action.type.repairClipboard",
-  stopMacros: "action.type.stopMacros",
-  cheatSheet: "action.type.cheatSheet",
 };
 
 /** All action-type discriminators, derived from the SoT label map so a new

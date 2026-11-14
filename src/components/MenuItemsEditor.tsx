@@ -17,6 +17,7 @@ import { sumDays, unpickedItems, type PressLog } from "../lib/press-stats";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { PillTrack } from "./PillTrack";
 import { ContextMenu, type ContextMenuProps } from "./ContextMenu";
+import { ChevronIcon } from "./icons";
 import { HelpTip, SelectField, Toggle } from "./shared";
 
 /** Items a side button picks by number in the popup. */
@@ -147,11 +148,16 @@ export function MenuItemsEditor({
   const [addAt, setAddAt] = useState<{ x: number; y: number } | null>(null);
   // Blocks folded in the tree (this session only).
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
-  const toggleFold = (id: string) => setFolded((current) => {
-    const next = new Set(current);
-    if (!next.delete(id)) next.add(id);
-    return next;
-  });
+  const toggleFold = (block: MenuItem) => {
+    const folding = !folded.has(block.id);
+    // A folded block hides all it holds: a selection inside moves up to the block.
+    if (folding && block.kind === "submenu" && selectedId && collectMenuItemIds(block.items).includes(selectedId)) setSelectedId(block.id);
+    setFolded((current) => {
+      const next = new Set(current);
+      if (!next.delete(block.id)) next.add(block.id);
+      return next;
+    });
+  };
   const ctxItem = ctx ? findItem(items, ctx.id) : undefined;
   const openCtx = (event: React.MouseEvent, item: MenuItem) => {
     event.preventDefault();
@@ -362,10 +368,10 @@ export function MenuItemsEditor({
           {item.kind === "action" && item.pinned ? <span className="menu-ed__mark" aria-label={t("inspector.menuPinned")}>★</span> : null}
           {usage && item.kind === "action" ? (
             <span className={`menu-ed__uses${usage[item.actionId] ? "" : " menu-ed__uses--none"}`} title={t("inspector.menuUses")}>
-              {usage[item.actionId] ?? 0}×
+              {t("inspector.menuUsesCount", { count: usage[item.actionId] ?? 0 })}
             </span>
           ) : null}
-          {item.kind === "submenu" ? <span className="menu-ed__mark">{open ? "⌄" : "›"}</span> : null}
+          {item.kind === "submenu" ? <span className="menu-ed__mark"><ChevronIcon open={Boolean(open)} /></span> : null}
         </button>
         {/* A list's items show while it or one of them is selected. */}
         {item.kind === "submenu" && open ? item.items.map((inner) => renderRow(inner, true)) : null}
@@ -385,8 +391,8 @@ export function MenuItemsEditor({
               <div className="menu-ed__group-line">
                 <button type="button" className="menu-ed__fold" aria-expanded={!folded.has(item.id)}
                   aria-label={t(folded.has(item.id) ? "inspector.menuUnfold" : "inspector.menuFold", { name: item.label })}
-                  onClick={() => toggleFold(item.id)}>
-                  {folded.has(item.id) ? "▸" : "▾"}
+                  onClick={() => toggleFold(item)}>
+                  <ChevronIcon open={!folded.has(item.id)} />
                 </button>
                 <button
                   type="button"
@@ -401,8 +407,10 @@ export function MenuItemsEditor({
                   <span className="menu-ed__count">{item.items.length}</span>
                 </button>
               </div>
-              {/* A folded block still shows its selected item. */}
-              {item.items.filter((inner) => !folded.has(item.id) || selected?.id === inner.id).map((inner) => renderRow(inner, false))}
+              {/* Its own body with a guide line: the loose items after it are not part of it. */}
+              {folded.has(item.id) || item.items.length === 0 ? null : (
+                <div className="menu-ed__block-body">{item.items.map((inner) => renderRow(inner, false))}</div>
+              )}
             </div>
           );
         })}
@@ -741,14 +749,18 @@ export function MenuItemsEditor({
             const linked = action.payload.source === "libraryRef" ? library.find((item) => action.payload.source === "libraryRef" && item.id === action.payload.snippetId) : undefined;
             const mode = action.payload.source === "inline" ? action.payload.pasteMode : linked?.pasteMode;
             if (!mode) return null;
+            // The "?" sits beside the label, not in it: a click on it must not flip the switch.
             return (
-              <label className="menu-ed__switch" title={t(linked ? "picker.keyboardOnlyLibraryHint" : "picker.keyboardOnlyHint")}>
-                {t("picker.keyboardOnly")}
-                <Toggle checked={mode === "keyboardOnly"} disabled={disabled} ariaLabel={t("picker.keyboardOnly")}
-                  onChange={(on) => linked
-                    ? onEditsChange({ ...edits, libraryModes: { ...edits.libraryModes, [linked.id]: on ? "keyboardOnly" : "sendText" } })
-                    : onEditsChange(putAction(withKeyboardOnly(action, on)))} />
-              </label>
+              <span className="menu-ed__switch">
+                <HelpTip text={t(linked ? "picker.keyboardOnlyLibraryHint" : "picker.keyboardOnlyHint")} />
+                <label className="menu-ed__switch">
+                  {t("picker.keyboardOnly")}
+                  <Toggle checked={mode === "keyboardOnly"} disabled={disabled} ariaLabel={t("picker.keyboardOnly")}
+                    onChange={(on) => linked
+                      ? onEditsChange({ ...edits, libraryModes: { ...edits.libraryModes, [linked.id]: on ? "keyboardOnly" : "sendText" } })
+                      : onEditsChange(putAction(withKeyboardOnly(action, on)))} />
+                </label>
+              </span>
             );
           })() : null}
           </div>

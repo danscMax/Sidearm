@@ -1744,6 +1744,35 @@ input[type="radio"] {
   background: var(--c-card-border);
 }
 
+/* ── Macro steps: one row each, the open one shows its fields ── */
+.seq-where { margin: -4px 0 0; }
+.seq-list { display: grid; gap: 4px; }
+.seq-row { border: 1px solid var(--c-card-border); border-radius: var(--radius-md); background: var(--c-card-bg); }
+.seq-row--open { border-color: color-mix(in srgb, var(--c-accent) 45%, transparent); background: var(--c-menu-selected); }
+.seq-row--drop { outline: 2px dashed var(--c-accent); outline-offset: 2px; }
+.seq-row__line { display: flex; align-items: center; gap: 4px; padding: 2px 6px 2px 2px; }
+.seq-row__grip { flex: none; width: 18px; color: var(--c-text-muted); text-align: center; cursor: grab; user-select: none; }
+.seq-row__main {
+  display: flex; flex: 1; min-width: 0; align-items: center; gap: 10px;
+  padding: 7px 6px; border: 0; border-radius: var(--radius-xs); background: none;
+  color: var(--c-text-bright); font: inherit; font-size: var(--fs-body-sm); text-align: left; cursor: pointer;
+}
+.seq-row__main:hover { background: var(--c-card-bg); }
+.seq-row__main:focus-visible { outline: 2px solid var(--c-accent); outline-offset: -2px; }
+.seq-row__num { flex: none; min-width: 20px; color: var(--c-text-muted); font-variant-numeric: tabular-nums; text-align: right; }
+.seq-row__icon { display: inline-flex; flex: none; color: var(--c-accent); }
+.seq-row__summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.seq-row__chip { flex: none; padding: 1px 7px; border-radius: 999px; background: var(--c-card-bg); color: var(--c-text-muted); font-size: var(--fs-caption); font-variant-numeric: tabular-nums; }
+.seq-row__tool {
+  flex: none; width: 28px; height: 28px; border: 0; border-radius: var(--radius-xs);
+  background: none; color: var(--c-text-muted); cursor: pointer;
+}
+.seq-row__tool:hover:not(:disabled) { background: var(--c-card-bg); color: var(--c-text-bright); }
+.seq-row__tool:disabled { opacity: 0.3; cursor: default; }
+.seq-row__tool--danger:hover:not(:disabled) { color: var(--c-danger); }
+.seq-row__body { padding: 4px 14px 14px 48px; }
+.seq-row__pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+
 /* ── Compound card ── */
 .compound-card {
   display: grid;
@@ -1853,10 +1882,18 @@ input[type="radio"] {
 .menu-ed__chips:empty { display: none; }
 .menu-ed__block-select { margin: 0; }
 .menu-ed__block-select select { padding-block: 4px; font-size: var(--fs-caption); }
-/* Blocks in the tree fold (▾ / ▸) and show how many items they hold. */
+/* One fold mark everywhere (blocks and lists): a chevron that turns down when open. */
+.chevron { display: block; transition: transform 120ms ease-out; }
+.chevron--open { transform: rotate(90deg); }
+.menu-ed__mark .chevron { display: inline-block; vertical-align: middle; }
+/* Blocks in the tree fold and show how many items they hold; their items sit in
+   a body with a guide line, so a loose item after the block reads as outside it. */
+.menu-ed__block-body { margin: 2px 0 6px 9px; padding-left: 8px; border-left: 2px solid var(--c-border); }
 .menu-ed__group-line { display: flex; align-items: center; gap: 2px; margin-top: 4px; }
 .menu-ed__group-line .menu-ed__group { display: flex; flex: 1; min-width: 0; margin-top: 0; }
 .menu-ed__fold {
+  display: grid;
+  place-items: center;
   flex: none;
   width: 20px;
   height: 22px;
@@ -2267,8 +2304,9 @@ input[type="radio"] {
   content: attr(data-tooltip);
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  /* From the cell's left edge: centred, a wide bubble over a narrow column
+     poked past the scroll container's left edge and got clipped. */
+  left: 0;
   padding: 6px 10px;
   border-radius: var(--radius-xs);
   background: rgba(0, 0, 0, 0.88);

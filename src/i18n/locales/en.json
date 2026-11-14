@@ -895,7 +895,9 @@
     "menuMarkedOn": "Turn on",
     "menuMarkedOff": "Turn off",
     "menuMarkedClear": "Unpick",
-    "menuMarkedHint": "Ctrl+click adds or removes an item, Shift+click picks a run of one list. A plain click picks one again."
+    "menuMarkedHint": "Ctrl+click adds or removes an item, Shift+click picks a run of one list. A plain click picks one again.",
+    "menuUsesCount_one": "{{count}} time",
+    "menuUsesCount_other": "{{count}} times"
   },
   "properties": {
     "empty": "Select a button to see properties",
@@ -994,7 +996,7 @@
     "textPlaceholder": "Enter text to type...",
     "tokenInsert": "Insert token",
     "tokenInsertHint": "Click inserts the token at the caret. Tokens are highlighted in the text.",
-    "tokenDateDesc": "Inserts today's date in YYYY-MM-DD format.",
+    "tokenDateDesc": "Puts in the date or time in the format you pick: 2026-11-14, 14 November 2026, 13:05…",
     "tokenClipboardDesc": "Inserts the current clipboard contents.",
     "tokenCursorDesc": "The caret goes here after the text is typed. Short form: {|}.",
     "longTextClipboardWarning": "Text longer than 100 characters is pasted through the clipboard temporarily so line breaks stay intact.",
@@ -1148,7 +1150,7 @@
     "previewMenu_other": "Opens a menu ({{count}} items)",
     "stopMacrosHint": "Ends the macro that is running now and drops the ones waiting behind it. Other buttons keep working; nothing is typed.",
     "previewStopMacros": "Stops the running macro and the queued ones",
-    "keyboardOnly": "Keyboard only",
+    "keyboardOnly": "Type key by key, no clipboard",
     "keyboardOnlyHint": "Types the text key by key, never through the clipboard — for a terminal or a remote session that must not get a paste. Without it, a text over 100 characters is pasted. Not for a phrase with Enter (a macro).",
     "cheatSheetLayer": "Layer to show",
     "cheatSheetHint": "Shows the side buttons of the mouse you pressed, on this layer of the profile in effect, at the cursor. The next press puts it away (and still runs); after 10 seconds it goes by itself.",
@@ -1162,7 +1164,20 @@
     "tokenInputDesc": "A field asked for in a small window before the phrase is typed: {input:host} — Enter inserts, Esc cancels. Rename the field after inserting it.",
     "tokenInputName": "field",
     "waitWindowExeMissing": "A \"Wait for window\" step needs the program to wait for (its .exe name).",
-    "keyboardOnlyLibraryHint": "Types this library text key by key, never through the clipboard — everywhere it is used."
+    "keyboardOnlyLibraryHint": "Types this library text key by key, never through the clipboard — everywhere it is used.",
+    "tokenDateChip": "Date and time",
+    "stepNoValue": "not set",
+    "stepSleepFor": "Pause {{ms}} ms",
+    "stepWaitFor": "Wait for {{exe}} · up to {{seconds}} s",
+    "stepsGoAfter": "New and recorded steps go in after step {{index}}. Click the step again to unselect it.",
+    "stepsGoEnd": "New and recorded steps go at the end. Select a step to put them in after it.",
+    "stepDrag": "Drag to reorder",
+    "stepDelayChip": "+{{ms}} ms",
+    "stepDelete": "Delete step {{index}}",
+    "stepSleepLength": "Pause length, ms (up to 30,000)",
+    "sequenceStopHint": "To stop a running macro, use the “Stop macros” action on another button or the tray menu.",
+    "pressEnterAfter": "Press Enter after the text",
+    "pressEnterAfterHint": "A short pause and Enter after the text — to send a command in a terminal or chat right away. Saved as a “text → pause → Enter” macro, whose steps the Macro category shows too. Typing key by key is not available with Enter."
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1920,6 +1935,9 @@
     },
     "prompt": {
       "hint": "Enter: next field, then insert · Esc: cancel"
+    },
+    "snippet": {
+      "monthNames": "January,February,March,April,May,June,July,August,September,October,November,December"
     }
   },
   "newMouse": {

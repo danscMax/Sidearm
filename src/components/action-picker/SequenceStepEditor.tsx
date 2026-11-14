@@ -21,7 +21,7 @@ import {
 import { ChipEditor } from "../ChipEditor";
 import { ExecutablePathField } from "../ExecutablePathField";
 import { DirectoryPathField } from "../DirectoryPathField";
-import { CompoundCard } from "./shared/CompoundCard";
+import { CategoryIcon } from "../icons";
 import { acquireKeyRecording } from "./shared/key-recording";
 
 // The backend recorder is shared by editor instances, including pending teardown.
@@ -31,6 +31,10 @@ interface RecordingSession {
   cancelled: boolean;
   started: boolean;
   count: number;
+  /** Steps it may still add: the macro's room when it started. */
+  limit: number;
+  /** The step it records after (its key), or the end. */
+  after: string | null;
   start: Promise<void>;
   pending: Promise<void>;
   keyRecording?: ReturnType<typeof acquireKeyRecording>;
@@ -67,6 +71,21 @@ export function SequenceStepEditor({
   const [recordingError, setRecordingError] = useState<string | null>(null);
   const [recordingBusy, setRecordingBusy] = useState(false);
   const recordingRef = useRef<RecordingSession | null>(null);
+  // The step shown open (its key): new and recorded steps go in after it.
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  // A step just added: scrolled into view once it is drawn.
+  const revealKey = useRef<string | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const [dropAt, setDropAt] = useState<number | null>(null);
+  // The recorder's stop runs from a listener set up at its start: it reads the steps now.
+  const stepsRef = useRef(steps);
+  stepsRef.current = steps;
+  useEffect(() => {
+    const key = revealKey.current;
+    if (!key) return;
+    revealKey.current = null;
+    rowRefs.current.get(key)?.scrollIntoView?.({ block: "nearest" });
+  });
 
   useEffect(() => () => {
     const session = recordingRef.current;
@@ -84,8 +103,8 @@ export function SequenceStepEditor({
   function newStepKey(): string {
     return crypto.randomUUID();
   }
-  // Reconcile the key list to the current step count. Handles initial mount and
-  // wholesale replacement (e.g. macro recording overwrites all steps).
+  // Reconcile the key list to the current step count (initial mount, or the
+  // steps replaced from outside, e.g. an undo).
   if (stepKeysRef.current.length < steps.length) {
     while (stepKeysRef.current.length < steps.length) {
       stepKeysRef.current.push(newStepKey());
@@ -111,7 +130,7 @@ export function SequenceStepEditor({
       e.stopPropagation();
 
       const session = recordingRef.current;
-      if (!session || session.cancelled || session.stop || session.count >= MAX_SEQUENCE_STEPS) return;
+      if (!session || session.cancelled || session.stop || session.count >= session.limit) return;
       // Canonical Ctrl→Shift→Alt→Win order (+ Win, previously missing) via the
       // shared modifierLabels helper, so recorded chords match the rest of the UI.
       const mods = modifierLabels({
@@ -131,7 +150,7 @@ export function SequenceStepEditor({
       });
       session.count += 1;
       setRecordedCount(session.count);
-      if (session.count >= MAX_SEQUENCE_STEPS) {
+      if (session.count >= session.limit) {
         setLimitReached(true);
         void handleStopRecording();
       }
@@ -143,8 +162,13 @@ export function SequenceStepEditor({
 
   async function handleStartRecording() {
     if (recordingRef.current) return;
+    const room = MAX_SEQUENCE_STEPS - steps.length;
+    if (room <= 0) {
+      setLimitReached(true);
+      return;
+    }
     const session: RecordingSession = {
-      cancelled: false, started: false, count: 0,
+      cancelled: false, started: false, count: 0, limit: room, after: selectedKey,
       start: Promise.resolve(), pending: Promise.resolve(),
     };
     recordingRef.current = session;
@@ -184,11 +208,10 @@ export function SequenceStepEditor({
       const recording = await finishRecording(session);
       if (session.cancelled) return;
       if (recording && recording.steps.length > 0) {
-        // Wholesale replacement: clear keys so the render-time reconcile mints
-        // fresh ones matching the new step list.
-        stepKeysRef.current = [];
-        if (recording.steps.length >= MAX_SEQUENCE_STEPS) setLimitReached(true);
-        onChange(recording.steps.slice(0, MAX_SEQUENCE_STEPS));
+        // Inserted after the step picked at the start (or at the end): a
+        // recording never wipes the steps already there.
+        if (recording.steps.length >= session.limit) setLimitReached(true);
+        insertSteps(recording.steps.slice(0, session.limit), session.after);
       }
     } catch (unknownError) {
       if (!session.cancelled) setRecordingError(normalizeCommandError(unknownError).message);
@@ -200,16 +223,32 @@ export function SequenceStepEditor({
     }
   }
 
+  /** Put `added` in after the step with key `after` (or at the end), the first
+   *  of them open and scrolled to. */
+  function insertSteps(added: SequenceStep[], after: string | null) {
+    const current = stepsRef.current;
+    const room = MAX_SEQUENCE_STEPS - current.length;
+    const fresh = added.slice(0, Math.max(0, room));
+    if (fresh.length === 0) return;
+    const keys = stepKeysRef.current.slice(0, current.length);
+    const found = after ? keys.indexOf(after) : -1;
+    const at = found >= 0 ? found + 1 : current.length;
+    const freshKeys = fresh.map(() => newStepKey());
+    keys.splice(at, 0, ...freshKeys);
+    stepKeysRef.current = keys;
+    setSelectedKey(freshKeys[0]!);
+    revealKey.current = freshKeys[0]!;
+    onChange([...current.slice(0, at), ...fresh, ...current.slice(at)]);
+  }
+
   function addStep(type: SequenceStep["type"]) {
-    if (steps.length >= MAX_SEQUENCE_STEPS) return;
-    stepKeysRef.current.push(newStepKey());
-    onChange([...steps, createDefaultSequenceStep(type)]);
+    insertSteps([createDefaultSequenceStep(type)], selectedKey);
   }
 
   function removeStep(index: number) {
-    if (steps.length <= 1) return;
     // Drop the key at the same index so the surviving steps keep their keys.
-    stepKeysRef.current.splice(index, 1);
+    const [gone] = stepKeysRef.current.splice(index, 1);
+    if (gone === selectedKey) setSelectedKey(null);
     onChange(steps.filter((_, i) => i !== index));
   }
 
@@ -233,6 +272,191 @@ export function SequenceStepEditor({
     onChange(steps.map((s, i) => (i === index ? next : s)));
   }
 
+  /** What a collapsed row says the step does. */
+  function summaryOf(step: SequenceStep): string {
+    switch (step.type) {
+      case "send":
+        return step.value || t("picker.stepNoValue");
+      case "text":
+        return step.value ? `«${step.value}»` : t("picker.stepNoValue");
+      case "sleep":
+        return t("picker.stepSleepFor", { ms: step.delayMs ?? 0 });
+      case "launch":
+        return step.value.split(/[\\/]/).pop() || t("picker.stepNoValue");
+      case "waitWindow":
+        return t("picker.stepWaitFor", { exe: step.exe || "…", seconds: Math.round(step.timeoutMs / 100) / 10 });
+    }
+  }
+
+  const STEP_ICONS: Record<SequenceStep["type"], [string, string]> = {
+    send: ["shortcut", "⌨"],
+    text: ["textSnippet", "T"],
+    sleep: ["sleep", "⏱"],
+    launch: ["launch", "↗"],
+    waitWindow: ["waitWindow", "⧗"],
+  };
+
+  function renderFields(step: SequenceStep, index: number) {
+    return (
+      <>
+        <SelectField
+          label={t("picker.stepType")}
+          value={step.type}
+          onChange={(v) => updateStep(index, coerceSequenceStepType(step, v))}
+          options={[
+            { value: "send", label: t("picker.stepSend") },
+            { value: "text", label: t("picker.stepText") },
+            { value: "sleep", label: t("picker.stepSleep") },
+            { value: "launch", label: t("picker.stepLaunch") },
+            { value: "waitWindow", label: t("picker.stepWaitWindow") },
+          ]}
+        />
+
+        {step.type === "waitWindow" ? (
+          <>
+            <label className="field">
+              <span className="field__label">{t("picker.waitWindowExe")}</span>
+              <input
+                className="input"
+                type="text"
+                value={step.exe}
+                placeholder="notepad.exe"
+                onChange={(e) => updateStep(index, { ...step, exe: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">{t("picker.waitWindowTitle")}</span>
+              <input
+                className="input"
+                type="text"
+                value={step.title ?? ""}
+                onChange={(e) => updateStep(index, { ...step, title: e.target.value || undefined })}
+              />
+            </label>
+            <label className="field">
+              <span className="field__label">{t("picker.waitWindowTimeout")}</span>
+              <input
+                className="input"
+                type="number"
+                min={100}
+                max={30000}
+                value={step.timeoutMs}
+                onChange={(e) => {
+                  const raw = Number(e.target.value);
+                  const timeoutMs = Number.isFinite(raw) ? Math.max(100, Math.min(30000, Math.round(raw))) : 10000;
+                  updateStep(index, { ...step, timeoutMs });
+                }}
+              />
+            </label>
+          </>
+        ) : null}
+
+        {step.type === "send" || step.type === "text" ? (
+          <label className="field">
+            <span className="field__label">{t("picker.stepValue")}</span>
+            <input
+              className="input"
+              type="text"
+              value={step.value}
+              onChange={(e) =>
+                updateStep(index, { ...step, value: e.target.value } as SequenceStep)
+              }
+            />
+          </label>
+        ) : null}
+
+        {step.type === "launch" ? (
+          <>
+            <ExecutablePathField
+              label={t("picker.programLabel")}
+              value={step.value}
+              onChange={(value) => updateStep(index, { ...step, value } as SequenceStep)}
+              browseTitle={t("picker.launchBrowseProgram")}
+              filterName={t("picker.launchBrowseFilter")}
+              browseLabel={t("picker.launchBrowseBtn")}
+            />
+            <div className="field">
+              <span className="field__label">{t("picker.launchArgsLabel")}</span>
+              <ChipEditor
+                literalValues
+                values={step.args ?? []}
+                onChange={(vals) =>
+                  updateStep(index, {
+                    ...step,
+                    args: vals.length > 0 ? vals : undefined,
+                  } as SequenceStep)
+                }
+                placeholder={t("picker.launchArgsPlaceholder")}
+                ariaLabel={t("picker.launchArgsLabel")}
+              />
+            </div>
+            <DirectoryPathField
+              label={t("picker.launchWorkingDirLabel")}
+              value={step.workingDir ?? ""}
+              onChange={(value) =>
+                updateStep(index, {
+                  ...step,
+                  workingDir: value.trim() ? value : undefined,
+                } as SequenceStep)
+              }
+              browseTitle={t("picker.launchBrowseDir")}
+              browseLabel={t("picker.launchBrowseDirBtn")}
+              placeholder={t("picker.launchWorkingDirPlaceholder")}
+            />
+          </>
+        ) : null}
+
+        <div className="seq-row__pair">
+          {step.type === "waitWindow" ? null : (
+            <label className="field">
+              <span className="field__label">{t(step.type === "sleep" ? "picker.stepSleepLength" : "picker.stepDelay")}</span>
+              <input
+                className="input"
+                type="number"
+                min={0}
+                max={30000}
+                value={step.delayMs ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value.trim();
+                  const raw = v ? Number(v) : undefined;
+                  const delay =
+                    raw !== undefined && Number.isFinite(raw)
+                      ? Math.max(0, Math.min(30000, Math.round(raw)))
+                      : undefined;
+                  updateStep(index, setSequenceStepDelay(step, delay));
+                }}
+              />
+            </label>
+          )}
+
+          {(step.type === "send" || step.type === "text") && (
+            <label className="field">
+              <span className="field__label">{t("picker.stepRepeat")}</span>
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={100}
+                value={step.repeat ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value.trim();
+                  const raw = v ? Number(v) : undefined;
+                  const repeat =
+                    raw !== undefined && Number.isFinite(raw)
+                      ? Math.max(1, Math.min(100, Math.round(raw)))
+                      : undefined;
+                  updateStep(index, { ...step, repeat } as SequenceStep);
+                }}
+              />
+            </label>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  const selectedIndex = selectedKey ? stepKeys.indexOf(selectedKey) : -1;
+
   return (
     <div className="editor-grid">
       <div className="field__header">
@@ -252,7 +476,7 @@ export function SequenceStepEditor({
                 type="button"
                 className="action-button action-button--small action-button--accent"
                 onClick={() => { void handleStartRecording(); }}
-                disabled={recordingBusy}
+                disabled={recordingBusy || steps.length >= MAX_SEQUENCE_STEPS}
               >
                 {t("picker.recordMacro")}
               </button>
@@ -279,13 +503,18 @@ export function SequenceStepEditor({
           )}
         </div>
       </div>
+      {steps.length > 0 && !isRecording ? (
+        <p className="panel__muted seq-where">
+          {selectedIndex >= 0 ? t("picker.stepsGoAfter", { index: selectedIndex + 1 }) : t("picker.stepsGoEnd")}
+        </p>
+      ) : null}
 
       {isRecording ? (
         <Notice variant="warning" className="mb-8">
           <strong>
             {t("picker.recordingNotice")}{" "}
             <span className="text-dim">
-              {t("picker.recordingCount", { count: recordedCount, max: MAX_SEQUENCE_STEPS })}
+              {t("picker.recordingCount", { count: recordedCount, max: recordingRef.current?.limit ?? MAX_SEQUENCE_STEPS })}
             </span>
           </strong>
           <p>{t("picker.recordingHint")}</p>
@@ -320,173 +549,99 @@ export function SequenceStepEditor({
         </Notice>
       ) : null}
 
-      <div className="stack-list">
-        {steps.map((step, index) => (
-          <CompoundCard
-            key={stepKeys[index]}
-            title={t("picker.stepTitle", { index: index + 1 })}
-            meta={labelForSequenceStep(step.type)}
-            removeLabel={t("common.delete")}
-            canRemove={steps.length !== 1}
-            onRemove={() => removeStep(index)}
-            onMoveUp={() => moveStep(index, -1)}
-            onMoveDown={() => moveStep(index, 1)}
-            canMoveUp={index > 0}
-            canMoveDown={index < steps.length - 1}
-            moveUpLabel={t("common.moveUp")}
-            moveDownLabel={t("common.moveDown")}
-            reorder={{ index, onMove: dropStep }}
-          >
-              <SelectField
-                label={t("picker.stepType")}
-                value={step.type}
-                onChange={(v) => updateStep(index, coerceSequenceStepType(step, v))}
-                options={[
-                  { value: "send", label: t("picker.stepSend") },
-                  { value: "text", label: t("picker.stepText") },
-                  { value: "sleep", label: t("picker.stepSleep") },
-                  { value: "launch", label: t("picker.stepLaunch") },
-                  { value: "waitWindow", label: t("picker.stepWaitWindow") },
-                ]}
-              />
-
-              {step.type === "waitWindow" ? (
-                <>
-                  <label className="field">
-                    <span className="field__label">{t("picker.waitWindowExe")}</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={step.exe}
-                      placeholder="notepad.exe"
-                      onChange={(e) => updateStep(index, { ...step, exe: e.target.value })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field__label">{t("picker.waitWindowTitle")}</span>
-                    <input
-                      className="input"
-                      type="text"
-                      value={step.title ?? ""}
-                      onChange={(e) => updateStep(index, { ...step, title: e.target.value || undefined })}
-                    />
-                  </label>
-                  <label className="field">
-                    <span className="field__label">{t("picker.waitWindowTimeout")}</span>
-                    <input
-                      className="input"
-                      type="number"
-                      min={100}
-                      max={30000}
-                      value={step.timeoutMs}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value);
-                        const timeoutMs = Number.isFinite(raw) ? Math.max(100, Math.min(30000, Math.round(raw))) : 10000;
-                        updateStep(index, { ...step, timeoutMs });
-                      }}
-                    />
-                  </label>
-                </>
-              ) : null}
-
-              {step.type === "send" || step.type === "text" ? (
-                <label className="field">
-                  <span className="field__label">{t("picker.stepValue")}</span>
-                  <input
-                    type="text"
-                    value={step.value}
-                    onChange={(e) =>
-                      updateStep(index, { ...step, value: e.target.value } as SequenceStep)
-                    }
-                  />
-                </label>
-              ) : null}
-
-              {step.type === "launch" ? (
-                <>
-                  <ExecutablePathField
-                    label={t("picker.programLabel")}
-                    value={step.value}
-                    onChange={(value) => updateStep(index, { ...step, value } as SequenceStep)}
-                    browseTitle={t("picker.launchBrowseProgram")}
-                    filterName={t("picker.launchBrowseFilter")}
-                    browseLabel={t("picker.launchBrowseBtn")}
-                  />
-                  <div className="field">
-                    <span className="field__label">{t("picker.launchArgsLabel")}</span>
-                    <ChipEditor
-                      literalValues
-                      values={step.args ?? []}
-                      onChange={(vals) =>
-                        updateStep(index, {
-                          ...step,
-                          args: vals.length > 0 ? vals : undefined,
-                        } as SequenceStep)
-                      }
-                      placeholder={t("picker.launchArgsPlaceholder")}
-                      ariaLabel={t("picker.launchArgsLabel")}
-                    />
-                  </div>
-                  <DirectoryPathField
-                    label={t("picker.launchWorkingDirLabel")}
-                    value={step.workingDir ?? ""}
-                    onChange={(value) =>
-                      updateStep(index, {
-                        ...step,
-                        workingDir: value.trim() ? value : undefined,
-                      } as SequenceStep)
-                    }
-                    browseTitle={t("picker.launchBrowseDir")}
-                    browseLabel={t("picker.launchBrowseDirBtn")}
-                    placeholder={t("picker.launchWorkingDirPlaceholder")}
-                  />
-                </>
-              ) : null}
-
-              {step.type === "waitWindow" ? null : (
-              <label className="field">
-                <span className="field__label">{t("picker.stepDelay")}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={30000}
-                  value={step.delayMs ?? ""}
-                  onChange={(e) => {
-                    const v = e.target.value.trim();
-                    const raw = v ? Number(v) : undefined;
-                    const delay =
-                      raw !== undefined && Number.isFinite(raw)
-                        ? Math.max(0, Math.min(30000, Math.round(raw)))
-                        : undefined;
-                    updateStep(index, setSequenceStepDelay(step, delay));
-                  }}
-                />
-              </label>
-              )}
-
-              {(step.type === "send" || step.type === "text") && (
-                <label className="field">
-                  <span className="field__label">{t("picker.stepRepeat")}</span>
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={step.repeat ?? ""}
-                    onChange={(e) => {
-                      const v = e.target.value.trim();
-                      const raw = v ? Number(v) : undefined;
-                      const repeat =
-                        raw !== undefined && Number.isFinite(raw)
-                          ? Math.max(1, Math.min(100, Math.round(raw)))
-                          : undefined;
-                      updateStep(index, { ...step, repeat } as SequenceStep);
+      {steps.length > 0 ? (
+        <div className="seq-list">
+          {steps.map((step, index) => {
+            const key = stepKeys[index]!;
+            const open = key === selectedKey;
+            const [iconId, glyph] = STEP_ICONS[step.type];
+            const delay = step.type === "sleep" || step.type === "waitWindow" ? undefined : step.delayMs;
+            const repeat = step.type === "send" || step.type === "text" ? step.repeat : undefined;
+            return (
+              <div
+                key={key}
+                ref={(node) => { if (node) rowRefs.current.set(key, node); else rowRefs.current.delete(key); }}
+                className={`seq-row${open ? " seq-row--open" : ""}${dropAt === index ? " seq-row--drop" : ""}`}
+                onDragOver={(e) => {
+                  if (!Array.from(e.dataTransfer.types).includes(STEP_DRAG_TYPE)) return;
+                  e.preventDefault();
+                  setDropAt(index);
+                }}
+                onDragLeave={() => setDropAt(null)}
+                onDrop={(e) => {
+                  setDropAt(null);
+                  const from = Number(e.dataTransfer.getData(STEP_DRAG_TYPE));
+                  if (Number.isInteger(from) && from !== index) {
+                    e.preventDefault();
+                    dropStep(from, index);
+                  }
+                }}
+              >
+                <div className="seq-row__line">
+                  <span
+                    className="seq-row__grip"
+                    draggable
+                    title={t("picker.stepDrag")}
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      e.dataTransfer.setData(STEP_DRAG_TYPE, String(index));
                     }}
-                  />
-                </label>
-              )}
-          </CompoundCard>
-        ))}
-      </div>
+                  >
+                    ⠿
+                  </span>
+                  <button
+                    type="button"
+                    className="seq-row__main"
+                    aria-expanded={open}
+                    onClick={() => setSelectedKey(open ? null : key)}
+                  >
+                    <span className="seq-row__num">{index + 1}</span>
+                    <span className="seq-row__icon" title={labelForSequenceStep(step.type)}>
+                      <CategoryIcon id={iconId} fallback={glyph} size={14} />
+                    </span>
+                    <span className="seq-row__summary">{summaryOf(step)}</span>
+                    {repeat && repeat > 1 ? <span className="seq-row__chip">×{repeat}</span> : null}
+                    {delay ? <span className="seq-row__chip">{t("picker.stepDelayChip", { ms: delay })}</span> : null}
+                  </button>
+                  <button
+                    type="button"
+                    className="seq-row__tool"
+                    disabled={index === 0}
+                    aria-label={t("common.moveUp")}
+                    title={t("common.moveUp")}
+                    onClick={() => moveStep(index, -1)}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="seq-row__tool"
+                    disabled={index === steps.length - 1}
+                    aria-label={t("common.moveDown")}
+                    title={t("common.moveDown")}
+                    onClick={() => moveStep(index, 1)}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className="seq-row__tool seq-row__tool--danger"
+                    aria-label={t("picker.stepDelete", { index: index + 1 })}
+                    title={t("common.delete")}
+                    onClick={() => removeStep(index)}
+                  >
+                    ✕
+                  </button>
+                </div>
+                {open ? <div className="seq-row__body editor-grid">{renderFields(step, index)}</div> : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+      <p className="panel__muted">{t("picker.sequenceStopHint")}</p>
     </div>
   );
 }
+
+const STEP_DRAG_TYPE = "application/x-sidearm-step";

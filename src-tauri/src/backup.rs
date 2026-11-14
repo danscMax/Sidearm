@@ -282,15 +282,49 @@ fn entry_meta(path: &Path) -> Option<(u64, u128)> {
 /// Today in local time (YYYY-MM-DD): the day the user sees ({date}, the press
 /// log, an export's folder name). Backups keep their UTC stamps.
 pub(crate) fn local_date_string() -> String {
+    let time = local_time();
+    format!("{:04}-{:02}-{:02}", time.year, time.month, time.day)
+}
+
+/// A local wall-clock moment (the snippet date and time tokens).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct LocalTime {
+    pub year: u16,
+    pub month: u8,
+    pub day: u8,
+    pub hour: u8,
+    pub minute: u8,
+    pub second: u8,
+}
+
+/// Now in local time (UTC off Windows).
+pub(crate) fn local_time() -> LocalTime {
     #[cfg(target_os = "windows")]
     {
         let mut time = windows_sys::Win32::Foundation::SYSTEMTIME::default();
         unsafe { windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut time) };
-        format!("{:04}-{:02}-{:02}", time.wYear, time.wMonth, time.wDay)
+        LocalTime {
+            year: time.wYear,
+            month: time.wMonth as u8,
+            day: time.wDay as u8,
+            hour: time.wHour as u8,
+            minute: time.wMinute as u8,
+            second: time.wSecond as u8,
+        }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        today_date_string()
+        let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs() as i64);
+        let (year, month, day) = ymd_from_unix_secs(secs);
+        let of_day = secs.rem_euclid(86_400);
+        LocalTime {
+            year: year as u16,
+            month: month as u8,
+            day: day as u8,
+            hour: (of_day / 3600) as u8,
+            minute: (of_day / 60 % 60) as u8,
+            second: (of_day % 60) as u8,
+        }
     }
 }
 

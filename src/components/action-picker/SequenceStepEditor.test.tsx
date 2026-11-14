@@ -232,6 +232,19 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
     expect(screen.getByText(i18n.t("picker.recordLimitReached", { max: 200 }))).toBeTruthy();
   });
 
+  it("puts a recording in after the selected step instead of wiping the steps", async () => {
+    const existing: SequenceStep[] = [{ type: "text", value: "Hi" }, { type: "text", value: "Bye" }];
+    const recorded: SequenceStep[] = [{ type: "send", value: "A" }];
+    vi.mocked(backend.stopMacroRecording).mockResolvedValueOnce({ steps: recorded, startedAt: 0, stoppedAt: 1 });
+    const onChange = vi.fn();
+    render(<SequenceStepEditor steps={existing} onChange={onChange} />);
+    fireEvent.click(screen.getByText("«Hi»"));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.recordMacro") }));
+    fireEvent.click(await screen.findByRole("button", { name: i18n.t("picker.stopRecording") }));
+    await act(async () => {});
+    expect(onChange).toHaveBeenLastCalledWith([existing[0], recorded[0], existing[1]]);
+  });
+
   it("blocks manual additions at 200 steps and explains the limit", () => {
     const steps: SequenceStep[] = Array.from({ length: 200 }, () => ({ type: "send", value: "A" }));
     const onChange = vi.fn();
@@ -244,5 +257,22 @@ describe("SequenceStepEditor macro recorder (F3)", () => {
     }
     expect(onChange).not.toHaveBeenCalled();
     expect(screen.getByText(i18n.t("picker.sequenceStepLimit", { max: 200 }))).toBeTruthy();
+  });
+});
+
+describe("SequenceStepEditor rows", () => {
+  it("adds a step after the open one (or at the end), opens it, and deletes down to none", () => {
+    const steps: SequenceStep[] = [{ type: "send", value: "Ctrl+L" }, { type: "text", value: "x" }];
+    const onChange = vi.fn();
+    const { rerender } = render(<SequenceStepEditor steps={steps} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: `+ ${i18n.t("picker.addSleep")}` }));
+    expect(onChange.mock.lastCall?.[0].map((step: SequenceStep) => step.type)).toEqual(["send", "text", "sleep"]);
+    fireEvent.click(screen.getByText("Ctrl+L"));
+    expect(screen.getByText(i18n.t("picker.stepsGoAfter", { index: 1 }))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: `+ ${i18n.t("picker.addText")}` }));
+    expect(onChange.mock.lastCall?.[0].map((step: SequenceStep) => step.type)).toEqual(["send", "text", "text"]);
+    rerender(<SequenceStepEditor steps={[steps[0]!]} onChange={onChange} />);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.stepDelete", { index: 1 }) }));
+    expect(onChange).toHaveBeenLastCalledWith([]);
   });
 });

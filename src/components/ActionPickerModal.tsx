@@ -35,6 +35,7 @@ import {
   describeAction,
   isSaveDisabled,
   type PickerDrafts,
+  enterPhraseOf,
 } from "../lib/action-picker-helpers";
 import type { TriggerMode } from "../lib/config";
 import { SequenceStepEditor } from "./action-picker/SequenceStepEditor";
@@ -210,6 +211,7 @@ export function ActionPickerModal({
     if (isCurrentTrigger) return "hypershift";
     if (isCurrentTrigger2) return "hypershift2";
     if (existingAction) {
+      if (enterPhraseOf(existingAction, config.snippetLibrary) !== null) return "textSnippet";
       return ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut";
     }
     return "native";

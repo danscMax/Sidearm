@@ -1,17 +1,20 @@
-import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { PasteMode, SnippetLibraryItem } from "../../lib/config";
+import { DATE_TOKENS, formatDatePattern, patternOf } from "../../lib/date-pattern";
+import { ContextMenu } from "../ContextMenu";
 import { HelpTip, Notice, SelectField, Toggle } from "../shared";
 
-type TextDraft = { text: string; pasteMode: PasteMode; snippetId?: string };
+type TextDraft = { text: string; pasteMode: PasteMode; snippetId?: string; enter?: boolean };
 
 // The template tokens the backend expands at send time (see
 // input_synthesis::expand_snippet_tokens; `{|}` is a short `{cursor}`). Kept in
 // sync with that Rust list.
 // `{input:name}` is asked for in a small window before the phrase runs (input_prompt.rs).
-const TOKEN_RE = /\{(?:date|clipboard|selection|cursor|\||input:[^{}]+)\}/g;
+const TOKEN_RE = /\{(?:date(?::[^{}]+)?|time|clipboard|selection|cursor|\||input:[^{}]+)\}/g;
 const INPUT_TOKEN = "{input:…}";
 const TOKENS: { token: string; descKey: string }[] = [
+  // Opens the list of date and time formats (DATE_TOKENS).
   { token: "{date}", descKey: "picker.tokenDateDesc" },
   { token: "{clipboard}", descKey: "picker.tokenClipboardDesc" },
   { token: "{selection}", descKey: "picker.tokenSelectionDesc" },
@@ -95,8 +98,12 @@ export function TextSnippetEditor({
 
   // Typing/inserting detaches from a linked library snippet (snippetId cleared).
   function setText(next: string) {
-    onChange({ text: next, pasteMode: draft.pasteMode, snippetId: undefined });
+    onChange({ ...draft, text: next, snippetId: undefined });
   }
+
+  // The date chip's list of formats, each shown as today in it.
+  const [dateMenuAt, setDateMenuAt] = useState<{ x: number; y: number } | null>(null);
+  const months = t("backend.snippet.monthNames").split(",");
 
   function insertToken(token: string) {
     const ta = taRef.current;
@@ -115,11 +122,11 @@ export function TextSnippetEditor({
           onChange={(id) => {
             const snippet = library.find((item) => item.id === id);
             if (snippet) {
-              onChange({ text: snippet.text, pasteMode: snippet.pasteMode, snippetId: snippet.id });
+              onChange({ ...draft, text: snippet.text, pasteMode: snippet.pasteMode, snippetId: snippet.id });
               onPickName(snippet.name);
             } else {
               // Re-selecting the placeholder unlinks back to an editable inline copy.
-              onChange({ text: draft.text, pasteMode: draft.pasteMode, snippetId: undefined });
+              onChange({ ...draft, snippetId: undefined });
             }
           }}
           options={[
@@ -164,14 +171,27 @@ export function TextSnippetEditor({
             key={token}
             type="button"
             className="token-chip"
-            onClick={() => insertToken(token === INPUT_TOKEN ? `{input:${t("picker.tokenInputName")}}` : token)}
+            onClick={(event) => {
+              if (token === "{date}") {
+                const box = event.currentTarget.getBoundingClientRect();
+                setDateMenuAt({ x: box.left, y: box.bottom + 4 });
+              } else insertToken(token === INPUT_TOKEN ? `{input:${t("picker.tokenInputName")}}` : token);
+            }}
             title={t(descKey)}
             aria-label={t("picker.tokenInsertAria", { token })}
+            aria-haspopup={token === "{date}" ? "menu" : undefined}
           >
-            {token}
+            {token === "{date}" ? `${t("picker.tokenDateChip")} ▾` : token}
           </button>
         ))}
       </div>
+      {dateMenuAt ? (
+        <ContextMenu x={dateMenuAt.x} y={dateMenuAt.y} onClose={() => setDateMenuAt(null)}
+          items={DATE_TOKENS.map((token) => ({
+            label: `${formatDatePattern(patternOf(token), new Date(), months)}   ${token}`,
+            onClick: () => { setDateMenuAt(null); insertToken(token); },
+          }))} />
+      ) : null}
 
       {usesClipboardFastPath ? (
         <Notice variant="warning">{t("picker.longTextClipboardWarning")}</Notice>
@@ -180,7 +200,17 @@ export function TextSnippetEditor({
       {/* The save-to-library toggle only applies to an inline snippet; a linked
           one is already in the library. Outer wrapper is a <div> (not <label>)
           because Toggle renders its own <label>. */}
-      {linked ? null : (
+      <div className="snippet-save-toggle">
+        <Toggle
+          checked={Boolean(draft.enter)}
+          onChange={(on) => onChange({ ...draft, enter: on || undefined, ...(on ? { pasteMode: "sendText" as const } : {}) })}
+          ariaLabel={t("picker.pressEnterAfter")}
+        />
+        <span>{t("picker.pressEnterAfter")}</span>
+        <HelpTip text={t("picker.pressEnterAfterHint")} />
+      </div>
+      {/* Text + Enter is a macro, whose text step has no input mode (menu-phrase.ts). */}
+      {linked || draft.enter ? null : (
         <div className="snippet-save-toggle">
           <Toggle
             checked={keyboardOnly}

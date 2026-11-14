@@ -7,6 +7,7 @@ import {
   autoName,
   buildAction,
   createInitialDrafts,
+  enterPhraseOf,
   isSaveDisabled,
   acceleratorKeyFromCode,
   normalizeKeyName,
@@ -162,6 +163,27 @@ describe("autoName", () => {
 
   it("uses the action.type label for repairClipboard", () => {
     expect(autoName("repairClipboard", makeDrafts(), t, profiles)).toBe("action.type.repairClipboard");
+  });
+});
+
+describe("text with Enter", () => {
+  const enterMacro = makeAction({ type: "sequence", payload: { steps: [
+    { type: "text", value: "/resume" }, { type: "sleep", delayMs: 80 }, { type: "send", value: "Enter" },
+  ] } });
+
+  it("opens the menu's text + Enter macro as a text with Enter, and saves it back the same", () => {
+    const drafts = createInitialDrafts(enterMacro, null, profiles);
+    expect(drafts.text).toEqual({ text: "/resume", pasteMode: "sendText", enter: true });
+    expect(drafts.sequence).toHaveLength(3);
+    const saved = buildAction({ effectiveCategory: "textSnippet", existingAction: enterMacro, drafts, t, profiles });
+    expect(saved.type).toBe("sequence");
+    expect(saved.type === "sequence" ? saved.payload.steps : null).toEqual((enterMacro.payload as { steps: unknown }).steps);
+  });
+
+  it("leaves another macro a macro", () => {
+    const other = makeAction({ type: "sequence", payload: { steps: [{ type: "text", value: "a" }, { type: "send", value: "Enter" }] } });
+    expect(enterPhraseOf(other, [])).toBeNull();
+    expect(createInitialDrafts(other, null, profiles).text.enter).toBeUndefined();
   });
 });
 
@@ -337,7 +359,7 @@ describe("createInitialDrafts", () => {
     expect(initial.mouse.action).toBe("leftClick");
     expect(initial.media).toBe("playPause");
     expect(initial.profile).toBe("p1"); // first profile
-    expect(initial.sequence).toEqual([{ type: "send", value: "Ctrl+C" }]);
+    expect(initial.sequence).toEqual([]);
     expect(initial.name).toBe("");
     expect(initial.conditions).toEqual([]);
     expect(initial.triggerMode).toBe("press");

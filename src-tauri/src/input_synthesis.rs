@@ -1492,6 +1492,8 @@ fn send_text_as(text: &str, inter_key_delay_ms: u32, allow_clipboard: bool) -> R
 }
 
 /// Expand snippet tokens at send time: `{date}` → today's date (YYYY-MM-DD),
+/// `{date:dd.MM.yyyy}` → today in that pattern (see [`format_date_pattern`]),
+/// `{time}` → the time now (HH:mm),
 /// `{clipboard}` → the current clipboard text, `{selection}` → the text
 /// selected in the window in front (copied with Ctrl+Insert, the clipboard put
 /// back), `{cursor}` (or `{|}`) → nothing, but the caret is moved back to the
@@ -1503,25 +1505,82 @@ pub fn expand_snippet_tokens(text: &str) -> (String, Option<usize>) {
     if !text.contains('{') && !text.contains('}') {
         return (text.to_string(), None);
     }
-    let date = crate::backup::local_date_string();
+    let now = Now {
+        time: crate::backup::local_time(),
+        months: crate::ui_text::native(&crate::ui_text!(
+            "snippet.monthNames",
+            "January,February,March,April,May,June,July,August,September,October,November,December"
+        )),
+    };
     // The selection first: copying it must not show up as `{clipboard}`.
     let selection = text.contains("{selection}").then(selection_text_for_token).flatten();
     let clipboard = text.contains("{clipboard}").then(get_clipboard_text_for_token).flatten();
-    expand_tokens_with(text, &date, clipboard.as_deref(), selection.as_deref())
+    expand_tokens_with(text, &now, clipboard.as_deref(), selection.as_deref())
+}
+
+/// The moment the date and time tokens show, and the month names (comma
+/// separated, in the UI language: "ноября" in "14 ноября 2026") for `MMMM`.
+struct Now {
+    time: crate::backup::LocalTime,
+    months: String,
+}
+
+/// `pattern` filled from `time`: `yyyy` `yy` the year, `MMMM` the month's name,
+/// `MM` `M` its number, `dd` `d` the day, `HH` `H` the hour, `mm` minutes, `ss`
+/// seconds; anything else is copied as is (`dd.MM.yyyy` → `14.11.2026`).
+/// The frontend's examples (`formatDatePattern`) follow the same rules.
+fn format_date_pattern(pattern: &str, time: &crate::backup::LocalTime, months: &str) -> String {
+    const PARTS: [&str; 11] = ["yyyy", "yy", "MMMM", "MM", "M", "dd", "d", "HH", "H", "mm", "ss"];
+    let mut out = String::new();
+    let mut rest = pattern;
+    while let Some(first) = rest.chars().next() {
+        let Some(part) = PARTS.iter().find(|part| rest.starts_with(**part)) else {
+            out.push(first);
+            rest = &rest[first.len_utf8()..];
+            continue;
+        };
+        match *part {
+            "yyyy" => out.push_str(&format!("{:04}", time.year)),
+            "yy" => out.push_str(&format!("{:02}", time.year % 100)),
+            "MMMM" => out.push_str(months.split(',').nth(usize::from(time.month).saturating_sub(1)).unwrap_or("").trim()),
+            "MM" => out.push_str(&format!("{:02}", time.month)),
+            "M" => out.push_str(&time.month.to_string()),
+            "dd" => out.push_str(&format!("{:02}", time.day)),
+            "d" => out.push_str(&time.day.to_string()),
+            "HH" => out.push_str(&format!("{:02}", time.hour)),
+            "H" => out.push_str(&time.hour.to_string()),
+            "mm" => out.push_str(&format!("{:02}", time.minute)),
+            _ => out.push_str(&format!("{:02}", time.second)),
+        }
+        rest = &rest[part.len()..];
+    }
+    out
 }
 
 /// Whether a text holds one of the tokens (a macro's text is typed verbatim
 /// otherwise, `{{` included).
 pub fn has_snippet_token(text: &str) -> bool {
-    SNIPPET_TOKENS.iter().any(|token| text.contains(&format!("{{{token}}}")))
+    SNIPPET_TOKENS.iter().any(|token| text.contains(&format!("{{{token}}}"))) || text.contains("{date:")
 }
 
-/// Every token `expand_tokens_with` replaces (a test keeps the two in step).
-const SNIPPET_TOKENS: [&str; 5] = ["date", "clipboard", "selection", "cursor", "|"];
+/// Every token `expand_tokens_with` replaces (a test keeps the two in step);
+/// `{date:<pattern>}` too.
+const SNIPPET_TOKENS: [&str; 6] = ["date", "time", "clipboard", "selection", "cursor", "|"];
+
+/// A fixed moment for the tests: `date` as `yyyy-mm-dd` (anything else: year 0), 09:05:07.
+#[cfg(test)]
+fn test_now(date: &str) -> Now {
+    let mut parts = date.split('-').map(|part| part.parse::<u16>().unwrap_or(0));
+    let (year, month, day) = (parts.next().unwrap_or(0), parts.next().unwrap_or(0) as u8, parts.next().unwrap_or(0) as u8);
+    Now {
+        time: crate::backup::LocalTime { year, month, day, hour: 9, minute: 5, second: 7 },
+        months: "января,февраля,марта,апреля,мая,июня,июля,августа,сентября,октября,ноября,декабря".to_owned(),
+    }
+}
 
 #[cfg(test)]
 fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Option<usize>) {
-    expand_tokens_with(text, date, clipboard, None)
+    expand_tokens_with(text, &test_now(date), clipboard, None)
 }
 
 /// Pure token expander — dependencies injected so it is deterministic to test.
@@ -1530,7 +1589,7 @@ fn expand_tokens(text: &str, date: &str, clipboard: Option<&str>) -> (String, Op
 /// The first marker wins; any further `{cursor}` markers are stripped. Marker
 /// positions count only template tokens — a literal `{cursor}` arriving via
 /// `{clipboard}` content is pasted as text, never treated as a marker.
-fn expand_tokens_with(text: &str, date: &str, clipboard: Option<&str>, selection: Option<&str>) -> (String, Option<usize>) {
+fn expand_tokens_with(text: &str, now: &Now, clipboard: Option<&str>, selection: Option<&str>) -> (String, Option<usize>) {
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
     let mut out = String::with_capacity(text.len());
@@ -1548,7 +1607,11 @@ fn expand_tokens_with(text: &str, date: &str, clipboard: Option<&str>, selection
                 let close = idx + 1 + rel;
                 let token: String = chars[idx + 1..close].iter().collect();
                 match token.as_str() {
-                    "date" => out.push_str(date),
+                    "date" => out.push_str(&format_date_pattern("yyyy-MM-dd", &now.time, &now.months)),
+                    "time" => out.push_str(&format_date_pattern("HH:mm", &now.time, &now.months)),
+                    _ if token.starts_with("date:") => {
+                        out.push_str(&format_date_pattern(&token["date:".len()..], &now.time, &now.months));
+                    }
                     "clipboard" => out.push_str(clipboard.unwrap_or("")),
                     "selection" => out.push_str(selection.unwrap_or("")),
                     "cursor" | "|" => {
@@ -3204,6 +3267,18 @@ mod tests {
     }
 
     #[test]
+    fn date_patterns_and_time_fill_from_the_moment() {
+        let fill = |text: &str| expand_tokens(text, "2026-11-04", None).0;
+        assert_eq!(fill("{date}"), "2026-11-04");
+        assert_eq!(fill("{date:dd.MM.yyyy}"), "04.11.2026");
+        assert_eq!(fill("{date:d MMMM yyyy}"), "4 ноября 2026");
+        assert_eq!(fill("{date:dd.MM.yy HH:mm:ss}"), "04.11.26 09:05:07");
+        assert_eq!(fill("{time} / {date:H}h"), "09:05 / 9h");
+        assert_eq!(fill("{date:[ддд]}"), "[ддд]", "unknown letters stay");
+        assert!(has_snippet_token("{date:dd.MM}") && has_snippet_token("{time}"));
+    }
+
+    #[test]
     fn expand_tokens_escapes_double_braces_and_keeps_unknown() {
         let out = expand_tokens("{{literal}} {unknown} {date}", "2026-07-05", None);
         assert_eq!(out, ("{literal} {unknown} 2026-07-05".to_string(), None));
@@ -3221,18 +3296,18 @@ mod tests {
     #[test]
     fn expand_tokens_selection_and_short_cursor_marker() {
         assert_eq!(
-            expand_tokens_with("Fix: {selection}{|}!", "d", Some("clip"), Some("sel")),
+            expand_tokens_with("Fix: {selection}{|}!", &test_now("d"), Some("clip"), Some("sel")),
             ("Fix: sel!".to_string(), Some(1))
         );
         // Nothing selected: the token goes, the rest stays.
-        assert_eq!(expand_tokens_with("[{selection}]", "d", None, None), ("[]".to_string(), None));
+        assert_eq!(expand_tokens_with("[{selection}]", &test_now("d"), None, None), ("[]".to_string(), None));
         // A macro's text without a token is typed as it is, `{{` included.
         assert!(!has_snippet_token("{{name}} and {json: 1}"));
         // Every listed token is one the expander replaces (none left verbatim).
         for token in SNIPPET_TOKENS {
             let text = format!("[{{{token}}}]");
             assert!(has_snippet_token(&text));
-            assert!(!expand_tokens_with(&text, "d", Some("c"), Some("s")).0.contains('{'), "{token} is not expanded");
+            assert!(!expand_tokens_with(&text, &test_now("d"), Some("c"), Some("s")).0.contains('{'), "{token} is not expanded");
         }
         assert!(has_snippet_token("at {|} here") && has_snippet_token("{date}"));
     }

@@ -75,6 +75,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full height. A right click on an item (or its ⋯) copies or moves it to another
   menu, and in the popup a right click on a name inside a submenu offers insert,
   insert + Enter, copy or edit for that item.
+- Smaller footprint: the WebView2 caches (page and code cache, shader cache,
+  crash dumps, component downloads) are emptied at every start, the main window
+  asks WebView2 for less memory while it is hidden in the tray or minimized, and
+  a held button no longer writes three log lines per auto-repeat.
 
 ### Fixed
 - The same shortcut on two buttons is no longer a conflict when the press

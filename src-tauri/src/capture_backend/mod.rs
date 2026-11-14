@@ -482,8 +482,10 @@ fn process_encoded_key_event(
     let _ = app.emit(EVENT_ENCODED_KEY_RECEIVED, &event);
 
     // Mirrors "Key-up received": without it a press that never reaches dispatch
-    // leaves only its key-up in the file log.
-    if !event.is_key_up {
+    // leaves only its key-up in the file log. Auto-repeats are left out: a held
+    // button repeats ~30 times a second (78k lines a day measured), and a repeat
+    // that runs an action logs its own dispatch.
+    if !event.is_key_up && !event.is_repeat {
         log::info!(
             "[capture] Key-down received for {} (hypershift: {}, hypershift2: {}, repeat: {})",
             event.encoded_key,
@@ -587,10 +589,8 @@ fn process_encoded_key_event(
                 }
             }
         } else if !ambiguous {
-            log::info!(
-                "[capture] Key-up for {} without active hold",
-                event.encoded_key
-            );
+            // No file log line: "Key-up received" without a "Hold-shortcut
+            // released" after it says so already (every wheel tick doubled it).
             log_entries.push((
                 "capture",
                 crate::ui_text!(
@@ -837,23 +837,27 @@ fn process_encoded_key_event(
         && (preview.trigger_mode == Some(config::TriggerMode::Hold) || is_modifier_only_shortcut);
 
     if is_hold_shortcut {
-        log::info!(
-            "[capture] Hold-shortcut dispatch for {} (action_pretty={:?})",
-            event.encoded_key,
-            preview.action_pretty,
-        );
         // Skip auto-repeat events — the shortcut is already held.
         // Re-calling hold_down would overwrite held_actions with an empty
         // state (modifiers already active → "reused" → nothing pressed)
         // and the eventual hold_up would fail to release.
         if held_actions.contains_key(&event.encoded_key) {
-            log::info!(
-                "[capture] Hold-shortcut already held for {}, skipping duplicate",
-                event.encoded_key
-            );
+            // Logged once per hold: the hold-down and release lines bound it,
+            // a line per auto-repeat only filled the log.
+            if !event.is_repeat {
+                log::info!(
+                    "[capture] Hold-shortcut already held for {}, skipping duplicate",
+                    event.encoded_key
+                );
+            }
             flush_log_entries(runtime_store, log_entries);
             return EventOutcome::DroppedAsHeldDuplicate;
         }
+        log::info!(
+            "[capture] Hold-shortcut dispatch for {} (action_pretty={:?})",
+            event.encoded_key,
+            preview.action_pretty,
+        );
 
         if let Some(config::Action {
             payload: config::ActionPayload::Shortcut(payload),

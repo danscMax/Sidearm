@@ -68,6 +68,7 @@
     "allow-export-profile",
     "allow-import-profile",
     "allow-read-text-folder",
+    "allow-resolve-shortcut-target",
     "allow-get-menu-usage",
     "allow-export-snippets",
     "allow-import-device-image",

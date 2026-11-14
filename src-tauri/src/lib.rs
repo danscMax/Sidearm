@@ -1068,6 +1068,59 @@ fn read_text_files(mut files: Vec<PathBuf>, max_file: u64, max_files: usize) -> 
     folder
 }
 
+/// The file a Windows shortcut (`.lnk`) starts, as stored in it (environment
+/// variables expanded). An app rule matches that exe, not the shortcut.
+#[cfg(target_os = "windows")]
+fn shortcut_target(path: &Path) -> Result<PathBuf, String> {
+    use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize, IPersistFile, STGM_READ};
+    use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+    use windows::core::{HSTRING, Interface};
+    // SAFETY: COM is initialized on this (blocking) thread and uninitialized only
+    // when this call initialized it; the buffer outlives GetPath.
+    unsafe {
+        let initialized = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+        let target = (|| {
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?;
+            let file: IPersistFile = link.cast().map_err(|e| e.to_string())?;
+            file.Load(&HSTRING::from(path.as_os_str()), STGM_READ).map_err(|e| e.to_string())?;
+            let mut buffer = vec![0u16; 32_768];
+            link.GetPath(&mut buffer, std::ptr::null_mut(), 0).map_err(|e| e.to_string())?;
+            let length = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
+            Ok(PathBuf::from(String::from_utf16_lossy(&buffer[..length])))
+        })();
+        if initialized {
+            CoUninitialize();
+        }
+        target
+    }
+}
+
+/// An app rule picked from a shortcut: the `.exe` it starts. Anything else (a
+/// shortcut to a document, a folder or a store app) is refused.
+#[tauri::command]
+async fn resolve_shortcut_target(path: String) -> Result<String, CommandError> {
+    #[cfg(target_os = "windows")]
+    {
+        let source = validate_user_file_path(&path)?;
+        let target = tauri::async_runtime::spawn_blocking(move || shortcut_target(&source))
+            .await
+            .map_err(|e| CommandError::internal(format!("resolve_shortcut_target task failed: {e}")))?
+            .map_err(|reason| CommandError::from_ui("shortcut_unreadable", crate::ui_text!("error.shortcutUnreadable", "The shortcut could not be read: {reason}", reason = reason)))?;
+        if !target.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+            return Err(CommandError::from_ui(
+                "shortcut_not_exe",
+                crate::ui_text!("error.shortcutNotExe", "The shortcut does not start an .exe program (it starts `{target}`).", target = target.display()),
+            ));
+        }
+        Ok(target.to_string_lossy().into_owned())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = path;
+        Err(CommandError::from_ui("unsupported_platform", crate::ui_text!("error.shortcutWindowsOnly", "Shortcuts are read only on Windows.")))
+    }
+}
+
 /// The `.txt` / `.md` files directly in a user-chosen folder, sorted by name,
 /// for the menu editor's "Add from folder". Their text is copied into the
 /// config; the folder is not referenced afterwards. Files over 1 MiB, files
@@ -4432,6 +4485,7 @@ pub fn run() {
             menu_wheel,
             menu_search,
             menu_search_scope,
+            resolve_shortcut_target,
             menu_confirm,
             menu_close,
             menu_back,
@@ -4702,6 +4756,27 @@ mod tests {
     fn untranslated_command_errors_do_not_grow() {
         let count = include_str!("lib.rs").matches(concat!("CommandError::", "new(")).count();
         assert!(count <= 8, "{count} untranslated CommandError::new calls: use CommandError::from_ui with ui_text!");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn a_shortcut_resolves_to_the_exe_it_starts() {
+        use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile};
+        use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
+        use windows::core::{HSTRING, Interface};
+        let notepad = PathBuf::from(std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into())).join("System32").join("notepad.exe");
+        let link_path = std::env::temp_dir().join(format!("sidearm-shortcut-{}.lnk", std::process::id()));
+        // SAFETY: COM initialized on this test thread; the strings outlive the calls.
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+            let link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).expect("shell link");
+            link.SetPath(&HSTRING::from(notepad.as_os_str())).expect("set path");
+            link.cast::<IPersistFile>().expect("persist").Save(&HSTRING::from(link_path.as_os_str()), true).expect("save");
+        }
+        let target = shortcut_target(&link_path);
+        let _ = fs::remove_file(&link_path);
+        assert_eq!(target.expect("resolved").to_string_lossy().to_lowercase(), notepad.to_string_lossy().to_lowercase());
+        assert!(shortcut_target(&link_path).is_err(), "a missing shortcut is an error");
     }
 
     #[test]

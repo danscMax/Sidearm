@@ -21,6 +21,7 @@ const APP_COMMANDS: &[&str] = &[
     "menu_wheel",
     "menu_search",
     "menu_search_scope",
+    "resolve_shortcut_target",
     "menu_confirm",
     "menu_close",
     "menu_back",

@@ -494,7 +494,8 @@
     "delayLabel": "Delay:",
     "captureHelp": "Click the button and switch to the target window within the selected time. After the delay, the app will detect the application and fill in the fields.",
     "titleFilter": "Title filter",
-    "titleFilterHelp": "The rule will only trigger if the window title contains this text. Without a filter — triggers for any window of this application."
+    "titleFilterHelp": "The rule will only trigger if the window title contains this text. Without a filter — triggers for any window of this application.",
+    "exeOrShortcut": "Choose the program's .exe file or its shortcut, or capture its running window."
   },
   "ruleModal": {
     "profileLabel": "Profile: {{name}}",
@@ -1896,7 +1897,10 @@
       "runtimeReload": "Could not restart capture: {{reason}}",
       "runtimeStart": "Could not start capture: {{reason}}",
       "runtimeStop": "Could not stop capture: {{reason}}",
-      "windowCapture": "Could not read the window in front: {{reason}}"
+      "windowCapture": "Could not read the window in front: {{reason}}",
+      "shortcutUnreadable": "The shortcut could not be read: {{reason}}",
+      "shortcutNotExe": "The shortcut does not start an .exe program (it starts `{{target}}`).",
+      "shortcutWindowsOnly": "Shortcuts are read only on Windows."
     }
   },
   "newMouse": {

@@ -189,7 +189,8 @@ if (-not (Test-Path -LiteralPath (Join-Path $portable 'resources\MicrosoftEdgeWe
 }
 if (Test-Path -LiteralPath $outDir) { Remove-Item -LiteralPath $outDir -Recurse -Force }
 New-Item -ItemType Directory -Path $outDir | Out-Null
-$items = Get-ChildItem -LiteralPath $portable -Force -Exclude 'data'
+# Nor an exe a restore process still ran from when the package was built (build_portable.ps1).
+$items = Get-ChildItem -LiteralPath $portable -Force -Exclude 'data', '*.old-*'
 Compress-Archive -Path $items.FullName -DestinationPath $zip
 $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 $sizeMb = (Get-Item -LiteralPath $zip).Length / 1MB

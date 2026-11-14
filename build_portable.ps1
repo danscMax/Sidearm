@@ -42,6 +42,7 @@ $ErrorActionPreference = "Stop"
 # Show-Notification, Get-AppVersion). Vendored at the repo root.
 $kit = Join-Path $PSScriptRoot 'ScriptKit.ps1'
 if (Test-Path $kit) { . $kit }
+. (Join-Path $PSScriptRoot 'tools\locked-exe.ps1')
 
 # Wall-clock start for the whole run (build + assemble + verify), shown in the
 # final summary alongside the per-phase Rust timing.
@@ -219,23 +220,23 @@ function Stop-AppProcessIfRunning {
     Write-Warn "Detected running Sidearm (PID: $pids). Stopping..."
 
     try {
-        # Stop the app itself first: its capture helper then starts a
+        # Stop the app itself: its capture helper then starts a
         # `--restore-live-maps` process that puts the mice's own button maps
         # back (else the V3 stays silent until its profile button is pressed).
         # The app is the Sidearm whose parent is not a Sidearm (a command line
-        # is unreadable for an elevated instance).
+        # is unreadable for an elevated instance) and that is no restore
+        # process (its watchdog's parent has ended too).
         $all = @(Get-CimInstance Win32_Process -Filter "Name = 'Sidearm.exe'" -ErrorAction SilentlyContinue)
         $ids = @($all | ForEach-Object { [int]$_.ProcessId })
-        $apps = @($all | Where-Object { $ids -notcontains [int]$_.ParentProcessId } | ForEach-Object { [int]$_.ProcessId })
-        if ($apps.Count -gt 0) { Stop-Process -Id $apps -Force -ErrorAction Stop }
-        # Up to 30 s for the restore; a mouse asleep longer is restored by the next start.
-        $deadline = (Get-Date).AddSeconds(30)
-        while ((Get-Date) -lt $deadline -and (Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue)) {
-            Start-Sleep -Milliseconds 250
+        $apps = @($all | Where-Object { $ids -notcontains [int]$_.ParentProcessId -and $_.CommandLine -notmatch '--restore-live-maps' } | ForEach-Object { [int]$_.ProcessId })
+        if ($apps.Count -gt 0) {
+            Stop-Process -Id $apps -Force -ErrorAction Stop
+            Wait-Process -Id $apps -Timeout 10 -ErrorAction SilentlyContinue
         }
-        Get-Process -Name 'Sidearm' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 1
-        Write-Ok "Stopped running process(es)"
+        # The restore processes keep running (one may wait for a sleeping
+        # mouse): the exes they hold are moved out of the way before they are
+        # replaced (Move-LockedExe), not stopped.
+        Write-Ok "Stopped running app(s)"
     } catch {
         Write-Fail "Could not stop process: $($_.Exception.Message)"
         exit 1
@@ -259,9 +260,10 @@ if ($Clean) {
     Write-Host "  Cleaning build artifacts..." -ForegroundColor Yellow
     if (Test-Path -LiteralPath $PORTABLE_DIR) {
         Stop-AppProcessIfRunning
+        Move-LockedExe (Join-Path $PORTABLE_DIR $EXE_NAME)
         # ./data is the user's config (dev runs use it too) -- never part of "build artifacts".
         Get-ChildItem -LiteralPath $PORTABLE_DIR -Force |
-            Where-Object { $_.Name -ne 'data' } |
+            Where-Object { $_.Name -ne 'data' -and $_.Name -notlike "$EXE_NAME.old-*" } |
             Remove-Item -Recurse -Force
         Write-Ok "Removed build artifacts from $PORTABLE_DIR (kept ./data)"
     } else {
@@ -321,6 +323,7 @@ if (-not $SkipBuild) {
     # target/release/sidearm.exe. The assemble step stops it again before
     # copying the fresh EXE.
     Stop-AppProcessIfRunning
+    Move-LockedExe $TAURI_EXE
 
     if ($CleanCargo) {
         Write-Host "    $([char]0x25B6) cargo clean -p sidearm (-CleanCargo requested)..." -ForegroundColor White
@@ -448,11 +451,13 @@ Write-Step $stepNum $totalSteps "Assembling portable package"
 
 if (Test-Path -LiteralPath $PORTABLE_DIR) {
     Stop-AppProcessIfRunning
+    Move-LockedExe (Join-Path $PORTABLE_DIR $EXE_NAME)
     # Preserve ./data (config, profiles, snapshots, WebView2 state) across
-    # rebuilds -- wipe only the executable + bundled resources, never user data.
+    # rebuilds -- wipe only the executable + bundled resources, never user data
+    # (nor the moved exe a restore process still runs from).
     # (The release zip excludes ./data separately; see the release workflow.)
     Get-ChildItem -LiteralPath $PORTABLE_DIR -Force |
-        Where-Object { $_.Name -ne 'data' } |
+        Where-Object { $_.Name -ne 'data' -and $_.Name -notlike "$EXE_NAME.old-*" } |
         Remove-Item -Recurse -Force
 }
 New-Item -ItemType Directory -Path $PORTABLE_DIR -Force | Out-Null

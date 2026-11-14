@@ -28,6 +28,14 @@ export function formatDatePattern(pattern: string, now: Date, months: readonly s
   return out;
 }
 
+/** A pattern written with the letters of other date formats (`YYYY-MM-DD`,
+ *  `hh:mm`), which the backend copies as is, put right (`yyyy-MM-dd`,
+ *  `HH:mm`); null when it has none of them. */
+export function fixDatePattern(pattern: string): string | null {
+  const fixed = pattern.replace(/[YDh]/g, (letter) => (letter === "h" ? "H" : letter.toLowerCase()));
+  return fixed === pattern ? null : fixed;
+}
+
 /** The date and time formats the token menu offers (`{time}` = `HH:mm`). */
 export const DATE_TOKENS = ["{date}", "{date:dd.MM.yyyy}", "{date:dd.MM.yy}", "{date:d MMMM yyyy}", "{time}", "{date:dd.MM.yyyy HH:mm}"] as const;
 

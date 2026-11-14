@@ -15,6 +15,7 @@ import {
 import { getMenuUsage, getPressLog, normalizeCommandError, pickTextFolder } from "../lib/backend";
 import { sumDays, unpickedItems, type PressLog } from "../lib/press-stats";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
+import { TokenTextarea } from "./action-picker/shared/TokenTextarea";
 import { PillTrack } from "./PillTrack";
 import { ContextMenu, type ContextMenuProps } from "./ContextMenu";
 import { ChevronIcon } from "./icons";
@@ -835,9 +836,9 @@ export function MenuItemsEditor({
           </div>
         </div>
         {kind === "phrase" && action && phrase ? (
-          <textarea className="input menu-ed__text" value={phrase.text} disabled={disabled}
-            aria-label={t("inspector.menuPhraseText")} placeholder={t("inspector.menuPhrasePlaceholder")}
-            onChange={(event) => setPhrase(action, event.target.value, phrase.enter)} />
+          <TokenTextarea className="menu-ed__text" value={phrase.text} disabled={disabled}
+            ariaLabel={t("inspector.menuPhraseText")} placeholder={t("inspector.menuPhrasePlaceholder")}
+            onChange={(text) => setPhrase(action, text, phrase.enter)} />
         ) : null}
         {kind === "keys" && action?.type === "shortcut" ? (
           <ShortcutEditor

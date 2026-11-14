@@ -1,7 +1,7 @@
 import { beforeEach, expect, it } from "vitest";
 import source from "../public/prompt.js?raw";
 
-type View = { generation: number; title: string; fields: string[]; submit: string; hint: string };
+type View = { generation: number; title: string; fields: string[]; submit?: string; hint: string };
 let render: (event: { payload: View }) => void;
 const calls: { command: string; args: Record<string, unknown> }[] = [];
 
@@ -37,4 +37,10 @@ it("Esc sends nothing", () => {
   render({ payload: { generation: 4, title: "T", fields: ["x"], submit: "Insert", hint: "" } });
   key(document.querySelector("input")!, "Escape");
   expect(calls.at(-1)).toEqual({ command: "prompt_cancel", args: { generation: 4 } });
+});
+
+it("another window in front cancels the question", () => {
+  render({ payload: { generation: 5, title: "T", fields: ["x"], submit: "Insert", hint: "" } });
+  window.dispatchEvent(new Event("blur"));
+  expect(calls.at(-1)).toEqual({ command: "prompt_cancel", args: { generation: 5 } });
 });

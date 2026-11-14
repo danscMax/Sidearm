@@ -406,7 +406,30 @@ fn measure_text_width(text: &str, font_family: &str, font_size_px: i32, font_wei
 
 /// Create the hidden OSD window (called lazily on first show_osd).
 /// Positioned off-screen and explicitly hidden to prevent any flash.
+/// Builds a window on a thread of its own. `WebviewWindowBuilder::build` waits
+/// for the main thread, so on the main thread itself (a sync command such as a
+/// menu pick) it deadlocks; `creating` keeps a second build of it from starting.
+pub(crate) fn spawn_window_build(creating: &'static AtomicBool, build: impl FnOnce() -> bool + Send + 'static) {
+    if creating.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let started = std::thread::Builder::new().name("window-build".into()).spawn(move || {
+        if !build() {
+            creating.store(false, Ordering::Release); // the next call may try again
+        }
+    });
+    if started.is_err() {
+        creating.store(false, Ordering::Release);
+    }
+}
+
 fn create_osd_window(app: &AppHandle) {
+    static CREATING: AtomicBool = AtomicBool::new(false);
+    let app = app.clone();
+    spawn_window_build(&CREATING, move || build_osd_window(&app));
+}
+
+fn build_osd_window(app: &AppHandle) -> bool {
     use tauri::WebviewUrl;
     use tauri::WebviewWindowBuilder;
 
@@ -425,7 +448,10 @@ fn create_osd_window(app: &AppHandle) {
     {
         // Belt-and-suspenders: force hide even if visible(false) is ignored
         let _ = w.hide();
+        return true;
     }
+    log::warn!("[osd] could not create the window");
+    false
 }
 
 fn resolve_app_paths(app: &AppHandle) -> Arc<paths::AppPaths> {
@@ -516,8 +542,6 @@ fn build_tray_menu(
         true,
         None::<&str>,
     )?)?;
-    // "Restart as administrator" only when non-elevated (UIPI blocks SendInput
-    // into elevated foreground windows otherwise).
     menu.append(&MenuItem::with_id(
         app,
         "stop_macros",
@@ -525,6 +549,8 @@ fn build_tray_menu(
         true,
         None::<&str>,
     )?)?;
+    // "Restart as administrator" only when non-elevated (UIPI blocks SendInput
+    // into elevated foreground windows otherwise).
     if !is_elevated {
         menu.append(&MenuItem::with_id(
             app,
@@ -4345,6 +4371,8 @@ pub fn run() {
                             if let Ok(mut store) = app.state::<Arc<Mutex<RuntimeStore>>>().lock() {
                                 store.set_manual_profile_override(Some(profile_id.clone()));
                             }
+                            // Chosen by hand again: a pending way back to the rules is off.
+                            RULES_BACK.fetch_add(1, Ordering::SeqCst);
                             capture_backend::follow_manual_profile(&profile_id);
                             let _ = app.emit(EVENT_TRAY_PROFILE_CHANGED, &profile_id);
                             rebuild_tray_menu(&app);

@@ -27,7 +27,10 @@
 # Usage:
 #   .\release.ps1 -Version 0.11.0              - Checks, build, zip, notes (no publish)
 #   .\release.ps1 -Version 0.11.0 -SkipBuild   - Same, reusing the current portable build
-#   .\release.ps1 -Version 0.11.0 -Publish     - All of the above, then publish
+#   then test that build on the mice and run tools\hw-check.ps1 -Version 0.11.0
+#   .\release.ps1 -Version 0.11.0 -SkipBuild -Publish
+#                                              - Publish exactly that tested build
+#                                                (a rebuild would change its hash)
 #
 # The title is ASCII ("vX.Y.Z"): a non-ASCII --title arg is mangled by the
 # console codepage; the notes go through --notes-file (read as UTF-8).
@@ -111,6 +114,11 @@ try {
     $schemaThen = if ($lastTag) { [regex]::Match(((git show "${lastTag}:src-tauri/src/config.rs") -join "`n"), 'SCHEMA_VERSION: i32 = (\d+);').Groups[1].Value } else { '' }
 } finally { Pop-Location }
 Write-Ok "clean, branch $branch, $tag is new"
+
+# A release publishes the build its hardware check tested: never a fresh one.
+if ($Publish -and -not $SkipBuild) {
+    Stop-Release "Publish the tested build: run release.ps1 -Version $Version, test it, run tools\hw-check.ps1 -Version $Version, then release.ps1 -Version $Version -SkipBuild -Publish."
+}
 
 # 4. The whole local check, once per commit.
 if ($SkipVerify -and $Publish) { Stop-Release "A published release is verified: drop -SkipVerify." }

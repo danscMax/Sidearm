@@ -304,6 +304,10 @@ export function SequenceStepEditor({
         <Notice variant="warning" className="mb-8">
           <strong>{t("picker.sequenceEmpty")}</strong>
         </Notice>
+      ) : steps.some((step) => step.type === "waitWindow" && !step.exe.trim()) ? (
+        <Notice variant="warning" className="mb-8">
+          <strong>{t("picker.waitWindowExeMissing")}</strong>
+        </Notice>
       ) : null}
       {recordingError ? (
         <Notice variant="error" className="mb-8">

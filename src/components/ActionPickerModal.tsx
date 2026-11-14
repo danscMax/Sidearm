@@ -448,7 +448,8 @@ export function ActionPickerModal({
   const saveDisabled = roleCategory
     ? false
     : isSaveDisabled(effectiveCategory, drafts)
-      || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS))
+      || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS
+        || sequenceDraft.some((step) => step.type === "waitWindow" && !step.exe.trim())))
       || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [

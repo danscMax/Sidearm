@@ -1628,12 +1628,14 @@ fn sequence_step_summary(step: &SequenceStep) -> crate::ui_text::UiText {
     }
 }
 
-/// The window in front is `exe` (file name, any case) and, when given, holds
-/// `title` in its title (any case).
+/// The window in front is `exe` (file name, any case; `notepad` matches
+/// `notepad.exe`) and, when given, holds `title` in its title (any case).
 fn foreground_matches(exe: &str, title: Option<&str>) -> bool {
     let Ok(window) = crate::window_capture::capture_foreground_window() else { return false };
-    let name = std::path::Path::new(&window.exe).file_name().and_then(|name| name.to_str()).unwrap_or(&window.exe);
-    name.eq_ignore_ascii_case(exe.trim())
+    let path = std::path::Path::new(&window.exe);
+    let wanted = exe.trim();
+    let same = |part: Option<&std::ffi::OsStr>| part.and_then(|part| part.to_str()).is_some_and(|part| part.eq_ignore_ascii_case(wanted));
+    (same(path.file_name()) || same(path.file_stem()))
         && title.is_none_or(|title| window.title.to_lowercase().contains(&title.trim().to_lowercase()))
 }
 

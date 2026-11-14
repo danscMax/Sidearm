@@ -76,9 +76,10 @@ fn scan(text: &str, mut replace: impl FnMut(&str) -> Option<String>) -> String {
     out
 }
 
-/// `text` with each `{input:name}` replaced by its value.
+/// `text` with each `{input:name}` replaced by its value. A value is typed as
+/// written: its braces are escaped, so `{date}` or `{input:x}` in it stays text.
 pub(crate) fn fill(text: &str, values: &HashMap<String, String>) -> String {
-    scan(text, |name| values.get(name).cloned())
+    scan(text, |name| values.get(name).map(|value| value.replace('{', "{{").replace('}', "}}")))
 }
 
 /// `config` with `action`'s fields filled in: a library text becomes an inline
@@ -131,7 +132,6 @@ struct PromptView {
     generation: u64,
     title: String,
     fields: Vec<String>,
-    submit: String,
     hint: String,
 }
 
@@ -167,7 +167,6 @@ pub(crate) fn ask(
         generation,
         title: title.to_owned(),
         fields,
-        submit: crate::ui_text::native(&crate::ui_text!("prompt.submit", "Insert")),
         hint: crate::ui_text::native(&crate::ui_text!("prompt.hint", "Enter: next field, then insert · Esc: cancel")),
     };
     let window = app.get_webview_window(WINDOW_LABEL);
@@ -182,6 +181,13 @@ pub(crate) fn ask(
 }
 
 fn create_window(app: &AppHandle) {
+    static CREATING: AtomicBool = AtomicBool::new(false);
+    let app = app.clone();
+    // A menu pick asks on the main thread, where building a window deadlocks.
+    crate::spawn_window_build(&CREATING, move || build_window(&app));
+}
+
+fn build_window(app: &AppHandle) -> bool {
     use tauri::{WebviewUrl, WebviewWindowBuilder};
     if let Err(error) = WebviewWindowBuilder::new(app, WINDOW_LABEL, WebviewUrl::App("/prompt.html".into()))
         .title("")
@@ -198,10 +204,13 @@ fn create_window(app: &AppHandle) {
         .build()
     {
         log::warn!("[prompt] could not create the window: {error}");
-        if let Some(pending) = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
-            (pending.cancel)();
+        let pending = PENDING.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take();
+        if let Some(pending) = pending {
+            (pending.cancel)(); // after the lock: a cancel may ask again
         }
+        return false;
     }
+    true
 }
 
 /// The page listens: it gets the question that waited for it.
@@ -278,6 +287,13 @@ mod tests {
         assert_eq!(fill(text, &values), "ssh admin@server5 # server5 {{input:literal}}");
         assert_eq!(fill("no fields, {date}", &values), "no fields, {date}");
         assert_eq!(fill("broken {input:host", &values), "broken {input:host");
+        let tricky: HashMap<String, String> = [("host".to_owned(), "{date} {input:x} {{".to_owned())].into();
+        let filled = fill("go {input:host}", &tricky);
+        assert_eq!(filled, "go {{date}} {{input:x}} {{{{");
+        assert_eq!(crate::input_synthesis::expand_snippet_tokens(&filled).0, "go {date} {input:x} {{", "typed as written");
+        let mut asked = Vec::new();
+        scan(&filled, |name| { asked.push(name.to_owned()); None });
+        assert!(asked.is_empty(), "a value never asks again");
     }
 
     #[test]

@@ -1397,11 +1397,20 @@ pub(crate) fn run_menu_item(
             crate::input_prompt::ask(&app, &action.display_name, crate::input_prompt::fields_of(&config, &action), move |values| {
                 let filled = crate::input_prompt::filled_config(&config, &action_run, &values);
                 let completed = done.lock().ok().and_then(|mut slot| slot.take());
-                run_menu_execution(
+                let settings = filled.settings.clone();
+                let (notify_app, notify_store) = (app_run.clone(), store_run.clone());
+                let run = move || run_menu_execution(
                     || executor::run_preview_action(&filled, &preview),
                     |executed| report_execution(&app_run, &store_run, &filled, &preview, Vec::new(), is_fg_elevated, true, executed),
                     move |ok| if let Some(completed) = completed { completed(ok) },
                 );
+                // A filled macro waits its turn behind the others, like any macro.
+                if is_sequence {
+                    let admitted = submit_sequence(Box::new(run));
+                    report_sequence_admission(&notify_app, &notify_store, &settings, admitted);
+                } else {
+                    run();
+                }
             }, move || {
                 if let Some(completed) = done_cancel.lock().ok().and_then(|mut slot| slot.take()) {
                     completed(false); // nothing inserted: no Enter either

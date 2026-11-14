@@ -1158,7 +1158,8 @@
     "waitWindowTitle": "Its title contains (optional)",
     "waitWindowTimeout": "Wait at most, ms (up to 30000)",
     "tokenInputDesc": "A field asked for in a small window before the phrase is typed: {input:host} — Enter inserts, Esc cancels. Rename the field after inserting it.",
-    "tokenInputName": "field"
+    "tokenInputName": "field",
+    "waitWindowExeMissing": "A \"Wait for window\" step needs the program to wait for (its .exe name)."
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1914,7 +1915,6 @@
       "shortcutLocalOnly": "Only a .lnk shortcut on a local drive can be read."
     },
     "prompt": {
-      "submit": "Insert",
       "hint": "Enter: next field, then insert · Esc: cancel"
     }
   },

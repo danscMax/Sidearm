@@ -1528,7 +1528,8 @@ struct Now {
 /// `pattern` filled from `time`: `yyyy` `yy` the year, `MMMM` the month's name,
 /// `MM` `M` its number, `dd` `d` the day, `HH` `H` the hour, `mm` minutes, `ss`
 /// seconds; anything else is copied as is (`dd.MM.yyyy` → `14.11.2026`).
-/// The frontend's examples (`formatDatePattern`) follow the same rules.
+/// The frontend's examples (`formatDatePattern`) follow the same rules; both
+/// tests read `tools/fixtures/date-patterns.json`.
 fn format_date_pattern(pattern: &str, time: &crate::backup::LocalTime, months: &str) -> String {
     const PARTS: [&str; 11] = ["yyyy", "yy", "MMMM", "MM", "M", "dd", "d", "HH", "H", "mm", "ss"];
     let mut out = String::new();
@@ -3268,13 +3269,36 @@ mod tests {
 
     #[test]
     fn date_patterns_and_time_fill_from_the_moment() {
-        let fill = |text: &str| expand_tokens(text, "2026-11-04", None).0;
-        assert_eq!(fill("{date}"), "2026-11-04");
-        assert_eq!(fill("{date:dd.MM.yyyy}"), "04.11.2026");
-        assert_eq!(fill("{date:d MMMM yyyy}"), "4 ноября 2026");
-        assert_eq!(fill("{date:dd.MM.yy HH:mm:ss}"), "04.11.26 09:05:07");
-        assert_eq!(fill("{time} / {date:H}h"), "09:05 / 9h");
-        assert_eq!(fill("{date:[ддд]}"), "[ддд]", "unknown letters stay");
+        // Shared with the frontend's `formatDatePattern` test (src/lib/date-pattern.test.ts).
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../tools/fixtures/date-patterns.json")).expect("fixture");
+        let part = |name: &str| fixture["moment"][name].as_u64().expect(name);
+        let now = Now {
+            time: crate::backup::LocalTime {
+                year: part("year") as u16,
+                month: part("month") as u8,
+                day: part("day") as u8,
+                hour: part("hour") as u8,
+                minute: part("minute") as u8,
+                second: part("second") as u8,
+            },
+            months: fixture["months"].as_array().expect("months").iter().map(|m| m.as_str().expect("month")).collect::<Vec<_>>().join(","),
+        };
+        let cases = |list: &str, key: &str| -> Vec<(String, String)> {
+            fixture[list].as_array().expect(list).iter()
+                .map(|case| (case[key].as_str().expect(key).to_owned(), case["expected"].as_str().expect("expected").to_owned()))
+                .collect()
+        };
+        let patterns = cases("patterns", "pattern");
+        let tokens = cases("tokens", "token");
+        assert!(!patterns.is_empty() && !tokens.is_empty());
+        for (pattern, expected) in patterns {
+            assert_eq!(format_date_pattern(&pattern, &now.time, &now.months), expected, "pattern {pattern:?}");
+        }
+        for (token, expected) in tokens {
+            assert_eq!(expand_tokens_with(&token, &now, None, None).0, expected, "token {token}");
+        }
+        assert_eq!(expand_tokens("{time} / {date:H}h", "2026-11-04", None).0, "09:05 / 9h");
         assert!(has_snippet_token("{date:dd.MM}") && has_snippet_token("{time}"));
     }
 

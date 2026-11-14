@@ -1,7 +1,8 @@
 /** `{date:<pattern>}` as the backend fills it (input_synthesis::format_date_pattern):
  *  `yyyy` `yy` year, `MMMM` month name, `MM` `M` month, `dd` `d` day, `HH` `H`
  *  hour, `mm` minutes, `ss` seconds; anything else is copied. Here only for the
- *  examples the editor shows, so the two must follow the same rules. */
+ *  examples the editor shows, so the two must follow the same rules (both tests
+ *  read tools/fixtures/date-patterns.json). */
 const PARTS = ["yyyy", "yy", "MMMM", "MM", "M", "dd", "d", "HH", "H", "mm", "ss"] as const;
 
 export function formatDatePattern(pattern: string, now: Date, months: readonly string[]): string {

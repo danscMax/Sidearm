@@ -1,6 +1,8 @@
 // OSD notification — receives profile switch events from Rust.
 // Rust handles window sizing and positioning via Win32 API.
 // JS only updates text content and plays animation.
+// Never the browser's own menu (back, reload, print…) on the bubble.
+document.addEventListener("contextmenu", function (event) { event.preventDefault(); });
 if (window.__TAURI_INTERNALS__) {
   window.__TAURI_INTERNALS__.invoke("plugin:event|listen", {
     event: "osd-show",

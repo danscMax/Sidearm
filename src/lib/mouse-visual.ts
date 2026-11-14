@@ -32,6 +32,8 @@ export interface MouseVisualizationProps {
   onToggleMultiSelect: (id: ControlId) => void;
   onOpenActionPicker: (id: ControlId, binding: Binding | null) => void;
   onSelectLayer: (layer: Layer) => void;
+  /** A layer pill's right-click "Copy assignments…" from that layer; absent = no menu. */
+  onCopyLayer?: (layer: Layer) => void;
   /** Layers the pills offer (`deviceLayers`); absent = standard and HyperShift. */
   layers?: readonly Layer[];
   onContextMenu?: (id: ControlId, binding: Binding | null, action: Action | null, x: number, y: number) => void;

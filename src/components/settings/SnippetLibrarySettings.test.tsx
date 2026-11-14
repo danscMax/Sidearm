@@ -84,4 +84,25 @@ describe("snippet library editing", () => {
     rerender(<SnippetLibrarySettings {...props} selectedSnippetNonce={2} />);
     expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: i18n.t("snippet.text") }).value).toBe("Text A");
   });
+
+  it("a right click on a row offers edit, copy and delete for that snippet", () => {
+    const updates: AppConfig[] = [];
+    callbacks.setConfirmModal.mockClear();
+    render(<Library onUpdate={(next) => updates.push(next)} />);
+    const row = screen.getByRole("button", { name: /Snippet B/ });
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("inspector.copyLabel") }));
+    expect(updates.at(-1)?.snippetLibrary.map((snippet) => snippet.name)).toContain(i18n.t("snippetLibrary.copyName", { name: "Snippet B" }));
+    expect(screen.queryByRole("menu")).toBeNull();
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("common.delete") }));
+    expect(callbacks.setConfirmModal).toHaveBeenCalledWith(expect.objectContaining({
+      message: i18n.t("snippetLibrary.deleteConfirmMessage", { name: "Snippet B" }),
+    }));
+
+    fireEvent.contextMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("common.edit") }));
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+  });
 });

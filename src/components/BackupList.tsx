@@ -9,6 +9,7 @@ import {
 } from "../lib/backend";
 import { normalizeCommandError } from "../lib/backend";
 import type { ConfirmModalRequest } from "./ConfirmModal";
+import { ContextMenu } from "./ContextMenu";
 
 export interface BackupListProps {
   onRestored: () => void | Promise<unknown>;
@@ -27,6 +28,7 @@ export function BackupList({
   const [entries, setEntries] = useState<BackupEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAllSnapshots, setShowAllSnapshots] = useState(false);
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; entry: BackupEntry } | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -103,6 +105,10 @@ export function BackupList({
       <div
         key={entry.path}
         className={`backup-item backup-item--${entry.kind.kind}`}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setRowMenu({ x: e.clientX, y: e.clientY, entry });
+        }}
       >
         <div className="backup-item__main">
           <span className="backup-item__label">{describeEntry(entry, t)}</span>
@@ -152,6 +158,14 @@ export function BackupList({
             </button>
           ) : null}
         </div>
+      ) : null}
+      {rowMenu ? (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          onClose={() => setRowMenu(null)}
+          items={[{ label: t("backup.restoreButton"), onClick: () => void handleRestore(rowMenu.entry) }]}
+        />
       ) : null}
     </div>
   );

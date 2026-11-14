@@ -13,6 +13,7 @@ import { exportProfileToFile, importProfileFromFile } from "../../lib/profile-tr
 import { normalizeCommandError } from "../../lib/backend";
 import { clampPriority } from "../../lib/helpers";
 import { PresetsModal } from "../PresetsModal";
+import { ContextMenu } from "../ContextMenu";
 import { HelpTip, Notice, SettingRow, Toggle } from "../shared";
 import { CopyIcon, ExportIcon, ImportIcon, TrashIcon } from "../icons";
 
@@ -44,6 +45,8 @@ export function ProfileSettings({
   const { t } = useTranslation();
   const [importError, setImportError] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(false);
+  // A profile row's right-click menu: the editor's actions plus the default star.
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; profile: Profile } | null>(null);
 
   const sortedProfiles = [...activeConfig.profiles].sort(
     (a, b) => b.priority - a.priority || a.name.localeCompare(b.name),
@@ -270,6 +273,11 @@ export function ProfileSettings({
                   className="settings-profile-card__info"
                   aria-pressed={isActive}
                   onClick={() => setSelectedProfileId(profile.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setSelectedProfileId(profile.id);
+                    setRowMenu({ x: e.clientX, y: e.clientY, profile });
+                  }}
                 >
                   <span className="settings-profile-card__name">{profile.name}</span>
                   <span className="settings-profile-card__meta">
@@ -325,6 +333,25 @@ export function ProfileSettings({
           </Notice>
         ) : null}
       </section>
+
+      {rowMenu ? (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          onClose={() => setRowMenu(null)}
+          items={[
+            { label: t("inspector.copyLabel"), onClick: () => handleDuplicate(rowMenu.profile.id) },
+            { label: t("common.export"), onClick: () => { void handleExport(rowMenu.profile); } },
+            {
+              label: t("settings.makeDefault"),
+              disabled: rowMenu.profile.id === defaultProfileId || !rowMenu.profile.enabled,
+              onClick: () => handleSetDefault(rowMenu.profile.id),
+            },
+            null,
+            { label: t("common.delete"), danger: true, disabled: sortedProfiles.length <= 1, onClick: () => handleDelete(rowMenu.profile) },
+          ]}
+        />
+      ) : null}
 
       {showPresets ? (
         <PresetsModal

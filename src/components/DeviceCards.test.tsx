@@ -25,11 +25,11 @@ beforeEach(async () => {
 });
 afterEach(cleanup);
 
-function show(connected: string[], activeDeviceId: string) {
+function show(connected: string[], activeDeviceId: string, onContextMenu = vi.fn()) {
   vi.mocked(backend.listNativeMice).mockResolvedValue(connected.map(mouse));
   const onSelect = vi.fn();
   render(<DeviceCards config={config} devices={[v2, v3]} activeDeviceId={activeDeviceId} profile={null}
-    refreshToken={0} onSelect={onSelect} onAdd={vi.fn()} />);
+    refreshToken={0} onSelect={onSelect} onAdd={vi.fn()} onContextMenu={onContextMenu} />);
   return onSelect;
 }
 
@@ -45,6 +45,15 @@ describe("device cards", () => {
   it("moves a default pick off an unplugged mouse to the connected one", async () => {
     const onSelect = show([v3.id], v2.id);
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith(v3.id));
+  });
+
+  it("a right click selects the card, then opens its menu at the pointer", async () => {
+    const onContextMenu = vi.fn();
+    const onSelect = show([v2.id, v3.id], v2.id, onContextMenu);
+    fireEvent.contextMenu(await screen.findByTitle(v3.name), { clientX: 30, clientY: 40 });
+    expect(onSelect).toHaveBeenCalledWith(v3.id);
+    expect(onContextMenu).toHaveBeenCalledWith(30, 40);
+    expect(vi.mocked(onSelect).mock.invocationCallOrder[0]).toBeLessThan(onContextMenu.mock.invocationCallOrder[0]);
   });
 
   it("offers adding a device when no supported mouse is connected", async () => {

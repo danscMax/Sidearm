@@ -376,8 +376,10 @@
 
   window.addEventListener("resize", layout);
   if (window.ResizeObserver) new ResizeObserver(layout).observe(root);
-  // Never the browser's own menu (back, reload, print…).
-  document.addEventListener("contextmenu", function (event) { event.preventDefault(); });
+  // Never the browser's own menu (back, reload, print…); the search box keeps cut / copy / paste.
+  document.addEventListener("contextmenu", function (event) {
+    if (event.target !== search) event.preventDefault();
+  });
   // A click outside the right-click choices puts the tip back.
   document.addEventListener("mousedown", function (event) {
     if (modes && !modes.contains(event.target)) hideModes();

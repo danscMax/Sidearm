@@ -17,6 +17,7 @@ import {
 } from "../../lib/snippet-transfer";
 import { normalizeCommandError } from "../../lib/backend";
 import { ChipEditor } from "../ChipEditor";
+import { ContextMenu } from "../ContextMenu";
 import { CopyIcon, ExportIcon, ImportIcon, TrashIcon } from "../icons";
 
 export interface SnippetLibrarySettingsProps {
@@ -46,6 +47,7 @@ export function SnippetLibrarySettings({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [textDraft, setTextDraft] = useState<{ id: string; text: string } | null>(null);
+  const [rowMenu, setRowMenu] = useState<{ x: number; y: number; snippet: SnippetLibraryItem } | null>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
   const selectionRequestRef = useRef<{ id: string; nonce?: number } | null>(null);
 
@@ -261,6 +263,10 @@ export function SnippetLibrarySettings({
                       className="settings-profile-card__info"
                       aria-pressed={snippet.id === selectedId}
                       onClick={() => setSelectedId(snippet.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setRowMenu({ x: e.clientX, y: e.clientY, snippet });
+                      }}
                     >
                       <span className="settings-profile-card__name">{snippet.name}</span>
                       <span className="settings-profile-card__meta">
@@ -310,6 +316,22 @@ export function SnippetLibrarySettings({
           </button>
         </div>
       </div>
+
+      {/* A row's menu selects it only through an item: selecting focuses the
+          editor's name field, which would take the focus from the menu. */}
+      {rowMenu ? (
+        <ContextMenu
+          x={rowMenu.x}
+          y={rowMenu.y}
+          onClose={() => setRowMenu(null)}
+          items={[
+            { label: t("common.edit"), onClick: () => setSelectedId(rowMenu.snippet.id) },
+            { label: t("inspector.copyLabel"), onClick: () => handleDuplicate(rowMenu.snippet) },
+            null,
+            { label: t("common.delete"), danger: true, onClick: () => handleDelete(rowMenu.snippet) },
+          ]}
+        />
+      ) : null}
 
       {/* RIGHT: sticky editor for the selected snippet (or an empty hint). */}
       <div className="snippet-library__editor-pane">

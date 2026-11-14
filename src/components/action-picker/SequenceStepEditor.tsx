@@ -22,6 +22,7 @@ import { ChipEditor } from "../ChipEditor";
 import { ExecutablePathField } from "../ExecutablePathField";
 import { DirectoryPathField } from "../DirectoryPathField";
 import { CategoryIcon } from "../icons";
+import { ContextMenu } from "../ContextMenu";
 import { acquireKeyRecording } from "./shared/key-recording";
 
 // The backend recorder is shared by editor instances, including pending teardown.
@@ -112,6 +113,8 @@ export function SequenceStepEditor({
   const revealKey = useRef<string | null>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
   const [dropAt, setDropAt] = useState<number | null>(null);
+  // A step row's right-click menu: the same up / down / duplicate / delete as its tools.
+  const [stepMenu, setStepMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   // The recorder's stop runs from a listener set up at its start: it reads the steps now.
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
@@ -700,6 +703,10 @@ export function SequenceStepEditor({
                     className="seq-row__main"
                     aria-expanded={open}
                     onClick={() => setSelectedKey(open ? null : key)}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setStepMenu({ x: e.clientX, y: e.clientY, index });
+                    }}
                   >
                     <span className="seq-row__num">{index + 1}</span>
                     <span className="seq-row__icon" title={labelForSequenceStep(step.type)}>
@@ -763,6 +770,24 @@ export function SequenceStepEditor({
         </p>
       ) : null}
       <p className="panel__muted">{t("picker.sequenceStopHint")}</p>
+      {stepMenu && steps[stepMenu.index] ? (
+        <ContextMenu
+          x={stepMenu.x}
+          y={stepMenu.y}
+          onClose={() => setStepMenu(null)}
+          items={[
+            { label: t("common.moveUp"), disabled: stepMenu.index === 0, onClick: () => moveStep(stepMenu.index, -1) },
+            { label: t("common.moveDown"), disabled: stepMenu.index === steps.length - 1, onClick: () => moveStep(stepMenu.index, 1) },
+            {
+              label: t("common.duplicate"),
+              disabled: recordingBusy || steps.length >= MAX_SEQUENCE_STEPS,
+              onClick: () => insertSteps([structuredClone(steps[stepMenu.index]!)], stepKeysRef.current[stepMenu.index]!),
+            },
+            null,
+            { label: t("common.delete"), danger: true, onClick: () => removeStep(stepMenu.index) },
+          ]}
+        />
+      ) : null}
     </div>
   );
 }

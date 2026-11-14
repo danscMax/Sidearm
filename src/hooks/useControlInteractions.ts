@@ -14,8 +14,7 @@ interface ControlInteractionProps {
   onClick: (e: React.MouseEvent<Element>) => void;
   onDoubleClick: (e: React.MouseEvent<Element>) => void;
   onKeyDown: (e: React.KeyboardEvent<Element>) => void;
-  /** Omitted when the control opts out of a context menu (e.g. the side grid). */
-  onContextMenu?: (e: React.MouseEvent<Element>) => void;
+  onContextMenu: (e: React.MouseEvent<Element>) => void;
   onMouseEnter: () => void;
   onMouseLeave: () => void;
   onDragStart: (e: React.DragEvent<Element>) => void;
@@ -61,7 +60,7 @@ export interface ControlInteractions {
   entryMap: Map<ControlId, ControlSurfaceEntry>;
   hoveredId: ControlId | null;
   dragOverId: ControlId | null;
-  getInteractionProps: (id: ControlId, opts?: { contextMenu?: boolean }) => ControlInteractionProps;
+  getInteractionProps: (id: ControlId) => ControlInteractionProps;
   /** Applies (or clears) the heatmap background tint via CSSOM, CSP-safe. */
   applyHeatBg: (el: HTMLElement | null, id: ControlId) => void;
 }
@@ -91,11 +90,8 @@ export function useControlInteractions({
     }
   }
 
-  function getInteractionProps(
-    id: ControlId,
-    opts?: { contextMenu?: boolean },
-  ): ControlInteractionProps {
-    const props: ControlInteractionProps = {
+  function getInteractionProps(id: ControlId): ControlInteractionProps {
+    return {
       onClick: (e) => {
         if (e.ctrlKey || e.metaKey) onToggleMultiSelect(id);
         else onSelectControl(id);
@@ -146,16 +142,12 @@ export function useControlInteractions({
         const from = parseBindingDragData(e.dataTransfer.getData(BINDING_DRAG_TYPE));
         if (from != null) onDropBinding?.(id, from, e.ctrlKey);
       },
-    };
-    // Side-grid cells have never had a context menu — let callers opt out.
-    if (opts?.contextMenu !== false) {
-      props.onContextMenu = (e) => {
+      onContextMenu: (e) => {
         e.preventDefault();
         const entry = entryMap.get(id);
         onContextMenu?.(id, entry?.binding ?? null, entry?.action ?? null, e.clientX, e.clientY);
-      };
-    }
-    return props;
+      },
+    };
   }
 
   return { entryMap, hoveredId, dragOverId, getInteractionProps, applyHeatBg };

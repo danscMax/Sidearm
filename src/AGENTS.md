@@ -19,6 +19,7 @@ The React 19 + TypeScript UI. Renders the mouse visualization, action editors, p
 - Razer takeover events are owned by the consolidated `SynapseNotice` card, not separate root toasts; preserve its unchecked-by-default startup opt-in and explicit physical verification step.
 - Root event effects release registrations that resolve after cleanup; deferred mouse-status visibility callbacks and snapshots must also stop after cleanup.
 - Root workspace shortcuts are blocked while the presets dialog is open. Stored Undo-toast actions invoke the current redo handler.
+- `main.tsx` owns the one `contextmenu` rule: the browser's own menu (Back, Reload, Print…) never shows outside text fields; a dev build shows it with Shift held (Inspect). App menus are `components/ContextMenu`.
 - Config reloads synchronously invalidate the import revision; Synapse merges cannot start while a reload is pending or its revision marker awaits React commit, or apply across its revision.
 
 ## Work Guidance

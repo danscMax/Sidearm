@@ -116,6 +116,9 @@ pub(crate) struct ViewItem {
     /// The block heading it sits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// A cheat sheet's cell: the button's other press patterns (mark + name).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extras: Vec<String>,
 }
 
 /// What `menu.js` draws.
@@ -144,6 +147,9 @@ pub(crate) struct View {
     /// The scope switch's two names, in the UI language.
     pub scope_all: String,
     pub scope_this: String,
+    /// A cheat sheet: the side buttons drawn as the mouse's grid, no search.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub grid: bool,
 }
 
 /// A line is never enabled: it is not highlighted, hovered or picked.
@@ -499,6 +505,7 @@ impl Model {
                         MenuItem::Action { .. } | MenuItem::Separator { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
+                    extras: Vec::new(),
                 })
                 .collect(),
             highlight: self.highlight,
@@ -512,6 +519,7 @@ impl Model {
             has_others: !self.others.is_empty(),
             scope_all: String::new(),
             scope_this: String::new(),
+            grid: false,
         }
     }
 }
@@ -594,6 +602,9 @@ struct OpenMenu {
     /// The popup's physical anchor (the cursor at open).
     anchor: (i32, i32),
     max_height: u32,
+    /// A cheat sheet ([`open_sheet`]): drawn as a grid, with each cell's other
+    /// press patterns; no search.
+    sheet: Option<Vec<Vec<String>>>,
 }
 
 static OPEN: Mutex<Option<OpenMenu>> = Mutex::new(None);
@@ -620,7 +631,6 @@ pub(crate) fn open(
     payload: &MenuActionPayload,
     is_fg_elevated: bool,
 ) {
-    let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     let menus: Vec<(&Action, &MenuActionPayload)> = config
         .actions
         .iter()
@@ -639,6 +649,41 @@ pub(crate) fn open(
     let menu_ids = menus.iter().map(|(action, _)| action.id.clone()).collect();
     let mut model = Model::new(payload.items.clone(), menu_details(config, &all_items)).with_others(others, menu_ids);
     model.text_actions = config.actions.iter().filter(|action| full_text(config, &action.id).is_some()).map(|action| action.id.clone()).collect();
+    open_model(app, runtime_store, config, preview, title, model, is_fg_elevated, None);
+}
+
+/// Open the popup for a resolved `cheatSheet` action: the pressed mouse's 12
+/// side buttons on `layer` as a grid; side button N, a click or Enter runs
+/// that button's action of the layer shown (the opening button closes it).
+pub(crate) fn open_sheet(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    config: &AppConfig,
+    preview: &ResolvedInputPreview,
+    layer: crate::config::Layer,
+    is_fg_elevated: bool,
+) {
+    let profile = preview.resolved_profile_id.clone().unwrap_or_else(|| config.settings.fallback_profile_id.clone());
+    let (items, extras) = crate::cheatsheet::sheet_items(config, &profile, preview.control_id.as_deref(), layer);
+    let details = menu_details(config, &items);
+    let mut model = Model::new(items, details);
+    model.text_actions = config.actions.iter().filter(|action| full_text(config, &action.id).is_some()).map(|action| action.id.clone()).collect();
+    let title = crate::cheatsheet::layer_title(config, &profile, layer);
+    open_model(app, runtime_store, config, preview, &title, model, is_fg_elevated, Some(extras));
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_model(
+    app: &AppHandle,
+    runtime_store: &Arc<Mutex<RuntimeStore>>,
+    config: &AppConfig,
+    preview: &ResolvedInputPreview,
+    title: &str,
+    model: Model,
+    is_fg_elevated: bool,
+    sheet: Option<Vec<Vec<String>>>,
+) {
+    let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     let anchor = platform::cursor_position();
     let max_height = app.monitor_from_point(f64::from(anchor.0), f64::from(anchor.1)).ok().flatten()
         .or_else(|| app.primary_monitor().ok().flatten())
@@ -655,6 +700,7 @@ pub(crate) fn open(
         target_window: platform::foreground_window(),
         anchor,
         max_height,
+        sheet,
     };
     let view = view_of(&menu);
     let anchor = menu.anchor;
@@ -672,6 +718,13 @@ pub(crate) fn open(
 fn view_of(menu: &OpenMenu) -> View {
     let mut view = menu.model.view(&menu.title, menu.generation);
     view.max_height = menu.max_height;
+    if let Some(extras) = &menu.sheet {
+        // A sheet has no search and no submenus: row N is side button N.
+        view.grid = true;
+        for (item, extras) in view.items.iter_mut().zip(extras) {
+            item.extras.clone_from(extras);
+        }
+    }
     view.placeholder = crate::ui_text::native(&crate::ui_text!("menu.searchPlaceholder", "Search phrases…"));
     view.scope_all = crate::ui_text::native(&crate::ui_text!("menu.scopeAll", "All menus"));
     view.scope_this = crate::ui_text::native(&crate::ui_text!("menu.scopeThis", "This menu"));

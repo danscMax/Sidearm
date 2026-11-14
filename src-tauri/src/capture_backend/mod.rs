@@ -688,10 +688,6 @@ fn process_encoded_key_event(
     );
 
     let own_window = capture_result.ignore_reason.as_deref() == Some(window_capture::OWN_WINDOW_REASON);
-    // A cheat sheet an action showed goes with the next press, which still runs.
-    if !event.is_repeat {
-        crate::cheatsheet::dismiss_shown(app);
-    }
     // An open menu owns the mouse's buttons: the press drives it, the app gets nothing.
     if crate::menu_popup::is_open() {
         if !event.is_repeat {
@@ -1056,14 +1052,20 @@ fn run_fire_and_forget(
     {
         crate::onboard_guard::note_device_used(app, &physical.device_id);
     }
-    // A cheat sheet shows the pressed mouse's grid of that layer at the cursor.
+    // A cheat sheet is the popup as a grid of the pressed mouse's side buttons
+    // on that layer: side button N (or a click) runs button N's action there.
     if let Some(action) = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
         && let crate::config::ActionPayload::CheatSheet(payload) = &action.payload
     {
         flush_log_entries(runtime_store, log_entries);
         count_press(config, preview, &action.id, !menu_pick);
-        let profile = preview.resolved_profile_id.clone().unwrap_or_else(|| config.settings.fallback_profile_id.clone());
-        crate::cheatsheet::show_layer(app, config, &profile, preview.control_id.as_deref(), payload.layer);
+        crate::menu_popup::open_sheet(app, runtime_store, config, preview, payload.layer, is_fg_elevated);
+        if crate::fake_mode() {
+            log::info!("[capture] E2E execution {}", serde_json::json!({
+                "encodedKey": preview.encoded_key, "controlId": preview.control_id, "layer": preview.layer,
+                "actionId": action.id, "profileId": preview.resolved_profile_id, "outcome": "sheetOpened",
+            }));
+        }
         return;
     }
     // A phrase with input fields asks for them first; Enter runs it filled in.

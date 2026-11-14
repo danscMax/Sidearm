@@ -10,7 +10,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::config::{AppConfig, Gesture, Layer};
+use crate::config::{AppConfig, Gesture, Layer, MenuItem};
 use crate::runtime::RuntimeStore;
 
 pub(crate) const WINDOW_LABEL: &str = "cheatsheet";
@@ -119,7 +119,7 @@ pub(crate) fn sheet_of_layer(config: &AppConfig, profile_id: &str, thumbs: &str,
 }
 
 /// The side-button prefix of the mouse `control` belongs to (`v3_thumb_`, `thumb_`).
-fn thumb_prefix(config: &AppConfig, control: Option<&str>) -> String {
+pub(crate) fn thumb_prefix(config: &AppConfig, control: Option<&str>) -> String {
     let device = control.and_then(|id| config.physical_controls.iter().find(|c| c.id.as_str() == id)).map(|c| c.device_id.as_str());
     config
         .physical_controls
@@ -129,15 +129,8 @@ fn thumb_prefix(config: &AppConfig, control: Option<&str>) -> String {
         .unwrap_or_else(|| "v3_thumb_".to_owned())
 }
 
-/// A `cheatSheet` action's sheet is up: the next press puts it away.
-static ACTION_SHOWN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-/// How long a sheet an action showed stays without a press.
-const ACTION_SHOWN_FOR: Duration = Duration::from_secs(10);
-
-/// The `cheatSheet` action: the pressed mouse's grid of `layer`, at once.
-pub(crate) fn show_layer(app: &AppHandle, config: &AppConfig, profile_id: &str, control: Option<&str>, layer: Layer) {
-    let generation = LIFECYCLE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).begin();
-    ACTION_SHOWN.store(generation, std::sync::atomic::Ordering::SeqCst);
+/// The title of a `cheatSheet` action's grid: the profile and the layer.
+pub(crate) fn layer_title(config: &AppConfig, profile_id: &str, layer: Layer) -> String {
     let name = config.profiles.iter().find(|p| p.id == profile_id).map_or(profile_id, |p| p.name.as_str());
     let layer_name = crate::ui_text::native(&match layer {
         Layer::Standard => crate::ui_text!("cheatsheet.layerStandard", "standard"),
@@ -145,22 +138,41 @@ pub(crate) fn show_layer(app: &AppHandle, config: &AppConfig, profile_id: &str, 
         Layer::Hypershift2 => crate::ui_text!("cheatsheet.layerHypershift2", "HyperShift 2"),
         Layer::HypershiftBoth => crate::ui_text!("cheatsheet.layerBoth", "HS + HS2"),
     });
-    let title = crate::ui_text::native(&crate::ui_text!("cheatsheet.layerTitle", "{profile} · {layer}", profile = name, layer = layer_name));
-    show(app, generation, sheet_of_layer(config, profile_id, &thumb_prefix(config, control), layer, title));
-    let app = app.clone();
-    let _ = std::thread::Builder::new().name("cheatsheet-timeout".into()).spawn(move || {
-        std::thread::sleep(ACTION_SHOWN_FOR);
-        if ACTION_SHOWN.compare_exchange(generation, 0, std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst).is_ok() {
-            cancel(&app);
-        }
-    });
+    crate::ui_text::native(&crate::ui_text!("cheatsheet.layerTitle", "{profile} · {layer}", profile = name, layer = layer_name))
 }
 
-/// A press while an action's sheet is up puts it away (one compare otherwise).
-pub(crate) fn dismiss_shown(app: &AppHandle) {
-    if ACTION_SHOWN.load(std::sync::atomic::Ordering::Relaxed) != 0 && ACTION_SHOWN.swap(0, std::sync::atomic::Ordering::SeqCst) != 0 {
-        cancel(app);
+/// A `cheatSheet` action's grid as the popup's items: the 12 side buttons of
+/// the mouse `control` is on, in order — an empty button is a disabled
+/// nameless item, so side button N is still item N — and for each its other
+/// press patterns on `layer` (a mark and the action's name), for its cell.
+pub(crate) fn sheet_items(config: &AppConfig, profile_id: &str, control: Option<&str>, layer: Layer) -> (Vec<MenuItem>, Vec<Vec<String>>) {
+    let thumbs = thumb_prefix(config, control);
+    let mut items: Vec<MenuItem> = (1..=12)
+        .map(|number| MenuItem::Action { id: format!("sheet-{number}"), label: String::new(), action_id: String::new(), enabled: false, pinned: false })
+        .collect();
+    let mut extras: Vec<Vec<String>> = vec![Vec::new(); 12];
+    for binding in config.bindings.iter().filter(|b| b.enabled && b.profile_id == profile_id && b.layer == layer) {
+        let Some(index) = binding.control_id.as_str().strip_prefix(thumbs.as_str()).and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)) else {
+            continue;
+        };
+        if index >= 12 {
+            continue;
+        }
+        let action = config.actions.iter().find(|action| action.id == binding.action_id);
+        let mark = match Gesture::of(binding.trigger_mode) {
+            Gesture::Press => {
+                let runs = action.is_some_and(|action| !matches!(action.payload, crate::config::ActionPayload::Disabled(_)));
+                let label = if binding.label.is_empty() { action.map(|a| a.display_name.clone()).unwrap_or_default() } else { binding.label.clone() };
+                items[index] = MenuItem::Action { id: format!("sheet-{}", index + 1), label, action_id: binding.action_id.clone(), enabled: runs, pinned: false };
+                continue;
+            }
+            Gesture::LongPress => "●—",
+            Gesture::DoublePress => "●●",
+            Gesture::TriplePress => "●●●",
+        };
+        extras[index].push(format!("{mark} {}", binding.label));
     }
+    (items, extras)
 }
 
 /// The helper says the HyperShift 2 trigger went down (`held`) or up.
@@ -345,6 +357,31 @@ mod tests {
         assert_eq!(sheet.cells[2].label.as_deref(), Some("V2 HS"), "the V2's own thumbs on that layer only");
         assert!(sheet.cells[3].label.as_deref() != Some("V2 std"));
         assert_eq!(thumb_prefix(&config, Some("thumb_03")), "thumb_");
+    }
+
+    #[test]
+    fn an_action_sheet_keeps_button_n_as_item_n_and_lists_its_other_presses() {
+        let mut config = crate::config::default_seed_config();
+        let profile = config.settings.fallback_profile_id.clone();
+        let template = config.bindings[0].clone();
+        for (control, mode, label) in [("thumb_03", None, "Copy"), ("thumb_03", Some(TriggerMode::LongPress), "Paste")] {
+            let mut binding = template.clone();
+            binding.id = format!("{control}-{label}");
+            binding.profile_id = profile.clone();
+            binding.control_id = ControlId::new(control);
+            binding.layer = Layer::Hypershift;
+            binding.label = label.into();
+            binding.trigger_mode = mode;
+            binding.enabled = true;
+            config.bindings.push(binding);
+        }
+        let (items, extras) = sheet_items(&config, &profile, Some("thumb_01"), Layer::Hypershift);
+        assert_eq!(items.len(), 12);
+        let labels: Vec<_> = items.iter().map(|item| match item { MenuItem::Action { label, enabled, .. } => (label.as_str(), *enabled), _ => ("?", false) }).collect();
+        assert_eq!(labels[2].0, "Copy", "button 3 is item 3");
+        assert!(labels.iter().enumerate().all(|(index, (label, _))| index == 2 || label.is_empty() || config.bindings.iter().any(|b| b.label == *label)));
+        assert_eq!(extras[2], ["●— Paste"]);
+        assert!(extras[0].is_empty());
     }
 
     #[test]

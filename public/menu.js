@@ -43,7 +43,11 @@
     search = el("input");
     search.type = "text";
     search.spellcheck = false;
-    search.addEventListener("input", function () { invoke("menu_search", { query: search.value }); });
+    search.addEventListener("input", function () {
+      // A cheat sheet has no search: the box only keeps the keyboard focus.
+      if (view && view.grid) { search.value = ""; return; }
+      invoke("menu_search", { query: search.value });
+    });
     search.addEventListener("keydown", onKey);
     box.appendChild(search);
     // This menu or all menus; Tab switches it too. The click keeps the focus in the box.
@@ -81,10 +85,34 @@
     return node;
   }
 
+  /** A cheat sheet: the mouse's 12 side buttons as its grid (3 across), each
+   *  cell its number, its action and its other press patterns. */
+  function buildGrid(rows) {
+    rows.appendChild(el("div", "sheet-title", view.title));
+    view.items.forEach(function (item, index) {
+      var cell = el("div", "row cell" + (item.enabled ? "" : " item--off"));
+      cell.appendChild(el("span", "key", String(item.number != null ? item.number : index + 1)));
+      var body = el("div", "cell__body");
+      body.appendChild(el("span", "label", item.label || "—"));
+      (item.extras || []).forEach(function (extra) { body.appendChild(el("span", "cell__extra", extra)); });
+      cell.appendChild(body);
+      if (item.enabled) cell.addEventListener("click", function () { invoke("menu_pick", { index: index }); });
+      rows.appendChild(cell);
+      items.push(cell);
+    });
+  }
+
   function buildRows() {
     var rows = root.querySelector(".rows");
     rows.textContent = "";
     items = [];
+    root.classList.toggle("menu--grid", !!view.grid);
+    rows.classList.toggle("rows--grid", !!view.grid);
+    if (view.grid) {
+      buildGrid(rows);
+      highlight = -1;
+      return;
+    }
     if (view.parent != null) {
       var back = el("button", "back");
       back.appendChild(el("span", "back__arrow", "‹"));

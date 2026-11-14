@@ -107,7 +107,8 @@ function closestToken(word: string): string | undefined {
   let best: { name: string; d: number } | undefined;
   for (const name of WORD_TOKENS) {
     const d = distance(lower, name);
-    if (d <= 2 && d < name.length && (!best || d < best.d)) best = { name, d };
+    // Short names get one edit at most: "{time}" is no "{tile}", a word like "{page}" no "{date}".
+    if (d <= (name.length <= 5 ? 1 : 2) && d < name.length && (!best || d < best.d)) best = { name, d };
   }
   if (!best) return undefined;
   return best.name === "input" ? `{input:${word}}` : `{${best.name}}`;

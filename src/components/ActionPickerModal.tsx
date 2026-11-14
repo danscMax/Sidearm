@@ -83,6 +83,9 @@ const GESTURE_LABEL_KEYS: Record<Gesture, string> = {
  *  to and the config as it was there (a tab switch applies the tab's edit). */
 interface PickerSnapshot {
   gesture: Gesture;
+  /** "The same on <mouse>" and "Also save to the library": undone with the drafts. */
+  syncDraft: boolean;
+  saveToLibraryDraft: boolean;
   base: AppConfig;
   activeCategory: string;
   shortcutDraft: PickerDrafts["shortcut"];
@@ -254,10 +257,22 @@ function PickerTab({
 
   // Draft action state per category — seeded once from the edited action/binding
   // (`pristine`), or from the step an undo / redo brought back onto this tab.
+  // "The same on the other mouse": this button's edits repeated on the same
+  // place of the other built-in mice (settings.syncSlots over syncMice).
+  const ownDevice = controlId ? config.physicalControls.find((control) => control.id === controlId)?.deviceId : undefined;
+  const otherMice = ownDevice && deviceLayout(ownDevice)
+    ? config.devices.filter((device) => device.builtin && device.id !== ownDevice && deviceLayout(device.id))
+    : [];
+  const syncKey = otherMice.length > 0 && profileId && selectedLayer && controlId ? slotKey(profileId, selectedLayer, gesture, controlId) : null;
   const [pristine] = useState((): PickerSnapshot => {
     const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
     return {
       gesture,
+      syncDraft: syncKey ? slotSynced(config.settings, syncKey) : false,
+      // Default ON so snippet text lands in the durable library, not only inline on
+      // the button — inline-only text is silently lost when the button is later
+      // reassigned. Snippets already backed by the library don't need re-saving.
+      saveToLibraryDraft: !(existingAction?.type === "textSnippet" && existingAction.payload.source === "libraryRef"),
       base: config,
       activeCategory: isCurrentTrigger ? "hypershift"
         : isCurrentTrigger2 ? "hypershift2"
@@ -313,16 +328,7 @@ function PickerTab({
   const [shortcutDraft, setShortcutDraft] = useState(start.shortcutDraft);
   const [mouseDraft, setMouseDraft] = useState(start.mouseDraft);
   const [textDraft, setTextDraft] = useState(start.textDraft);
-  // Default ON so snippet text lands in the durable library, not only inline on
-  // the button — inline-only text is silently lost when the button is later
-  // reassigned. Snippets already backed by the library don't need re-saving.
-  const [saveSnippetToLibrary, setSaveSnippetToLibrary] = useState(
-    () =>
-      !(
-        existingAction?.type === "textSnippet" &&
-        existingAction.payload.source === "libraryRef"
-      ),
-  );
+  const [saveSnippetToLibrary, setSaveSnippetToLibrary] = useState(start.saveToLibraryDraft);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [testRunning, setTestRunning] = useState(false);
   const [launchDraft, setLaunchDraft] = useState(start.launchDraft);
@@ -429,7 +435,9 @@ function PickerTab({
       ? nextConfig.snippetLibrary.find((snippet) => snippet.id === textDraft.snippetId)
       : undefined;
     if (linkedSnippet && (linkedSnippet.text !== textDraft.text || linkedSnippet.pasteMode !== textDraft.pasteMode)) {
-      nextConfig = upsertSnippetLibraryItem(nextConfig, { ...linkedSnippet, text: textDraft.text, pasteMode: textDraft.pasteMode });
+      // A blanked text is not written: it would blank every use (the button still
+      // saves — renamed, another trigger — against the library's own text).
+      nextConfig = upsertSnippetLibraryItem(nextConfig, { ...linkedSnippet, text: textDraft.text.trim() ? textDraft.text : linkedSnippet.text, pasteMode: textDraft.pasteMode });
     }
 
     // Opt-in: store this inline snippet in the reusable library AND link the
@@ -479,14 +487,7 @@ function PickerTab({
     return nextConfig;
   }
 
-  // "The same on the other mouse": this button's edits repeated on the same
-  // place of the other built-in mice (settings.syncSlots over syncMice).
-  const ownDevice = controlId ? config.physicalControls.find((control) => control.id === controlId)?.deviceId : undefined;
-  const otherMice = ownDevice && deviceLayout(ownDevice)
-    ? config.devices.filter((device) => device.builtin && device.id !== ownDevice && deviceLayout(device.id))
-    : [];
-  const syncKey = otherMice.length > 0 && profileId && selectedLayer && controlId ? slotKey(profileId, selectedLayer, gesture, controlId) : null;
-  const [syncDraft, setSyncDraft] = useState(() => (syncKey ? slotSynced(config.settings, syncKey) : false));
+  const [syncDraft, setSyncDraft] = useState(start.syncDraft);
 
   /** The save with the sync choice applied; turned on, the button is copied
    *  onto the other mice at once. */
@@ -581,7 +582,7 @@ function PickerTab({
   // Undo / redo of every edit made in the picker before Save (a menu item moved
   // into the wrong list, a step deleted…), across the press-pattern tabs.
   const current: PickerSnapshot = {
-    gesture, base: config,
+    gesture, base: config, syncDraft, saveToLibraryDraft: saveSnippetToLibrary,
     activeCategory, shortcutDraft, mouseDraft, textDraft, launchDraft, mediaDraft, profileDraft, sequenceDraft,
     nameDraft, triggerModeDraft, chordPartnerDraft, throttleDraft, conditionsDraft, menuItemsDraft, cheatLayerDraft,
     menuEdits, signalDraft,
@@ -614,6 +615,8 @@ function PickerTab({
       setCheatLayerDraft(snapshot.cheatLayerDraft);
       setMenuEdits(snapshot.menuEdits);
       setSignalDraft(snapshot.signalDraft);
+      setSyncDraft(snapshot.syncDraft);
+      setSaveSnippetToLibrary(snapshot.saveToLibraryDraft);
     },
     { store, passive: ["base"] },
   );
@@ -624,7 +627,7 @@ function PickerTab({
   function requestClose() {
     const edited = (Object.keys(pristine) as Array<keyof PickerSnapshot>).some((key) =>
       key !== "base" && key !== "gesture" && JSON.stringify(pristine[key]) !== JSON.stringify(current[key]));
-    if (edited || (syncKey !== null && syncDraft !== slotSynced(config.settings, syncKey))) setAskDiscard(true); else onCancel();
+    if (edited) setAskDiscard(true); else onCancel();
   }
 
   return (

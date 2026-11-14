@@ -465,8 +465,9 @@ export function isSaveDisabled(effectiveCategory: string, drafts: PickerDrafts):
     const s = drafts.shortcut;
     return !s.key && !s.ctrl && !s.shift && !s.alt && !s.win;
   }
-  // A library-linked text is edited for all its uses, so it needs content too.
-  if (effectiveCategory === "textSnippet") return !drafts.text.text.trim();
+  // A library-linked one may be empty (the library allows it, or its text was
+  // removed): renaming it or changing its trigger must still save.
+  if (effectiveCategory === "textSnippet") return !drafts.text.text.trim() && !drafts.text.snippetId;
   if (effectiveCategory === "launch") return !drafts.launch.target.trim();
   // Audit F005: an empty menu passes the backend schema check only to be rejected by
   // validate_action (menu must have >=1 item), which rolls back the whole draft. Block

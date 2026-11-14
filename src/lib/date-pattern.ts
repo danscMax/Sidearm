@@ -33,7 +33,12 @@ export function formatDatePattern(pattern: string, now: Date, months: readonly s
  *  `hh:mm`), which the backend copies as is, put right (`yyyy-MM-dd`,
  *  `HH:mm`); null when it has none of them. */
 export function fixDatePattern(pattern: string): string | null {
-  const fixed = pattern.replace(/[YDh]/g, (letter) => (letter === "h" ? "H" : letter.toLowerCase()));
+  // Only the runs other formats use (YYYY, YY, DD, hh, h: ): a lone letter is
+  // more likely meant as text than as a date part.
+  const fixed = pattern
+    .replace(/Y{2,}/g, (run) => run.toLowerCase())
+    .replace(/D{2,}/g, (run) => run.toLowerCase())
+    .replace(/h{2}|h(?=:)/g, (run) => run.toUpperCase());
   return fixed === pattern ? null : fixed;
 }
 

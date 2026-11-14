@@ -255,6 +255,15 @@ describe("a library text in the Text category", () => {
     expect(result.actions.find((a) => a.id === "act")?.payload).toEqual({ source: "libraryRef", snippetId: "lib1" });
   });
 
+  it("saves a blanked library text without blanking the library", () => {
+    const { onSave } = show("mouse_4", linkedConfig(), "b");
+    fireEvent.change(textBox(), { target: { value: "  " } });
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.snippetLibrary).toEqual(linkedConfig().snippetLibrary);
+    expect(result.actions.find((a) => a.id === "act")?.payload).toEqual({ source: "libraryRef", snippetId: "lib1" });
+  });
+
   it("detaches into the button's own copy only on request, leaving the library alone", () => {
     const { onSave } = show("mouse_4", linkedConfig(), "b");
     fireEvent.click(screen.getByRole("button", { name: i18n.t("snippet.detach") }));

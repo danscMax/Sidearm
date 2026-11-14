@@ -199,6 +199,11 @@ export function SequenceStepEditor({
     const lease = acquireKeyRecording();
     void lease.ready.catch(() => {});
     function handleChordKey(e: KeyboardEvent) {
+      // The step turned into another type meanwhile: nothing to capture into.
+      if (stepsRef.current[stepKeysRef.current.indexOf(target)]?.type !== "send") {
+        setChordFor(null);
+        return;
+      }
       const cancel = e.key === "Escape" && !e.ctrlKey && !e.shiftKey && !e.altKey && !e.metaKey;
       const chord = cancel ? null : chordOf(e);
       if (!cancel && !chord) return;
@@ -211,9 +216,16 @@ export function SequenceStepEditor({
       }
       setChordFor(null);
     }
+    // A click anywhere but its Record button ends the capture: the next key
+    // typed into another field is no longer swallowed into the step.
+    function handleChordPointer(e: PointerEvent) {
+      if (!(e.target instanceof Element) || !e.target.closest(`[data-chord-for="${target}"]`)) setChordFor(null);
+    }
     window.addEventListener("keydown", handleChordKey, true);
+    window.addEventListener("pointerdown", handleChordPointer, true);
     return () => {
       window.removeEventListener("keydown", handleChordKey, true);
+      window.removeEventListener("pointerdown", handleChordPointer, true);
       void lease.release().catch(() => {});
     };
   }, [chordFor]);
@@ -442,6 +454,7 @@ export function SequenceStepEditor({
                   aria-pressed={capturing}
                   aria-label={capturing ? t("picker.stopCapture") : t("picker.sendStepRecord", { index: index + 1 })}
                   disabled={isRecording || recordingBusy}
+                  data-chord-for={stepKeys[index]}
                   onClick={() => setChordFor(capturing ? null : stepKeys[index]!)}
                 >
                   {capturing ? t("picker.stopCapture") : t("picker.record")}

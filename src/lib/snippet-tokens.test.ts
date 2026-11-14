@@ -42,10 +42,14 @@ describe("snippet tokens", () => {
       { kind: "unknown", raw: "{foo}", fix: undefined },
       { kind: "datePattern", raw: "{date:YYYY-MM-DD}", fix: "{date:yyyy-MM-dd}" },
     ]);
-    expect(snippetWarnings("{selecton} {inptu}")).toEqual([
+    // A short name allows one edit: {inptu} (two) and a plain {page} get no fix.
+    expect(snippetWarnings("{selecton} {inptu} {page} {tme}")).toEqual([
       { kind: "unknown", raw: "{selecton}", fix: "{selection}" },
-      { kind: "unknown", raw: "{inptu}", fix: "{input:inptu}" },
+      { kind: "unknown", raw: "{inptu}", fix: undefined },
+      { kind: "unknown", raw: "{page}", fix: undefined },
+      { kind: "unknown", raw: "{tme}", fix: "{time}" },
     ]);
+    expect(fixDatePattern("Day yyyy")).toBeNull(); // a lone D is text, not a date part
   });
 
   it("replaces a token everywhere but inside escapes", () => {

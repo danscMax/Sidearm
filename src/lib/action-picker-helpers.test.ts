@@ -425,8 +425,8 @@ describe("isSaveDisabled", () => {
   it("disables save for blank text, enables with content", () => {
     expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: "   ", pasteMode: "sendText" } }))).toBe(true);
     expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: "hi", pasteMode: "sendText" } }))).toBe(false);
-    // A linked text is the library's: blanking it would blank every use.
-    expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: " ", pasteMode: "sendText", snippetId: "s" } }))).toBe(true);
+    // A linked one still saves (renamed, another trigger); the picker then keeps the library's text.
+    expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: " ", pasteMode: "sendText", snippetId: "s" } }))).toBe(false);
   });
 
   it("disables save for an empty launch target", () => {

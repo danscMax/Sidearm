@@ -967,7 +967,10 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
             std::thread::sleep(std::time::Duration::from_millis(200));
             if SHOWN.load(Ordering::Acquire) != generation {
                 log::warn!("[menu] the page did not measure again: its size rescaled to the monitor");
-                page_layout(&app, generation, width / now * scale, height / now * scale);
+                // On the main thread like every other layout: a close queues its hide
+                // behind it there, so a menu closed meanwhile never comes back.
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || page_layout(&handle, generation, width / now * scale, height / now * scale));
             }
         });
         return;

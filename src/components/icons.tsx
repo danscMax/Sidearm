@@ -96,6 +96,15 @@ export function TrashIcon({ size = 14 }: IconProps) {
   );
 }
 
+/** The snippet library: two books on a shelf. */
+export function LibraryIcon({ size = 14 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path d="M2.5 2.5h3v11h-3zM7 2.5h3v11H7zM10.8 3.4l2.4-.6 1.9 9.6-2.4.6z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 /** The action picker's category glyphs (16 px line icons); a category without
  *  one (the HyperShift roles) shows its `fallback` letters. */
 export function CategoryIcon({ id, fallback, size = 16 }: { id: string; fallback: string; size?: number }) {

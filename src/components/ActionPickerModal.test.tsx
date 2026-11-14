@@ -230,3 +230,36 @@ describe("press pattern tabs", () => {
     expect(applied.actions.find((a) => a.id === long?.actionId)?.type).toBe("disabled");
   });
 });
+
+describe("a library text in the Text category", () => {
+  function linkedConfig() {
+    const config = makeConfig();
+    config.snippetLibrary = [{ id: "lib1", name: "Sig", text: "Old", tags: [], pasteMode: "sendText" }];
+    config.actions = [{ id: "act", type: "textSnippet", displayName: "Sig", payload: { source: "libraryRef", snippetId: "lib1" } }];
+    config.bindings = [{ id: "b", profileId: "p1", controlId: "mouse_4", layer: "standard", actionId: "act", enabled: true, label: "Sig" }];
+    return config;
+  }
+  const textBox = () => screen.getByRole("textbox", { name: i18n.t("picker.textLabel") });
+
+  it("edits the library text for all its uses and stays linked", () => {
+    const { onSave } = show("mouse_4", linkedConfig(), "b");
+    expect(screen.getByText(i18n.t("snippet.linkedTitle", { name: "Sig" }))).toBeTruthy();
+    expect(screen.getByText(new RegExp(i18n.t("snippet.usedInPlaces", { count: 1 })))).toBeTruthy();
+    fireEvent.change(textBox(), { target: { value: "New {date}" } });
+    expect(screen.getByText(i18n.t("snippet.linkedTitle", { name: "Sig" }))).toBeTruthy();
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.snippetLibrary).toEqual([{ id: "lib1", name: "Sig", text: "New {date}", tags: [], pasteMode: "sendText" }]);
+    expect(result.actions.find((a) => a.id === "act")?.payload).toEqual({ source: "libraryRef", snippetId: "lib1" });
+  });
+
+  it("detaches into the button's own copy only on request, leaving the library alone", () => {
+    const { onSave } = show("mouse_4", linkedConfig(), "b");
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("snippet.detach") }));
+    fireEvent.change(textBox(), { target: { value: "Mine" } });
+    save();
+    const result = onSave.mock.calls[0]![0];
+    expect(result.snippetLibrary).toEqual(linkedConfig().snippetLibrary);
+    expect(result.actions.find((a) => a.id === "act")?.payload).toMatchObject({ source: "inline", text: "Mine" });
+  });
+});

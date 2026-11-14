@@ -47,7 +47,7 @@ const inputClasses = new Set([
 const specialInputs: Record<string, ReadonlySet<string>> = {
   "components/ChipEditor.tsx": new Set(["chip-editor__input", "chip-editor__chip-edit"]),
   "components/CommandPalette.tsx": new Set(["command-palette__input"]),
-  "components/action-picker/TextSnippetEditor.tsx": new Set(["token-textarea__input"]),
+  "components/action-picker/shared/TokenTextarea.tsx": new Set(["token-textarea__input"]),
 };
 type Opening = ts.JsxOpeningElement | ts.JsxSelfClosingElement;
 

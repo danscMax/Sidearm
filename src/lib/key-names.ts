@@ -19,6 +19,17 @@ const names = new Map(NAMED_KEYS.map(([code, aliases]) => [code, aliases.split("
 const CYRILLIC = "\u0401\u0419\u0426\u0423\u041a\u0415\u041d\u0413\u0428\u0429\u0417\u0425\u042a\u0424\u042b\u0412\u0410\u041f\u0420\u041e\u041b\u0414\u0416\u042d\u042f\u0427\u0421\u041c\u0418\u0422\u042c\u0411\u042e";
 const LATIN = "`QWERTYUIOP[]ASDFGHJKL;'ZXCVBNM,.";
 
+/** `text` as if typed on the other keyboard layout (Russian and US, the same
+ *  keys), lower case: a search typed on the wrong layout still finds its word. */
+export function otherLayout(text: string): string {
+  return [...text.toUpperCase()].map((ch) => {
+    const cyrillic = CYRILLIC.indexOf(ch);
+    if (cyrillic >= 0) return LATIN[cyrillic];
+    const latin = LATIN.indexOf(ch);
+    return latin >= 0 ? CYRILLIC[latin] : ch;
+  }).join("").toLowerCase();
+}
+
 /** Windows VK, using the same layout-independent aliases as the backend. */
 export function primaryKeyCode(raw: string): number | null {
   const key = [...raw.trim()].map((ch) => {

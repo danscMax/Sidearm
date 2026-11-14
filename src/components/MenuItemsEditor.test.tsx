@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
-import "../i18n";
+import i18n from "../i18n";
 
 import type { Action, AppConfig, MenuItem } from "../lib/config";
 import { applyMenuEdits, NO_MENU_EDITS, phraseOf } from "../lib/menu-phrase";
@@ -22,6 +22,16 @@ describe("MenuItemsEditor", () => {
     fireEvent.change(screen.getByRole("textbox", { name: /напечатает|types/i }), { target: { value: "bye" } });
     const edited: Action = onEditsChange.mock.calls[0][0].actions.a1;
     expect(phraseOf(edited, [])).toEqual({ text: "bye", enter: false });
+  });
+
+  it("gives the phrase the token chips, the preview and the typo warning", () => {
+    const onEditsChange = vi.fn();
+    const typo: Action = { ...phrase, payload: { source: "inline", text: "hi {clipbord}", pasteMode: "sendText", tags: [] } };
+    render(<MenuItemsEditor items={items} onChange={vi.fn()} config={{ ...config, actions: [typo] }} edits={NO_MENU_EDITS} onEditsChange={onEditsChange} />);
+    expect(screen.getByText(i18n.t("picker.tokenUnknownLike", { token: "{clipbord}", fix: "{clipboard}" }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("picker.previewLabel"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.tokenFix", { fix: "{clipboard}" }) }));
+    expect(phraseOf(onEditsChange.mock.calls[0][0].actions.a1, [])).toEqual({ text: "hi {clipboard}", enter: false });
   });
 
   it("numbers block items on through the blocks and marks the selected row", () => {

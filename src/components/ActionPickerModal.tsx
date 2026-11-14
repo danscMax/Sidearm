@@ -20,6 +20,7 @@ import {
   removeBinding,
   promoteInlineSnippetActionToLibrary,
   upsertAction,
+  upsertSnippetLibraryItem,
   upsertBinding,
   upsertEncoderMapping,
 } from "../lib/config-editing";
@@ -27,6 +28,7 @@ import { MenuItemsEditor } from "./MenuItemsEditor";
 import { CategoryIcon } from "./icons";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
+import { snippetPlaceCounts } from "../lib/snippet-search";
 import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice, SelectField, Toggle } from "./shared";
 import { historyKey, useDraftHistory } from "../hooks/useDraftHistory";
 import { copySlotToOtherMice, slotKey, slotSynced, withSlotSync } from "../lib/device-transfer";
@@ -358,6 +360,13 @@ export function ActionPickerModal({
     }
     nextConfig = upsertAction(nextConfig, nextAction);
     if (effectiveCategory === "menu") nextConfig = applyMenuEdits(nextConfig, menuEdits, menuItemsDraft);
+    // A library text edited here is the library's: every use gets it (as in the menu editor).
+    const linkedSnippet = effectiveCategory === "textSnippet" && textDraft.snippetId
+      ? nextConfig.snippetLibrary.find((snippet) => snippet.id === textDraft.snippetId)
+      : undefined;
+    if (linkedSnippet && (linkedSnippet.text !== textDraft.text || linkedSnippet.pasteMode !== textDraft.pasteMode)) {
+      nextConfig = upsertSnippetLibraryItem(nextConfig, { ...linkedSnippet, text: textDraft.text, pasteMode: textDraft.pasteMode });
+    }
 
     // Opt-in: store this inline snippet in the reusable library AND link the
     // button to it (source: libraryRef), so later library edits reach the
@@ -660,6 +669,7 @@ export function ActionPickerModal({
                 draft={textDraft}
                 onChange={setTextDraft}
                 library={config.snippetLibrary}
+                uses={snippetPlaceCounts(config)}
                 saveToLibrary={saveSnippetToLibrary}
                 onToggleSaveToLibrary={setSaveSnippetToLibrary}
                 onPickName={setNameDraft}

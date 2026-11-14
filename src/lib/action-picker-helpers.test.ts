@@ -425,6 +425,8 @@ describe("isSaveDisabled", () => {
   it("disables save for blank text, enables with content", () => {
     expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: "   ", pasteMode: "sendText" } }))).toBe(true);
     expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: "hi", pasteMode: "sendText" } }))).toBe(false);
+    // A linked text is the library's: blanking it would blank every use.
+    expect(isSaveDisabled("textSnippet", makeDrafts({ text: { text: " ", pasteMode: "sendText", snippetId: "s" } }))).toBe(true);
   });
 
   it("disables save for an empty launch target", () => {

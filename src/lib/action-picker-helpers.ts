@@ -132,8 +132,8 @@ export interface PickerDrafts {
   shortcut: ShortcutActionPayload;
   mouse: MouseDraft;
   // `snippetId` set => the action links to a library snippet (source: libraryRef);
-  // `text` then holds the resolved snippet text for preview only. Editing the text
-  // clears `snippetId`, detaching the button into its own inline copy.
+  // `text` / `pasteMode` then are that snippet's, edited for all its uses (Save
+  // writes them into the library). Detaching clears `snippetId`: an inline copy.
   /** `enter`: Enter is pressed after the text (saved as a text + Enter macro, `withPhrase`). */
   text: { text: string; pasteMode: PasteMode; snippetId?: string; enter?: boolean };
   launch: { target: string; args: string[]; workingDir: string };
@@ -290,9 +290,9 @@ export function buildAction(params: {
         };
       case "textSnippet": {
         // A live snippetId means the button links to a library snippet
-        // (source: libraryRef). Editing the text in the picker clears snippetId
-        // upstream, detaching into an inline copy — so here snippetId is the
-        // single source of truth for link-vs-inline.
+        // (source: libraryRef); "Detach" in the picker clears it upstream for an
+        // inline copy — so here snippetId is the single source of truth for
+        // link-vs-inline.
         const pressEnter = drafts.text.enter ? { pressEnter: true } : {};
         if (drafts.text.snippetId) {
           return {
@@ -465,9 +465,8 @@ export function isSaveDisabled(effectiveCategory: string, drafts: PickerDrafts):
     const s = drafts.shortcut;
     return !s.key && !s.ctrl && !s.shift && !s.alt && !s.win;
   }
-  // A library-linked snippet (snippetId set) is always saveable even if the
-  // resolved preview text is momentarily empty; an inline snippet needs content.
-  if (effectiveCategory === "textSnippet") return !drafts.text.snippetId && !drafts.text.text.trim();
+  // A library-linked text is edited for all its uses, so it needs content too.
+  if (effectiveCategory === "textSnippet") return !drafts.text.text.trim();
   if (effectiveCategory === "launch") return !drafts.launch.target.trim();
   // Audit F005: an empty menu passes the backend schema check only to be rejected by
   // validate_action (menu must have >=1 item), which rolls back the whole draft. Block

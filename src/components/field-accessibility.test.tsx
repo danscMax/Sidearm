@@ -70,7 +70,7 @@ describe("form field names", () => {
 
   it("names the token textarea while keeping its overlay out of accessibility", () => {
     render(<TextSnippetEditor draft={{ text: "Hello {date}", pasteMode: "clipboardPaste" }} onChange={vi.fn()}
-      library={[]} saveToLibrary={false} onToggleSaveToLibrary={vi.fn()} onPickName={vi.fn()} />);
+      library={[]} uses={new Map()} saveToLibrary={false} onToggleSaveToLibrary={vi.fn()} onPickName={vi.fn()} />);
     expect(screen.getByRole("textbox", { name: i18n.t("picker.textLabel") })).toBeTruthy();
   });
 

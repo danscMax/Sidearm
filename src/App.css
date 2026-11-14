@@ -1890,7 +1890,10 @@ input[type="radio"] {
 .menu-ed__switches { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px 18px; margin-left: auto; }
 .menu-ed__switches:empty { display: none; }
 .menu-ed__switch { display: inline-flex; gap: 8px; align-items: center; color: var(--c-text-muted); font-size: var(--fs-caption); font-weight: 600; }
-.menu-ed-root .menu-ed__text { flex: 1; min-height: 160px; resize: none; }
+.menu-ed-root .menu-ed__text { flex: 1; min-height: 220px; }
+/* The phrase box takes the height left and scrolls inside (no auto-grow here). */
+.menu-ed__text > .token-textarea { flex: 1; display: flex; flex-direction: column; min-height: 120px; }
+.menu-ed__text .token-textarea .token-textarea__input { flex: 1; min-height: 0; max-height: none; field-sizing: fixed; }
 .menu-ed__chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .menu-ed__chips:empty { display: none; }
 .menu-ed__block-select { margin: 0; }
@@ -2038,8 +2041,6 @@ input[type="radio"] {
   border-radius: var(--radius-md);
   background: var(--c-card-bg);
 }
-
-.menu-ed__text { min-height: 130px; line-height: 1.45; }
 
 .menu-ed__list--empty { padding: 14px 10px; color: var(--c-text-muted); font-size: var(--fs-caption); }
 .menu-ed__head { display: flex; gap: 14px; align-items: flex-end; }
@@ -5109,15 +5110,124 @@ code {
   color: var(--c-text-muted);
 }
 
-/* "Linked to library snippet «…»" hint shown when a button references a snippet */
-.snippet-linked-hint {
-  margin: 0;
-  padding: 8px 12px;
+/* The library text a button is linked to: its name, its uses, "Detach". */
+.snippet-linked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 6px 6px 6px 12px;
   border: 1px solid color-mix(in srgb, var(--c-accent) 32%, transparent);
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--c-accent) 10%, transparent);
+  background: color-mix(in srgb, var(--c-accent) 8%, transparent);
   font-size: var(--fs-caption);
-  color: var(--c-text);
+}
+.snippet-linked__chip { display: inline-flex; align-items: center; gap: 6px; color: var(--c-accent); font-weight: 600; }
+.snippet-linked__meta { flex: 1; min-width: 160px; color: var(--c-text-muted); }
+.snippet-linked__detach { flex: none; }
+
+/* ── "Insert from library": a button and its searchable popover list ── */
+.lib-picker { position: relative; display: flex; }
+.lib-picker__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-card-bg);
+  color: var(--c-text-bright);
+  font-size: var(--fs-body-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+.lib-picker__trigger:hover,
+.lib-picker__trigger[aria-expanded="true"] {
+  border-color: var(--c-border-hover);
+  background: rgba(255, 255, 255, 0.07);
+}
+.lib-picker__trigger > svg:first-child { color: var(--c-accent); }
+.lib-picker__count {
+  padding: 0 7px;
+  border-radius: var(--radius-pill);
+  background: var(--c-surface-alt);
+  color: var(--c-text-muted);
+  font-size: var(--fs-micro);
+  line-height: 1.7;
+}
+.lib-picker__pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(560px, 100%);
+  padding: 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-md);
+  background: var(--c-surface);
+  box-shadow: var(--shadow-popover);
+  animation: help-tip-in 120ms ease;
+}
+.lib-picker__search { margin: 0; }
+.lib-picker__list {
+  display: grid;
+  gap: 2px;
+  max-height: 300px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.lib-picker__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.lib-picker__row--active { background: var(--c-menu-selected); }
+.lib-picker__row--linked { box-shadow: inset 3px 0 0 var(--c-accent); }
+.lib-picker__name {
+  overflow: hidden;
+  color: var(--c-text-bright);
+  font-size: var(--fs-body-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lib-picker__uses { color: var(--c-text-muted); font-size: var(--fs-caption); white-space: nowrap; }
+.lib-picker__row--linked .lib-picker__uses { color: var(--c-accent); }
+.lib-picker__line {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: var(--c-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.lib-picker__badges { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.lib-picker__badge {
+  padding: 0 7px;
+  border: 1px solid var(--c-card-border);
+  border-radius: var(--radius-pill);
+  color: var(--c-text-muted);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+.lib-picker__badge--mode { border-color: color-mix(in srgb, var(--c-info) 45%, transparent); color: var(--c-info); }
+.lib-picker__empty { margin: 0; padding: 14px 10px; color: var(--c-text-muted); font-size: var(--fs-caption); text-align: center; }
+.lib-picker__keys {
+  margin: 0;
+  padding: 6px 4px 0;
+  border-top: 1px solid var(--c-card-border);
+  color: var(--c-text-subtle);
+  font-size: var(--fs-micro);
 }
 
 /* ── Help tip: "?" badge + hover/focus explanation bubble ───────────────────
@@ -5214,6 +5324,72 @@ code {
 .token-chip:active {
   transform: translateY(0);
 }
+.token-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* A phrase's box with its chips, the preview line and the warnings (TokenTextarea). */
+.token-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.token-preview {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px dashed var(--c-card-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface-alt);
+  font-size: var(--fs-caption);
+}
+.token-preview__label { flex: none; color: var(--c-text-muted); font-weight: 600; }
+.token-preview__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-text-bright);
+  font-family: var(--font-mono);
+  white-space: pre;
+  text-overflow: ellipsis;
+}
+/* What is only known at send time: the clipboard, the selection, a field. */
+.token-preview__slot {
+  margin: 0 1px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--c-accent-dim);
+  color: var(--c-accent);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+}
+.token-warnings { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.token-warning {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid color-mix(in srgb, var(--c-warning) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--c-warning) 10%, transparent);
+  color: var(--c-warning-light);
+  font-size: var(--fs-caption);
+}
+.token-warning__text { flex: 1; min-width: 0; }
+.token-warning__fix {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--c-warning) 55%, transparent);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--c-warning-light);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  cursor: pointer;
+}
+.token-warning__fix:hover:not(:disabled) { background: color-mix(in srgb, var(--c-warning) 18%, transparent); }
+.token-warning__fix:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Highlighting textarea: a transparent <textarea> over a backdrop that
    renders the same text with the tokens <mark>ed. Both layers MUST share
@@ -5263,6 +5439,10 @@ code {
   color: transparent;
   border-radius: 3px;
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-accent) 45%, transparent);
+}
+.token-textarea__mark--warn {
+  background: color-mix(in srgb, var(--c-warning) 20%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c-warning) 55%, transparent);
 }
 .token-textarea .token-textarea__input {
   position: relative;

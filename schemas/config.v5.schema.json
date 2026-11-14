@@ -324,6 +324,12 @@
           "type": "boolean",
           "description": "An assignment edit on one built-in mouse is repeated on the same place of the others (HyperShift 2 layers only where the mouse has them)."
         },
+        "syncSlots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        },
         "offlineProfileId": {
           "type": "string",
           "description": "Profile written into the mouse on exit for use without Sidearm; absent = the fallback profile, \"@active\" = the profile in effect at exit."

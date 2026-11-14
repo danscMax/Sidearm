@@ -293,6 +293,11 @@ pub struct Settings {
     /// (done by the UI when it saves; the runtime never reads it).
     #[serde(default)]
     pub sync_mice: bool,
+    /// Per button (`profile|layer|gesture|place`, `lib/device-transfer.ts` `slotKey`):
+    /// whether its edits are repeated on the other mice, overriding `sync_mice`.
+    /// UI-only too.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub sync_slots: std::collections::BTreeMap<String, bool>,
     /// Show the name of each action run in the OSD bubble (a check that the
     /// right thing went out). Off by default.
     #[serde(default)]
@@ -2132,6 +2137,7 @@ pub(crate) fn default_seed_config() -> AppConfig {
             hypershift_tap: false,
             show_battery_in_tray: false,
             sync_mice: false,
+            sync_slots: Default::default(),
             osd_actions: false,
             hs2_cheat_sheet: false,
             accepted_conflicts: Vec::new(),
@@ -4008,7 +4014,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x155e_ae32_4468_d983);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xcf19_f06a_b56b_5580);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

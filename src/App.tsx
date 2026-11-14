@@ -70,6 +70,7 @@ import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
 import { isBuiltinControl, offlineProfileId, playsWithoutSidearm } from "./lib/onboard-mapping";
+import { syncedWith } from "./lib/device-transfer";
 import { describeConfigChange } from "./lib/config-diff";
 import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
 import type { ErrorActionKind } from "./lib/errors";
@@ -807,9 +808,7 @@ function App() {
       } else if (commandPaletteOpen) {
         setCommandPaletteOpen(false);
       } else if (actionPickerOpen) {
-        setActionPickerOpen(false);
-        setActionPickerBindingId(null);
-        setMenuFocusItemId(undefined);
+        // The picker closes itself on Escape: with edits it asks first.
       } else if (presetsOpen) {
         setPresetsOpen(false);
       } else if (confirmModal) {
@@ -1238,6 +1237,7 @@ function App() {
                 extras: extrasByControlId.get(control.id),
                 sidearmOnly: offlineHere && isBuiltinControl(activeConfig, control.id) && binding !== null
                   && binding.enabled && !playsWithoutSidearm(binding, actionById.get(binding.actionId)),
+                syncedWith: binding ? syncedWith(activeConfig, binding.id) : undefined,
               };
             }) ?? [],
       })),
@@ -1440,7 +1440,7 @@ function App() {
       </div>
       {actionPickerOpen && activeConfig ? (
         <ActionPickerModal
-          key={`${actionPickerGesture}:${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
+          key={`${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
           focusMenuItemId={menuFocusItemId}
           config={activeConfig}
           bindingId={
@@ -1483,6 +1483,7 @@ function App() {
           title={confirmModal.title}
           message={confirmModal.message}
           confirmLabel={confirmModal.confirmLabel}
+          cancelLabel={confirmModal.cancelLabel}
           danger={confirmModal.danger}
           onConfirm={confirmModal.onConfirm}
           secondaryConfirmLabel={confirmModal.secondaryConfirmLabel}

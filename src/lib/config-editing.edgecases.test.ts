@@ -514,6 +514,13 @@ describe("null & empty: config with empty collections", () => {
     expect(result.appMappings.length).toBe(0);
   });
 
+  it("deleteProfile drops that profile's per-button sync choices and keeps the others'", () => {
+    const cfg = minCfg({ profiles: [makeProfile("p1", "One"), makeProfile("p10", "Ten")] });
+    cfg.settings = { ...cfg.settings, syncSlots: { "p1|standard|press|thumb_01": true, "p10|standard|press|thumb_01": false } };
+    expect(deleteProfile(cfg, "p1").settings.syncSlots).toEqual({ "p10|standard|press|thumb_01": false });
+    expect("syncSlots" in deleteProfile(deleteProfile(cfg, "p1"), "p10").settings).toBe(false);
+  });
+
   it("duplicateProfile with zero bindings adds new profile with empty binding/action arrays", () => {
     const src = makeProfile("src", "Empty");
     const cfg = minCfg({ profiles: [src] });

@@ -30,8 +30,9 @@ import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from 
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
 import { snippetPlaceCounts } from "../lib/snippet-search";
 import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice, SelectField, Toggle } from "./shared";
-import { historyKey, useDraftHistory } from "../hooks/useDraftHistory";
-import { copySlotToOtherMice, slotKey, slotSynced, withSlotSync } from "../lib/device-transfer";
+import { createDraftHistoryStore, type DraftHistoryStore, historyKey, useDraftHistory } from "../hooks/useDraftHistory";
+import { ConfirmModal } from "./ConfirmModal";
+import { copySlotToOtherMice, slotKey, slotReplacements, slotSynced, withSlotSync } from "../lib/device-transfer";
 import { gestureOf } from "../lib/config-editing";
 import { deviceLayout } from "../lib/devices";
 import {
@@ -78,21 +79,31 @@ const GESTURE_LABEL_KEYS: Record<Gesture, string> = {
   triplePress: "picker.gestureTriplePress",
 };
 
-export function ActionPickerModal({
-  config,
-  bindingId,
-  profileId,
-  controlLabel,
-  layerLabel,
-  controlId,
-  selectedLayer,
-  gesture = "press",
-  onGestureChange,
-  onApply,
-  onSave,
-  onCancel,
-  focusMenuItemId,
-}: {
+/** Everything the picker's undo history holds: the drafts, the tab they belong
+ *  to and the config as it was there (a tab switch applies the tab's edit). */
+interface PickerSnapshot {
+  gesture: Gesture;
+  base: AppConfig;
+  activeCategory: string;
+  shortcutDraft: PickerDrafts["shortcut"];
+  mouseDraft: PickerDrafts["mouse"];
+  textDraft: PickerDrafts["text"];
+  launchDraft: PickerDrafts["launch"];
+  mediaDraft: PickerDrafts["media"];
+  profileDraft: PickerDrafts["profile"];
+  sequenceDraft: PickerDrafts["sequence"];
+  nameDraft: string;
+  triggerModeDraft: TriggerMode;
+  chordPartnerDraft: string;
+  throttleDraft: number;
+  conditionsDraft: PickerDrafts["conditions"];
+  menuItemsDraft: PickerDrafts["menuItems"];
+  cheatLayerDraft: Layer;
+  menuEdits: MenuEdits;
+  signalDraft: string | null;
+}
+
+interface ActionPickerProps {
   config: AppConfig;
   bindingId: string | null;
   profileId?: string;
@@ -110,6 +121,39 @@ export function ActionPickerModal({
   onApply?: (config: AppConfig) => void;
   onSave: (config: AppConfig) => void;
   onCancel: () => void;
+}
+
+/** Each press-pattern tab is its own mount (its drafts come from that
+ *  pattern's binding); the undo history is one for the whole picker, so
+ *  Ctrl+Z after a tab switch goes back into the tab before. */
+export function ActionPickerModal(props: ActionPickerProps) {
+  const [store] = useState(createDraftHistoryStore<PickerSnapshot>);
+  // Drafts an undo / redo brings back onto another tab, read by that tab's mount.
+  const [seed, setSeed] = useState<PickerSnapshot | null>(null);
+  return <PickerTab key={props.gesture ?? "press"} {...props} store={store} seed={seed} onSeed={setSeed} />;
+}
+
+function PickerTab({
+  config,
+  bindingId,
+  profileId,
+  controlLabel,
+  layerLabel,
+  controlId,
+  selectedLayer,
+  gesture = "press",
+  onGestureChange,
+  onApply,
+  onSave,
+  onCancel,
+  focusMenuItemId,
+  store,
+  seed,
+  onSeed,
+}: ActionPickerProps & {
+  store: DraftHistoryStore<PickerSnapshot>;
+  seed: PickerSnapshot | null;
+  onSeed: (seed: PickerSnapshot | null) => void;
 }) {
   const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
@@ -208,20 +252,42 @@ export function ActionPickerModal({
     ? expectedEncodedKeyForControl(controlId, selectedLayer)
     : null;
 
-  const [signalDraft, setSignalDraft] = useState<string | null>(
-    () => currentEncoderMapping?.encodedKey ?? null,
-  );
+  // Draft action state per category — seeded once from the edited action/binding
+  // (`pristine`), or from the step an undo / redo brought back onto this tab.
+  const [pristine] = useState((): PickerSnapshot => {
+    const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
+    return {
+      gesture,
+      base: config,
+      activeCategory: isCurrentTrigger ? "hypershift"
+        : isCurrentTrigger2 ? "hypershift2"
+        : !existingAction ? "native"
+        : enterPhraseOf(existingAction, config.snippetLibrary) !== null ? "textSnippet"
+        : ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut",
+      shortcutDraft: initial.shortcut,
+      mouseDraft: initial.mouse,
+      textDraft: initial.text,
+      launchDraft: initial.launch,
+      mediaDraft: initial.media,
+      profileDraft: initial.profile,
+      sequenceDraft: initial.sequence,
+      nameDraft: isPlaceholderAction(existingAction) ? "" : initial.name,
+      triggerModeDraft: initial.triggerMode,
+      chordPartnerDraft: initial.chordPartner,
+      throttleDraft: initial.throttleMs,
+      conditionsDraft: initial.conditions,
+      menuItemsDraft: initial.menuItems,
+      cheatLayerDraft: initial.cheatLayer ?? "hypershift",
+      menuEdits: NO_MENU_EDITS,
+      signalDraft: currentEncoderMapping?.encodedKey ?? null,
+    };
+  });
+  const start = seed ?? pristine;
+
+  const [signalDraft, setSignalDraft] = useState(start.signalDraft);
   const [isCapturingSignal, setIsCapturingSignal] = useState(false);
 
-  const [activeCategory, setActiveCategory] = useState(() => {
-    if (isCurrentTrigger) return "hypershift";
-    if (isCurrentTrigger2) return "hypershift2";
-    if (existingAction) {
-      if (enterPhraseOf(existingAction, config.snippetLibrary) !== null) return "textSnippet";
-      return ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut";
-    }
-    return "native";
-  });
+  const [activeCategory, setActiveCategory] = useState(start.activeCategory);
 
   function setActiveCategoryWithMemory(cat: string) {
     setActiveCategory(cat);
@@ -244,11 +310,9 @@ export function ActionPickerModal({
 
   const [isCapturing, setIsCapturing] = useState(false);
 
-  // Draft action state per category — seeded once from the edited action/binding
-  const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
-  const [shortcutDraft, setShortcutDraft] = useState(initial.shortcut);
-  const [mouseDraft, setMouseDraft] = useState(initial.mouse);
-  const [textDraft, setTextDraft] = useState(initial.text);
+  const [shortcutDraft, setShortcutDraft] = useState(start.shortcutDraft);
+  const [mouseDraft, setMouseDraft] = useState(start.mouseDraft);
+  const [textDraft, setTextDraft] = useState(start.textDraft);
   // Default ON so snippet text lands in the durable library, not only inline on
   // the button — inline-only text is silently lost when the button is later
   // reassigned. Snippets already backed by the library don't need re-saving.
@@ -261,26 +325,26 @@ export function ActionPickerModal({
   );
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
   const [testRunning, setTestRunning] = useState(false);
-  const [launchDraft, setLaunchDraft] = useState(initial.launch);
-  const [mediaDraft, setMediaDraft] = useState(initial.media);
-  const [profileDraft, setProfileDraft] = useState(initial.profile);
-  const [sequenceDraft, setSequenceDraft] = useState(initial.sequence);
-  const [nameDraft, setNameDraft] = useState(isPlaceholderAction(existingAction) ? "" : initial.name);
-  const [triggerModeDraft, setTriggerModeDraft] = useState(initial.triggerMode);
-  const [chordPartnerDraft, setChordPartnerDraft] = useState(initial.chordPartner);
-  const [throttleDraft, setThrottleDraft] = useState(initial.throttleMs);
-  const [conditionsDraft, setConditionsDraft] = useState(initial.conditions);
-  const [menuItemsDraft, setMenuItemsDraft] = useState(initial.menuItems);
-  const [cheatLayerDraft, setCheatLayerDraft] = useState<Layer>(initial.cheatLayer ?? "hypershift");
+  const [launchDraft, setLaunchDraft] = useState(start.launchDraft);
+  const [mediaDraft, setMediaDraft] = useState(start.mediaDraft);
+  const [profileDraft, setProfileDraft] = useState(start.profileDraft);
+  const [sequenceDraft, setSequenceDraft] = useState(start.sequenceDraft);
+  const [nameDraft, setNameDraft] = useState(start.nameDraft);
+  const [triggerModeDraft, setTriggerModeDraft] = useState(start.triggerModeDraft);
+  const [chordPartnerDraft, setChordPartnerDraft] = useState(start.chordPartnerDraft);
+  const [throttleDraft, setThrottleDraft] = useState(start.throttleDraft);
+  const [conditionsDraft, setConditionsDraft] = useState(start.conditionsDraft);
+  const [menuItemsDraft, setMenuItemsDraft] = useState(start.menuItemsDraft);
+  const [cheatLayerDraft, setCheatLayerDraft] = useState(start.cheatLayerDraft);
 
   // Advanced settings (trigger mode, throttle, conditions) collapse by default,
   // but open automatically when the edited action already has any of them set.
   const [advancedOpen, setAdvancedOpen] = useState(
-    () => initial.triggerMode !== "press" || initial.throttleMs > 0 || initial.conditions.length > 0,
+    () => start.triggerModeDraft !== "press" || start.throttleDraft > 0 || start.conditionsDraft.length > 0,
   );
 
   // Phrase texts and new phrase actions edited in the menu editor, written on Save.
-  const [menuEdits, setMenuEdits] = useState<MenuEdits>(NO_MENU_EDITS);
+  const [menuEdits, setMenuEdits] = useState(start.menuEdits);
 
   // Signal capture: listen to runtime's encoded_key_received event
   useEffect(() => {
@@ -429,9 +493,14 @@ export function ActionPickerModal({
   function withSync(next: AppConfig | null): AppConfig | null {
     if (!next || !syncKey || syncDraft === slotSynced(config.settings, syncKey)) return next;
     const synced = withSlotSync(next, syncKey, syncDraft);
-    const own = synced.bindings.find((binding) => binding.profileId === profileId && binding.layer === selectedLayer
-      && binding.controlId === controlId && gestureOf(binding.triggerMode) === gesture);
+    const own = ownBinding(synced);
     return syncDraft && own ? copySlotToOtherMice(synced, own.id) : synced;
+  }
+
+  /** This button's binding (this tab's press pattern) in `next`. */
+  function ownBinding(next: AppConfig) {
+    return next.bindings.find((binding) => binding.profileId === profileId && binding.layer === selectedLayer
+      && binding.controlId === controlId && gestureOf(binding.triggerMode) === gesture);
   }
 
   function handleSave() {
@@ -445,6 +514,7 @@ export function ActionPickerModal({
     if (next === gesture || !onGestureChange) return;
     const saved = saveDisabled ? null : withSync(buildSave());
     if (saved && saved !== config) onApply?.(saved);
+    onSeed(null);
     onGestureChange(next);
   }
 
@@ -485,6 +555,16 @@ export function ActionPickerModal({
       || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS
         || sequenceDraft.some((step) => (step.type === "waitWindow" && !step.exe.trim()) || (step.type === "send" && !step.value.trim()))))
       || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
+  // Turning "The same on" on overwrites the other mice's button: say what it holds.
+  const syncSave = syncKey && syncDraft && !slotSynced(config.settings, syncKey) ? buildSave() : null;
+  const syncOwn = syncSave ? ownBinding(syncSave) : undefined;
+  const syncReplaced = syncSave && syncOwn
+    ? slotReplacements(syncSave, syncOwn.id).map((other) => ({
+        id: other.id,
+        action: syncSave.actions.find((action) => action.id === other.actionId)?.displayName || other.label,
+        mouse: config.devices.find((device) => device.id === config.physicalControls.find((c) => c.id === other.controlId)?.deviceId)?.name ?? "",
+      }))
+    : [];
   const activeConditionsCount = conditionsDraft.filter((c) => c.value.trim()).length;
   const advancedTags = [
     triggerModeDraft !== "press" ? t(TRIGGER_LABEL_KEYS[triggerModeDraft]) : null,
@@ -499,14 +579,24 @@ export function ActionPickerModal({
   const activeCat = categories.find((c) => c.id === effectiveCategory);
 
   // Undo / redo of every edit made in the picker before Save (a menu item moved
-  // into the wrong list, a step deleted…).
+  // into the wrong list, a step deleted…), across the press-pattern tabs.
+  const current: PickerSnapshot = {
+    gesture, base: config,
+    activeCategory, shortcutDraft, mouseDraft, textDraft, launchDraft, mediaDraft, profileDraft, sequenceDraft,
+    nameDraft, triggerModeDraft, chordPartnerDraft, throttleDraft, conditionsDraft, menuItemsDraft, cheatLayerDraft,
+    menuEdits, signalDraft,
+  };
   const history = useDraftHistory(
-    {
-      activeCategory, shortcutDraft, mouseDraft, textDraft, launchDraft, mediaDraft, profileDraft, sequenceDraft,
-      nameDraft, triggerModeDraft, chordPartnerDraft, throttleDraft, conditionsDraft, menuItemsDraft, cheatLayerDraft,
-      menuEdits, signalDraft,
-    },
+    current,
     (snapshot) => {
+      if (snapshot.gesture !== gesture && onGestureChange) {
+        // A step of another tab: the config as it was there (that tab's applied
+        // edit taken back), then that tab with these drafts.
+        onSeed(snapshot);
+        if (snapshot.base !== config) onApply?.(snapshot.base);
+        onGestureChange(snapshot.gesture);
+        return;
+      }
       setActiveCategory(snapshot.activeCategory);
       setShortcutDraft(snapshot.shortcutDraft);
       setMouseDraft(snapshot.mouseDraft);
@@ -525,15 +615,26 @@ export function ActionPickerModal({
       setMenuEdits(snapshot.menuEdits);
       setSignalDraft(snapshot.signalDraft);
     },
+    { store, passive: ["base"] },
   );
 
+  // Esc, ✕, Cancel and a click outside: edits of this tab are not dropped
+  // without asking (a tab switch has already applied the tabs before).
+  const [askDiscard, setAskDiscard] = useState(false);
+  function requestClose() {
+    const edited = (Object.keys(pristine) as Array<keyof PickerSnapshot>).some((key) =>
+      key !== "base" && key !== "gesture" && JSON.stringify(pristine[key]) !== JSON.stringify(current[key]));
+    if (edited || (syncKey !== null && syncDraft !== slotSynced(config.settings, syncKey))) setAskDiscard(true); else onCancel();
+  }
+
   return (
+    <>
     <ModalShell
-      onClose={onCancel}
+      onClose={requestClose}
       className={`modal action-picker${effectiveCategory === "menu" ? " action-picker--tall" : ""}`}
       dialogRef={modalRef}
       ariaLabelledby="action-picker-title"
-      escapeEnabled={!isCapturing && !isCapturingSignal}
+      escapeEnabled={!isCapturing && !isCapturingSignal && !askDiscard}
       onKeyDown={(e) => {
         // Ctrl/Cmd+Enter commits from anywhere in the modal (not while capturing).
         if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !saveDisabled && !isCapturing && !isCapturingSignal) {
@@ -556,7 +657,7 @@ export function ActionPickerModal({
               <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
             ) : null}
           </div>
-          <CloseButton onClick={onCancel} ariaLabel={t("common.close")} className="action-picker__close" />
+          <CloseButton onClick={requestClose} ariaLabel={t("common.close")} className="action-picker__close" />
         </div>
 
         {onGestureChange && controlId && profileId && selectedLayer ? (
@@ -838,6 +939,14 @@ export function ActionPickerModal({
           </div>
         ) : null}
 
+        {syncReplaced.length > 0 ? (
+          <div className="action-picker__sync-note">
+            {syncReplaced.map((item) => (
+              <Notice key={item.id} variant="warning">{t("picker.syncReplaces", { action: item.action, mouse: item.mouse })}</Notice>
+            ))}
+          </div>
+        ) : null}
+
         <ModalFooter className="action-picker__footer">
           {syncKey ? (
             <span className="action-picker__sync">
@@ -852,7 +961,7 @@ export function ActionPickerModal({
             <button type="button" className="action-button action-button--ghost" onClick={history.redo}
               disabled={!history.canRedo} aria-label={t("picker.redo")} title={t("picker.redo")}>↷</button>
           </div>
-          <button type="button" className="action-button action-button--ghost" onClick={onCancel}>
+          <button type="button" className="action-button action-button--ghost" onClick={requestClose}>
             {t("common.cancel")}
           </button>
           {!roleCategory ? <button
@@ -873,5 +982,17 @@ export function ActionPickerModal({
           </button>
         </ModalFooter>
     </ModalShell>
+    {askDiscard ? (
+      <ConfirmModal
+        title={t("picker.discardTitle")}
+        message={t("picker.discardMessage")}
+        confirmLabel={t("picker.discard")}
+        cancelLabel={t("picker.keepEditing")}
+        danger
+        onConfirm={onCancel}
+        onCancel={() => setAskDiscard(false)}
+      />
+    ) : null}
+    </>
   );
 }

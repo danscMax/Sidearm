@@ -12,6 +12,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 - `useModalDismiss.ts` / `useDismissable.ts` — Escape + focus-trap + outside-click for modals/popovers.
 - `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle.
 - `useLogPanel.ts`, `useMouseVisualPanel.ts`, `useActionPicker.ts`, `useVerification.ts`.
+- `useDraftHistory.ts` — undo / redo over a form's drafts (the action picker): a step is recorded after React draws it, typing in one field coalesces; a `store` from `createDraftHistoryStore` held by a parent outlives a remount, and `passive` keys ride along in snapshots without being a step of their own.
 - `useActionPicker` only opens a valid control's editor and selects its existing binding, if any. It must never create a placeholder or invoke persistence; the modal owns local drafts until Save.
 - `useAppPersistence` waits for an already-running save request before reading disk for a reload; completing that older save does not invalidate the reload. Only the current reload revision can apply; newer reloads, edits, and undo/redo supersede it, including while it waits for a save. Reload clears undo/redo. A rejected save drops dependent queued edits; `runtime_reload_failed` means the file was committed, so reload it and surface the runtime error without a rollback notification.
 - `useVerification` synchronizes selection only when the active step belongs to `effectiveDeviceId`; choosing another device pauses selection sync and preserves the session.

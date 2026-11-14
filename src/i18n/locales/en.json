@@ -1195,6 +1195,11 @@
     "undo": "Undo (Ctrl+Z)",
     "redo": "Redo (Ctrl+Y)",
     "syncOther": "The same on {{mice}}",
+    "syncReplaces": "Replaces “{{action}}” on {{mouse}}",
+    "discardTitle": "Discard changes?",
+    "discardMessage": "The edits in this window are not saved yet and will be lost.",
+    "discard": "Discard",
+    "keepEditing": "Keep editing",
     "syncOtherHint": "This button is alike on both mice: an edit here is repeated on the same button of the other mouse (and back). Turning it on copies this assignment there. The general “Keep the mice alike” setting is the default.",
     "sendStepEmpty": "Step {{index}} has nothing to press: type a shortcut, e.g. Ctrl+L.",
     "sendStepPlaceholder": "e.g. Ctrl+L or Enter",
@@ -2115,7 +2120,8 @@
     "banner_other": "This profile has {{count}} problems to look at:"
   },
   "mouseVisual": {
-    "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm."
+    "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm.",
+    "syncedWith": "The same on {{mice}}: an edit of this button is repeated there."
   },
   "stats": {
     "loading": "Reading the press log…",

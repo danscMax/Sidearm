@@ -1083,9 +1083,18 @@ export function deleteProfile(config: AppConfig, profileId: string): AppConfig {
       ? undefined
       : config.settings.lastSelectedProfileId;
 
+  // The profile's per-button "same on the other mouse" choices (`profile|layer|gesture|place`) go with it.
+  const { syncSlots, ...settings } = config.settings;
+  const keptSlots = Object.entries(syncSlots ?? {}).filter(([key]) => !key.startsWith(`${profileId}|`));
+
   return {
     ...config,
-    settings: { ...config.settings, fallbackProfileId, lastSelectedProfileId },
+    settings: {
+      ...settings,
+      ...(keptSlots.length > 0 ? { syncSlots: Object.fromEntries(keptSlots) } : {}),
+      fallbackProfileId,
+      lastSelectedProfileId,
+    },
     profiles: remainingProfiles,
     bindings: nextBindings,
     actions: retargetedActions,

@@ -125,13 +125,45 @@
   .rows--grid { display: grid; grid-template-columns: repeat(3, 168px); gap: 4px; }
   .sheet-title {
     grid-column: 1 / -1;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    min-width: 0;
     padding: 4px 6px 4px;
+  }
+  .sheet-title__name {
+    flex: none;
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--accent);
   }
+  /* The typed query, quiet: the cells it does not match are dimmed. */
+  .sheet-query {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sheet-switch {
+    flex: none;
+    margin-left: auto;
+    color: var(--dim);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+  .sheet-switch kbd {
+    padding: 0 4px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 3px;
+    font: inherit;
+    font-size: 10px;
+  }
+  .rows--grid .cell--dim { opacity: 0.28; }
   .rows--grid .cell {
     align-items: flex-start;
     min-height: 48px;

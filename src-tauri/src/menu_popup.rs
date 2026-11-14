@@ -48,6 +48,9 @@ pub(crate) enum Input {
     Number(usize),
     Next,
     Prev,
+    /// A row down / up: in a cheat sheet's grid the cell below / above, in a list one item.
+    NextRow,
+    PrevRow,
     Confirm,
     Back,
     Close,
@@ -83,6 +86,21 @@ pub(crate) struct Model {
     menu_ids: HashSet<String>,
     /// The search looks only in this menu, not in the others too.
     only_this: bool,
+    /// A cheat sheet ([`Model::sheet`]): the cells' other press patterns. Its
+    /// cells stay in place while typing: the ones that do not match are dimmed.
+    grid: Option<Vec<Vec<String>>>,
+}
+
+/// Cells per row of a cheat sheet's grid (the mouse's side buttons, 3 across).
+const GRID_COLUMNS: usize = 3;
+
+/// The text contains the needle (already lowercased) — also when it was typed
+/// in the other keyboard layout: both sides compared as the keys pressed on a
+/// ЙЦУКЕН/QWERTY keyboard.
+fn text_hits(text: &str, needle: &str) -> bool {
+    let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
+    let text = text.to_lowercase();
+    text.contains(needle) || keys(&text).contains(&keys(needle))
 }
 
 /// One row of the level shown: the item, the block it sits in, and for a
@@ -119,6 +137,9 @@ pub(crate) struct ViewItem {
     /// A cheat sheet's cell: the button's other press patterns (mark + name).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub extras: Vec<String>,
+    /// A cheat sheet's cell that the typed query does not match.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub dim: bool,
 }
 
 /// What `menu.js` draws.
@@ -147,9 +168,13 @@ pub(crate) struct View {
     /// The scope switch's two names, in the UI language.
     pub scope_all: String,
     pub scope_this: String,
-    /// A cheat sheet: the side buttons drawn as the mouse's grid, no search.
+    /// A cheat sheet: the side buttons drawn as the mouse's grid; typing dims
+    /// the cells that do not match.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub grid: bool,
+    /// A cheat sheet: the name of the layer Tab switches to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub switch_layer: Option<String>,
 }
 
 /// A line is never enabled: it is not highlighted, hovered or picked.
@@ -187,9 +212,40 @@ impl Model {
             others: Vec::new(),
             menu_ids: HashSet::new(),
             only_this: false,
+            grid: None,
         };
         model.highlight = model.first_enabled().unwrap_or(0);
         model
+    }
+
+    /// A cheat sheet: `items` are the side buttons in order, drawn as a grid
+    /// [`GRID_COLUMNS`] across, `extras` each cell's other press patterns.
+    pub(crate) fn sheet(items: Vec<MenuItem>, details: HashMap<String, String>, extras: Vec<Vec<String>>) -> Self {
+        let mut model = Self::new(items, details);
+        model.grid = Some(extras);
+        model
+    }
+
+    fn needle(&self) -> String {
+        self.query.trim().to_lowercase()
+    }
+
+    /// A cheat sheet's cell that does not match the typed query.
+    fn dimmed(&self, index: usize, item: &MenuItem) -> bool {
+        let Some(extras) = &self.grid else { return false };
+        let needle = self.needle();
+        !needle.is_empty()
+            && !self.matches(item, &needle)
+            && !extras.get(index).is_some_and(|extras| extras.iter().any(|extra| text_hits(extra, &needle)))
+    }
+
+    /// A row the highlight can land on: enabled, and in a grid not dimmed.
+    fn selectable(&self, index: usize, item: &MenuItem) -> bool {
+        item_enabled(item) && !self.dimmed(index, item)
+    }
+
+    fn selectable_at(&self, index: usize) -> bool {
+        self.walk().0.get(index).is_some_and(|entry| self.selectable(index, entry.item))
     }
 
     /// The other menus a search also looks in (their details must be in the
@@ -256,19 +312,14 @@ impl Model {
 
     fn matches(&self, item: &MenuItem, needle: &str) -> bool {
         let MenuItem::Action { label, action_id, .. } = item else { return false };
-        let keys = |text: &str| crate::hotkeys::normalize_cyrillic_key(text).to_lowercase();
-        let needle_keys = keys(needle);
-        let hit = |text: &str| {
-            let text = text.to_lowercase();
-            text.contains(needle) || keys(&text).contains(&needle_keys)
-        };
-        hit(label) || self.details.get(action_id).is_some_and(|text| hit(text))
+        text_hits(label, needle) || self.details.get(action_id).is_some_and(|text| text_hits(text, needle))
     }
 
     /// The rows shown and the labels of the submenus opened to get there.
     fn walk(&self) -> (Vec<Entry<'_>>, Vec<&str>) {
-        let needle = self.query.trim().to_lowercase();
-        if !needle.is_empty() {
+        let needle = self.needle();
+        // A grid keeps its cells where they are; `dimmed` marks the misses.
+        if !needle.is_empty() && self.grid.is_none() {
             struct Search<'m, 'a> {
                 model: &'m Model,
                 needle: &'m str,
@@ -358,18 +409,52 @@ impl Model {
         (level, labels)
     }
 
+    /// The first row the highlight can land on; in a filtered grid the best
+    /// match (`rank`), ties in grid order.
     fn first_enabled(&self) -> Option<usize> {
-        self.walk().0.iter().position(|entry| item_enabled(entry.item))
+        let needle = self.needle();
+        let ranked = self.grid.is_some() && !needle.is_empty();
+        self.walk()
+            .0
+            .iter()
+            .enumerate()
+            .filter(|(index, entry)| self.selectable(*index, entry.item))
+            .min_by_key(|(index, entry)| (if ranked { Self::rank(entry.item, &needle) } else { 0 }, *index))
+            .map(|(index, _)| index)
     }
 
-    /// The enabled row one step away from the highlight, wrapping.
+    /// The selectable row one step away from the highlight, wrapping.
     fn step(&self, forward: bool) -> usize {
         let (level, _) = self.walk();
         let len = level.len();
         let mut index = self.highlight.min(len.saturating_sub(1));
         for _ in 0..len {
             index = if forward { (index + 1) % len } else { (index + len - 1) % len };
-            if item_enabled(level[index].item) {
+            if self.selectable(index, level[index].item) {
+                return index;
+            }
+        }
+        self.highlight
+    }
+
+    /// A row down / up: in a grid the next selectable cell of the same column
+    /// (wrapping), in a list one step.
+    fn step_row(&self, down: bool) -> usize {
+        if self.grid.is_none() {
+            return self.step(down);
+        }
+        let (level, _) = self.walk();
+        let len = level.len();
+        if len == 0 {
+            return self.highlight;
+        }
+        let start = self.highlight.min(len - 1);
+        let (row, column) = (start / GRID_COLUMNS, start % GRID_COLUMNS);
+        let rows = len.div_ceil(GRID_COLUMNS);
+        for k in 1..rows {
+            let next = if down { (row + k) % rows } else { (row + rows - k) % rows };
+            let index = next * GRID_COLUMNS + column;
+            if index < len && self.selectable(index, level[index].item) {
                 return index;
             }
         }
@@ -418,13 +503,15 @@ impl Model {
                 Some(index) => self.take(index),
                 None => Step::Stay,
             },
+            // Not a dimmed cell, nor one left highlighted when nothing matches.
+            Input::Confirm if !self.selectable_at(self.highlight) => Step::Stay,
             Input::Confirm => self.take(self.highlight),
-            Input::Next => {
-                self.highlight = self.step(true);
+            Input::Next | Input::Prev => {
+                self.highlight = self.step(input == Input::Next);
                 Step::Stay
             }
-            Input::Prev => {
-                self.highlight = self.step(false);
+            Input::NextRow | Input::PrevRow => {
+                self.highlight = self.step_row(input == Input::NextRow);
                 Step::Stay
             }
             Input::Back if !self.query.is_empty() => {
@@ -442,17 +529,18 @@ impl Model {
         }
     }
 
-    /// Typing in the search box: results from the whole tree, best first.
+    /// Typing in the search box: results from the whole tree, best first; in a
+    /// grid the best matching cell (none highlighted when nothing matches).
     pub(crate) fn set_query(&mut self, query: &str) {
         self.query = query.to_owned();
         self.path.clear();
-        self.highlight = self.first_enabled().unwrap_or(0);
+        let none = if self.grid.is_some() { self.walk().0.len() } else { 0 };
+        self.highlight = self.first_enabled().unwrap_or(none);
     }
 
-    /// Highlight a row under the mouse pointer (ignored when disabled).
+    /// Highlight a row under the mouse pointer (ignored when disabled or dimmed).
     pub(crate) fn hover(&mut self, index: usize) -> bool {
-        let enabled = self.walk().0.get(index).is_some_and(|entry| item_enabled(entry.item));
-        if enabled && self.highlight != index {
+        if self.selectable_at(index) && self.highlight != index {
             self.highlight = index;
             return true;
         }
@@ -477,7 +565,8 @@ impl Model {
             parent,
             items: level
                 .iter()
-                .map(|entry| ViewItem {
+                .enumerate()
+                .map(|(index, entry)| ViewItem {
                     label: item_label(entry.item).to_owned(),
                     number: (!is_line(entry.item)).then(|| {
                         numbered += 1;
@@ -505,7 +594,8 @@ impl Model {
                         MenuItem::Action { .. } | MenuItem::Separator { .. } => Vec::new(),
                     },
                     group: entry.group.map(str::to_owned),
-                    extras: Vec::new(),
+                    extras: self.grid.as_ref().and_then(|extras| extras.get(index).cloned()).unwrap_or_default(),
+                    dim: self.dimmed(index, entry.item),
                 })
                 .collect(),
             highlight: self.highlight,
@@ -519,7 +609,8 @@ impl Model {
             has_others: !self.others.is_empty(),
             scope_all: String::new(),
             scope_this: String::new(),
-            grid: false,
+            grid: self.grid.is_some(),
+            switch_layer: None,
         }
     }
 }
@@ -602,9 +693,25 @@ struct OpenMenu {
     /// The popup's physical anchor (the cursor at open).
     anchor: (i32, i32),
     max_height: u32,
-    /// A cheat sheet ([`open_sheet`]): drawn as a grid, with each cell's other
-    /// press patterns; no search.
-    sheet: Option<Vec<Vec<String>>>,
+    /// A cheat sheet ([`open_sheet`]): the profile and layer shown.
+    sheet: Option<(String, crate::config::Layer)>,
+}
+
+/// The layer Tab switches a cheat sheet to: standard ↔ HyperShift (a
+/// HyperShift 2 sheet goes to standard).
+fn other_layer(layer: crate::config::Layer) -> crate::config::Layer {
+    use crate::config::Layer;
+    if layer == Layer::Standard { Layer::Hypershift } else { Layer::Standard }
+}
+
+/// A cheat sheet's model and title: the 12 side buttons of the mouse `control`
+/// is on, on `layer`.
+fn sheet_model(config: &AppConfig, profile: &str, control: Option<&str>, layer: crate::config::Layer) -> (Model, String) {
+    let (items, extras) = crate::cheatsheet::sheet_items(config, profile, control, layer);
+    let details = menu_details(config, &items);
+    let mut model = Model::sheet(items, details, extras);
+    model.text_actions = config.actions.iter().filter(|action| full_text(config, &action.id).is_some()).map(|action| action.id.clone()).collect();
+    (model, crate::cheatsheet::layer_title(config, profile, layer))
 }
 
 static OPEN: Mutex<Option<OpenMenu>> = Mutex::new(None);
@@ -664,12 +771,26 @@ pub(crate) fn open_sheet(
     is_fg_elevated: bool,
 ) {
     let profile = preview.resolved_profile_id.clone().unwrap_or_else(|| config.settings.fallback_profile_id.clone());
-    let (items, extras) = crate::cheatsheet::sheet_items(config, &profile, preview.control_id.as_deref(), layer);
-    let details = menu_details(config, &items);
-    let mut model = Model::new(items, details);
-    model.text_actions = config.actions.iter().filter(|action| full_text(config, &action.id).is_some()).map(|action| action.id.clone()).collect();
-    let title = crate::cheatsheet::layer_title(config, &profile, layer);
-    open_model(app, runtime_store, config, preview, &title, model, is_fg_elevated, Some(extras));
+    let (model, title) = sheet_model(config, &profile, preview.control_id.as_deref(), layer);
+    open_model(app, runtime_store, config, preview, &title, model, is_fg_elevated, Some((profile, layer)));
+}
+
+/// Tab in a cheat sheet: the same sheet on the other layer ([`other_layer`]),
+/// in the same popup (same opening button); the typed query stays.
+pub(crate) fn switch_sheet_layer_from_window(app: &AppHandle) {
+    let mut guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
+    let Some(menu) = guard.as_mut() else { return };
+    let Some((profile, layer)) = menu.sheet.clone() else { return };
+    let layer = other_layer(layer);
+    let (mut model, title) = sheet_model(&menu.config, &profile, menu.opener_control.as_deref(), layer);
+    model.set_query(&menu.model.query);
+    (menu.model, menu.title, menu.sheet) = (model, title, Some((profile, layer)));
+    let view = view_of(menu);
+    drop(guard);
+    log::info!("[menu] cheat sheet switched to {layer:?}");
+    if !crate::fake_mode() || crate::fake_popups() {
+        let _ = app.emit_to(WINDOW_LABEL, EVENT_SHOW, &view);
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -681,7 +802,7 @@ fn open_model(
     title: &str,
     model: Model,
     is_fg_elevated: bool,
-    sheet: Option<Vec<Vec<String>>>,
+    sheet: Option<(String, crate::config::Layer)>,
 ) {
     let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
     let anchor = platform::cursor_position();
@@ -718,12 +839,8 @@ fn open_model(
 fn view_of(menu: &OpenMenu) -> View {
     let mut view = menu.model.view(&menu.title, menu.generation);
     view.max_height = menu.max_height;
-    if let Some(extras) = &menu.sheet {
-        // A sheet has no search and no submenus: row N is side button N.
-        view.grid = true;
-        for (item, extras) in view.items.iter_mut().zip(extras) {
-            item.extras.clone_from(extras);
-        }
+    if let Some((_, layer)) = menu.sheet {
+        view.switch_layer = Some(crate::cheatsheet::layer_name(other_layer(layer)));
     }
     view.placeholder = crate::ui_text::native(&crate::ui_text!("menu.searchPlaceholder", "Search phrases…"));
     view.scope_all = crate::ui_text::native(&crate::ui_text!("menu.scopeAll", "All menus"));
@@ -885,6 +1002,23 @@ pub(crate) fn finish_pick(mode: PickMode, succeeded: bool, enter: impl FnOnce())
     }
 }
 
+/// "Insert and Enter" on an action that already ends with Enter (a phrase's
+/// `pressEnter`, a sequence whose last input is Enter) only runs it: a second
+/// Enter would submit twice.
+fn pick_mode_for(config: &AppConfig, action_id: &str, mode: PickMode) -> PickMode {
+    let presses_enter = config.actions.iter().find(|action| action.id == action_id).is_some_and(|action| match &action.payload {
+        ActionPayload::TextSnippet(payload) => payload.press_enter(),
+        ActionPayload::Sequence(payload) => payload
+            .steps
+            .iter()
+            .rev()
+            .find(|step| !matches!(step, SequenceStep::Sleep { .. }))
+            .is_some_and(|step| matches!(step, SequenceStep::Send { value, .. } if value.eq_ignore_ascii_case("enter"))),
+        _ => false,
+    });
+    if mode == PickMode::Enter && presses_enter { PickMode::Run } else { mode }
+}
+
 fn layout_height(height: f64, max_height: u32) -> u32 {
     height.ceil().max(1.0).min(f64::from(max_height.max(1))) as u32
 }
@@ -930,6 +1064,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
                 return;
             }
             let target_window = menu.target_window;
+            let mode = pick_mode_for(&menu.config, &action_id, mode);
             // Off the thread that got the pick: a click or Enter in the page comes
             // in on the main thread, which must not type a phrase (the window,
             // tray and popups would freeze meanwhile, and a window built there deadlocks).
@@ -1057,9 +1192,15 @@ pub(crate) fn close_from_window(app: &AppHandle) {
     drive(app, |model| model.apply(Input::Close));
 }
 
-/// A wheel tick or an arrow key in the page.
-pub(crate) fn wheel_from_window(app: &AppHandle, down: bool) {
-    drive(app, |model| model.apply(if down { Input::Next } else { Input::Prev }));
+/// A wheel tick or an arrow key in the page; `row`: ↑/↓, a row of a cheat sheet's grid.
+pub(crate) fn wheel_from_window(app: &AppHandle, down: bool, row: bool) {
+    let input = match (row, down) {
+        (false, true) => Input::Next,
+        (false, false) => Input::Prev,
+        (true, true) => Input::NextRow,
+        (true, false) => Input::PrevRow,
+    };
+    drive(app, |model| model.apply(input));
 }
 
 pub(crate) fn back_from_window(app: &AppHandle) {
@@ -1575,6 +1716,130 @@ mod tests {
         finish_pick(PickMode::Run, true, || enters += 1);
         finish_pick(PickMode::Copy, true, || enters += 1);
         assert_eq!(enters, 1);
+    }
+
+    #[test]
+    fn insert_and_enter_on_an_action_that_already_presses_enter_sends_no_second_enter() {
+        use crate::config::{PasteMode, SequenceActionPayload};
+        let mut config = crate::config::default_seed_config();
+        let template = config.actions[0].clone();
+        let add = |config: &mut AppConfig, id: &str, payload| {
+            let mut action = template.clone();
+            action.id = id.into();
+            action.payload = payload;
+            config.actions.push(action);
+        };
+        let inline = |press_enter| ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter, text: "ok".into(), paste_mode: PasteMode::SendText, tags: Vec::new() });
+        add(&mut config, "with-enter", inline(true));
+        add(&mut config, "plain", inline(false));
+        add(&mut config, "lib-enter", ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: true, snippet_id: "x".into() }));
+        add(&mut config, "seq-enter", ActionPayload::Sequence(SequenceActionPayload { steps: vec![
+            SequenceStep::Text { value: "ok".into(), delay_ms: None, repeat: None },
+            SequenceStep::Send { value: "Enter".into(), delay_ms: None, repeat: None },
+            SequenceStep::Sleep { delay_ms: 50 },
+        ] }));
+        add(&mut config, "seq-text", ActionPayload::Sequence(SequenceActionPayload { steps: vec![
+            SequenceStep::Send { value: "Enter".into(), delay_ms: None, repeat: None },
+            SequenceStep::Text { value: "ok".into(), delay_ms: None, repeat: None },
+        ] }));
+        for id in ["with-enter", "lib-enter", "seq-enter"] {
+            assert_eq!(pick_mode_for(&config, id, PickMode::Enter), PickMode::Run, "{id} already presses Enter");
+        }
+        for id in ["plain", "seq-text", "missing"] {
+            assert_eq!(pick_mode_for(&config, id, PickMode::Enter), PickMode::Enter, "{id} gets the popup's Enter");
+        }
+        assert_eq!(pick_mode_for(&config, "with-enter", PickMode::Copy), PickMode::Copy);
+    }
+
+    /// A cheat sheet of 12 cells: cells 2 and 5 (0-based 1, 4) are empty buttons.
+    fn sheet() -> Model {
+        let items = (1..=12)
+            .map(|n| MenuItem::Action {
+                id: format!("sheet-{n}"),
+                label: match n { 1 => "Copy".into(), 7 => "Paste".into(), 9 => "Принять".into(), 2 | 5 => String::new(), _ => format!("Cell {n}") },
+                action_id: format!("act-{n}"),
+                enabled: n != 2 && n != 5,
+                pinned: false,
+            })
+            .collect();
+        let mut extras = vec![Vec::new(); 12];
+        extras[10] = vec!["●● Screenshot".to_owned()];
+        let details = HashMap::from([("act-4".to_owned(), "git status".to_owned())]);
+        Model::sheet(items, details, extras)
+    }
+
+    #[test]
+    fn a_cheat_sheet_moves_by_rows_and_cells_and_skips_empty_buttons() {
+        let mut model = sheet();
+        assert_eq!(model.highlight, 0);
+        model.apply(Input::NextRow);
+        assert_eq!(model.highlight, 3, "↓ is the cell below");
+        model.apply(Input::NextRow);
+        assert_eq!(model.highlight, 6);
+        model.apply(Input::NextRow);
+        model.apply(Input::NextRow);
+        assert_eq!(model.highlight, 0, "wraps to the top of the column");
+        model.apply(Input::PrevRow);
+        assert_eq!(model.highlight, 9, "↑ from the top row wraps to the bottom");
+        model.apply(Input::Next);
+        assert_eq!(model.highlight, 10, "→ is the next cell");
+        model.highlight = 0;
+        model.apply(Input::Next);
+        assert_eq!(model.highlight, 2, "→ steps over an empty button");
+        model.highlight = 7; // the middle column, third row
+        model.apply(Input::PrevRow);
+        assert_eq!(model.highlight, 10, "↑ steps over the empty cells 5 and 2 of the column, wrapping");
+        let view = model.view("Sheet", 1);
+        assert!(view.grid);
+        assert_eq!(view.items[10].extras, ["●● Screenshot"]);
+        // A list keeps its one-item steps for ↑↓.
+        let mut list = sample();
+        list.apply(Input::NextRow);
+        assert_eq!(list.highlight, 2, "a list: the next enabled item");
+        assert!(!list.view("Phrases", 1).grid);
+    }
+
+    #[test]
+    fn typing_in_a_cheat_sheet_dims_the_cells_that_do_not_match() {
+        let mut model = sheet();
+        model.set_query("cell");
+        let view = model.view("Sheet", 1);
+        assert_eq!(view.items.len(), 12, "the cells stay in place");
+        assert!(view.items[0].dim && !view.items[2].dim);
+        assert_eq!(view.highlight, 2, "the first match");
+        assert_eq!(view.query, "cell");
+        model.apply(Input::Next);
+        assert_eq!(model.highlight, 3, "→ steps over dimmed cells");
+        model.set_query("past");
+        assert_eq!(model.highlight, 6, "the name");
+        assert_eq!(model.apply(Input::Confirm), Step::Run("act-7".into()), "Enter runs the match");
+        let mut model = sheet();
+        model.set_query("git");
+        assert_eq!(model.highlight, 3, "what it sends");
+        model.set_query("screen");
+        assert_eq!(model.highlight, 10, "another press pattern of the button");
+        model.set_query("ghbyznm");
+        assert_eq!(model.highlight, 8, "typed in the other keyboard layout");
+        model.set_query("Cell 1");
+        assert_eq!(model.highlight, 9, "of equal matches the first in grid order");
+        model.set_query("p");
+        assert_eq!(model.highlight, 6, "a name starting with the query (Paste) before an earlier one holding it (Copy)");
+        model.set_query("zzz");
+        let view = model.view("Sheet", 1);
+        assert!(view.items.iter().all(|item| item.dim));
+        assert_eq!(view.highlight, 12, "nothing highlighted");
+        assert_eq!(model.apply(Input::Confirm), Step::Stay, "Enter runs nothing");
+        assert_eq!(model.apply(Input::Back), Step::Stay, "back clears the query first");
+        assert!(model.view("Sheet", 1).items.iter().all(|item| !item.dim));
+        assert_eq!(model.apply(Input::Number(3)), Step::Run("act-4".into()), "side button N still picks cell N");
+    }
+
+    #[test]
+    fn tab_switches_a_cheat_sheet_between_standard_and_hypershift() {
+        use crate::config::Layer;
+        assert_eq!(other_layer(Layer::Standard), Layer::Hypershift);
+        assert_eq!(other_layer(Layer::Hypershift), Layer::Standard);
+        assert_eq!(other_layer(Layer::Hypershift2), Layer::Standard);
     }
 
     #[test]

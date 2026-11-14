@@ -43,9 +43,8 @@
     search = el("input");
     search.type = "text";
     search.spellcheck = false;
+    // In a cheat sheet the box is out of sight: typing dims the cells that do not match.
     search.addEventListener("input", function () {
-      // A cheat sheet has no search: the box only keeps the keyboard focus.
-      if (view && view.grid) { search.value = ""; return; }
       invoke("menu_search", { query: search.value });
     });
     search.addEventListener("keydown", onKey);
@@ -86,14 +85,24 @@
   }
 
   /** A cheat sheet: the mouse's 12 side buttons as its grid (3 across), each
-   *  cell its number, its action and its other press patterns. */
+   *  cell its number, its action and its other press patterns. The header
+   *  shows the typed query and the layer Tab switches to. */
   function buildGrid(rows) {
-    rows.appendChild(el("div", "sheet-title", view.title));
+    var head = el("div", "sheet-title");
+    head.appendChild(el("span", "sheet-title__name", view.title));
+    if (view.query) head.appendChild(el("span", "sheet-query", "⌕ " + view.query));
+    if (view.switchLayer) {
+      var hint = el("span", "sheet-switch");
+      hint.appendChild(el("kbd", null, "Tab"));
+      hint.appendChild(document.createTextNode(" " + view.switchLayer));
+      head.appendChild(hint);
+    }
+    rows.appendChild(head);
     view.items.forEach(function (item, index) {
-      var cell = el("div", "row cell" + (item.enabled ? "" : " item--off"));
+      var cell = el("div", "row cell" + (item.enabled ? "" : " item--off") + (item.dim ? " cell--dim" : ""));
       cell.appendChild(el("span", "key", String(item.number != null ? item.number : index + 1)));
       var body = el("div", "cell__body");
-      body.appendChild(el("span", "label", item.label || "—"));
+      body.appendChild(item.label ? labelNode(item.label, view.query) : el("span", "label", "—"));
       (item.extras || []).forEach(function (extra) { body.appendChild(el("span", "cell__extra", extra)); });
       cell.appendChild(body);
       if (item.enabled) cell.addEventListener("click", function () { invoke("menu_pick", { index: index }); });
@@ -296,9 +305,21 @@
     search.focus();
   }
 
+  /** A cheat sheet's keys: ↑↓ a row, ←→ a cell, Tab the other layer, Esc
+   *  clears the query first. False: not a grid key. */
+  function onGridKey(event) {
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") invoke("menu_wheel", { down: event.key === "ArrowDown", row: true });
+    else if (event.key === "ArrowRight" || event.key === "ArrowLeft") invoke("menu_wheel", { down: event.key === "ArrowRight" });
+    else if (event.key === "Tab") invoke("menu_sheet_layer");
+    else if (event.key === "Escape" && view.query) invoke("menu_search", { query: "" });
+    else return false;
+    return true;
+  }
+
   function onKey(event) {
     var handled = true;
-    if (event.key === "ArrowDown") invoke("menu_wheel", { down: true });
+    if (view && view.grid && onGridKey(event)) handled = true;
+    else if (event.key === "ArrowDown") invoke("menu_wheel", { down: true });
     else if (event.key === "ArrowUp") invoke("menu_wheel", { down: false });
     else if (event.key === "Enter") invoke("menu_confirm");
     else if (event.key === "Escape") invoke("menu_close");
@@ -318,7 +339,7 @@
     if (!moved) return;
     var row = event.target.closest && event.target.closest(".row");
     var index = items.indexOf(row);
-    if (index >= 0 && index !== highlight && !row.classList.contains("item--off")) {
+    if (index >= 0 && index !== highlight && !row.classList.contains("item--off") && !row.classList.contains("cell--dim")) {
       invoke("menu_hover", { index: index });
     }
   });

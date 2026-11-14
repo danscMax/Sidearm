@@ -1,8 +1,11 @@
 # Sidearm Dev Server (auto-restart on crash)
-# Usage: .\dev.ps1 or double-click dev.bat
+# Usage: .\dev.ps1 [-Clean] [-NoWatch] or double-click dev.bat (it passes the same switches)
+#   -NoWatch  no restart on each saved file (cargo tauri dev --no-watch): a restart kills
+#             the app mid-run and can leave the mice with Sidearm's signals
 
 param(
-    [switch]$Clean  # Force full recompile
+    [switch]$Clean,   # Force full recompile
+    [switch]$NoWatch  # Build once; do not rebuild/restart on file changes
 )
 
 chcp 65001 | Out-Null
@@ -94,9 +97,10 @@ while ($true) {
     Write-Info "Waiting for cleanup..."
     Start-Sleep -Seconds 3
 
-    Write-Ok "Starting cargo tauri dev"
+    $devArgs = @('tauri', 'dev') + @(if ($NoWatch) { '--no-watch' })
+    Write-Ok "Starting cargo $($devArgs -join ' ')"
     Set-Location $PROJECT_DIR
-    & cargo tauri dev
+    & cargo @devArgs
 
     Write-Host ""
     Write-Warn "Dev server exited. Restarting in 5s... (Ctrl+C to stop)"

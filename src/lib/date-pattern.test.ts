@@ -1,19 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { DATE_TOKENS, formatDatePattern, patternOf } from "./date-pattern";
+// Shared with the Rust test of input_synthesis::format_date_pattern: both must agree.
+import fixture from "../../tools/fixtures/date-patterns.json";
 
-const months = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"];
-const now = new Date(2026, 10, 4, 9, 5, 7);
+const { year, month, day, hour, minute, second } = fixture.moment;
+const now = new Date(year, month - 1, day, hour, minute, second);
 
-describe("date patterns (same cases as the Rust test)", () => {
-  it("fills every part and keeps other letters", () => {
-    expect(formatDatePattern("dd.MM.yyyy", now, months)).toBe("04.11.2026");
-    expect(formatDatePattern("d MMMM yyyy", now, months)).toBe("4 ноября 2026");
-    expect(formatDatePattern("dd.MM.yy HH:mm:ss", now, months)).toBe("04.11.26 09:05:07");
-    expect(formatDatePattern("[ддд]", now, months)).toBe("[ддд]");
+describe("date patterns (tools/fixtures/date-patterns.json, same as the Rust test)", () => {
+  it.each(fixture.patterns)("fills $pattern", ({ pattern, expected }) => {
+    expect(formatDatePattern(pattern, now, fixture.months)).toBe(expected);
   });
 
   it("knows each offered token's pattern", () => {
-    expect(DATE_TOKENS.map((token) => formatDatePattern(patternOf(token), now, months)))
-      .toEqual(["2026-11-04", "04.11.2026", "04.11.26", "4 ноября 2026", "09:05", "04.11.2026 09:05"]);
+    expect([...DATE_TOKENS]).toEqual(fixture.tokens.map((entry) => entry.token));
+    for (const { token, expected } of fixture.tokens) {
+      expect(formatDatePattern(patternOf(token), now, fixture.months), token).toBe(expected);
+    }
   });
 });

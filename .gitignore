@@ -65,6 +65,8 @@ FIXES_*.md
 
 # Playwright / smoke-test artifacts
 output/
+# UI check config copy (may be a real config: never commit)
+tools/ui-check/config.js
 Sidearm-Portable-v*.zip
 release-notes-v*.md
 

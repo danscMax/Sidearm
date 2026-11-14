@@ -1,0 +1,22 @@
+{
+  "moment": { "year": 2026, "month": 11, "day": 4, "hour": 9, "minute": 5, "second": 7 },
+  "months": ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"],
+  "patterns": [
+    { "pattern": "yyyy-MM-dd", "expected": "2026-11-04" },
+    { "pattern": "dd.MM.yyyy", "expected": "04.11.2026" },
+    { "pattern": "d MMMM yyyy", "expected": "4 ноября 2026" },
+    { "pattern": "dd.MM.yy HH:mm:ss", "expected": "04.11.26 09:05:07" },
+    { "pattern": "M/d H", "expected": "11/4 9" },
+    { "pattern": "MMMMyy", "expected": "ноября26" },
+    { "pattern": "[ддд] Q", "expected": "[ддд] Q" },
+    { "pattern": "", "expected": "" }
+  ],
+  "tokens": [
+    { "token": "{date}", "expected": "2026-11-04" },
+    { "token": "{date:dd.MM.yyyy}", "expected": "04.11.2026" },
+    { "token": "{date:dd.MM.yy}", "expected": "04.11.26" },
+    { "token": "{date:d MMMM yyyy}", "expected": "4 ноября 2026" },
+    { "token": "{time}", "expected": "09:05" },
+    { "token": "{date:dd.MM.yyyy HH:mm}", "expected": "04.11.2026 09:05" }
+  ]
+}

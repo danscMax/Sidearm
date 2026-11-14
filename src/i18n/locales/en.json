@@ -1310,14 +1310,24 @@
     "bindingCount_other": "{{count}} bindings",
     "submitting": "Importing…",
     "configChanged": "Settings changed during import. The import was not applied. Try again.",
-    "summaryToast": "Imported: {{profiles}} profiles, {{bindings}} bindings, {{actions}} actions, {{macros}} macros",
+    "summaryToast": "Imported: {{profiles}}, {{bindings}}, {{actions}}, {{macros}}",
     "strategy": {
       "legend": "Merge strategy",
       "append": "Append as new",
       "appendHint": "Name collisions get an (import) suffix.",
       "replaceByName": "Replace by name",
       "replaceByNameHint": "Any existing profile with the same name is deleted along with its bindings."
-    }
+    },
+    "summarySkipped": "{{summary}} · skipped: {{count}}",
+    "profileCount_one": "{{count}} profile",
+    "profileCount_other": "{{count}} profiles",
+    "actionCount_one": "{{count}} action",
+    "actionCount_other": "{{count}} actions",
+    "macroCount_one": "{{count}} macro",
+    "macroCount_other": "{{count}} macros",
+    "warningRepeat": "×{{count}}",
+    "notesTitle": "What the import left out",
+    "notesShow": "Details"
   },
   "portable": {
     "badge": {

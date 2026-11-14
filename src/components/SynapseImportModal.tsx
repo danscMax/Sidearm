@@ -8,20 +8,72 @@ import {
 } from "../lib/backend";
 import { toggleInSet } from "../lib/helpers";
 import { displayNameForControlId } from "../lib/labels";
+import type { TFunction } from "i18next";
 import {
   describeParsedAction,
+  groupWarnings,
   type ImportSummary,
+  type ImportWarning,
   type MergeStrategy,
   type ParsedSynapseProfiles,
 } from "../lib/synapse-import";
 import { ModalFooter, ModalHeader, ModalShell } from "./shared";
+
+/** Most distinct warnings listed; the rest are counted. */
+const WARNINGS_SHOWN = 30;
+
+/** Import warnings: each distinct message once (×N when repeated), its code as the tooltip. */
+export function ImportWarningList({ warnings }: { warnings: readonly ImportWarning[] }) {
+  const { t } = useTranslation();
+  const groups = groupWarnings(warnings);
+  return (
+    <ul>
+      {groups.slice(0, WARNINGS_SHOWN).map((group) => (
+        <li key={group.message} title={group.code}>
+          {group.message}
+          {group.count > 1 ? <span className="panel__muted"> {t("synapseImport.warningRepeat", { count: group.count })}</span> : null}
+        </li>
+      ))}
+      {groups.length > WARNINGS_SHOWN ? (
+        <li className="panel__muted">{t("synapseImport.warningsMore", { count: groups.length - WARNINGS_SHOWN })}</li>
+      ) : null}
+    </ul>
+  );
+}
+
+/** "Imported: 2 profiles, 5 bindings, …" with each count declined, and what was skipped. */
+export function importSummaryMessage(t: TFunction, summary: ImportSummary): string {
+  const text = t("synapseImport.summaryToast", {
+    profiles: t("synapseImport.profileCount", { count: summary.profilesAdded }),
+    bindings: t("synapseImport.bindingCount", { count: summary.bindingsAdded }),
+    actions: t("synapseImport.actionCount", { count: summary.actionsAdded }),
+    macros: t("synapseImport.macroCount", { count: summary.macrosAdded }),
+  });
+  return summary.skipped > 0 ? t("synapseImport.summarySkipped", { summary: text, count: summary.skipped }) : text;
+}
+
+/** What the merge itself reported (oversized macros, duplicates, …), after the import. */
+export function SynapseImportNotesModal({ warnings, onClose }: { warnings: readonly ImportWarning[]; onClose: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <ModalShell onClose={onClose} className="confirm-modal synapse-import-modal" ariaLabelledby="synapse-import-notes-title">
+      <ModalHeader id="synapse-import-notes-title" title={t("synapseImport.notesTitle")} onClose={onClose} closeLabel={t("common.close")} />
+      <div className="synapse-import-modal__body synapse-import-warnings">
+        <ImportWarningList warnings={warnings} />
+      </div>
+      <ModalFooter>
+        <button type="button" className="action-button action-button--accent" onClick={onClose}>{t("common.close")}</button>
+      </ModalFooter>
+    </ModalShell>
+  );
+}
 
 export interface SynapseImportModalProps {
   parsed: ParsedSynapseProfiles;
   activeConfig: AppConfig;
   /** Null while an external reload is pending; changes before React commits it. */
   getConfigRevision?: () => number | null;
-  onImported: (next: AppConfig, summary: ImportSummary) => void;
+  onImported: (next: AppConfig, summary: ImportSummary, warnings: ImportWarning[]) => void;
   onCancel: () => void;
   setError: (error: CommandError | null) => void;
 }
@@ -87,7 +139,7 @@ export function SynapseImportModal({
         setError({ code: "config_changed_on_disk", message: t("synapseImport.configChanged") });
         return;
       }
-      onImported(result.config, result.summary);
+      onImported(result.config, result.summary, result.warnings);
     } catch (unknownError) {
       setError(normalizeCommandError(unknownError));
     } finally {
@@ -225,13 +277,7 @@ export function SynapseImportModal({
                   count: parsed.warnings.length,
                 })}
               </summary>
-              <ul>
-                {parsed.warnings.map((w, i) => (
-                  <li key={i}>
-                    <code>[{w.code}]</code> {w.message}
-                  </li>
-                ))}
-              </ul>
+              <ImportWarningList warnings={parsed.warnings} />
             </details>
           ) : null}
         </div>

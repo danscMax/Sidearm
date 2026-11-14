@@ -1332,14 +1332,30 @@
     "bindingCount_other": "{{count}} назначения",
     "submitting": "Импорт…",
     "configChanged": "Настройки изменились во время импорта. Импорт не применён. Повторите попытку.",
-    "summaryToast": "Импортировано: {{profiles}} профилей, {{bindings}} назначений, {{actions}} действий, {{macros}} макросов",
+    "summaryToast": "Импортировано: {{profiles}}, {{bindings}}, {{actions}}, {{macros}}",
     "strategy": {
       "legend": "Стратегия слияния",
       "append": "Добавить как новые",
       "appendHint": "Имена-коллизии получат суффикс (импорт).",
       "replaceByName": "Заменить по имени",
       "replaceByNameHint": "Если профиль с таким именем уже есть — он будет удалён вместе со своими назначениями."
-    }
+    },
+    "summarySkipped": "{{summary}} · пропущено: {{count}}",
+    "profileCount_one": "{{count}} профиль",
+    "profileCount_few": "{{count}} профиля",
+    "profileCount_many": "{{count}} профилей",
+    "profileCount_other": "{{count}} профиля",
+    "actionCount_one": "{{count}} действие",
+    "actionCount_few": "{{count}} действия",
+    "actionCount_many": "{{count}} действий",
+    "actionCount_other": "{{count}} действия",
+    "macroCount_one": "{{count}} макрос",
+    "macroCount_few": "{{count}} макроса",
+    "macroCount_many": "{{count}} макросов",
+    "macroCount_other": "{{count}} макроса",
+    "warningRepeat": "×{{count}}",
+    "notesTitle": "Что импорт пропустил",
+    "notesShow": "Подробнее"
   },
   "portable": {
     "badge": {

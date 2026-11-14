@@ -4,7 +4,7 @@ import i18n from "../i18n";
 import * as backend from "../lib/backend";
 import { makeConfig } from "../lib/test-fixtures";
 import type { ImportedConfig, ParsedSynapseProfiles } from "../lib/synapse-import";
-import { SynapseImportModal } from "./SynapseImportModal";
+import { importSummaryMessage, SynapseImportModal } from "./SynapseImportModal";
 
 vi.mock("../lib/backend", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/backend")>(),
@@ -37,7 +37,7 @@ it("rejects a delayed import when its config base changed and permits an explici
   vi.mocked(backend.importSynapseIntoConfig).mockResolvedValueOnce({ config: latest, summary, warnings: [] });
   await act(async () => fireEvent.click(screen.getByRole("button", { name: /Import.*1/i })));
   expect(backend.importSynapseIntoConfig).toHaveBeenLastCalledWith(parsed, expect.anything(), latest);
-  expect(onImported).toHaveBeenCalledWith(latest, summary);
+  expect(onImported).toHaveBeenCalledWith(latest, summary, []);
 });
 
 it("applies an import whose config base is still current", async () => {
@@ -47,7 +47,7 @@ it("applies an import whose config base is still current", async () => {
   const setError = vi.fn();
   render(<SynapseImportModal parsed={parsed} activeConfig={base} onImported={onImported} setError={setError} onCancel={vi.fn()} />);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: /Import.*1/i })));
-  expect(onImported).toHaveBeenCalledWith(base, summary);
+  expect(onImported).toHaveBeenCalledWith(base, summary, []);
   expect(setError).not.toHaveBeenCalled();
 });
 
@@ -94,4 +94,25 @@ it("does not start an import while an external reload is pending", () => {
   fireEvent.click(screen.getByRole("button", { name: /Import.*1/i }));
   expect(backend.importSynapseIntoConfig).not.toHaveBeenCalled();
   expect(setError).toHaveBeenCalledWith({ code: "config_changed_on_disk", message: i18n.t("synapseImport.configChanged") });
+});
+
+it.each([
+  ["en", { profilesAdded: 1, bindingsAdded: 2, actionsAdded: 1, macrosAdded: 0, skipped: 0 }, "Imported: 1 profile, 2 bindings, 1 action, 0 macros"],
+  ["ru", { profilesAdded: 1, bindingsAdded: 2, actionsAdded: 5, macrosAdded: 21, skipped: 3 }, "Импортировано: 1 профиль, 2 назначения, 5 действий, 21 макрос · пропущено: 3"],
+])("declines every count of the summary in %s and names what was skipped", async (language, counts, text) => {
+  await i18n.changeLanguage(language);
+  expect(importSummaryMessage(i18n.t, counts)).toBe(text);
+});
+
+it("hands the merge's own warnings to the caller and lists parse warnings once each", async () => {
+  const base = makeConfig();
+  const warning = { code: "macro_too_long", message: "Macro `Long` was skipped." };
+  vi.mocked(backend.importSynapseIntoConfig).mockResolvedValueOnce({ config: base, summary, warnings: [warning] });
+  const onImported = vi.fn();
+  const noisy = { ...parsed, warnings: [warning, warning, { code: "x", message: "Other" }] };
+  render(<SynapseImportModal parsed={noisy} activeConfig={base} onImported={onImported} setError={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getAllByText(/Macro `Long` was skipped\./)).toHaveLength(1);
+  expect(screen.getByText("×2")).toBeTruthy();
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: /Import.*1/i })));
+  expect(onImported).toHaveBeenCalledWith(base, summary, [warning]);
 });

@@ -1181,7 +1181,9 @@
     "pressEnterAfter": "Press Enter after the text",
     "pressEnterAfterHint": "A short pause and Enter after the text — to send a command in a terminal or chat right away. Saved as a “text → pause → Enter” macro, whose steps the Macro category shows too. Typing key by key is not available with Enter.",
     "undo": "Undo (Ctrl+Z)",
-    "redo": "Redo (Ctrl+Y)"
+    "redo": "Redo (Ctrl+Y)",
+    "syncOther": "The same on {{mice}}",
+    "syncOtherHint": "This button is alike on both mice: an edit here is repeated on the same button of the other mouse (and back). Turning it on copies this assignment there. The general “Keep the mice alike” setting is the default."
   },
   "assignments": {
     "copyBinding": "Copy binding",

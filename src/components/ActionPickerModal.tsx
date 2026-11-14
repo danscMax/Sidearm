@@ -27,8 +27,11 @@ import { MenuItemsEditor } from "./MenuItemsEditor";
 import { CategoryIcon } from "./icons";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
-import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice, SelectField } from "./shared";
+import { CloseButton, HelpTip, ModalFooter, ModalShell, Notice, SelectField, Toggle } from "./shared";
 import { historyKey, useDraftHistory } from "../hooks/useDraftHistory";
+import { copySlotToOtherMice, slotKey, slotSynced, withSlotSync } from "../lib/device-transfer";
+import { gestureOf } from "../lib/config-editing";
+import { deviceLayout } from "../lib/devices";
 import {
   autoName,
   buildAction,
@@ -403,8 +406,27 @@ export function ActionPickerModal({
     return nextConfig;
   }
 
+  // "The same on the other mouse": this button's edits repeated on the same
+  // place of the other built-in mice (settings.syncSlots over syncMice).
+  const ownDevice = controlId ? config.physicalControls.find((control) => control.id === controlId)?.deviceId : undefined;
+  const otherMice = ownDevice && deviceLayout(ownDevice)
+    ? config.devices.filter((device) => device.builtin && device.id !== ownDevice && deviceLayout(device.id))
+    : [];
+  const syncKey = otherMice.length > 0 && profileId && selectedLayer && controlId ? slotKey(profileId, selectedLayer, gesture, controlId) : null;
+  const [syncDraft, setSyncDraft] = useState(() => (syncKey ? slotSynced(config.settings, syncKey) : false));
+
+  /** The save with the sync choice applied; turned on, the button is copied
+   *  onto the other mice at once. */
+  function withSync(next: AppConfig | null): AppConfig | null {
+    if (!next || !syncKey || syncDraft === slotSynced(config.settings, syncKey)) return next;
+    const synced = withSlotSync(next, syncKey, syncDraft);
+    const own = synced.bindings.find((binding) => binding.profileId === profileId && binding.layer === selectedLayer
+      && binding.controlId === controlId && gestureOf(binding.triggerMode) === gesture);
+    return syncDraft && own ? copySlotToOtherMice(synced, own.id) : synced;
+  }
+
   function handleSave() {
-    const next = buildSave();
+    const next = withSync(buildSave());
     if (next) onSave(next);
   }
 
@@ -412,7 +434,7 @@ export function ActionPickerModal({
    *  closing), so several patterns can be set in one go. */
   function switchGesture(next: Gesture) {
     if (next === gesture || !onGestureChange) return;
-    const saved = saveDisabled ? null : buildSave();
+    const saved = saveDisabled ? null : withSync(buildSave());
     if (saved && saved !== config) onApply?.(saved);
     onGestureChange(next);
   }
@@ -807,6 +829,13 @@ export function ActionPickerModal({
         ) : null}
 
         <ModalFooter className="action-picker__footer">
+          {syncKey ? (
+            <span className="action-picker__sync">
+              <Toggle checked={syncDraft} onChange={setSyncDraft} ariaLabel={t("picker.syncOther", { mice: otherMice.map((device) => device.name).join(", ") })} />
+              <span>{t("picker.syncOther", { mice: otherMice.map((device) => device.name).join(", ") })}</span>
+              <HelpTip text={t("picker.syncOtherHint")} />
+            </span>
+          ) : null}
           <div className="action-picker__history">
             <button type="button" className="action-button action-button--ghost" onClick={history.undo}
               disabled={!history.canUndo} aria-label={t("picker.undo")} title={t("picker.undo")}>↶</button>

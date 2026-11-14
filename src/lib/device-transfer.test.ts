@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AppConfig, Binding, PhysicalControl } from "./config";
 import { RAZER_NAGA_DEVICE_ID } from "./config";
 import { NAGA_V3_DEVICE_ID } from "./devices";
-import { applyDeviceTransfer, applyHoldOffers, mirrorMouseEdit, planDeviceTransfer, planHoldsFromHypershift2, retargetImportedBindings } from "./device-transfer";
+import { applyDeviceTransfer, applyHoldOffers, copySlotToOtherMice, mirrorMouseEdit, planDeviceTransfer, planHoldsFromHypershift2, retargetImportedBindings, slotKey, withSlotSync } from "./device-transfer";
 import { makeAction, makeConfig } from "./test-fixtures";
 
 const control = (id: string, deviceId: string): PhysicalControl => ({
@@ -112,6 +112,28 @@ describe("keeping the mice alike", () => {
     change(next);
     return mirrorMouseEdit(config, next);
   };
+
+  it("keeps one button alike, or one apart, over the general choice", () => {
+    const base = synced([]);
+    base.settings.syncMice = false;
+    const key = slotKey("p1", "standard", "press", "v3_wheel_left");
+    const one = withSlotSync(base, key, true);
+    expect(one.settings.syncSlots).toEqual({ [key]: true });
+    const next = edit(one, (draft) => draft.bindings.push(binding("new", "v3_wheel_left"), binding("other", "v3_thumb_01")));
+    expect(next.bindings.map((item) => item.controlId).sort()).toEqual(["mouse_4", "v3_thumb_01", "v3_wheel_left"], "only the synced button is repeated");
+    const apart = withSlotSync({ ...one, settings: { ...one.settings, syncMice: true } }, key, false);
+    const skipped = edit(apart, (draft) => draft.bindings.push(binding("new", "v3_wheel_left")));
+    expect(skipped.bindings.map((item) => item.controlId)).toEqual(["v3_wheel_left"]);
+    expect(withSlotSync(one, key, false).settings.syncSlots).toBeUndefined();
+  });
+
+  it("copies a button onto the other mouse when it is synced now", () => {
+    const config = synced([binding("v3", "v3_wheel_left"), binding("v2", "mouse_4", { actionId: "old" })]);
+    config.actions.push({ ...config.actions[0]!, id: "old" });
+    config.settings.syncMice = false;
+    const next = copySlotToOtherMice(withSlotSync(config, slotKey("p1", "standard", "press", "v3_wheel_left"), true), "v3");
+    expect(next.bindings.find((item) => item.controlId === "mouse_4")?.actionId).toBe("a1");
+  });
 
   it("repeats a new assignment on the same place of the other mouse, sharing its action", () => {
     const config = synced([]);

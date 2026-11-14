@@ -224,7 +224,33 @@ export function retargetImportedBindings(
   return { config: { ...config, bindings, encoderMappings }, dropped: droppedBindings.length, droppedBindings };
 }
 
-/* ── Keeping the mice alike (`Settings.syncMice`) ── */
+/* ── Keeping the mice alike (`Settings.syncMice`, per button `syncSlots`) ── */
+
+/** A button's place on every mouse: profile, layer, press pattern and the layout id they share. */
+export function slotKey(profileId: string, layer: Layer, gesture: string, controlId: ControlId): string {
+  return [profileId, layer, gesture, sharedPlace(controlId)].join("|");
+}
+
+/** Whether edits of the button at `key` are repeated on the other mice. */
+export function slotSynced(settings: AppConfig["settings"], key: string): boolean {
+  return settings.syncSlots?.[key] ?? settings.syncMice ?? false;
+}
+
+/** `config` with the button at `key` synced or not; a choice equal to the
+ *  general one is not stored. */
+export function withSlotSync(config: AppConfig, key: string, on: boolean): AppConfig {
+  const { [key]: _old, ...rest } = config.settings.syncSlots ?? {};
+  const slots = on === (config.settings.syncMice ?? false) ? rest : { ...rest, [key]: on };
+  const { syncSlots: _was, ...settings } = config.settings;
+  return { ...config, settings: Object.keys(slots).length > 0 ? { ...settings, syncSlots: slots } : settings };
+}
+
+/** The button `bindingId` copied onto the same place of the other mice now (it
+ *  was just synced): its edit is then repeated as if it had been made there. */
+export function copySlotToOtherMice(config: AppConfig, bindingId: string): AppConfig {
+  if (!config.bindings.some((binding) => binding.id === bindingId)) return config;
+  return mirrorMouseEdit({ ...config, bindings: config.bindings.filter((binding) => binding.id !== bindingId) }, config);
+}
 
 /** Whether a layer exists on a mouse: HyperShift 2 and HS + HS2 need a HyperShift 2 button. */
 function hasLayer(deviceId: string, layer: Layer): boolean {
@@ -258,7 +284,7 @@ function slotsOf(config: AppConfig, deviceId: string, actions: ReadonlyMap<strin
   const slots = new Map<string, { binding: Binding; sig: string }>();
   for (const binding of config.bindings) {
     if (!onMouse.has(binding.controlId)) continue;
-    const key = [binding.profileId, binding.layer, gestureOf(binding.triggerMode), sharedPlace(binding.controlId)].join("|");
+    const key = slotKey(binding.profileId, binding.layer, gestureOf(binding.triggerMode), binding.controlId);
     slots.set(key, { binding, sig: signature(binding, actions) });
   }
   return slots;
@@ -274,7 +300,8 @@ function slotsOf(config: AppConfig, deviceId: string, actions: ReadonlyMap<strin
  */
 export function mirrorMouseEdit(previous: AppConfig, next: AppConfig): AppConfig {
   // Nothing of the assignments changed (a setting, a profile name): nothing to repeat.
-  if (!next.settings.syncMice || (previous.bindings === next.bindings && previous.actions === next.actions)) return next;
+  const anySynced = next.settings.syncMice || Object.values(next.settings.syncSlots ?? {}).some(Boolean);
+  if (!anySynced || (previous.bindings === next.bindings && previous.actions === next.actions)) return next;
   const mice = next.devices.filter((device) => device.builtin && deviceLayout(device.id)).map((device) => device.id);
   if (mice.length < 2) return next;
   const before = new Map(previous.actions.map((action) => [action.id, action]));
@@ -290,6 +317,7 @@ export function mirrorMouseEdit(previous: AppConfig, next: AppConfig): AppConfig
   const added: Binding[] = [];
   for (const from of mice) {
     for (const key of changed.get(from)!) {
+      if (!slotSynced(next.settings, key)) continue;
       const source = now.get(from)!.get(key)?.binding;
       const sourceControl = source?.controlId ?? old.get(from)!.get(key)!.binding.controlId;
       for (const to of mice) {

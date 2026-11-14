@@ -84,6 +84,8 @@ export interface Settings {
   showBatteryInTray?: boolean;
   /** Repeat an assignment edit of one built-in mouse on the others (owner's two mice). */
   syncMice?: boolean;
+  /** Per button (`slotKey`): whether its edits are repeated on the other mice, over `syncMice`. */
+  syncSlots?: Record<string, boolean>;
   /** Show the name of each action run in the OSD bubble. */
   osdActions?: boolean;
   /** Hold the HyperShift 2 trigger 1 s: its grid shows at the cursor. */

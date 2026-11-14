@@ -4004,8 +4004,11 @@ code {
   padding: 12px 20px 16px;
   border-top: 1px solid var(--c-border);
 }
+/* "The same on the other mouse" for this button, at the footer's left. */
+.action-picker__sync { display: inline-flex; align-items: center; gap: 8px; color: var(--c-text-muted); font-size: var(--fs-body-sm); }
 /* Undo / redo of the picker's edits, at the footer's left. */
 .action-picker__history { display: flex; gap: 2px; margin-right: auto; }
+.action-picker__sync + .action-picker__history { margin-left: 12px; }
 .action-picker__history .action-button { min-width: 40px; font-size: 1.15em; }
 
 .capture-row {

@@ -15,15 +15,15 @@ use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows_sys::Win32::UI::WindowsAndMessaging::{IsIconic, IsWindowVisible, SIZE_MINIMIZED, WM_SHOWWINDOW, WM_SIZE};
 
 /// Folders of the Chromium profile that hold no user state: the HTTP cache, V8's
-/// code cache, the GPU shader cache, crash dumps and the component updater's
-/// downloads. Chromium rebuilds each on demand. `Default\Local Storage` and
-/// `Default\IndexedDB` (the UI's own state) are never touched.
-const CACHE_DIRS: [&str; 5] = [
+/// code cache, the GPU shader cache and crash dumps. Chromium rebuilds each on
+/// demand. Not `component_crx_cache`: its downloads would come again on every
+/// start. `Default\Local Storage` and `Default\IndexedDB` (the UI's own state)
+/// are never touched.
+const CACHE_DIRS: [&str; 4] = [
     r"Default\Cache",
     r"Default\Code Cache",
     "GrShaderCache",
     r"Crashpad\reports",
-    "component_crx_cache",
 ];
 
 /// Empties [`CACHE_DIRS`] in the WebView2 user data folder `user_data` (WebView2
@@ -38,16 +38,23 @@ pub fn clear_caches(user_data: &Path) -> Option<String> {
     if lock.exists() && std::fs::OpenOptions::new().write(true).open(&lock).is_err() {
         return Some("[webview] profile in use by another process: caches kept".into());
     }
-    let mut removed = Vec::new();
+    let (mut removed, mut kept) = (Vec::new(), Vec::new());
     for dir in CACHE_DIRS {
         match std::fs::remove_dir_all(profile.join(dir)) {
-            Ok(()) => removed.push(dir),
+            Ok(()) => removed.push(dir.to_owned()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            // A file held by something else: the rest is gone, that much stays.
-            Err(error) => return Some(format!("[webview] cache `{dir}` not emptied: {error}")),
+            // A file held by something else (a scanner): this one stays, the next are still tried.
+            Err(error) => kept.push(format!("`{dir}` ({error})")),
         }
     }
-    (!removed.is_empty()).then(|| format!("[webview] caches emptied: {}", removed.join(", ")))
+    let mut lines = Vec::new();
+    if !removed.is_empty() {
+        lines.push(format!("[webview] caches emptied: {}", removed.join(", ")));
+    }
+    if !kept.is_empty() {
+        lines.push(format!("[webview] caches not emptied: {}", kept.join(", ")));
+    }
+    (!lines.is_empty()).then(|| lines.join("; "))
 }
 
 thread_local! {

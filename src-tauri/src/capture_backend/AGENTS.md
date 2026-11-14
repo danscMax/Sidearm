@@ -16,7 +16,7 @@ The low-level input hooks and the Razer-encoding detector: turns raw key events 
 
 ## Local Contracts
 
-- File log: one line per press, never per auto-repeat (`Key-down received` skips repeats; a held hold-shortcut's repeats log nothing — its hold-down and `released` lines bound it); a key-up without a hold is only `Key-up received`.
+- File log: one line per press and, of a hold's auto-repeats, only the first (`Key-down received … repeat: true`, `first_of_hold`, reset at key-up — a key whose key-up was lost turns every later press into a repeat, and that line says why it did nothing); a held hold-shortcut's repeats log nothing else — its hold-down and `released` lines bound it; a key-up without a hold is only `Key-up received`.
 - While a shortcut is recorded in Sidearm's own foreground window, only direct `dpiUp`/`dpiDown` mouse actions run. Outside recording, its buttons work on the fallback profile.
 - Once the exit began (`crate::is_shutting_down`) no press is dispatched (`Not dispatched …: exiting`), like the capture-mode suppression; key-ups still run.
 - Capture-mode suppression cancels pending gestures on both the event and clock paths; existing hold key-ups still release. Settled gestures share the ordinary press's binding throttle; real holds and picks inside an already-open menu keep their existing exemptions.

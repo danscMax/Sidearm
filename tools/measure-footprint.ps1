@@ -29,8 +29,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $Exe = (Resolve-Path -LiteralPath $Exe).Path
-# The env var name only exists in a build with the `fake-mice` feature.
-if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains('SIDEARM_FAKE_MICE')) {
+# SIDEARM_FAKE_POPUPS is only read by a build with the `fake-mice` feature
+# (SIDEARM_FAKE_MICE is in every build: the mutex scoping reads it).
+if (-not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($Exe)).Contains('SIDEARM_FAKE_POPUPS')) {
   throw "$Exe is not a fake-mice build: it would drive the real mice."
 }
 

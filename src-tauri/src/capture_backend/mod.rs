@@ -234,6 +234,14 @@ enum HeldMatch {
 /// treats `"F3"` as a suffix of `"Ctrl+F13"`), and MUST be unique: releasing the
 /// wrong held shortcut leaves the intended one physically stuck, so an ambiguous
 /// base (2+ holds sharing the same base key) refuses to release any.
+/// Keys whose first auto-repeat of the current hold was logged (cleared on key-up).
+static REPEAT_LOGGED: std::sync::LazyLock<Mutex<std::collections::HashSet<String>>> = std::sync::LazyLock::new(|| Mutex::new(std::collections::HashSet::new()));
+
+/// A press is logged, and of a hold's auto-repeats only the first.
+fn first_of_hold(key: &str, repeat: bool) -> bool {
+    !repeat || REPEAT_LOGGED.lock().unwrap_or_else(|poison| poison.into_inner()).insert(key.to_owned())
+}
+
 fn select_held_key<'a>(held_keys: impl Iterator<Item = &'a str>, encoded_key: &str) -> HeldMatch {
     let base = encoded_key.rsplit('+').next().unwrap_or(encoded_key);
     let mut exact: Option<String> = None;
@@ -482,10 +490,11 @@ fn process_encoded_key_event(
     let _ = app.emit(EVENT_ENCODED_KEY_RECEIVED, &event);
 
     // Mirrors "Key-up received": without it a press that never reaches dispatch
-    // leaves only its key-up in the file log. Auto-repeats are left out: a held
-    // button repeats ~30 times a second (78k lines a day measured), and a repeat
-    // that runs an action logs its own dispatch.
-    if !event.is_key_up && !event.is_repeat {
+    // leaves only its key-up in the file log. Of a held button's auto-repeats
+    // (~30 a second, 78k lines a day measured) only the first is logged: a key
+    // whose key-up was lost makes every later press a repeat, and that line
+    // still says why such a press did nothing.
+    if !event.is_key_up && first_of_hold(&event.encoded_key, event.is_repeat) {
         log::info!(
             "[capture] Key-down received for {} (hypershift: {}, hypershift2: {}, repeat: {})",
             event.encoded_key,
@@ -493,6 +502,9 @@ fn process_encoded_key_event(
             event.is_hypershift2,
             event.is_repeat
         );
+    }
+    if event.is_key_up {
+        REPEAT_LOGGED.lock().unwrap_or_else(|poison| poison.into_inner()).remove(&event.encoded_key);
     }
 
     // Live-capture/test mode: the UI just observed the raw key above; do NOT
@@ -1607,6 +1619,16 @@ fn emit_runtime_error(
 mod dispatch_regression_tests {
     use super::*;
     use std::time::{Duration, Instant};
+
+    #[test]
+    fn of_a_holds_repeats_only_the_first_is_logged_again_after_its_key_up() {
+        let key = "Test+F99";
+        assert!(first_of_hold(key, false), "a press");
+        assert!(first_of_hold(key, true), "the first repeat");
+        assert!(!first_of_hold(key, true), "later repeats");
+        REPEAT_LOGGED.lock().unwrap().remove(key); // what the key-up does
+        assert!(first_of_hold(key, true), "the next hold's first repeat");
+    }
 
     #[test]
     fn a_full_sequence_queue_says_the_press_was_dropped() {

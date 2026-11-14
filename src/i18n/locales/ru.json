@@ -1178,7 +1178,9 @@
     "stepWaitWindow": "Ждать окно",
     "waitWindowExe": "Программа на переднем плане (.exe)",
     "waitWindowTitle": "Её заголовок содержит (необязательно)",
-    "waitWindowTimeout": "Ждать не дольше, мс (до 30000)"
+    "waitWindowTimeout": "Ждать не дольше, мс (до 30000)",
+    "tokenInputDesc": "Поле, которое спросят в маленьком окне перед вставкой фразы: {input:хост} — Enter вставляет, Esc отменяет. После вставки переименуйте поле.",
+    "tokenInputName": "поле"
   },
   "assignments": {
     "copyBinding": "Копировать назначение",
@@ -1950,6 +1952,10 @@
       "shortcutNotExe": "Ярлык запускает не программу .exe, а «{{target}}».",
       "shortcutWindowsOnly": "Ярлыки читаются только в Windows.",
       "shortcutLocalOnly": "Читается только ярлык .lnk на локальном диске."
+    },
+    "prompt": {
+      "submit": "Вставить",
+      "hint": "Enter — следующее поле, потом вставка · Esc — отмена"
     }
   },
   "newMouse": {

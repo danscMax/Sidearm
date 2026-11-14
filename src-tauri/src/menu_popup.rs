@@ -1052,7 +1052,7 @@ fn is_generation(generation: u64) -> bool {
 }
 
 #[cfg(target_os = "windows")]
-mod platform {
+pub(crate) mod platform {
     use std::time::Duration;
 
     use tauri::AppHandle;
@@ -1071,9 +1071,9 @@ mod platform {
         },
     };
 
-    pub(super) use crate::platform::display::{cursor_position, dpi_scale_at, position_near};
+    pub(crate) use crate::platform::display::{cursor_position, dpi_scale_at, position_near};
 
-    pub(super) fn foreground_window() -> isize {
+    pub(crate) fn foreground_window() -> isize {
         unsafe { GetForegroundWindow() as isize }
     }
 
@@ -1099,7 +1099,7 @@ mod platform {
     }
 
     /// Show the popup and give it the keyboard focus.
-    pub(super) fn show_focused(window: &tauri::WebviewWindow) {
+    pub(crate) fn show_focused(window: &tauri::WebviewWindow) {
         match window.hwnd() {
             Ok(hwnd) => {
                 let hwnd = hwnd.0 as HWND;
@@ -1121,7 +1121,7 @@ mod platform {
     /// Move, size 1×1 and show without activating, in one call (no frame of
     /// the old menu at the old place): visible, the window takes the scale of
     /// the monitor it is on. Transparent and 1 px, it is not seen.
-    pub(super) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+    pub(crate) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SWP_NOACTIVATE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowPos};
         let Ok(hwnd) = window.hwnd() else { return };
         unsafe {
@@ -1130,7 +1130,7 @@ mod platform {
     }
 
     /// Hidden the way it was shown (Tauri's own state never saw it shown).
-    pub(super) fn hide_window(window: &tauri::WebviewWindow) {
+    pub(crate) fn hide_window(window: &tauri::WebviewWindow) {
         match window.hwnd() {
             Ok(hwnd) => unsafe {
                 ShowWindow(hwnd.0 as HWND, SW_HIDE);
@@ -1142,7 +1142,7 @@ mod platform {
     }
 
     /// Give the focus back to the window the menu opened over (the popup had it).
-    pub(super) fn restore_foreground(target: isize) {
+    pub(crate) fn restore_foreground(target: isize) {
         if target == 0 || foreground_window() == target {
             return;
         }
@@ -1169,7 +1169,7 @@ mod platform {
 
     /// Close the menu when the user goes elsewhere: a click outside it, another
     /// window coming to the front, or [`MAX_OPEN`] without a choice.
-    pub(super) fn spawn_watch(app: AppHandle, generation: u64) {
+    pub(crate) fn spawn_watch(app: AppHandle, generation: u64) {
         let target = foreground_window();
         let _ = std::thread::Builder::new().name("menu-watch".into()).spawn(move || {
             use tauri::Manager;
@@ -1203,33 +1203,33 @@ mod platform {
 }
 
 #[cfg(not(target_os = "windows"))]
-mod platform {
+pub(crate) mod platform {
     use tauri::AppHandle;
 
-    pub(super) fn foreground_window() -> isize {
+    pub(crate) fn foreground_window() -> isize {
         0
     }
-    pub(super) fn cursor_position() -> (i32, i32) {
+    pub(crate) fn cursor_position() -> (i32, i32) {
         (100, 100)
     }
-    pub(super) fn dpi_scale_at(_: (i32, i32)) -> f64 {
+    pub(crate) fn dpi_scale_at(_: (i32, i32)) -> f64 {
         1.0
     }
-    pub(super) fn position_near(point: (i32, i32), _: i32, _: i32, gap: i32) -> (i32, i32) {
+    pub(crate) fn position_near(point: (i32, i32), _: i32, _: i32, gap: i32) -> (i32, i32) {
         (point.0 + gap, point.1 + gap)
     }
-    pub(super) fn restore_foreground(_: isize) {}
-    pub(super) fn show_focused(window: &tauri::WebviewWindow) {
+    pub(crate) fn restore_foreground(_: isize) {}
+    pub(crate) fn show_focused(window: &tauri::WebviewWindow) {
         let _ = window.show();
         let _ = window.set_focus();
     }
-    pub(super) fn hide_window(window: &tauri::WebviewWindow) {
+    pub(crate) fn hide_window(window: &tauri::WebviewWindow) {
         let _ = window.hide();
     }
-    pub(super) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
+    pub(crate) fn park_at(window: &tauri::WebviewWindow, anchor: (i32, i32)) {
         let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x: anchor.0, y: anchor.1 }));
     }
-    pub(super) fn spawn_watch(_: AppHandle, _: u64) {}
+    pub(crate) fn spawn_watch(_: AppHandle, _: u64) {}
 }
 
 #[cfg(test)]

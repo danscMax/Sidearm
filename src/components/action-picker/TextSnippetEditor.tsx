@@ -8,12 +8,15 @@ type TextDraft = { text: string; pasteMode: PasteMode; snippetId?: string };
 // The template tokens the backend expands at send time (see
 // input_synthesis::expand_snippet_tokens; `{|}` is a short `{cursor}`). Kept in
 // sync with that Rust list.
-const TOKEN_RE = /\{(?:date|clipboard|selection|cursor|\|)\}/g;
+// `{input:name}` is asked for in a small window before the phrase runs (input_prompt.rs).
+const TOKEN_RE = /\{(?:date|clipboard|selection|cursor|\||input:[^{}]+)\}/g;
+const INPUT_TOKEN = "{input:…}";
 const TOKENS: { token: string; descKey: string }[] = [
   { token: "{date}", descKey: "picker.tokenDateDesc" },
   { token: "{clipboard}", descKey: "picker.tokenClipboardDesc" },
   { token: "{selection}", descKey: "picker.tokenSelectionDesc" },
   { token: "{cursor}", descKey: "picker.tokenCursorDesc" },
+  { token: INPUT_TOKEN, descKey: "picker.tokenInputDesc" },
 ];
 
 /** Split the text into plain runs and <mark>ed token runs for the highlight
@@ -161,7 +164,7 @@ export function TextSnippetEditor({
             key={token}
             type="button"
             className="token-chip"
-            onClick={() => insertToken(token)}
+            onClick={() => insertToken(token === INPUT_TOKEN ? `{input:${t("picker.tokenInputName")}}` : token)}
             title={t(descKey)}
             aria-label={t("picker.tokenInsertAria", { token })}
           >

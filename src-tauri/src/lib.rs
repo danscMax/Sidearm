@@ -19,6 +19,7 @@ mod machine_files;
 mod menu_usage;
 mod press_log;
 mod cheatsheet;
+mod input_prompt;
 mod mouse_memory;
 #[cfg(target_os = "windows")]
 mod mouse_settings;
@@ -2317,6 +2318,30 @@ fn menu_search(app: AppHandle, query: String) {
     menu_popup::search_from_window(&app, &query);
 }
 
+/// The input-field window loaded and listens.
+#[tauri::command]
+fn prompt_ready(app: AppHandle) {
+    input_prompt::page_ready(&app);
+}
+
+/// The input-field window measured itself (physical pixels).
+#[tauri::command]
+fn prompt_layout(app: AppHandle, generation: u64, width: f64, height: f64) {
+    input_prompt::page_layout(&app, generation, width, height);
+}
+
+/// Enter in the input-field window: run the phrase with these values.
+#[tauri::command]
+fn prompt_submit(app: AppHandle, generation: u64, values: std::collections::HashMap<String, String>) {
+    input_prompt::submit(&app, generation, values);
+}
+
+/// Esc or a click elsewhere: the phrase does not run.
+#[tauri::command]
+fn prompt_cancel(app: AppHandle, generation: u64) {
+    input_prompt::cancel(&app, generation);
+}
+
 /// The menu popup's search scope switch: `all` menus or only this one.
 #[tauri::command]
 fn menu_search_scope(app: AppHandle, all: bool) {
@@ -4498,6 +4523,10 @@ pub fn run() {
             menu_wheel,
             menu_search,
             menu_search_scope,
+            prompt_ready,
+            prompt_layout,
+            prompt_submit,
+            prompt_cancel,
             resolve_shortcut_target,
             menu_confirm,
             menu_close,
@@ -4870,14 +4899,17 @@ mod tests {
         let main = allowed(include_str!("../capabilities/default.json"));
         let osd = allowed(include_str!("../capabilities/osd.json"));
         assert!(osd.iter().all(|c| c.starts_with("osd_")), "OSD window: only osd_* ({osd:?})");
+        let prompt = allowed(include_str!("../capabilities/prompt.json"));
+        assert!(prompt.iter().all(|c| c.starts_with("prompt_")), "input-field window: only prompt_* ({prompt:?})");
         assert!(menu.iter().all(|c| c.starts_with("menu_")), "menu window: only menu_* ({menu:?})");
         assert!(sheet.iter().all(|c| c.starts_with("cheatsheet_")), "cheat sheet: only cheatsheet_*");
         let mut every: std::collections::BTreeSet<String> = main.clone();
         every.extend(menu.iter().cloned());
         every.extend(sheet.iter().cloned());
         every.extend(osd.iter().cloned());
+        every.extend(prompt.iter().cloned());
         assert_eq!(every, handler, "every command is allowed in some window");
-        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c) && !osd.contains(c)), "main gets no popup command");
+        assert!(main.iter().all(|c| !menu.contains(c) && !sheet.contains(c) && !osd.contains(c) && !prompt.contains(c)), "main gets no popup command");
     }
 
     /// Merge-import must not orphan the base config's user devices: since v3

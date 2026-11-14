@@ -1066,6 +1066,20 @@ fn run_fire_and_forget(
         crate::cheatsheet::show_layer(app, config, &profile, preview.control_id.as_deref(), payload.layer);
         return;
     }
+    // A phrase with input fields asks for them first; Enter runs it filled in.
+    if let Some(action) = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
+        && crate::input_prompt::needs_inputs(config, action)
+    {
+        flush_log_entries(runtime_store, log_entries);
+        count_press(config, preview, &action.id, !menu_pick);
+        let (app_run, store, config_run, preview_run, action_run) = (app.clone(), runtime_store.clone(), config.clone(), preview.clone(), action.clone());
+        crate::input_prompt::ask(app, &action.display_name, crate::input_prompt::fields_of(config, action), move |values| {
+            let filled = crate::input_prompt::filled_config(&config_run, &action_run, &values);
+            // Counted and throttled already: run as a menu pick does.
+            run_fire_and_forget(&app_run, &store, &filled, &preview_run, Vec::new(), is_fg_elevated, true, None);
+        }, || log::info!("[prompt] cancelled: nothing sent"));
+        return;
+    }
     // A menu opens its popup; the item picked there runs through `run_menu_item`.
     if let Some(action) = config.actions.iter().find(|a| Some(a.id.as_str()) == preview.action_id.as_deref())
         && let crate::config::ActionPayload::Menu(payload) = &action.payload
@@ -1374,6 +1388,25 @@ pub(crate) fn run_menu_item(
         if matches!(action.payload, config::ActionPayload::Menu(_)) {
             run_fire_and_forget(&app, &store, &config, &preview, Vec::new(), is_fg_elevated, true, None);
             completed(false); // Opening another menu has not inserted text.
+            return;
+        }
+        if crate::input_prompt::needs_inputs(&config, &action) {
+            let done = Arc::new(Mutex::new(Some(completed)));
+            let done_cancel = done.clone();
+            let (app_run, store_run, action_run) = (app.clone(), store.clone(), action.clone());
+            crate::input_prompt::ask(&app, &action.display_name, crate::input_prompt::fields_of(&config, &action), move |values| {
+                let filled = crate::input_prompt::filled_config(&config, &action_run, &values);
+                let completed = done.lock().ok().and_then(|mut slot| slot.take());
+                run_menu_execution(
+                    || executor::run_preview_action(&filled, &preview),
+                    |executed| report_execution(&app_run, &store_run, &filled, &preview, Vec::new(), is_fg_elevated, true, executed),
+                    move |ok| if let Some(completed) = completed { completed(ok) },
+                );
+            }, move || {
+                if let Some(completed) = done_cancel.lock().ok().and_then(|mut slot| slot.take()) {
+                    completed(false); // nothing inserted: no Enter either
+                }
+            });
             return;
         }
         log::info!(

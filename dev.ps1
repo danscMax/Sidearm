@@ -33,13 +33,23 @@ $APP_VERSION = Get-AppVersion $PROJECT_DIR
 # above).
 
 function Stop-StaleProcesses {
-    # Kill only Sidearm processes from our project directory
-    Get-Process -Name 'sidearm','naga-workflow-studio' -ErrorAction SilentlyContinue |
-        Where-Object { $_.Path -and $_.Path -like "*Razer Naga Studio*" } |
-        ForEach-Object {
-            Write-Host "  Stopping PID $($_.Id)" -ForegroundColor Yellow
-            Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue
-        }
+    # Only the dev build's Sidearm processes (app, helper, mouse restorer): they
+    # hold target\debug\sidearm.exe, which the next build must replace.
+    $target = Join-Path $TAURI_DIR 'target'
+    $ours = {
+        Get-CimInstance Win32_Process -Filter "Name = 'sidearm.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target, [StringComparison]::OrdinalIgnoreCase) }
+    }
+    # A restorer a killed dev app left puts the mice back first (30 s at most:
+    # one waiting for a sleeping mouse never ends; the next start restores it).
+    $deadline = (Get-Date).AddSeconds(30)
+    while ((& $ours | Where-Object { $_.CommandLine -match '--restore-live-maps' }) -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 1
+    }
+    & $ours | ForEach-Object {
+        Write-Host "  Stopping PID $($_.ProcessId)" -ForegroundColor Yellow
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
 
     # Kill Vite/node holding our port
     $portPids = netstat -ano 2>$null | Select-String ":${VITE_PORT}.*LISTENING" |

@@ -140,7 +140,104 @@ fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<()> {
             .spawn()
             .map(|_| ())
     };
-    spawn(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB).or_else(|_| spawn(CREATE_NO_WINDOW | DETACHED_PROCESS))
+    spawn(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
+        // A job that allows no breakaway (`cargo run`'s, the dev build's) is
+        // closed with every process in it: the shell's child is in its job instead.
+        .or_else(|_| spawn_under_shell(args, CREATE_NO_WINDOW | DETACHED_PROCESS))
+        .or_else(|error| {
+            log::warn!("[system] restore process stays in Sidearm's job (its end takes it along): {error}");
+            spawn(CREATE_NO_WINDOW | DETACHED_PROCESS)
+        })
+}
+
+/// [`spawn_detached`] as a child of the shell (Explorer): a process gets the job
+/// of the parent it is created under (`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`),
+/// so it leaves Sidearm's job. Its token is the shell's too (not elevated:
+/// the restore needs no rights); the environment is still this process's.
+fn spawn_under_shell(args: &[&std::ffi::OsStr], flags: u32) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::{
+        Foundation::CloseHandle,
+        System::Threading::{
+            CreateProcessW, DeleteProcThreadAttributeList, EXTENDED_STARTUPINFO_PRESENT, InitializeProcThreadAttributeList,
+            LPPROC_THREAD_ATTRIBUTE_LIST, OpenProcess, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS, PROCESS_CREATE_PROCESS,
+            PROCESS_INFORMATION, STARTUPINFOEXW, UpdateProcThreadAttribute,
+        },
+        UI::WindowsAndMessaging::{GetShellWindow, GetWindowThreadProcessId},
+    };
+    let exe = std::env::current_exe()?;
+    let mut line = quote_arg(exe.as_os_str());
+    for arg in args {
+        line.push(' ');
+        line.push_str(&quote_arg(arg));
+    }
+    let mut line: Vec<u16> = std::ffi::OsStr::new(&line).encode_wide().chain(Some(0)).collect();
+    // SAFETY: plain Win32 calls; the attribute list lives in `buffer` until
+    // deleted, the shell handle and the new process's handles are closed.
+    unsafe {
+        let mut shell_pid = 0;
+        GetWindowThreadProcessId(GetShellWindow(), &mut shell_pid);
+        if shell_pid == 0 {
+            return Err(std::io::Error::other("no shell window"));
+        }
+        let shell = OpenProcess(PROCESS_CREATE_PROCESS, 0, shell_pid);
+        if shell.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut size = 0;
+        InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut size);
+        let mut buffer = vec![0u8; size];
+        let list = buffer.as_mut_ptr() as LPPROC_THREAD_ATTRIBUTE_LIST;
+        let result = (|| {
+            if InitializeProcThreadAttributeList(list, 1, 0, &mut size) == 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            let ok = UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_PARENT_PROCESS as usize,
+                (&shell as *const windows_sys::Win32::Foundation::HANDLE).cast(), std::mem::size_of_val(&shell), std::ptr::null_mut(), std::ptr::null());
+            let created = ok != 0 && {
+                let mut startup: STARTUPINFOEXW = std::mem::zeroed();
+                startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
+                startup.lpAttributeList = list;
+                let mut info: PROCESS_INFORMATION = std::mem::zeroed();
+                let created = CreateProcessW(std::ptr::null(), line.as_mut_ptr(), std::ptr::null(), std::ptr::null(), 0,
+                    flags | EXTENDED_STARTUPINFO_PRESENT, std::ptr::null(), std::ptr::null(), &startup.StartupInfo, &mut info) != 0;
+                if created {
+                    CloseHandle(info.hThread);
+                    CloseHandle(info.hProcess);
+                }
+                created
+            };
+            let error = std::io::Error::last_os_error();
+            DeleteProcThreadAttributeList(list);
+            if created { Ok(()) } else { Err(error) }
+        })();
+        CloseHandle(shell);
+        result
+    }
+}
+
+/// One command-line argument as `CommandLineToArgvW` reads it back.
+fn quote_arg(arg: &std::ffi::OsStr) -> String {
+    let arg = arg.to_string_lossy();
+    if !arg.is_empty() && !arg.contains([' ', '\t', '"']) {
+        return arg.into_owned();
+    }
+    let mut out = String::from('"');
+    let mut slashes = 0;
+    for ch in arg.chars() {
+        if ch == '\\' {
+            slashes += 1;
+            continue;
+        }
+        // Backslashes before a quote are doubled, and the quote escaped.
+        out.push_str(&"\\".repeat(if ch == '"' { slashes * 2 + 1 } else { slashes }));
+        slashes = 0;
+        out.push(ch);
+    }
+    // Backslashes before the closing quote are doubled.
+    out.push_str(&"\\".repeat(slashes * 2));
+    out.push('"');
+    out
 }
 
 /// Started by the capture helper when Sidearm died, and by an exit that left
@@ -405,6 +502,16 @@ pub fn claim_app() -> Option<windows_sys::Win32::Foundation::HANDLE> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_argument_reads_back_as_it_was_quoted() {
+        let quote = |text: &str| quote_arg(std::ffi::OsStr::new(text));
+        assert_eq!(quote(r"C:\Scripts\data"), r"C:\Scripts\data", "nothing to quote");
+        assert_eq!(quote(r"C:\My data\"), r#""C:\My data\\""#, "a trailing backslash is doubled");
+        assert_eq!(quote(r#"a "b" c"#), r#""a \"b\" c""#);
+        assert_eq!(quote(r#"x\"y z"#), r#""x\\\"y z""#, "backslashes before a quote are doubled");
+        assert_eq!(quote(""), r#""""#);
+    }
 
     #[test]
     fn the_watchdog_mutex_is_seen_once_it_exists() {

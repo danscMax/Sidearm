@@ -170,7 +170,8 @@ pub(crate) fn sheet_items(config: &AppConfig, profile_id: &str, control: Option<
             Gesture::DoublePress => "●●",
             Gesture::TriplePress => "●●●",
         };
-        extras[index].push(format!("{mark} {}", binding.label));
+        let name = if binding.label.is_empty() { action.map(|a| a.display_name.as_str()).unwrap_or_default() } else { binding.label.as_str() };
+        extras[index].push(format!("{mark} {name}"));
     }
     (items, extras)
 }

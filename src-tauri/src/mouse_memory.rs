@@ -1424,6 +1424,9 @@ pub(crate) mod fake {
         /// How many commands it was sent.
         #[serde(skip)]
         pub asked: usize,
+        /// Falls asleep once it was sent this many commands.
+        #[serde(skip)]
+        pub asleep_after: Option<usize>,
         /// How long a sleeping fake mouse takes to say so (a real one's
         /// unanswered commands make an exit take many seconds).
         pub asleep_delay_ms: u64,
@@ -1518,7 +1521,7 @@ pub(crate) mod fake {
         let key = (args[0], args[1], args[2]);
         let mut reply = *payload;
         mouse.asked += 1;
-        reply[0] = if mouse.asleep || mouse.asleep_for.contains(&(class, command)) {
+        reply[0] = if mouse.asleep || mouse.asleep_for.contains(&(class, command)) || mouse.asleep_after.is_some_and(|after| mouse.asked > after) {
             COMMAND_STATUS_NO_RESPONSE
         } else if mouse.refused.contains(&(class, command)) {
             0x03

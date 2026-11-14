@@ -143,7 +143,9 @@ fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<()> {
     spawn(CREATE_NO_WINDOW | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
         // A job that allows no breakaway (`cargo run`'s, the dev build's) is
         // closed with every process in it: the shell's child is in its job instead.
-        .or_else(|_| spawn_under_shell(args, CREATE_NO_WINDOW | DETACHED_PROCESS))
+        // Not for an elevated Sidearm: a watchdog with the shell's token might
+        // not open it to wait for its end (a medium-integrity process).
+        .or_else(|error| if crate::window_capture::is_current_process_elevated() { Err(error) } else { spawn_under_shell(args, CREATE_NO_WINDOW | DETACHED_PROCESS) })
         .or_else(|error| {
             log::warn!("[system] restore process stays in Sidearm's job (its end takes it along): {error}");
             spawn(CREATE_NO_WINDOW | DETACHED_PROCESS)

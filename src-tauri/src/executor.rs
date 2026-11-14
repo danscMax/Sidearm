@@ -1316,6 +1316,7 @@ fn run_live_text_snippet_action(
     // already delivered, so a failure here degrades to a warning, not an error.
     if let Some(back) = cursor_back
         && back > 0
+        && !payload.press_enter()
         && let Err(message) = input_synthesis::send_left_arrows(back)
     {
         log::warn!(

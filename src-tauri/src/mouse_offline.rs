@@ -341,7 +341,7 @@ fn write_onboard_offline_on(device: &VendorDevice, config: &AppConfig, profile_i
     let records = plan(config, device.model(), profile_id);
     let mut asleep = false;
     let mut failed = 0;
-    for record in &records {
+    for (at, record) in records.iter().enumerate() {
         if let Err(error) = device.write_record(record.button_id, record.layer, record.action) {
             log::warn!("[mouse-offline] {error}");
             failed += 1;
@@ -350,6 +350,10 @@ fn write_onboard_offline_on(device: &VendorDevice, config: &AppConfig, profile_i
             // is retried once it is awake (`mouse-offline-failed`).
             if crate::mouse_memory::is_no_response(&error) {
                 log::warn!("[mouse-offline] {} did not answer: the offline profile waits until it is awake", device.model().name);
+                // Records it took before it slept: the next start must put Sidearm's signals back.
+                if at + 1 > failed {
+                    write_marker(&config_dir.join(OFFLINE_MARKER_FILE), profile_id);
+                }
                 return Some(device.model().device_id.to_owned());
             }
         }
@@ -652,6 +656,27 @@ mod tests {
             fake::with(|mouse| mouse.asked)
         };
         assert_eq!(asked(&["thumb_01", "thumb_02", "thumb_03", "thumb_04"]), asked(&["thumb_01"]));
+    }
+
+    /// A mouse that took records before it slept holds part of the profile:
+    /// the marker is left, so the next start puts Sidearm's signals back.
+    #[test]
+    fn a_mouse_asleep_midway_keeps_the_marker() {
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
+        // How many commands one record takes: the mouse sleeps right after the first.
+        let one_record = {
+            let (device, _fake) = fake_v2();
+            let first = plan(&config, device.model(), &profile)[0];
+            device.write_record(first.button_id, first.layer, first.action).unwrap();
+            fake::with(|mouse| mouse.asked)
+        };
+        bind(&mut config, &profile, "thumb_02", Layer::Standard, shortcut("U", true, false, false), None);
+        let dir = tempfile::tempdir().unwrap();
+        let (device, _fake) = fake_v2();
+        fake::with(|mouse| mouse.asleep_after = Some(one_record));
+        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"));
+        assert!(dir.path().join(OFFLINE_MARKER_FILE).exists(), "a record went in before the mouse slept");
     }
 
     #[test]

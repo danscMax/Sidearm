@@ -66,7 +66,12 @@ pub fn apply_parsed_into_config(
                 warnings.push(
                     ImportWarning::new(
                         "profile_append_failed",
-                        format!("Profile `{}` could not be appended: {err}", profile.name),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.profileAppendFailed",
+                            "Profile `{name}` could not be appended: {error}",
+                            name = &profile.name,
+                            error = err
+                        )),
                     )
                     .with_context(profile.name.clone()),
                 );
@@ -147,10 +152,11 @@ fn append_profile(
             None => {
                 warnings.push(ImportWarning::new(
                     "control_id_not_in_enum",
-                    format!(
-                        "Control `{}` is not a known Sidearm control.",
-                        pb.control_id
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.controlIdNotInEnum",
+                        "Control `{control_id}` is not a known Sidearm control.",
+                        control_id = &pb.control_id
+                    )),
                 ));
                 continue;
             }
@@ -161,7 +167,11 @@ fn append_profile(
             other => {
                 warnings.push(ImportWarning::new(
                     "layer_unknown",
-                    format!("Layer `{other}` is not recognised."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.layerUnknown",
+                        "Layer `{layer}` is not recognised.",
+                        layer = other
+                    )),
                 ));
                 continue;
             }
@@ -170,10 +180,12 @@ fn append_profile(
         if !bound_controls.insert((layer, control_id.clone())) {
             warnings.push(ImportWarning::new(
                 "duplicate_control_binding",
-                format!(
-                    "Control `{}` is mapped more than once on the `{}` layer; keeping the first.",
-                    pb.control_id, pb.layer
-                ),
+                crate::ui_text::native(&crate::ui_text!(
+                    "synapse.duplicateControlBinding",
+                    "Control `{control_id}` is mapped more than once on the `{layer}` layer; keeping the first.",
+                    control_id = &pb.control_id,
+                    layer = &pb.layer
+                )),
             ));
             continue;
         }
@@ -294,7 +306,11 @@ fn build_action_from_parsed(
             } else {
                 warnings.push(ImportWarning::new(
                     "sequence_ref_missing",
-                    format!("Macro guid `{macro_guid}` referenced by a binding was not decoded."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.sequenceRefMissing",
+                        "Macro guid `{macro_guid}` referenced by a binding was not decoded.",
+                        macro_guid = macro_guid
+                    )),
                 ));
                 BuiltAction::Skipped
             }
@@ -320,7 +336,11 @@ fn build_action_from_parsed(
             None => {
                 warnings.push(ImportWarning::new(
                     "mouse_action_unknown",
-                    format!("Mouse action `{action}` not recognised."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.mouseActionUnknown",
+                        "Mouse action `{action}` not recognised.",
+                        action = action
+                    )),
                 ));
                 BuiltAction::Skipped
             }
@@ -425,10 +445,12 @@ fn remove_profile_by_name(
         warnings.push(
             ImportWarning::new(
                 "replace_by_name_ambiguous",
-                format!(
-                    "{} existing profiles are named `{name}`; replaced only the first and left the others untouched.",
-                    matching_ids.len()
-                ),
+                crate::ui_text::native(&crate::ui_text!(
+                    "synapse.replaceByNameAmbiguous",
+                    "{count} existing profiles are named `{name}`; replaced only the first and left the others untouched.",
+                    count = matching_ids.len(),
+                    name = name
+                )),
             )
             .with_context(name.to_string()),
         );

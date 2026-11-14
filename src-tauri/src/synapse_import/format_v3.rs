@@ -177,7 +177,12 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
                 Err(e) => warnings.push(
                     ImportWarning::new(
                         "v3_macro_parse_failed",
-                        format!("Could not parse macro `{name}`: {e}"),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.v3MacroParseFailed",
+                            "Could not parse macro `{name}`: {error}",
+                            name = name,
+                            error = e
+                        )),
                     )
                     .with_context(name.clone()),
                 ),
@@ -193,7 +198,11 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
             if profiles.len() >= MAX_V3_PROFILES {
                 warnings.push(ImportWarning::new(
                     "v3_too_many_profiles",
-                    format!("The export has more than {MAX_V3_PROFILES} profiles; the rest were skipped."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3TooManyProfiles",
+                        "The export has more than {limit} profiles; the rest were skipped.",
+                        limit = MAX_V3_PROFILES
+                    )),
                 ));
                 break;
             }
@@ -237,7 +246,12 @@ pub fn parse_synapse_v3_reader<R: Read + std::io::Seek>(
                 Err(e) => warnings.push(
                     ImportWarning::new(
                         "v3_profile_parse_failed",
-                        format!("Could not parse profile `{name}`: {e}"),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.v3ProfileParseFailed",
+                            "Could not parse profile `{name}`: {error}",
+                            name = name,
+                            error = e
+                        )),
                     )
                     .with_context(name.clone()),
                 ),
@@ -280,7 +294,12 @@ fn collect_profile_bindings<R: Read + std::io::Seek>(
                 warnings.push(
                     ImportWarning::new(
                         "v3_feature_read_failed",
-                        format!("Could not read feature `{feature_name}`: {e}"),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.v3FeatureReadFailed",
+                            "Could not read feature `{feature_name}`: {error}",
+                            feature_name = feature_name,
+                            error = e
+                        )),
                     )
                     .with_context(profile_name.to_string()),
                 );
@@ -297,7 +316,11 @@ fn collect_profile_bindings<R: Read + std::io::Seek>(
             warnings.push(
                 ImportWarning::new(
                     "v3_mappings_parse_failed",
-                    format!("Mapping XML parse failed: {e}"),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3MappingsParseFailed",
+                        "Mapping XML parse failed: {error}",
+                        error = e
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -324,7 +347,11 @@ fn collect_referenced_macros(
             let Some(left) = step_budget.checked_sub(m.steps.len()) else {
                 warnings.push(ImportWarning::new(
                     "v3_macro_budget_exceeded",
-                    format!("Macro `{}` was skipped: the export's macros are too large to import together.", m.name),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3MacroBudgetExceeded",
+                        "Macro `{name}` was skipped: the export's macros are too large to import together.",
+                        name = &m.name
+                    )),
                 ));
                 continue;
             };
@@ -497,7 +524,11 @@ fn resolve_input(
             warnings.push(
                 ImportWarning::new(
                     "v3_unmappable_dkm",
-                    format!("DKM input `{}` has no Sidearm equivalent.", b.dkm_input),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3UnmappableDkm",
+                        "DKM input `{input}` has no Sidearm equivalent.",
+                        input = &b.dkm_input
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -511,7 +542,11 @@ fn resolve_input(
             warnings.push(
                 ImportWarning::new(
                     "v3_unmappable_mouse",
-                    format!("Mouse input `{}` has no Sidearm equivalent.", b.mouse_input),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3UnmappableMouse",
+                        "Mouse input `{input}` has no Sidearm equivalent.",
+                        input = &b.mouse_input
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -525,10 +560,12 @@ fn resolve_input(
             warnings.push(
                 ImportWarning::new(
                     "v3_keyinput_dropped",
-                    format!(
-                        "KeyInput (HID_Page={:?}, HID_Id={:?}) is not a Sidearm-mappable control — dropped.",
-                        b.key_hid_page, b.key_hid_id
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3KeyInputDropped",
+                        "KeyInput (HID_Page={hid_page}, HID_Id={hid_id}) is not a Sidearm-mappable control — dropped.",
+                        hid_page = format!("{:?}", b.key_hid_page),
+                        hid_id = format!("{:?}", b.key_hid_id)
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -538,7 +575,11 @@ fn resolve_input(
             warnings.push(
                 ImportWarning::new(
                     "v3_unsupported_input_type",
-                    format!("Input type `{other}` is not supported."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3UnsupportedInputType",
+                        "Input type `{input_type}` is not supported.",
+                        input_type = other
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -598,11 +639,12 @@ fn build_shortcut_from_key_group(
             warnings.push(
                 ImportWarning::new(
                     "v3_unknown_keycode",
-                    format!(
-                        "Shortcut <KeyAssignment> has no recognisable VK or scancode \
-                         (vk={:?}, scancode={:?}).",
-                        b.key_vk, b.key_scancode
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.v3UnknownKeycode",
+                        "Shortcut <KeyAssignment> has no recognisable VK or scancode (vk={vk}, scancode={scancode}).",
+                        vk = format!("{:?}", b.key_vk),
+                        scancode = format!("{:?}", b.key_scancode)
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );

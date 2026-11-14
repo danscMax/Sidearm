@@ -311,7 +311,12 @@ pub fn parse_synapse_v4_str(
                 warnings.push(
                     ImportWarning::new(
                         "macro_decode_failed",
-                        format!("Macro '{}' could not be decoded: {err}", env.name),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.macroDecodeFailed",
+                            "Macro '{name}' could not be decoded: {error}",
+                            name = &env.name,
+                            error = err
+                        )),
                     )
                     .with_context(env.name.clone()),
                 );
@@ -327,7 +332,12 @@ pub fn parse_synapse_v4_str(
                 warnings.push(
                     ImportWarning::new(
                         "profile_decode_failed",
-                        format!("Profile '{}' could not be decoded: {err}", env.name),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.profileDecodeFailed",
+                            "Profile '{name}' could not be decoded: {error}",
+                            name = &env.name,
+                            error = err
+                        )),
                     )
                     .with_context(env.name.clone()),
                 );
@@ -432,10 +442,11 @@ fn resolve_macro_ref(
             warnings.push(
                 ImportWarning::new(
                     "macro_reference_missing",
-                    format!(
-                        "Binding references macro guid `{}` but the macro is not present in this file.",
-                        macro_guid
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.macroReferenceMissing",
+                        "Binding references macro guid `{macro_guid}` but the macro is not present in this file.",
+                        macro_guid = macro_guid
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -458,10 +469,12 @@ fn transform_mapping(
             warnings.push(
                 ImportWarning::new(
                     "unmappable_input_id",
-                    format!(
-                        "Input `{}/{}` has no Sidearm equivalent — dropped.",
-                        raw.input_type, raw.input_id
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.unmappableInputId",
+                        "Input `{input_type}/{input_id}` has no Sidearm equivalent — dropped.",
+                        input_type = &raw.input_type,
+                        input_id = &raw.input_id
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -511,7 +524,11 @@ fn transform_output(
             warnings.push(
                 ImportWarning::new(
                     "unsupported_output_type",
-                    format!("Output type `{other}` is not supported yet."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.unsupportedOutputType",
+                        "Output type `{output_type}` is not supported yet.",
+                        output_type = other
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -559,7 +576,11 @@ fn build_shortcut(
             warnings.push(
                 ImportWarning::new(
                     "unknown_key_token",
-                    format!("Key token `{t}` has no Sidearm equivalent."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.unknownKeyToken",
+                        "Key token `{token}` has no Sidearm equivalent.",
+                        token = &t
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );
@@ -595,7 +616,10 @@ fn build_sequence_ref(
         warnings.push(
             ImportWarning::new(
                 "macro_ref_missing_payload",
-                "macroGroup payload missing on a mapping that claims to reference a macro.",
+                crate::ui_text::native(&crate::ui_text!(
+                    "synapse.macroRefMissingPayload",
+                    "macroGroup payload missing on a mapping that claims to reference a macro."
+                )),
             )
             .with_context(profile_name.to_string()),
         );
@@ -680,9 +704,11 @@ fn build_macro_steps(
                 if !std::mem::replace(&mut mouse_warned, true) {
                     warnings.push(ImportWarning::new(
                         "macro_mouse_event_skipped",
-                        format!(
-                            "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only."
-                        ),
+                        crate::ui_text::native(&crate::ui_text!(
+                            "synapse.macroMouseEventSkipped",
+                            "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only.",
+                            macro_name = macro_name
+                        )),
                     ));
                 }
             }

@@ -56,9 +56,13 @@ pub fn build(
                     if clamped != delay_ms && !std::mem::replace(&mut warned.delay_clamped, true) {
                         warnings.push(ImportWarning::new(
                             "macro_delay_clamped",
-                            format!(
-                                "Macro `{macro_name}` had a {delay_ms} ms delay — clamped to {MAX_MACRO_DELAY_MS} ms."
-                            ),
+                            crate::ui_text::native(&crate::ui_text!(
+                                "synapse.macroDelayClamped",
+                                "Macro `{macro_name}` had a {delay_ms} ms delay — clamped to {max_delay_ms} ms.",
+                                macro_name = macro_name,
+                                delay_ms = delay_ms,
+                                max_delay_ms = MAX_MACRO_DELAY_MS
+                            )),
                         ));
                     }
                     steps.push(ParsedSequenceStep::Sleep { delay_ms: clamped });
@@ -77,9 +81,11 @@ pub fn build(
                         {
                             warnings.push(ImportWarning::new(
                                 "macro_hold_flattened",
-                                format!(
-                                    "Macro `{macro_name}` had overlapping key-holds — they will fire as independent keystrokes."
-                                ),
+                                crate::ui_text::native(&crate::ui_text!(
+                                    "synapse.macroHoldFlattened",
+                                    "Macro `{macro_name}` had overlapping key-holds — they will fire as independent keystrokes.",
+                                    macro_name = macro_name
+                                )),
                             ));
                         }
                         held.insert((makecode, is_extended));
@@ -138,9 +144,12 @@ fn emit_send(
             if warned.unknown_scancodes.insert(makecode_val) {
                 warnings.push(ImportWarning::new(
                     "unknown_scancode",
-                    format!(
-                        "Macro `{macro_name}` uses unknown scancode 0x{makecode_val:02X} — emitted as a literal."
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.unknownScancode",
+                        "Macro `{macro_name}` uses unknown scancode 0x{scancode} — emitted as a literal.",
+                        macro_name = macro_name,
+                        scancode = format!("{makecode_val:02X}")
+                    )),
                 ));
             }
             format!("Scancode(0x{makecode_val:02X})")

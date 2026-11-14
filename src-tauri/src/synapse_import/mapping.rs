@@ -422,7 +422,11 @@ pub fn mouse_action_from_assignment(
             warnings.push(
                 ImportWarning::new(
                     "unsupported_mouse_assignment",
-                    format!("Mouse assignment `{assignment}` is not supported."),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.unsupportedMouseAssignment",
+                        "Mouse assignment `{assignment}` is not supported.",
+                        assignment = assignment
+                    )),
                 )
                 .with_context(profile_name.to_string()),
             );

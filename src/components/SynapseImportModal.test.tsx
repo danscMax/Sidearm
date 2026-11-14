@@ -67,6 +67,26 @@ it.each([null, 1])("rejects an import when reload revision becomes %s before new
   expect(setError).toHaveBeenCalledWith({ code: "config_changed_on_disk", message: i18n.t("synapseImport.configChanged") });
 });
 
+it.each([
+  ["en", 1, 1, "Import 1 profile (1 binding)"],
+  ["en", 2, 5, "Import 2 profiles (5 bindings)"],
+  ["ru", 1, 1, "Импортировать 1 профиль (1 назначение)"],
+  ["ru", 3, 2, "Импортировать 3 профиля (2 назначения)"],
+  ["ru", 5, 11, "Импортировать 5 профилей (11 назначений)"],
+])("declines the submit label in %s for %i profiles and %i bindings", async (language, profiles, bindings, label) => {
+  await i18n.changeLanguage(language);
+  const many: ParsedSynapseProfiles = {
+    ...parsed,
+    profiles: Array.from({ length: profiles }, (_, i) => ({
+      synapseGuid: `s${i}`, name: `P${i}`, macros: [],
+      // Only the count matters for the label.
+      bindings: i === 0 ? Array.from({ length: bindings }, () => ({}) as ParsedSynapseProfiles["profiles"][number]["bindings"][number]) : [],
+    })),
+  };
+  render(<SynapseImportModal parsed={many} activeConfig={makeConfig()} onImported={vi.fn()} setError={vi.fn()} onCancel={vi.fn()} />);
+  expect(screen.getByRole("button", { name: label })).toBeTruthy();
+});
+
 it("does not start an import while an external reload is pending", () => {
   const setError = vi.fn();
   render(<SynapseImportModal parsed={parsed} activeConfig={makeConfig()} getConfigRevision={() => null}

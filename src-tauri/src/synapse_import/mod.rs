@@ -93,7 +93,12 @@ fn enrich_with_sibling_xml_macros(
             Err(e) => {
                 extra_warnings.push(ImportWarning::new(
                     "macro_dir_io_error",
-                    format!("Could not read `{}`: {e}", cand.display()),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.entryReadFailed",
+                        "Could not read `{path}`: {error}",
+                        path = cand.display(),
+                        error = e
+                    )),
                 ));
             }
         }

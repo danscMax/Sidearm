@@ -254,8 +254,8 @@ export function SynapseImportModal({
             {submitting
               ? t("synapseImport.submitting")
               : t("synapseImport.submit", {
-                  profiles: selectedCount,
-                  bindings: totalBindings,
+                  count: selectedCount,
+                  bindings: t("synapseImport.bindingCount", { count: totalBindings }),
                 })}
           </button>
         </ModalFooter>

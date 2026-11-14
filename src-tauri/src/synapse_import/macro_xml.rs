@@ -283,9 +283,11 @@ fn build_steps(
             if ev.ty == "2" && !std::mem::replace(&mut mouse_warned, true) {
                 warnings.push(ImportWarning::new(
                     "macro_mouse_event_skipped",
-                    format!(
-                        "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only."
-                    ),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.macroMouseEventSkipped",
+                        "Macro `{macro_name}` contains a mouse event — Sidearm sequences support keyboard events only.",
+                        macro_name = macro_name
+                    )),
                 ));
             }
             continue;
@@ -341,10 +343,12 @@ pub(super) fn parse_macros_in_dir(
         if xml_seen > MAX_XML_MACRO_FILES {
             warnings.push(ImportWarning::new(
                 "macro_xml_too_many_files",
-                format!(
-                    "Sibling macro folder `{}` has more than {MAX_XML_MACRO_FILES} `.xml` files; the rest were skipped.",
-                    dir.display()
-                ),
+                crate::ui_text::native(&crate::ui_text!(
+                    "synapse.macroXmlTooManyFiles",
+                    "Sibling macro folder `{path}` has more than {limit} `.xml` files; the rest were skipped.",
+                    path = dir.display(),
+                    limit = MAX_XML_MACRO_FILES
+                )),
             ));
             break;
         }
@@ -354,10 +358,12 @@ pub(super) fn parse_macros_in_dir(
         {
             warnings.push(ImportWarning::new(
                 "macro_xml_too_large",
-                format!(
-                    "Skipped `{}`: exceeds the {MAX_XML_MACRO_BYTES}-byte macro-file limit.",
-                    path.display()
-                ),
+                crate::ui_text::native(&crate::ui_text!(
+                    "synapse.macroXmlTooLarge",
+                    "Skipped `{path}`: exceeds the {limit}-byte macro-file limit.",
+                    path = path.display(),
+                    limit = MAX_XML_MACRO_BYTES
+                )),
             ));
             continue;
         }
@@ -384,7 +390,12 @@ pub(super) fn parse_macros_in_dir(
             Err(e) => {
                 warnings.push(ImportWarning::new(
                     "macro_xml_io_error",
-                    format!("Could not read `{}`: {e}", path.display()),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.entryReadFailed",
+                        "Could not read `{path}`: {error}",
+                        path = path.display(),
+                        error = e
+                    )),
                 ));
                 continue;
             }
@@ -402,7 +413,12 @@ pub(super) fn parse_macros_in_dir(
             Err(e) => {
                 warnings.push(ImportWarning::new(
                     "macro_xml_parse_failed",
-                    format!("Could not parse `{}`: {e}", path.display()),
+                    crate::ui_text::native(&crate::ui_text!(
+                        "synapse.macroXmlParseFailed",
+                        "Could not parse `{path}`: {error}",
+                        path = path.display(),
+                        error = e
+                    )),
                 ));
             }
         }

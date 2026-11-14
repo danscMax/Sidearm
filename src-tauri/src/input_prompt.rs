@@ -40,7 +40,7 @@ pub(crate) fn needs_inputs(config: &AppConfig, action: &Action) -> bool {
 fn texts_of<'a>(config: &'a AppConfig, action: &'a Action) -> Vec<&'a str> {
     match &action.payload {
         ActionPayload::TextSnippet(TextSnippetPayload::Inline { text, .. }) => vec![text.as_str()],
-        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id }) => {
+        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id, .. }) => {
             config.snippet_library.iter().filter(|item| &item.id == snippet_id).map(|item| item.text.as_str()).collect()
         }
         ActionPayload::Sequence(sequence) => sequence
@@ -88,12 +88,13 @@ pub(crate) fn filled_config(config: &AppConfig, action: &Action, values: &HashMa
     let mut filled = action.clone();
     match &mut filled.payload {
         ActionPayload::TextSnippet(TextSnippetPayload::Inline { text, .. }) => *text = fill(text, values),
-        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id }) => {
+        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id, press_enter }) => {
             if let Some(item) = config.snippet_library.iter().find(|item| &item.id == snippet_id) {
                 filled.payload = ActionPayload::TextSnippet(TextSnippetPayload::Inline {
                     text: fill(&item.text, values),
                     paste_mode: item.paste_mode,
                     tags: item.tags.clone(),
+                    press_enter: *press_enter,
                 });
             }
         }
@@ -306,12 +307,12 @@ mod tests {
         });
         let mut action = config.actions[0].clone();
         action.id = "phrase".into();
-        action.payload = ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id: "lib".into() });
+        action.payload = ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: false, snippet_id: "lib".into() });
         config.actions.push(action.clone());
         assert_eq!(fields_of(&config, &action), ["host"]);
         let filled = filled_config(&config, &action, &[("host".to_owned(), "srv".to_owned())].into());
         let run = filled.actions.iter().find(|candidate| candidate.id == "phrase").expect("action");
-        assert_eq!(run.payload, ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+        assert_eq!(run.payload, ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter: false,
             text: "ssh srv".into(), paste_mode: PasteMode::KeyboardOnly, tags: Vec::new(),
         }));
         assert_eq!(filled.snippet_library, config.snippet_library, "the library keeps its fields");

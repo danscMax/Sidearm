@@ -818,11 +818,27 @@ pub enum TextSnippetPayload {
         text: String,
         paste_mode: PasteMode,
         tags: Vec<String>,
+        /// Enter after the text (80 ms later, and not into another window
+        /// that came to the front meanwhile).
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        press_enter: bool,
     },
     LibraryRef {
         #[serde(rename = "snippetId")]
         snippet_id: String,
+        /// Enter after the text, for this use of the library text.
+        #[serde(default, rename = "pressEnter", skip_serializing_if = "std::ops::Not::not")]
+        press_enter: bool,
     },
+}
+
+impl TextSnippetPayload {
+    /// Whether Enter follows the text.
+    pub fn press_enter(&self) -> bool {
+        match self {
+            Self::Inline { press_enter, .. } | Self::LibraryRef { press_enter, .. } => *press_enter,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -1927,7 +1943,7 @@ fn validate_action(
                     ));
                 }
             }
-            TextSnippetPayload::LibraryRef { snippet_id } => {
+            TextSnippetPayload::LibraryRef { snippet_id, .. } => {
                 if !snippet_ids.contains(snippet_id) {
                     errors.push(format!(
                         "action `{}` references missing snippet `{snippet_id}`.",
@@ -3425,7 +3441,7 @@ fn text_snippet_library_action(id: String, display_name: &str, snippet_id: &str)
     Action {
         id,
         action_type: ActionType::TextSnippet,
-        payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef {
+        payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: false,
             snippet_id: snippet_id.into(),
         }),
         display_name: display_name.into(),
@@ -3488,6 +3504,16 @@ fn binding_id(profile_id: &str, layer: Layer, control_id: &ControlId) -> String 
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn a_phrase_keeps_its_enter_and_an_old_one_has_none() {
+        let old: TextSnippetPayload = serde_json::from_str(r#"{"source":"libraryRef","snippetId":"s1"}"#).unwrap();
+        assert!(!old.press_enter());
+        assert_eq!(serde_json::to_string(&old).unwrap(), r#"{"source":"libraryRef","snippetId":"s1"}"#, "no field when off");
+        let with: TextSnippetPayload = serde_json::from_str(r#"{"source":"inline","text":"/resume","pasteMode":"keyboardOnly","tags":[],"pressEnter":true}"#).unwrap();
+        assert!(with.press_enter());
+        assert!(serde_json::to_string(&with).unwrap().contains(r#""pressEnter":true"#));
+    }
 
     #[test]
     fn device_slots_roundtrip_and_a_v4_config_migrates() {
@@ -4014,7 +4040,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xcf19_f06a_b56b_5580);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x6eaa_8215_6021_3db0);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -4582,7 +4608,7 @@ mod edge_proptests {
             ],
             tags in prop::collection::vec("[a-z]{1,10}", 0..5),
         ) {
-            let p = TextSnippetPayload::Inline { text, paste_mode, tags };
+            let p = TextSnippetPayload::Inline { press_enter: false, text, paste_mode, tags };
             let json = serde_json::to_string(&p).unwrap();
             let back: TextSnippetPayload = serde_json::from_str(&json).unwrap();
             prop_assert_eq!(p, back);
@@ -5044,7 +5070,7 @@ mod edge_proptests {
         cfg.actions = vec![Action {
             id: "a1".into(),
             action_type: ActionType::TextSnippet,
-            payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+            payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter: false,
                 text: "hello".into(),
                 paste_mode: PasteMode::ClipboardPaste,
                 tags: vec![],
@@ -5105,7 +5131,7 @@ mod edge_proptests {
         cfg.actions = vec![Action {
             id: "a1".into(),
             action_type: ActionType::TextSnippet,
-            payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+            payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter: false,
                 text: "hello".into(),
                 paste_mode: PasteMode::ClipboardPaste,
                 tags: vec![],
@@ -5175,7 +5201,7 @@ mod edge_proptests {
         cfg.actions = vec![Action {
             id: "a1".into(),
             action_type: ActionType::TextSnippet,
-            payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef {
+            payload: ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: false,
                 snippet_id: "s1".into(),
             }),
             display_name: "a1".into(),

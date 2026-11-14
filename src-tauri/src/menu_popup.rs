@@ -539,7 +539,7 @@ fn clip(text: &str) -> String {
 pub(crate) fn action_detail(config: &AppConfig, action: &Action) -> Option<String> {
     let text = match &action.payload {
         ActionPayload::TextSnippet(TextSnippetPayload::Inline { text, .. }) => text.clone(),
-        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id }) => {
+        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id, .. }) => {
             config.snippet_library.iter().find(|snippet| &snippet.id == snippet_id)?.text.clone()
         }
         ActionPayload::Sequence(payload) => payload
@@ -850,7 +850,7 @@ fn full_text(config: &AppConfig, action_id: &str) -> Option<String> {
     let action = config.actions.iter().find(|action| action.id == action_id)?;
     match &action.payload {
         ActionPayload::TextSnippet(TextSnippetPayload::Inline { text, .. }) => Some(text.clone()),
-        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id }) => {
+        ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id, .. }) => {
             config.snippet_library.iter().find(|snippet| &snippet.id == snippet_id).map(|snippet| snippet.text.clone())
         }
         ActionPayload::Sequence(payload) => {
@@ -1527,9 +1527,9 @@ mod tests {
             ],
         }));
         assert_eq!(action_detail(&config, &sequence).as_deref(), Some("продолжай ⏎"));
-        let library = action(ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id: "lib-1".into() }));
+        let library = action(ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: false, snippet_id: "lib-1".into() }));
         assert_eq!(action_detail(&config, &library).as_deref(), Some("from the library"));
-        let long = action(ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+        let long = action(ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter: false,
             text: "x".repeat(DETAIL_CHARS + 50),
             paste_mode: PasteMode::SendText,
             tags: Vec::new(),
@@ -1592,8 +1592,8 @@ mod tests {
         let text = format!("{}suffix-needle", "я".repeat(650));
         config.snippet_library.push(SnippetLibraryItem { id: "long-lib".into(), name: "Library".into(), text: text.clone(), paste_mode: PasteMode::SendText, tags: Vec::new(), notes: None });
         for (index, payload) in [
-            ActionPayload::TextSnippet(TextSnippetPayload::Inline { text: text.clone(), paste_mode: PasteMode::SendText, tags: Vec::new() }),
-            ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { snippet_id: "long-lib".into() }),
+            ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter: false, text: text.clone(), paste_mode: PasteMode::SendText, tags: Vec::new() }),
+            ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: false, snippet_id: "long-lib".into() }),
             ActionPayload::Sequence(SequenceActionPayload { steps: vec![SequenceStep::Text { value: text.clone(), delay_ms: None, repeat: None }] }),
         ].into_iter().enumerate() {
             let id = format!("act-long-{index}");

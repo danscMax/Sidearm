@@ -983,6 +983,10 @@
             "$ref": "#/$defs/nonEmptyString"
           },
           "uniqueItems": true
+        },
+        "pressEnter": {
+          "type": "boolean",
+          "description": "Enter after the text (80 ms later, not into another window that came to the front)."
         }
       }
     },
@@ -999,6 +1003,10 @@
         },
         "snippetId": {
           "$ref": "#/$defs/idToken"
+        },
+        "pressEnter": {
+          "type": "boolean",
+          "description": "Enter after the text (80 ms later, not into another window that came to the front)."
         }
       }
     },

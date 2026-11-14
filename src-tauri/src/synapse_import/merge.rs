@@ -290,7 +290,7 @@ fn build_action_from_parsed(
             BuiltAction::New(Action {
                 id,
                 action_type: ActionType::TextSnippet,
-                payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline {
+                payload: ActionPayload::TextSnippet(TextSnippetPayload::Inline { press_enter: false,
                     text: text.clone(),
                     paste_mode: PasteMode::SendText,
                     tags: Vec::new(),

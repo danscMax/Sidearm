@@ -1262,6 +1262,9 @@ fn format_mouse_summary(payload: &MouseActionPayload) -> crate::ui_text::UiText 
     }
 }
 
+/// The pause between a text and its Enter (the menu's text + Enter macro keeps the same).
+const ENTER_AFTER_TEXT_MS: u64 = 80;
+
 fn run_live_text_snippet_action(
     config: &AppConfig,
     action: &Action,
@@ -1289,6 +1292,7 @@ fn run_live_text_snippet_action(
         live_text.paste_mode
     );
     let (expanded, cursor_back) = input_synthesis::expand_snippet_tokens(&live_text.text);
+    let start_window = foreground_window();
     let sent = if live_text.paste_mode == PasteMode::KeyboardOnly {
         input_synthesis::send_text_typed(&expanded)
     } else {
@@ -1323,6 +1327,22 @@ fn run_live_text_snippet_action(
             "Could not move the caret back to {{cursor}}: {message}",
             message = message
         ));
+    }
+
+    // Enter after the text: the pause a TUI needs not to take it as part of a
+    // paste, and never into another window that came to the front meanwhile.
+    if payload.press_enter() {
+        std::thread::sleep(std::time::Duration::from_millis(ENTER_AFTER_TEXT_MS));
+        let now = foreground_window();
+        if start_window != 0 && now != 0 && now != start_window {
+            log::warn!("[executor] TextSnippet Enter skipped: the window in front changed while the text was typed");
+            warnings.push(crate::ui_text!(
+                "execution.enterSkippedWindowChanged",
+                "Enter was not sent: another window came to the front while the text was typed."
+            ));
+        } else if let Err(message) = input_synthesis::send_hotkey_string("Enter", &crate::hotkeys::HotkeyModifiers::default()) {
+            return Err(execution_error("execution_failed", "execution", &message, Some(preview.encoded_key.clone()), Some(action.id.clone())));
+        }
     }
 
     Ok(ActionExecutionEvent {
@@ -1527,6 +1547,7 @@ fn resolve_live_text_snippet(
             text,
             paste_mode,
             tags,
+            ..
         } => Ok(ResolvedLiveTextSnippet {
             text: text.clone(),
             paste_mode: *paste_mode,
@@ -1544,7 +1565,7 @@ fn resolve_live_text_snippet(
             .param("mode", crate::ui_text::native(&paste_mode_text(*paste_mode))),
             warnings: snippet_tag_warnings(tags),
         }),
-        TextSnippetPayload::LibraryRef { snippet_id } => {
+        TextSnippetPayload::LibraryRef { snippet_id, .. } => {
             let snippet = config
                 .snippet_library
                 .iter()
@@ -1847,7 +1868,7 @@ mod tests {
             .find(|candidate| candidate.id == action_id)
             .expect("expected mutable seed action");
         action.action_type = ActionType::TextSnippet;
-        action.payload = ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef {
+        action.payload = ActionPayload::TextSnippet(TextSnippetPayload::LibraryRef { press_enter: false,
             snippet_id: "missing-snippet".into(),
         });
 

@@ -5,7 +5,7 @@ import { nextUniqueId } from "../lib/config-editing";
 import { displayNameForControlId } from "../lib/labels";
 import { appendMenuItem, collectMenuItemIds, removeMenuItem, updateMenuItem } from "../lib/menu-helpers";
 import {
-  editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withPhrase,
+  editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withKeyboardOnly, withPhrase,
   type ItemKind, type MenuEdits,
 } from "../lib/menu-phrase";
 import { addTemplate, menuTemplates, type MenuTemplate } from "../lib/menu-templates";
@@ -637,6 +637,14 @@ export function MenuItemsEditor({
                   const label = enter ? `${bare} ⏎` : bare;
                   if (label !== item.label) onChange(updateMenuItem(items, item.id, (current) => ({ ...current, label })));
                 }} />
+            </label>
+          ) : null}
+          {/* A phrase with Enter is a macro, whose text step has no input mode. */}
+          {kind === "phrase" && action?.type === "textSnippet" && action.payload.source === "inline" ? (
+            <label className="menu-ed__switch" title={t("picker.keyboardOnlyHint")}>
+              {t("picker.keyboardOnly")}
+              <Toggle checked={action.payload.pasteMode === "keyboardOnly"} disabled={disabled} ariaLabel={t("picker.keyboardOnly")}
+                onChange={(on) => onEditsChange(putAction(withKeyboardOnly(action, on)))} />
             </label>
           ) : null}
         </div>

@@ -33,7 +33,7 @@ export type ActionType =
 
 export type TriggerMode = "press" | "doublePress" | "triplePress" | "hold" | "chord" | "longPress";
 
-export type PasteMode = "clipboardPaste" | "sendText";
+export type PasteMode = "clipboardPaste" | "sendText" | "keyboardOnly";
 
 type ValidationSeverity = "warning";
 

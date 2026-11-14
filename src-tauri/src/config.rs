@@ -791,8 +791,12 @@ pub struct ShortcutActionPayload {
 #[serde(rename_all = "camelCase")]
 pub enum PasteMode {
     ClipboardPaste,
+    /// Automatic: typed, a long text (over 100 characters) pasted through the clipboard.
     #[default]
     SendText,
+    /// Always typed key by key, never through the clipboard (a terminal or a
+    /// remote session that must not get a paste).
+    KeyboardOnly,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -3971,7 +3975,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xaa4b_e772_a374_27b3);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0xa8c9_72e8_5745_6bca);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -4535,6 +4539,7 @@ mod edge_proptests {
             paste_mode in prop_oneof![
                 Just(PasteMode::ClipboardPaste),
                 Just(PasteMode::SendText),
+                Just(PasteMode::KeyboardOnly),
             ],
             tags in prop::collection::vec("[a-z]{1,10}", 0..5),
         ) {

@@ -1230,16 +1230,21 @@ fn run_live_text_snippet_action(
     })?;
 
     let mut warnings = live_text.warnings;
-    // Always use SendInput (sendText) regardless of paste_mode setting.
-    // clipboardPaste causes COM/OLE crashes in debug builds and is
-    // unreliable. SendInput + KEYEVENTF_UNICODE works universally.
+    // Typed through SendInput (KEYEVENTF_UNICODE); a long text in the automatic
+    // mode goes through the clipboard, `KeyboardOnly` never does.
     log::info!(
-        "[executor] TextSnippet sendText: {} chars for key {}",
+        "[executor] TextSnippet sendText: {} chars for key {} ({:?})",
         live_text.text.chars().count(),
-        preview.encoded_key
+        preview.encoded_key,
+        live_text.paste_mode
     );
     let (expanded, cursor_back) = input_synthesis::expand_snippet_tokens(&live_text.text);
-    input_synthesis::send_text(&expanded).map_err(|message| {
+    let sent = if live_text.paste_mode == PasteMode::KeyboardOnly {
+        input_synthesis::send_text_typed(&expanded)
+    } else {
+        input_synthesis::send_text(&expanded)
+    };
+    sent.map_err(|message| {
         log::error!(
             "[executor] TextSnippet sendText failed for key {}: {message}",
             preview.encoded_key
@@ -1596,6 +1601,7 @@ fn paste_mode_text(paste_mode: PasteMode) -> crate::ui_text::UiText {
             crate::ui_text!("execution.pasteModeClipboard", "clipboard paste")
         }
         PasteMode::SendText => crate::ui_text!("execution.pasteModeText", "text input"),
+        PasteMode::KeyboardOnly => crate::ui_text!("execution.pasteModeKeyboard", "keyboard only"),
     }
 }
 
@@ -2572,7 +2578,7 @@ mod edge_proptests {
 
     #[test]
     fn paste_mode_text_total_coverage() {
-        for mode in [PasteMode::ClipboardPaste, PasteMode::SendText] {
+        for mode in [PasteMode::ClipboardPaste, PasteMode::SendText, PasteMode::KeyboardOnly] {
             let name = paste_mode_text(mode).text;
             assert!(
                 !name.is_empty(),

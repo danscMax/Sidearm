@@ -64,6 +64,12 @@ export function withPhrase(action: Action, text: string, enter: boolean): Action
   };
 }
 
+/** An inline phrase typed key by key (`keyboardOnly`) or in the automatic mode. */
+export function withKeyboardOnly(action: Action, keyboardOnly: boolean): Action {
+  if (action.type !== "textSnippet" || action.payload.source !== "inline") return action;
+  return { ...action, payload: { ...action.payload, pasteMode: keyboardOnly ? "keyboardOnly" : "sendText" } };
+}
+
 /** Changes the menu editor made to other actions and the library, applied on Save. */
 export interface MenuEdits {
   /** Edited or new actions, by id. */

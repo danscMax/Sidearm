@@ -166,7 +166,8 @@
       "type": "string",
       "enum": [
         "clipboardPaste",
-        "sendText"
+        "sendText",
+        "keyboardOnly"
       ]
     },
     "controlId": {

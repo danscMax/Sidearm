@@ -1130,7 +1130,9 @@
     "previewMenu_one": "Opens a menu ({{count}} item)",
     "previewMenu_other": "Opens a menu ({{count}} items)",
     "stopMacrosHint": "Ends the macro that is running now and drops the ones waiting behind it. Other buttons keep working; nothing is typed.",
-    "previewStopMacros": "Stops the running macro and the queued ones"
+    "previewStopMacros": "Stops the running macro and the queued ones",
+    "keyboardOnly": "Keyboard only",
+    "keyboardOnlyHint": "Types the text key by key, never through the clipboard — for a terminal or a remote session that must not get a paste. Without it, a text over 100 characters is pasted. Not for a phrase with Enter (a macro)."
   },
   "assignments": {
     "copyBinding": "Copy binding",
@@ -1723,7 +1725,8 @@
       "macrosStopped": "Macros stopped: the running one ends, the queued ones are dropped.",
       "stopMacrosPreview": "Will stop the running macro and drop the queued ones.",
       "sequenceQueued": "Macro waits: {{ahead}} ahead of it.",
-      "sequenceDropped": "Macro not started: {{count}} are already waiting. \"Stop macros\" ends them."
+      "sequenceDropped": "Macro not started: {{count}} are already waiting. \"Stop macros\" ends them.",
+      "pasteModeKeyboard": "keyboard only"
     },
     "synapse": {
       "v3MacroParseFailed": "Could not parse macro `{{name}}`: {{error}}",

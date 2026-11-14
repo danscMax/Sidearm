@@ -60,7 +60,9 @@ export function TextSnippetEditor({
   // button into its own inline copy (link-vs-copy semantics).
   const linked = Boolean(draft.snippetId);
   const linkedSnippet = linked ? library.find((s) => s.id === draft.snippetId) : undefined;
-  const usesClipboardFastPath = draft.text.length > 100;
+  const keyboardOnly = draft.pasteMode === "keyboardOnly";
+  // Mirrors input_synthesis::CLIPBOARD_PASTE_THRESHOLD; never in keyboard-only mode.
+  const usesClipboardFastPath = draft.text.length > 100 && !keyboardOnly;
 
   const taRef = useRef<HTMLTextAreaElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
@@ -175,6 +177,17 @@ export function TextSnippetEditor({
       {/* The save-to-library toggle only applies to an inline snippet; a linked
           one is already in the library. Outer wrapper is a <div> (not <label>)
           because Toggle renders its own <label>. */}
+      {linked ? null : (
+        <div className="snippet-save-toggle">
+          <Toggle
+            checked={keyboardOnly}
+            onChange={(on) => onChange({ ...draft, pasteMode: on ? "keyboardOnly" : "sendText" })}
+            ariaLabel={t("picker.keyboardOnly")}
+          />
+          <span>{t("picker.keyboardOnly")}</span>
+          <HelpTip text={t("picker.keyboardOnlyHint")} />
+        </div>
+      )}
       {linked ? null : (
         <div className="snippet-save-toggle">
           <Toggle

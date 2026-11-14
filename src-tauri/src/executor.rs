@@ -1769,10 +1769,17 @@ mod tests {
             payload: ActionPayload::Sequence(payload.clone()), display_name: "Wait".into(),
             notes: None, conditions: Vec::new(),
         };
-        let started = std::time::Instant::now();
-        let error = run_live_sequence_action(&action, &preview, &payload, Some(action.id.clone())).expect_err("timed out");
+        // Other tests cancel live sequences (a global generation): an attempt they cut short is retried.
+        let (error, elapsed) = (0..5)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                let error = run_live_sequence_action(&action, &preview, &payload, Some(action.id.clone())).expect_err("stopped");
+                (error, started.elapsed())
+            })
+            .find(|(error, _)| error.event.message.key != Some("execution.sequenceCancelled"))
+            .expect("one attempt ran to its timeout");
         assert_eq!(error.event.message.key, Some("execution.waitWindowTimeout"));
-        assert!(started.elapsed() >= Duration::from_millis(300) && started.elapsed() < Duration::from_secs(3));
+        assert!(elapsed >= Duration::from_millis(300) && elapsed < Duration::from_secs(3));
         assert!(!foreground_matches("no-such-program-for-sidearm.exe", None));
     }
 

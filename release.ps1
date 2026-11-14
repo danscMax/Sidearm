@@ -6,16 +6,23 @@
 #      src-tauri/tauri.conf.json, src-tauri/Cargo.toml and src-tauri/Cargo.lock
 #   2. CHANGELOG.md has a "## [x.y.z]" section -> the release notes
 #   3. The working tree is clean and the tag does not exist yet
-#   4. build_portable.ps1 (audit + build + assemble)
-#   5. Authenticode-signs portable\Sidearm.exe with the GlobalSign code signing
+#   4. npm run verify (tsc, knip, clippy, cargo test, vitest, tool tests, e2e)
+#      once per commit: a pass is remembered in plans\release\verified-<commit>
+#   5. build_portable.ps1 (audit + build + assemble)
+#   6. Authenticode-signs portable\Sidearm.exe with the GlobalSign code signing
 #      certificate on the Rutoken plugged into MiniPC (SweetWhisper's
 #      scripts\sign-windows.ps1, jsign over PKCS#11; over ssh: copy there, sign,
 #      copy back) and checks the signature is valid, timestamped and ours
 #      Both embedded versions must match -Version before signing and zipping.
-#   6. plans\release\out\Sidearm-Portable-vX.Y.Z.zip from ..\portable without
-#      data/ + SHA-256 (the folder is recreated, so only this release is there)
-#   7. -Publish only: asks to type the version, then tags, pushes the branch
-#      and the tag, creates the GitHub release with the zip, deletes plans\release\out
+#      An exe already signed with our certificate is not signed again (its hash
+#      is what the hardware check below was recorded for).
+#   7. plans\release\out\Sidearm-Portable-vX.Y.Z.zip from ..\portable without
+#      data/ + SHA-256 (the folder is recreated, so only this release is there);
+#      a changed settings format (SCHEMA_VERSION since the last tag) heads the notes
+#   8. -Publish only: requires the hardware check of this very exe
+#      (tools\hw-check.ps1 -> plans\release\hw-check-vX.Y.Z.json), asks to type
+#      the version, then tags, pushes the branch and the tag, creates the GitHub
+#      release with the zip, deletes plans\release\out
 #
 # Usage:
 #   .\release.ps1 -Version 0.11.0              - Checks, build, zip, notes (no publish)
@@ -32,6 +39,8 @@ param(
     [switch]$Publish,
     # Leave Sidearm.exe unsigned (no token at hand). A published release is always signed.
     [switch]$NoSign,
+    # Skip npm run verify (a local try only: a published release is always verified).
+    [switch]$SkipVerify,
     # The publish confirmation, given up front (a run without a console: Read-Host
     # cannot read piped input). Must equal -Version, like the typed answer.
     [string]$ConfirmVersion
@@ -64,7 +73,7 @@ function Assert-ReleaseExecutableVersion([string]$Path) {
 }
 
 # 1. One version everywhere.
-Write-Step 1 6 "Version $Version in every manifest"
+Write-Step 1 7 "Version $Version in every manifest"
 # The lockfile's root package has an empty name: only a hashtable can hold it.
 $lock = Get-Content -LiteralPath "$root\package-lock.json" -Raw | ConvertFrom-Json -AsHashtable
 $found = [ordered]@{
@@ -83,25 +92,45 @@ if ($wrong) {
 Write-Ok "all six say $Version"
 
 # 2. Release notes from the CHANGELOG section.
-Write-Step 2 6 "CHANGELOG section [$Version]"
+Write-Step 2 7 "CHANGELOG section [$Version]"
 $changelog = Get-Content -LiteralPath "$root\CHANGELOG.md" -Raw
 $section = [regex]::Match($changelog, "(?ms)^## \[$([regex]::Escape($Version))\][^\r\n]*\r?\n(.*?)(?=^## \[|\z)")
 if (-not $section.Success) { Stop-Release "CHANGELOG.md has no '## [$Version]' section (rename [Unreleased])." }
 $notes = $section.Groups[1].Value.Trim()
 
 # 3. Clean tree, new tag.
-Write-Step 3 6 "Git state"
+Write-Step 3 7 "Git state"
 Push-Location $root
 try {
     if (git status --porcelain --untracked-files=no) { Stop-Release "The working tree has uncommitted changes." }
     if (git tag --list $tag) { Stop-Release "Tag $tag already exists." }
     $branch = git rev-parse --abbrev-ref HEAD
+    $commit = git rev-parse HEAD
+    $lastTag = git describe --tags --abbrev=0 HEAD 2>$null
+    $schemaNow = [regex]::Match((Get-Content -LiteralPath "$root\src-tauri\src\config.rs" -Raw), 'SCHEMA_VERSION: i32 = (\d+);').Groups[1].Value
+    $schemaThen = if ($lastTag) { [regex]::Match(((git show "${lastTag}:src-tauri/src/config.rs") -join "`n"), 'SCHEMA_VERSION: i32 = (\d+);').Groups[1].Value } else { '' }
 } finally { Pop-Location }
 Write-Ok "clean, branch $branch, $tag is new"
 
+# 4. The whole local check, once per commit.
+if ($SkipVerify -and $Publish) { Stop-Release "A published release is verified: drop -SkipVerify." }
+$verifiedMark = Join-Path $root "plans\release\verified-$commit"
+if ($SkipVerify) {
+    Write-Warn "npm run verify skipped (-SkipVerify)."
+} elseif (Test-Path -LiteralPath $verifiedMark) {
+    Write-Ok "npm run verify already passed on $($commit.Substring(0, 8))"
+} else {
+    Write-Step 4 7 "npm run verify"
+    Push-Location $root
+    try { npm run verify } finally { Pop-Location }
+    if ($LASTEXITCODE -ne 0) { Stop-Release "npm run verify failed ($LASTEXITCODE): fix it before a release." }
+    New-Item -ItemType File -Path $verifiedMark -Force | Out-Null
+    Write-Ok "verified $($commit.Substring(0, 8))"
+}
+
 # 4. Build.
 if (-not $SkipBuild) {
-    Write-Step 4 6 "Portable build"
+    Write-Step 5 7 "Portable build"
     & pwsh -NoProfile -File (Join-Path $root 'build_portable.ps1') -NoOpen -StrictAudit
     if ($LASTEXITCODE -ne 0) { Stop-Release "build_portable.ps1 failed ($LASTEXITCODE)." }
 }
@@ -111,8 +140,18 @@ $exe = Join-Path $portable 'Sidearm.exe'
 Assert-ReleaseExecutableVersion $exe
 $certFile = Join-Path (Split-Path (Split-Path $root -Parent) -Parent) 'SweetWhisper\app\src-tauri\codesign\sweetwhisper-codesign.cer'
 if ($NoSign -and $Publish) { Stop-Release "A published release is signed: drop -NoSign." }
+$signed = $false
 if (-not $NoSign) {
-    Write-Step 5 6 "Code signing (MiniPC token)"
+    # Already ours (an earlier run, then the hardware check): signing again would change its hash.
+    $existing = Get-AuthenticodeSignature -LiteralPath $exe
+    if (Test-Path -LiteralPath $certFile) {
+        $ours = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certFile).Thumbprint
+        $signed = $existing.Status -eq 'Valid' -and $existing.SignerCertificate.Thumbprint -eq $ours -and [bool]$existing.TimeStamperCertificate
+    }
+    if ($signed) { Write-Ok "already signed with our certificate: kept (its hash is what was tested)" }
+}
+if (-not $NoSign -and -not $signed) {
+    Write-Step 6 7 "Code signing (MiniPC token)"
     if (-not (Test-Path -LiteralPath $certFile)) { Stop-Release "Certificate file missing: $certFile" }
     $thumbprint = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certFile).Thumbprint
     $remoteExe = 'C:\Users\dansc\sidearm-sign\Sidearm.exe'
@@ -131,7 +170,7 @@ if (-not $NoSign) {
 }
 
 # 6. Zip without the per-user data/ folder.
-Write-Step 6 6 "Zip"
+Write-Step 7 7 "Zip"
 Assert-ReleaseExecutableVersion $exe
 $notices = Join-Path $portable 'THIRD-PARTY-NOTICES.txt'
 if (-not (Test-Path -LiteralPath $notices) -or (Get-Item -LiteralPath $notices).Length -eq 0) {
@@ -149,6 +188,17 @@ $sizeMb = (Get-Item -LiteralPath $zip).Length / 1MB
 Write-Ok ("{0} ({1:N2} MB)" -f (Split-Path $zip -Leaf), $sizeMb)
 Write-Info "SHA-256 $hash"
 
+if ($schemaThen -and $schemaNow -and $schemaThen -ne $schemaNow) {
+    $formatNote = @"
+> **The settings format changed (v$schemaThen -> v$schemaNow).** An older Sidearm will not open settings saved by this one: before the first start, keep a copy of ``data\`` if you may go back.
+>
+> **Формат настроек изменился (v$schemaThen -> v$schemaNow).** Прежний Sidearm не откроет настройки, сохранённые этим: перед первым запуском сохраните копию папки ``data\``, если можете вернуться.
+
+"@
+    $notes = $formatNote + $notes
+    Write-Warn "settings format v$schemaThen -> v$schemaNow since ${lastTag}: noted at the top of the release notes"
+}
+
 $footer = @"
 
 ---
@@ -164,7 +214,17 @@ if (-not $Publish) {
     exit 0
 }
 
-# 7. Publish — an explicit confirmation, it is public and hard to undo.
+# 8. Publish — the hardware check of this very exe, then an explicit
+# confirmation (it is public and hard to undo).
+$hwCheck = Join-Path $root "plans\release\hw-check-$tag.json"
+$exeHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+$recorded = if (Test-Path -LiteralPath $hwCheck) { Get-Content -LiteralPath $hwCheck -Raw | ConvertFrom-Json } else { $null }
+if (-not $recorded -or $recorded.exeSha256 -ne $exeHash) {
+    Stop-Release "No hardware check of this Sidearm.exe ($($exeHash.Substring(0, 12))...): test it on the mice, then run tools\hw-check.ps1 -Version $Version."
+}
+$failedChecks = @($recorded.checks.PSObject.Properties | Where-Object Value -ne $true | ForEach-Object Name)
+if ($failedChecks.Count) { Stop-Release "Hardware check not passed: $($failedChecks -join ', ')." }
+Write-Ok "hardware check of this exe passed"
 $answer = if ($ConfirmVersion) { $ConfirmVersion } else { Read-Host "Publish $tag (tag, push $branch + tag, GitHub release)? Type the version to confirm" }
 if ($answer -ne $Version) { Stop-Release "Not confirmed." }
 Push-Location $root

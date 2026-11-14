@@ -1882,7 +1882,9 @@
       "pickRun": "Вставить",
       "pickEnter": "Вставить и нажать Enter",
       "pickCopy": "Только скопировать в буфер",
-      "pickEdit": "Редактировать в Sidearm"
+      "pickEdit": "Редактировать в Sidearm",
+      "scopeAll": "Все меню",
+      "scopeThis": "Это меню"
     },
     "cheatsheet": {
       "title": "{{profile}} · HyperShift 2"

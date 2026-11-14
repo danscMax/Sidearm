@@ -1842,7 +1842,9 @@
       "pickRun": "Insert",
       "pickEnter": "Insert and press Enter",
       "pickCopy": "Only copy to the clipboard",
-      "pickEdit": "Edit in Sidearm"
+      "pickEdit": "Edit in Sidearm",
+      "scopeAll": "All menus",
+      "scopeThis": "This menu"
     },
     "cheatsheet": {
       "title": "{{profile}} · HyperShift 2"

@@ -724,7 +724,7 @@ describe("swapItems", () => {
 
 describe("waitWindow steps", () => {
   it("waits for the program a launch step started, and keeps no delay of its own", () => {
-    const launch: SequenceStep = { type: "launch", value: "C:\Tools\Editor\editor.exe", delayMs: 500 };
+    const launch: SequenceStep = { type: "launch", value: "C:/Tools/Editor/editor.exe", delayMs: 500 };
     const wait = coerceSequenceStepType(launch, "waitWindow");
     expect(wait).toEqual({ type: "waitWindow", exe: "editor.exe", timeoutMs: 10000 });
     expect(setSequenceStepDelay(wait, 900)).toBe(wait);

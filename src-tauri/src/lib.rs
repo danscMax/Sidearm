@@ -469,22 +469,37 @@ fn build_tray_menu(
 #[cfg(target_os = "windows")]
 fn update_tray_icon(app: &AppHandle, tray: &tauri::tray::TrayIcon, badge: Option<u8>) {
     static SHOWN: Mutex<Option<Option<u8>>> = Mutex::new(None);
-    let mut shown = SHOWN.lock().recover_poison();
+    let (handle, tray) = (app.clone(), tray.clone());
+    // `set_icon` waits for the main thread, which may itself wait for SHOWN
+    // (`set_native_texts` is a sync command there): decide and set on the main
+    // thread, so SHOWN is never held across that wait.
+    let scheduled = app.run_on_main_thread(move || {
+        settle_tray_icon(&SHOWN, badge, || {
+            let Some(base) = handle.default_window_icon() else { return Ok(()) };
+            let icon = match badge {
+                Some(percent) => tauri::image::Image::new_owned(
+                    tray_badge::compose(base.rgba(), base.width(), base.height(), percent),
+                    tray_badge::SIZE,
+                    tray_badge::SIZE,
+                ),
+                None => base.clone().to_owned(),
+            };
+            tray.set_icon(Some(icon))
+        });
+    });
+    if let Err(error) = scheduled {
+        log::warn!("[tray] icon update not scheduled: {error}");
+    }
+}
+
+/// Sets the icon for `badge` unless it already shows it; remembers it only once set.
+#[cfg(target_os = "windows")]
+fn settle_tray_icon<E: std::fmt::Display>(shown: &Mutex<Option<Option<u8>>>, badge: Option<u8>, set: impl FnOnce() -> Result<(), E>) {
+    let mut shown = shown.lock().recover_poison();
     if *shown == Some(badge) {
         return;
     }
-    let Some(base) = app.default_window_icon() else {
-        return;
-    };
-    let icon = match badge {
-        Some(percent) => tauri::image::Image::new_owned(
-            tray_badge::compose(base.rgba(), base.width(), base.height(), percent),
-            tray_badge::SIZE,
-            tray_badge::SIZE,
-        ),
-        None => base.clone().to_owned(),
-    };
-    match tray.set_icon(Some(icon)) {
+    match set() {
         Ok(()) => *shown = Some(badge),
         Err(error) => log::warn!("[tray] set_icon failed: {error}"),
     }
@@ -4542,6 +4557,19 @@ mod tests {
             apply_config_shortcut(&config, |shortcut| desired = Some(shortcut.to_owned()));
             assert_eq!(desired.as_deref(), Some("ctrl+alt+n"));
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn tray_icon_is_set_once_per_state_and_retried_after_a_failure() {
+        let shown = Mutex::new(None);
+        let mut sets = 0;
+        settle_tray_icon(&shown, Some(40), || { sets += 1; Err("busy") });
+        settle_tray_icon(&shown, Some(40), || { sets += 1; Ok::<(), &str>(()) });
+        settle_tray_icon(&shown, Some(40), || { sets += 1; Ok::<(), &str>(()) });
+        assert_eq!(sets, 2, "a failed set is retried, a shown state is not set again");
+        settle_tray_icon(&shown, None, || { sets += 1; Ok::<(), &str>(()) });
+        assert_eq!(sets, 3);
     }
 
     /// The app ACL (build.rs `APP_COMMANDS` + capabilities) must cover exactly the

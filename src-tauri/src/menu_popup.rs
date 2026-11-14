@@ -849,8 +849,12 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
                 return;
             }
             let target_window = menu.target_window;
-            crate::capture_backend::run_menu_item(
-                app,
+            // Off the thread that got the pick: a click or Enter in the page comes
+            // in on the main thread, which must not type a phrase (the window,
+            // tray and popups would freeze meanwhile, and a window built there deadlocks).
+            let app = app.clone();
+            let _ = std::thread::Builder::new().name("menu-pick".into()).spawn(move || crate::capture_backend::run_menu_item(
+                &app,
                 &menu.runtime_store,
                 &menu.config,
                 &menu.preview,
@@ -868,7 +872,7 @@ fn drive_as(app: &AppHandle, mode: PickMode, input: impl FnOnce(&mut Model) -> S
                         }
                     }
                 }),
-            );
+            ));
         }
     }
 }

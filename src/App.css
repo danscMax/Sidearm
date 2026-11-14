@@ -1745,7 +1745,7 @@ input[type="radio"] {
 }
 
 /* ── Macro steps: one row each, the open one shows its fields ── */
-.seq-where { margin: -4px 0 0; }
+.seq-where { margin: -4px 0 0; font-size: var(--fs-caption); }
 .seq-list { display: grid; gap: 4px; }
 .seq-row { border: 1px solid var(--c-card-border); border-radius: var(--radius-md); background: var(--c-card-bg); }
 .seq-row--open { border-color: color-mix(in srgb, var(--c-accent) 45%, transparent); background: var(--c-menu-selected); }
@@ -1888,7 +1888,7 @@ input[type="radio"] {
 .menu-ed__mark .chevron { display: inline-block; vertical-align: middle; }
 /* Blocks in the tree fold and show how many items they hold; their items sit in
    a body with a guide line, so a loose item after the block reads as outside it. */
-.menu-ed__block-body { margin: 2px 0 6px 9px; padding-left: 8px; border-left: 2px solid var(--c-border); }
+.menu-ed__block-body { margin: 2px 0 6px 9px; padding-left: 8px; border-left: 2px solid var(--c-border-hover); }
 .menu-ed__group-line { display: flex; align-items: center; gap: 2px; margin-top: 4px; }
 .menu-ed__group-line .menu-ed__group { display: flex; flex: 1; min-width: 0; margin-top: 0; }
 .menu-ed__fold {

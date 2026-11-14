@@ -195,8 +195,9 @@ pub(crate) fn cancel(app: &AppHandle) {
             log::warn!("[cheatsheet] hide not scheduled: {error}");
         }
     }, move || {
-        hide(&handle);
-        log::info!("[cheatsheet] hidden");
+        if hide(&handle) {
+            log::info!("[cheatsheet] hidden");
+        }
     });
 }
 
@@ -248,10 +249,9 @@ pub(crate) fn page_layout(app: &AppHandle, width: f64, height: f64) {
     });
 }
 
-fn hide(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
-        platform::hide(&window);
-    }
+/// Hides the sheet; whether it was on screen.
+fn hide(app: &AppHandle) -> bool {
+    app.get_webview_window(WINDOW_LABEL).is_some_and(|window| platform::hide(&window))
 }
 
 fn create_window(app: &AppHandle) {
@@ -300,10 +300,9 @@ mod platform {
         }
     }
 
-    pub(super) fn hide(window: &tauri::WebviewWindow) {
-        if let Ok(hwnd) = window.hwnd() {
-            unsafe { ShowWindow(hwnd.0 as HWND, SW_HIDE) };
-        }
+    /// Whether it was visible (`ShowWindow` returns the previous state).
+    pub(super) fn hide(window: &tauri::WebviewWindow) -> bool {
+        window.hwnd().is_ok_and(|hwnd| unsafe { ShowWindow(hwnd.0 as HWND, SW_HIDE) } != 0)
     }
 }
 
@@ -314,8 +313,10 @@ mod platform {
         let _ = window.show();
     }
 
-    pub(super) fn hide(window: &tauri::WebviewWindow) {
+    pub(super) fn hide(window: &tauri::WebviewWindow) -> bool {
+        let visible = window.is_visible().unwrap_or(false);
         let _ = window.hide();
+        visible
     }
 }
 

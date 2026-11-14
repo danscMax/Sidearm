@@ -334,7 +334,10 @@ fn read_until_lost(
         // Fake mice: a native mouse button for the mouse hook's HyperShift 2
         // path (`FAKE_NATIVE_BUTTON`, button code, down).
         if crate::fake_mode() && read >= 3 && buffer[0] == FAKE_NATIVE_BUTTON {
-            super::windows::fake_native_button(buffer[1], buffer[2] != 0);
+            // Its lines (`H2HOLD:`…) carry no device prefix, as the hook's do.
+            if !emit(&super::windows::fake_native_button(buffer[1], buffer[2] != 0), "") {
+                break Ok(());
+            }
             continue;
         }
         let Some(usages) = held_usages(&buffer[..read as usize], report_id) else {

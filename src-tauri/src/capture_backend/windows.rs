@@ -2080,7 +2080,9 @@ fn apply_trigger2(button: u8, held: bool) {
 
 /// Fake mice: a native button of the HyperShift 2 mouse, as the mouse hook
 /// would see it (report `0x7F` on its pipe).
-pub(super) fn fake_native_button(button: u8, is_down: bool) {
+/// Returns the lines it queued (`H2HOLD:`…): the hook's own thread sends its
+/// queue, but this runs on a reader thread, whose queue nobody else sends.
+pub(super) fn fake_native_button(button: u8, is_down: bool) -> Vec<String> {
     let held = HELPER_HYPER2_HELD.load(Ordering::Relaxed);
     let state = Trigger2State { trigger: HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed), held, ..Trigger2State::default() };
     let decision = trigger2_decision(state, None, button, is_down);
@@ -2090,6 +2092,7 @@ pub(super) fn fake_native_button(button: u8, is_down: bool) {
         Trigger2::Release => apply_trigger2(button, false),
         _ => log::info!("[capture-helper] native button {button} {} passed through", if is_down { "down" } else { "up" }),
     }
+    HELPER_MATCHES.with_borrow_mut(std::mem::take)
 }
 
 /// A reader's `H2:` stamp: the trigger is held. A press in `lines` uses the

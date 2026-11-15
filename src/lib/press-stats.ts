@@ -6,6 +6,7 @@
 import type { PressDay } from "./backend";
 import type { Action, AppConfig, Binding, ControlId, Layer, MenuItem } from "./config";
 import { findBinding, gestureOf } from "./config-editing";
+import { isOfflineLayer } from "./config";
 
 export type PressLog = Record<string, PressDay>;
 
@@ -43,7 +44,8 @@ export function slotKey(binding: Binding): string {
 /** A device's enabled bindings of one profile on the layers it presses. */
 function placesOf(config: AppConfig, profileId: string, deviceId: string): Binding[] {
   const onDevice = new Set(config.physicalControls.filter((c) => c.deviceId === deviceId).map((c) => c.id));
-  return config.bindings.filter((b) => b.enabled && b.profileId === profileId && onDevice.has(b.controlId));
+  // Firmware presses happen after exit and cannot appear in Sidearm's press log.
+  return config.bindings.filter((b) => b.enabled && !isOfflineLayer(b.layer) && b.profileId === profileId && onDevice.has(b.controlId));
 }
 
 export interface PlaceCount {
@@ -114,6 +116,7 @@ export function holdHints(config: AppConfig, sums: PressSums, profileId: string,
 /** Presses per control of one profile and layer (all press patterns), for the heat map. */
 export function layerHeat(sums: PressSums, profileId: string, layer: Layer): Map<ControlId, number> {
   const heat = new Map<ControlId, number>();
+  if (isOfflineLayer(layer)) return heat;
   for (const [key, n] of sums.slots) {
     const [profile, keyLayer, control] = key.split("|");
     if (profile === profileId && keyLayer === layer && control) heat.set(control, (heat.get(control) ?? 0) + n);

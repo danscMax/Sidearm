@@ -3,6 +3,12 @@
  *  else the standard (/ hypershift) binding. Never resolved while Sidearm runs. */
 export type Layer = "standard" | "hypershift" | "hypershift2" | "hypershiftBoth" | "offline" | "offlineHypershift";
 
+export type OfflineLayer = Extract<Layer, "offline" | "offlineHypershift">;
+
+export function isOfflineLayer(layer: Layer): layer is OfflineLayer {
+  return layer === "offline" || layer === "offlineHypershift";
+}
+
 export type ControlFamily = "thumbGrid" | "topPanel" | "wheel" | "system";
 
 export type CapabilityStatus =

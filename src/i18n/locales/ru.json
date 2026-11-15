@@ -215,6 +215,8 @@
     "hypershift": "Hypershift",
     "hypershift2": "HyperShift 2",
     "hypershiftBoth": "HS + HS2",
+    "offline": "Без Sidearm",
+    "offlineHypershift": "Без Sidearm · HyperShift",
     "neutral": "Слой {{n}}",
     "standardDesc": "Основной слой назначений и сигналов.",
     "hypershiftDesc": "Второй слой со своими биндами и отдельной валидацией."

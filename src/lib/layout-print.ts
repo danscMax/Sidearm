@@ -9,6 +9,7 @@ import { deviceLayout, layoutControlId } from "./devices";
 import i18n from "../i18n";
 import { displayNameForControlId, labelForLayer } from "./labels";
 
+// Print live assignments; memory-only layers do not describe runtime behaviour.
 const LAYERS: Layer[] = ["standard", "hypershift", "hypershift2", "hypershiftBoth"];
 const GESTURE_NAME = { longPress: "picker.gestureLongPress", doublePress: "picker.gestureDoublePress", triplePress: "picker.gestureTriplePress" } as const;
 const ORDER = { press: 0, longPress: 1, doublePress: 2, triplePress: 3 } as const;

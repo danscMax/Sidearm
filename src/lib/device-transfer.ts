@@ -71,6 +71,7 @@ export function planDeviceTransfer(
   profileIds: readonly string[],
   conflict: TransferConflict,
 ): TransferItem[] {
+  // Offline layers belong to the profile/control too; only software HS2 needs a layout check.
   return config.bindings
     .filter((binding) => profileIds.includes(binding.profileId)
       && config.physicalControls.some((control) => control.id === binding.controlId && control.deviceId === fromDevice))

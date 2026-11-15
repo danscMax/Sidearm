@@ -14,6 +14,15 @@ const today = new Date(2026, 10, 13);
 const day = (offset: number) => { const d = new Date(today); d.setDate(d.getDate() - offset); return localDate(d); };
 
 describe("press statistics", () => {
+  it("does not show firmware-only assignments as pressed or unused live places", () => {
+    const offline = [bind("off", "thumb_01", "a", { layer: "offline" }), bind("off-hs", "thumb_01", "a", { layer: "offlineHypershift" })];
+    const config = makeConfig({ actions: [key("a", "A")], bindings: offline });
+    const sums = { slots: new Map(offline.map((binding) => [slotKey(binding), 10])), actions: new Map<string, number>() };
+    expect(topPlaces(config, sums, sums, "p1", "razer-naga")).toEqual([]);
+    expect(unusedPlaces(config, { ...sums, slots: new Map() }, "p1", "razer-naga")).toEqual([]);
+    expect(layerHeat(sums, "p1", "offline").size).toBe(0);
+  });
+
   const config = makeConfig({
     actions: [key("c", "C", true), text("hi", "hello"), key("v", "V", true)],
     bindings: [bind("copy", "thumb_01", "c"), bind("hello", "mouse_4", "hi"), bind("hsv", "thumb_01", "v", { layer: "hypershift" })],

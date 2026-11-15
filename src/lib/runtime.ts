@@ -1,5 +1,8 @@
 import type { UiText } from "./ui-text";
-import type { ActionType, ControlId, Layer, MappingSource, TriggerMode } from "./config";
+import type { ActionType, ControlId, Layer, MappingSource, OfflineLayer, TriggerMode } from "./config";
+
+// Runtime events never resolve the firmware-only layers written at exit.
+type RuntimeLayer = Exclude<Layer, OfflineLayer>;
 
 export type RuntimeStatus = "idle" | "running";
 
@@ -74,7 +77,7 @@ export interface ResolvedInputPreview {
   candidateAppMappingIds: string[];
   candidateControlIds: string[];
   controlId?: ControlId;
-  layer?: Layer;
+  layer?: RuntimeLayer;
   bindingId?: string;
   bindingLabel?: string;
   actionId?: string;
@@ -94,7 +97,7 @@ export interface ActionExecutionEvent {
   resolvedProfileName?: string;
   matchedAppMappingId?: string;
   controlId?: ControlId;
-  layer?: Layer;
+  layer?: RuntimeLayer;
   bindingId?: string;
   mode: ExecutionMode;
   outcome: ExecutionOutcome;

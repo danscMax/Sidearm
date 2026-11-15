@@ -1,5 +1,5 @@
 import i18n from "../i18n";
-import { isMenuMark } from "./config";
+import { isMenuMark, isOfflineLayer } from "./config";
 import type {
   Action,
   ActionType,
@@ -16,9 +16,11 @@ import type {
   SnippetLibraryItem,
   TriggerMode,
   MouseOverrides,
+  OfflineLayer,
+  ShortcutActionPayload,
 } from "./config";
 import { clampPriority, uniqueStrings } from "./helpers";
-import { defaultPayloadFor } from "./action-helpers";
+import { defaultPayloadFor, describeActionSummary } from "./action-helpers";
 import { isRecord, uniqueIds, validActionReferences, validConfigPart } from "./import-validation";
 
 const PLACEHOLDER_ACTION_NOTE =
@@ -192,6 +194,29 @@ export function upsertAction(config: AppConfig, nextAction: Action): AppConfig {
     ...config,
     actions,
   };
+}
+
+/** An own firmware press; null restores inheritance and uses the usual orphan rules. */
+export function setOfflineAssignment(
+  config: AppConfig,
+  profileId: string,
+  controlId: ControlId,
+  layer: OfflineLayer,
+  payload: ShortcutActionPayload | Extract<Action, { type: "mouseAction" }>["payload"] | "silent" | null,
+): AppConfig {
+  const next = removeBindingsForControls(config, profileId, layer, new Set([controlId])).config;
+  if (payload === null) return next;
+  const id = nextUniqueId(next.actions.map((action) => action.id), makeActionId(profileId, layer, controlId));
+  const action: Action = payload === "silent"
+    ? { id, type: "disabled", payload: {}, displayName: "" }
+    : "action" in payload
+      ? { id, type: "mouseAction", payload: { ...payload }, displayName: "" }
+      : { id, type: "shortcut", payload: { ...payload }, displayName: "" };
+  action.displayName = describeActionSummary(action, new Map());
+  return upsertBinding(upsertAction(next, action), {
+    id: nextUniqueId(next.bindings.map((binding) => binding.id), makeBindingId(profileId, layer, controlId)),
+    profileId, controlId, layer, actionId: id, label: action.displayName, enabled: true, triggerMode: "press",
+  });
 }
 
 export function upsertProfile(config: AppConfig, nextProfile: Profile): AppConfig {
@@ -890,6 +915,8 @@ export function seedExpectedEncoderMapping(
   layer: Layer,
   control: PhysicalControl,
 ): AppConfig {
+  // Firmware-only assignments have no live transport signal to learn.
+  if (isOfflineLayer(layer)) return config;
   const expectedEncodedKey = expectedEncodedKeyForControl(control.id, layer);
   if (!expectedEncodedKey) {
     return ensureEncoderMapping(config, layer, control);
@@ -924,6 +951,7 @@ export function expectedEncodedKeyForControl(
   controlId: ControlId,
   layer: Layer,
 ): string | null {
+  if (isOfflineLayer(layer)) return null;
   const thumbIndex = thumbGridIndex(controlId);
   if (thumbIndex !== null) {
     const baseFunction = 13 + thumbIndex;
@@ -1383,6 +1411,8 @@ export function copyBindingFromLayer(
   sourceLayer: Layer,
   targetLayer: Layer,
 ): AppConfig {
+  // Layer-copy tools edit live assignments; offline assignments travel with whole profiles.
+  if (isOfflineLayer(sourceLayer) || isOfflineLayer(targetLayer)) return config;
   const sourceBinding = findBinding(config, profileId, sourceLayer, controlId);
   if (!sourceBinding) return config;
   return duplicateBinding(config, sourceBinding.id, controlId, targetLayer);

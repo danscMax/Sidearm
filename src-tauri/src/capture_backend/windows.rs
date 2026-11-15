@@ -1481,7 +1481,7 @@ fn build_hotkey_registrations(
     consumer: bool,
 ) -> Result<Vec<RegisteredHotkey>, String> {
     let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
-    for mapping in &config.encoder_mappings {
+    for mapping in config.encoder_mappings.iter().filter(|mapping| mapping.layer.is_live()) {
         let device = config.physical_controls.iter()
             .find(|control| control.id == mapping.control_id)
             .map(|control| control.device_id.as_str());
@@ -5498,6 +5498,21 @@ mod helper_modifier_state_tests {
             let selected = registrations.get((registration.id as usize) - 1);
             assert_eq!(selected.map(|reg| reg.encoded_key.as_str()), Some(registration.encoded_key.as_str()));
         }
+    }
+
+    #[test]
+    fn offline_encoder_mappings_never_register_or_capture_side_buttons() {
+        let mut config = crate::config::default_seed_config();
+        let before = build_hotkey_registrations(&config, &[], false).unwrap();
+        for layer in [crate::config::Layer::Offline, crate::config::Layer::OfflineHypershift] {
+            let mut mapping = config.encoder_mappings[0].clone();
+            mapping.layer = layer;
+            mapping.control_id = crate::config::ControlId::new("mouse_4");
+            mapping.encoded_key = "not a hotkey".into();
+            config.encoder_mappings.push(mapping);
+        }
+        let after = build_hotkey_registrations(&config, &[], false).unwrap();
+        assert_eq!(after.len(), before.len());
     }
 
     #[test]

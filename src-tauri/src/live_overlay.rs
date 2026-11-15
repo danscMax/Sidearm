@@ -286,6 +286,7 @@ pub struct Overlay {
 fn has_action(config: &AppConfig, control: &ControlId, layer: Layer) -> bool {
     config.bindings.iter().any(|binding| {
         binding.enabled
+            && binding.layer.is_live()
             && binding.control_id == *control
             // The hypershift layer falls back to the standard binding; a
             // HyperShift 2 press arrives as the standard record's signal.
@@ -1226,6 +1227,25 @@ pub(crate) mod tests {
             assert!(setup.signals.iter().any(|entry| entry.usage == signal && !entry.hypershift));
         }
         assert!(offline_targets(&config, &NAGA_V3_PRO, "main").is_empty());
+    }
+
+    #[test]
+    fn offline_only_assignments_do_not_capture_extra_controls_live() {
+        let mut config = config_with_v3();
+        let before = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        let template = config.bindings[0].clone();
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            config.bindings.push(crate::config::Binding {
+                id: format!("offline-extra-{layer:?}"),
+                layer,
+                control_id: control_id(&NAGA_V3_PRO, "wheel_down"),
+                ..template.clone()
+            });
+        }
+        assert_eq!(overlay(&config, &NAGA_V3_PRO, true, false).unwrap(), before);
+        for layer in [Layer::Standard, Layer::Hypershift] {
+            assert!(!has_action(&config, &control_id(&NAGA_V3_PRO, "wheel_down"), layer));
+        }
     }
 
     #[test]

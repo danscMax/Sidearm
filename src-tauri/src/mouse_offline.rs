@@ -7,7 +7,8 @@
 //! with modifiers, or a plain mouse button. Text, macros, launches, menus and
 //! per-app profiles cannot live in the mouse and stay inert until Sidearm runs
 //! again. If the profile uses Hypershift, its trigger becomes the firmware
-//! Hypershift key and the layer-1 records get the hypershift bindings.
+//! Hypershift key and the layer-1 records get the hypershift bindings. Own
+//! `Offline` / `OfflineHypershift` plain presses override the respective records.
 //!
 //! On the next start the marker file says the memory holds the offline
 //! profile, and Sidearm writes its own signals back before the guard looks.
@@ -43,10 +44,12 @@ pub struct OfflineRecord {
 /// - an unbound control keeps its record, except on layer 1 of Sidearm's own
 ///   onboard profile (the onboard path), where a leftover of an earlier
 ///   offline profile would play: there it gets the inert signal too;
-/// - layer 1 follows the resolver: the hypershift binding, else the standard
-///   one; under a right-button trigger a left click is a right click;
+/// - own offline bindings override layers 0 and 1 independently; otherwise
+///   layer 1 follows the resolver: hypershift, else standard, with a left click
+///   under a right-button trigger becoming a right click;
 /// - the trigger becomes the firmware Hypershift key when a hypershift binding
-///   is playable; the profile button keeps switching banks.
+///   is playable or an own offline-hypershift binding exists; the profile button
+///   keeps switching banks.
 pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<OfflineRecord> {
     use crate::mouse_memory::live_overlay::{USAGES, control_id, controls};
     let own_profile = model.transport == Transport::Onboard;
@@ -63,8 +66,10 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<Of
     });
     let right_trigger = firmware_trigger.is_none() && settings_trigger == "mouse_right";
     let signals = onboard_bindings(config);
-    let inert = |index: usize, control: &str, layer: u8| -> Option<OnboardAction> {
-        if !own_profile {
+    let inert = |index: usize, control: &str, layer: u8, own_binding: bool| -> Option<OnboardAction> {
+        // An explicit silent assignment must silence native buttons too; the
+        // derived fallback keeps their existing native behaviour.
+        if !own_profile || (own_binding && model.native_buttons.iter().any(|(id, _, _)| *id == control)) {
             return USAGES.get(2 * index + usize::from(layer)).map(|&usage| OnboardAction::Consumer(usage));
         }
         if let Some(&(_, _, value)) = model.native_buttons.iter().find(|(id, _, _)| *id == control) {
@@ -85,18 +90,22 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<Of
         let action = |layer| binding_action(config, model, profile_id, id.as_str(), layer);
         let standard = action(Layer::Standard);
         let hypershift = action(Layer::Hypershift);
-        uses_hypershift |= matches!(hypershift, Some(Some(_)));
-        if let Some(found) = standard
-            && let Some(action) = found.or_else(|| inert(index, control, 0))
+        let offline = action(Layer::Offline);
+        let offline_hypershift = action(Layer::OfflineHypershift);
+        uses_hypershift |= offline_hypershift.is_some() || matches!(hypershift, Some(Some(_)));
+        if let Some(found) = offline.or(standard)
+            && let Some(action) = found.or_else(|| inert(index, control, 0, offline.is_some()))
         {
             records.push(OfflineRecord { button_id: button, layer: 0, action });
         }
-        let layer_one_action = if control == "mouse_left" && right_trigger {
+        let layer_one_action = if let Some(found) = offline_hypershift {
+            found.or_else(|| inert(index, control, 1, true))
+        } else if control == "mouse_left" && right_trigger {
             Some(OnboardAction::Mouse(2))
         } else {
             match hypershift.or(standard) {
-                Some(found) => found.or_else(|| inert(index, control, 1)),
-                None if own_profile => inert(index, control, 1),
+                Some(found) => found.or_else(|| inert(index, control, 1, false)),
+                None if own_profile => inert(index, control, 1, false),
                 None => None,
             }
         };
@@ -525,6 +534,97 @@ mod tests {
         binding_target(&NAGA_V2_HYPERSPEED, &binding).unwrap().1
     }
 
+    #[test]
+    fn an_own_offline_press_overrides_only_layer_zero() {
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            let (mut config, profile) = empty_profile();
+            let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+            bind(&mut config, &profile, id.as_str(), Layer::Standard, shortcut("T", true, false, false), None);
+            let other = crate::mouse_memory::live_overlay::control_id(model, "thumb_02");
+            bind(&mut config, &profile, other.as_str(), Layer::Hypershift, shortcut("U", true, false, false), None);
+            let before = plan(&config, model, &profile);
+            bind(&mut config, &profile, id.as_str(), Layer::Offline, shortcut("F4", false, false, true), Some(TriggerMode::Press));
+            let records = plan(&config, model, &profile);
+            let button = model.button_id_for("thumb_01").unwrap();
+            assert_eq!(record(&records, button, 0), onboard_action(model, &shortcut("F4", false, false, true)));
+            assert_eq!(record(&records, button, 1), record(&before, button, 1), "layer 1 keeps its live fallback");
+            config.bindings.last_mut().unwrap().enabled = false;
+            assert_eq!(plan(&config, model, &profile), before, "a disabled own binding falls back");
+        }
+    }
+
+    #[test]
+    fn a_disabled_or_unplayable_own_offline_action_is_inert() {
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            for payload in [
+                ActionPayload::Disabled(Default::default()),
+                ActionPayload::MouseAction(MouseActionPayload { action: MouseActionKind::DpiUp, ctrl: false, shift: false, alt: false, win: false }),
+            ] {
+                let (mut config, profile) = empty_profile();
+                let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+                bind(&mut config, &profile, id.as_str(), Layer::Standard, shortcut("T", true, false, false), None);
+                bind(&mut config, &profile, id.as_str(), Layer::Offline, payload, None);
+                let inert = if model.transport == Transport::Onboard { v2_signal(&config, "thumb_01") }
+                    else { OnboardAction::Consumer(crate::mouse_memory::live_overlay::USAGES[0]) };
+                assert_eq!(record(&plan(&config, model, &profile), model.button_id_for("thumb_01").unwrap(), 0), Some(inert));
+            }
+        }
+    }
+
+    #[test]
+    fn an_own_offline_hypershift_action_overrides_layer_one_and_enables_the_trigger() {
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            let (mut config, profile) = empty_profile();
+            let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+            bind(&mut config, &profile, id.as_str(), Layer::Standard, shortcut("T", true, false, false), None);
+            let mouse = ActionPayload::MouseAction(MouseActionPayload { action: MouseActionKind::MouseBack, ctrl: false, shift: false, alt: false, win: false });
+            bind(&mut config, &profile, id.as_str(), Layer::OfflineHypershift, mouse, None);
+            let trigger = model.live.as_ref().and_then(|live| live.firmware_trigger).unwrap_or(0x02);
+            let button = model.button_id_for("thumb_01").unwrap();
+            let records = plan(&config, model, &profile);
+            assert_eq!(record(&records, button, 0), Some(OnboardAction::Key { modifier: 1, usage: 0x17 }));
+            assert_eq!(record(&records, button, 1), Some(OnboardAction::Mouse(4)));
+            for layer in [0, 1] {
+                assert_eq!(record(&records, trigger, layer), Some(OnboardAction::Hypershift));
+            }
+            bind(&mut config, &profile, id.as_str(), Layer::Hypershift, shortcut("U", true, false, false), None);
+            assert_eq!(plan(&config, model, &profile), records, "the own assignment also wins over a live HyperShift binding");
+        }
+    }
+
+    #[test]
+    fn a_silent_own_hypershift_assignment_still_needs_the_firmware_trigger() {
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
+        bind(&mut config, &profile, "thumb_01", Layer::OfflineHypershift, ActionPayload::Disabled(Default::default()), None);
+        let records = plan(&config, &NAGA_V2_HYPERSPEED, &profile);
+        assert_eq!(record(&records, 0x02, 0), Some(OnboardAction::Hypershift));
+        assert_eq!(record(&records, NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap(), 1), Some(v2_signal(&config, "thumb_01")));
+    }
+
+    #[test]
+    fn an_own_offline_hypershift_left_click_overrides_the_right_trigger_translation() {
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "mouse_left", Layer::OfflineHypershift, shortcut("T", true, false, false), None);
+        assert_eq!(record(&plan(&config, &NAGA_V2_HYPERSPEED, &profile), 0x01, 1), Some(OnboardAction::Key { modifier: 1, usage: 0x17 }));
+    }
+
+    #[test]
+    fn an_explicit_disabled_mouse_button_is_silent_on_both_layers() {
+        for (model, control) in [(&NAGA_V2_HYPERSPEED, "mouse_left"), (&NAGA_V3_PRO, "wheel_click")] {
+            let (mut config, profile) = empty_profile();
+            let id = crate::mouse_memory::live_overlay::control_id(model, control);
+            for layer in [Layer::Offline, Layer::OfflineHypershift] {
+                bind(&mut config, &profile, id.as_str(), layer, ActionPayload::Disabled(Default::default()), None);
+            }
+            let button = crate::mouse_memory::live_overlay::controls(model).into_iter().find(|(id, _)| *id == control).unwrap().1;
+            let records = plan(&config, model, &profile);
+            for layer in [0, 1] {
+                assert!(matches!(record(&records, button, layer), Some(OnboardAction::Consumer(_))), "{}/{layer}: {records:?}", model.name);
+            }
+        }
+    }
+
     /// A double press or a text binding would play wrong (a single press, an
     /// old record): both get the inert signal, on the V2 and in a V3 bank.
     #[test]
@@ -585,6 +685,26 @@ mod tests {
     fn fake_v2() -> (VendorDevice, fake::Installed) {
         let installed = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
         (VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, ""), installed)
+    }
+
+    #[test]
+    fn an_own_offline_record_is_written_and_its_marker_restores_live_signals() {
+        let (mut config, profile) = empty_profile();
+        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
+        bind(&mut config, &profile, "thumb_01", Layer::Offline, shortcut("U", true, false, false), None);
+        let dir = tempfile::tempdir().unwrap();
+        let (device, installed) = fake_v2();
+        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
+        let button = NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap();
+        assert_eq!(fake::with(|mouse| mouse.records[&(1, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x18]);
+        drop(device);
+        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
+        assert!(restore_after_offline(&config, dir.path()));
+        assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
+        let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+        assert_eq!(device.drifted_bindings(&onboard_bindings(&config)), Ok(Vec::new()));
+        assert_eq!(device.drifted_native_buttons(), Ok(Vec::new()));
+        drop((device, installed));
     }
 
     #[test]

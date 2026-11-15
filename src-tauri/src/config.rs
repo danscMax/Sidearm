@@ -551,6 +551,10 @@ pub enum Layer {
 }
 
 impl Layer {
+    pub fn is_live(self) -> bool {
+        !matches!(self, Self::Offline | Self::OfflineHypershift)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Standard => "standard",
@@ -1817,6 +1821,16 @@ pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarnin
         &mut errors,
     );
     for binding in &config.bindings {
+        if !binding.layer.is_live() {
+            if !matches!(binding.trigger_mode, None | Some(TriggerMode::Press)) {
+                errors.push(format!("binding `{}` on offline layer `{}` must use a plain press trigger.", binding.id, binding.layer.as_str()));
+            }
+            if let Some(action) = config.actions.iter().find(|action| action.id == binding.action_id)
+                && !matches!(action.action_type, ActionType::Shortcut | ActionType::MouseAction | ActionType::Disabled)
+            {
+                errors.push(format!("binding `{}` on offline layer `{}` must use a shortcut, mouseAction or disabled action.", binding.id, binding.layer.as_str()));
+            }
+        }
         if !profile_ids.contains(&binding.profile_id) {
             errors.push(format!(
                 "binding `{}` references missing profile `{}`.",
@@ -1864,6 +1878,9 @@ pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarnin
     let mut encoder_keys = HashSet::new();
     let mut encoded_inputs = HashSet::new();
     for mapping in &config.encoder_mappings {
+        if !mapping.layer.is_live() {
+            errors.push(format!("encoderMapping `{}::{}` cannot use an offline layer.", mapping.control_id.as_str(), mapping.layer.as_str()));
+        }
         let key = format!(
             "{}::{}",
             mapping.control_id.as_str(),
@@ -2090,7 +2107,11 @@ fn validate_action(
         // catch-all below, so validate_config rejected save/load of any config using it.)
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {}
         (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {}
-        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => {}
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(payload)) => {
+            if !payload.layer.is_live() {
+                errors.push(format!("action `{}` cheatSheet must use a live layer.", action.id));
+            }
+        }
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
@@ -3721,6 +3742,65 @@ mod tests {
     }
 
     #[test]
+    fn offline_bindings_accept_only_plain_presses() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.bindings[0].layer = layer;
+            for trigger in [None, Some(TriggerMode::Press)] {
+                config.bindings[0].trigger_mode = trigger;
+                validate_config(&config).expect("an offline plain press is valid");
+            }
+            for trigger in [TriggerMode::LongPress, TriggerMode::DoublePress, TriggerMode::TriplePress, TriggerMode::Hold, TriggerMode::Chord] {
+                config.bindings[0].trigger_mode = Some(trigger);
+                let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+                assert!(errors.iter().any(|error| error.contains("must use a plain press trigger")), "{layer:?}/{trigger:?}: {errors:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn offline_bindings_accept_only_shortcut_mouse_or_disabled_actions() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.bindings[0].layer = layer;
+            let id = config.bindings[0].action_id.clone();
+            for (action_type, payload) in [
+                (ActionType::Shortcut, ActionPayload::Shortcut(ShortcutActionPayload { key: "A".into(), ctrl: true, shift: false, alt: false, win: false, raw: None })),
+                (ActionType::MouseAction, ActionPayload::MouseAction(MouseActionPayload { action: MouseActionKind::MouseBack, ctrl: false, shift: false, alt: false, win: false })),
+                (ActionType::Disabled, ActionPayload::Disabled(Default::default())),
+            ] {
+                let action = config.actions.iter_mut().find(|action| action.id == id).unwrap();
+                (action.action_type, action.payload) = (action_type, payload);
+                validate_config(&config).expect("supported offline action");
+            }
+            config.bindings[0].action_id = config.actions.iter().find(|action| action.action_type == ActionType::TextSnippet).unwrap().id.clone();
+            let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+            assert!(errors.iter().any(|error| error.contains("must use a shortcut, mouseAction or disabled action")), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn encoder_mappings_cannot_use_offline_layers() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.encoder_mappings[0].layer = layer;
+            let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+            assert!(errors.iter().any(|error| error.contains("cannot use an offline layer")), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn cheat_sheet_actions_cannot_expose_offline_layers() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.actions[0].action_type = ActionType::CheatSheet;
+            config.actions[0].payload = ActionPayload::CheatSheet(CheatSheetPayload { layer });
+            let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+            assert!(errors.iter().any(|error| error.contains("cheatSheet must use a live layer")), "{errors:?}");
+        }
+    }
+
+    #[test]
     fn sequence_step_repeat_is_optional_and_roundtrips() {
         // Backward compat: a step without `repeat` deserializes with repeat = None.
         let legacy: SequenceStep =
@@ -4353,7 +4433,7 @@ mod tests {
         legacy.version = 11;
         fs::write(dir.path().join(CONFIG_FILE_NAME), serde_json::to_vec(&legacy).unwrap()).unwrap();
         let loaded = load_or_initialize_config(dir.path()).unwrap();
-        legacy.version = 12;
+        legacy.version = SCHEMA_VERSION;
         assert_eq!(loaded.config, legacy);
     }
 
@@ -5933,7 +6013,7 @@ mod edge_proptests {
     /// Layer::as_str() must match its serde JSON representation.
     #[test]
     fn layer_as_str_matches_serde_rename() {
-        for layer in [Layer::Standard, Layer::Hypershift] {
+        for layer in [Layer::Standard, Layer::Hypershift, Layer::Hypershift2, Layer::HypershiftBoth, Layer::Offline, Layer::OfflineHypershift] {
             let json = serde_json::to_string(&layer).expect("serialize Layer");
             let expected_json = format!("\"{}\"", layer.as_str());
             assert_eq!(

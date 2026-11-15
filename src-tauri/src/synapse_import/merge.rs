@@ -421,8 +421,8 @@ fn build_sequence_action(
 // ============================================================================
 
 /// Remove the single profile that `MergeStrategy::ReplaceByName` should
-/// overwrite, along with its bindings, appMappings, and any actions referenced
-/// *only* by those bindings.
+/// overwrite, along with its live bindings, appMappings, and any actions
+/// referenced *only* by those bindings. Own offline assignments survive.
 ///
 /// Profile names are NOT unique in `AppConfig` — the user can rename freely, and
 /// the imported `name` comes from an untrusted file. Removing *every* same-named
@@ -459,12 +459,12 @@ fn remove_profile_by_name(
     let dropped_action_ids: std::collections::HashSet<String> = config
         .bindings
         .iter()
-        .filter(|b| b.profile_id == target_id)
+        .filter(|b| b.profile_id == target_id && b.layer.is_live())
         .map(|b| b.action_id.clone())
         .collect();
 
     config.profiles.retain(|p| p.id != target_id);
-    config.bindings.retain(|b| b.profile_id != target_id);
+    config.bindings.retain(|b| b.profile_id != target_id || !b.layer.is_live());
     config.app_mappings.retain(|m| m.profile_id != target_id);
 
     // Menu items (including nested/disabled ones) also own their referenced actions.
@@ -881,6 +881,28 @@ mod tests {
         // New binding + action present
         assert_eq!(result.config.bindings.len(), 1);
         assert_eq!(result.config.actions.len(), 1);
+    }
+
+    #[test]
+    fn replace_by_name_preserves_own_offline_bindings_and_their_actions() {
+        let mut config = crate::config::default_seed_config();
+        let profile = config.profiles[0].clone();
+        let template = config.bindings.iter().find(|binding| binding.profile_id == profile.id).unwrap().clone();
+        let mut offline = Vec::new();
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let binding = Binding { id: format!("own-{layer:?}"), layer, ..template.clone() };
+            config.bindings.push(binding.clone());
+            offline.push(binding);
+        }
+        let mut warnings = Vec::new();
+        let replaced = remove_profile_by_name(&mut config, &profile.name, &mut warnings);
+        append_profile(&mut config, &ParsedProfile {
+            synapse_guid: "import".into(), name: profile.name, bindings: Vec::new(), macros: Vec::new(),
+        }, &mut warnings, "", replaced).unwrap();
+        let bindings: Vec<_> = config.bindings.iter().filter(|binding| binding.profile_id == profile.id).cloned().collect();
+        assert_eq!(bindings, offline);
+        assert!(config.actions.iter().any(|action| action.id == template.action_id), "the offline assignment keeps its action alive");
+        crate::config::validate_config(&config).expect("offline assignments still reference the replaced profile");
     }
 
     #[test]

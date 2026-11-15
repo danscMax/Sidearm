@@ -99,7 +99,7 @@ pub(crate) fn sheet_of(config: &AppConfig, profile_id: &str, title: String) -> S
 /// The grid of one mouse's 12 side buttons (control ids `<thumbs>01`…`12`) on `layer`.
 pub(crate) fn sheet_of_layer(config: &AppConfig, profile_id: &str, thumbs: &str, layer: Layer, title: String) -> Sheet {
     let mut cells: Vec<Cell> = (1..=12).map(|number| Cell { number, ..Cell::default() }).collect();
-    for binding in config.bindings.iter().filter(|b| b.enabled && b.profile_id == profile_id && b.layer == layer) {
+    for binding in config.bindings.iter().filter(|b| b.enabled && b.layer.is_live() && b.profile_id == profile_id && b.layer == layer) {
         let Some(number) = binding.control_id.as_str().strip_prefix(thumbs).and_then(|n| n.parse::<usize>().ok()) else {
             continue;
         };
@@ -142,6 +142,7 @@ pub(crate) fn layer_name(layer: Layer) -> String {
         Layer::Hypershift => crate::ui_text!("cheatsheet.layerHypershift", "HyperShift"),
         Layer::Hypershift2 => crate::ui_text!("cheatsheet.layerHypershift2", "HyperShift 2"),
         Layer::HypershiftBoth => crate::ui_text!("cheatsheet.layerBoth", "HS + HS2"),
+        Layer::Offline | Layer::OfflineHypershift => return String::new(),
     })
 }
 
@@ -155,7 +156,7 @@ pub(crate) fn sheet_items(config: &AppConfig, profile_id: &str, control: Option<
         .map(|number| MenuItem::Action { id: format!("sheet-{number}"), label: String::new(), action_id: String::new(), enabled: false, pinned: false })
         .collect();
     let mut extras: Vec<Vec<String>> = vec![Vec::new(); 12];
-    for binding in config.bindings.iter().filter(|b| b.enabled && b.profile_id == profile_id && b.layer == layer) {
+    for binding in config.bindings.iter().filter(|b| b.enabled && b.layer.is_live() && b.profile_id == profile_id && b.layer == layer) {
         let Some(index) = binding.control_id.as_str().strip_prefix(thumbs.as_str()).and_then(|n| n.parse::<usize>().ok()).and_then(|n| n.checked_sub(1)) else {
             continue;
         };
@@ -341,6 +342,21 @@ mod platform {
 mod tests {
     use super::*;
     use crate::config::{Binding, ControlId, TriggerMode};
+
+    #[test]
+    fn offline_layers_never_expose_bindings_in_either_cheat_sheet() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = crate::config::default_seed_config();
+            let profile = config.bindings[0].profile_id.clone();
+            config.bindings[0].layer = layer;
+            let sheet = sheet_of_layer(&config, &profile, "thumb_", layer, String::new());
+            assert!(sheet.cells.iter().all(|cell| cell.label.is_none() && cell.extras.is_empty()));
+            let (items, extras) = sheet_items(&config, &profile, Some("thumb_01"), layer);
+            assert!(items.iter().all(|item| matches!(item, MenuItem::Action { enabled: false, action_id, .. } if action_id.is_empty())));
+            assert!(extras.iter().all(Vec::is_empty));
+            assert!(layer_name(layer).is_empty());
+        }
+    }
 
     #[test]
     fn any_mouse_and_layer_gets_its_own_grid() {

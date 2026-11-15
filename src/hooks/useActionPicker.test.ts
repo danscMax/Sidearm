@@ -10,12 +10,23 @@ function makeDeps(config: AppConfig = makeConfig()) {
   return {
     effectiveProfileId: "p1" as string | null,
     config,
+    selectedLayer: "standard" as const,
+    offlinePreview: null,
+    setSelectedControlId: vi.fn(),
     setActionPickerBindingId: vi.fn(),
     setActionPickerOpen: vi.fn(),
   };
 }
 
 describe("useActionPicker", () => {
+  it.each([false, true])("honors offline editability %s and selects at opening priority", (editable) => {
+    const deps = { ...makeDeps(), selectedLayer: "offline" as const,
+      offlinePreview: { target: { state: "written" as const }, controls: [{ controlId: "thumb_01", layer: "offline" as const, kind: "role" as const, editable }] } };
+    const { result } = renderHook(() => useActionPicker(deps));
+    result.current("thumb_01", null);
+    expect(deps.setActionPickerOpen).toHaveBeenCalledTimes(editable ? 1 : 0);
+    if (editable) expect(deps.setSelectedControlId.mock.invocationCallOrder[0]).toBeLessThan(deps.setActionPickerOpen.mock.invocationCallOrder[0]);
+  });
   it("does nothing when there is no active profile", () => {
     const deps = { ...makeDeps(), effectiveProfileId: null };
     const { result } = renderHook(() => useActionPicker(deps));
@@ -34,6 +45,8 @@ describe("useActionPicker", () => {
 
     expect(deps.setActionPickerBindingId).toHaveBeenCalledWith("b-123");
     expect(deps.setActionPickerOpen).toHaveBeenCalledWith(true);
+    expect(deps.setSelectedControlId).toHaveBeenCalledWith("thumb_01");
+    expect(deps.setSelectedControlId.mock.invocationCallOrder[0]).toBeLessThan(deps.setActionPickerOpen.mock.invocationCallOrder[0]);
     expect(deps.config.bindings).toHaveLength(0);
   });
 

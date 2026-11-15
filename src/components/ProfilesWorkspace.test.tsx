@@ -2,9 +2,9 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { startTransition, useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type AppMapping, type Layer, type OfflineLayer } from "../lib/config";
+import { type AppConfig, type AppMapping, type Layer, type OfflineLayer } from "../lib/config";
 import { setOfflineAssignment } from "../lib/config-editing";
-import { offlineAssignment } from "../lib/onboard-mapping";
+import type { OfflinePreview } from "../lib/onboard-mapping";
 import { withOfflineAssignment, type MouseVisualizationProps } from "../lib/mouse-visual";
 import { NAGA_V3_DEVICE_ID } from "../lib/devices";
 import { resolveInitialControlId } from "../lib/helpers";
@@ -27,6 +27,7 @@ afterEach(cleanup);
 
 function workspaceProps(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
   const props: ProfilesWorkspaceProps = {
+    offlinePreview: { target: { state: "written" }, controls: [] },
     activeConfig: config, activeProfile: config.profiles[0], effectiveProfileId: "p1",
     addRuleSignal: false, onAddRuleHandled: vi.fn(), transferSignal: false, onTransferHandled: vi.fn(),
     ruleSignal: null, onRuleSignalHandled: vi.fn(), allProfilesView: false,
@@ -50,9 +51,11 @@ function show(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
 
 function offlineProps(config: AppConfig, layer: OfflineLayer = "offline"): Partial<ProfilesWorkspaceProps> {
   const control = config.physicalControls[1];
+  const offlinePreview: OfflinePreview = { target: { state: "written" }, controls: [{ controlId: control.id, layer, kind: "preserved", editable: true }] };
   return {
+    offlinePreview,
     selectedLayer: layer,
-    familySections: [{ family: control.family, entries: [withOfflineAssignment(config, "p1", layer, { control, action: null, binding: null, mapping: null, isSelected: false })] }],
+    familySections: [{ family: control.family, entries: [withOfflineAssignment(config, "p1", layer, { control, action: null, binding: null, mapping: null, isSelected: false }, offlinePreview)] }],
   };
 }
 
@@ -63,7 +66,7 @@ it.each<OfflineLayer>(["offline", "offlineHypershift"])("silences an offline cel
   expect(screen.getByRole<HTMLButtonElement>("menuitem", { name: i18n.t("offline.inherit") }).disabled).toBe(true);
   fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("offline.mute") }));
   const result = vi.mocked(props.updateDraft).mock.calls[0][0](config);
-  expect(offlineAssignment(result, "p1", "thumb_01", layer).kind).toBe("silent");
+  expect(result.actions[0].type).toBe("disabled");
   expect(result.bindings).toEqual([expect.objectContaining({ layer, enabled: true, controlId: "thumb_01" })]);
 });
 
@@ -101,23 +104,34 @@ it("shows the exit target and a Mouse memory link, and hides heatmap tools", () 
   expect(screen.getByRole("button", { name: i18n.t("device.tabMemory"), pressed: true })).toBeTruthy();
 });
 
-it("shows a different exit profile, a V3 linked bank and window-following accurately", () => {
+it.each([
+  [{ state: "notWritten" }, "warning"],
+  [{ state: "unknown" }, "warning"],
+  [{ state: "written", bank: 3 }, "info"],
+  [{ state: "followsWindow" }, "info"],
+] satisfies [OfflinePreview["target"], string][])("uses the planner target %j in a canonical notice", (target, variant) => {
   const config = makeConfig();
-  config.settings.offlineProfileId = "p2";
-  show(config, offlineProps(config));
-  expect(screen.getByText(i18n.t("offline.notWritten"))).toBeTruthy();
-  cleanup();
-  config.devices = [{ id: NAGA_V3_DEVICE_ID, name: "V3", builtin: true }];
-  config.profiles[0].deviceSlots = { [NAGA_V3_DEVICE_ID]: 3 };
-  show(config, offlineProps(config));
-  expect(screen.getByText(new RegExp(i18n.t("offline.bank", { bank: 3 })))).toBeTruthy();
-  expect(screen.queryByText(i18n.t("offline.notWritten"))).toBeNull();
-  cleanup();
-  config.profiles[0].deviceSlots = {};
-  config.settings.offlineProfileId = OFFLINE_PROFILE_ACTIVE;
-  show(config, offlineProps(config));
-  expect(screen.getByText(i18n.t("offline.followsWindow"))).toBeTruthy();
-  expect(screen.queryByText(i18n.t("offline.notWritten"))).toBeNull();
+  show(config, { ...offlineProps(config), offlinePreview: { target, controls: [] } });
+  const notice = screen.getByText(new RegExp(i18n.t(`offline.${target.state}`))).closest(".notice")!;
+  expect(notice.classList.contains(`notice--${variant}`)).toBe(true);
+  if ("bank" in target) expect(notice.textContent).toContain(i18n.t("offline.bank", { bank: 3 }));
+});
+
+it.each(["role", "unavailable"] as const)("refuses edits/mute for %s but allows removing an ineffective own binding", (kind) => {
+  const config = setOfflineAssignment(makeConfig(), "p1", "thumb_01", "offline", "silent");
+  const props = show(config, { ...offlineProps(config), offlinePreview: {
+    target: { state: "written" }, controls: [{ controlId: "thumb_01", layer: "offline", kind, editable: false }],
+  } });
+  fireEvent.contextMenu(screen.getByRole("button", { name: "cell thumb_01" }));
+  for (const key of ["mute", "edit"]) {
+    const item = screen.getByRole<HTMLButtonElement>("menuitem", { name: i18n.t(`offline.${key}`) });
+    expect(item.disabled).toBe(true);
+    fireEvent.click(item);
+  }
+  expect(props.updateDraft).not.toHaveBeenCalled();
+  expect(props.setActionPickerOpen).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("offline.inherit") }));
+  expect(vi.mocked(props.updateDraft).mock.calls[0][0](config).bindings).toEqual([]);
 });
 
 const rule: AppMapping = { id: "r1", profileId: "p1", exe: "python.exe", processPath: "C:\\envA\\python.exe", titleIncludes: [" Project ", "regex:foo $"], enabled: false, priority: 10 };

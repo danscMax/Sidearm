@@ -350,7 +350,8 @@ export function MouseVisualizationSvg({
     const isDragOver = dragOverId === id;
     // Mirror the photo view: dim controls outside the active search match, and
     // ring controls whose binding conflicts with another on the same layer.
-    const isDimmed = matchedControlIds != null && !matchedControlIds.has(id);
+    const isDimmed = entry?.offline?.kind === "unavailable" || entry?.offline?.kind === "unknown"
+      || (matchedControlIds != null && !matchedControlIds.has(id));
     const isThrottled = throttledControlIds?.has(id) ?? false;
     const hasConflict = !!entry?.binding && (conflictBindingIds?.has(entry.binding.id) ?? false);
     const colors = buttonColors(entry, isSelected, isHovered);

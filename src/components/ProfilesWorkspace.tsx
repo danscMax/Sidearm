@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
 import { isOfflineLayer, RAZER_NAGA_DEVICE_ID } from "../lib/config";
-import { offlineAssignment, offlineWriteTarget } from "../lib/onboard-mapping";
+import type { OfflinePreview } from "../lib/onboard-mapping";
 import { layerCopy, type FamilySection, type ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
@@ -22,6 +22,7 @@ import {
   createAppMapping,
   deleteAppMapping,
   duplicateBinding,
+  findBinding,
   findDuplicateAppMapping,
   importProfile,
   placeDeviceHotspot,
@@ -79,6 +80,7 @@ export interface RuleSignal {
 }
 
 export interface ProfilesWorkspaceProps {
+  offlinePreview: OfflinePreview | null;
   activeConfig: AppConfig;
   activeProfile: Profile | null;
   effectiveProfileId: string | null;
@@ -137,6 +139,7 @@ const DEVICE_TAB_LABEL = {
 } as const;
 
 export function ProfilesWorkspace({
+  offlinePreview,
   activeConfig,
   activeProfile,
   effectiveProfileId,
@@ -209,6 +212,9 @@ export function ProfilesWorkspace({
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
     config: activeConfig,
+    selectedLayer,
+    offlinePreview,
+    setSelectedControlId,
     setActionPickerBindingId,
     setActionPickerOpen,
   });
@@ -241,7 +247,7 @@ export function ProfilesWorkspace({
   const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
   const builtinMice = activeConfig.devices.filter((device) => device.builtin && deviceLayout(device.id)).length;
   const writeTarget = offlineView && effectiveProfileId && activeDevice?.builtin
-    ? offlineWriteTarget(activeConfig, effectiveProfileId, activeDevice.id)
+    ? offlinePreview?.target ?? { state: "unknown" as const }
     : null;
 
   const deviceControlCount = activeDevice
@@ -1004,16 +1010,17 @@ export function ProfilesWorkspace({
       </div>
 
       {writeTarget ? (
-        <div className="profiles__offline-target" role="status">
-          <span>
-            {t(writeTarget.written ? "offline.written" : writeTarget.followsWindow ? "offline.followsWindow" : "offline.notWritten")}
-            {writeTarget.bank !== undefined ? ` · ${t("offline.bank", { bank: writeTarget.bank })}` : ""}
-            {writeTarget.written && writeTarget.followsWindow ? ` · ${t("offline.followsWindow")}` : ""}
-          </span>
-          <button type="button" className="action-button action-button--small" onClick={() => setDeviceTab("memory")}>
-            {t("device.tabMemory")}
-          </button>
-        </div>
+        <Notice variant={writeTarget.state === "notWritten" || writeTarget.state === "unknown" ? "warning" : "info"}>
+          <div className="profiles__offline-target">
+            <span>
+              {t(`offline.${writeTarget.state}`)}
+              {writeTarget.bank !== undefined ? ` · ${t("offline.bank", { bank: writeTarget.bank })}` : ""}
+            </span>
+            <button type="button" className="action-button action-button--small" onClick={() => setDeviceTab("memory")}>
+              {t("device.tabMemory")}
+            </button>
+          </div>
+        </Notice>
       ) : null}
 
       {searchAllProfiles && searchQuery ? (
@@ -1529,17 +1536,18 @@ export function ProfilesWorkspace({
             items={isOfflineLayer(selectedLayer) && effectiveProfileId ? [
               {
                 label: t("offline.inherit"),
-                disabled: !offlineAssignment(activeConfig, effectiveProfileId, cid, selectedLayer).binding,
+                disabled: !findBinding(activeConfig, effectiveProfileId, selectedLayer, cid),
                 onClick: () => updateDraft((config) => setOfflineAssignment(config, effectiveProfileId, cid, selectedLayer, null)),
               },
               {
                 label: t("offline.mute"),
+                disabled: !offlinePreview?.controls.some((control) => control.controlId === cid && control.layer === selectedLayer && control.editable),
                 onClick: () => updateDraft((config) => setOfflineAssignment(config, effectiveProfileId, cid, selectedLayer, "silent")),
               },
               {
                 label: t("offline.edit"),
+                disabled: !offlinePreview?.controls.some((control) => control.controlId === cid && control.layer === selectedLayer && control.editable),
                 onClick: () => {
-                  setSelectedControlId(cid);
                   handleOpenActionPicker(cid, binding);
                 },
               },

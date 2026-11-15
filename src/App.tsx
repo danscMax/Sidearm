@@ -13,6 +13,7 @@ import { useLogPanel } from "./hooks/useLogPanel";
 import { useRuntime } from "./hooks/useRuntime";
 import { useVerification } from "./hooks/useVerification";
 import { useActionPicker } from "./hooks/useActionPicker";
+import { useOfflinePreview } from "./hooks/useOfflinePreview";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
@@ -69,7 +70,7 @@ import { displayNameForControl, labelForLayer, relativeTime } from "./lib/labels
 import { MOUSE_STATUS_NOTICES, type MouseStatusKind, type NativeModelInfo } from "./lib/onboard-mapping";
 import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
-import { isBuiltinControl, offlineProfileId, playsWithoutSidearm } from "./lib/onboard-mapping";
+import { isBuiltinControl, playsWithoutSidearm } from "./lib/onboard-mapping";
 import { syncedWith } from "./lib/device-transfer";
 import { withOfflineAssignment } from "./lib/mouse-visual";
 import { isOfflineLayer } from "./lib/config";
@@ -751,6 +752,7 @@ function App() {
 
   // H1: Global keyboard shortcuts (useEffectEvent avoids re-registering on every render)
   const handleKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     // Don't intercept when typing in inputs
     const tag = (e.target as HTMLElement).tagName;
     if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
@@ -838,7 +840,8 @@ function App() {
         setSelectedControlId(availableIds[nextIndex]);
         setMultiSelectedControlIds(new Set());
       }
-    } else if (e.key === "Enter" && selectedControlId && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    } else if (e.key === "Enter" && selectedControlId && !e.ctrlKey && !e.altKey && !e.metaKey
+      && !(e.target as HTMLElement).closest("button, [role='button']")) {
       // Enter: open the action picker for the selected control
       e.preventDefault();
       handleOpenActionPicker(selectedControlId, selectedBinding);
@@ -1025,9 +1028,13 @@ function App() {
 
   // Keyboard-driven action picker (Enter on a selected control). Reuses the
   // same read-only opening hook the visualization uses.
+  const offlinePreview = useOfflinePreview(activeConfig, effectiveProfileId, activeDevice?.builtin ? effectiveDeviceId : null);
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
     config: activeConfig,
+    selectedLayer,
+    offlinePreview,
+    setSelectedControlId,
     setActionPickerBindingId,
     setActionPickerOpen,
   });
@@ -1209,7 +1216,7 @@ function App() {
   }
 
   // The profile written into the mice at exit, on a layer the mouse keeps.
-  const offlineHere = !!activeConfig && offlineProfileId(activeConfig) === effectiveProfileId
+  const offlineHere = offlinePreview?.target.state !== "notWritten"
     && (selectedLayer === "standard" || selectedLayer === "hypershift");
   // Per button: the other buttons of this mouse and layer doing the same thing.
   const sameAsByControlId = useMemo(
@@ -1250,10 +1257,10 @@ function App() {
                   && binding.enabled && !playsWithoutSidearm(binding, actionById.get(binding.actionId)),
                 syncedWith: binding ? syncedWith(activeConfig, binding.id) : undefined,
                 sameAs: sameAsByControlId.get(control.id),
-              });
+              }, offlinePreview);
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, effectiveProfileId, selectedLayer, extrasByControlId, offlineHere, sameAsByControlId],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, effectiveProfileId, selectedLayer, extrasByControlId, offlineHere, offlinePreview, sameAsByControlId],
   );
 
   const isProfilesMode = workspaceMode === "profiles";
@@ -1334,6 +1341,7 @@ function App() {
           <section className={workspaceClass}>
             {isProfilesMode ? (
               <ProfilesWorkspace
+                offlinePreview={offlinePreview}
                 activeConfig={activeConfig}
                 activeProfile={activeProfile}
                 effectiveProfileId={effectiveProfileId}
@@ -1452,7 +1460,8 @@ function App() {
       </div>
       {actionPickerOpen && activeConfig ? (
         <ActionPickerModal
-          key={`${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
+          key={`${effectiveProfileId}:${selectedLayer}:${selectedControlId}:${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
+          offlineControl={offlinePreview?.controls.find((control) => control.controlId === selectedControlId && control.layer === selectedLayer)}
           focusMenuItemId={menuFocusItemId}
           config={activeConfig}
           bindingId={

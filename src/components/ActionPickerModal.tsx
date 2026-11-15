@@ -4,7 +4,7 @@ import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { isOfflineLayer, MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId, labelForLayer } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
-import { isBuiltinControl, isKeyButton, offlineAssignment } from "../lib/onboard-mapping";
+import { isBuiltinControl, isKeyButton, type OfflineControl } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
 import { getNativeModel, listNativeMice, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
@@ -110,6 +110,7 @@ interface PickerSnapshot {
 }
 
 interface ActionPickerProps {
+  offlineControl?: OfflineControl;
   config: AppConfig;
   bindingId: string | null;
   profileId?: string;
@@ -133,6 +134,10 @@ interface ActionPickerProps {
  *  pattern's binding); the undo history is one for the whole picker, so
  *  Ctrl+Z after a tab switch goes back into the tab before. */
 export function ActionPickerModal(props: ActionPickerProps) {
+  return <ActionPicker key={`${props.profileId}:${props.selectedLayer}:${props.controlId}`} {...props} />;
+}
+
+function ActionPicker(props: ActionPickerProps) {
   const [store] = useState(createDraftHistoryStore<PickerSnapshot>);
   // Drafts an undo / redo brings back onto another tab, read by that tab's mount.
   const [seed, setSeed] = useState<PickerSnapshot | null>(null);
@@ -141,6 +146,7 @@ export function ActionPickerModal(props: ActionPickerProps) {
 }
 
 function PickerTab({
+  offlineControl,
   config,
   bindingId,
   profileId,
@@ -195,14 +201,14 @@ function PickerTab({
 
 
   const offline = selectedLayer !== undefined && isOfflineLayer(selectedLayer);
-  const assignment = selectedLayer && isOfflineLayer(selectedLayer) && profileId && controlId
-    ? offlineAssignment(config, profileId, controlId, selectedLayer) : null;
-  const binding = offline ? assignment?.binding ?? null
+  const binding = offline && profileId && controlId && selectedLayer ? findBinding(config, profileId, selectedLayer, controlId) ?? null
     : bindingId ? config.bindings.find((b) => b.id === bindingId) ?? null : null;
   const savedAction = binding
     ? config.actions.find((a) => a.id === binding.actionId) ?? null
     : null;
-  const existingAction = offline ? assignment?.action ?? null : isPlaceholderAction(savedAction) ? null : savedAction;
+  const existingAction = offline ? (offlineControl?.kind === "own" || offlineControl?.kind === "inherited")
+    ? config.actions.find((action) => action.id === offlineControl.actionId) ?? null : null
+    : isPlaceholderAction(savedAction) ? null : savedAction;
   // Where else this action runs: other buttons and menu items (shown under the preview).
   const elsewhere = existingAction
     ? [...bindingUses(config, existingAction.id, binding), ...otherMenuUses(config, NO_MENU_EDITS, existingAction.id, existingAction.id)]
@@ -571,12 +577,13 @@ function PickerTab({
   const roleCategory = effectiveCategory === "native" || effectiveCategory === "hypershift" || effectiveCategory === "hypershift2";
   const offlineUnplayable = offline && ((effectiveCategory === "shortcut" && !isOfflinePayloadPlayable(shortcutDraft))
     || (effectiveCategory === "mouseAction" && !isOfflinePayloadPlayable(mouseDraft)));
-  const saveDisabled = roleCategory
+  const offlineBlocked = offline && !offlineControl?.editable && !(effectiveCategory === "native" && binding);
+  const saveDisabled = offlineBlocked || (roleCategory
     ? false
     : offlineUnplayable || isSaveDisabled(effectiveCategory, drafts)
       || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS
         || sequenceDraft.some((step) => (step.type === "waitWindow" && !step.exe.trim()) || (step.type === "send" && !step.value.trim()))))
-      || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
+      || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft)));
   // Turning "The same on" on overwrites the other mice's button: say what it holds.
   const syncSave = syncKey && syncDraft && !slotSynced(config.settings, syncKey) ? buildSave() : null;
   const syncOwn = syncSave ? ownBinding(syncSave) : undefined;
@@ -801,6 +808,7 @@ function PickerTab({
               <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} searchQuery={searchQuery} offline={offline} />
             ) : null}
             {offlineUnplayable ? <Notice variant="warning">{t("picker.offlineUnstorable")}</Notice> : null}
+            {offlineBlocked ? <Notice variant="warning">{t("offline.notEditable")}</Notice> : null}
 
             {effectiveCategory === "textSnippet" ? (
               <TextSnippetEditor

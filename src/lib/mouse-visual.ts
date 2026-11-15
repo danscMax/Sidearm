@@ -6,7 +6,8 @@
 
 import i18n from "../i18n";
 import { isOfflineLayer, type Action, type AppConfig, type Binding, type ControlId, type Layer, type TriggerMode } from "./config";
-import { isBuiltinControl, offlineAssignment } from "./onboard-mapping";
+import { isBuiltinControl, type OfflinePreview } from "./onboard-mapping";
+import { findBinding } from "./config-editing";
 import type { Slot } from "./binding-moves";
 import type { ControlSurfaceEntry } from "./constants";
 import type { ExecutionRecord } from "./runtime";
@@ -14,25 +15,24 @@ import { ACTION_CATEGORIES } from "./constants";
 import { controlAssignmentLabel, displayNameForControl, fallbackLabel, offlineDetailLabel } from "./labels";
 
 /** Use the same firmware result for the legend and the mouse hotspots. */
-export function withOfflineAssignment(config: AppConfig, profileId: string, layer: Layer, entry: ControlSurfaceEntry): ControlSurfaceEntry {
+export function withOfflineAssignment(config: AppConfig, profileId: string, layer: Layer, entry: ControlSurfaceEntry, preview: OfflinePreview | null): ControlSurfaceEntry {
   if (!isBuiltinControl(config, entry.control.id)) return entry;
+  const offlineLayer = isOfflineLayer(layer) ? layer : layer === "hypershift" ? "offlineHypershift" : "offline";
+  const result = preview?.controls.find((control) => control.controlId === entry.control.id && control.layer === offlineLayer);
+  const action = config.actions.find((action) => action.id === result?.actionId) ?? null;
   if (!isOfflineLayer(layer)) {
     if (!entry.sidearmOnly) return entry;
-    const offline = offlineAssignment(config, profileId, entry.control.id, layer === "hypershift" ? "offlineHypershift" : "offline");
-    return { ...entry, offlineActionLabel: offline.action?.displayName };
+    return { ...entry, offlineActionLabel: controlAssignmentLabel({ ...entry, action, offline: result ?? { kind: "unknown", editable: false } }) };
   }
-  const result = offlineAssignment(config, profileId, entry.control.id, layer);
-  let liveAction = result.liveAction;
-  if (result.kind === "silent" && result.binding) {
-    const ownId = result.binding.id;
-    const inherited = offlineAssignment({ ...config, bindings: config.bindings.filter((binding) => binding.id !== ownId) }, profileId, entry.control.id, layer);
-    liveAction = inherited.action ?? inherited.liveAction;
-  }
+  const liveLayer = layer === "offlineHypershift" ? "hypershift" : "standard";
+  const live = ([liveLayer, "standard"] as const).map((liveLayer) =>
+    findBinding(config, profileId, liveLayer, entry.control.id)).find((binding) => binding?.enabled);
+  const liveAction = config.actions.find((action) => action.id === live?.actionId);
   return {
     ...entry,
-    binding: result.binding ?? null,
-    action: result.action ?? null,
-    offline: { kind: result.kind, liveAction },
+    binding: findBinding(config, profileId, layer, entry.control.id) ?? null,
+    action,
+    offline: { ...(result ?? { kind: "unknown", editable: false }), liveAction },
     mapping: null,
     fallback: null,
     isHypershiftTrigger: false,

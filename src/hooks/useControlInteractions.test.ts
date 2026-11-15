@@ -74,12 +74,14 @@ function makeDrag(data?: string) {
 
 describe("useControlInteractions — getInteractionProps", () => {
   it("opens offline assignments on a single click and blocks binding drags and drops", () => {
-    const entry = { ...assignedEntry(), offline: { kind: "own" as const } };
+    const entry = { ...assignedEntry(), offline: { kind: "own" as const, editable: true } };
     const params = makeParams({ entries: [entry] });
     const { result } = renderHook(() => useControlInteractions(params));
     result.current.getInteractionProps(ASSIGNED).onClick(makeMouse().event);
-    expect(params.onSelectControl).toHaveBeenCalledWith(ASSIGNED);
+    expect(params.onSelectControl).not.toHaveBeenCalled();
     expect(params.onOpenActionPicker).toHaveBeenCalledWith(ASSIGNED, entry.binding);
+    result.current.getInteractionProps(ASSIGNED).onKeyDown({ key: "Enter", preventDefault: vi.fn() } as unknown as React.KeyboardEvent<Element>);
+    expect(params.onOpenActionPicker).toHaveBeenCalledTimes(2);
     const drag = makeDrag(buildBindingDragData(SLOT));
     act(() => {
       result.current.getInteractionProps(ASSIGNED).onDragStart(drag.event);
@@ -90,6 +92,15 @@ describe("useControlInteractions — getInteractionProps", () => {
     expect(drag.setData).not.toHaveBeenCalled();
     expect(params.onDropBinding).not.toHaveBeenCalled();
     expect(result.current.dragOverId).toBeNull();
+  });
+  it.each(["role", "unavailable", "unknown"] as const)("refuses click, double-click and Enter for %s", (kind) => {
+    const params = makeParams({ entries: [{ ...assignedEntry(), offline: { kind, editable: false } }] });
+    const { result } = renderHook(() => useControlInteractions(params));
+    const handlers = result.current.getInteractionProps(ASSIGNED);
+    handlers.onClick(makeMouse().event);
+    handlers.onDoubleClick(makeMouse().event);
+    handlers.onKeyDown({ key: "Enter", preventDefault: vi.fn() } as unknown as React.KeyboardEvent<Element>);
+    expect(params.onOpenActionPicker).not.toHaveBeenCalled();
   });
   it("onClick selects, and ctrl/meta toggles multi-select", () => {
     const params = makeParams();

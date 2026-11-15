@@ -3744,6 +3744,20 @@ async fn get_onboard_banks(device_id: String) -> Result<mouse_memory::live_overl
     .map_err(|e| CommandError::internal(format!("onboard banks task failed: {e}")))?
 }
 
+/// The current draft's offline decisions; bank inventory is read off the UI thread.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn get_offline_preview(config: AppConfig, profile_id: String, device_id: String) -> Result<mouse_offline::OfflinePreview, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = device_catalog::CATALOG.iter().find(|model| model.device_id == device_id)
+            .ok_or_else(|| CommandError::internal(format!("Unknown native device {device_id}")))?;
+        let banks = if model.live.as_ref().is_some_and(|live| live.banks) {
+            mouse_memory::live_overlay::banks(model).ok()
+        } else { None };
+        Ok(mouse_offline::preview(&config, model, &profile_id, banks.as_ref()))
+    }).await.map_err(|e| CommandError::internal(format!("offline preview task failed: {e}")))?
+}
+
 /// Read-only dump of the connected mouse for a "help verify" issue
 /// (`VendorDevice::probe_report`). Scans every button id, so it takes ~20 s.
 #[cfg(target_os = "windows")]
@@ -4752,6 +4766,7 @@ pub fn run() {
             get_native_model,
             list_native_mice,
             get_onboard_banks,
+            get_offline_preview,
             get_device_report,
             open_device_report_issue,
             get_mouse_status,

@@ -1152,7 +1152,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=11) {
+    if matches!(config.version, 2..=12) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -3701,6 +3701,26 @@ mod tests {
         assert!(!loaded.created_default);
         assert_eq!(serde_json::to_value(&loaded.config).unwrap(), serde_json::to_value(&original).unwrap());
         assert!(loaded.config.profiles.iter().all(|profile| profile.mouse_dpi_stages.is_none()));
+    }
+
+    #[test]
+    fn v12_load_backup_and_import_preserve_assignments_without_recovery() {
+        let mut original = default_seed_config();
+        original.bindings[0].label = "Customized v12 assignment".into();
+        let mut old = serde_json::to_value(&original).unwrap();
+        old["version"] = 12.into();
+        for name in [CONFIG_FILE_NAME, "config.last-known-good.json", "config.bak.1"] {
+            let dir = tempdir().unwrap();
+            fs::write(dir.path().join(name), old.to_string()).unwrap();
+            let loaded = load_or_initialize_config(dir.path()).unwrap();
+            assert!(!loaded.created_default);
+            assert_eq!(serde_json::to_value(&loaded.config).unwrap(), serde_json::to_value(&original).unwrap());
+            assert_eq!(loaded.config.version, 13);
+            assert!(!has_quarantine_file(dir.path()));
+            assert_eq!(loaded.warnings.iter().any(|w| w.code == "config_recovered_from_backup"), name != CONFIG_FILE_NAME);
+            let imported = read_and_migrate_config_file(&dir.path().join(name)).unwrap();
+            assert_eq!(serde_json::to_value(imported).unwrap(), serde_json::to_value(&original).unwrap());
+        }
     }
 
     #[test]

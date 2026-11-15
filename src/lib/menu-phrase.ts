@@ -63,6 +63,22 @@ export function withPhrase(action: Action, text: string, enter: boolean): Action
   };
 }
 
+/** A library-linked phrase as its own inline text (the library's current text
+ *  and input mode, this use's Enter): editing it no longer changes the library
+ *  or the other places using that text. Any other action is returned as it is. */
+export function detachedPhrase(action: Action, library: SnippetLibraryItem[]): Action {
+  if (action.type !== "textSnippet" || action.payload.source !== "libraryRef") return action;
+  const { snippetId, pressEnter } = action.payload;
+  const snippet = library.find((item) => item.id === snippetId);
+  if (!snippet) return action;
+  const { id, displayName, notes, conditions } = action;
+  return {
+    id, displayName, ...(notes ? { notes } : {}), ...(conditions ? { conditions } : {}),
+    type: "textSnippet",
+    payload: { source: "inline", text: snippet.text, pasteMode: snippet.pasteMode, tags: [], ...(pressEnter ? { pressEnter: true } : {}) },
+  };
+}
+
 /** An inline phrase typed key by key (`keyboardOnly`) or in the automatic mode. */
 export function withKeyboardOnly(action: Action, keyboardOnly: boolean): Action {
   if (action.type !== "textSnippet" || action.payload.source !== "inline") return action;

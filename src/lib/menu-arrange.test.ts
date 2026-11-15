@@ -41,6 +41,15 @@ describe("cloneMenuItem", () => {
     expect(inner.kind === "action" && inner.actionId).not.toBe("a-y");
     expect(Object.values(edits.actions).map((action) => action.payload)).toEqual([phrase.payload]);
   });
+
+  it("gives a library-linked phrase's copy its own text, so editing one leaves the other", () => {
+    const linked: Action = { id: "a-y", type: "textSnippet", displayName: "y", payload: { source: "libraryRef", snippetId: "s1", pressEnter: true } };
+    const config = makeConfig({ actions: [linked], snippetLibrary: [{ id: "s1", name: "Team", text: "run the team", pasteMode: "keyboardOnly", tags: [] }] });
+    const { edits } = cloneMenuItem(config, NO_MENU_EDITS, act("y", "a-y"), [act("y", "a-y")]);
+    expect(Object.values(edits.actions).map((action) => action.payload)).toEqual([
+      { source: "inline", text: "run the team", pasteMode: "keyboardOnly", tags: [], pressEnter: true },
+    ]);
+  });
 });
 
 describe("promptsFromFile", () => {

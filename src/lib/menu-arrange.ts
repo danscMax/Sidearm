@@ -5,7 +5,7 @@ import { isMenuMark, type Action, type AppConfig, type Binding, type MenuItem } 
 import { controlWithGesture, labelForLayer } from "./labels";
 import { nextUniqueId } from "./config-editing";
 import { collectMenuItemIds, removeMenuItem } from "./menu-helpers";
-import { editedActions, editedLibrary, parentOf, phraseOf, type MenuEdits } from "./menu-phrase";
+import { detachedPhrase, editedActions, editedLibrary, parentOf, phraseOf, type MenuEdits } from "./menu-phrase";
 
 export type DropPlace = "before" | "after" | "inside";
 
@@ -91,7 +91,9 @@ export function cloneMenuItem(
     if (!action || (action.type !== "shortcut" && !phraseOf(action, library))) return { ...current, id };
     const actionId = nextUniqueId(actionIds, `${action.id}-copy`);
     actionIds.add(actionId);
-    added[actionId] = { ...structuredClone(action), id: actionId };
+    // A copy is its own text: a library-linked phrase copied as a link changed
+    // the original along with it (both edited the one library text).
+    added[actionId] = { ...detachedPhrase(structuredClone(action), library), id: actionId };
     return { ...current, id, actionId };
   };
   const cloned = copy(item);

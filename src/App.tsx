@@ -347,10 +347,10 @@ function App() {
       }
       void getMouseStatus().then((events) => {
         if (disposed) return;
-        for (const { kind } of events) {
+        for (const { kind, model } of events) {
           if (!MOUSE_STATUS_NOTICES.includes(kind)) continue;
           if (kind === "offlineNotStored") {
-            showToast(t("mouse.noticeOfflineNotStored"), "warning");
+            showToast(t("mouse.noticeOfflineNotStored", { model: model ?? t("mouse.someMouse") }), "warning");
             continue;
           }
           if (kind === "noFreeBankSlot") {

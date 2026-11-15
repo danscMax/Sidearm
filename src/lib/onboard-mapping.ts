@@ -176,6 +176,8 @@ export type MouseStatusKind =
 export interface MouseStatusEvent {
   kind: MouseStatusKind;
   active: boolean;
+  /** The mouse a notice is about (`short_name`), when it names one. */
+  model?: string;
 }
 
 /** Kinds shown once as a toast; the rest are states held until cleared. */

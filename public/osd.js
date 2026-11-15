@@ -3,6 +3,10 @@
 // JS only updates text content and plays animation.
 // Never the browser's own menu (back, reload, print…) on the bubble.
 document.addEventListener("contextmenu", function (event) { event.preventDefault(); });
+// A click hides the bubble; the "mouse offline" one also goes back to Sidearm (Rust decides).
+document.addEventListener("click", function () {
+  if (window.__TAURI_INTERNALS__) window.__TAURI_INTERNALS__.invoke("osd_click");
+});
 if (window.__TAURI_INTERNALS__) {
   window.__TAURI_INTERNALS__.invoke("plugin:event|listen", {
     event: "osd-show",

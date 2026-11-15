@@ -233,6 +233,8 @@ fn osd_ready(app: AppHandle) {
 /// (`osd_ready`). Later calls emit the event, position, show and auto-hide.
 /// Shows the OSD bubble: `label` (bold-less, may be empty) then `profile_name`.
 pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, settings: &config::Settings) {
+    // Any other bubble replaces the offline one: a click on it only hides it.
+    OSD_SAYS_OFFLINE.store(false, Ordering::Release);
     if !settings.osd_enabled {
         return;
     }
@@ -3831,8 +3833,34 @@ pub(crate) fn mouse_offline_mode_changed(model: &'static device_catalog::NativeM
     mouse_status::set_state(Some(app), mouse_status::StatusKind::MouseOffline, any);
     rebuild_tray_menu(app);
     if offline && let Ok(load) = load_or_initialize_config(&resolve_app_paths(app).config_dir) {
-        let text = crate::ui_text!("runtime.mouseOfflineOsd", "{model} offline (profile button) — back to Sidearm in the tray menu", model = model.short_name);
-        show_osd(app, "", &crate::ui_text::native(&text), &load.config.settings);
+        let text = crate::ui_text!("runtime.mouseOfflineOsd", "{model} offline (profile button) — click here or the tray item to go back to Sidearm", model = model.short_name);
+        // Long enough to reach with the mouse.
+        let settings = config::Settings { osd_duration_ms: OFFLINE_OSD_MS, ..load.config.settings };
+        show_osd(app, "", &crate::ui_text::native(&text), &settings);
+        OSD_SAYS_OFFLINE.store(true, Ordering::Release);
+    }
+}
+
+/// How long the offline bubble stays (the OSD's longest).
+#[cfg(target_os = "windows")]
+const OFFLINE_OSD_MS: u32 = 10_000;
+/// The OSD shows the offline bubble: a click on it goes back to Sidearm's bank.
+static OSD_SAYS_OFFLINE: AtomicBool = AtomicBool::new(false);
+
+/// A click on the OSD bubble: it goes; the offline one also puts the mouse
+/// back on Sidearm's bank.
+#[tauri::command]
+fn osd_click(app: AppHandle) {
+    if let Some(window) = app.get_webview_window("osd") {
+        let _ = window.hide();
+    }
+    #[cfg(target_os = "windows")]
+    if OSD_SAYS_OFFLINE.swap(false, Ordering::AcqRel) {
+        tauri::async_runtime::spawn_blocking(|| {
+            if let Err(error) = mouse_memory::live_overlay::back_to_sidearm_bank() {
+                log::warn!("[osd] back to the Sidearm bank failed: {error}");
+            }
+        });
     }
 }
 
@@ -4490,8 +4518,13 @@ pub fn run() {
                     if key_signals {
                         log::info!("[onboard] `{}` present: key buttons send F13..F24", mouse_memory::KEY_SIGNALS_FILE);
                     }
-                    if std::fs::remove_file(config_dir.join(mouse_offline::OFFLINE_FAILED_FILE)).is_ok() {
-                        mouse_status::notice(None, mouse_status::StatusKind::OfflineNotStored);
+                    // The marker names the profile, then the mice that slept: the notice names the first.
+                    let failed = config_dir.join(mouse_offline::OFFLINE_FAILED_FILE);
+                    let slept = std::fs::read_to_string(&failed).ok().and_then(|text| {
+                        text.lines().skip(1).find_map(|id| device_catalog::CATALOG.iter().find(|model| model.device_id == id.trim()).map(|model| model.short_name))
+                    });
+                    if std::fs::remove_file(&failed).is_ok() {
+                        mouse_status::notice_about(None, mouse_status::StatusKind::OfflineNotStored, slept);
                     }
                     onboard_guard::spawn(
                         app.handle().clone(),
@@ -4826,6 +4859,7 @@ pub fn run() {
             cheatsheet_layout,
             cheatsheet_ready,
             osd_ready,
+            osd_click,
             export_layout_html,
             export_layout_folder,
             get_press_log,

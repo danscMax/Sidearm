@@ -1334,6 +1334,8 @@ impl Session {
                                 }
                                 log::info!("[naga-live] {} plays the Sidearm bank {bank}", model.name);
                                 *sidearm = Some(bank);
+                                // Bring the offline banks up to date now, so the exit only selects one.
+                                schedule_bank_store(session_config.clone(), config_dir.clone());
                                 return Ok(());
                             }
                             None if !no_free_bank_said.replace(true) => {

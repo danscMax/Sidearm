@@ -15,6 +15,7 @@ const APP_COMMANDS: &[&str] = &[
     "cheatsheet_layout",
     "cheatsheet_ready",
     "osd_ready",
+    "osd_click",
     "prompt_ready",
     "prompt_layout",
     "prompt_submit",

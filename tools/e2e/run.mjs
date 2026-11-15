@@ -405,7 +405,8 @@ async function main() {
     mark = world.log().length;
     check("quit ends the app", await world.quit());
     const exitLog = world.log().slice(mark);
-    check("V3 banks stored", /Razer Naga V3 Pro profile `[^`]+` verified in bank \d/.test(exitLog), exitLog.slice(-800));
+    // By the exit itself, or already in the background after the start.
+    check("V3 banks stored", /Razer Naga V3 Pro (profile `[^`]+` verified in bank \d|banks already stored in the background)/.test(exitLog), exitLog.slice(-800));
     check("V2 offline profile stored", /profile `[^`]+` written for use without Sidearm: \d+ records, 0 failed/.test(exitLog));
     check("V3 bank 1 holds records", bankRecords(world.mouse(V3), 1).length > 0);
     // Bank 1 plays after exit, its records in the live map (a bank switch reloads it).

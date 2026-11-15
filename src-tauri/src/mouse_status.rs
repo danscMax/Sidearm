@@ -44,10 +44,15 @@ pub enum StatusKind {
 pub struct StatusEvent {
     pub kind: StatusKind,
     pub active: bool,
+    /// The mouse a notice is about, when it names one (`short_name`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<&'static str>,
 }
 
 /// Active states and notices the UI has not taken yet.
-static STATUS: Mutex<(Vec<StatusKind>, Vec<StatusKind>)> = Mutex::new((Vec::new(), Vec::new()));
+/// A pending notice and the mouse it names.
+type Notice = (StatusKind, Option<&'static str>);
+static STATUS: Mutex<(Vec<StatusKind>, Vec<Notice>)> = Mutex::new((Vec::new(), Vec::new()));
 
 /// Sets or clears a state; emits only a change.
 pub fn set_state(app: Option<&AppHandle>, kind: StatusKind, active: bool) {
@@ -62,16 +67,21 @@ pub fn set_state(app: Option<&AppHandle>, kind: StatusKind, active: bool) {
         held != active
     };
     if changed && let Some(app) = app {
-        let _ = app.emit(EVENT_MOUSE_STATUS, StatusEvent { kind, active });
+        let _ = app.emit(EVENT_MOUSE_STATUS, StatusEvent { kind, active, model: None });
     }
 }
 
 /// Raises a one-time notice: kept until a [`snapshot`] takes it; the event only
 /// tells an open window to take it now.
 pub fn notice(app: Option<&AppHandle>, kind: StatusKind) {
-    STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).1.push(kind);
+    notice_about(app, kind, None);
+}
+
+/// [`notice`] naming the mouse it is about.
+pub fn notice_about(app: Option<&AppHandle>, kind: StatusKind, model: Option<&'static str>) {
+    STATUS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).1.push((kind, model));
     if let Some(app) = app {
-        let _ = app.emit(EVENT_MOUSE_STATUS, StatusEvent { kind, active: true });
+        let _ = app.emit(EVENT_MOUSE_STATUS, StatusEvent { kind, active: true, model });
     }
 }
 
@@ -82,8 +92,8 @@ pub fn snapshot() -> Vec<StatusEvent> {
     status
         .0
         .iter()
-        .chain(notices.iter())
-        .map(|kind| StatusEvent { kind: *kind, active: true })
+        .map(|&kind| StatusEvent { kind, active: true, model: None })
+        .chain(notices.into_iter().map(|(kind, model)| StatusEvent { kind, active: true, model }))
         .collect()
 }
 
@@ -96,12 +106,12 @@ mod tests {
     fn states_hold_and_notices_are_taken_once() {
         set_state(None, StatusKind::ButtonsUnreadable, true);
         set_state(None, StatusKind::ButtonsUnreadable, true);
-        notice(None, StatusKind::OfflineNotStored);
+        notice_about(None, StatusKind::OfflineNotStored, Some("V2 HyperSpeed"));
         let first = snapshot();
-        assert!(first.contains(&StatusEvent { kind: StatusKind::ButtonsUnreadable, active: true }));
-        assert!(first.contains(&StatusEvent { kind: StatusKind::OfflineNotStored, active: true }));
+        assert!(first.contains(&StatusEvent { kind: StatusKind::ButtonsUnreadable, active: true, model: None }));
+        assert!(first.contains(&StatusEvent { kind: StatusKind::OfflineNotStored, active: true, model: Some("V2 HyperSpeed") }));
         assert_eq!(first.len(), 2, "a repeated state is held once");
-        assert_eq!(snapshot(), vec![StatusEvent { kind: StatusKind::ButtonsUnreadable, active: true }]);
+        assert_eq!(snapshot(), vec![StatusEvent { kind: StatusKind::ButtonsUnreadable, active: true, model: None }]);
         set_state(None, StatusKind::ButtonsUnreadable, false);
         assert!(snapshot().is_empty());
     }

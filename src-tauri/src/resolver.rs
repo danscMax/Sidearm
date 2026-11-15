@@ -323,6 +323,7 @@ pub fn resolve_gesture_preview(
     let matching_mappings: Vec<&EncoderMapping> = config
         .encoder_mappings
         .iter()
+        .filter(|mapping| mapping.layer.is_live())
         .filter(|mapping| {
             normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&normalized_key)
         })
@@ -660,6 +661,34 @@ mod tests {
 
         assert_eq!(result.status, ResolutionStatus::Unresolved);
         assert!(result.reason.contains("No encoder mapping exists"));
+    }
+
+    #[test]
+    fn offline_bindings_and_encoder_mappings_never_resolve_live() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = test_config(vec![]);
+            let mut binding = config.bindings[0].clone();
+            binding.id = "offline-binding".into();
+            binding.layer = layer;
+            config.bindings.push(binding);
+            let mut mapping = config.encoder_mappings[0].clone();
+            mapping.layer = layer;
+            config.encoder_mappings.push(mapping);
+            for hypershift in [false, true] {
+                for hypershift2 in [false, true] {
+                    let held = HeldLayers { hypershift, hypershift2 };
+                    assert!(held.layer().is_none_or(Layer::is_live));
+                    let preview = resolve_gesture_preview(&config, "F13", "chrome.exe", "Docs", None, None, held, Gesture::Press);
+                    assert_ne!(preview.status, ResolutionStatus::Ambiguous);
+                    assert_ne!(preview.binding_id.as_deref(), Some("offline-binding"));
+                    assert!(preview.layer.as_deref().is_none_or(|layer| !layer.starts_with("offline")));
+                }
+            }
+            config.encoder_mappings.remove(0);
+            let preview = resolve_input_preview(&config, "F13", "chrome.exe", "Docs", None);
+            assert_eq!(preview.status, ResolutionStatus::Unresolved);
+            assert!(preview.layer.is_none());
+        }
     }
 
     #[test]

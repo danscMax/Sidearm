@@ -508,7 +508,7 @@ async function main() {
     check("V2 offline profile stored", /profile `[^`]+` written for use without Sidearm: \d+ records, 0 failed/.test(exitLog));
     check("V3 bank 1 holds records", bankRecords(world.mouse(V3), 1).length > 0);
     // Bank 1 plays after exit: each live record is what that bank holds there
-    // (the reselect reloads it), else the original Sidearm replaced.
+    // (a bank switch reloads it), else the original Sidearm replaced.
     const v3After = world.mouse(V3);
     const at = (bank, button, layer) => v3After.records.find(([b, n, l]) => b === bank && n === button && l === layer)?.[3];
     const wrongLive = v3Originals.filter(({ button, layer, before }) =>

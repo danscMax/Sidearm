@@ -269,6 +269,9 @@ pub fn spawn_watchdog(app: &tauri::AppHandle, config_dir: &Path) {
     use crate::mouse_status::{StatusKind, set_state};
     // A mark an earlier Sidearm left (its watchdog gone) must not pass for this one's.
     let _ = std::fs::remove_file(config_dir.join(CLEAN_EXIT_FILE));
+    // Until the clean exit removes it: a power loss or a crash of Windows takes
+    // the watchdog along, and the next logon restores the mice instead.
+    set_run_once(config_dir, true);
     let pid = std::process::id();
     let (app, config_dir) = (app.clone(), config_dir.to_owned());
     // The broker it goes through ends at once and logs only a failed spawn: a
@@ -347,6 +350,8 @@ fn wait_for_mutex(name: &str, limit: std::time::Duration) -> bool {
 /// The end of a clean exit: this Sidearm's watchdog has nothing to do.
 pub fn mark_clean_exit(config_dir: &Path) {
     crate::mouse_offline::write_marker(&config_dir.join(CLEAN_EXIT_FILE), &std::process::id().to_string());
+    // A restorer this exit started for a sleeping mouse registers its own.
+    set_run_once(config_dir, false);
 }
 
 /// The restore processes' entry (`main.rs`, before Tauri starts). Returns
@@ -361,7 +366,14 @@ pub fn restore_entry(args: &[String]) -> bool {
         log::error!("[restore] {what} not started: {error}");
     };
     if let Some(dir) = value(SPAWN_RESTORE_ARG) {
-        if let Err(error) = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref()]) {
+        // Windows removed the value to run this. A Sidearm that started first
+        // (the logon task) had written it for itself: give it back.
+        if mutex_exists(APP_MUTEX) {
+            set_run_once(Path::new(dir), true);
+        }
+        // Registered by every running Sidearm and removed by its clean exit:
+        // what is left at logon is a Sidearm that ended without it.
+        if let Err(error) = spawn_detached(&[RESTORE_LIVE_MAPS_ARG.as_ref(), dir.as_ref(), AFTER_CRASH_ARG.as_ref()]) {
             broker_failed("restore process (logon entry)", error);
         }
         return true;
@@ -548,7 +560,7 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
     let started = Instant::now();
     let mut said_waiting = started;
     let mut tries = 0u32;
-    let mut next_logon = None;
+    let mut registered = false;
     let sidearm_started = "a Sidearm started (it restores the mice itself)";
     let outcome = 'retry: loop {
         if mutex_exists(APP_MUTEX) {
@@ -571,8 +583,9 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
             log::info!("[restore] still waiting for a mouse to answer ({tries} tries, {} min)", started.elapsed().as_secs() / 60);
             said_waiting = Instant::now();
         }
-        if next_logon.is_none() {
-            next_logon = Some(set_run_once(config_dir, true));
+        if !registered {
+            set_run_once(config_dir, true);
+            registered = true;
         }
         // A starting Sidearm is noticed within 2 s either way (it waits for
         // this process to let go of the mice).
@@ -584,14 +597,15 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
             }
         }
     };
-    if next_logon == Some(true) {
+    // A Sidearm that started registered the logon restore for itself.
+    if outcome != sidearm_started && !mutex_exists(APP_MUTEX) {
         set_run_once(config_dir, false);
     }
     done(&format!("{outcome} after {tries} tries"));
 }
 
 /// `RunOnce` value that starts the restore process at the next logon while a
-/// mouse still waits for its restore.
+/// Sidearm runs (until its clean exit) or a mouse still waits for its restore.
 const RUN_ONCE_VALUE: &str = "SidearmRestoreMice";
 
 /// Adds (`on`) or removes this restore at the next logon. Returns whether it

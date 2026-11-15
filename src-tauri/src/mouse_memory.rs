@@ -1562,7 +1562,10 @@ pub(crate) mod fake {
                 }
             }
             (FAKE_CLASS_BANKS, 0x84) => reply[8] = mouse.active_bank,
-            // Selecting a bank reloads the live map (bank 0) from it.
+            // Selecting another bank reloads the live map (bank 0) from it;
+            // reselecting the bank already playing reloads nothing (the real
+            // V3, measured 2026-11-14).
+            (FAKE_CLASS_BANKS, 0x04) if mouse.banks.contains(&args[0]) && mouse.active_bank == args[0] => {}
             (FAKE_CLASS_BANKS, 0x04) if mouse.banks.contains(&args[0]) => {
                 mouse.active_bank = args[0];
                 let loaded: Vec<_> = mouse.records.iter().filter(|((bank, _, _), _)| *bank == args[0]).map(|(&(_, b, l), &block)| ((0, b, l), block)).collect();

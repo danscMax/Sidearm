@@ -445,8 +445,8 @@ pub fn banks(model: &'static NativeModel) -> Result<Banks, String> {
 }
 
 /// Makes `bank` the one the mouse plays, confirmed by reading it back. The
-/// firmware then reloads the live map from that bank — also when it already
-/// was the active one, which is how a freshly written bank takes effect.
+/// firmware reloads the live map from it only when it was not the active one:
+/// reselecting the bank already playing reloads nothing (measured 2026-11-14).
 fn select_bank(device: &VendorDevice, bank: u8) -> Result<(), String> {
     if !read_banks(device)?.assigned.contains(&bank) {
         return Err(format!("Bank {bank} holds no profile on the mouse"));
@@ -1543,7 +1543,8 @@ pub(crate) mod tests {
     fn offline_only_wheel_is_restored_reversibly_during_live_use() {
         use crate::mouse_memory::fake::{self, FakeMouse};
         for offline in [OnboardAction::Key { modifier: 1, usage: 6 }, OnboardAction::Consumer(USAGES[42])] {
-            let _fake = fake::install(FakeMouse { banks: vec![1], active_bank: 1, ..Default::default() });
+            // Bank 2 plays, so selecting bank 1 below reloads the live map.
+            let _fake = fake::install(FakeMouse { banks: vec![1, 2], active_bank: 2, ..Default::default() });
             let dir = tempfile::tempdir().unwrap();
             let config = config_with_v3();
             let live = overlay(&config, &NAGA_V3_PRO, true, false).unwrap().targets;
@@ -1628,7 +1629,8 @@ pub(crate) mod tests {
     #[test]
     fn switching_banks_replans_uncovered_extras_from_the_new_banks_snapshot() {
         use crate::mouse_memory::fake::{self, FakeMouse};
-        let _fake = fake::install(FakeMouse { banks: vec![1, 2], active_bank: 1, ..Default::default() });
+        // Bank 2 plays, so selecting bank 1 below reloads the live map.
+        let _fake = fake::install(FakeMouse { banks: vec![1, 2], active_bank: 2, ..Default::default() });
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         let live = overlay(&config_with_v3(), &NAGA_V3_PRO, true, false).unwrap().targets;

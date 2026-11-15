@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 12;
+const SCHEMA_VERSION: i32 = 13;
 pub const MAX_SEQUENCE_STEPS: usize = 200;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
@@ -540,6 +540,14 @@ pub enum Layer {
     /// While both HyperShift triggers of a mouse are held.
     #[serde(rename = "hypershiftBoth")]
     HypershiftBoth,
+    /// What the mouse itself plays without Sidearm (the offline profile written
+    /// at exit, `mouse_offline::plan`): an own plain-press assignment for that
+    /// place, else the standard binding. Never resolved while Sidearm runs.
+    Offline,
+    /// The same under the firmware's HyperShift (layer 1 of the record), else
+    /// the hypershift binding, else the standard one.
+    #[serde(rename = "offlineHypershift")]
+    OfflineHypershift,
 }
 
 impl Layer {
@@ -549,6 +557,8 @@ impl Layer {
             Self::Hypershift => "hypershift",
             Self::Hypershift2 => "hypershift2",
             Self::HypershiftBoth => "hypershiftBoth",
+            Self::Offline => "offline",
+            Self::OfflineHypershift => "offlineHypershift",
         }
     }
 }
@@ -4115,7 +4125,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x6a87_4c4b_f84c_1ed9);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (13, 0x4291_056d_e060_7ae7);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')

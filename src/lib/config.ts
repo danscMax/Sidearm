@@ -1,4 +1,7 @@
-export type Layer = "standard" | "hypershift" | "hypershift2" | "hypershiftBoth";
+/** `offline` / `offlineHypershift`: what the mouse plays itself without Sidearm
+ *  (the offline profile written at exit) — an own plain-press assignment there,
+ *  else the standard (/ hypershift) binding. Never resolved while Sidearm runs. */
+export type Layer = "standard" | "hypershift" | "hypershift2" | "hypershiftBoth" | "offline" | "offlineHypershift";
 
 export type ControlFamily = "thumbGrid" | "topPanel" | "wheel" | "system";
 

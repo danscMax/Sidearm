@@ -25,16 +25,39 @@
     list_native_mice: () => [],
     get_menu_usage: () => ({}),
     get_press_log: () => ({}),
-    // A display fixture, not the firmware planner: own, standard, or preserved.
+    // Display fixtures only; the real firmware planner lives in Rust.
     get_offline_preview: ({ config: current, profileId, deviceId }) => ({
-      target: { state: "written" },
+      target: (() => {
+        if (current.settings.offlineProfileId === "@active") return { state: "followsWindow" };
+        const writtenProfileId = current.settings.offlineProfileId || current.settings.fallbackProfileId;
+        if (deviceId === "razer-naga-v3") {
+          const banks = current.profiles.filter((profile) => profile.deviceSlots?.[deviceId] !== undefined)
+            .map((profile) => ({ bank: profile.deviceSlots[deviceId], profileId: profile.id }));
+          const bank = banks.find((entry) => entry.profileId === profileId)?.bank;
+          return { state: bank === undefined ? "notWritten" : "written", bank, banks };
+        }
+        return { state: writtenProfileId === profileId ? "written" : "notWritten", writtenProfileId };
+      })(),
       controls: current.physicalControls.filter((control) => control.deviceId === deviceId).flatMap((control) =>
         ["offline", "offlineHypershift"].map((layer) => {
           const bindings = current.bindings.filter((binding) => binding.enabled && binding.profileId === profileId
             && binding.controlId === control.id && (!binding.triggerMode || binding.triggerMode === "press"));
           const own = bindings.find((binding) => binding.layer === layer);
-          const standard = bindings.find((binding) => binding.layer === "standard");
+          const standard = bindings.find((binding) => binding.layer === (layer === "offlineHypershift" ? "hypershift" : "standard"))
+            ?? bindings.find((binding) => binding.layer === "standard");
           const binding = own ?? standard;
+          const action = current.actions.find((action) => action.id === binding?.actionId);
+          if (layer === "offlineHypershift" && current.settings.hypershiftTrigger === "none") {
+            return { controlId: control.id, layer, kind: "unavailable", editable: false, reason: "noTrigger" };
+          }
+          if (action && !["shortcut", "mouseAction", "disabled"].includes(action.type)) {
+            return { controlId: control.id, layer, kind: "silent", actionId: action.id, editable: true,
+              reason: "actionType", liveActionType: action.type };
+          }
+          if (action?.type === "disabled") return { controlId: control.id, layer, kind: "silent", actionId: action.id, editable: true };
+          if (action?.type === "mouseAction" && ["ctrl", "shift", "alt", "win"].some((key) => action.payload[key])) {
+            return { controlId: control.id, layer, kind: "silent", actionId: action.id, editable: true, reason: "mouseModifiers" };
+          }
           return { controlId: control.id, layer, kind: own ? "own" : standard ? "inherited" : "preserved",
             ...(binding ? { actionId: binding.actionId } : {}), editable: true };
         })),

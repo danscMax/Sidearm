@@ -4,6 +4,7 @@ import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
 import { isOfflineLayer, RAZER_NAGA_DEVICE_ID } from "../lib/config";
 import type { OfflinePreview } from "../lib/onboard-mapping";
+import { offlineTargetLabel } from "../lib/labels";
 import { layerCopy, type FamilySection, type ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
@@ -1013,8 +1014,7 @@ export function ProfilesWorkspace({
         <Notice variant={writeTarget.state === "notWritten" || writeTarget.state === "unknown" ? "warning" : "info"}>
           <div className="profiles__offline-target">
             <span>
-              {t(`offline.${writeTarget.state}`)}
-              {writeTarget.bank !== undefined ? ` · ${t("offline.bank", { bank: writeTarget.bank })}` : ""}
+              {offlineTargetLabel(writeTarget, activeConfig, effectiveProfileId!)}
             </span>
             <button type="button" className="action-button action-button--small" onClick={() => setDeviceTab("memory")}>
               {t("device.tabMemory")}

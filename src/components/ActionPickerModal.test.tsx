@@ -31,6 +31,144 @@ function show(controlId = "mouse_4", config = makeConfig(), bindingId: string | 
 }
 function save() { fireEvent.click(screen.getByRole("button", { name: "Сохранить" })); }
 
+describe("Without Sidearm in the live picker", () => {
+  const action: Action = { id: "live", type: "shortcut", displayName: "Copy", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } };
+  function livePicker(layer: "standard" | "hypershift" = "standard", editable = true, gesture: Gesture = "press") {
+    const offlineLayer: OfflineLayer = layer === "standard" ? "offline" : "offlineHypershift";
+    const initial = editing.setOfflineAssignment(makeConfig({ actions: [action], bindings: [{
+      id: "binding", controlId: "thumb_01", profileId: "p1", layer, actionId: action.id, label: "Copy", enabled: true,
+    }] }), "p1", "thumb_01", offlineLayer, "silent");
+    const onSave = vi.fn<(config: AppConfig) => void>();
+    const onApply = vi.fn();
+    const onCancel = vi.fn();
+    function Harness() {
+      const [config, setConfig] = useState(initial);
+      const [currentGesture, setGesture] = useState(gesture);
+      return <ActionPickerModal config={config} bindingId="binding" profileId="p1" controlId="thumb_01" selectedLayer={layer}
+        offlineControl={{ controlId: "thumb_01", layer: offlineLayer, kind: editable ? "silent" : "role", role: "hypershift", editable,
+          reason: editable ? "key" : undefined }} gesture={currentGesture} onGestureChange={setGesture}
+        onApply={(next) => { onApply(next); setConfig(next); }} onSave={onSave} onCancel={onCancel} />;
+    }
+    const view = render(<Harness />);
+    const expand = () => {
+      const summary = view.container.querySelector<HTMLDetailsElement>(".action-picker__offline")!;
+      fireEvent.click(summary.querySelector("summary")!);
+      return summary;
+    };
+    return { initial, onSave, onApply, onCancel, expand, view, offlineLayer };
+  }
+
+  it("starts collapsed with the reason and expands the three existing choices", () => {
+    const { view, expand, onSave, onApply } = livePicker();
+    const details = view.container.querySelector<HTMLDetailsElement>(".action-picker__offline")!;
+    expect(details.open).toBe(false);
+    expect(details.querySelector("summary")?.textContent).toContain(i18n.t("offline.reason.key"));
+    expand();
+    expect(details.open).toBe(true);
+    for (const key of ["inherit", "mute", "setOwn"]) expect(within(details).getByRole("button", { name: i18n.t(`offline.${key}`) })).toBeTruthy();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(onApply).not.toHaveBeenCalled();
+  });
+
+  it("saving an untouched live editor preserves its offline binding without writing one", () => {
+    const { initial, onSave } = livePicker();
+    const write = vi.spyOn(editing, "setOfflineAssignment");
+    save();
+    expect(write).not.toHaveBeenCalled();
+    expect(onSave.mock.calls[0][0].bindings.filter((binding) => binding.layer === "offline"))
+      .toEqual(initial.bindings.filter((binding) => binding.layer === "offline"));
+    write.mockRestore();
+  });
+
+  it.each(["standard", "hypershift"] as const)("stages inherit/mute on the matching %s offline layer and undoes them", (layer) => {
+    const { expand, onSave, onApply, offlineLayer } = livePicker(layer);
+    expand();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("offline.inherit") }));
+    expect(onApply).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.undo") }));
+    expect(screen.getByRole("button", { name: i18n.t("offline.inherit") }).getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.redo") }));
+    save();
+    expect(findBinding(onSave.mock.calls[0][0], "p1", offlineLayer, "thumb_01")).toBeNull();
+    onSave.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("offline.mute") }));
+    save();
+    const result = onSave.mock.calls[0][0];
+    const binding = findBinding(result, "p1", offlineLayer, "thumb_01")!;
+    expect(result.actions.find((action) => action.id === binding.actionId)?.type).toBe("disabled");
+    expect(findBinding(result, "p1", layer, "thumb_01")).toBeTruthy();
+  });
+
+  it.each(["standard", "hypershift"] as const)("switches %s to the existing offline picker with one undo history", (layer) => {
+    const { expand, onApply, onSave, offlineLayer, view } = livePicker(layer);
+    expand();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("offline.setOwn") }));
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByText(i18n.t("picker.offlineHint"))).toBeTruthy();
+    expect(screen.queryByRole("button", { name: i18n.t("picker.test") })).toBeNull();
+    expect(onApply).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.undo") }));
+    expect(view.container.querySelector(".action-picker__offline")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.redo") }));
+    expect(screen.getByText(i18n.t("picker.offlineHint"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    save();
+    expect(findBinding(onSave.mock.calls[0][0], "p1", offlineLayer, "thumb_01")).toBeNull();
+    expect(findBinding(onSave.mock.calls[0][0], "p1", layer, "thumb_01")).toBeTruthy();
+  });
+
+  it("shows a reserved role without edit actions", () => {
+    const { expand } = livePicker("standard", false);
+    const details = expand();
+    expect(details.textContent).toContain(i18n.t("offline.role.hypershift"));
+    expect(within(details).queryByRole("button")).toBeNull();
+  });
+
+  it("waits for a fresh preview after applying live drafts, then seeds the offline editor", () => {
+    const initial = makeConfig({ actions: [action], bindings: [{
+      id: "binding", controlId: "thumb_01", profileId: "p1", layer: "standard", actionId: action.id, label: "Copy", enabled: true,
+    }] });
+    const preview = { controlId: "thumb_01", layer: "offline" as const, kind: "inherited" as const, actionId: action.id, editable: true };
+    function Harness({ ready }: { ready: boolean }) {
+      const [config, setConfig] = useState(initial);
+      return <ActionPickerModal config={config} bindingId="binding" profileId="p1" controlId="thumb_01" selectedLayer="standard"
+        onApply={setConfig} onSave={vi.fn()} onCancel={vi.fn()} offlineControl={config === initial || ready ? preview : undefined} />;
+    }
+    const view = render(<Harness ready={false} />);
+    const key = screen.getByRole("textbox", { name: i18n.t("picker.keyLabel") });
+    fireEvent.focus(key);
+    fireEvent.keyDown(key, { key: "V", ctrlKey: true });
+    fireEvent.blur(key);
+    fireEvent.click(view.container.querySelector(".action-picker__offline summary")!);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("offline.setOwn") }));
+    expect(screen.getByText(i18n.t("offline.loading"))).toBeTruthy();
+    view.rerender(<Harness ready />);
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: i18n.t("picker.keyLabel") }).value).toBe("V");
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.undo") }));
+    expect(view.container.querySelector(".action-picker__offline")).toBeTruthy();
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: i18n.t("picker.keyLabel") }).value).toBe("V");
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.undo") }));
+    expect(screen.getByRole<HTMLInputElement>("textbox", { name: i18n.t("picker.keyLabel") }).value).toBe("C");
+  });
+
+  it("does not apply a staged mute when the live editor is discarded", () => {
+    const { expand, onApply, onSave, onCancel } = livePicker();
+    expand();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("offline.mute") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("common.cancel") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.discard") }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onApply).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it.each(["longPress", "doublePress", "triplePress"] as const)("shows a muted explanation for %s", (gesture) => {
+    const { view } = livePicker("standard", true, gesture);
+    expect(screen.getByText(i18n.t("offline.plainPressOnly"))).toBeTruthy();
+    expect(view.container.querySelector(".action-picker__offline")).toBeNull();
+  });
+});
+
 describe("offline assignment picker", () => {
   it.each(["profile", "layer", "control"] as const)("remounts drafts and history when the %s identity changes", (identity) => {
     const first: Action = { id: "first", type: "shortcut", displayName: "First", payload: { key: "A", ctrl: true, shift: false, alt: false, win: false } };

@@ -13,7 +13,9 @@ import type {
   SequenceStep,
   TriggerMode,
   HypershiftTrigger,
+  AppConfig,
 } from "./config";
+import type { OfflinePreview } from "./onboard-mapping";
 import type {
   ActionExecutionEvent,
   DebugLogEntry,
@@ -250,30 +252,55 @@ export function displayNameForControlId(controlId: string): string {
 
 /** The native hook reserves the configured trigger, independently of bindings. */
 export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
-  if (entry.offline) {
-    const result = entry.offline;
-    switch (result.kind) {
-      case "own": case "inherited": return entry.action?.displayName ?? i18n.t("offline.unknownAction");
-      case "preserved": return result.native && i18n.exists(`mouseAction.${result.native}`)
-        ? i18n.t(`mouseAction.${result.native}`) : i18n.t("offline.preserved");
-      case "silent": return i18n.t("offline.silent");
-      case "role": return i18n.t(`offline.role.${result.role ?? "nativeClick"}`);
-      case "unavailable": return i18n.t("offline.unavailable");
-      case "unknown": return i18n.t("offline.unknownAction");
-    }
-  }
+  if (entry.offline) return offlineAssignmentLabel(entry.offline, entry.action);
   if (entry.isHypershiftTrigger) {
     return i18n.t(entry.isHypershift2Trigger ? "visualization.hypershift2Assignment" : "visualization.hypershiftAssignment");
   }
   return fallbackLabel(entry) ?? surfacePrimaryLabel(entry.binding, entry.action);
 }
 
+export function offlineAssignmentLabel(result: NonNullable<ControlSurfaceEntry["offline"]>, action: Action | null): string {
+  switch (result.kind) {
+    case "own": case "inherited": return action?.displayName ?? i18n.t("offline.unknownAction");
+    case "preserved": return result.native && i18n.exists(`mouseAction.${result.native}`)
+      ? i18n.t(`mouseAction.${result.native}`) : i18n.t("offline.preserved");
+    case "silent": return [i18n.t("offline.silent"), offlineReasonLabel(result)].filter(Boolean).join(" · ");
+    case "role": return i18n.t(`offline.role.${result.role ?? "nativeClick"}`);
+    case "unavailable": return i18n.t("offline.unavailable");
+    case "unknown": return i18n.t("offline.unknownAction");
+  }
+}
+
+function offlineReasonLabel(result: NonNullable<ControlSurfaceEntry["offline"]>, full = false): string {
+  if (!result.reason || (result.kind !== "silent" && result.kind !== "unavailable")) return "";
+  const typeKey = `action.type.${result.liveActionType}`;
+  const type = i18n.exists(typeKey) ? i18n.t(typeKey) : i18n.t("binding.assigned");
+  return i18n.t(`offline.reason.${result.reason}${full ? "Full" : ""}`, { type });
+}
+
+export function offlineTargetLabel(target: OfflinePreview["target"], config: AppConfig, profileId: string): string {
+  const name = (id: string | undefined) => config.profiles.find((profile) => profile.id === id)?.name ?? i18n.t("offline.unknownAction");
+  const banks = (target.banks ?? []).map(({ bank, profileId }) => `${bank} — ${name(profileId)}`).join(", ");
+  switch (target.state) {
+    case "notWritten": return target.banks !== undefined
+      ? i18n.t("offline.notWrittenBanks", { name: name(profileId), banks })
+      : i18n.t("offline.notWritten", { name: name(target.writtenProfileId) });
+    case "written": return [
+      target.bank !== undefined ? i18n.t("offline.writtenBank", { bank: target.bank }) : i18n.t("offline.written"),
+      banks ? i18n.t("offline.bankPlan", { banks }) : "",
+    ].filter(Boolean).join(" ");
+    default: return i18n.t(`offline.${target.state}`);
+  }
+}
+
 /** The small firmware badge, or the live assignment of a silent button. */
-export function offlineDetailLabel(entry: ControlSurfaceEntry): string {
+export function offlineDetailLabel(entry: ControlSurfaceEntry, full = true): string {
   if (!entry.offline) return "";
   if (entry.offline.kind === "own" || entry.offline.kind === "inherited") return i18n.t(`offline.${entry.offline.kind}`);
-  if (entry.offline.kind !== "silent") return "";
-  return entry.offline.liveAction ? i18n.t("offline.liveAction", { action: entry.offline.liveAction.displayName }) : "";
+  return [full ? offlineReasonLabel(entry.offline, true) : "",
+    entry.offline.kind === "silent" && entry.offline.liveAction
+      ? i18n.t("offline.liveAction", { action: entry.offline.liveAction.displayName }) : "",
+  ].filter(Boolean).join(" ");
 }
 
 /** "Ctrl+C · from Standard" for a control with no assignment of its own on

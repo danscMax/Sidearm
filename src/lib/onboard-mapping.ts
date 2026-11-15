@@ -41,10 +41,17 @@ export interface OfflineControl {
   native?: string;
   role?: "hypershift" | "profileButton" | "nativeClick";
   editable: boolean;
+  reason?: "actionType" | "gesture" | "key" | "mouseModifiers" | "noTrigger";
+  liveActionType?: string;
 }
 
 export interface OfflinePreview {
-  target: { state: "written" | "notWritten" | "followsWindow" | "unknown"; bank?: number };
+  target: {
+    state: "written" | "notWritten" | "followsWindow" | "unknown";
+    bank?: number;
+    writtenProfileId?: string;
+    banks?: { bank: number; profileId: string }[];
+  };
   controls: OfflineControl[];
 }
 

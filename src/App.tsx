@@ -1461,7 +1461,8 @@ function App() {
       {actionPickerOpen && activeConfig ? (
         <ActionPickerModal
           key={`${effectiveProfileId}:${selectedLayer}:${selectedControlId}:${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
-          offlineControl={offlinePreview?.controls.find((control) => control.controlId === selectedControlId && control.layer === selectedLayer)}
+          offlineControl={offlinePreview?.controls.find((control) => control.controlId === selectedControlId
+            && control.layer === (isOfflineLayer(selectedLayer) ? selectedLayer : selectedLayer === "hypershift" ? "offlineHypershift" : "offline"))}
           focusMenuItemId={menuFocusItemId}
           config={activeConfig}
           bindingId={

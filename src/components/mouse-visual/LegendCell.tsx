@@ -83,9 +83,9 @@ export function LegendCell({
             </span>
           ) : null}
         </span>
-        {entry.offline && offlineDetailLabel(entry) ? (
+        {entry.offline && offlineDetailLabel(entry, false) ? (
           <span className="btn-legend__offline-detail">
-            <span className={entry.offline.kind === "silent" ? "btn-legend__offline-live" : "btn-legend__gesture"}>{offlineDetailLabel(entry)}</span>
+            <span className={entry.offline.kind === "silent" ? "btn-legend__offline-live" : "btn-legend__gesture"}>{offlineDetailLabel(entry, false)}</span>
           </span>
         ) : null}
         {/* The other press patterns, one chip each: what the hold / double / triple press does. */}

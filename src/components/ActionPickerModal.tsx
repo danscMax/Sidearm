@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
 import { isOfflineLayer, MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
-import { displayNameForControlId, labelForLayer } from "../lib/labels";
+import { displayNameForControlId, labelForLayer, offlineAssignmentLabel } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
 import { isBuiltinControl, isKeyButton, type OfflineControl } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
@@ -26,7 +26,7 @@ import {
   upsertEncoderMapping,
 } from "../lib/config-editing";
 import { MenuItemsEditor } from "./MenuItemsEditor";
-import { CategoryIcon } from "./icons";
+import { CategoryIcon, ChevronIcon } from "./icons";
 import { applyMenuEdits, isMenuIncomplete, NO_MENU_EDITS, type MenuEdits } from "../lib/menu-phrase";
 import { bindingUses, otherMenuUses } from "../lib/menu-arrange";
 import { snippetPlaceCounts } from "../lib/snippet-search";
@@ -86,6 +86,8 @@ const GESTURE_LABEL_KEYS: Record<Gesture, string> = {
  *  to and the config as it was there (a tab switch applies the tab's edit). */
 interface PickerSnapshot {
   gesture: Gesture;
+  layer: Layer | undefined;
+  offlineChoice: "silent" | null | undefined;
   /** "The same on <mouse>" and "Also save to the library": undone with the drafts. */
   syncDraft: boolean;
   saveToLibraryDraft: boolean;
@@ -138,11 +140,22 @@ export function ActionPickerModal(props: ActionPickerProps) {
 }
 
 function ActionPicker(props: ActionPickerProps) {
+  const { t } = useTranslation();
   const [store] = useState(createDraftHistoryStore<PickerSnapshot>);
   // Drafts an undo / redo brings back onto another tab, read by that tab's mount.
   const [seed, setSeed] = useState<PickerSnapshot | null>(null);
-  const gesture = props.selectedLayer && isOfflineLayer(props.selectedLayer) ? "press" : props.gesture ?? "press";
-  return <PickerTab key={gesture} {...props} gesture={gesture} store={store} seed={seed} onSeed={setSeed} />;
+  const [layer, setLayer] = useState(props.selectedLayer);
+  const gesture = layer && isOfflineLayer(layer) ? "press" : props.gesture ?? "press";
+  // Applying the live edit invalidates its preview. Seed the offline tab only
+  // from the fresh result, while keeping the history store above the tab.
+  if (layer !== props.selectedLayer && layer && isOfflineLayer(layer) && !props.offlineControl) {
+    return <ModalShell onClose={props.onCancel} className="modal action-picker" ariaLabel={t("picker.title")}>
+      <p className="action-picker__preview panel__muted">{t("offline.loading")}</p>
+    </ModalShell>;
+  }
+  return <PickerTab key={`${layer}:${gesture}`} {...props} selectedLayer={layer}
+    layerLabel={layer !== props.selectedLayer && layer ? labelForLayer(layer) : props.layerLabel}
+    gesture={gesture} store={store} seed={seed} onSeed={setSeed} onLayerChange={setLayer} />;
 }
 
 function PickerTab({
@@ -163,10 +176,12 @@ function PickerTab({
   store,
   seed,
   onSeed,
+  onLayerChange,
 }: ActionPickerProps & {
   store: DraftHistoryStore<PickerSnapshot>;
   seed: PickerSnapshot | null;
   onSeed: (seed: PickerSnapshot | null) => void;
+  onLayerChange: (layer: Layer | undefined) => void;
 }) {
   const { t } = useTranslation();
   const modalRef = useRef<HTMLDivElement>(null);
@@ -285,6 +300,8 @@ function PickerTab({
     const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
     return {
       gesture,
+      layer: selectedLayer,
+      offlineChoice: undefined,
       syncDraft: syncKey ? slotSynced(config.settings, syncKey) : false,
       // Default ON so snippet text lands in the durable library, not only inline on
       // the button — inline-only text is silently lost when the button is later
@@ -316,6 +333,7 @@ function PickerTab({
     };
   });
   const start = seed ?? pristine;
+  const [offlineChoice, setOfflineChoice] = useState(start.offlineChoice);
 
   const [signalDraft, setSignalDraft] = useState(start.signalDraft);
   const [isCapturingSignal, setIsCapturingSignal] = useState(false);
@@ -517,6 +535,9 @@ function PickerTab({
   /** The save with the sync choice applied; turned on, the button is copied
    *  onto the other mice at once. */
   function withSync(next: AppConfig | null): AppConfig | null {
+    if (next && !offline && offlineChoice !== undefined && offlineControl?.editable && profileId && controlId) {
+      next = setOfflineAssignment(next, profileId, controlId, offlineControl.layer, offlineChoice);
+    }
     if (!next || !syncKey || syncDraft === slotSynced(config.settings, syncKey)) return next;
     const synced = withSlotSync(next, syncKey, syncDraft);
     const own = ownBinding(synced);
@@ -542,6 +563,14 @@ function PickerTab({
     if (saved && saved !== config) onApply?.(saved);
     onSeed(null);
     onGestureChange(next);
+  }
+
+  function switchToOffline() {
+    if (!offlineControl?.editable || saveDisabled) return;
+    const saved = withSync(buildSave());
+    if (saved && saved !== config) onApply?.(saved);
+    onSeed(null);
+    onLayerChange(offlineControl.layer);
   }
 
   async function handleTest() {
@@ -606,6 +635,10 @@ function PickerTab({
     ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview"
       : effectiveCategory === "hypershift2" ? "picker.hypershift2Preview" : "picker.nativePreview")
     : describeAction(effectiveCategory, drafts, t, config.profiles);
+  const offlineSummary = offlineChoice === "silent" ? t("offline.silent")
+    : offlineChoice === null ? t("offline.inherit")
+    : offlineAssignmentLabel(offlineControl ?? { kind: "unknown", editable: false },
+      config.actions.find((action) => action.id === offlineControl?.actionId) ?? null);
   const activeCat = offline && effectiveCategory === "native" ? inheritCategory : categories.find((c) => c.id === effectiveCategory);
   const categoryDescription = offline && effectiveCategory === "native" ? "picker.offlineInheritHint"
     : offline && effectiveCategory === "disabled" ? "picker.offlineSilentHint"
@@ -614,7 +647,7 @@ function PickerTab({
   // Undo / redo of every edit made in the picker before Save (a menu item moved
   // into the wrong list, a step deleted…), across the press-pattern tabs.
   const current: PickerSnapshot = {
-    gesture, base: config, syncDraft, saveToLibraryDraft: saveSnippetToLibrary,
+    gesture, layer: selectedLayer, offlineChoice, base: config, syncDraft, saveToLibraryDraft: saveSnippetToLibrary,
     activeCategory, shortcutDraft, mouseDraft, textDraft, launchDraft, mediaDraft, profileDraft, sequenceDraft,
     nameDraft, triggerModeDraft, chordPartnerDraft, throttleDraft, conditionsDraft, menuItemsDraft, cheatLayerDraft,
     menuEdits, signalDraft,
@@ -622,15 +655,17 @@ function PickerTab({
   const history = useDraftHistory(
     current,
     (snapshot) => {
-      if (snapshot.gesture !== gesture && onGestureChange) {
+      if (snapshot.layer !== selectedLayer || (snapshot.gesture !== gesture && onGestureChange)) {
         // A step of another tab: the config as it was there (that tab's applied
         // edit taken back), then that tab with these drafts.
         onSeed(snapshot);
         if (snapshot.base !== config) onApply?.(snapshot.base);
-        onGestureChange(snapshot.gesture);
+        onLayerChange(snapshot.layer);
+        if (snapshot.gesture !== gesture) onGestureChange?.(snapshot.gesture);
         return;
       }
       setActiveCategory(snapshot.activeCategory);
+      setOfflineChoice(snapshot.offlineChoice);
       setShortcutDraft(snapshot.shortcutDraft);
       setMouseDraft(snapshot.mouseDraft);
       setTextDraft(snapshot.textDraft);
@@ -971,6 +1006,27 @@ function PickerTab({
           <span className="action-picker__preview-label">{t("picker.previewLabel")}</span>
           <span className="action-picker__preview-text">{previewText}</span>
         </p>
+        {!offline && builtinControl ? (
+          selectedLayer === "standard" || selectedLayer === "hypershift" ? (
+            gesture === "press" && triggerModeDraft === "press" ? (
+              <details className="action-picker__offline">
+                <summary className="action-picker__preview" title={offlineSummary}>
+                  <ChevronIcon />
+                  <span className="action-picker__preview-label">{t("offline.view")}:</span>
+                  <span className="action-picker__preview-text">{offlineSummary}</span>
+                </summary>
+                {offlineControl?.editable ? <div className="action-picker__offline-actions">
+                  <button type="button" className="action-button action-button--small" aria-pressed={offlineChoice === null}
+                    onClick={() => setOfflineChoice(null)}>{t("offline.inherit")}</button>
+                  <button type="button" className="action-button action-button--small" aria-pressed={offlineChoice === "silent"}
+                    onClick={() => setOfflineChoice("silent")}>{t("offline.mute")}</button>
+                  <button type="button" className="action-button action-button--small" disabled={saveDisabled}
+                    onClick={switchToOffline}>{t("offline.setOwn")}</button>
+                </div> : null}
+              </details>
+            ) : <p className="action-picker__uses">{t("offline.plainPressOnly")}</p>
+          ) : null
+        ) : null}
         {elsewhere.length > 0 ? (
           <p className="action-picker__uses">
             {t("picker.alsoUsed", { places: elsewhere.slice(0, 4).join("; ") })}

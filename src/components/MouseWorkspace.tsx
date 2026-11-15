@@ -116,6 +116,7 @@ export function MouseWorkspace({
       const deviceId = targetRef.current;
       const [readings, descriptor] = await Promise.allSettled([request(deviceId), getNativeModel(deviceId)]);
       if (!state.alive || state.version !== version) return;
+      setBanksVersion((v) => v + 1);
       if (descriptor.status === "fulfilled") setModel(descriptor.value);
       if (readings.status === "fulfilled") {
         setDevice(readings.value);

@@ -67,7 +67,13 @@ pub fn offline_models() -> Vec<&'static NativeModel> {
 pub fn back_to_sidearm_bank() -> Result<(), String> {
     for model in offline_models() {
         let bank = OFFLINE[model.catalog_index()].load(Ordering::Acquire);
-        select_bank(&VendorDevice::open_model(model)?, bank)?;
+        let device = VendorDevice::open_model(model)?;
+        // Holding the device: a session that stopped meanwhile cleared OFFLINE
+        // first, and its mouse must not be put back on a bank nobody watches.
+        if OFFLINE[model.catalog_index()].load(Ordering::Acquire) != bank {
+            continue;
+        }
+        select_bank(&device, bank)?;
         log::info!("[naga-live] {} put back on the Sidearm bank {bank}", model.name);
     }
     Ok(())
@@ -563,9 +569,16 @@ fn bank_addresses(model: &NativeModel) -> Vec<(u8, u8)> {
 
 /// The bank that plays without Sidearm: the offline profile's, else the one
 /// playing (never Sidearm's own; `banks` has it left out).
-fn base_bank(config: &AppConfig, model: &NativeModel, banks: &Banks) -> u8 {
+/// `remembered`: the bank that played before Sidearm's, kept for when the
+/// offline profile has no bank of its own (Sidearm's bank playing gives no
+/// other hint).
+fn base_bank(config: &AppConfig, model: &NativeModel, banks: &Banks, remembered: Option<u8>) -> u8 {
     let offline = crate::mouse_offline::offline_profile_id(config, None);
-    exit_bank(&bank_plan(config, model, banks, &offline), banks, &offline)
+    let plan = bank_plan(config, model, banks, &offline);
+    match plan.iter().find(|(_, profile)| *profile == offline) {
+        Some(&(bank, _)) => bank,
+        None => remembered.filter(|bank| banks.assigned.contains(bank)).unwrap_or_else(|| exit_bank(&plan, banks, &offline)),
+    }
 }
 
 /// Makes Sidearm's bank hold `base`'s records with `targets` over them, writing
@@ -576,9 +589,6 @@ fn base_bank(config: &AppConfig, model: &NativeModel, banks: &Banks) -> u8 {
 fn sync_sidearm_bank(device: &VendorDevice, bank: u8, base: u8, targets: &[(u8, u8, OnboardAction)], config_dir: &Path) -> Result<usize, String> {
     let model = device.model();
     let stored = load_snapshot(device, &bank_backup(config_dir, model, base))?.map(|snapshot| snapshot.records).unwrap_or_default();
-    // Rewriting a record under a held button strands its key: the playing
-    // bank is the live map.
-    let playing = active_bank(device)? == bank;
     let mut written = 0;
     for (button, layer) in bank_addresses(model) {
         let wanted = match targets.iter().find(|&&(b, l, _)| (b, l) == (button, layer)) {
@@ -589,7 +599,10 @@ fn sync_sidearm_bank(device: &VendorDevice, bank: u8, base: u8, targets: &[(u8, 
             },
         };
         if device.read_block(bank, button, layer)? != wanted {
-            if playing {
+            // Rewriting a record under a held button strands its key: the
+            // playing bank is the live map. Asked per write: the profile button
+            // may select this bank meanwhile.
+            if active_bank(device)? == bank {
                 wait_released(model);
             }
             write_bank(device, bank, button, layer, wanted)?;
@@ -612,17 +625,27 @@ fn sync_sidearm_bank(device: &VendorDevice, bank: u8, base: u8, targets: &[(u8, 
 fn claim_sidearm_bank(device: &VendorDevice, config: &AppConfig, targets: &[(u8, u8, OnboardAction)], config_dir: &Path) -> Result<Option<(u8, u8)>, String> {
     let model = device.model();
     let (banks, sidearm) = user_banks(device)?;
-    let base = base_bank(config, model, &banks);
-    let bank = match sidearm {
-        Some(bank) => bank,
+    let base = base_bank(config, model, &banks, remembered_base(config_dir, model));
+    let (bank, created) = match sidearm {
+        Some(bank) => (bank, false),
         None => {
             let Some(free) = (1..=MAX_BANKS).find(|bank| !banks.assigned.contains(bank)) else { return Ok(None) };
             create_bank(device, free)?;
             log::info!("[naga-live] {} claimed free slot {free} as the Sidearm bank", model.name);
-            free
+            (free, true)
         }
     };
-    let written = sync_sidearm_bank(device, bank, base, targets, config_dir)?;
+    let written = match sync_sidearm_bank(device, bank, base, targets, config_dir) {
+        Ok(written) => written,
+        Err(error) => {
+            // Half filled it is no Sidearm bank anyone finds again: give the
+            // slot back, or every retry would take another one.
+            if created && let Err(release) = delete_bank(device, bank) {
+                log::warn!("[naga-live] {} half-filled slot {bank} not given back: {release}", model.name);
+            }
+            return Err(error);
+        }
+    };
     log::info!("[naga-live] {} Sidearm bank {bank} up to date ({written} records written, base bank {base})", model.name);
     Ok(Some((bank, base)))
 }
@@ -633,6 +656,17 @@ fn in_sidearm_bank_marker(config_dir: &Path, model: &NativeModel) -> PathBuf {
     config_dir.join(format!("{}-in-sidearm-bank", model.device_id))
 }
 
+/// Writes the marker before Sidearm's bank is selected (a kill in between
+/// must still find it): Sidearm's bank and the one that played before it.
+fn mark_in_sidearm_bank(config_dir: &Path, model: &NativeModel, bank: u8, base: u8) {
+    crate::mouse_offline::write_marker(&in_sidearm_bank_marker(config_dir, model), &format!("{bank} {base}"));
+}
+
+/// The bank that played before Sidearm's, as the marker keeps it.
+fn remembered_base(config_dir: &Path, model: &NativeModel) -> Option<u8> {
+    std::fs::read_to_string(in_sidearm_bank_marker(config_dir, model)).ok()?.split_whitespace().nth(1)?.parse().ok()
+}
+
 /// Selects the bank that plays without Sidearm when Sidearm's bank plays, and
 /// drops the marker. `config` (else the one in `config_dir`) names that bank.
 fn leave_sidearm_bank(device: &VendorDevice, config: Option<&AppConfig>, config_dir: &Path) -> Result<(), String> {
@@ -640,9 +674,13 @@ fn leave_sidearm_bank(device: &VendorDevice, config: Option<&AppConfig>, config_
     let (banks, sidearm) = user_banks(device)?;
     if let Some(bank) = sidearm.filter(|&bank| bank == banks.active) {
         let from_disk = config.is_none().then(|| crate::config::read_and_migrate_config_file(&config_dir.join("config.json")).ok()).flatten();
+        let remembered = remembered_base(config_dir, model);
         let base = match config.or(from_disk.as_ref()) {
-            Some(config) => base_bank(config, model, &banks),
-            None => *banks.assigned.first().ok_or("The mouse holds no bank but Sidearm's")?,
+            Some(config) => base_bank(config, model, &banks, remembered),
+            None => match remembered.filter(|bank| banks.assigned.contains(bank)) {
+                Some(bank) => bank,
+                None => *banks.assigned.first().ok_or("The mouse holds no bank but Sidearm's")?,
+            },
         };
         select_bank(device, base)?;
         log::info!("[naga-live] {} left the Sidearm bank {bank}: bank {base} plays", model.name);
@@ -747,7 +785,11 @@ pub fn schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
         let offline = crate::mouse_offline::offline_profile_id(&config, None);
         for model in CATALOG.iter().copied().filter(|model| model.live.as_ref().is_some_and(|live| live.banks) && configured(&config, model)) {
             let stored = VendorDevice::open_model(model).and_then(|device| {
-                if user_banks(&device)?.1.is_none() {
+                // Only while Sidearm's own bank plays: in keyboard-fallback mode,
+                // or offline, the playing bank is the user's and writing it would
+                // replace the live map.
+                let (banks, sidearm) = user_banks(&device)?;
+                if sidearm != Some(banks.active) {
                     return Ok(false);
                 }
                 store_banks(&device, &config, model, &offline, &config_dir, false).map(|()| true)
@@ -1325,9 +1367,9 @@ impl Session {
                     if bank_path {
                         let device = open()?;
                         match claim_sidearm_bank(&device, &session_config, &worker_targets, &config_dir)? {
-                            Some((bank, _)) => {
+                            Some((bank, base)) => {
+                                mark_in_sidearm_bank(&config_dir, model, bank, base);
                                 select_bank(&device, bank)?;
-                                crate::mouse_offline::write_marker(&in_sidearm_bank_marker(&config_dir, model), &bank.to_string());
                                 // The bank switch reloaded the live map: a rollback of an older one is moot.
                                 if backup.exists() {
                                     std::fs::remove_file(&backup).map_err(|error| error.to_string())?;
@@ -1840,8 +1882,8 @@ pub(crate) mod tests {
             ..config.bindings.last().unwrap().clone()
         });
         let targets = offline_targets(&config, &NAGA_V3_PRO, &profile);
-        assert!(targets.contains(&(0x42, 0, OnboardAction::Consumer(USAGES[4]))));
-        assert!(targets.contains(&(0x42, 1, OnboardAction::Consumer(USAGES[5]))));
+        assert!(targets.contains(&(0x42, 0, OnboardAction::Consumer(crate::mouse_offline::BANK_SILENT_USAGE))));
+        assert!(targets.contains(&(0x42, 1, OnboardAction::Consumer(crate::mouse_offline::BANK_SILENT_USAGE))));
         assert!(!targets.iter().any(|&(button, _, _)| button == 0x43), "an unbound button keeps its record");
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 0, usage: 0x2a }), [2, 1, 0, 0x2a, 0, 0, 0]);
         assert_eq!(bank_block(1, OnboardAction::Key { modifier: 1, usage: 0x19 }), [2, 2, 1, 0x19, 0, 0, 0]);
@@ -2260,6 +2302,36 @@ pub(crate) mod tests {
         fake::with(|mouse| assert_eq!((mouse.banks.clone(), mouse.active_bank), (vec![1, 2], 1)));
         // Nothing left to give back.
         assert!(!release_sidearm_bank(&NAGA_V3_PRO, dir.path()).unwrap());
+    }
+
+    #[test]
+    fn leaving_goes_back_to_the_bank_that_played_before_sidearms() {
+        use crate::mouse_memory::fake;
+        let (mut mouse, targets) = sidearm_bank_mouse();
+        mouse.active_bank = 2;
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        // No profile is linked to a bank: only the marker knows bank 2 played.
+        let (bank, base) = claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap().unwrap();
+        assert_eq!((bank, base), (3, 2));
+        mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, bank, base);
+        select_bank(&device, bank).unwrap();
+        leave_sidearm_bank(&device, None, dir.path()).unwrap();
+        fake::with(|mouse| assert_eq!(mouse.active_bank, 2));
+    }
+
+    #[test]
+    fn a_slot_that_could_not_be_filled_is_given_back() {
+        use crate::mouse_memory::fake;
+        let (mut mouse, targets) = sidearm_bank_mouse();
+        // Record writes refused (the button class's set command); the rest answers.
+        mouse.refused = vec![(0x02, 0x0c)];
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        assert!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).is_err());
+        fake::with(|mouse| assert_eq!(mouse.banks, vec![1, 2], "no half-filled slot is left taken"));
     }
 
     #[test]

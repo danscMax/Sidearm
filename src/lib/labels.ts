@@ -261,7 +261,8 @@ export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
 
 export function offlineAssignmentLabel(result: NonNullable<ControlSurfaceEntry["offline"]>, action: Action | null): string {
   switch (result.kind) {
-    case "own": case "inherited": return action?.displayName ?? i18n.t("offline.unknownAction");
+    case "own": case "inherited": return action?.displayName ?? (result.native
+      ? i18n.t(`mouseAction.${result.native}`) : i18n.t("offline.unknownAction"));
     case "preserved": return result.native && i18n.exists(`mouseAction.${result.native}`)
       ? i18n.t(`mouseAction.${result.native}`) : i18n.t("offline.preserved");
     case "silent": return [i18n.t("offline.silent"), offlineReasonLabel(result)].filter(Boolean).join(" · ");

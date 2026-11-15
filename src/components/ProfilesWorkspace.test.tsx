@@ -172,6 +172,25 @@ it("duplicates the complete disabled rule instead of creating a capture rule", (
   expect(result.appMappings[1].id).not.toBe(rule.id);
 });
 
+it.each<OfflineLayer>(["offline", "offlineHypershift"])("excludes %s bindings from cross-profile search and its other-profile count", (layer) => {
+  const config = makeConfig({
+    actions: [makeAction({ type: "mouseAction", payload: { action: "rightClick" } })],
+    bindings: [
+      { id: "live", profileId: "p2", layer: "standard", controlId: "thumb_01", actionId: "a1", enabled: true, label: "Search match live" },
+      { id: "firmware", profileId: "p2", layer, controlId: "thumb_01", actionId: "a1", enabled: true, label: "Search match firmware" },
+      { id: "local-firmware", profileId: "p1", layer, controlId: "thumb_01", actionId: "a1", enabled: true, label: "Search match local firmware" },
+    ],
+  });
+  show(config);
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Search match" } });
+  expect(screen.getByRole("button", { name: i18n.t("profile.searchFoundElsewhere", { count: 1 }) })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: i18n.t("profile.searchAllProfiles") }));
+  expect(screen.getByRole("button", { name: /Gaming.*Search match live/ })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /Search match.*firmware/ })).toBeNull();
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "firmware" } });
+  expect(screen.getByText(i18n.t("profile.searchNoResults"))).toBeTruthy();
+});
+
 it("selects the result's device before selecting its control in all-profile search", () => {
   const config = makeConfig({
     actions: [makeAction({ type: "mouseAction", payload: { action: "mouseBack" } })],

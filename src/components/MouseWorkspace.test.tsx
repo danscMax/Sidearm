@@ -5,10 +5,12 @@ import { MouseWorkspace } from "./MouseWorkspace";
 import { makeConfig } from "../lib/test-fixtures";
 import type { AppConfig } from "../lib/config";
 import type { MouseSettings } from "../lib/onboard-mapping";
+import { NAGA_V3_DEVICE_ID } from "../lib/devices";
 import * as backend from "../lib/backend";
 
 vi.mock("../lib/backend", () => ({
   getMouseSettings: vi.fn(), getNativeModel: vi.fn(), getDeviceReport: vi.fn(), getOnboardBanks: vi.fn(),
+  getSidearmBank: vi.fn(), releaseSidearmBank: vi.fn(),
   listNativeMice: vi.fn(async () => []), listenNativeMiceChanged: vi.fn(async () => () => {}),
   listenMouseBattery: vi.fn(), listenActionExecutionEvent: vi.fn(),
   setMouseDpi: vi.fn(), setMousePollRate: vi.fn(), setKeySignals: vi.fn(), openDeviceReportIssue: vi.fn(),
@@ -19,6 +21,7 @@ const partial: MouseSettings = { ...readings, batteryPercent: null, status: "par
   { field: "batteryPercent", message: { text: "Battery charge could not be read.", key: "mouseRead.batteryFailed" }, details: "query refused" },
 ] };
 let batteryEvent: () => void;
+let nativeMiceEvent: () => void;
 let executionEvent: (event: { actionType: string; summary: { key: string } }) => void;
 
 beforeEach(async () => {
@@ -27,6 +30,7 @@ beforeEach(async () => {
   vi.mocked(backend.getMouseSettings).mockResolvedValue(readings);
   vi.mocked(backend.getNativeModel).mockResolvedValue({ name: "Naga", deviceId: "razer-naga", banks: false, connected: true, verified: true, consumerSignals: null, dpiMin: 100, dpiMax: 30000, pollRates: [125, 500, 1000] });
   vi.mocked(backend.listenMouseBattery).mockImplementation(async (callback) => { batteryEvent = () => callback({ model: "Razer Naga V2 HyperSpeed", percent: 63, low: false }); return vi.fn<() => void>(); });
+  vi.mocked(backend.listenNativeMiceChanged).mockImplementation(async (callback) => { nativeMiceEvent = () => callback([]); return vi.fn<() => void>(); });
   vi.mocked(backend.listenActionExecutionEvent).mockImplementation(async (_name, callback) => { executionEvent = callback as typeof executionEvent; return vi.fn<() => void>(); });
   vi.mocked(backend.getDeviceReport).mockResolvedValue("Sidearm diagnostic summary");
   vi.mocked(backend.setMouseDpi).mockResolvedValue(readings);
@@ -43,6 +47,30 @@ function show(overrides: Partial<AppConfig> = {}, runtimeProfileId?: string) {
 }
 
 describe("independent mouse readings", () => {
+  it.each(["battery", "native mice", "manual"] as const)("retries bank reads after a failed sleeping V3 read on %s refresh", async (trigger) => {
+    const model = await backend.getNativeModel();
+    vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true });
+    vi.mocked(backend.getOnboardBanks).mockRejectedValueOnce(new Error("asleep"))
+      .mockResolvedValue({ assigned: [1, 2], active: 2 });
+    vi.mocked(backend.getSidearmBank).mockRejectedValueOnce(new Error("asleep")).mockResolvedValue(4);
+    const config = makeConfig();
+    const workspace = (section: "performance" | "memory") => <MouseWorkspace activeConfig={config}
+      deviceId={NAGA_V3_DEVICE_ID} section={section} profiles={config.profiles} activeProfile={config.profiles[0]}
+      runtimeProfileId="p1" updateDraft={vi.fn()} mouseStates={[]} />;
+    const { rerender } = render(workspace(trigger === "manual" ? "performance" : "memory"));
+    await waitFor(() => expect(backend.getSidearmBank).toHaveBeenCalledExactlyOnceWith(NAGA_V3_DEVICE_ID));
+    expect(screen.queryByRole("button", { name: i18n.t("mouse.sidearmSlotRelease") })).toBeNull();
+    if (trigger === "manual") fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.retry") }));
+    else act(() => { if (trigger === "battery") batteryEvent(); else nativeMiceEvent(); });
+    await waitFor(() => expect(backend.getSidearmBank).toHaveBeenCalledTimes(2));
+    expect(backend.getOnboardBanks).toHaveBeenCalledTimes(2);
+    expect(backend.getOnboardBanks).toHaveBeenLastCalledWith(NAGA_V3_DEVICE_ID);
+    rerender(workspace("memory"));
+    expect(await screen.findByText(i18n.t("mouse.sidearmSlotRow", { n: 4 }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("mouse.slotRow", { n: 2 }))).toBeTruthy();
+    expect(screen.getByRole("button", { name: i18n.t("mouse.sidearmSlotRelease") })).toBeTruthy();
+  });
+
   it("selects Manual and focuses the existing input without writing settings or the mouse", async () => {
     const { updates } = show({ profiles: [{ ...makeConfig().profiles[0], deviceMouse: { "razer-naga": { mouseDpi: 1100 } } }] });
     await screen.findByText("1100 DPI");

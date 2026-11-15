@@ -413,7 +413,11 @@ async function main() {
     const v3After = world.mouse(V3);
     check("V3 left the Sidearm bank for bank 1, keeping the slot", v3After.activeBank === 1 && v3After.banks.includes(4), JSON.stringify({ banks: v3After.banks, active: v3After.activeBank }));
     const at = (bank, button, layer) => v3After.records.find(([b, n, l]) => b === bank && n === button && l === layer)?.[3];
-    const wrongLive = bankRecords(v3After, 1).filter(([, button, layer, record]) => JSON.stringify(at(0, button, layer)) !== JSON.stringify(record));
+    // Both ways: every bank-1 record plays, and no live record is left that bank 1 does not hold.
+    const wrongLive = [
+      ...bankRecords(v3After, 1).filter(([, button, layer, record]) => JSON.stringify(at(0, button, layer)) !== JSON.stringify(record)),
+      ...liveRecords(v3After).filter(([, button, layer]) => at(1, button, layer) === undefined),
+    ];
     check("V3 live map is bank 1's", wrongLive.length === 0, JSON.stringify(wrongLive));
     check("V3 live rollback file gone", !fs.existsSync(path.join(world.data, `${V3}-live.json`)));
     check("no Sidearm-bank marker left", !fs.existsSync(path.join(world.data, `${V3}-in-sidearm-bank`)));

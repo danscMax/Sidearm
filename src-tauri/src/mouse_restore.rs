@@ -350,8 +350,12 @@ fn wait_for_mutex(name: &str, limit: std::time::Duration) -> bool {
 /// The end of a clean exit: this Sidearm's watchdog has nothing to do.
 pub fn mark_clean_exit(config_dir: &Path) {
     crate::mouse_offline::write_marker(&config_dir.join(CLEAN_EXIT_FILE), &std::process::id().to_string());
-    // A restorer this exit started for a sleeping mouse registers its own.
-    set_run_once(config_dir, false);
+    // A mouse still waiting for its restore keeps the logon restore: the
+    // restorer this exit started only registers it after its first failed
+    // try, and a logoff right now would end both before that.
+    if !config_dir.join(crate::mouse_offline::OFFLINE_FAILED_FILE).exists() {
+        set_run_once(config_dir, false);
+    }
 }
 
 /// A fake-mice process (app, capture helper, watchdog, restorer) ends with the
@@ -615,6 +619,11 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
     // A Sidearm that started registered the logon restore for itself.
     if outcome != sidearm_started && !mutex_exists(APP_MUTEX) {
         set_run_once(config_dir, false);
+        // A Sidearm that started between the check and the removal registered
+        // its own value, which is gone now: give it back.
+        if mutex_exists(APP_MUTEX) {
+            set_run_once(config_dir, true);
+        }
     }
     done(&format!("{outcome} after {tries} tries"));
 }
@@ -626,9 +635,15 @@ const RUN_ONCE_VALUE: &str = "SidearmRestoreMice";
 /// Adds (`on`) or removes this restore at the next logon. Returns whether it
 /// is registered now.
 fn set_run_once(config_dir: &Path, on: bool) -> bool {
-    if crate::fake_mode() {
+    // Never the user's real registry from a test run.
+    if crate::fake_mode() || cfg!(test) {
         return false;
     }
+    write_run_once(config_dir, on)
+}
+
+/// The registry write of [`set_run_once`].
+fn write_run_once(config_dir: &Path, on: bool) -> bool {
     use windows_sys::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegSetKeyValueW};
     let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
     let key = wide(r"Software\Microsoft\Windows\CurrentVersion\RunOnce");
@@ -784,10 +799,10 @@ mod tests {
                 .unwrap_or_default()
         };
         let dir = Path::new(r"C:\Temp\sidearm test");
-        assert!(set_run_once(dir, true));
+        assert!(write_run_once(dir, true));
         let value = read();
         assert!(value.contains(SPAWN_RESTORE_ARG) && value.contains(r#""C:\Temp\sidearm test""#), "{value}");
-        set_run_once(dir, false);
+        write_run_once(dir, false);
         assert!(!read().contains(RUN_ONCE_VALUE));
     }
 }

@@ -16,5 +16,10 @@ if ($guard) {
 if (-not $args.Count) { return }
 $command = $args[0]
 $rest = @($args | Select-Object -Skip 1)
-& $command @rest
+try {
+    & $command @rest
+} catch [System.Management.Automation.CommandNotFoundException] {
+    Write-Error $_
+    exit 127
+}
 exit $LASTEXITCODE

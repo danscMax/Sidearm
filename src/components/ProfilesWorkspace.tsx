@@ -536,13 +536,13 @@ export function ProfilesWorkspace({
   // Cross-profile search: scan every binding in the config (bindingMatchesQuery
   // is profile-agnostic) so the user can find a shortcut wherever it's bound.
   // Also counted while searching one profile: "found in other profiles: N".
-  const crossProfileResults = useMemo(() => {
+  const crossProfileResults = (() => {
     if (!searchQuery) return [];
     const actionsById = new Map(activeConfig.actions.map((a) => [a.id, a]));
     const profilesById = new Map(activeConfig.profiles.map((p) => [p.id, p]));
     const controlsById = new Map(activeConfig.physicalControls.map((c) => [c.id, c]));
     return activeConfig.bindings
-      .filter((b) => bindingMatchesQuery(b, actionsById.get(b.actionId) ?? null, searchQuery))
+      .filter((b) => !isOfflineLayer(b.layer) && bindingMatchesQuery(b, actionsById.get(b.actionId) ?? null, searchQuery))
       .map((b) => {
         const control = controlsById.get(b.controlId);
         return {
@@ -552,7 +552,7 @@ export function ProfilesWorkspace({
           controlName: control ? displayNameForControl(control, "raw") : b.controlId,
         };
       });
-  }, [activeConfig, searchQuery]);
+  })();
   const foundElsewhere = searchQuery && !searchAllProfiles && matchedControlIds?.size === 0
     ? crossProfileResults.filter((result) => result.binding.profileId !== effectiveProfileId).length
     : 0;

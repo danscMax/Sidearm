@@ -1581,7 +1581,9 @@ pub(crate) mod fake {
             (FAKE_CLASS_BANKS, 0x04) if mouse.banks.contains(&args[0]) && mouse.active_bank == args[0] => {}
             (FAKE_CLASS_BANKS, 0x04) if mouse.banks.contains(&args[0]) => {
                 mouse.active_bank = args[0];
+                // The whole live map becomes the bank's: nothing of the old one stays.
                 let loaded: Vec<_> = mouse.records.iter().filter(|((bank, _, _), _)| *bank == args[0]).map(|(&(_, b, l), &block)| ((0, b, l), block)).collect();
+                mouse.records.retain(|&(bank, _, _), _| bank != 0);
                 mouse.records.extend(loaded);
             }
             // Mode reads answer `MODE_NORMAL` (args echo zeros).

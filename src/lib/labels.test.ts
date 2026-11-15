@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import i18n from "../i18n";
 import type {
   Binding,
   PhysicalControl,
@@ -23,8 +24,14 @@ import {
   displayNameForControlId,
   actionCategoryIcon,
   surfacePrimaryLabel,
+  offlineAssignmentLabel,
 } from "./labels";
 import { makeAction } from "./test-fixtures";
+
+it.each(["own", "inherited"] as const)("labels a known native %s offline assignment without an action", (kind) => {
+  expect(offlineAssignmentLabel({ kind, native: "rightClick", editable: true }, null))
+    .toBe(i18n.t("mouseAction.rightClick"));
+});
 
 // ---------------------------------------------------------------------------
 // formatTimestamp

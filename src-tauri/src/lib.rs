@@ -211,7 +211,7 @@ fn spawn_main_thread_watch(app: AppHandle) {
 /// The OSD page listens for `osd-show` (it said so through `osd_ready`).
 static OSD_READY: AtomicBool = AtomicBool::new(false);
 /// The latest bubble asked for while the page was still loading.
-static OSD_PENDING: Mutex<Option<(String, String, config::Settings)>> = Mutex::new(None);
+static OSD_PENDING: Mutex<Option<(String, String, config::Settings, bool)>> = Mutex::new(None);
 
 /// The OSD page registered its listener: show the bubble that waited for it.
 #[tauri::command]
@@ -221,8 +221,8 @@ fn osd_ready(app: AppHandle) {
         OSD_READY.store(true, Ordering::Release);
         pending.take()
     };
-    if let Some((label, name, settings)) = pending {
-        show_osd(&app, &label, &name, &settings);
+    if let Some((label, name, settings, offline)) = pending {
+        show_osd_with_offline(&app, &label, &name, &settings, offline);
     }
 }
 
@@ -233,8 +233,10 @@ fn osd_ready(app: AppHandle) {
 /// (`osd_ready`). Later calls emit the event, position, show and auto-hide.
 /// Shows the OSD bubble: `label` (bold-less, may be empty) then `profile_name`.
 pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, settings: &config::Settings) {
-    // Any other bubble replaces the offline one: a click on it only hides it.
-    OSD_SAYS_OFFLINE.store(false, Ordering::Release);
+    show_osd_with_offline(app, label, profile_name, settings, false);
+}
+
+fn show_osd_with_offline(app: &AppHandle, label: &str, profile_name: &str, settings: &config::Settings, offline: bool) {
     if !settings.osd_enabled {
         return;
     }
@@ -251,7 +253,7 @@ pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, setting
         match existing {
             Some(w) if OSD_READY.load(Ordering::Acquire) => w,
             existing => {
-                *pending = Some((label.to_owned(), profile_name.to_owned(), settings.clone()));
+                *pending = Some((label.to_owned(), profile_name.to_owned(), settings.clone(), offline));
                 drop(pending);
                 if existing.is_none() {
                     create_osd_window(app);
@@ -351,6 +353,7 @@ pub(crate) fn show_osd(app: &AppHandle, label: &str, profile_name: &str, setting
         let _ = w.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
 
+    OSD_SAYS_OFFLINE.store(offline, Ordering::Release);
     let _ = w.show();
     log::info!("[osd] shown");
 
@@ -3813,9 +3816,8 @@ async fn release_sidearm_bank(app: AppHandle, device_id: String) -> Result<bool,
     tauri::async_runtime::spawn_blocking(move || {
         let model = bank_model(&device_id)?;
         mouse_memory::live_overlay::keep_off_sidearm_bank(model);
-        if let Err(error) = restart_capture_with(&app, || true, false) {
-            log::warn!("[system] capture restart before giving the Sidearm bank back failed: {error}");
-        }
+        restart_capture_with(&app, || true, false)
+            .map_err(|error| CommandError::internal(format!("Capture restart before giving the Sidearm bank back failed: {error}")))?;
         let config_dir = resolve_config_dir(&app)?;
         mouse_memory::live_overlay::release_sidearm_bank(model, &config_dir).map_err(|msg| mouse_access_error(&msg))
     })
@@ -3836,8 +3838,7 @@ pub(crate) fn mouse_offline_mode_changed(model: &'static device_catalog::NativeM
         let text = crate::ui_text!("runtime.mouseOfflineOsd", "{model} offline (profile button) — click here or the tray item to go back to Sidearm", model = model.short_name);
         // Long enough to reach with the mouse.
         let settings = config::Settings { osd_duration_ms: OFFLINE_OSD_MS, ..load.config.settings };
-        show_osd(app, "", &crate::ui_text::native(&text), &settings);
-        OSD_SAYS_OFFLINE.store(true, Ordering::Release);
+        show_osd_with_offline(app, "", &crate::ui_text::native(&text), &settings, true);
     }
 }
 

@@ -460,7 +460,7 @@ fn select_bank(device: &VendorDevice, bank: u8) -> Result<(), String> {
 
 /// The bank to play after exit: the offline profile's own bank, else the one
 /// that was playing.
-fn exit_bank(plan: &[(u8, &str)], banks: &Banks, offline_profile: &str) -> u8 {
+pub(crate) fn exit_bank(plan: &[(u8, &str)], banks: &Banks, offline_profile: &str) -> u8 {
     plan.iter().find(|(_, profile)| *profile == offline_profile).map_or(banks.active, |(bank, _)| *bank)
 }
 

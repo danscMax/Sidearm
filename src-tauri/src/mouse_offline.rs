@@ -103,6 +103,11 @@ pub struct OfflineTarget {
     pub written_profile_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub banks: Option<Vec<OfflineBank>>,
+    /// V3: the bank the exit selects, so the mouse plays it after Sidearm
+    /// closes (the offline profile's, else the one playing) — the same
+    /// `live_overlay::exit_bank` the exit uses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub playing_bank: Option<u8>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -114,7 +119,7 @@ pub struct OfflinePreview {
 pub fn preview(config: &AppConfig, model: &NativeModel, profile_id: &str, banks: Option<&crate::mouse_memory::live_overlay::Banks>) -> OfflinePreview {
     let follows = config.settings.offline_profile_id.as_deref() == Some(crate::config::OFFLINE_PROFILE_ACTIVE);
     let offline = if follows { crate::config::OFFLINE_PROFILE_ACTIVE.to_owned() } else { offline_profile_id(config, None) };
-    let mut target = OfflineTarget { state: TargetState::NotWritten, bank: None, written_profile_id: None, banks: None };
+    let mut target = OfflineTarget { state: TargetState::NotWritten, bank: None, written_profile_id: None, banks: None, playing_bank: None };
     if model.verified && model.transport == Transport::LiveOverlay {
         if let Some(banks) = banks {
             let planned = crate::mouse_memory::live_overlay::bank_plan(config, model, banks, &offline);
@@ -125,6 +130,9 @@ pub fn preview(config: &AppConfig, model: &NativeModel, profile_id: &str, banks:
                 target.state = TargetState::FollowsWindow;
             }
             if matches!(target.state, TargetState::Written | TargetState::NotWritten) {
+                if !planned.is_empty() {
+                    target.playing_bank = Some(crate::mouse_memory::live_overlay::exit_bank(&planned, banks, &offline));
+                }
                 target.banks = Some(planned.into_iter().map(|(bank, profile_id)| OfflineBank { bank, profile_id: profile_id.into() }).collect());
             }
         } else {
@@ -956,6 +964,8 @@ mod tests {
             assert_eq!(target["bank"], serde_json::json!(bank));
             assert_eq!(target["banks"], serde_json::json!([{"bank": 3, "profileId": profile}, {"bank": 2, "profileId": other}]));
             assert!(target.get("writtenProfileId").is_none());
+            // The exit selects the offline profile's bank: bank 3, whichever profile is shown.
+            assert_eq!(target["playingBank"], 3);
         }
         config.profiles[0].device_slots = Some([("razer-naga-v3".into(), 5)].into());
         config.profiles[1].device_slots = None;
@@ -963,7 +973,7 @@ mod tests {
         assert_eq!(target, serde_json::json!({"state": "notWritten", "banks": []}));
         let one = Banks { active: 2, assigned: vec![2] };
         let target = serde_json::to_value(preview(&config, &NAGA_V3_PRO, &other, Some(&one)).target).unwrap();
-        assert_eq!(target, serde_json::json!({"state": "notWritten", "banks": [{"bank": 2, "profileId": profile}]}));
+        assert_eq!(target, serde_json::json!({"state": "notWritten", "banks": [{"bank": 2, "profileId": profile}], "playingBank": 2}));
     }
 
     #[test]

@@ -281,13 +281,21 @@ function offlineReasonLabel(result: NonNullable<ControlSurfaceEntry["offline"]>,
 export function offlineTargetLabel(target: OfflinePreview["target"], config: AppConfig, profileId: string): string {
   const name = (id: string | undefined) => config.profiles.find((profile) => profile.id === id)?.name ?? i18n.t("offline.unknownAction");
   const banks = (target.banks ?? []).map(({ bank, profileId }) => `${bank} — ${name(profileId)}`).join(", ");
+  // Which bank the mouse plays once Sidearm is closed: another one than this
+  // profile's means its own assignments sound only after the profile button.
+  const playing = target.playingBank;
+  const playingProfile = target.banks?.find(({ bank }) => bank === playing)?.profileId;
+  const plays = playing === undefined ? ""
+    : playing === target.bank ? i18n.t("offline.playsThis")
+    : i18n.t("offline.playsOther", { bank: playing, name: name(playingProfile) });
   switch (target.state) {
     case "notWritten": return target.banks !== undefined
-      ? i18n.t("offline.notWrittenBanks", { name: name(profileId), banks })
+      ? [i18n.t("offline.notWrittenBanks", { name: name(profileId), banks }), plays].filter(Boolean).join(" ")
       : i18n.t("offline.notWritten", { name: name(target.writtenProfileId) });
     case "written": return [
       target.bank !== undefined ? i18n.t("offline.writtenBank", { bank: target.bank }) : i18n.t("offline.written"),
       banks ? i18n.t("offline.bankPlan", { banks }) : "",
+      plays,
     ].filter(Boolean).join(" ");
     default: return i18n.t(`offline.${target.state}`);
   }

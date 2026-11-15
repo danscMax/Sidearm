@@ -126,6 +126,10 @@ it.each(["en", "ru"])('explains the actual exit target and fix in %s', async (la
     [{ state: "notWritten", banks: [{ bank: 1, profileId: "p2" }] }, [i18n.t("offline.notWrittenBanks", { name: "Default", banks: "1 — Gaming" })]],
     [{ state: "written", bank: 2, banks: [{ bank: 1, profileId: "p2" }, { bank: 2, profileId: "p1" }] },
       [i18n.t("offline.writtenBank", { bank: 2 }), i18n.t("offline.bankPlan", { banks: "1 — Gaming, 2 — Default" })]],
+    // The mouse plays another bank after the exit: say so, and how this one plays.
+    [{ state: "written", bank: 2, playingBank: 1, banks: [{ bank: 1, profileId: "p2" }, { bank: 2, profileId: "p1" }] },
+      [i18n.t("offline.writtenBank", { bank: 2 }), i18n.t("offline.playsOther", { bank: 1, name: "Gaming" })]],
+    [{ state: "written", bank: 2, playingBank: 2, banks: [{ bank: 2, profileId: "p1" }] }, [i18n.t("offline.playsThis")]],
     [{ state: "followsWindow" }, [i18n.t("offline.followsWindow")]],
     [{ state: "unknown" }, [i18n.t("offline.unknown")]],
   ];

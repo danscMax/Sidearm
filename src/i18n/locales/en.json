@@ -2139,6 +2139,8 @@
     "banner_other": "This profile has {{count}} problems to look at:"
   },
   "offline": {
+    "playsThis": "After Sidearm closes the mouse plays this bank.",
+    "playsOther": "After Sidearm closes the mouse plays bank {{bank}} ({{name}}); this profile plays after switching banks with the mouse's profile button.",
     "unknown": "The mouse did not respond, so its bank assignments are unknown. It will be written on exit if it wakes up.",
     "unknownAction": "Unknown",
     "preserved": "as stored in mouse memory",

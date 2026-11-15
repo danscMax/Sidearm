@@ -51,6 +51,8 @@ export interface OfflinePreview {
     bank?: number;
     writtenProfileId?: string;
     banks?: { bank: number; profileId: string }[];
+    /** V3: the bank the exit selects, so the mouse plays it after Sidearm closes. */
+    playingBank?: number;
   };
   controls: OfflineControl[];
 }

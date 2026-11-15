@@ -1540,6 +1540,11 @@ pub(crate) mod fake {
                 let mut block = [0u8; 7];
                 block.copy_from_slice(&args[3..10]);
                 mouse.records.insert(key, block);
+                // Writing the playing bank changes the live map at once (the
+                // real V3, measured 2026-11-15).
+                if key.0 != 0 && key.0 == mouse.active_bank && !mouse.banks.is_empty() {
+                    mouse.records.insert((0, key.1, key.2), block);
+                }
                 mouse.writes.push(key);
             }
             (CLASS_DPI, CMD_GET_DPI) => {

@@ -71,7 +71,9 @@ function Stop-StaleProcesses {
             Write-Host "  Stopping PID $($_.ProcessId)" -ForegroundColor Yellow
             Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
         }
+    # Both names cargo gives the exe: the linker writes the deps one.
     Move-LockedExe (Join-Path $target 'debug\sidearm.exe')
+    Move-LockedExe (Join-Path $target 'debug\deps\sidearm.exe')
 
     # Kill Vite/node holding our port
     $portPids = netstat -ano 2>$null | Select-String ":${VITE_PORT}.*LISTENING" |

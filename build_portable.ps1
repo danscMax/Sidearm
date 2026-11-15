@@ -323,7 +323,9 @@ if (-not $SkipBuild) {
     # target/release/sidearm.exe. The assemble step stops it again before
     # copying the fresh EXE.
     Stop-AppProcessIfRunning
+    # Both names cargo gives the exe: the linker writes the deps one.
     Move-LockedExe $TAURI_EXE
+    Move-LockedExe (Join-Path $TAURI_TARGET_DIR "release\deps\$BUILD_EXE_NAME")
 
     if ($CleanCargo) {
         Write-Host "    $([char]0x25B6) cargo clean -p sidearm (-CleanCargo requested)..." -ForegroundColor White

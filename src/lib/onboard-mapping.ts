@@ -1,6 +1,5 @@
-import { OFFLINE_PROFILE_ACTIVE, type Action, type AppConfig, type Binding, type ControlId, type OfflineLayer } from "./config";
+import type { Action, AppConfig, Binding, ControlId, OfflineLayer } from "./config";
 import { gestureOf } from "./config-editing";
-import { NAGA_V3_DEVICE_ID } from "./devices";
 import { primaryKeyCode } from "./key-names";
 
 /** Mouse actions the firmware plays itself (Rust `mouse_offline::onboard_action`). */
@@ -33,50 +32,20 @@ export function playsWithoutSidearm(binding: Binding, action: Action | null | un
     && !(action.payload.ctrl || action.payload.shift || action.payload.alt || action.payload.win);
 }
 
-/** The profile written into the mice at exit; null when it follows the window. */
-export function offlineProfileId(config: AppConfig): string | null {
-  const id = config.settings.offlineProfileId ?? config.settings.fallbackProfileId;
-  return id === OFFLINE_PROFILE_ACTIVE ? null : id;
+/** Rust's firmware planner preview; the UI never derives these decisions. */
+export interface OfflineControl {
+  controlId: string;
+  layer: OfflineLayer;
+  kind: "own" | "inherited" | "preserved" | "silent" | "role" | "unavailable";
+  actionId?: string;
+  native?: string;
+  role?: "hypershift" | "profileButton" | "nativeClick";
+  editable: boolean;
 }
 
-/** Effective firmware assignment; an unplayable own assignment still overrides inheritance. */
-export function offlineAssignment(
-  config: AppConfig,
-  profileId: string,
-  controlId: ControlId,
-  layer: OfflineLayer,
-): { kind: "own" | "inherited" | "silent"; action?: Action; binding?: Binding; liveAction?: Action } {
-  const bindings = config.bindings.filter((binding) => binding.enabled && binding.profileId === profileId && binding.controlId === controlId);
-  const own = bindings.find((binding) => binding.layer === layer && (binding.triggerMode === undefined || binding.triggerMode === "press"));
-  if (own) {
-    const action = config.actions.find((action) => action.id === own.actionId);
-    return playsWithoutSidearm(own, action)
-      ? { kind: "own", action, binding: own }
-      : { kind: "silent", binding: own };
-  }
-  const live = (liveLayer: "standard" | "hypershift") =>
-    bindings.find((binding) => binding.layer === liveLayer && gestureOf(binding.triggerMode) === "press");
-  // Choose the binding before testing playability: a text on HyperShift must not fall through.
-  const binding = (layer === "offlineHypershift" ? live("hypershift") : undefined) ?? live("standard");
-  const action = binding && config.actions.find((action) => action.id === binding.actionId);
-  if (binding && playsWithoutSidearm(binding, action)) return { kind: "inherited", action };
-  return action ? { kind: "silent", liveAction: action } : { kind: "silent" };
-}
-
-/** A profile written at exit, or one written into its linked V3 bank. */
-export function offlineWriteTarget(
-  config: AppConfig,
-  profileId: string,
-  deviceId: string,
-): { written: boolean; bank?: number; followsWindow: boolean } {
-  const target = offlineProfileId(config);
-  const profile = config.profiles.find((profile) => profile.id === profileId);
-  const bank = deviceId === NAGA_V3_DEVICE_ID ? profile?.deviceSlots?.[deviceId] : undefined;
-  return {
-    written: Boolean(profile && (target === profileId || bank !== undefined)),
-    ...(bank === undefined ? {} : { bank }),
-    followsWindow: target === null,
-  };
+export interface OfflinePreview {
+  target: { state: "written" | "notWritten" | "followsWindow" | "unknown"; bank?: number };
+  controls: OfflineControl[];
 }
 
 /**

@@ -5,7 +5,7 @@ import { useControlInteractions } from "../../hooks/useControlInteractions";
 import type { ControlSurfaceEntry } from "../../lib/constants";
 import { actionLabel, tooltipText, withOfflineAssignment } from "../../lib/mouse-visual";
 import { makeAction, makeConfig } from "../../lib/test-fixtures";
-import { setOfflineAssignment } from "../../lib/config-editing";
+import type { OfflineControl, OfflinePreview } from "../../lib/onboard-mapping";
 import { LegendCell } from "./LegendCell";
 
 afterEach(cleanup);
@@ -20,8 +20,7 @@ const config = makeConfig({ actions: [action], bindings: [{ id: "live", profileI
 const base: ControlSurfaceEntry = { control: config.physicalControls[1], binding: config.bindings[0], action, mapping: null, isSelected: false };
 
 it.each(["own", "inherited"] as const)("shows the %s firmware badge and never makes offline cells draggable", (kind) => {
-  const source = kind === "own" ? setOfflineAssignment(config, "p1", "thumb_01", "offline", { action: "mouseBack" }) : config;
-  const entry = withOfflineAssignment(source, "p1", "offline", base);
+  const entry = withOfflineAssignment(config, "p1", "offline", base, preview({ kind, actionId: action.id }));
   render(<Cell entry={entry} />);
   expect(screen.getByText(i18n.t(`offline.${kind}`))).toBeTruthy();
   expect(screen.getByText(entry.action!.displayName)).toBeTruthy();
@@ -29,8 +28,7 @@ it.each(["own", "inherited"] as const)("shows the %s firmware badge and never ma
 });
 
 it("dims silence and shows what the same button does in Sidearm", () => {
-  const source = setOfflineAssignment(config, "p1", "thumb_01", "offline", "silent");
-  render(<Cell entry={withOfflineAssignment(source, "p1", "offline", base)} />);
+  render(<Cell entry={withOfflineAssignment(config, "p1", "offline", base, preview({ kind: "silent" }))} />);
   expect(screen.getByText(i18n.t("offline.silent"))).toBeTruthy();
   expect(screen.getByText(i18n.t("offline.liveAction", { action: action.displayName }))).toBeTruthy();
   expect(screen.getByRole("button").classList.contains("btn-legend__cell--silent")).toBe(true);
@@ -40,4 +38,18 @@ it("keeps the live S mark and gives it the exact firmware result", () => {
   const entry = { ...base, sidearmOnly: true, offlineActionLabel: "Ctrl+C" };
   const { container } = render(<Cell entry={entry} />);
   expect(container.querySelector(".btn-legend__live")?.getAttribute("data-tip")).toBe(i18n.t("offline.tooltip", { action: "Ctrl+C" }));
+});
+
+function preview(control: Partial<OfflineControl>): OfflinePreview {
+  return { target: { state: "written" }, controls: [{ controlId: "thumb_01", layer: "offline", kind: "preserved", editable: true, ...control }] };
+}
+
+it.each([
+  [{ kind: "preserved" }, "offline.preserved", false],
+  [{ kind: "role", role: "profileButton", editable: false }, "offline.role.profileButton", false],
+  [{ kind: "unavailable", editable: false }, "offline.unavailable", true],
+] satisfies [Partial<OfflineControl>, string, boolean][])("renders %j cells", (control, key, dimmed) => {
+  render(<Cell entry={withOfflineAssignment(config, "p1", "offline", base, preview(control))} />);
+  expect(screen.getByText(i18n.t(key))).toBeTruthy();
+  expect(screen.getByRole("button").classList.contains("btn-legend__cell--dimmed")).toBe(dimmed);
 });

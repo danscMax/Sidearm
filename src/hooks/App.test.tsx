@@ -12,6 +12,7 @@ vi.mock("../lib/backend", async (importOriginal) => {
     setNativeTexts: vi.fn().mockResolvedValue(undefined),
     getAppPaths: vi.fn().mockResolvedValue({ testRun: true }),
     getAdminAutostartStatus: vi.fn().mockResolvedValue({ enabled: false }),
+    getOfflinePreview: vi.fn().mockResolvedValue({ target: { state: "written" }, controls: [] }),
     getMouseStatus: vi.fn().mockResolvedValue([]),
     getNativeModel: vi.fn().mockResolvedValue({ consumerSignals: true }),
     getDebugLog: vi.fn().mockResolvedValue([]),
@@ -31,6 +32,7 @@ import i18n from "../i18n";
 import * as backend from "../lib/backend";
 import { makeConfig } from "../lib/test-fixtures";
 import { ProfilesWorkspace } from "../components/ProfilesWorkspace";
+import { LayerPills } from "../components/mouse-visual/LayerPills";
 
 const config = makeConfig({
   settings: { ...makeConfig().settings, onboardingCompleted: true },
@@ -45,8 +47,33 @@ async function renderReady() {
 }
 
 describe("App orchestration", () => {
+  it("leaves Enter on offline pills and the sub-switch to native button activation", async () => {
+    vi.mocked(ProfilesWorkspace).mockImplementation((props) => <LayerPills selectedLayer={props.selectedLayer} onSelectLayer={props.onSelectLayer} />);
+    await renderReady();
+    act(() => { workspace().setSelectedControlId("thumb_01"); });
+    for (const [name, layer] of [[i18n.t("offline.view"), "offline"], [i18n.t("offline.hypershift"), "offlineHypershift"], [i18n.t("offline.standard"), "offline"]] as const) {
+      const button = screen.getAllByRole("button", { name }).at(-1)!;
+      button.focus();
+      const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      fireEvent(button, event);
+      expect(event.defaultPrevented).toBe(false);
+      expect(screen.queryByRole("dialog")).toBeNull();
+      fireEvent.click(button);
+      expect(workspace().selectedLayer).toBe(layer);
+    }
+  });
+
+  it("honors keyboard events already handled by a child", async () => {
+    await renderReady();
+    act(() => { workspace().setSelectedControlId("thumb_01"); });
+    const event = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    event.preventDefault();
+    fireEvent(window, event);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(ProfilesWorkspace).mockImplementation(() => <></>);
     vi.mocked(backend.loadConfig).mockResolvedValue({ config, warnings: [], path: "config.json", createdDefault: false });
   });
   afterEach(() => {

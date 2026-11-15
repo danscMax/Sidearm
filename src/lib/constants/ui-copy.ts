@@ -59,7 +59,7 @@ export const FALLBACK_LAYERS: Record<Layer, readonly Layer[]> = {
   // The HyperShift 2 layers stand alone: empty there means nothing.
   hypershift2: [],
   hypershiftBoth: [],
-  // Firmware inheritance is resolved by offlineAssignment, never by the live UI.
+  // Firmware inheritance comes from the Rust preview, never the live UI.
   offline: [],
   offlineHypershift: [],
 };

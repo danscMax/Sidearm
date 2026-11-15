@@ -25,6 +25,7 @@ import type {
   OnboardBinding,
   OnboardReport,
   OnboardTakeoverEvent,
+  OfflinePreview,
 } from "./onboard-mapping";
 import type {
   ImportOptions as SynapseImportOptions,
@@ -108,6 +109,10 @@ export async function pickTextFolder(title: string): Promise<{ folder: string; f
 
 export async function loadConfig(): Promise<LoadConfigResponse> {
   return invoke<LoadConfigResponse>("load_config");
+}
+
+export async function getOfflinePreview(config: AppConfig, profileId: string, deviceId: string): Promise<OfflinePreview> {
+  return invoke<OfflinePreview>("get_offline_preview", { config, profileId, deviceId });
 }
 
 export async function saveConfig(config: AppConfig): Promise<SaveConfigResponse> {

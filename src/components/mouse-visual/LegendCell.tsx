@@ -55,8 +55,9 @@ export function LegendCell({
   return (
     <button
       type="button"
-      className={legendCellClass({ selected, hovered, dragOver, dimmed, conflict }) + (entry.offline?.kind === "silent" ? " btn-legend__cell--silent" : "")}
+      className={legendCellClass({ selected, hovered, dragOver, dimmed: dimmed || entry.offline?.kind === "unavailable" || entry.offline?.kind === "unknown", conflict }) + (entry.offline?.kind === "silent" ? " btn-legend__cell--silent" : "")}
       data-action-type={entry.action?.type ?? ""}
+      aria-disabled={entry.offline ? !entry.offline.editable : undefined}
       {...(nativeTooltip ? { title: tooltip } : { "data-tooltip": tooltip })}
       ref={(el) => applyHeatBg(el, controlId)}
       draggable={!entry.offline && !!entry.binding && !!entry.action}

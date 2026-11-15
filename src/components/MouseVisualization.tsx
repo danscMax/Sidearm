@@ -121,7 +121,8 @@ export function MouseVisualization({
 
       const isDragOver = dragOverId === entry.control.id;
       const isDimmed =
-        matchedControlIds != null && !matchedControlIds.has(entry.control.id);
+        entry.offline?.kind === "unavailable" || entry.offline?.kind === "unknown"
+        || (matchedControlIds != null && !matchedControlIds.has(entry.control.id));
       const hasConflict =
         !!entry.binding && conflictBindingIds?.has(entry.binding.id);
       // Heatmap on the photo is conveyed by the background tint (applyHeatBg);

@@ -32,6 +32,38 @@ function show(controlId = "mouse_4", config = makeConfig(), bindingId: string | 
 function save() { fireEvent.click(screen.getByRole("button", { name: "Сохранить" })); }
 
 describe("offline assignment picker", () => {
+  it.each(["profile", "layer", "control"] as const)("remounts drafts and history when the %s identity changes", (identity) => {
+    const first: Action = { id: "first", type: "shortcut", displayName: "First", payload: { key: "A", ctrl: true, shift: false, alt: false, win: false } };
+    const second: Action = { ...first, id: "second", displayName: "Second", payload: { ...first.payload, key: "B" } };
+    const config = makeConfig({ actions: [first, second] });
+    const initial = { config, bindingId: null, profileId: "p1", selectedLayer: "offline" as const, controlId: "thumb_01", onSave: vi.fn(), onCancel: vi.fn(),
+      offlineControl: { controlId: "thumb_01", layer: "offline" as const, kind: "inherited" as const, actionId: "first", editable: true } };
+    const { rerender } = render(<ActionPickerModal {...initial} />);
+    const field = () => screen.getByRole<HTMLInputElement>("textbox", { name: i18n.t("picker.keyLabel") });
+    expect(field().value).toBe("A");
+    fireEvent.focus(field());
+    fireEvent.keyDown(field(), { key: "Z", ctrlKey: true });
+    fireEvent.blur(field());
+    const next = { ...initial, profileId: identity === "profile" ? "p2" : "p1",
+      selectedLayer: identity === "layer" ? "offlineHypershift" as const : "offline" as const,
+      controlId: identity === "control" ? "thumb_02" : "thumb_01" };
+    rerender(<ActionPickerModal {...next} offlineControl={{ ...initial.offlineControl, controlId: next.controlId, layer: next.selectedLayer, actionId: "second" }} />);
+    expect(field().value).toBe("B");
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: i18n.t("picker.undo") }).disabled).toBe(true);
+  });
+
+  it.each(["role", "unavailable"] as const)("refuses saving a %s but permits deleting an ineffective own assignment", (kind) => {
+    const config = assigned("offline");
+    const onSave = vi.fn();
+    render(<ActionPickerModal config={config} bindingId="b" profileId="p1" controlId="thumb_01" selectedLayer="offline"
+      offlineControl={{ controlId: "thumb_01", layer: "offline", kind, editable: false }} onSave={onSave} onCancel={vi.fn()} />);
+    expect(screen.getByRole<HTMLButtonElement>("button", { name: i18n.t("common.save") }).disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter", ctrlKey: true });
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    save();
+    expect(onSave.mock.calls[0][0].bindings).toEqual([]);
+  });
   afterEach(() => vi.restoreAllMocks());
   const shortcut = { key: "C", ctrl: true, shift: false, alt: false, win: false };
   const action: Action = { id: "copy", type: "shortcut", displayName: "Copy", payload: shortcut };
@@ -47,6 +79,10 @@ describe("offline assignment picker", () => {
     const onApply = vi.fn();
     const onGestureChange = vi.fn();
     render(<ActionPickerModal config={config} bindingId={null} profileId="p1" controlId="thumb_01"
+      offlineControl={{ controlId: "thumb_01", layer, editable: true,
+        kind: config.actions[0]?.type === "shortcut" || config.actions[0]?.type === "mouseAction"
+          ? config.bindings[0]?.layer === layer ? "own" : "inherited" : "silent",
+        actionId: config.actions[0]?.id }}
       selectedLayer={layer} gesture={gesture} onGestureChange={onGestureChange} onApply={onApply}
       onSave={onSave} onCancel={onCancel} />);
     return { onSave, onCancel, onApply, onGestureChange };

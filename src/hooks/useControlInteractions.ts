@@ -95,13 +95,13 @@ export function useControlInteractions({
       onClick: (e) => {
         const entry = entryMap.get(id);
         if (entry?.offline) {
-          onSelectControl(id);
-          onOpenActionPicker(id, entry.binding);
+          if (entry.offline.editable) onOpenActionPicker(id, entry.binding);
         } else if (e.ctrlKey || e.metaKey) onToggleMultiSelect(id);
         else onSelectControl(id);
       },
       onDoubleClick: (e) => {
         e.preventDefault();
+        if (entryMap.get(id)?.offline?.editable === false) return;
         onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
       },
       onKeyDown: (e) => {
@@ -110,6 +110,7 @@ export function useControlInteractions({
         // hotspots are not, so this is a harmless no-op there.
         if (e.key === "Enter") {
           e.preventDefault();
+          if (entryMap.get(id)?.offline?.editable === false) return;
           onOpenActionPicker(id, entryMap.get(id)?.binding ?? null);
         }
       },

@@ -25,6 +25,20 @@
     list_native_mice: () => [],
     get_menu_usage: () => ({}),
     get_press_log: () => ({}),
+    // A display fixture, not the firmware planner: own, standard, or preserved.
+    get_offline_preview: ({ config: current, profileId, deviceId }) => ({
+      target: { state: "written" },
+      controls: current.physicalControls.filter((control) => control.deviceId === deviceId).flatMap((control) =>
+        ["offline", "offlineHypershift"].map((layer) => {
+          const bindings = current.bindings.filter((binding) => binding.enabled && binding.profileId === profileId
+            && binding.controlId === control.id && (!binding.triggerMode || binding.triggerMode === "press"));
+          const own = bindings.find((binding) => binding.layer === layer);
+          const standard = bindings.find((binding) => binding.layer === "standard");
+          const binding = own ?? standard;
+          return { controlId: control.id, layer, kind: own ? "own" : standard ? "inherited" : "preserved",
+            ...(binding ? { actionId: binding.actionId } : {}), editable: true };
+        })),
+    }),
     list_backups: () => [],
     get_synapse_status: () => ({ running: false, startupRestoreAvailable: false }),
     start_runtime: () => runtime,

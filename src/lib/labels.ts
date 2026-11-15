@@ -250,7 +250,18 @@ export function displayNameForControlId(controlId: string): string {
 
 /** The native hook reserves the configured trigger, independently of bindings. */
 export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
-  if (entry.offline) return entry.action?.displayName ?? i18n.t("offline.silent");
+  if (entry.offline) {
+    const result = entry.offline;
+    switch (result.kind) {
+      case "own": case "inherited": return entry.action?.displayName ?? i18n.t("offline.unknownAction");
+      case "preserved": return result.native && i18n.exists(`mouseAction.${result.native}`)
+        ? i18n.t(`mouseAction.${result.native}`) : i18n.t("offline.preserved");
+      case "silent": return i18n.t("offline.silent");
+      case "role": return i18n.t(`offline.role.${result.role ?? "nativeClick"}`);
+      case "unavailable": return i18n.t("offline.unavailable");
+      case "unknown": return i18n.t("offline.unknownAction");
+    }
+  }
   if (entry.isHypershiftTrigger) {
     return i18n.t(entry.isHypershift2Trigger ? "visualization.hypershift2Assignment" : "visualization.hypershiftAssignment");
   }
@@ -260,7 +271,8 @@ export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
 /** The small firmware badge, or the live assignment of a silent button. */
 export function offlineDetailLabel(entry: ControlSurfaceEntry): string {
   if (!entry.offline) return "";
-  if (entry.offline.kind !== "silent") return i18n.t(`offline.${entry.offline.kind}`);
+  if (entry.offline.kind === "own" || entry.offline.kind === "inherited") return i18n.t(`offline.${entry.offline.kind}`);
+  if (entry.offline.kind !== "silent") return "";
   return entry.offline.liveAction ? i18n.t("offline.liveAction", { action: entry.offline.liveAction.displayName }) : "";
 }
 

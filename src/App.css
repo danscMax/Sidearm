@@ -2464,7 +2464,7 @@ input[type="radio"] {
   justify-content: center;
   padding: 4px 0 2px;
 }
-.pill-track--offline-mode .pill-track__pill { font-size: var(--fs-micro); padding: 4px 10px; }
+.pill-track--offline-mode .pill-track__pill { font-size: var(--fs-micro); padding: var(--space-xs) var(--space-sm); }
 
 /* ── Device switcher + generic-device view ─────────────────────────── */
 
@@ -7276,6 +7276,16 @@ body:has(.modal-backdrop) .toast-stack {
   color: #68c57f;
   background: rgba(104, 197, 127, 0.1);
   border: 1px solid rgba(104, 197, 127, 0.35);
+}
+.layer-badge--offline {
+  color: var(--c-accent);
+  background: var(--c-accent-dim);
+  border: 1px solid var(--c-border-active);
+}
+.layer-badge--offlineHypershift {
+  color: var(--c-hypershift);
+  background: color-mix(in srgb, var(--c-hypershift) 10%, transparent);
+  border: 1px solid var(--c-border-active);
 }
 .layer-badge--hypershift {
   color: var(--c-hypershift);

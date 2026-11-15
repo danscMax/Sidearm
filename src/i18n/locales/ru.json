@@ -2185,6 +2185,24 @@
     "banner_many": "В этом профиле {{count}} проблем, проверьте:",
     "banner_other": "В этом профиле {{count}} проблемы, проверьте:"
   },
+  "offline": {
+    "view": "Без Sidearm",
+    "standard": "Обычный",
+    "hypershift": "HyperShift",
+    "own": "своё",
+    "inherited": "как в Sidearm",
+    "silent": "— молчит",
+    "silentAction": "молчит",
+    "liveAction": "(в Sidearm: {{action}})",
+    "tooltip": "Без Sidearm: {{action}}",
+    "written": "Этот профиль записывается в память мыши при выходе",
+    "notWritten": "Этот профиль в память мыши не пишется — в настройках памяти выбран другой",
+    "followsWindow": "При выходе записывается профиль окна на переднем плане",
+    "bank": "банк {{bank}}",
+    "inherit": "Как в Sidearm",
+    "mute": "Молчит",
+    "edit": "Изменить…"
+  },
   "mouseVisual": {
     "sidearmOnly": "Работает только при запущенном Sidearm: в память мыши для работы без Sidearm не записывается.",
     "syncedWith": "Так же на {{mice}}: правка этой кнопки повторяется там.",

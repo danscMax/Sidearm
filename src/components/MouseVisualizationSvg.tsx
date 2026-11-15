@@ -183,7 +183,7 @@ function buttonColors(
   if (entry?.isHypershiftTrigger) {
     return { stroke: "var(--c-accent)", fill: "var(--c-surface)" };
   }
-  if (entry?.binding?.enabled && entry.action && entry.action.type !== "disabled") {
+  if ((entry?.offline ? entry.offline.kind !== "silent" : entry?.binding?.enabled) && entry?.action && entry.action.type !== "disabled") {
     const typeColor = ACTION_TYPE_COLORS[entry.action.type];
     if (typeColor) {
       return { stroke: typeColor.border, fill: typeColor.fill };

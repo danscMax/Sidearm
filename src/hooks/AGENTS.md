@@ -10,7 +10,7 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 - `useRuntime.ts` — runtime status + push-based log/event stream (incremental; avoid full refetch).
 - `useListKeyboard.ts` — canonical Arrow/Home/End/Enter list navigation (palette, dropdown, context menu).
 - `useModalDismiss.ts` / `useDismissable.ts` — Escape + focus-trap + outside-click for modals/popovers.
-- `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle.
+- `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle. Offline entries open their picker on one click and reject assignment dragging/dropping.
 - `useLogPanel.ts`, `useMouseVisualPanel.ts`, `useActionPicker.ts`, `useVerification.ts`.
 - `useDraftHistory.ts` — undo / redo over a form's drafts (the action picker): a step is recorded after React draws it, typing in one field coalesces; a `store` from `createDraftHistoryStore` held by a parent outlives a remount, and `passive` keys ride along in snapshots without being a step of their own.
 - `useActionPicker` only opens a valid control's editor and selects its existing binding, if any. It must never create a placeholder or invoke persistence; the modal owns local drafts until Save.

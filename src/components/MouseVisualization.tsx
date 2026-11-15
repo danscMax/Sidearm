@@ -111,7 +111,7 @@ export function MouseVisualization({
       const pos = hotspots[layoutControlId(entry.control.id)];
       if (!pos) return null;
 
-      const isAssigned = entry.isHypershiftTrigger || (entry.binding && entry.binding.enabled && entry.action && entry.action.type !== "disabled");
+      const isAssigned = entry.isHypershiftTrigger || (entry.offline ? !!entry.action : (entry.binding && entry.binding.enabled && entry.action && entry.action.type !== "disabled"));
       const actionType = entry.action?.type;
       const assignedClass = isAssigned
         ? ` mouse-visual__hotspot--assigned${actionType && !entry.isHypershiftTrigger ? ` mouse-visual__hotspot--type-${actionType}` : ""}`
@@ -153,7 +153,7 @@ export function MouseVisualization({
           }}
           title={tooltip}
           aria-label={tooltip}
-          draggable={!!entry.binding && !!entry.action}
+          draggable={!entry.offline && !!entry.binding && !!entry.action}
           {...getInteractionProps(entry.control.id)}
         >
           {resolveControlBadge(pos.label)}

@@ -93,7 +93,11 @@ export function useControlInteractions({
   function getInteractionProps(id: ControlId): ControlInteractionProps {
     return {
       onClick: (e) => {
-        if (e.ctrlKey || e.metaKey) onToggleMultiSelect(id);
+        const entry = entryMap.get(id);
+        if (entry?.offline) {
+          onSelectControl(id);
+          onOpenActionPicker(id, entry.binding);
+        } else if (e.ctrlKey || e.metaKey) onToggleMultiSelect(id);
         else onSelectControl(id);
       },
       onDoubleClick: (e) => {
@@ -113,7 +117,7 @@ export function useControlInteractions({
       onMouseLeave: () => setHoveredId(null),
       onDragStart: (e) => {
         const entry = entryMap.get(id);
-        if (!entry?.binding || !entry?.action) {
+        if (!entry?.binding || !entry?.action || entry.offline) {
           e.preventDefault();
           return;
         }
@@ -127,11 +131,13 @@ export function useControlInteractions({
       },
       onDragEnd: stopDragging,
       onDragOver: (e) => {
+        if (entryMap.get(id)?.offline) return;
         e.preventDefault();
         // Plain drag moves (or swaps with an occupied button); Ctrl copies.
         e.dataTransfer.dropEffect = e.ctrlKey ? "copy" : "move";
       },
       onDragEnter: (e) => {
+        if (entryMap.get(id)?.offline) return;
         e.preventDefault();
         setDragOverId(id);
       },
@@ -139,6 +145,7 @@ export function useControlInteractions({
       onDrop: (e) => {
         e.preventDefault();
         setDragOverId(null);
+        if (entryMap.get(id)?.offline) return;
         const from = parseBindingDragData(e.dataTransfer.getData(BINDING_DRAG_TYPE));
         if (from != null) onDropBinding?.(id, from, e.ctrlKey);
       },

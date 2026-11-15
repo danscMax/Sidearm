@@ -2,7 +2,10 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { startTransition, useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import type { AppConfig, AppMapping, Layer } from "../lib/config";
+import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type AppMapping, type Layer, type OfflineLayer } from "../lib/config";
+import { setOfflineAssignment } from "../lib/config-editing";
+import { offlineAssignment } from "../lib/onboard-mapping";
+import { withOfflineAssignment, type MouseVisualizationProps } from "../lib/mouse-visual";
 import { NAGA_V3_DEVICE_ID } from "../lib/devices";
 import { resolveInitialControlId } from "../lib/helpers";
 import { makeAction, makeConfig } from "../lib/test-fixtures";
@@ -12,7 +15,11 @@ vi.mock("./DeviceCards", () => ({
   DeviceCards: ({ onContextMenu }: { onContextMenu?: (x: number, y: number) => void }) =>
     <button type="button" onClick={() => onContextMenu?.(0, 0)}>device card menu</button>,
 }));
-vi.mock("./MouseVisualization", () => ({ MouseVisualization: () => null }));
+vi.mock("./MouseVisualization", () => ({
+  MouseVisualization: ({ entries, onContextMenu }: MouseVisualizationProps) => <>{entries.map((entry) => (
+    <button key={entry.control.id} type="button" onContextMenu={(event) => onContextMenu?.(entry.control.id, entry.binding, entry.action, event.clientX, event.clientY)}>cell {entry.control.id}</button>
+  ))}</>,
+}));
 vi.mock("./ExeIcon", () => ({ ExeIcon: () => null }));
 vi.mock("./AppMappingModal", () => ({ AppMappingModal: () => null }));
 beforeEach(async () => { await i18n.changeLanguage("en"); });
@@ -40,6 +47,78 @@ function show(config: AppConfig, extra: Partial<ProfilesWorkspaceProps> = {}) {
   render(<ProfilesWorkspace {...props} />);
   return props;
 }
+
+function offlineProps(config: AppConfig, layer: OfflineLayer = "offline"): Partial<ProfilesWorkspaceProps> {
+  const control = config.physicalControls[1];
+  return {
+    selectedLayer: layer,
+    familySections: [{ family: control.family, entries: [withOfflineAssignment(config, "p1", layer, { control, action: null, binding: null, mapping: null, isSelected: false })] }],
+  };
+}
+
+it.each<OfflineLayer>(["offline", "offlineHypershift"])("silences an offline cell on %s without changing live bindings", (layer) => {
+  const config = makeConfig();
+  const props = show(config, offlineProps(config, layer));
+  fireEvent.contextMenu(screen.getByRole("button", { name: "cell thumb_01" }));
+  expect(screen.getByRole<HTMLButtonElement>("menuitem", { name: i18n.t("offline.inherit") }).disabled).toBe(true);
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("offline.mute") }));
+  const result = vi.mocked(props.updateDraft).mock.calls[0][0](config);
+  expect(offlineAssignment(result, "p1", "thumb_01", layer).kind).toBe("silent");
+  expect(result.bindings).toEqual([expect.objectContaining({ layer, enabled: true, controlId: "thumb_01" })]);
+});
+
+it.each(["silent", "own"] as const)("restores inheritance from an %s override", (kind) => {
+  const config = setOfflineAssignment(makeConfig(), "p1", "thumb_01", "offline", kind === "silent" ? "silent" : { action: "middleClick" });
+  const props = show(config, offlineProps(config));
+  fireEvent.contextMenu(screen.getByRole("button", { name: "cell thumb_01" }));
+  expect(screen.getByRole<HTMLButtonElement>("menuitem", { name: i18n.t("offline.inherit") }).disabled).toBe(false);
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("offline.inherit") }));
+  const result = vi.mocked(props.updateDraft).mock.calls[0][0](config);
+  expect(result.bindings).toEqual([]);
+  expect(result.actions).toEqual([]);
+});
+
+it("opens the offline cell's existing picker path without selecting an inherited live binding", () => {
+  const config = makeConfig({
+    actions: [makeAction({ type: "mouseAction", payload: { action: "middleClick" } })],
+    bindings: [{ id: "live", profileId: "p1", controlId: "thumb_01", layer: "standard", actionId: "a1", enabled: true, label: "Middle" }],
+  });
+  const props = show(config, offlineProps(config));
+  fireEvent.contextMenu(screen.getByRole("button", { name: "cell thumb_01" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("offline.edit") }));
+  expect(props.setSelectedControlId).toHaveBeenCalledWith("thumb_01");
+  expect(props.setActionPickerBindingId).toHaveBeenCalledWith(null);
+  expect(props.setActionPickerOpen).toHaveBeenCalledWith(true);
+  expect(props.updateDraft).not.toHaveBeenCalled();
+});
+
+it("shows the exit target and a Mouse memory link, and hides heatmap tools", () => {
+  const config = makeConfig();
+  show(config, offlineProps(config));
+  expect(screen.getByText(i18n.t("offline.written"))).toBeTruthy();
+  expect(screen.queryByRole("button", { name: i18n.t("profile.heatmapOff") })).toBeNull();
+  fireEvent.click(screen.getAllByRole("button", { name: i18n.t("device.tabMemory") }).at(-1)!);
+  expect(screen.getByRole("button", { name: i18n.t("device.tabMemory"), pressed: true })).toBeTruthy();
+});
+
+it("shows a different exit profile, a V3 linked bank and window-following accurately", () => {
+  const config = makeConfig();
+  config.settings.offlineProfileId = "p2";
+  show(config, offlineProps(config));
+  expect(screen.getByText(i18n.t("offline.notWritten"))).toBeTruthy();
+  cleanup();
+  config.devices = [{ id: NAGA_V3_DEVICE_ID, name: "V3", builtin: true }];
+  config.profiles[0].deviceSlots = { [NAGA_V3_DEVICE_ID]: 3 };
+  show(config, offlineProps(config));
+  expect(screen.getByText(new RegExp(i18n.t("offline.bank", { bank: 3 })))).toBeTruthy();
+  expect(screen.queryByText(i18n.t("offline.notWritten"))).toBeNull();
+  cleanup();
+  config.profiles[0].deviceSlots = {};
+  config.settings.offlineProfileId = OFFLINE_PROFILE_ACTIVE;
+  show(config, offlineProps(config));
+  expect(screen.getByText(i18n.t("offline.followsWindow"))).toBeTruthy();
+  expect(screen.queryByText(i18n.t("offline.notWritten"))).toBeNull();
+});
 
 const rule: AppMapping = { id: "r1", profileId: "p1", exe: "python.exe", processPath: "C:\\envA\\python.exe", titleIncludes: [" Project ", "regex:foo $"], enabled: false, priority: 10 };
 

@@ -250,10 +250,18 @@ export function displayNameForControlId(controlId: string): string {
 
 /** The native hook reserves the configured trigger, independently of bindings. */
 export function controlAssignmentLabel(entry: ControlSurfaceEntry): string {
+  if (entry.offline) return entry.action?.displayName ?? i18n.t("offline.silent");
   if (entry.isHypershiftTrigger) {
     return i18n.t(entry.isHypershift2Trigger ? "visualization.hypershift2Assignment" : "visualization.hypershiftAssignment");
   }
   return fallbackLabel(entry) ?? surfacePrimaryLabel(entry.binding, entry.action);
+}
+
+/** The small firmware badge, or the live assignment of a silent button. */
+export function offlineDetailLabel(entry: ControlSurfaceEntry): string {
+  if (!entry.offline) return "";
+  if (entry.offline.kind !== "silent") return i18n.t(`offline.${entry.offline.kind}`);
+  return entry.offline.liveAction ? i18n.t("offline.liveAction", { action: entry.offline.liveAction.displayName }) : "";
 }
 
 /** "Ctrl+C · from Standard" for a control with no assignment of its own on
@@ -336,6 +344,7 @@ export function buildHotspotTooltip(
       : displayNameForControl(entry.control),
     controlAssignmentLabel(entry),
   ];
+  if (entry.offline) return [...lines, offlineDetailLabel(entry)].filter(Boolean).join("\n");
 
   const triggerMode = entry.isHypershiftTrigger ? "hold" : entry.binding?.triggerMode;
   const triggerLabel = triggerMode ? labelForTriggerMode(triggerMode) : null;

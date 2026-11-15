@@ -2131,6 +2131,24 @@
     "banner_one": "This profile has {{count}} problem to look at:",
     "banner_other": "This profile has {{count}} problems to look at:"
   },
+  "offline": {
+    "view": "Without Sidearm",
+    "standard": "Standard",
+    "hypershift": "HyperShift",
+    "own": "own",
+    "inherited": "same as Sidearm",
+    "silent": "— silent",
+    "silentAction": "silent",
+    "liveAction": "(in Sidearm: {{action}})",
+    "tooltip": "Without Sidearm: {{action}}",
+    "written": "This profile is written to mouse memory on exit",
+    "notWritten": "This profile is not written to mouse memory — another is selected in memory settings",
+    "followsWindow": "The profile written on exit follows the foreground window",
+    "bank": "bank {{bank}}",
+    "inherit": "Same as Sidearm",
+    "mute": "Silent",
+    "edit": "Edit…"
+  },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm.",
     "syncedWith": "The same on {{mice}}: an edit of this button is repeated there.",

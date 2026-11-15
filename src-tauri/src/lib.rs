@@ -2376,6 +2376,9 @@ fn restart_capture_with(app: &AppHandle, still_wanted: impl Fn() -> bool, keep_m
     }
     let config_dir = resolve_config_dir(app).map_err(|error| error.message)?;
     let loaded = load_or_initialize_config(&config_dir).map_err(|error| error.to_string())?;
+    // The offline banks follow a changed config in the background, so the exit only selects a bank.
+    #[cfg(target_os = "windows")]
+    let bank_config = loaded.config.clone();
     let store = app.state::<Arc<Mutex<RuntimeStore>>>().inner().clone();
     let result = {
         let controller = app.state::<Arc<Mutex<RuntimeController>>>();
@@ -2400,6 +2403,10 @@ fn restart_capture_with(app: &AppHandle, still_wanted: impl Fn() -> bool, keep_m
     // lock: a tray call waits for the main thread, which may wait for that lock.
     if result.is_err() {
         rebuild_tray_menu(app);
+    }
+    #[cfg(target_os = "windows")]
+    if result.is_ok() {
+        mouse_memory::live_overlay::schedule_bank_store(bank_config, config_dir);
     }
     result.map(|()| true)
 }

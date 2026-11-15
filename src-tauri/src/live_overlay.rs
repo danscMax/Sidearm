@@ -662,7 +662,65 @@ pub(crate) fn write_offline(
     config_dir: &Path,
 ) -> Result<(), String> {
     let device = VendorDevice::open_model(model)?;
-    store_banks(&device, config, model, offline_profile, config_dir)
+    store_banks(&device, config, model, offline_profile, config_dir, true)
+}
+
+/// What the last background store wrote into each mouse's banks
+/// ([`store_key`]), 0 for nothing: an exit that would write the same skips it.
+static STORED: [std::sync::atomic::AtomicU64; CATALOG_LEN] = [const { std::sync::atomic::AtomicU64::new(0) }; CATALOG_LEN];
+/// Bumped by every config change: a background store that waited past a newer one does nothing.
+static STORE_GENERATION: AtomicU32 = AtomicU32::new(0);
+/// A burst of saves (typing in a field) is one store.
+const STORE_PAUSE: Duration = Duration::from_secs(5);
+
+/// The DPI a bank gets with `profile_id`: the profile's own for this mouse.
+fn bank_dpi(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Option<u16> {
+    config.profiles.iter().find(|profile| profile.id == profile_id)
+        .and_then(|profile| profile.mouse_for(model.device_id))
+        .and_then(|own| own.mouse_dpi)
+        .map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max))
+}
+
+/// A fingerprint of what a store of `model`'s banks writes: the banks, each
+/// planned bank's records and DPI.
+fn store_key(config: &AppConfig, model: &NativeModel, banks: &Banks, offline_profile: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let plan = bank_plan(config, model, banks, offline_profile);
+    let what: Vec<_> = plan.iter().map(|&(bank, profile)| (bank, offline_targets(config, model, profile), bank_dpi(config, model, profile))).collect();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{:?}{what:?}", banks.assigned).hash(&mut hasher);
+    hasher.finish().max(1)
+}
+
+/// Stores the offline banks of every bank mouse in the background, once the
+/// config has stopped changing for [`STORE_PAUSE`], so an exit only selects a
+/// bank. Only beside Sidearm's own bank: on the live-map path the playing bank
+/// is the user's, and writing it would replace the live map.
+pub fn schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
+    let generation = STORE_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let spawned = thread::Builder::new().name("bank-store".into()).spawn(move || {
+        thread::sleep(STORE_PAUSE);
+        if STORE_GENERATION.load(Ordering::Acquire) != generation || crate::is_shutting_down() {
+            return;
+        }
+        let offline = crate::mouse_offline::offline_profile_id(&config, None);
+        for model in CATALOG.iter().copied().filter(|model| model.live.as_ref().is_some_and(|live| live.banks) && configured(&config, model)) {
+            let stored = VendorDevice::open_model(model).and_then(|device| {
+                if user_banks(&device)?.1.is_none() {
+                    return Ok(false);
+                }
+                store_banks(&device, &config, model, &offline, &config_dir, false).map(|()| true)
+            });
+            match stored {
+                Ok(true) => log::info!("[mouse-offline] {} offline banks stored in the background", model.name),
+                Ok(false) => {}
+                Err(error) => log::warn!("[mouse-offline] {} offline banks not stored in the background (the exit stores them): {error}", model.name),
+            }
+        }
+    });
+    if let Err(error) = spawned {
+        log::warn!("[mouse-offline] background bank store not started: {error}");
+    }
 }
 
 /// The banks part of [`write_offline`]. The live map is already back (its
@@ -677,31 +735,62 @@ fn store_banks(
     model: &'static NativeModel,
     offline_profile: &str,
     config_dir: &Path,
+    exiting: bool,
 ) -> Result<(), String> {
     // Sidearm's own bank never stores a profile.
     let (banks, _) = user_banks(device)?;
     let plan = bank_plan(config, model, &banks, offline_profile);
+    let key = store_key(config, model, &banks, offline_profile);
     let mut asleep = None;
     // The bank reselect below sets the DPI (no linked bank: no reselect); the
-    // poll rate stays what the last profile switch left.
-    if let Err(error) = crate::mouse_offline::restore_live_speed(device, config, offline_profile, plan.is_empty()) {
+    // poll rate stays what the last profile switch left. A store while
+    // Sidearm runs leaves the live speed alone.
+    if exiting && let Err(error) = crate::mouse_offline::restore_live_speed(device, config, offline_profile, plan.is_empty()) {
         log::warn!("[mouse-offline] {} poll rate not put back: {error}", model.name);
         note_asleep(&mut asleep, error);
     }
+    if exiting && STORED[model.catalog_index()].load(Ordering::Acquire) == key {
+        log::info!("[mouse-offline] {} banks already stored in the background", model.name);
+    } else {
+        store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep)?;
+        if asleep.is_none() {
+            STORED[model.catalog_index()].store(key, Ordering::Release);
+        }
+    }
+    // The records are stored either way; playing them at once is a
+    // convenience. Never while Sidearm runs: it plays its own bank.
+    if exiting && !plan.is_empty() && let Err(error) = select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
+        log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
+        note_asleep(&mut asleep, error);
+    }
+    asleep.map_or(Ok(()), Err)
+}
+
+/// The writes of [`store_banks`]: unlinked banks get their records back, each
+/// planned bank its profile and DPI.
+fn store_planned_banks(
+    device: &VendorDevice,
+    config: &AppConfig,
+    model: &'static NativeModel,
+    banks: &Banks,
+    plan: &[(u8, &str)],
+    config_dir: &Path,
+    asleep: &mut Option<String>,
+) -> Result<(), String> {
     // A bank no profile is linked to any more gets its own records back: what
     // Sidearm stored there earlier (an old turbo record included) would play on.
     for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
         let backup = bank_backup(config_dir, model, bank);
         if backup.exists() && let Err(error) = restore_bank(device, bank, &backup) {
             log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
-            note_asleep(&mut asleep, error);
+            note_asleep(asleep, error);
         }
     }
     if plan.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
-        return asleep.map_or(Ok(()), Err);
+        return Ok(());
     }
-    for &(bank, profile_id) in &plan {
+    for &(bank, profile_id) in plan {
         let backup = bank_backup(config_dir, model, bank);
         let targets = offline_targets(config, model, profile_id);
         let already_stored = load_snapshot(device, &backup)?.is_some_and(|snapshot| {
@@ -717,26 +806,17 @@ fn store_banks(
         log::info!("[mouse-offline] {} profile `{profile_id}` verified in bank {bank}: {} records", model.name, targets.len());
         // Each bank keeps its own DPI and the mouse switches to it with the
         // bank: store the profile's own DPI for this mouse there.
-        if let Some(dpi) = config.profiles.iter().find(|profile| profile.id == profile_id)
-            .and_then(|profile| profile.mouse_for(model.device_id))
-            .and_then(|own| own.mouse_dpi)
-        {
-            let dpi = dpi.clamp(model.dpi_min, model.dpi_max);
+        if let Some(dpi) = bank_dpi(config, model, profile_id) {
             match device.set_dpi_in(bank, dpi) {
                 Ok(()) => log::info!("[mouse-offline] {} bank {bank} DPI {dpi} stored", model.name),
                 Err(error) => {
                     log::warn!("[mouse-offline] {} bank {bank} DPI not stored: {error}", model.name);
-                    note_asleep(&mut asleep, error);
+                    note_asleep(asleep, error);
                 }
             }
         }
     }
-    // The records are stored either way; playing them at once is a convenience.
-    if let Err(error) = select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
-        log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
-        note_asleep(&mut asleep, error);
-    }
-    asleep.map_or(Ok(()), Err)
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2082,6 +2162,46 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_store_while_sidearm_runs_writes_the_banks_and_selects_nothing() {
+        use crate::mouse_memory::fake;
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let mut config = config_with_v3();
+        let profile = config.settings.fallback_profile_id.clone();
+        config.profiles.iter_mut().find(|p| p.id == profile).unwrap().device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
+        claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap();
+        select_bank(&device, 3).unwrap();
+        fake::with(|mouse| { mouse.poll_code = 2; mouse.writes.clear(); });
+        store_banks(&device, &config, &NAGA_V3_PRO, &profile, dir.path(), false).unwrap();
+        fake::with(|mouse| {
+            assert_eq!(mouse.active_bank, 3, "Sidearm's bank keeps playing");
+            assert_eq!(mouse.poll_code, 2, "the live speed is left alone");
+            assert!(mouse.writes.iter().all(|&(bank, _, _)| bank == 1), "only bank 1 is written: {:?}", mouse.writes);
+        });
+    }
+
+    #[test]
+    fn the_store_fingerprint_follows_what_a_bank_gets() {
+        use crate::mouse_memory::fake;
+        let (mouse, _) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        let mut config = config_with_v3();
+        let profile = config.settings.fallback_profile_id.clone();
+        config.profiles.iter_mut().find(|p| p.id == profile).unwrap().device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
+        let banks = Banks { assigned: vec![1, 2], active: 1 };
+        let key = store_key(&config, &NAGA_V3_PRO, &banks, &profile);
+        assert_eq!(key, store_key(&config.clone(), &NAGA_V3_PRO, &banks, &profile));
+        let mut faster = config.clone();
+        faster.profiles.iter_mut().find(|p| p.id == profile).unwrap().device_mouse = Some([(
+            NAGA_V3_PRO.device_id.to_owned(),
+            crate::config::MouseOverrides { mouse_dpi: Some(2400), ..Default::default() },
+        )].into());
+        assert_ne!(key, store_key(&faster, &NAGA_V3_PRO, &banks, &profile));
+    }
+
+    #[test]
     fn leaving_after_the_profile_button_keeps_the_users_bank() {
         use crate::mouse_memory::fake;
         let (mouse, targets) = sidearm_bank_mouse();
@@ -2161,7 +2281,7 @@ pub(crate) mod tests {
         assert_eq!(shown.target.state, mouse_offline::TargetState::Written);
         assert_eq!(shown.target.bank, Some(1));
         let dir = tempfile::tempdir().unwrap();
-        store_banks(&device, &config, &NAGA_V3_PRO, &profile, dir.path()).unwrap();
+        store_banks(&device, &config, &NAGA_V3_PRO, &profile, dir.path(), true).unwrap();
         for record in planned.records() {
             assert_eq!(device.read_block(1, record.button_id, record.layer).unwrap(), bank_block(1, record.action));
         }

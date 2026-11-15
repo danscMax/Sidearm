@@ -5,7 +5,7 @@ import { nextUniqueId } from "../lib/config-editing";
 import { displayNameForControlId } from "../lib/labels";
 import { appendMenuItem, collectMenuItemIds, insertMenuItemAfter, menuItemLabel, removeMenuItem, searchNested, updateMenuItem } from "../lib/menu-helpers";
 import {
-  editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withKeyboardOnly, withPhrase,
+  detachedPhrase, editedActions, editedLibrary, incompleteItems, kindOf, moveMenuItem, moveMenuItemTo, newPhrase, parentOf, phraseOf, withKeyboardOnly, withPhrase,
   type ItemKind, type MenuEdits,
 } from "../lib/menu-phrase";
 import { addTemplate, menuTemplates, type MenuTemplate } from "../lib/menu-templates";
@@ -933,6 +933,13 @@ export function MenuItemsEditor({
             <span className="menu-ed__chip menu-ed__chip--accent" title={t("inspector.menuPhraseLibrary", { name: libraryName })}>
               {t("inspector.menuChipLibrary", { name: libraryName })}
             </span>
+          ) : null}
+          {/* Its own copy of the text: editing it no longer changes the library and its other places. */}
+          {libraryName != null && action ? (
+            <button type="button" className="action-button action-button--ghost action-button--small" disabled={disabled}
+              title={t("snippet.detachHint")} onClick={() => onEditsChange(putAction(detachedPhrase(action, library)))}>
+              {t("snippet.detach")}
+            </button>
           ) : null}
           {places.length > 0 ? (
             <span className="menu-ed__chip" title={t("inspector.menuPhraseShared", { places: places.join("; ") })}>

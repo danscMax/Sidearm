@@ -1562,6 +1562,14 @@ pub(crate) mod fake {
                 }
             }
             (FAKE_CLASS_BANKS, 0x84) => reply[8] = mouse.active_bank,
+            // Assign a free slot (factory records: none stored here) and
+            // unassign a stored one, as the real V3 (measured 2026-11-15).
+            (FAKE_CLASS_BANKS, 0x02) if !mouse.banks.contains(&args[0]) && mouse.banks.len() < 5 => {
+                mouse.banks.push(args[0]);
+                mouse.banks.sort_unstable();
+                mouse.records.retain(|&(bank, _, _), _| bank != args[0]);
+            }
+            (FAKE_CLASS_BANKS, 0x03) if mouse.active_bank != args[0] => mouse.banks.retain(|&bank| bank != args[0]),
             // Selecting another bank reloads the live map (bank 0) from it;
             // reselecting the bank already playing reloads nothing (the real
             // V3, measured 2026-11-14).

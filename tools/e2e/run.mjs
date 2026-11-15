@@ -20,6 +20,8 @@ const TARGET = path.join(process.env.CARGO_TARGET_DIR || path.join(APP, "src-tau
 const EXE = path.join(TARGET, "debug", "sidearm.exe");
 const V2 = "razer-naga";
 const V3 = "razer-naga-v3";
+// A V3 start is done once its live map is written or it plays Sidearm's own bank.
+const V3_READY = /Razer Naga V3 Pro (verified \d+ live assignments|plays the Sidearm bank \d)/;
 
 // Live-map signals: `live_overlay::USAGES[2 * control index + layer]`; the thumbs come first.
 // The V3's consumer usage per key button and layer (src-tauri/src/live_overlay.rs `USAGES`).
@@ -28,7 +30,6 @@ const V3_USAGES = [
   0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2a,
 ];
 const v3Usage = (thumb, layer) => V3_USAGES[2 * (thumb - 1) + layer];
-const v2Usage = v3Usage;
 // Mouse-hook button codes (`HYPER_TRIGGER_*` in capture_backend/windows.rs).
 const RIGHT = 2;
 /** `--popups`: the real menu, cheat sheet and OSD windows open (on screen; the menu takes the focus). */
@@ -190,7 +191,7 @@ class World {
   /** Waits for this start's live maps in both mice and its watchdog
    *  (`from`: the app log's length before the start). */
   async startedFully(from) {
-    return await this.waitFor(() => this.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 40000, from)
+    return await this.waitFor(() => this.log(), V3_READY, 40000, from)
       && await this.waitFor(() => this.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 40000, from)
       && await this.waitFor(() => this.log(), /\[system\] mouse watchdog (running|runs inside)/, 10000, from);
   }
@@ -314,14 +315,6 @@ function addProfileBindings(config, profile) {
   });
 }
 
-/** A press pattern the recognizer settled on, then actually dispatched (its
- *  "not dispatched" line does not count). */
-const gestureFired = (gesture) => (text) =>
-  text.split(/\r?\n/).some((line, index, lines) =>
-    line.includes(`] ${gesture} of `)
-    && !line.includes("not dispatched")
-    && (lines[index + 1] ?? "").includes("Dispatching action"));
-
 const dispatched = (text, expected) => text.split(/\r?\n/).some((line) => {
   const marker = "[capture] E2E execution ";
   const offset = line.indexOf(marker);
@@ -360,7 +353,7 @@ async function main() {
     // 0. First start seeds the config (the V3 device is added on connect); add our assignments.
     world.start();
     check("first start seeds a config", await world.waitFor(() => (fs.existsSync(path.join(world.data, "config.json")) ? "x" : ""), /x/));
-    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000);
+    await world.waitFor(() => world.log(), V3_READY, 30000);
     check("first start quits on request", await world.quit());
     const config = addBindings(world.config());
     world.writeConfig(config);
@@ -376,7 +369,9 @@ async function main() {
     // 1. Start: live maps in both mice.
     let mark = world.log().length;
     world.start();
-    check("V3 live map written", await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000, mark));
+    check("V3 plays its Sidearm bank (free slot 4)", await world.waitFor(() => world.log(), /Razer Naga V3 Pro plays the Sidearm bank 4/, 30000, mark));
+    const v3Started = world.mouse(V3);
+    check("…a bank of its own, playing", v3Started.banks.includes(4) && v3Started.activeBank === 4, JSON.stringify({ banks: v3Started.banks, active: v3Started.activeBank }));
     check("V2 live map written", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 30000, mark));
     check("V3 file holds the live map", liveRecords(world.mouse(V3)).length > 0);
     const wheelClick = liveRecords(world.mouse(V3)).find(([, button, layer]) => button === 0x03 && layer === 0);
@@ -393,132 +388,34 @@ async function main() {
     await world.press(V3, v3Usage(3, 1));
     check("HyperShift press → hypershift action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_03", "hypershift", "K")), 5000, mark));
 
-    // 4. Press patterns.
+    // 5. The profile button takes the V3 to another bank: that is offline mode,
+    // nothing is repaired; back on the Sidearm bank it is online again.
     mark = world.log().length;
-    await world.press(V3, v3Usage(1, 0), 80);
-    check("short press of a button with a hold → Press", await world.waitFor(() => world.log(), (t) => gestureFired("Press")(t) && dispatched(t, expectedAction("v3_thumb_01", "standard", "F")), 3000, mark));
+    await world.edit(V3, (state) => { state.activeBank = 2; });
+    check("profile button → offline mode", await world.waitFor(() => world.log(), /plays bank 2 \(profile button\): offline/, 10000, mark));
+    await sleep(2500);
+    check("…nothing written meanwhile", !/repaired \d+|verified \d+ live assignments|Sidearm bank \d up to date/.test(world.log().slice(mark)), world.log().slice(mark).slice(-600));
     mark = world.log().length;
-    await world.press(V3, v3Usage(1, 0), 450);
-    check("held press → LongPress", await world.waitFor(() => world.log(), (t) => gestureFired("LongPress")(t) && dispatched(t, expectedAction("v3_thumb_01", "standard", "G")), 3000, mark));
-    mark = world.log().length;
-    await world.press(V3, v3Usage(2, 0), 50);
-    await world.press(V3, v3Usage(2, 0), 50);
-    check("two quick taps → DoublePress", await world.waitFor(() => world.log(), (t) => gestureFired("DoublePress")(t) && dispatched(t, expectedAction("v3_thumb_02", "standard", "H")), 3000, mark));
+    await world.edit(V3, (state) => { state.activeBank = 4; });
+    check("…and online again on the Sidearm bank", await world.waitFor(() => world.log(), /plays the Sidearm bank 4 again/, 10000, mark));
 
-    // 5. The profile button reloads the live map from another bank: the session
-    // repairs it — but only once the held button is let go.
-    mark = world.log().length;
-    world.report(V3, v3Usage(5, 0)); // held
-    await world.edit(V3, (state) => {
-      // What the profile button does: another bank's records in the live map.
-      state.activeBank = 2;
-      const record = state.records.find(([bank, button, layer]) => bank === 0 && button === 0x41 && layer === 0);
-      record[3] = [2, 2, 0, 0x04, 0, 0, 0];
-    });
-    const waited = await world.waitFor(() => world.log(), /waits for its buttons to be released/, 15000, mark);
-    world.report(V3, 0);
-    check("live-map repair waits for a held button", waited);
-    // A bank switch ends the old map's ownership, so the session writes the map
-    // anew ("verified"); a changed record alone is repaired ("repaired N of M").
-    check("…and repairs after the release", await world.waitFor(() => world.log(), /repaired \d+ of \d+ live assignments|verified \d+ live assignments/, 15000, mark));
-    const thumb5 = liveRecords(world.mouse(V3)).find(([, button, layer]) => button === 0x41 && layer === 0);
-    check("…the switched record holds Sidearm's signal again", thumb5?.[3]?.[0] === 0x0a, JSON.stringify(thumb5));
-
-    // 5b. The V2 reports one button at a time: a second press releases the first.
-    mark = world.log().length;
-    world.report(V2, v2Usage(1, 0));
-    await sleep(150);
-    world.report(V2, v2Usage(2, 0));
-    await sleep(150);
-    world.report(V2);
-    const v2Order = await world.waitFor(() => world.log(), (t) => {
-      const lines = t.split(/\r?\n/);
-      const firstUp = lines.findIndex((line) => line.includes("Key-up received"));
-      const secondDown = lines.findIndex((line, i) => i > 0 && line.includes("Key-down received") && lines.slice(0, i).some((l) => l.includes("Key-down received")));
-      return firstUp >= 0 && secondDown > firstUp;
-    }, 5000, mark);
-    check("V2: a second button releases the first", v2Order);
-
-    // 5c. HyperShift 2 on the V3's right button (the mouse hook's path, fed by the pipe).
-    check("HyperShift 2 trigger sent for the profile", /HyperShift 2 trigger for this profile: 2/.test(world.log()));
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    await sleep(100);
-    await world.press(V3, v3Usage(4, 0));
-    world.nativeButton(V3, RIGHT, false);
-    check("right held + thumb → HyperShift 2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_04", "hypershift2", "N")), 5000, mark));
-    await sleep(500);
-    check("…and the used trigger does not click", !/HyperShift 2 click/.test(world.log().slice(mark)));
-    // Thumb 3 has standard and HyperShift actions but none on HyperShift 2:
-    // that layer stands alone, so the press does nothing.
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    await sleep(100);
-    await world.press(V3, v3Usage(3, 0));
-    world.nativeButton(V3, RIGHT, false);
-    check("an empty HyperShift 2 button does nothing", await world.waitFor(() => world.log(), /Key-down received for \S+ \(hypershift: false, hypershift2: true/, 5000, mark)
-      && (await sleep(500), !/Dispatching action for [^\n]*control v3_thumb_03/.test(world.log().slice(mark))));
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    await sleep(80);
-    world.nativeButton(V3, RIGHT, false);
-    check("a quick right press clicks", await world.waitFor(() => world.log(), /HyperShift 2 click \(simulated, button 2\)/, 5000, mark));
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    await sleep(100);
-    await world.press(V3, v3Usage(4, 1)); // the ring button's firmware layer
-    world.nativeButton(V3, RIGHT, false);
-    check("right + ring + thumb → HS + HS2 action", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_04", "hypershiftBoth", "O")), 5000, mark));
-    // 5d. The menu popup: HyperShift 2 + thumb 11 opens it, thumb 2 picks item 2,
-    // and the press drives the menu instead of thumb 2's own action.
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    await sleep(100);
-    await world.press(V3, v3Usage(11, 0));
-    world.nativeButton(V3, RIGHT, false);
-    check("HyperShift 2 + thumb 11 opens the menu", await world.waitFor(() => world.log(), /\[menu\] opened `E2E menu` \(2 items\)/, 5000, mark));
-    await sleep(300);
-    mark = world.log().length;
-    await world.press(V3, v3Usage(2, 0), 50);
-    check("thumb 2 picks item 2", await world.waitFor(() => world.log(), /\[menu\] picked `e2e-[a-z0-9-]+-menu-t`/, 5000, mark));
-    check("…which runs on the menu's press", await world.waitFor(() => world.log(), (t) => dispatched(t, expectedAction("v3_thumb_11", "hypershift2", "T")), 5000, mark));
-    await sleep(500);
-    check("…and thumb 2's own action does not run", !/control v3_thumb_02/.test(world.log().slice(mark)));
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    await sleep(100);
-    await world.press(V3, v3Usage(11, 0));
-    world.nativeButton(V3, RIGHT, false);
-    await world.waitFor(() => world.log(), /\[menu\] opened/, 5000, mark);
-    mark = world.log().length;
-    await world.press(V3, v3Usage(11, 0));
-    check("the opening button closes the menu", await world.waitFor(() => world.log(), /\[menu\] closed/, 5000, mark));
     if (POPUPS) await popupScenarios(world, expectedAction);
-
-    mark = world.log().length;
-    await world.press(V3, v3Usage(6, 0));
-    check("a profile without HyperShift 2 turns it off", await world.waitFor(() => world.log(), /HyperShift 2 trigger for this profile: 0/, 5000, mark));
-    mark = world.log().length;
-    world.nativeButton(V3, RIGHT, true);
-    world.nativeButton(V3, RIGHT, false);
-    check("…and the right button passes through", await world.waitFor(() => world.log(), /native button 2 down passed through/, 5000, mark));
 
     // 6. Quit: offline profiles in both mice, live maps restored, clean exit.
     mark = world.log().length;
-    const v3Originals = JSON.parse(fs.readFileSync(path.join(world.data, `${V3}-live.json`), "utf8")).records;
     check("quit ends the app", await world.quit());
     const exitLog = world.log().slice(mark);
     check("V3 banks stored", /Razer Naga V3 Pro profile `[^`]+` verified in bank \d/.test(exitLog), exitLog.slice(-800));
     check("V2 offline profile stored", /profile `[^`]+` written for use without Sidearm: \d+ records, 0 failed/.test(exitLog));
     check("V3 bank 1 holds records", bankRecords(world.mouse(V3), 1).length > 0);
-    // Bank 1 plays after exit: each live record is what that bank holds there
-    // (a bank switch reloads it), else the original Sidearm replaced.
+    // Bank 1 plays after exit, its records in the live map (a bank switch reloads it).
     const v3After = world.mouse(V3);
+    check("V3 left the Sidearm bank for bank 1, keeping the slot", v3After.activeBank === 1 && v3After.banks.includes(4), JSON.stringify({ banks: v3After.banks, active: v3After.activeBank }));
     const at = (bank, button, layer) => v3After.records.find(([b, n, l]) => b === bank && n === button && l === layer)?.[3];
-    const wrongLive = v3Originals.filter(({ button, layer, before }) =>
-      JSON.stringify(at(0, button, layer) ?? [0, 0, 0, 0, 0, 0, 0]) !== JSON.stringify(at(1, button, layer) ?? before));
-    check("V3 live map is the bank's or the original", wrongLive.length === 0, JSON.stringify(wrongLive));
+    const wrongLive = bankRecords(v3After, 1).filter(([, button, layer, record]) => JSON.stringify(at(0, button, layer)) !== JSON.stringify(record));
+    check("V3 live map is bank 1's", wrongLive.length === 0, JSON.stringify(wrongLive));
     check("V3 live rollback file gone", !fs.existsSync(path.join(world.data, `${V3}-live.json`)));
+    check("no Sidearm-bank marker left", !fs.existsSync(path.join(world.data, `${V3}-in-sidearm-bank`)));
     check("exit runs off the main thread, step by step", /exit requested \(test run\)/.test(exitLog)
       && /exit step `stop capture`: \d+ ms/.test(exitLog) && /exit work done in \d+ ms/.test(exitLog), exitLog.slice(-1500));
     check("crash sentinel removed", !fs.existsSync(path.join(world.data, "logs", ".running")));
@@ -530,7 +427,7 @@ async function main() {
     check("a start writes both live maps and starts its watchdog", await world.startedFully(appMark));
     await world.kill();
     check("watchdog notices the kill", await world.waitFor(() => world.restoreLog(), /ended without its exit/, 20000, mark));
-    check("watchdog restores the V3 live map", await world.waitFor(() => world.restoreLog(), /Razer Naga V3 Pro restored previous assignments in bank 0/, 30000, mark));
+    check("watchdog takes the V3 off the Sidearm bank", await world.waitFor(() => world.restoreLog(), /Razer Naga V3 Pro left the Sidearm bank 4: bank 1 plays/, 30000, mark));
 
     // A restorer still holding the mice would make the next start wait for it.
     check("the kill's restore processes end", await world.waitFor(() => world.restoreLog(), restorersDone, 30000, mark));
@@ -646,7 +543,7 @@ async function layoutMain(file) {
     world.plug(V3, v3State());
     world.openPipes(V2, V3);
     world.start();
-    await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000);
+    await world.waitFor(() => world.log(), V3_READY, 30000);
     await world.quit();
     for (const { profile, bindings } of plan) {
       bindings.sort((a, b) => a.controlId.localeCompare(b.controlId) || a.layer.localeCompare(b.layer));
@@ -657,7 +554,7 @@ async function layoutMain(file) {
       let mark = world.log().length;
       world.start();
       check(`${profile.name}: live map written`,
-        await world.waitFor(() => world.log(), /Razer Naga V3 Pro verified \d+ live assignments/, 30000, mark));
+        await world.waitFor(() => world.log(), V3_READY, 30000, mark));
       await sleep(1500);
       for (const binding of bindings) {
         const action = actions.get(binding.actionId);

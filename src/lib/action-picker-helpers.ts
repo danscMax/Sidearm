@@ -17,7 +17,8 @@ import {
   type SnippetLibraryItem,
   type TriggerMode,
 } from "./config";
-import { ACTION_CATEGORIES } from "./constants";
+import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "./constants";
+import { playsWithoutSidearm } from "./onboard-mapping";
 import { mediaKeyLabel, modifierLabels, mouseActionLabel } from "./action-helpers";
 import { assertNever } from "./assertNever";
 import { isPlaceholderAction } from "./config-editing";
@@ -127,6 +128,20 @@ export interface MouseDraft {
   alt: boolean;
   win: boolean;
 }
+
+/** Validate a draft against the same firmware rule used by the offline view. */
+export function isOfflinePayloadPlayable(payload: ShortcutActionPayload | Extract<Action, { type: "mouseAction" }>["payload"]): boolean {
+  const binding: Binding = {
+    id: "", profileId: "", controlId: "", layer: "offline", actionId: "", label: "", enabled: true, triggerMode: "press",
+  };
+  const action: Action = "action" in payload
+    ? { id: "", displayName: "", type: "mouseAction", payload }
+    : { id: "", displayName: "", type: "shortcut", payload };
+  return playsWithoutSidearm(binding, action);
+}
+
+export const OFFLINE_MOUSE_ACTION_OPTIONS = MOUSE_ACTION_OPTIONS.filter((option) =>
+  isOfflinePayloadPlayable({ action: option.value }));
 
 /** Snapshot of all per-category draft state held by ActionPickerModal.
  *  Passed to the pure builders so they stay free of React state. */

@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { ActionPickerModal } from "./ActionPickerModal";
 import { makeConfig } from "../lib/test-fixtures";
-import type { AppConfig } from "../lib/config";
+import type { Action, AppConfig, OfflineLayer } from "../lib/config";
+import * as editing from "../lib/config-editing";
+import { mirrorMouseEdit, slotKey } from "../lib/device-transfer";
+import { MOUSE_ACTION_OPTIONS } from "../lib/constants";
+import { isOfflinePayloadPlayable } from "../lib/action-picker-helpers";
 import { ensurePlaceholderBinding, findBinding, type Gesture, makeActionId, makeBindingId } from "../lib/config-editing";
 import { NAGA_V3_DEVICE_ID } from "../lib/devices";
 import * as backend from "../lib/backend";
@@ -26,6 +30,189 @@ function show(controlId = "mouse_4", config = makeConfig(), bindingId: string | 
   return { onSave, onCancel };
 }
 function save() { fireEvent.click(screen.getByRole("button", { name: "Сохранить" })); }
+
+describe("offline assignment picker", () => {
+  afterEach(() => vi.restoreAllMocks());
+  const shortcut = { key: "C", ctrl: true, shift: false, alt: false, win: false };
+  const action: Action = { id: "copy", type: "shortcut", displayName: "Copy", payload: shortcut };
+
+  function assigned(layer: "standard" | "hypershift" | OfflineLayer, ownAction = action) {
+    return makeConfig({ actions: [ownAction], bindings: [{ id: "b", profileId: "p1", controlId: "thumb_01",
+      layer, actionId: ownAction.id, enabled: true, label: ownAction.displayName, triggerMode: "press" }] });
+  }
+
+  function showOffline(config = makeConfig(), layer: OfflineLayer = "offline", gesture: Gesture = "press") {
+    const onSave = vi.fn<(config: AppConfig) => void>();
+    const onCancel = vi.fn();
+    const onApply = vi.fn();
+    const onGestureChange = vi.fn();
+    render(<ActionPickerModal config={config} bindingId={null} profileId="p1" controlId="thumb_01"
+      selectedLayer={layer} gesture={gesture} onGestureChange={onGestureChange} onApply={onApply}
+      onSave={onSave} onCancel={onCancel} />);
+    return { onSave, onCancel, onApply, onGestureChange };
+  }
+
+  const category = (id: string) => screen.getByRole("button", { name: i18n.t(`action.type.${id}`) });
+  function keys(key = "C", ctrlKey = true) {
+    fireEvent.click(category("shortcut"));
+    const field = screen.getByRole("textbox", { name: i18n.t("picker.keyLabel") });
+    fireEvent.focus(field);
+    fireEvent.keyDown(field, { key, ctrlKey });
+  }
+
+  it.each(["offline", "offlineHypershift"] as const)("restricts %s to firmware actions and a plain press", (layer) => {
+    showOffline(makeConfig(), layer, "longPress");
+    const rail = screen.getByRole("navigation");
+    expect(within(rail).getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
+      expect.stringContaining(i18n.t("action.type.shortcut")), expect.stringContaining(i18n.t("action.type.mouseAction")),
+      expect.stringContaining(i18n.t("picker.offlineSilent")), i18n.t("picker.offlineInherit"),
+    ]);
+    expect(screen.getByText(i18n.t("picker.offlineHint"))).toBeTruthy();
+    expect(screen.queryByText(i18n.t("picker.gestureHelp"))).toBeNull();
+    for (const key of ["gestureLongPress", "gestureDoublePress", "gestureTriplePress", "test", "advancedTitle", "signalLabel", "nameLabel"]) {
+      expect(screen.queryByText(i18n.t(`picker.${key}`))).toBeNull();
+    }
+    expect((screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(category("mouseAction"));
+    for (const option of MOUSE_ACTION_OPTIONS) {
+      expect(screen.queryByRole("button", { name: i18n.t(option.label) }) !== null)
+        .toBe(isOfflinePayloadPlayable({ action: option.value }));
+    }
+    expect(screen.queryByRole("checkbox", { name: "Ctrl" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: i18n.t("picker.searchPlaceholder") }), { target: { value: "dpiUp" } });
+    expect(screen.queryByRole("button", { name: i18n.t("action.type.mouseAction") })).toBeNull();
+  });
+
+  it("blocks an unsupported recorded key and explains why, then allows a storable chord", () => {
+    const { onSave } = showOffline();
+    keys("AudioVolumeUp");
+    expect(screen.getByText(i18n.t("picker.offlineUnstorable"))).toBeTruthy();
+    expect((screen.getByRole("button", { name: i18n.t("common.save") }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter", ctrlKey: true });
+    expect(onSave).not.toHaveBeenCalled();
+    keys();
+    expect(screen.queryByText(i18n.t("picker.offlineUnstorable"))).toBeNull();
+    expect((screen.getByRole("button", { name: i18n.t("common.save") }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it.each(["offline", "offlineHypershift"] as const)("saves a shortcut via setOfflineAssignment on %s in one step", (layer) => {
+    const config = makeConfig();
+    const original = structuredClone(config);
+    const write = vi.spyOn(editing, "setOfflineAssignment");
+    const { onSave, onApply, onGestureChange } = showOffline(config, layer, "triplePress");
+    keys();
+    save();
+    expect(write).toHaveBeenCalledExactlyOnceWith(config, "p1", "thumb_01", layer, shortcut);
+    expect(onSave).toHaveBeenCalledOnce();
+    expect(onApply).not.toHaveBeenCalled();
+    expect(onGestureChange).not.toHaveBeenCalled();
+    const result = onSave.mock.calls[0][0];
+    expect(result.bindings).toEqual([expect.objectContaining({ layer, enabled: true, triggerMode: "press" })]);
+    expect(result.actions[0]).toMatchObject({ type: "shortcut", payload: shortcut });
+    expect(config).toEqual(original);
+  });
+
+  it("saves a firmware mouse action without modifiers", () => {
+    const config = makeConfig();
+    const write = vi.spyOn(editing, "setOfflineAssignment");
+    const { onSave } = showOffline(config);
+    fireEvent.click(category("mouseAction"));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouseAction.mouseBack") }));
+    save();
+    expect(write).toHaveBeenCalledExactlyOnceWith(config, "p1", "thumb_01", "offline",
+      { action: "mouseBack", ctrl: false, shift: false, alt: false, win: false });
+    expect(onSave.mock.calls[0][0].actions[0]).toMatchObject({ type: "mouseAction", payload: { action: "mouseBack" } });
+  });
+
+  it("saves Silent as an explicit override", () => {
+    const config = assigned("standard");
+    const write = vi.spyOn(editing, "setOfflineAssignment");
+    const { onSave } = showOffline(config);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineSilent") }));
+    save();
+    expect(write).toHaveBeenCalledExactlyOnceWith(config, "p1", "thumb_01", "offline", "silent");
+    const result = onSave.mock.calls[0][0];
+    const binding = findBinding(result, "p1", "offline", "thumb_01")!;
+    expect(result.actions.find((action) => action.id === binding.actionId)?.type).toBe("disabled");
+    expect(result.bindings.find((binding) => binding.layer === "standard")).toEqual(config.bindings[0]);
+  });
+
+  it.each(["offline", "offlineHypershift"] as const)("stages removing an own %s assignment until Save", (layer) => {
+    const config = assigned(layer);
+    const write = vi.spyOn(editing, "setOfflineAssignment");
+    const { onSave, onCancel } = showOffline(config, layer);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    expect(write).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.undo") }));
+    expect(category("shortcut").getAttribute("aria-current")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.redo") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("common.cancel") }));
+    expect(screen.getByText(i18n.t("picker.discardTitle"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.keepEditing") }));
+    save();
+    expect(write).toHaveBeenCalledExactlyOnceWith(config, "p1", "thumb_01", layer, null);
+    expect(onSave.mock.calls[0][0].bindings).toEqual([]);
+    expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["offline", "offline"], ["offlineHypershift", "offlineHypershift"],
+    ["standard", "offline"], ["hypershift", "offlineHypershift"], ["standard", "offlineHypershift"],
+  ] as const)("prefills %s into %s, saving an own copy", (source, layer) => {
+    const config = assigned(source);
+    const { onSave } = showOffline(config, layer);
+    expect(category("shortcut").getAttribute("aria-current")).toBe("true");
+    expect((screen.getByRole("textbox", { name: i18n.t("picker.keyLabel") }) as HTMLInputElement).value).toBe("C");
+    expect((screen.getByRole("checkbox", { name: "Ctrl" }) as HTMLInputElement).checked).toBe(true);
+    save();
+    const result = onSave.mock.calls[0][0];
+    const binding = findBinding(result, "p1", layer, "thumb_01")!;
+    expect(result.actions.find((action) => action.id === binding.actionId)).toMatchObject({ type: "shortcut", payload: shortcut });
+    if (source !== layer) expect(result.bindings.find((binding) => binding.layer === source)).toEqual(config.bindings[0]);
+  });
+
+  it("prefills an inherited mouse action and starts silent for an unplayable live action", () => {
+    const mouse: Action = { id: "mouse", type: "mouseAction", displayName: "Scroll", payload: { action: "scrollDown" } };
+    const first = showOffline(assigned("standard", mouse));
+    expect(category("mouseAction").getAttribute("aria-current")).toBe("true");
+    save();
+    expect(first.onSave.mock.calls[0][0].actions.at(-1)).toMatchObject({ type: "mouseAction", payload: { action: "scrollDown" } });
+    cleanup();
+    showOffline(assigned("standard", { id: "text", type: "textSnippet", displayName: "Text", payload: { source: "inline", text: "Hi", tags: [], pasteMode: "sendText" } }));
+    expect(screen.getByRole("button", { name: i18n.t("picker.offlineSilent") }).getAttribute("aria-current")).toBe("true");
+  });
+
+  it("opens a silent override without changing config or saving on Cancel", () => {
+    const config = assigned("offline", { id: "silent", type: "disabled", displayName: "Silent", payload: {} });
+    const original = structuredClone(config);
+    const { onSave, onCancel } = showOffline(config);
+    expect(screen.getByRole("button", { name: i18n.t("picker.offlineSilent") }).getAttribute("aria-current")).toBe("true");
+    expect((screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("common.cancel") }));
+    expect(onCancel).toHaveBeenCalledOnce();
+    expect(onSave).not.toHaveBeenCalled();
+    expect(config).toEqual(original);
+  });
+
+  it.each(["offline", "offlineHypershift"] as const)("keeps %s slot sync through the existing persistence path", (layer) => {
+    const config = assigned(layer);
+    config.devices.push({ id: NAGA_V3_DEVICE_ID, name: "Razer Naga V3 Pro", builtin: true });
+    config.physicalControls.push({ ...config.physicalControls[1], id: "v3_thumb_01", deviceId: NAGA_V3_DEVICE_ID });
+    const { onSave } = showOffline(config, layer);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Так же на Razer Naga V3 Pro" }));
+    save();
+    const next = mirrorMouseEdit(config, onSave.mock.calls[0][0]);
+    expect(next.settings.syncSlots?.[slotKey("p1", layer, "press", "thumb_01")]).toBe(true);
+    expect(findBinding(next, "p1", layer, "v3_thumb_01")).toMatchObject({ actionId: findBinding(next, "p1", layer, "thumb_01")!.actionId });
+    cleanup();
+    const removed = showOffline(next, layer);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    save();
+    const inherited = mirrorMouseEdit(next, removed.onSave.mock.calls[0][0]);
+    expect(inherited.bindings).toEqual([]);
+  });
+});
 
 describe("button role editor", () => {
   it("shows the configured global role instead of an unassigned action, without mutating config", () => {

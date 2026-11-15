@@ -979,6 +979,13 @@
     "debugLogging": "Debug logging"
   },
   "picker": {
+    "offlineHint": "What this button does with Sidearm off — from the mouse's memory.",
+    "offlineSilent": "Silent",
+    "offlineSilentHint": "This button does nothing without Sidearm.",
+    "offlineInherit": "Same as in Sidearm",
+    "offlineInheritHint": "Remove the own assignment: the mouse uses its Sidearm assignment if it can store it in memory; otherwise the button is silent.",
+    "offlineMouseHint": "A mouse button or scroll action the mouse can store in its own memory.",
+    "offlineUnstorable": "The mouse cannot store this combination in memory. Choose another key or modifiers only.",
     "native": "Native action",
     "hypershift": "HyperShift · hold",
     "nativeHint": "Use the device's original action for this button in the selected profile and layer.",

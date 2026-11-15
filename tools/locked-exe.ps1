@@ -33,6 +33,28 @@ function Move-LockedExe {
     }
 }
 
+function Stop-SidearmApps {
+    # Asks each running Sidearm app to quit (`<its exe> --quit`: the running one
+    # gets it and exits as from the tray — releases its keys, restores its mice)
+    # and kills only the ones still running after $TimeoutSec. A plain kill
+    # mid-shortcut left Ctrl down for every app (2026-11-15).
+    param([Parameter(Mandatory)][int[]]$Ids, [int]$TimeoutSec = 30)
+    $exes = @($Ids | ForEach-Object { (Get-CimInstance Win32_Process -Filter "ProcessId = $_" -ErrorAction SilentlyContinue).ExecutablePath } |
+        Where-Object { $_ } | Sort-Object -Unique)
+    foreach ($exe in $exes) {
+        try { Start-Process -FilePath $exe -ArgumentList '--quit' -WindowStyle Hidden -ErrorAction Stop } catch {
+            Write-Host "  Could not ask $exe to quit: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+    Wait-Process -Id $Ids -Timeout $TimeoutSec -ErrorAction SilentlyContinue
+    $left = @($Ids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+    if ($left.Count -gt 0) {
+        Write-Host "  Sidearm did not quit within $TimeoutSec s: stopping PID $($left -join ', ')" -ForegroundColor Yellow
+        Stop-Process -Id $left -Force -ErrorAction SilentlyContinue
+        Wait-Process -Id $left -Timeout 10 -ErrorAction SilentlyContinue
+    }
+}
+
 function Remove-OldExeCopies {
     # The `<name>.old-<n>` copies nothing runs from any more (a running one stays).
     param([string]$Dir, [string]$Name)

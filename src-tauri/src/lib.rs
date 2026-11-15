@@ -30,7 +30,11 @@ mod mouse_restore;
 #[cfg(target_os = "windows")]
 mod mouse_speed;
 #[cfg(target_os = "windows")]
-pub use mouse_restore::{end_with_test_runner, restore_entry};
+pub use mouse_restore::{app_running, end_with_test_runner, restore_entry};
+
+/// `Sidearm.exe --quit`: the running Sidearm exits as from the tray (the build
+/// scripts ask it so instead of killing it mid-shortcut).
+pub const QUIT_ARG: &str = "--quit";
 #[cfg(target_os = "windows")]
 pub(crate) use mouse_restore::{live_map_restore_running, spawn_live_map_restore};
 #[cfg(target_os = "windows")]
@@ -4404,7 +4408,11 @@ pub fn run() {
             // Builder ever runs, so it never acquires this lock.
             // relaunch_as_admin starts the elevated Sidearm with `--relaunched`,
             // which waits for the old process to end before it gets here.
-            .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+                if args.iter().any(|arg| arg == QUIT_ARG) {
+                    request_exit(app, "--quit");
+                    return;
+                }
                 if let Some(window) = app.get_webview_window("main") {
                     bring_to_front(&window);
                 }

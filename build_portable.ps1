@@ -232,8 +232,7 @@ function Stop-AppProcessIfRunning {
         $ids = @($all | ForEach-Object { [int]$_.ProcessId })
         $apps = @($all | Where-Object { $ids -notcontains [int]$_.ParentProcessId -and $_.CommandLine -notmatch '--restore-live-maps' } | ForEach-Object { [int]$_.ProcessId })
         if ($apps.Count -gt 0) {
-            Stop-Process -Id $apps -Force -ErrorAction Stop
-            Wait-Process -Id $apps -Timeout 10 -ErrorAction SilentlyContinue
+            Stop-SidearmApps -Ids $apps
         }
         # The restore processes keep running (one may wait for a sleeping
         # mouse): the exes they hold are moved out of the way before they are

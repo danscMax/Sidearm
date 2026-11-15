@@ -5,6 +5,13 @@ fn main() {
     #[cfg(target_os = "windows")]
     sidearm_lib::end_with_test_runner();
 
+    // `--quit` with no Sidearm running starts none (a running one gets it
+    // through the single-instance plugin and exits).
+    #[cfg(target_os = "windows")]
+    if std::env::args().any(|arg| arg == sidearm_lib::QUIT_ARG) && !sidearm_lib::app_running() {
+        return;
+    }
+
     // If launched as the capture helper subprocess, run the LL keyboard hook
     // loop instead of the full Tauri application.
     if std::env::args().any(|arg| arg == "--capture-helper") {

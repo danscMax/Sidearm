@@ -2348,6 +2348,23 @@ pub(crate) mod tests {
         fake::with(|mouse| assert_eq!(mouse.active_bank, 2));
     }
 
+    /// Hardware, read-only — **close Sidearm first**. Prints every record of the
+    /// live map and each bank of the V3 (diagnosing a bank that plays wrong).
+    /// Run: `cargo test v3_dump_banks -- --ignored --nocapture --test-threads=1`.
+    #[test]
+    #[ignore]
+    fn v3_dump_banks() {
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
+        let banks = read_banks(&device).expect("banks");
+        println!("banks {banks:?}, Sidearm's {:?}", sidearm_bank(&device, &banks));
+        for bank in std::iter::once(LIVE_BANK).chain(banks.assigned.iter().copied()) {
+            println!("== bank {bank}");
+            for (button, layer) in bank_addresses(&NAGA_V3_PRO) {
+                println!("   {button:#04x}/{layer}: {:02x?}", device.read_block(bank, button, layer));
+            }
+        }
+    }
+
     const V3_PATH: &str = r"\\?\hid#vid_1532&pid_00e8&mi_00#x";
 
     #[test]

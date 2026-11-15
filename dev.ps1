@@ -64,13 +64,20 @@ function Stop-StaleProcesses {
     # one its helper started) keeps running — it may be waiting for a sleeping
     # mouse — and its exe is moved out of the way instead.
     $target = Join-Path $TAURI_DIR 'target'
-    Get-CimInstance Win32_Process -Filter "Name = 'sidearm.exe'" -ErrorAction SilentlyContinue |
+    $stale = @(Get-CimInstance Win32_Process -Filter "Name = 'sidearm.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target, [StringComparison]::OrdinalIgnoreCase) } |
-        Where-Object { $_.CommandLine -notmatch '--restore-live-maps' } |
-        ForEach-Object {
-            Write-Host "  Stopping PID $($_.ProcessId)" -ForegroundColor Yellow
-            Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-        }
+        Where-Object { $_.CommandLine -notmatch '--restore-live-maps' })
+    # The app quits as from the tray (keys released, mice restored); its capture
+    # helper ends with it, and whatever is left is stopped.
+    $apps = @($stale | Where-Object { $_.CommandLine -notmatch '--capture-helper' } | ForEach-Object { [int]$_.ProcessId })
+    if ($apps.Count -gt 0) {
+        Write-Host "  Asking PID $($apps -join ', ') to quit" -ForegroundColor Yellow
+        Stop-SidearmApps -Ids $apps
+    }
+    $stale | Where-Object { Get-Process -Id $_.ProcessId -ErrorAction SilentlyContinue } | ForEach-Object {
+        Write-Host "  Stopping PID $($_.ProcessId)" -ForegroundColor Yellow
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
     # Both names cargo gives the exe: the linker writes the deps one.
     Move-LockedExe (Join-Path $target 'debug\sidearm.exe')
     Move-LockedExe (Join-Path $target 'debug\deps\sidearm.exe')

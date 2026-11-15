@@ -103,6 +103,11 @@ fn open_mutex(name: &str, keep_existing: bool) -> Option<windows_sys::Win32::Fou
 
 /// Whether a named mutex exists: one that refuses access exists too (an older
 /// or foreign DACL), so the check never fails open.
+/// Whether a Sidearm app runs (holds `Local\Sidearm-app`).
+pub fn app_running() -> bool {
+    mutex_exists(APP_MUTEX)
+}
+
 fn mutex_exists(name: &str) -> bool {
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
     let name: Vec<u16> = scoped(name).encode_utf16().chain(Some(0)).collect();
@@ -548,6 +553,13 @@ pub fn restore_live_maps_main(config_dir: &Path, after_crash: bool, watch: Optio
             return done(&format!("Sidearm {pid} exited cleanly"));
         }
         log::warn!("[restore] Sidearm {pid} ended without its exit (killed or crashed): restoring the mice");
+        // Killed mid-shortcut, it sent a modifier's press and never its
+        // release: Ctrl stayed down for every app (2026-11-15). Up now, not at
+        // the next start; a key-up of a key nobody holds is a no-op.
+        if !crate::fake_mode() {
+            log::info!("[restore] modifiers released after the kill");
+            crate::input_synthesis::release_all_modifiers();
+        }
         after_crash = true;
     }
     log::info!("[restore] process {me} started for {} (after a crash: {after_crash})", config_dir.display());

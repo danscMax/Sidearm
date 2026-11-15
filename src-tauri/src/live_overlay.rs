@@ -1631,6 +1631,100 @@ pub(crate) mod tests {
         drop(guard);
     }
 
+    /// Hardware, interactive — **close every Sidearm first**. Needs a free
+    /// bank slot on the V3. Answers what a Sidearm-owned bank depends on
+    /// (`plans/sidearm-bank/plan.md`, П0):
+    /// 1. what `05:02` (assign a free slot) leaves in the new bank;
+    /// 2. does a consumer record played from that bank reach Windows (volume up);
+    /// 3. the new bank's DPI and LED colour;
+    /// 4. does `05:03` (unassign) remove it, and a select of it is refused.
+    ///
+    /// Only the new bank is written. The old bank is reselected, the new one
+    /// unassigned and the live thumb 12 put back, also on a panic.
+    /// Run: `cargo test v3_sidearm_bank_probes -- --ignored --nocapture --test-threads=1`.
+    #[test]
+    #[ignore]
+    fn v3_sidearm_bank_probes() {
+        const THUMB_12: u8 = 0x4b;
+        const VOLUME_UP: u16 = 0x00e9;
+        let enter = |what: &str| {
+            println!("\n>>> {what}\n    then press Enter here");
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+            line.trim().to_lowercase()
+        };
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
+        let before = read_banks(&device).expect("banks");
+        let free = (1..=MAX_BANKS).find(|bank| !before.assigned.contains(bank)).expect("the V3 needs a free bank slot");
+        println!("banks before: {before:?}; free slot {free}");
+        let saved_live = device.read_block(LIVE_BANK, THUMB_12, 0).expect("live thumb 12");
+
+        /// Reselects the old bank, unassigns the probe bank, puts live thumb 12 back.
+        struct Restore(VendorDevice, u8, u8, [u8; 7]);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let Restore(device, old, free, live) = self;
+                if read_banks(device).is_ok_and(|banks| banks.active != *old)
+                    && let Err(error) = select_bank(device, *old)
+                {
+                    println!("!! bank {old} not reselected: {error}");
+                }
+                if read_banks(device).is_ok_and(|banks| banks.assigned.contains(free))
+                    && let Err(error) = device.command(CLASS_BANKS, 0x03, &[*free])
+                {
+                    println!("!! bank {free} not unassigned: {error}");
+                }
+                if let Err(error) = device.set_block(LIVE_BANK, THUMB_12, 0, live) {
+                    println!("!! live thumb 12 not put back: {error}");
+                }
+                println!("restored: banks {:?}, live thumb 12 {:02x?}", read_banks(device), device.read_block(LIVE_BANK, THUMB_12, 0));
+            }
+        }
+        let guard = Restore(device, before.active, free, saved_live);
+        let device = &guard.0;
+        let addresses: Vec<u8> = controls(&NAGA_V3_PRO).iter().map(|&(_, id)| id).collect();
+        let dump = |bank: u8| -> Vec<(u8, u8, Result<[u8; 7], String>)> {
+            addresses.iter().flat_map(|&id| [0, 1].map(|layer| (id, layer, device.read_block(bank, id, layer)))).collect()
+        };
+        let live_before = dump(LIVE_BANK);
+
+        // 1. Assign the free slot; what is in it, and did anything else move?
+        let reply = device.command(CLASS_BANKS, 0x02, &[free]);
+        println!("1. 05:02 {free}: {:02x?}", reply.as_ref().map(|r| &r[..12]));
+        let after = read_banks(device);
+        println!("1. banks after: {after:?}");
+        assert!(after.as_ref().is_ok_and(|banks| banks.assigned.contains(&free)), "05:02 did not assign bank {free}");
+        let playing = dump(before.active);
+        let fresh = dump(free);
+        let same_as_playing = fresh.iter().zip(&playing).filter(|(a, b)| a.2.is_ok() && a.2 == b.2).count();
+        println!("1. new bank {free}: {same_as_playing} of {} records equal the playing bank's", fresh.len());
+        for (id, layer, record) in &fresh {
+            println!("   {id:#04x}/{layer}: {record:02x?}");
+        }
+        let live_moved = dump(LIVE_BANK).iter().zip(&live_before).filter(|(a, b)| a.2 != b.2).count();
+        println!("1. live map records changed by 05:02: {live_moved}");
+        let dpi_reply = device.command(0x04, 0x85, &[free, 0, 0, 0, 0, 0, 0]);
+        println!("3. new bank DPI reply bytes 8..13: {:02x?}", dpi_reply.as_ref().map(|r| &r[8..13]));
+
+        // 2. A consumer record in the new bank, played after selecting it.
+        write_bank(device, free, THUMB_12, 0, block(OnboardAction::Consumer(VOLUME_UP))).unwrap();
+        select_bank(device, free).unwrap();
+        println!("2. live thumb 12 after selecting bank {free}: {:02x?}", device.read_block(LIVE_BANK, THUMB_12, 0));
+        let volume = enter("2. Press thumb 12 twice: does the volume go up? Type y or n");
+        println!("2. consumer record from a stored bank reaches Windows: {volume}");
+        let colour = enter(&format!("3. What colour is the V3's bottom LED now (bank {free})? Type it"));
+        println!("3. LED colour of the new bank: {colour}");
+
+        // 4. Back to the old bank, then unassign the new one.
+        select_bank(device, before.active).unwrap();
+        let reply = device.command(CLASS_BANKS, 0x03, &[free]);
+        println!("4. 05:03 {free}: {:02x?}", reply.as_ref().map(|r| &r[..12]));
+        println!("4. banks after unassign: {:?}", read_banks(device));
+        println!("4. select of the unassigned bank: {:?}", device.command(CLASS_BANKS, CMD_SELECT_BANK, &[free]).map(|r| r[..12].to_vec()));
+        println!("4. active after that select: {:?}", active_bank(device));
+        drop(guard);
+    }
+
     const V3_PATH: &str = r"\\?\hid#vid_1532&pid_00e8&mi_00#x";
 
     #[test]

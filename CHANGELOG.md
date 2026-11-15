@@ -5,7 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] — 2026-11-15
+
+### Added
+- The popup menu's search box is an item of the menu: move it anywhere among the
+  top-level items, turn it off (no box, typing searches nothing) or let it start
+  in this menu only (Tab still switches while the menu is open). Every menu gets
+  it first, where it always was. Config schema version 12.
+- Undo and redo in "Assign action" (Ctrl+Z / Ctrl+Y and ↶ ↷), across the press
+  pattern tabs; closing with changes asks first.
+- "The same on <mouse>" per button: keep one button alike on both mice or apart;
+  turning it on says which assignment on the other mouse it replaces.
+- A phrase can press Enter after its text ("…and Enter") and stays a text: it
+  keeps "Type with keys" and its library link.
+- `{date:…}` with a format (`{date:dd.MM.yyyy}`) and `{time}`; the phrase editor
+  shows what a phrase will type and warns about unknown tokens.
+- Menu lines (separators) and a searchable library picker with the text of each
+  phrase and how often it is used.
+- The macro editor lists steps as compact rows: a new step goes after the
+  selected one, a recording is inserted there, a Send step records its key
+  combination, steps can be duplicated and the total time is shown; typed letters
+  are recorded as one Text step.
+- The cheat sheet action opens as a grid in the menu window: side button N runs
+  cell N, arrows move by cell and row, Tab switches the layer, typing finds a
+  button.
+- Right-click menus everywhere it helps: device cards, the side grid, layer
+  pills, macro steps, profiles and phrases in Settings, backups, the title bar,
+  the log.
+- The same thing on several buttons is a quiet folded line under the mouse (it
+  can be hidden) and a mark on each such button.
+
+### Changed
+- Quitting no longer freezes the window and the tray: they go at once, the tray
+  says Sidearm is closing, capture stops first and the mice are put back in the
+  background (about 7 s instead of 14–36 s); each step is logged.
+- A build or a dev restart no longer stops Sidearm's mouse restorer: a locked
+  exe is moved aside, so a sleeping mouse still gets its buttons back.
+- Holding a button no longer writes three log lines per auto-repeat.
+
+### Fixed
+- A V3 whose rollback file was lost no longer keeps Sidearm's silent signals as
+  its "original" buttons: the playing bank's records are taken instead.
+- In the dev console a text selection froze logging and with it every mouse
+  button (QuickEdit is off in the dev console).
+- The same note listed twice for two mice; recording a macro replaced its
+  steps; the menu editor's lists did not fold with a second click.
 
 ### Added
 - Drag and drop everywhere: a button onto another moves its assignments (onto an

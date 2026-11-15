@@ -1,5 +1,6 @@
 import { bindingMatchesQuery } from "./conflict-detection";
 import type { Action, Binding, SnippetLibraryItem } from "./config";
+import { isOfflineLayer } from "./config";
 
 export type PaletteCommand = { id: string; label: string; shortcut?: string };
 
@@ -51,7 +52,8 @@ export function filterPaletteResults(
   const commands = [...substringCmds, ...fuzzyCmds];
 
   const bindings = data.bindings
-    .filter((b) => bindingMatchesQuery(b, data.actionsById.get(b.actionId) ?? null, q))
+    // Results open the live action picker, whose controls do not edit firmware layers.
+    .filter((b) => !isOfflineLayer(b.layer) && bindingMatchesQuery(b, data.actionsById.get(b.actionId) ?? null, q))
     .slice(0, SECTION_LIMIT);
   const snippets = data.snippets
     .filter((s) => s.name.toLowerCase().includes(q) || s.text.toLowerCase().includes(q))

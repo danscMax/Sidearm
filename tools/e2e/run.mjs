@@ -414,7 +414,11 @@ async function main() {
     const waited = await world.waitFor(() => world.log(), /waits for its buttons to be released/, 15000, mark);
     world.report(V3, 0);
     check("live-map repair waits for a held button", waited);
-    check("…and repairs after the release", await world.waitFor(() => world.log(), /repaired \d+ of \d+ live assignments/, 15000, mark));
+    // A bank switch ends the old map's ownership, so the session writes the map
+    // anew ("verified"); a changed record alone is repaired ("repaired N of M").
+    check("…and repairs after the release", await world.waitFor(() => world.log(), /repaired \d+ of \d+ live assignments|verified \d+ live assignments/, 15000, mark));
+    const thumb5 = liveRecords(world.mouse(V3)).find(([, button, layer]) => button === 0x41 && layer === 0);
+    check("…the switched record holds Sidearm's signal again", thumb5?.[3]?.[0] === 0x0a, JSON.stringify(thumb5));
 
     // 5b. The V2 reports one button at a time: a second press releases the first.
     mark = world.log().length;

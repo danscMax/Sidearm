@@ -74,6 +74,17 @@ describe("reorderProfiles", () => {
 });
 
 describe("copyAssignments", () => {
+  it("copies offline layers with a whole profile, without folding them into a live layer", () => {
+    const base = setup();
+    base.bindings.push(bind("offline", "thumb_01", "c", { layer: "offline" }), bind("offline-hs", "thumb_01", "a", { layer: "offlineHypershift" }));
+    const copied = copyAssignments(base, { profileId: "p1", layer: "all" }, { profileId: "p2", layer: "same" }, true);
+    expect(copied.config.bindings.filter((binding) => binding.profileId === "p2").map((binding) => binding.layer)).toEqual(["standard", "standard", "standard", "offline", "offlineHypershift"]);
+    const live = copyAssignments(base, { profileId: "p1", layer: "all" }, { profileId: "p2", layer: "hypershift" }, true);
+    expect(live.copied).toBe(2);
+    expect(live.config.bindings.filter((binding) => binding.profileId === "p2").map((binding) => binding.layer)).toEqual(["hypershift", "hypershift", "hypershift"]);
+    expect(copyAssignments(base, { profileId: "p1", layer: "standard" }, { profileId: "p2", layer: "offline" }, true)).toMatchObject({ config: base, copied: 0 });
+  });
+
   it("copies a layer into another layer, keeping occupied buttons unless replacing", () => {
     const base = setup();
     base.bindings.push(bind("hs", "mouse_4", "c", { layer: "hypershift2" }));

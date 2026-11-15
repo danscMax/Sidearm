@@ -5,12 +5,44 @@
 // forked copies.
 
 import i18n from "../i18n";
-import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
+import { isOfflineLayer, type Action, type AppConfig, type Binding, type ControlId, type Layer, type TriggerMode } from "./config";
+import { isBuiltinControl, type OfflinePreview } from "./onboard-mapping";
+import { findBinding } from "./config-editing";
 import type { Slot } from "./binding-moves";
 import type { ControlSurfaceEntry } from "./constants";
 import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
-import { controlAssignmentLabel, displayNameForControl, fallbackLabel } from "./labels";
+import { controlAssignmentLabel, displayNameForControl, fallbackLabel, offlineDetailLabel } from "./labels";
+
+/** Use the same firmware result for the legend and the mouse hotspots. */
+export function withOfflineAssignment(config: AppConfig, profileId: string, layer: Layer, entry: ControlSurfaceEntry, preview: OfflinePreview | null): ControlSurfaceEntry {
+  if (!isBuiltinControl(config, entry.control.id)) return entry;
+  const offlineLayer = isOfflineLayer(layer) ? layer : layer === "hypershift" ? "offlineHypershift" : "offline";
+  const result = preview?.controls.find((control) => control.controlId === entry.control.id && control.layer === offlineLayer);
+  const action = config.actions.find((action) => action.id === result?.actionId) ?? null;
+  if (!isOfflineLayer(layer)) {
+    if (!entry.sidearmOnly) return entry;
+    return { ...entry, offlineActionLabel: controlAssignmentLabel({ ...entry, action, offline: result ?? { kind: "unknown", editable: false } }) };
+  }
+  const liveLayer = layer === "offlineHypershift" ? "hypershift" : "standard";
+  const live = ([liveLayer, "standard"] as const).map((liveLayer) =>
+    findBinding(config, profileId, liveLayer, entry.control.id)).find((binding) => binding?.enabled);
+  const liveAction = config.actions.find((action) => action.id === live?.actionId);
+  return {
+    ...entry,
+    binding: findBinding(config, profileId, layer, entry.control.id) ?? null,
+    action,
+    offline: { ...(result ?? { kind: "unknown", editable: false }), liveAction },
+    mapping: null,
+    fallback: null,
+    isHypershiftTrigger: false,
+    isHypershift2Trigger: false,
+    extras: undefined,
+    sidearmOnly: false,
+    syncedWith: undefined,
+    sameAs: undefined,
+  };
+}
 
 export type ViewTab = "top" | "side" | "combined" | "bottom";
 
@@ -85,6 +117,7 @@ export function actionLabel(
   entry: ControlSurfaceEntry,
   opts: { triggerLabels?: TriggerBadgeLabels } = {},
 ): string {
+  if (entry.offline) return controlAssignmentLabel(entry);
   if (entry.isHypershiftTrigger) return controlAssignmentLabel(entry);
   if (entry.action && entry.action.type !== "disabled" && entry.binding?.enabled) {
     const base = entry.action.displayName;
@@ -112,13 +145,14 @@ export const HEAT_TINT = "rgba(159, 202, 105, 0.07)";
 /** Two-line tooltip text: control name + assignment (or the unassigned label). */
 export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {
   const name = displayNameForControl(entry.control);
+  if (entry.offline) return [name, controlAssignmentLabel(entry), offlineDetailLabel(entry)].filter(Boolean).join("\n");
   if (entry.isHypershiftTrigger) return `${name}\n${controlAssignmentLabel(entry)}`;
   if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
     return `${name}\n${fallbackLabel(entry) ?? unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   const catLabel = cat ? i18n.t(cat.label) : "";
-  const live = entry.sidearmOnly ? `\n${i18n.t("mouseVisual.sidearmOnly")}` : "";
+  const live = entry.sidearmOnly ? `\n${i18n.t("offline.tooltip", { action: entry.offlineActionLabel ?? i18n.t("offline.silentAction") })}` : "";
   const synced = entry.syncedWith?.length ? `\n${i18n.t("mouseVisual.syncedWith", { mice: entry.syncedWith.join(", ") })}` : "";
   const same = entry.sameAs?.length ? `\n${i18n.t("mouseVisual.sameAs", { buttons: entry.sameAs.join(", ") })}` : "";
   return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}${live}${synced}${same}`;

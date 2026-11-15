@@ -1,4 +1,4 @@
-import { OFFLINE_PROFILE_ACTIVE, type Action, type AppConfig, type Binding, type ControlId } from "./config";
+import type { Action, AppConfig, Binding, ControlId, OfflineLayer } from "./config";
 import { gestureOf } from "./config-editing";
 import { primaryKeyCode } from "./key-names";
 
@@ -32,10 +32,20 @@ export function playsWithoutSidearm(binding: Binding, action: Action | null | un
     && !(action.payload.ctrl || action.payload.shift || action.payload.alt || action.payload.win);
 }
 
-/** The profile written into the mice at exit; null when it follows the window. */
-export function offlineProfileId(config: AppConfig): string | null {
-  const id = config.settings.offlineProfileId ?? config.settings.fallbackProfileId;
-  return id === OFFLINE_PROFILE_ACTIVE ? null : id;
+/** Rust's firmware planner preview; the UI never derives these decisions. */
+export interface OfflineControl {
+  controlId: string;
+  layer: OfflineLayer;
+  kind: "own" | "inherited" | "preserved" | "silent" | "role" | "unavailable";
+  actionId?: string;
+  native?: string;
+  role?: "hypershift" | "profileButton" | "nativeClick";
+  editable: boolean;
+}
+
+export interface OfflinePreview {
+  target: { state: "written" | "notWritten" | "followsWindow" | "unknown"; bank?: number };
+  controls: OfflineControl[];
 }
 
 /**

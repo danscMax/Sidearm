@@ -6,6 +6,7 @@ import type {
   Layer,
   PhysicalControl,
 } from "../config";
+import type { OfflineControl } from "../onboard-mapping";
 
 export type ViewState = "idle" | "loading" | "ready" | "saving" | "error";
 export type WorkspaceMode = "profiles" | "debug" | "settings";
@@ -34,6 +35,10 @@ export type ControlSurfaceEntry = {
   /** In the profile written into the mouse: its plain press is not stored
    *  there (text, macro, menu…), so without Sidearm the button does not do it. */
   sidearmOnly?: boolean;
+  /** Effective firmware assignment, only in the Without Sidearm view. */
+  offline?: { kind: OfflineControl["kind"] | "unknown"; native?: string; role?: OfflineControl["role"]; editable: boolean; liveAction?: Action };
+  /** Precise firmware result for the live layer's S mark. */
+  offlineActionLabel?: string;
   /** The other mice whose same button this one is kept alike with (synced,
    *  with an assignment there): marked with a link beside the label. */
   syncedWith?: string[];

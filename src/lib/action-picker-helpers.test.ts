@@ -9,6 +9,7 @@ import {
   createInitialDrafts,
   enterPhraseOf,
   isSaveDisabled,
+  isOfflinePayloadPlayable,
   acceleratorKeyFromCode,
   normalizeKeyName,
   resolveKeyName,
@@ -447,5 +448,22 @@ describe("isSaveDisabled", () => {
   it("never blocks save for categories without required fields", () => {
     expect(isSaveDisabled("mediaKey", makeDrafts())).toBe(false);
     expect(isSaveDisabled("disabled", makeDrafts())).toBe(false);
+  });
+});
+
+describe("offline draft eligibility", () => {
+  it("uses the firmware rule for modifier-only, supported and unsupported keys", () => {
+    const plain = { ctrl: false, shift: false, alt: false, win: false };
+    expect(isOfflinePayloadPlayable({ ...plain, key: "" })).toBe(false);
+    expect(isOfflinePayloadPlayable({ ...plain, key: "", ctrl: true })).toBe(true);
+    expect(isOfflinePayloadPlayable({ ...plain, key: "F24", win: true })).toBe(true);
+    expect(isOfflinePayloadPlayable({ ...plain, key: "AudioVolumeUp" })).toBe(false);
+  });
+
+  it("rejects mouse modifiers and actions that need Sidearm", () => {
+    expect(isOfflinePayloadPlayable({ action: "mouseBack" })).toBe(true);
+    expect(isOfflinePayloadPlayable({ action: "mouseBack", ctrl: true })).toBe(false);
+    expect(isOfflinePayloadPlayable({ action: "doubleClick" })).toBe(false);
+    expect(isOfflinePayloadPlayable({ action: "dpiUp" })).toBe(false);
   });
 });

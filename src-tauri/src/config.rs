@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 12;
+const SCHEMA_VERSION: i32 = 13;
 pub const MAX_SEQUENCE_STEPS: usize = 200;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
@@ -540,15 +540,29 @@ pub enum Layer {
     /// While both HyperShift triggers of a mouse are held.
     #[serde(rename = "hypershiftBoth")]
     HypershiftBoth,
+    /// What the mouse itself plays without Sidearm (the offline profile written
+    /// at exit, `mouse_offline::plan`): an own plain-press assignment for that
+    /// place, else the standard binding. Never resolved while Sidearm runs.
+    Offline,
+    /// The same under the firmware's HyperShift (layer 1 of the record), else
+    /// the hypershift binding, else the standard one.
+    #[serde(rename = "offlineHypershift")]
+    OfflineHypershift,
 }
 
 impl Layer {
+    pub fn is_live(self) -> bool {
+        !matches!(self, Self::Offline | Self::OfflineHypershift)
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Standard => "standard",
             Self::Hypershift => "hypershift",
             Self::Hypershift2 => "hypershift2",
             Self::HypershiftBoth => "hypershiftBoth",
+            Self::Offline => "offline",
+            Self::OfflineHypershift => "offlineHypershift",
         }
     }
 }
@@ -1138,7 +1152,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=11) {
+    if matches!(config.version, 2..=12) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -1807,6 +1821,16 @@ pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarnin
         &mut errors,
     );
     for binding in &config.bindings {
+        if !binding.layer.is_live() {
+            if !matches!(binding.trigger_mode, None | Some(TriggerMode::Press)) {
+                errors.push(format!("binding `{}` on offline layer `{}` must use a plain press trigger.", binding.id, binding.layer.as_str()));
+            }
+            if let Some(action) = config.actions.iter().find(|action| action.id == binding.action_id)
+                && !matches!(action.action_type, ActionType::Shortcut | ActionType::MouseAction | ActionType::Disabled)
+            {
+                errors.push(format!("binding `{}` on offline layer `{}` must use a shortcut, mouseAction or disabled action.", binding.id, binding.layer.as_str()));
+            }
+        }
         if !profile_ids.contains(&binding.profile_id) {
             errors.push(format!(
                 "binding `{}` references missing profile `{}`.",
@@ -1854,6 +1878,9 @@ pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarnin
     let mut encoder_keys = HashSet::new();
     let mut encoded_inputs = HashSet::new();
     for mapping in &config.encoder_mappings {
+        if !mapping.layer.is_live() {
+            errors.push(format!("encoderMapping `{}::{}` cannot use an offline layer.", mapping.control_id.as_str(), mapping.layer.as_str()));
+        }
         let key = format!(
             "{}::{}",
             mapping.control_id.as_str(),
@@ -2080,7 +2107,11 @@ fn validate_action(
         // catch-all below, so validate_config rejected save/load of any config using it.)
         (ActionType::RepairClipboard, ActionPayload::RepairClipboard(_)) => {}
         (ActionType::StopMacros, ActionPayload::StopMacros(_)) => {}
-        (ActionType::CheatSheet, ActionPayload::CheatSheet(_)) => {}
+        (ActionType::CheatSheet, ActionPayload::CheatSheet(payload)) => {
+            if !payload.layer.is_live() {
+                errors.push(format!("action `{}` cheatSheet must use a live layer.", action.id));
+            }
+        }
         _ => errors.push(format!(
             "action `{}` type `{}` does not match payload shape.",
             action.id,
@@ -3673,6 +3704,26 @@ mod tests {
     }
 
     #[test]
+    fn v12_load_backup_and_import_preserve_assignments_without_recovery() {
+        let mut original = default_seed_config();
+        original.bindings[0].label = "Customized v12 assignment".into();
+        let mut old = serde_json::to_value(&original).unwrap();
+        old["version"] = 12.into();
+        for name in [CONFIG_FILE_NAME, "config.last-known-good.json", "config.bak.1"] {
+            let dir = tempdir().unwrap();
+            fs::write(dir.path().join(name), old.to_string()).unwrap();
+            let loaded = load_or_initialize_config(dir.path()).unwrap();
+            assert!(!loaded.created_default);
+            assert_eq!(serde_json::to_value(&loaded.config).unwrap(), serde_json::to_value(&original).unwrap());
+            assert_eq!(loaded.config.version, 13);
+            assert!(!has_quarantine_file(dir.path()));
+            assert_eq!(loaded.warnings.iter().any(|w| w.code == "config_recovered_from_backup"), name != CONFIG_FILE_NAME);
+            let imported = read_and_migrate_config_file(&dir.path().join(name)).unwrap();
+            assert_eq!(serde_json::to_value(imported).unwrap(), serde_json::to_value(&original).unwrap());
+        }
+    }
+
+    #[test]
     fn repair_clipboard_payload_roundtrips_and_avoids_disabled_collision() {
         // The required `strategy` discriminator keeps the untagged ActionPayload
         // enum unambiguous: RepairClipboard serializes as {"strategy":"latin1"}.
@@ -3708,6 +3759,65 @@ mod tests {
         let value = serde_json::to_value(&config).expect("config json");
         assert!(validate_config_schema_value(&value).is_ok(), "schema accepts stopMacros: {:?}", collect_schema_errors(&value));
         assert!(validate_config(&config).is_ok(), "semantic validation accepts stopMacros");
+    }
+
+    #[test]
+    fn offline_bindings_accept_only_plain_presses() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.bindings[0].layer = layer;
+            for trigger in [None, Some(TriggerMode::Press)] {
+                config.bindings[0].trigger_mode = trigger;
+                validate_config(&config).expect("an offline plain press is valid");
+            }
+            for trigger in [TriggerMode::LongPress, TriggerMode::DoublePress, TriggerMode::TriplePress, TriggerMode::Hold, TriggerMode::Chord] {
+                config.bindings[0].trigger_mode = Some(trigger);
+                let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+                assert!(errors.iter().any(|error| error.contains("must use a plain press trigger")), "{layer:?}/{trigger:?}: {errors:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn offline_bindings_accept_only_shortcut_mouse_or_disabled_actions() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.bindings[0].layer = layer;
+            let id = config.bindings[0].action_id.clone();
+            for (action_type, payload) in [
+                (ActionType::Shortcut, ActionPayload::Shortcut(ShortcutActionPayload { key: "A".into(), ctrl: true, shift: false, alt: false, win: false, raw: None })),
+                (ActionType::MouseAction, ActionPayload::MouseAction(MouseActionPayload { action: MouseActionKind::MouseBack, ctrl: false, shift: false, alt: false, win: false })),
+                (ActionType::Disabled, ActionPayload::Disabled(Default::default())),
+            ] {
+                let action = config.actions.iter_mut().find(|action| action.id == id).unwrap();
+                (action.action_type, action.payload) = (action_type, payload);
+                validate_config(&config).expect("supported offline action");
+            }
+            config.bindings[0].action_id = config.actions.iter().find(|action| action.action_type == ActionType::TextSnippet).unwrap().id.clone();
+            let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+            assert!(errors.iter().any(|error| error.contains("must use a shortcut, mouseAction or disabled action")), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn encoder_mappings_cannot_use_offline_layers() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.encoder_mappings[0].layer = layer;
+            let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+            assert!(errors.iter().any(|error| error.contains("cannot use an offline layer")), "{errors:?}");
+        }
+    }
+
+    #[test]
+    fn cheat_sheet_actions_cannot_expose_offline_layers() {
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            let mut config = default_seed_config();
+            config.actions[0].action_type = ActionType::CheatSheet;
+            config.actions[0].payload = ActionPayload::CheatSheet(CheatSheetPayload { layer });
+            let ConfigStoreError::InvalidConfig { errors } = validate_config(&config).unwrap_err() else { panic!("expected semantic validation error") };
+            assert!(errors.iter().any(|error| error.contains("cheatSheet must use a live layer")), "{errors:?}");
+        }
     }
 
     #[test]
@@ -4115,7 +4225,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (12, 0x6a87_4c4b_f84c_1ed9);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (13, 0x4291_056d_e060_7ae7);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -4343,7 +4453,7 @@ mod tests {
         legacy.version = 11;
         fs::write(dir.path().join(CONFIG_FILE_NAME), serde_json::to_vec(&legacy).unwrap()).unwrap();
         let loaded = load_or_initialize_config(dir.path()).unwrap();
-        legacy.version = 12;
+        legacy.version = SCHEMA_VERSION;
         assert_eq!(loaded.config, legacy);
     }
 
@@ -5923,7 +6033,7 @@ mod edge_proptests {
     /// Layer::as_str() must match its serde JSON representation.
     #[test]
     fn layer_as_str_matches_serde_rename() {
-        for layer in [Layer::Standard, Layer::Hypershift] {
+        for layer in [Layer::Standard, Layer::Hypershift, Layer::Hypershift2, Layer::HypershiftBoth, Layer::Offline, Layer::OfflineHypershift] {
             let json = serde_json::to_string(&layer).expect("serialize Layer");
             let expected_json = format!("\"{}\"", layer.as_str());
             assert_eq!(

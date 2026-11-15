@@ -395,7 +395,7 @@ fn gesture_patterns(config: &AppConfig, preview: &resolver::ResolvedInputPreview
     }
     let mut patterns = gestures::Patterns::default();
     for binding in config.bindings.iter().filter(|binding| {
-        binding.enabled && binding.profile_id == profile && on_layer(binding.layer.as_str()) && binding.control_id.as_str() == control
+        binding.enabled && binding.layer.is_live() && binding.profile_id == profile && on_layer(binding.layer.as_str()) && binding.control_id.as_str() == control
     }) {
         match config::Gesture::of(binding.trigger_mode) {
             config::Gesture::LongPress => patterns.long = true,

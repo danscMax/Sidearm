@@ -86,6 +86,7 @@
     "allow-get-native-model",
     "allow-list-native-mice",
     "allow-get-onboard-banks",
+    "allow-get-offline-preview",
     "allow-get-device-report",
     "allow-open-device-report-issue",
     "allow-get-mouse-status",

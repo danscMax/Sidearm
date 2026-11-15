@@ -2,7 +2,8 @@ import { Fragment, startTransition, useEffect, useMemo, useRef, useState, type R
 import { useTranslation } from "react-i18next";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 import type { AppConfig, AppMapping, ControlId, Device, Layer, Profile } from "../lib/config";
-import { RAZER_NAGA_DEVICE_ID } from "../lib/config";
+import { isOfflineLayer, RAZER_NAGA_DEVICE_ID } from "../lib/config";
+import type { OfflinePreview } from "../lib/onboard-mapping";
 import { layerCopy, type FamilySection, type ViewState } from "../lib/constants";
 import type { ExecutionRecord, WindowCaptureResult } from "../lib/runtime";
 import type { MouseStatusKind } from "../lib/onboard-mapping";
@@ -21,6 +22,7 @@ import {
   createAppMapping,
   deleteAppMapping,
   duplicateBinding,
+  findBinding,
   findDuplicateAppMapping,
   importProfile,
   placeDeviceHotspot,
@@ -32,6 +34,7 @@ import {
   removeDevice,
   renameDevice,
   setDeviceImage,
+  setOfflineAssignment,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
   updateLearnedControl,
@@ -77,6 +80,7 @@ export interface RuleSignal {
 }
 
 export interface ProfilesWorkspaceProps {
+  offlinePreview: OfflinePreview | null;
   activeConfig: AppConfig;
   activeProfile: Profile | null;
   effectiveProfileId: string | null;
@@ -135,6 +139,7 @@ const DEVICE_TAB_LABEL = {
 } as const;
 
 export function ProfilesWorkspace({
+  offlinePreview,
   activeConfig,
   activeProfile,
   effectiveProfileId,
@@ -176,6 +181,7 @@ export function ProfilesWorkspace({
   mouseStates,
 }: ProfilesWorkspaceProps) {
   const { t } = useTranslation();
+  const offlineView = isOfflineLayer(selectedLayer);
   // With the heat map on: the press log's last 7 days (every computer's) on the
   // layer shown (the press log), read again after every press.
   const [pressLog, setPressLog] = useState<PressLog | null>(null);
@@ -186,25 +192,29 @@ export function ProfilesWorkspace({
     updateDraft,
     showToast,
   });
+  const showHeatmap = heatmapEnabled && !offlineView;
 
   // Mirror heatmap state into the ref useRuntime reads, so execution-count
   // bookkeeping is skipped while the heatmap is off.
   useEffect(() => {
-    if (heatmapEnabledRef) heatmapEnabledRef.current = heatmapEnabled;
-  }, [heatmapEnabled, heatmapEnabledRef]);
+    if (heatmapEnabledRef) heatmapEnabledRef.current = showHeatmap;
+  }, [showHeatmap, heatmapEnabledRef]);
   useEffect(() => {
-    if (!heatmapEnabled) return;
+    if (!showHeatmap) return;
     let live = true;
     getPressLog().then((log) => { if (live) setPressLog(log); }).catch(() => {});
     return () => { live = false; };
-  }, [heatmapEnabled, executionCounts]);
-  const heatCounts = heatmapEnabled && pressLog && effectiveProfileId
+  }, [showHeatmap, executionCounts]);
+  const heatCounts = showHeatmap && pressLog && effectiveProfileId
     ? layerHeat(sumDays(pressLog, 7, new Date()), effectiveProfileId, selectedLayer)
     : executionCounts;
 
   const handleOpenActionPicker = useActionPicker({
     effectiveProfileId,
     config: activeConfig,
+    selectedLayer,
+    offlinePreview,
+    setSelectedControlId,
     setActionPickerBindingId,
     setActionPickerOpen,
   });
@@ -236,6 +246,9 @@ export function ProfilesWorkspace({
   const [cardsToken, setCardsToken] = useState(0);
   const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
   const builtinMice = activeConfig.devices.filter((device) => device.builtin && deviceLayout(device.id)).length;
+  const writeTarget = offlineView && effectiveProfileId && activeDevice?.builtin
+    ? offlinePreview?.target ?? { state: "unknown" as const }
+    : null;
 
   const deviceControlCount = activeDevice
     ? activeConfig.physicalControls.filter((control) => control.deviceId === activeDevice.id).length
@@ -429,7 +442,7 @@ export function ProfilesWorkspace({
   }, [swapFrom]);
 
   function selectControl(id: ControlId) {
-    if (swapFrom && effectiveProfileId) {
+    if (swapFrom && effectiveProfileId && !offlineView) {
       placeDragged(swapFrom, { profileId: effectiveProfileId, layer: selectedLayer, controlId: id }, false);
       setSwapFrom(null);
       return;
@@ -946,7 +959,7 @@ export function ProfilesWorkspace({
           {/* Both labels are rendered (the inactive one hidden) so the badge
               always reserves the width of the widest layer name — toggling the
               layer never shifts the search field beside it. */}
-          {layerCopy.map((layer) => (
+          {[...layerCopy, { value: "offline", label: "layer.offline" }, { value: "offlineHypershift", label: "layer.offlineHypershift" }].map((layer) => (
             <span key={layer.value} className="layer-badge__opt" aria-hidden={selectedLayer !== layer.value}>
               {t(layer.label)}
             </span>
@@ -995,6 +1008,20 @@ export function ProfilesWorkspace({
           {t("profile.searchAllProfiles")}
         </button>
       </div>
+
+      {writeTarget ? (
+        <Notice variant={writeTarget.state === "notWritten" || writeTarget.state === "unknown" ? "warning" : "info"}>
+          <div className="profiles__offline-target">
+            <span>
+              {t(`offline.${writeTarget.state}`)}
+              {writeTarget.bank !== undefined ? ` · ${t("offline.bank", { bank: writeTarget.bank })}` : ""}
+            </span>
+            <button type="button" className="action-button action-button--small" onClick={() => setDeviceTab("memory")}>
+              {t("device.tabMemory")}
+            </button>
+          </div>
+        </Notice>
+      ) : null}
 
       {searchAllProfiles && searchQuery ? (
         <div className="profiles__search-results">
@@ -1160,11 +1187,11 @@ export function ProfilesWorkspace({
             }
             onSelectLayer={onSelectLayer}
             onCopyLayer={copyLayer}
-            executionCounts={heatCounts}
-            executionHistory={executionHistory}
-            throttledControlIds={throttledControlIds}
-            heatmapEnabled={heatmapEnabled}
-            onDropBinding={handleDropBinding}
+            executionCounts={offlineView ? undefined : heatCounts}
+            executionHistory={offlineView ? undefined : executionHistory}
+            throttledControlIds={offlineView ? undefined : throttledControlIds}
+            heatmapEnabled={showHeatmap}
+            onDropBinding={offlineView ? undefined : handleDropBinding}
             device={activeDevice}
             onAddControl={() => setLearnModal({ mode: "create" })}
             onEditControl={handleEditControl}
@@ -1196,11 +1223,11 @@ export function ProfilesWorkspace({
             onSelectLayer={onSelectLayer}
             onCopyLayer={copyLayer}
             layers={deviceLayers(activeConfig, effectiveProfileId, activeDevice?.id, selectedLayer)}
-            executionCounts={heatCounts}
-            executionHistory={executionHistory}
-            throttledControlIds={throttledControlIds}
-            heatmapEnabled={heatmapEnabled}
-            onDropBinding={handleDropBinding}
+            executionCounts={offlineView ? undefined : heatCounts}
+            executionHistory={offlineView ? undefined : executionHistory}
+            throttledControlIds={offlineView ? undefined : throttledControlIds}
+            heatmapEnabled={showHeatmap}
+            onDropBinding={offlineView ? undefined : handleDropBinding}
             layout={deviceLayout(activeDevice?.id) ?? defaultLayout()}
           />
         )}
@@ -1214,7 +1241,7 @@ export function ProfilesWorkspace({
             onSubmit={handleSubmitControl}
           />
         ) : null}
-        <div className="heatmap-toggle">
+        {!offlineView ? <div className="heatmap-toggle">
           <button
             type="button"
             className={`action-button action-button--small${heatmapEnabled ? " action-button--active" : ""}`}
@@ -1224,9 +1251,9 @@ export function ProfilesWorkspace({
           >
             {heatmapEnabled ? t("profile.heatmapOn") : t("profile.heatmapOff")}
           </button>
-        </div>
+        </div> : null}
       </div>
-      <DuplicatesNote duplicates={duplicates} />
+      {!offlineView ? <DuplicatesNote duplicates={duplicates} /> : null}
 
       {/* ── Profile actions ── */}
       {activeProfile ? (
@@ -1319,11 +1346,11 @@ export function ProfilesWorkspace({
               {t("transfer.open")}
             </button>
           ) : null}
-          <button type="button" className="action-button action-button--small" onClick={() => setCopyDialog(selectedLayer)}>
+          <button type="button" className="action-button action-button--small" disabled={offlineView} onClick={() => setCopyDialog(selectedLayer)}>
             {t("copyLayer.open")}
           </button>
           {activeConfig.profiles.length > 1 ? (
-            <button type="button" className="action-button action-button--small" onClick={() => setCompareOpen(true)}>
+            <button type="button" className="action-button action-button--small" disabled={offlineView} onClick={() => setCompareOpen(true)}>
               {t("compare.open")}
             </button>
           ) : null}
@@ -1506,7 +1533,25 @@ export function ProfilesWorkspace({
             x={bindingCtxMenu.x}
             y={bindingCtxMenu.y}
             onClose={() => setBindingCtxMenu(null)}
-            items={[
+            items={isOfflineLayer(selectedLayer) && effectiveProfileId ? [
+              {
+                label: t("offline.inherit"),
+                disabled: !findBinding(activeConfig, effectiveProfileId, selectedLayer, cid),
+                onClick: () => updateDraft((config) => setOfflineAssignment(config, effectiveProfileId, cid, selectedLayer, null)),
+              },
+              {
+                label: t("offline.mute"),
+                disabled: !offlinePreview?.controls.some((control) => control.controlId === cid && control.layer === selectedLayer && control.editable),
+                onClick: () => updateDraft((config) => setOfflineAssignment(config, effectiveProfileId, cid, selectedLayer, "silent")),
+              },
+              {
+                label: t("offline.edit"),
+                disabled: !offlinePreview?.controls.some((control) => control.controlId === cid && control.layer === selectedLayer && control.editable),
+                onClick: () => {
+                  handleOpenActionPicker(cid, binding);
+                },
+              },
+            ] : [
               {
                 label: t("common.edit"),
                 onClick: () => handleOpenActionPicker(cid, binding),

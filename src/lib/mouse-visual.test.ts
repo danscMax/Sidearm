@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { Action, Binding, PhysicalControl } from "./config";
+import type { Action, Binding, OfflineLayer, PhysicalControl } from "./config";
+import i18n from "../i18n";
+import { makeConfig, makeAction } from "./test-fixtures";
+import type { OfflineControl, OfflinePreview } from "./onboard-mapping";
 import type { ControlSurfaceEntry } from "./constants";
 import { buildHotspotTooltip } from "./labels";
 import { COMBINED_RIGHT_BUTTONS, TOP_RIGHT_BUTTONS } from "./devices";
@@ -11,6 +14,7 @@ import {
   parseBindingDragData,
   tooltipText,
   triggerBadge,
+  withOfflineAssignment,
 } from "./mouse-visual";
 
 const LABELS = { hold: "Hold", chord: "Chord" };
@@ -49,6 +53,71 @@ const unassignedEntry: ControlSurfaceEntry = {
   mapping: null,
   isSelected: false,
 };
+
+describe("offline surface entries", () => {
+  const shortcut = makeAction({ type: "shortcut", displayName: "Ctrl+C", payload: { key: "C", ctrl: true, shift: false, alt: false, win: false } });
+  const text = makeAction({ id: "text", type: "textSnippet", displayName: "Greeting", payload: { source: "inline", text: "Hello", pasteMode: "clipboardPaste", tags: [] } });
+  const live: Binding = { id: "live", profileId: "p1", controlId: "thumb_01", layer: "standard", actionId: text.id, label: "Greeting", enabled: true };
+  const config = makeConfig({ actions: [shortcut, text], bindings: [live] });
+  const base = { ...unassignedEntry, isHypershiftTrigger: true, extras: [{ gesture: "longPress" as const, action: text }], sameAs: ["Other"] };
+  const preview = (layer: OfflineLayer, control: Partial<OfflineControl>): OfflinePreview => ({
+    target: { state: "written" }, controls: [{ controlId: "thumb_01", layer, kind: "preserved", editable: true, ...control }],
+  });
+
+  it.each<OfflineLayer>(["offline", "offlineHypershift"])("renders the planner result on %s without deciding playability", (layer) => {
+    const entry = withOfflineAssignment(config, "p1", layer, base, preview(layer, { kind: "inherited", actionId: text.id }));
+    expect(entry.offline?.kind).toBe("inherited");
+    expect(entry.binding).toBeNull();
+    expect(entry.isHypershiftTrigger).toBe(false);
+    expect(entry.extras).toBeUndefined();
+    expect(entry.sameAs).toBeUndefined();
+    expect(actionLabel(entry)).toBe("Greeting");
+    expect(tooltipText(entry, "Native")).toContain(i18n.t("offline.inherited"));
+    expect(buildHotspotTooltip(entry, layer, undefined, 55)).not.toContain("55");
+  });
+
+  it.each([
+    [{ kind: "own", actionId: "a1" }, "Ctrl+C"],
+    [{ kind: "preserved", native: "mouseBack" }, i18n.t("mouseAction.mouseBack")],
+    [{ kind: "preserved" }, i18n.t("offline.preserved")],
+    [{ kind: "silent", actionId: "a1" }, i18n.t("offline.silent")],
+    [{ kind: "role", role: "hypershift", editable: false }, i18n.t("offline.role.hypershift")],
+    [{ kind: "role", role: "profileButton", editable: false }, i18n.t("offline.role.profileButton")],
+    [{ kind: "role", role: "nativeClick", editable: false }, i18n.t("offline.role.nativeClick")],
+    [{ kind: "unavailable", editable: false }, i18n.t("offline.unavailable")],
+  ] satisfies [Partial<OfflineControl>, string][])("labels preview %j", (control, label) => {
+    const entry = withOfflineAssignment(config, "p1", "offline", base, preview("offline", control));
+    expect(actionLabel(entry)).toBe(label);
+    expect(tooltipText(entry, "Native")).toContain(label);
+    expect(buildHotspotTooltip(entry, "offline", undefined, 0)).toContain(label);
+    if (control.kind === "silent") expect(tooltipText(entry, "")).toContain(i18n.t("offline.liveAction", { action: "Greeting" }));
+  });
+
+  it("shows unknown for missing preview/controls", () => {
+    for (const value of [null, { target: { state: "unknown" as const }, controls: [] }]) {
+      const entry = withOfflineAssignment(config, "p1", "offline", base, value);
+      expect(actionLabel(entry)).toBe(i18n.t("offline.unknownAction"));
+      expect(entry.offline?.editable).toBe(false);
+    }
+  });
+
+  it("does not describe a disabled live binding as an action in Sidearm", () => {
+    const disabled = { ...config, bindings: [{ ...live, enabled: false }] };
+    const entry = withOfflineAssignment(disabled, "p1", "offline", base, preview("offline", { kind: "silent" }));
+    expect(entry.offline?.liveAction).toBeUndefined();
+    expect(tooltipText(entry, "")).not.toContain("Greeting");
+  });
+
+  it.each<OfflineLayer>(["offline", "offlineHypershift"])("uses the %s preview for the live S tooltip", (layer) => {
+    const liveLayer = layer === "offline" ? "standard" : "hypershift";
+    const entry = { ...base, isHypershiftTrigger: false, binding: live, action: text, sidearmOnly: true };
+    const own = withOfflineAssignment(config, "p1", liveLayer, entry, preview(layer, { kind: "own", actionId: shortcut.id }));
+    expect(tooltipText(own, "")).toContain(i18n.t("offline.tooltip", { action: "Ctrl+C" }));
+    const native = withOfflineAssignment(config, "p1", liveLayer, entry, preview(layer, { kind: "preserved", native: "mouseBack" }));
+    expect(native.offlineActionLabel).toBe(i18n.t("mouseAction.mouseBack"));
+    expect(withOfflineAssignment(config, "p1", liveLayer, entry, null).offlineActionLabel).toBe(i18n.t("offline.unknownAction"));
+  });
+});
 
 describe("triggerBadge", () => {
   it("maps known modes", () => {

@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, ControlId, Layer } from "../lib/config";
-import { MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
+import { isOfflineLayer, MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId, labelForLayer } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
-import { isBuiltinControl, isKeyButton } from "../lib/onboard-mapping";
+import { isBuiltinControl, isKeyButton, type OfflineControl } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
 import { getNativeModel, listNativeMice, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
@@ -18,6 +18,7 @@ import {
   isPlaceholderAction,
   nextUniqueId,
   removeBinding,
+  setOfflineAssignment,
   promoteInlineSnippetActionToLibrary,
   upsertAction,
   upsertSnippetLibraryItem,
@@ -41,6 +42,8 @@ import {
   createInitialDrafts,
   describeAction,
   isSaveDisabled,
+  isOfflinePayloadPlayable,
+  OFFLINE_MOUSE_ACTION_OPTIONS,
   type PickerDrafts,
   enterPhraseOf,
 } from "../lib/action-picker-helpers";
@@ -107,6 +110,7 @@ interface PickerSnapshot {
 }
 
 interface ActionPickerProps {
+  offlineControl?: OfflineControl;
   config: AppConfig;
   bindingId: string | null;
   profileId?: string;
@@ -130,13 +134,19 @@ interface ActionPickerProps {
  *  pattern's binding); the undo history is one for the whole picker, so
  *  Ctrl+Z after a tab switch goes back into the tab before. */
 export function ActionPickerModal(props: ActionPickerProps) {
+  return <ActionPicker key={`${props.profileId}:${props.selectedLayer}:${props.controlId}`} {...props} />;
+}
+
+function ActionPicker(props: ActionPickerProps) {
   const [store] = useState(createDraftHistoryStore<PickerSnapshot>);
   // Drafts an undo / redo brings back onto another tab, read by that tab's mount.
   const [seed, setSeed] = useState<PickerSnapshot | null>(null);
-  return <PickerTab key={props.gesture ?? "press"} {...props} store={store} seed={seed} onSeed={setSeed} />;
+  const gesture = props.selectedLayer && isOfflineLayer(props.selectedLayer) ? "press" : props.gesture ?? "press";
+  return <PickerTab key={gesture} {...props} gesture={gesture} store={store} seed={seed} onSeed={setSeed} />;
 }
 
 function PickerTab({
+  offlineControl,
   config,
   bindingId,
   profileId,
@@ -190,11 +200,15 @@ function PickerTab({
   }, []);
 
 
-  const binding = bindingId ? config.bindings.find((b) => b.id === bindingId) ?? null : null;
+  const offline = selectedLayer !== undefined && isOfflineLayer(selectedLayer);
+  const binding = offline && profileId && controlId && selectedLayer ? findBinding(config, profileId, selectedLayer, controlId) ?? null
+    : bindingId ? config.bindings.find((b) => b.id === bindingId) ?? null : null;
   const savedAction = binding
     ? config.actions.find((a) => a.id === binding.actionId) ?? null
     : null;
-  const existingAction = isPlaceholderAction(savedAction) ? null : savedAction;
+  const existingAction = offline ? (offlineControl?.kind === "own" || offlineControl?.kind === "inherited")
+    ? config.actions.find((action) => action.id === offlineControl.actionId) ?? null : null
+    : isPlaceholderAction(savedAction) ? null : savedAction;
   // Where else this action runs: other buttons and menu items (shown under the preview).
   const elsewhere = existingAction
     ? [...bindingUses(config, existingAction.id, binding), ...otherMenuUses(config, NO_MENU_EDITS, existingAction.id, existingAction.id)]
@@ -208,7 +222,7 @@ function PickerTab({
   const builtinControl = controlId ? isBuiltinControl(config, controlId) : false;
   const layout = controlId ? controlLayout(config, controlId) : undefined;
   // A firmware trigger is fixed in the mouse; only the software one can move.
-  const softwareTrigger = builtinControl && !layout?.firmwareTrigger;
+  const softwareTrigger = !offline && builtinControl && !layout?.firmwareTrigger;
   const currentTrigger = softwareTrigger ? config.settings.hypershiftTrigger ?? "mouse_right" : "none";
   // The role sits on the plain press (the button never clicks) or on the
   // held press (a quick press still clicks: `hypershiftTap`).
@@ -216,7 +230,7 @@ function PickerTab({
   const isCurrentTrigger = softwareTrigger && controlId === currentTrigger && gesture === roleTab;
   const canBeTrigger = softwareTrigger && NATIVE_HYPERSHIFT_TRIGGERS.some((id) => id === controlId);
   // HyperShift 2 is per profile and only a held press (a quick press clicks).
-  const canBeTrigger2 = !!controlId && !!profileId && canBeHypershift2Trigger(config, controlId);
+  const canBeTrigger2 = !offline && !!controlId && !!profileId && canBeHypershift2Trigger(config, controlId);
   const isCurrentTrigger2 = canBeTrigger2 && gesture === "longPress"
     && hypershift2ControlId(config, profileId, layout?.deviceId) === controlId;
   // An unverified Naga keeps HyperShift in Sidearm's own trigger: the same
@@ -229,7 +243,10 @@ function PickerTab({
   const hypershift2Conflict = canBeTrigger2 && softwareTriggerMouse && !!controlId
     && (config.settings.hypershiftTrigger ?? "mouse_right") === layoutControlId(controlId);
   // A global modifier role is not an executable, profile-specific ActionType.
-  const categories = [
+  const inheritCategory = { id: "native", icon: "↺", label: "picker.offlineInherit", actionType: "native" };
+  const categories = offline ? ACTION_CATEGORIES.filter((category) =>
+    category.id === "shortcut" || category.id === "mouseAction" || category.id === "disabled")
+    .map((category) => category.id === "disabled" ? { ...category, label: "picker.offlineSilent" } : category) : [
     { id: "native", icon: "↺", label: "picker.native", actionType: "native" },
     ...(canBeTrigger && (gesture === "press" || gesture === "longPress") ? [{ id: "hypershift", icon: "HS", label: "picker.hypershift", actionType: "hypershift" }] : []),
     ...(canBeTrigger2 && gesture === "longPress" ? [{ id: "hypershift2", icon: "H2", label: "picker.hypershift2", actionType: "hypershift2" }] : []),
@@ -237,7 +254,7 @@ function PickerTab({
   ];
   // The mouse reports one key button at a time only with consumer signals; in
   // F13..F24 mode two arrive together. Asked once per opened key button.
-  const keyButton = builtinControl && controlId !== undefined && isKeyButton(layoutControlId(controlId));
+  const keyButton = !offline && builtinControl && controlId !== undefined && isKeyButton(layoutControlId(controlId));
   const [consumerSignals, setConsumerSignals] = useState(false);
   useEffect(() => {
     if (!keyButton) return;
@@ -274,7 +291,8 @@ function PickerTab({
       // reassigned. Snippets already backed by the library don't need re-saving.
       saveToLibraryDraft: !(existingAction?.type === "textSnippet" && existingAction.payload.source === "libraryRef"),
       base: config,
-      activeCategory: isCurrentTrigger ? "hypershift"
+      activeCategory: offline ? existingAction?.type ?? "disabled"
+        : isCurrentTrigger ? "hypershift"
         : isCurrentTrigger2 ? "hypershift2"
         : !existingAction ? "native"
         : enterPhraseOf(existingAction, config.snippetLibrary) !== null ? "textSnippet"
@@ -315,11 +333,11 @@ function PickerTab({
   const query = searchQuery.trim().toLowerCase();
   const filteredCategories = categories.filter((cat) =>
     !query || [cat.id, cat.actionType, t(cat.label),
-      ...(cat.actionType === "mouseAction" ? MOUSE_ACTION_OPTIONS.flatMap((item) => [item.value, t(item.label)]) : []),
+      ...(cat.actionType === "mouseAction" ? (offline ? OFFLINE_MOUSE_ACTION_OPTIONS : MOUSE_ACTION_OPTIONS).flatMap((item) => [item.value, t(item.label)]) : []),
     ].some((text) => text.toLowerCase().includes(query)),
   );
 
-  const effectiveCategory = filteredCategories.some((c) => c.id === activeCategory)
+  const effectiveCategory = (offline && activeCategory === "native") || filteredCategories.some((c) => c.id === activeCategory)
     ? activeCategory
     : filteredCategories[0]?.id ?? "shortcut";
 
@@ -387,6 +405,13 @@ function PickerTab({
   /** The config with this tab's edit in it; null when it cannot be saved. */
   function buildSave(): AppConfig | null {
     if (saveDisabled) return null;
+    if (selectedLayer && isOfflineLayer(selectedLayer)) {
+      if (!profileId || !controlId) return null;
+      const payload = effectiveCategory === "native" ? null
+        : effectiveCategory === "disabled" ? "silent"
+        : effectiveCategory === "shortcut" ? shortcutDraft : mouseDraft;
+      return setOfflineAssignment(config, profileId, controlId, selectedLayer, payload);
+    }
     if (effectiveCategory === "hypershift") {
       if (!canBeTrigger || !controlId) return null;
       return {
@@ -520,7 +545,7 @@ function PickerTab({
   }
 
   async function handleTest() {
-    if (testRunning || saveDisabled) return;
+    if (offline || testRunning || saveDisabled) return;
     const draftAction = buildAction({ effectiveCategory, existingAction, drafts, t, profiles: config.profiles });
     setTestRunning(true);
     try {
@@ -550,12 +575,15 @@ function PickerTab({
   }
 
   const roleCategory = effectiveCategory === "native" || effectiveCategory === "hypershift" || effectiveCategory === "hypershift2";
-  const saveDisabled = roleCategory
+  const offlineUnplayable = offline && ((effectiveCategory === "shortcut" && !isOfflinePayloadPlayable(shortcutDraft))
+    || (effectiveCategory === "mouseAction" && !isOfflinePayloadPlayable(mouseDraft)));
+  const offlineBlocked = offline && !offlineControl?.editable && !(effectiveCategory === "native" && binding);
+  const saveDisabled = offlineBlocked || (roleCategory
     ? false
-    : isSaveDisabled(effectiveCategory, drafts)
+    : offlineUnplayable || isSaveDisabled(effectiveCategory, drafts)
       || (effectiveCategory === "sequence" && (sequenceDraft.length === 0 || sequenceDraft.length > MAX_SEQUENCE_STEPS
         || sequenceDraft.some((step) => (step.type === "waitWindow" && !step.exe.trim()) || (step.type === "send" && !step.value.trim()))))
-      || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft));
+      || (effectiveCategory === "menu" && isMenuIncomplete(config, menuEdits, menuItemsDraft)));
   // Turning "The same on" on overwrites the other mice's button: say what it holds.
   const syncSave = syncKey && syncDraft && !slotSynced(config.settings, syncKey) ? buildSave() : null;
   const syncOwn = syncSave ? ownBinding(syncSave) : undefined;
@@ -573,11 +601,15 @@ function PickerTab({
     activeConditionsCount > 0 ? t("picker.advancedConditionsTag", { count: activeConditionsCount }) : null,
   ].filter(Boolean);
   const advancedSummary = advancedTags.length > 0 ? advancedTags.join(" · ") : t("picker.advancedDefaults");
-  const previewText = roleCategory
+  const previewText = offline && effectiveCategory === "native" ? t("picker.offlineInherit")
+    : offline && effectiveCategory === "disabled" ? t("picker.offlineSilentHint") : roleCategory
     ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview"
       : effectiveCategory === "hypershift2" ? "picker.hypershift2Preview" : "picker.nativePreview")
     : describeAction(effectiveCategory, drafts, t, config.profiles);
-  const activeCat = categories.find((c) => c.id === effectiveCategory);
+  const activeCat = offline && effectiveCategory === "native" ? inheritCategory : categories.find((c) => c.id === effectiveCategory);
+  const categoryDescription = offline && effectiveCategory === "native" ? "picker.offlineInheritHint"
+    : offline && effectiveCategory === "disabled" ? "picker.offlineSilentHint"
+    : offline && effectiveCategory === "mouseAction" ? "picker.offlineMouseHint" : `picker.categoryDesc.${effectiveCategory}`;
 
   // Undo / redo of every edit made in the picker before Save (a menu item moved
   // into the wrong list, a step deleted…), across the press-pattern tabs.
@@ -659,11 +691,12 @@ function PickerTab({
             {controlLabel ? (
               <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
             ) : null}
+            {offline ? <p className="action-picker__subtitle">{t("picker.offlineHint")}</p> : null}
           </div>
           <CloseButton onClick={requestClose} ariaLabel={t("common.close")} className="action-picker__close" />
         </div>
 
-        {onGestureChange && controlId && profileId && selectedLayer ? (
+        {onGestureChange && controlId && profileId && selectedLayer && !offline ? (
           <div className="action-picker__gestures">
             <PillTrack
               className="pill-track--compact"
@@ -714,6 +747,13 @@ function PickerTab({
                 <span className="action-picker__cat-label">{t(cat.label)}</span>
               </button>
             ))}
+            {offline ? <button type="button"
+              className={`action-picker__cat-btn${effectiveCategory === "native" ? " action-picker__cat-btn--active" : ""}`}
+              disabled={!binding} aria-current={effectiveCategory === "native" ? "true" : undefined}
+              onClick={() => { setSearchQuery(""); setActiveCategoryWithMemory("native"); }}>
+              <span className="action-picker__cat-icon"><CategoryIcon id="native" fallback={inheritCategory.icon} /></span>
+              <span className="action-picker__cat-label">{t("picker.offlineInherit")}</span>
+            </button> : null}
             {filteredCategories.length === 0 ? (
               <p className="action-picker__no-results">{t("picker.noResults")}</p>
             ) : null}
@@ -728,7 +768,7 @@ function PickerTab({
                 <h3 className="action-picker__cat-title">
                   {activeCat ? t(activeCat.label) : ""}
                 </h3>
-                <p className="action-picker__cat-desc">{t(`picker.categoryDesc.${effectiveCategory}`)}</p>
+                <p className="action-picker__cat-desc">{t(categoryDescription)}</p>
               </div>
             </div>
 
@@ -749,7 +789,7 @@ function PickerTab({
             {isCurrentTrigger2 && effectiveCategory !== "hypershift2" ? (
               <Notice variant="warning">{t("picker.hypershift2Remove")}</Notice>
             ) : null}
-            {effectiveCategory === "native" ? (
+            {effectiveCategory === "native" && !offline ? (
               <Notice variant="info">{t("picker.nativeHint")}</Notice>
             ) : null}
             {isCurrentTrigger && effectiveCategory !== "hypershift" ? (
@@ -765,8 +805,10 @@ function PickerTab({
             ) : null}
 
             {effectiveCategory === "mouseAction" ? (
-              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} searchQuery={searchQuery} />
+              <MouseActionEditor draft={mouseDraft} onChange={setMouseDraft} searchQuery={searchQuery} offline={offline} />
             ) : null}
+            {offlineUnplayable ? <Notice variant="warning">{t("picker.offlineUnstorable")}</Notice> : null}
+            {offlineBlocked ? <Notice variant="warning">{t("offline.notEditable")}</Notice> : null}
 
             {effectiveCategory === "textSnippet" ? (
               <TextSnippetEditor
@@ -821,7 +863,7 @@ function PickerTab({
 
             {effectiveCategory === "disabled" ? (
               <div className="editor-grid">
-                <Notice variant="info">{t("picker.disabledHint")}</Notice>
+                <Notice variant="info">{t(offline ? "picker.offlineSilentHint" : "picker.disabledHint")}</Notice>
               </div>
             ) : null}
 
@@ -849,7 +891,7 @@ function PickerTab({
               </div>
             ) : null}
 
-            {controlId && selectedLayer && !builtinControl ? (
+            {controlId && selectedLayer && !builtinControl && !offline ? (
               <SignalCaptureField
                 signalDraft={signalDraft}
                 onChange={setSignalDraft}
@@ -860,7 +902,7 @@ function PickerTab({
             ) : null}
 
             {/* The menu editor has the name in its own top bar. */}
-            {!roleCategory && effectiveCategory !== "menu" ? <label className="field mt-12">
+            {!offline && !roleCategory && effectiveCategory !== "menu" ? <label className="field mt-12">
               <span className="field__label">
                 {t("picker.nameLabel")}
                 <HelpTip text={t("picker.nameHelp")} />
@@ -873,7 +915,7 @@ function PickerTab({
               />
             </label> : null}
 
-            {!roleCategory ? <details
+            {!offline && !roleCategory ? <details
               className="advanced-section picker-advanced mt-12"
               open={advancedOpen}
               onToggle={(e) => setAdvancedOpen(e.currentTarget.open)}
@@ -967,7 +1009,7 @@ function PickerTab({
           <button type="button" className="action-button action-button--ghost" onClick={requestClose}>
             {t("common.cancel")}
           </button>
-          {!roleCategory ? <button
+          {!offline && !roleCategory ? <button
             type="button"
             className="action-button action-button--ghost"
             onClick={handleTest}

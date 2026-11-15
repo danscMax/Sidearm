@@ -286,6 +286,7 @@ pub struct Overlay {
 fn has_action(config: &AppConfig, control: &ControlId, layer: Layer) -> bool {
     config.bindings.iter().any(|binding| {
         binding.enabled
+            && binding.layer.is_live()
             && binding.control_id == *control
             // The hypershift layer falls back to the standard binding; a
             // HyperShift 2 press arrives as the standard record's signal.
@@ -380,6 +381,7 @@ fn key_action(encoded_key: &str) -> Option<OnboardAction> {
 /// targets.
 fn offline_targets(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Vec<(u8, u8, OnboardAction)> {
     crate::mouse_offline::plan(config, model, profile_id)
+        .records()
         .into_iter()
         .map(|record| (record.button_id, record.layer, record.action))
         .collect()
@@ -464,7 +466,7 @@ fn exit_bank(plan: &[(u8, &str)], banks: &Banks, offline_profile: &str) -> u8 {
 
 /// Which profile each bank gets on exit: every profile linked to a bank, or —
 /// with one bank and no link — the offline profile.
-fn bank_plan<'a>(config: &'a AppConfig, model: &NativeModel, banks: &Banks, offline_profile: &'a str) -> Vec<(u8, &'a str)> {
+pub(crate) fn bank_plan<'a>(config: &'a AppConfig, model: &NativeModel, banks: &Banks, offline_profile: &'a str) -> Vec<(u8, &'a str)> {
     let linked: Vec<(u8, &str)> = config
         .profiles
         .iter()
@@ -746,6 +748,16 @@ fn save_snapshot(backup: &Path, snapshot: &Snapshot) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// A bank switch replaced the whole live map, ending ownership of the old one.
+/// Persist that fact before reading or writing any of the new bank's records.
+fn forget_reloaded_map(backup: &Path, active: &mut Option<Snapshot>) -> Result<(), String> {
+    if let Some(snapshot) = active {
+        save_snapshot(backup, &Snapshot { path: snapshot.path.clone(), records: Vec::new() })?;
+        *active = None;
+    }
+    Ok(())
+}
+
 /// Puts back every record Sidearm still owns (the user's own changes stay).
 fn restore_bank(device: &VendorDevice, bank: u8, backup: &Path) -> Result<(), String> {
     restore_bank_except(device, bank, backup, |_, _| false)
@@ -847,14 +859,33 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     if device.mode()? != MODE_NORMAL {
         return Err("Mouse is not in firmware mode".into());
     }
+    let previous = load_snapshot(device, backup)?.map(|snapshot| snapshot.records).unwrap_or_default();
+    let mut targets: Vec<_> = targets.iter().map(|&(button, layer, action)| (button, layer, bank_block(bank, action))).collect();
+    if bank == LIVE_BANK && device.model().live.as_ref().is_some_and(|live| live.banks) {
+        let playing = read_banks(device)?.active;
+        let dir = backup.parent().ok_or("Live backup has no parent directory")?;
+        if let Some(stored) = load_snapshot(device, &bank_backup(dir, device.model(), playing))? {
+            // Undo only our stored offline records outside the live map. Keep
+            // their current values in the live rollback, so stopping puts them back.
+            for record in stored.records {
+                if device.model().live.as_ref().is_some_and(|live| live.extras.iter().any(|&(_, button)| button == record.button))
+                    && !targets.iter().any(|&(button, layer, _)| (button, layer) == (record.button, record.layer))
+                    && record.before != record.target
+                    && (!confirmed_drift(record.target, || device.read_block(bank, record.button, record.layer))?
+                        || previous.iter().any(|owned| (owned.button, owned.layer, owned.before, owned.target) == (record.button, record.layer, record.target, record.before)))
+                {
+                    targets.push((record.button, record.layer, record.before));
+                }
+            }
+        }
+    }
     // A record Sidearm wrote earlier that stays the same keeps it and its
     // original: putting the original back only to write the same record again
     // cost five commands a record. Every other one goes back first, as before.
-    let previous = load_snapshot(device, backup)?.map(|snapshot| snapshot.records).unwrap_or_default();
     let mut kept: Vec<Record> = Vec::new();
-    for &(button, layer, action) in targets {
+    for &(button, layer, target) in &targets {
         if let Some(record) = previous.iter().find(|record| {
-            (record.button, record.layer) == (button, layer) && record.before != record.target && record.target == bank_block(bank, action)
+            (record.button, record.layer) == (button, layer) && record.before != record.target && record.target == target
         }) && !confirmed_drift(record.target, || device.read_block(bank, button, layer))?
         {
             kept.push(record.clone());
@@ -869,7 +900,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
     let playing = (bank == LIVE_BANK && model.live.as_ref().is_some_and(|live| live.banks))
         .then(|| read_banks(device).map(|banks| banks.active).ok())
         .flatten();
-    for &(button, layer, action) in targets {
+    for &(button, layer, target) in &targets {
         if let Some(record) = kept.iter().find(|record| (record.button, record.layer) == (button, layer)) {
             records.push(record.clone());
             continue;
@@ -886,7 +917,7 @@ fn apply_bank(device: &VendorDevice, bank: u8, backup: &Path, targets: &[(u8, u8
                 (None, None) => log::warn!("[naga-live] {} {button:#04x}/{layer} holds a Sidearm signal with no original", model.name),
             }
         }
-        records.push(Record { button, layer, before, target: bank_block(bank, action) });
+        records.push(Record { button, layer, before, target });
     }
     let snapshot = Snapshot { path: device.path.clone(), records };
     if snapshot.records.is_empty() {
@@ -973,10 +1004,18 @@ impl Session {
                     }
                 }
                 let open = || VendorDevice::open_model(model);
-                let attempt = |active: &mut Option<Snapshot>| {
+                let has_banks = model.live.as_ref().is_some_and(|live| live.banks);
+                let attempt = |active: &mut Option<Snapshot>, playing_bank: &mut Option<u8>| {
                     // The last session's maps are still being restored by another process.
                     if crate::live_map_restore_running() {
                         return Err("The previous session's live maps are still being restored".to_owned());
+                    }
+                    if has_banks {
+                        let playing = read_banks(&open()?)?.active;
+                        if playing_bank.is_some_and(|before| before != playing) {
+                            forget_reloaded_map(&backup, active)?;
+                        }
+                        *playing_bank = Some(playing);
                     }
                     if let Some(snapshot) = active {
                         return repair(&open()?, &backup, snapshot);
@@ -1001,10 +1040,10 @@ impl Session {
                 };
                 let mut last_error = None;
                 let mut active = None;
-                let has_banks = model.live.as_ref().is_some_and(|live| live.banks);
+                let mut playing_bank = None;
                 'session: loop {
                     loop {
-                        match attempt(&mut active) {
+                        match attempt(&mut active, &mut playing_bank) {
                             Ok(()) => break,
                             Err(message) if message != super::NO_INTERFACE && message != STOPPING && last_error.as_ref() != Some(&message) => {
                                 log::warn!("[naga-live] {} waiting to configure live assignments: {message}", model.name);
@@ -1022,26 +1061,24 @@ impl Session {
                     // The profile button reloads the whole live map from another
                     // bank: watching the active bank catches it at once, where the
                     // record-by-record check would take a full cycle.
-                    let mut last_bank = None;
-                    for &(button, layer, action) in worker_targets.iter().cycle() {
+                    let watched = active.as_ref().map(|snapshot| snapshot.records.clone()).unwrap_or_default();
+                    for record in watched.iter().cycle() {
                         if stopped.recv_timeout(RETRY) != Err(mpsc::RecvTimeoutError::Timeout) {
                             break 'session;
                         }
                         if has_banks
                             && let Ok(bank) = open().and_then(|device| active_bank(&device))
+                            && playing_bank.is_some_and(|last| last != bank)
                         {
-                            if last_bank.is_some_and(|last| last != bank) {
-                                log::warn!("[naga-live] {} switched to bank {bank}; repairing the live map", model.name);
-                                break;
-                            }
-                            last_bank = Some(bank);
+                            log::warn!("[naga-live] {} switched to bank {bank}; repairing the live map", model.name);
+                            break;
                         }
                         let drift = open().and_then(|device| {
-                            confirmed_drift(block(action), || device.read_block(LIVE_BANK, button, layer))
+                            confirmed_drift(record.target, || device.read_block(LIVE_BANK, record.button, record.layer))
                         });
                         if drift == Ok(true) {
                             // Keep forwarding releases for inputs held before recovery.
-                            log::warn!("[naga-live] {} live assignment {button:#04x}/{layer} changed; repairing", model.name);
+                            log::warn!("[naga-live] {} live assignment {:#04x}/{} changed; repairing", model.name, record.button, record.layer);
                             break;
                         }
                     }
@@ -1226,6 +1263,25 @@ pub(crate) mod tests {
             assert!(setup.signals.iter().any(|entry| entry.usage == signal && !entry.hypershift));
         }
         assert!(offline_targets(&config, &NAGA_V3_PRO, "main").is_empty());
+    }
+
+    #[test]
+    fn offline_only_assignments_do_not_capture_extra_controls_live() {
+        let mut config = config_with_v3();
+        let before = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        let template = config.bindings[0].clone();
+        for layer in [Layer::Offline, Layer::OfflineHypershift] {
+            config.bindings.push(crate::config::Binding {
+                id: format!("offline-extra-{layer:?}"),
+                layer,
+                control_id: control_id(&NAGA_V3_PRO, "wheel_down"),
+                ..template.clone()
+            });
+        }
+        assert_eq!(overlay(&config, &NAGA_V3_PRO, true, false).unwrap(), before);
+        for layer in [Layer::Standard, Layer::Hypershift] {
+            assert!(!has_action(&config, &control_id(&NAGA_V3_PRO, "wheel_down"), layer));
+        }
     }
 
     #[test]
@@ -1478,6 +1534,119 @@ pub(crate) mod tests {
     }
 
     const V3_PATH: &str = r"\\?\hid#vid_1532&pid_00e8&mi_00#x";
+
+    #[test]
+    fn offline_only_wheel_is_restored_reversibly_during_live_use() {
+        use crate::mouse_memory::fake::{self, FakeMouse};
+        for offline in [OnboardAction::Key { modifier: 1, usage: 6 }, OnboardAction::Consumer(USAGES[42])] {
+            let _fake = fake::install(FakeMouse { banks: vec![1], active_bank: 1, ..Default::default() });
+            let dir = tempfile::tempdir().unwrap();
+            let config = config_with_v3();
+            let live = overlay(&config, &NAGA_V3_PRO, true, false).unwrap().targets;
+            assert!(!live.iter().any(|&(button, _, _)| button == 0x0a));
+            let native = block(OnboardAction::Mouse(10));
+            fake::with(|mouse| {
+                mouse.records.insert((1, 0x0a, 0), native);
+                mouse.records.insert((LIVE_BANK, 0x0a, 0), native);
+            });
+            let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+            let stored = bank_backup(dir.path(), &NAGA_V3_PRO, 1);
+            apply_bank(&device, 1, &stored, &[(0x0a, 0, offline)]).unwrap();
+            select_bank(&device, 1).unwrap();
+            let offline_block = bank_block(1, offline);
+            assert_eq!(device.read_block(LIVE_BANK, 0x0a, 0).unwrap(), offline_block);
+            let backup = live_backup(dir.path(), &NAGA_V3_PRO);
+            let mut session = apply_bank(&device, LIVE_BANK, &backup, &live).unwrap();
+            assert_eq!(device.read_block(LIVE_BANK, 0x0a, 0).unwrap(), native);
+            let extra = session.records.iter().find(|record| record.button == 0x0a && record.layer == 0).unwrap();
+            assert_eq!((extra.before, extra.target), (offline_block, native));
+            assert_eq!(device.read_block(1, 0x0a, 0).unwrap(), offline_block, "stored bank is untouched");
+            fake::with(|mouse| { mouse.records.insert((LIVE_BANK, 0x0a, 0), offline_block); });
+            repair(&device, &backup, &mut session).unwrap();
+            assert_eq!(device.read_block(LIVE_BANK, 0x0a, 0).unwrap(), native);
+            apply_bank(&device, LIVE_BANK, &backup, &live).unwrap();
+            assert_eq!(device.read_block(LIVE_BANK, 0x0a, 0).unwrap(), native, "reapplying keeps the restoration");
+            restore_bank(&device, LIVE_BANK, &backup).unwrap();
+            assert_eq!(device.read_block(LIVE_BANK, 0x0a, 0).unwrap(), offline_block);
+            assert!(!backup.exists());
+            assert!(stored.exists());
+        }
+    }
+
+    #[test]
+    fn v3_preview_decisions_match_exit_records_and_preserve_unbound_records() {
+        use crate::{config::{Binding, Layer}, mouse_memory::fake::{self, FakeMouse}, mouse_offline::{self, OfflineKind}};
+        let mut config = config_with_v3();
+        let profile = config.profiles[0].id.clone();
+        config.bindings.retain(|b| b.profile_id != profile);
+        let key = config.actions.iter().find(|a| matches!(a.payload, crate::config::ActionPayload::Shortcut(_))).unwrap().id.clone();
+        for (id, layer) in [("v3_wheel_down", Layer::Offline), ("v3_thumb_02", Layer::OfflineHypershift),
+            ("v3_top_special_03", Layer::Offline), ("v3_mouse_left", Layer::Offline), ("v3_hypershift_button", Layer::Offline)] {
+            config.bindings.push(Binding {
+                id: format!("preview-{id}"), profile_id: profile.clone(), layer, control_id: ControlId::new(id), label: String::new(),
+                action_id: key.clone(), enabled: true, color_tag: None, trigger_mode: None, chord_partner: None, throttle_ms: None,
+            });
+        }
+        let _fake = fake::install(FakeMouse { banks: vec![1], active_bank: 1, ..Default::default() });
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let keep = bank_block(1, OnboardAction::Key { modifier: 0, usage: 0x1e });
+        fake::with(|mouse| { mouse.records.insert((1, 0x40, 0), keep); });
+        let banks = read_banks(&device).unwrap();
+        let shown = mouse_offline::preview(&config, &NAGA_V3_PRO, &profile, Some(&banks));
+        let planned = mouse_offline::plan(&config, &NAGA_V3_PRO, &profile);
+        assert_eq!(shown.controls, planned.0.iter().map(|c| c.preview.clone()).collect::<Vec<_>>());
+        assert_eq!(shown.target.state, mouse_offline::TargetState::Written);
+        assert_eq!(shown.target.bank, Some(1));
+        let dir = tempfile::tempdir().unwrap();
+        store_banks(&device, &config, &NAGA_V3_PRO, &profile, dir.path()).unwrap();
+        for record in planned.records() {
+            assert_eq!(device.read_block(1, record.button_id, record.layer).unwrap(), bank_block(1, record.action));
+        }
+        assert_eq!(device.read_block(1, 0x40, 0).unwrap(), keep);
+        assert_eq!(shown.controls.iter().find(|c| c.control_id == "v3_thumb_01" && c.layer == Layer::Offline).unwrap().kind, OfflineKind::Preserved);
+    }
+
+    #[test]
+    fn preview_target_is_unknown_when_bank_inventory_sleeps_or_is_absent() {
+        use crate::{mouse_memory::fake::{self, FakeMouse}, mouse_offline::{self, TargetState}};
+        let _fake = fake::install(FakeMouse { asleep: true, ..Default::default() });
+        let config = config_with_v3();
+        for present in [vec![&NAGA_V3_PRO], vec![]] {
+            fake::set_present_models(present);
+            let inventory = banks(&NAGA_V3_PRO).ok();
+            assert!(inventory.is_none());
+            let preview = mouse_offline::preview(&config, &NAGA_V3_PRO, &config.profiles[0].id, inventory.as_ref());
+            assert_eq!(preview.target.state, TargetState::Unknown);
+            assert!(preview.target.bank.is_none());
+        }
+    }
+
+    #[test]
+    fn switching_banks_replans_uncovered_extras_from_the_new_banks_snapshot() {
+        use crate::mouse_memory::fake::{self, FakeMouse};
+        let _fake = fake::install(FakeMouse { banks: vec![1, 2], active_bank: 1, ..Default::default() });
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let live = overlay(&config_with_v3(), &NAGA_V3_PRO, true, false).unwrap().targets;
+        let offline = OnboardAction::Key { modifier: 1, usage: 6 };
+        for (bank, button, native) in [(1, 0x0a, 10), (2, 0x09, 9)] {
+            fake::with(|mouse| { mouse.records.insert((bank, button, 0), block(OnboardAction::Mouse(native))); });
+            apply_bank(&device, bank, &bank_backup(dir.path(), &NAGA_V3_PRO, bank), &[(button, 0, offline)]).unwrap();
+        }
+        select_bank(&device, 1).unwrap();
+        let backup = live_backup(dir.path(), &NAGA_V3_PRO);
+        let mut active = Some(apply_bank(&device, LIVE_BANK, &backup, &live).unwrap());
+        assert_eq!(device.read_block(LIVE_BANK, 0x0a, 0).unwrap(), block(OnboardAction::Mouse(10)));
+        select_bank(&device, 2).unwrap();
+        forget_reloaded_map(&backup, &mut active).unwrap();
+        assert!(active.is_none());
+        assert!(snapshot_at(&backup).unwrap().is_empty());
+        let snapshot = apply_bank(&device, LIVE_BANK, &backup, &live).unwrap();
+        assert!(!snapshot.records.iter().any(|r| r.button == 0x0a));
+        assert_eq!(device.read_block(LIVE_BANK, 0x09, 0).unwrap(), block(OnboardAction::Mouse(9)));
+        restore_bank(&device, LIVE_BANK, &backup).unwrap();
+        assert_eq!(device.read_block(LIVE_BANK, 0x09, 0).unwrap(), bank_block(2, offline));
+    }
 
     fn snapshot_at(path: &Path) -> Option<Vec<Record>> {
         std::fs::read(path).ok().map(|bytes| serde_json::from_slice::<Snapshot>(&bytes).unwrap().records)

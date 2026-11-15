@@ -6,7 +6,7 @@
 // mouse and layer (`duplicate`: a note, often a choice; a shortcut doubled on the
 // same press pattern is the conflict banner's unless the user kept it).
 
-import { isMenuMark, type Action, type AppConfig, type Binding, type ControlId, type Layer, type MenuItem } from "./config";
+import { isMenuMark, isOfflineLayer, type Action, type AppConfig, type Binding, type ControlId, type Layer, type MenuItem } from "./config";
 import { conflictingBindingIds, shortcutSignature } from "./conflict-detection";
 import { controlWithGesture, gestureLabel } from "./labels";
 
@@ -62,7 +62,8 @@ export function checkProfile(config: AppConfig, profileId: string): ConfigIssue[
   const actions = new Map(config.actions.map((action) => [action.id, action]));
   const snippets = new Set(config.snippetLibrary.map((snippet) => snippet.id));
   const issues: ConfigIssue[] = [];
-  const bindings = config.bindings.filter((binding) => binding.profileId === profileId && binding.enabled);
+  // These issues describe live assignments; firmware duplicates are intentional.
+  const bindings = config.bindings.filter((binding) => binding.profileId === profileId && binding.enabled && !isOfflineLayer(binding.layer));
 
   const checkAction = (action: Action, where: string, seen: Set<string>) => {
     if (seen.has(action.id)) return;

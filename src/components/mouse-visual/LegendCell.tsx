@@ -8,6 +8,7 @@ import type { ControlSurfaceEntry } from "../../lib/constants";
 import type { ControlInteractions } from "../../hooks/useControlInteractions";
 import { useTranslation } from "react-i18next";
 import { legendCellClass } from "../../lib/mouse-visual";
+import { offlineDetailLabel } from "../../lib/labels";
 import { GestureIcon } from "./GestureIcon";
 import { HeatCount } from "./HeatCount";
 
@@ -54,11 +55,12 @@ export function LegendCell({
   return (
     <button
       type="button"
-      className={legendCellClass({ selected, hovered, dragOver, dimmed, conflict })}
+      className={legendCellClass({ selected, hovered, dragOver, dimmed: dimmed || entry.offline?.kind === "unavailable" || entry.offline?.kind === "unknown", conflict }) + (entry.offline?.kind === "silent" ? " btn-legend__cell--silent" : "")}
       data-action-type={entry.action?.type ?? ""}
+      aria-disabled={entry.offline ? !entry.offline.editable : undefined}
       {...(nativeTooltip ? { title: tooltip } : { "data-tooltip": tooltip })}
       ref={(el) => applyHeatBg(el, controlId)}
-      draggable={!!entry.binding && !!entry.action}
+      draggable={!entry.offline && !!entry.binding && !!entry.action}
       {...getInteractionProps(controlId)}
     >
       <span className="btn-legend__badge">{badge}</span>
@@ -66,7 +68,7 @@ export function LegendCell({
         <span className="btn-legend__main">
           <span className="btn-legend__label">{label}</span>
           {entry.sidearmOnly ? (
-            <span className="btn-legend__live" {...tip(t("mouseVisual.sidearmOnly"))}>
+            <span className="btn-legend__live" {...tip(t("offline.tooltip", { action: entry.offlineActionLabel ?? t("offline.silentAction") }))}>
               <GestureIcon mark="live" />
             </span>
           ) : null}
@@ -81,6 +83,11 @@ export function LegendCell({
             </span>
           ) : null}
         </span>
+        {entry.offline && offlineDetailLabel(entry) ? (
+          <span className="btn-legend__offline-detail">
+            <span className={entry.offline.kind === "silent" ? "btn-legend__offline-live" : "btn-legend__gesture"}>{offlineDetailLabel(entry)}</span>
+          </span>
+        ) : null}
         {/* The other press patterns, one chip each: what the hold / double / triple press does. */}
         {entry.extras?.length ? (
           <span className="btn-legend__gestures">

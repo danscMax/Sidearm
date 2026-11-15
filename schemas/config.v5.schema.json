@@ -29,7 +29,8 @@
         9,
         10,
         11,
-        12
+        12,
+        13
       ]
     },
     "settings": {
@@ -117,7 +118,9 @@
         "standard",
         "hypershift",
         "hypershift2",
-        "hypershiftBoth"
+        "hypershiftBoth",
+        "offline",
+        "offlineHypershift"
       ]
     },
     "controlFamily": {

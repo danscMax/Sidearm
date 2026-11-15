@@ -10,10 +10,11 @@ Shared React hooks that own cross-cutting UI behaviour: persistence/autosave, ru
 - `useRuntime.ts` — runtime status + push-based log/event stream (incremental; avoid full refetch).
 - `useListKeyboard.ts` — canonical Arrow/Home/End/Enter list navigation (palette, dropdown, context menu).
 - `useModalDismiss.ts` / `useDismissable.ts` — Escape + focus-trap + outside-click for modals/popovers.
-- `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle.
+- `useControlInteractions.ts` — mouse-control click/dblclick/keydown/drag prop bundle. Editable offline entries open on click or Enter; other offline entries reject opening. Offline entries reject assignment dragging/dropping.
+- `useOfflinePreview.ts` — 150 ms debounced Rust preview for the current config (including unsaved edits), profile and device. Changes immediately invalidate the displayed snapshot; stale responses and unmounted requests are dropped. Pending/failed reads display unknown.
 - `useLogPanel.ts`, `useMouseVisualPanel.ts`, `useActionPicker.ts`, `useVerification.ts`.
 - `useDraftHistory.ts` — undo / redo over a form's drafts (the action picker): a step is recorded after React draws it, typing in one field coalesces; a `store` from `createDraftHistoryStore` held by a parent outlives a remount, and `passive` keys ride along in snapshots without being a step of their own.
-- `useActionPicker` only opens a valid control's editor and selects its existing binding, if any. It must never create a placeholder or invoke persistence; the modal owns local drafts until Save.
+- `useActionPicker` synchronously selects the explicit target with opening and checks offline preview editability. It never creates a placeholder or invokes persistence; the modal owns drafts until Save.
 - `useAppPersistence` waits for an already-running save request before reading disk for a reload; completing that older save does not invalidate the reload. Only the current reload revision can apply; newer reloads, edits, and undo/redo supersede it, including while it waits for a save. Reload clears undo/redo. A rejected save drops dependent queued edits; `runtime_reload_failed` means the file was committed, so reload it and surface the runtime error without a rollback notification.
 - `useVerification` synchronizes selection only when the active step belongs to `effectiveDeviceId`; choosing another device pauses selection sync and preserves the session.
 

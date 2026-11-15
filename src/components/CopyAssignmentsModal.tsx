@@ -6,6 +6,7 @@ import { labelForLayer } from "../lib/labels";
 import { PillTrack } from "./PillTrack";
 import { ModalFooter, ModalHeader, ModalShell, SelectField, SettingRow } from "./shared";
 
+// Individual layer copies target live assignments; a whole profile also carries offline layers.
 const LAYERS: Layer[] = ["standard", "hypershift", "hypershift2", "hypershiftBoth"];
 
 /** Copies a whole layer, or every layer of a profile, into another layer or profile. */

@@ -7,6 +7,7 @@ import { deviceLayout } from "../lib/devices";
 import { PillTrack } from "./PillTrack";
 import { ModalHeader, ModalShell, SelectField, SettingRow, Toggle } from "./shared";
 
+// Compare live assignments; firmware-only layers are not runtime layers.
 const LAYERS: Layer[] = ["standard", "hypershift", "hypershift2", "hypershiftBoth"];
 
 /** A button × profile table of one layer, or (two built-in mice) button place ×

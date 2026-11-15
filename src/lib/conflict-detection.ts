@@ -11,6 +11,7 @@ import type {
 } from "./config";
 import { gestureOf, type Gesture } from "./config-editing";
 import { canonicalPrimaryKey } from "./key-names";
+import { isOfflineLayer } from "./config";
 
 export interface ConflictGroup {
   /** The group's identity (`conflictKey`), kept in `settings.acceptedConflicts` to keep it. */
@@ -54,7 +55,8 @@ export function findShortcutConflicts(config: AppConfig): ConflictGroup[] {
   const grouped = new Map<string, ConflictGroup>();
 
   for (const binding of config.bindings) {
-    if (!binding.enabled) continue;
+    // Firmware assignments never compete in the live shortcut resolver.
+    if (!binding.enabled || isOfflineLayer(binding.layer)) continue;
     const action = actionsById.get(binding.actionId);
     if (!action || action.type !== "shortcut") continue;
     const signature = shortcutSignature(action.payload as ShortcutActionPayload);

@@ -215,6 +215,8 @@
     "hypershift": "Hypershift",
     "hypershift2": "HyperShift 2",
     "hypershiftBoth": "HS + HS2",
+    "offline": "Без Sidearm",
+    "offlineHypershift": "Без Sidearm · HyperShift",
     "neutral": "Слой {{n}}",
     "standardDesc": "Основной слой назначений и сигналов.",
     "hypershiftDesc": "Второй слой со своими биндами и отдельной валидацией."
@@ -997,6 +999,13 @@
     "debugLogging": "Отладочное логирование"
   },
   "picker": {
+    "offlineHint": "Что эта кнопка делает при выключенном Sidearm — из памяти мыши.",
+    "offlineSilent": "Молчит",
+    "offlineSilentHint": "Без Sidearm эта кнопка ничего не делает.",
+    "offlineInherit": "Как в Sidearm",
+    "offlineInheritHint": "Убрать своё назначение. Что будет вместо него, определяет планировщик прошивки мыши.",
+    "offlineMouseHint": "Кнопка мыши или прокрутка, которую мышь хранит в своей памяти.",
+    "offlineUnstorable": "Мышь не может сохранить это сочетание в памяти. Выберите другую клавишу или только модификаторы.",
     "native": "Исходное действие",
     "hypershift": "HyperShift · удержание",
     "nativeHint": "Использовать исходное действие устройства для этой кнопки в выбранном профиле и слое.",
@@ -2182,6 +2191,30 @@
     "banner_few": "В этом профиле {{count}} проблемы, проверьте:",
     "banner_many": "В этом профиле {{count}} проблем, проверьте:",
     "banner_other": "В этом профиле {{count}} проблемы, проверьте:"
+  },
+  "offline": {
+    "unknown": "Не удалось определить, будет ли этот профиль записан в память мыши",
+    "unknownAction": "Неизвестно",
+    "preserved": "как в памяти мыши",
+    "unavailable": "без триггера HyperShift",
+    "notEditable": "Кнопка занята ролью прошивки или слой недоступен. Существующее своё назначение можно удалить.",
+    "role": { "hypershift": "HyperShift", "profileButton": "Кнопка профиля", "nativeClick": "Обычный клик" },
+    "view": "Без Sidearm",
+    "standard": "Обычный",
+    "hypershift": "HyperShift",
+    "own": "своё",
+    "inherited": "как в Sidearm",
+    "silent": "— молчит",
+    "silentAction": "молчит",
+    "liveAction": "(в Sidearm: {{action}})",
+    "tooltip": "Без Sidearm: {{action}}",
+    "written": "Этот профиль записывается в память мыши при выходе",
+    "notWritten": "Этот профиль не записывается в память мыши при выходе",
+    "followsWindow": "При выходе записывается профиль окна на переднем плане",
+    "bank": "банк {{bank}}",
+    "inherit": "Как в Sidearm",
+    "mute": "Молчит",
+    "edit": "Изменить…"
   },
   "mouseVisual": {
     "sidearmOnly": "Работает только при запущенном Sidearm: в память мыши для работы без Sidearm не записывается.",

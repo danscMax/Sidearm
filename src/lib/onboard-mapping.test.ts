@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Action, Binding, EncoderMapping } from "./config";
-import { isBuiltinControl, offlineProfileId, onboardBindings, playsWithoutSidearm } from "./onboard-mapping";
+import { isBuiltinControl, onboardBindings, playsWithoutSidearm } from "./onboard-mapping";
 import { makeConfig } from "./test-fixtures";
 
 function mapping(
@@ -100,10 +100,4 @@ describe("playsWithoutSidearm", () => {
     expect(playsWithoutSidearm(binding({ triggerMode: "chord" }), shortcut)).toBe(false);
   });
 
-  it("knows the profile written at exit", () => {
-    const config = makeConfig();
-    expect(offlineProfileId(config)).toBe(config.settings.fallbackProfileId);
-    config.settings.offlineProfileId = "@active";
-    expect(offlineProfileId(config)).toBeNull();
-  });
 });

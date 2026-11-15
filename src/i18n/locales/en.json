@@ -209,6 +209,8 @@
     "hypershift": "Hypershift",
     "hypershift2": "HyperShift 2",
     "hypershiftBoth": "HS + HS2",
+    "offline": "Without Sidearm",
+    "offlineHypershift": "Without Sidearm · HyperShift",
     "neutral": "Layer {{n}}",
     "standardDesc": "Primary layer for assignments and signals.",
     "hypershiftDesc": "Secondary layer with separate bindings and validation."
@@ -977,6 +979,13 @@
     "debugLogging": "Debug logging"
   },
   "picker": {
+    "offlineHint": "What this button does with Sidearm off — from the mouse's memory.",
+    "offlineSilent": "Silent",
+    "offlineSilentHint": "This button does nothing without Sidearm.",
+    "offlineInherit": "Same as in Sidearm",
+    "offlineInheritHint": "Remove the own assignment. The mouse's firmware planner decides what plays instead.",
+    "offlineMouseHint": "A mouse button or scroll action the mouse can store in its own memory.",
+    "offlineUnstorable": "The mouse cannot store this combination in memory. Choose another key or modifiers only.",
     "native": "Native action",
     "hypershift": "HyperShift · hold",
     "nativeHint": "Use the device's original action for this button in the selected profile and layer.",
@@ -2128,6 +2137,30 @@
     "duplicatesHide": "Hide",
     "banner_one": "This profile has {{count}} problem to look at:",
     "banner_other": "This profile has {{count}} problems to look at:"
+  },
+  "offline": {
+    "unknown": "Cannot determine whether this profile will be written to mouse memory",
+    "unknownAction": "Unknown",
+    "preserved": "as stored in mouse memory",
+    "unavailable": "no HyperShift trigger",
+    "notEditable": "The firmware reserves this control or the layer is unavailable. An existing own assignment can still be removed.",
+    "role": { "hypershift": "HyperShift", "profileButton": "Profile button", "nativeClick": "Native click" },
+    "view": "Without Sidearm",
+    "standard": "Standard",
+    "hypershift": "HyperShift",
+    "own": "own",
+    "inherited": "same as Sidearm",
+    "silent": "— silent",
+    "silentAction": "silent",
+    "liveAction": "(in Sidearm: {{action}})",
+    "tooltip": "Without Sidearm: {{action}}",
+    "written": "This profile is written to mouse memory on exit",
+    "notWritten": "This profile is not written to mouse memory on exit",
+    "followsWindow": "The profile written on exit follows the foreground window",
+    "bank": "bank {{bank}}",
+    "inherit": "Same as Sidearm",
+    "mute": "Silent",
+    "edit": "Edit…"
   },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm.",

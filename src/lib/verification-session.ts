@@ -8,6 +8,7 @@ import type {
 import type { EncodedKeyEvent, ResolvedInputPreview, WindowCaptureResult } from "./runtime";
 import { expectedEncodedKeyForControl } from "./config-editing";
 import { displayNameForControl } from "./labels";
+import { isOfflineLayer } from "./config";
 
 export type VerificationSessionScope = "currentFamily" | "all";
 export type VerificationStepResult =
@@ -72,6 +73,8 @@ export function createVerificationSession(
   selectedControlId: ControlId | null,
   scope: VerificationSessionScope,
 ): VerificationSession | null {
+  // Verification observes live signals, not what firmware plays after Sidearm exits.
+  if (isOfflineLayer(layer)) return null;
   const selectedControl =
     selectedControlId === null
       ? null

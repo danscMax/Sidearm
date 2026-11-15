@@ -44,6 +44,10 @@ pub enum OfflineKind { Own, Inherited, Preserved, Silent, Role, Unavailable }
 #[serde(rename_all = "camelCase")]
 pub enum OfflineRole { Hypershift, ProfileButton, NativeClick }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum OfflineReason { ActionType, Gesture, Key, MouseModifiers, NoTrigger }
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfflineControl {
@@ -56,6 +60,10 @@ pub struct OfflineControl {
     pub native: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<OfflineRole>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<OfflineReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_action_type: Option<&'static str>,
     pub editable: bool,
 }
 
@@ -80,10 +88,21 @@ pub enum TargetState { Written, NotWritten, FollowsWindow, Unknown }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct OfflineBank {
+    pub bank: u8,
+    pub profile_id: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OfflineTarget {
     pub state: TargetState,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bank: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written_profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banks: Option<Vec<OfflineBank>>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -95,20 +114,27 @@ pub struct OfflinePreview {
 pub fn preview(config: &AppConfig, model: &NativeModel, profile_id: &str, banks: Option<&crate::mouse_memory::live_overlay::Banks>) -> OfflinePreview {
     let follows = config.settings.offline_profile_id.as_deref() == Some(crate::config::OFFLINE_PROFILE_ACTIVE);
     let offline = if follows { crate::config::OFFLINE_PROFILE_ACTIVE.to_owned() } else { offline_profile_id(config, None) };
-    let mut target = OfflineTarget { state: TargetState::NotWritten, bank: None };
+    let mut target = OfflineTarget { state: TargetState::NotWritten, bank: None, written_profile_id: None, banks: None };
     if model.verified && model.transport == Transport::LiveOverlay {
         if let Some(banks) = banks {
             let planned = crate::mouse_memory::live_overlay::bank_plan(config, model, banks, &offline);
             if let Some(&(bank, _)) = planned.iter().find(|(_, profile)| *profile == profile_id) {
-                target = OfflineTarget { state: TargetState::Written, bank: Some(bank) };
+                target.state = TargetState::Written;
+                target.bank = Some(bank);
             } else if follows && planned.iter().any(|(_, profile)| *profile == crate::config::OFFLINE_PROFILE_ACTIVE) {
                 target.state = TargetState::FollowsWindow;
+            }
+            if matches!(target.state, TargetState::Written | TargetState::NotWritten) {
+                target.banks = Some(planned.into_iter().map(|(bank, profile_id)| OfflineBank { bank, profile_id: profile_id.into() }).collect());
             }
         } else {
             target.state = TargetState::Unknown;
         }
     } else if model.verified {
         target.state = if follows { TargetState::FollowsWindow } else if offline == profile_id { TargetState::Written } else { TargetState::NotWritten };
+        if target.state == TargetState::NotWritten {
+            target.written_profile_id = Some(offline);
+        }
     }
     OfflinePreview { target, controls: plan(config, model, profile_id).0.into_iter().map(|control| control.preview).collect() }
 }
@@ -175,7 +201,7 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
         let offline = action(Layer::Offline);
         let offline_hypershift = action(Layer::OfflineHypershift);
         if Some(button) != live.and_then(|live| live.profile_button) {
-            uses_hypershift |= offline_hypershift.is_some() || matches!(hypershift, Some((_, Some(_))));
+            uses_hypershift |= offline_hypershift.is_some() || hypershift.is_some_and(|binding| binding.action.is_ok());
         }
         for (layer, logical, own, derived) in [
             (0, Layer::Offline, offline, standard),
@@ -185,7 +211,7 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
             let translated = layer == 1 && own.is_none() && control == "mouse_left" && right_trigger;
             let action = if translated { Some(OnboardAction::Mouse(2)) } else {
                 match chosen {
-                    Some((_, found)) => found.or_else(|| inert(index, control, layer, own.is_some())),
+                    Some(binding) => binding.action.ok().or_else(|| inert(index, control, layer, own.is_some())),
                     None if layer == 1 && own_profile => inert(index, control, layer, false),
                     None => None,
                 }
@@ -196,11 +222,14 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
                 .or(match control { "wheel_click" => Some("middleClick"), "wheel_up" => Some("scrollUp"), "wheel_down" => Some("scrollDown"), _ => None });
             let native = match action { Some(OnboardAction::Mouse(value)) => native_action(value), None => factory, _ => None };
             let kind = if role.is_some() { OfflineKind::Role } else if action.is_none() { OfflineKind::Preserved }
-                else if matches!(action, Some(OnboardAction::Consumer(_))) || (chosen.is_some_and(|(_, found)| found.is_none()) && !matches!(action, Some(OnboardAction::Mouse(_)))) { OfflineKind::Silent }
+                else if matches!(action, Some(OnboardAction::Consumer(_))) || (chosen.is_some_and(|binding| binding.action.is_err()) && !matches!(action, Some(OnboardAction::Mouse(_)))) { OfflineKind::Silent }
                 else if own.is_some() { OfflineKind::Own } else { OfflineKind::Inherited };
+            let (reason, live_action_type) = if kind == OfflineKind::Silent {
+                (chosen.and_then(|binding| binding.action.err()), chosen.and_then(|binding| binding.live_action_type))
+            } else { (None, None) };
             planned.push(PlannedControl {
                 preview: OfflineControl { control_id: id.as_str().into(), layer: logical, kind,
-                    action_id: if role.is_some() || translated { None } else { chosen.map(|(id, _)| id.to_owned()) }, native, role, editable: role.is_none() },
+                    action_id: if role.is_some() || translated { None } else { chosen.map(|binding| binding.action_id.to_owned()) }, native, role, reason, live_action_type, editable: role.is_none() },
                 record: action.map(|action| OfflineRecord { button_id: button, layer, action }),
             });
         }
@@ -213,6 +242,8 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
             control.preview.kind = OfflineKind::Unavailable;
             control.preview.editable = false;
             control.preview.native = None;
+            control.preview.reason = Some(OfflineReason::NoTrigger);
+            control.preview.live_action_type = None;
         }
     }
     if uses_hypershift && let Some(trigger) = trigger {
@@ -222,7 +253,7 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
         for (layer, logical) in [(0, Layer::Offline), (1, Layer::OfflineHypershift)] {
             planned.push(PlannedControl {
                 preview: OfflineControl { control_id: trigger_id.as_str().into(), layer: logical, kind: OfflineKind::Role,
-                    action_id: None, native: None, role: Some(OfflineRole::Hypershift), editable: false },
+                    action_id: None, native: None, role: Some(OfflineRole::Hypershift), reason: None, live_action_type: None, editable: false },
                 record: Some(OfflineRecord { button_id: trigger, layer, action: OnboardAction::Hypershift }),
             });
         }
@@ -232,7 +263,7 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
             for layer in [Layer::Offline, Layer::OfflineHypershift] {
                 planned.push(PlannedControl { preview: OfflineControl {
                     control_id: control_id(model, id).as_str().into(), layer, kind: OfflineKind::Role,
-                    action_id: None, native: Some(native), role: Some(OfflineRole::NativeClick), editable: false,
+                    action_id: None, native: Some(native), role: Some(OfflineRole::NativeClick), reason: None, live_action_type: None, editable: false,
                 }, record: None });
             }
         }
@@ -240,7 +271,7 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
             for layer in [Layer::Offline, Layer::OfflineHypershift] {
                 planned.push(PlannedControl { preview: OfflineControl {
                     control_id: control_id(model, "hypershift_button").as_str().into(), layer, kind: OfflineKind::Role,
-                    action_id: None, native: None, role: Some(OfflineRole::Hypershift), editable: false,
+                    action_id: None, native: None, role: Some(OfflineRole::Hypershift), reason: None, live_action_type: None, editable: false,
                 }, record: None });
             }
         }
@@ -248,14 +279,21 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
     OfflinePlan(planned)
 }
 
-/// No tuple means no binding; a tuple retains its action id even when unplayable.
+#[derive(Clone, Copy)]
+struct BindingAction<'a> {
+    action_id: &'a str,
+    action: Result<OnboardAction, OfflineReason>,
+    live_action_type: Option<&'static str>,
+}
+
+/// No value means no binding; an unplayable binding retains its action id and reason.
 fn binding_action<'a>(
     config: &'a AppConfig,
     model: &NativeModel,
     profile_id: &str,
     control: &str,
     layer: Layer,
-) -> Option<(&'a str, Option<OnboardAction>)> {
+) -> Option<BindingAction<'a>> {
     use crate::config::Gesture;
     let mut bindings = config.bindings.iter().filter(|b| {
         b.enabled && b.profile_id == profile_id && b.layer == layer && b.control_id.as_str() == control
@@ -266,17 +304,21 @@ fn binding_action<'a>(
     let Some(binding) = bindings.clone().find(|b| Gesture::of(b.trigger_mode) == Gesture::Press) else {
         // Under HyperShift a press without its own binding plays the standard
         // one, as it does while Sidearm runs.
-        return bindings.next().filter(|_| layer != Layer::Hypershift).map(|binding| (binding.action_id.as_str(), None));
+        return bindings.next().filter(|_| layer != Layer::Hypershift).map(|binding| BindingAction {
+            action_id: binding.action_id.as_str(), action: Err(OfflineReason::Gesture), live_action_type: None,
+        });
     };
     if binding.trigger_mode == Some(TriggerMode::Chord) {
-        return Some((binding.action_id.as_str(), None));
+        return Some(BindingAction { action_id: binding.action_id.as_str(), action: Err(OfflineReason::Gesture), live_action_type: None });
     }
     let action = config.actions.iter().find(|a| a.id == binding.action_id)?;
-    Some((action.id.as_str(), onboard_action(model, &action.payload)))
+    let onboard = onboard_action(model, &action.payload);
+    Some(BindingAction { action_id: action.id.as_str(), action: onboard,
+        live_action_type: (onboard == Err(OfflineReason::ActionType)).then_some(action.action_type.as_str()) })
 }
 
 /// The firmware form of an action on `model`, when it has one.
-fn onboard_action(model: &NativeModel, payload: &ActionPayload) -> Option<OnboardAction> {
+fn onboard_action(model: &NativeModel, payload: &ActionPayload) -> Result<OnboardAction, OfflineReason> {
     match payload {
         ActionPayload::Shortcut(shortcut) => {
             let (ctrl, shift, alt, win) = (shortcut.ctrl, shortcut.shift, shortcut.alt, shortcut.win);
@@ -287,19 +329,23 @@ fn onboard_action(model: &NativeModel, payload: &ActionPayload) -> Option<Onboar
             // hold; the right Alt is AltGr on some layouts — a known limit).
             if shortcut.key.trim().is_empty() {
                 let modifier = if model.plain_left_modifiers { standard } else { modifier_bits(ctrl, shift, alt, win) };
-                return (modifier != 0).then_some(OnboardAction::Key { modifier, usage: 0 });
+                return (modifier != 0).then_some(OnboardAction::Key { modifier, usage: 0 }).ok_or(OfflineReason::Key);
             }
-            let usage = hid_usage_for_vk(crate::hotkeys::parse_primary_key(&shortcut.key).ok()?.code)?;
+            let key = crate::hotkeys::parse_primary_key(&shortcut.key).map_err(|_| OfflineReason::Key)?;
+            let usage = hid_usage_for_vk(key.code).ok_or(OfflineReason::Key)?;
             // Such a firmware taps a shortcut with Shift or Alt through the
             // turbo record, which plays the real left keys (one tap per press).
-            Some(if (shift || alt) && !model.plain_left_modifiers {
+            Ok(if (shift || alt) && !model.plain_left_modifiers {
                 OnboardAction::KeyTap { modifier: standard, usage }
             } else {
                 OnboardAction::Key { modifier: standard, usage }
             })
         }
-        ActionPayload::MouseAction(mouse) if !(mouse.ctrl || mouse.shift || mouse.alt || mouse.win) => {
-            Some(OnboardAction::Mouse(match mouse.action {
+        ActionPayload::MouseAction(mouse) => {
+            if mouse.ctrl || mouse.shift || mouse.alt || mouse.win {
+                return Err(OfflineReason::MouseModifiers);
+            }
+            Ok(OnboardAction::Mouse(match mouse.action {
                 MouseActionKind::LeftClick => 1,
                 MouseActionKind::RightClick => 2,
                 MouseActionKind::MiddleClick => 3,
@@ -309,10 +355,10 @@ fn onboard_action(model: &NativeModel, payload: &ActionPayload) -> Option<Onboar
                 // plain scroll is played by the mouse itself without Sidearm.
                 MouseActionKind::ScrollUp => 9,
                 MouseActionKind::ScrollDown => 10,
-                _ => return None,
+                _ => return Err(OfflineReason::MouseModifiers),
             }))
         }
-        _ => None,
+        _ => Err(OfflineReason::ActionType),
     }
 }
 
@@ -590,12 +636,12 @@ mod tests {
     #[test]
     fn the_v2_taps_shift_and_alt_through_the_turbo_record() {
         let v2 = &NAGA_V2_HYPERSPEED;
-        assert_eq!(onboard_action(v2, &shortcut("T", true, true, false)), Some(OnboardAction::KeyTap { modifier: 0x03, usage: 0x17 }));
-        assert_eq!(onboard_action(v2, &shortcut("F4", false, false, true)), Some(OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }));
-        assert_eq!(onboard_action(v2, &shortcut("Delete", false, false, false)), Some(OnboardAction::Key { modifier: 0, usage: 0x4c }));
+        assert_eq!(onboard_action(v2, &shortcut("T", true, true, false)), Ok(OnboardAction::KeyTap { modifier: 0x03, usage: 0x17 }));
+        assert_eq!(onboard_action(v2, &shortcut("F4", false, false, true)), Ok(OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }));
+        assert_eq!(onboard_action(v2, &shortcut("Delete", false, false, false)), Ok(OnboardAction::Key { modifier: 0, usage: 0x4c }));
         // A hold cannot be a turbo record: the right-hand keys this firmware plays.
-        assert_eq!(onboard_action(v2, &shortcut("", true, true, false)), Some(OnboardAction::Key { modifier: 0x21, usage: 0 }));
-        assert_eq!(onboard_action(v2, &shortcut("", false, false, false)), None, "empty shortcut");
+        assert_eq!(onboard_action(v2, &shortcut("", true, true, false)), Ok(OnboardAction::Key { modifier: 0x21, usage: 0 }));
+        assert_eq!(onboard_action(v2, &shortcut("", false, false, false)), Err(OfflineReason::Key), "empty shortcut");
     }
 
     /// The V3 repeats a stored turbo record on its own: plain records with the
@@ -603,18 +649,18 @@ mod tests {
     #[test]
     fn the_v3_gets_plain_records_with_the_standard_mask() {
         let v3 = &NAGA_V3_PRO;
-        assert_eq!(onboard_action(v3, &shortcut("F4", false, false, true)), Some(OnboardAction::Key { modifier: 0x04, usage: 0x3d }));
-        assert_eq!(onboard_action(v3, &shortcut("T", true, true, false)), Some(OnboardAction::Key { modifier: 0x03, usage: 0x17 }));
-        assert_eq!(onboard_action(v3, &shortcut("", false, false, true)), Some(OnboardAction::Key { modifier: 0x04, usage: 0 }));
+        assert_eq!(onboard_action(v3, &shortcut("F4", false, false, true)), Ok(OnboardAction::Key { modifier: 0x04, usage: 0x3d }));
+        assert_eq!(onboard_action(v3, &shortcut("T", true, true, false)), Ok(OnboardAction::Key { modifier: 0x03, usage: 0x17 }));
+        assert_eq!(onboard_action(v3, &shortcut("", false, false, true)), Ok(OnboardAction::Key { modifier: 0x04, usage: 0 }));
     }
 
     #[test]
     fn mouse_buttons_and_the_wheel_have_a_firmware_form() {
         let mouse = |action| ActionPayload::MouseAction(MouseActionPayload { action, ctrl: false, shift: false, alt: false, win: false });
         for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
-            assert_eq!(onboard_action(model, &mouse(MouseActionKind::MouseBack)), Some(OnboardAction::Mouse(4)));
-            assert_eq!(onboard_action(model, &mouse(MouseActionKind::ScrollUp)), Some(OnboardAction::Mouse(9)));
-            assert_eq!(onboard_action(model, &mouse(MouseActionKind::ScrollDown)), Some(OnboardAction::Mouse(10)));
+            assert_eq!(onboard_action(model, &mouse(MouseActionKind::MouseBack)), Ok(OnboardAction::Mouse(4)));
+            assert_eq!(onboard_action(model, &mouse(MouseActionKind::ScrollUp)), Ok(OnboardAction::Mouse(9)));
+            assert_eq!(onboard_action(model, &mouse(MouseActionKind::ScrollDown)), Ok(OnboardAction::Mouse(10)));
         }
     }
 
@@ -669,9 +715,16 @@ mod tests {
                 }
                 OfflineKind::Own | OfflineKind::Inherited => view.native.and_then(|native| {
                     (1..=10).find(|&value| native_action(value) == Some(native)).map(OnboardAction::Mouse)
-                }).or_else(|| view.action_id.as_ref().and_then(|id| config.actions.iter().find(|a| a.id == *id)).and_then(|a| onboard_action(model, &a.payload))),
+                }).or_else(|| view.action_id.as_ref().and_then(|id| config.actions.iter().find(|a| a.id == *id)).and_then(|a| onboard_action(model, &a.payload).ok())),
             };
             assert_eq!(control.record.map(|r| r.action), expected, "{view:?}");
+            let serialized = serde_json::to_value(view).unwrap();
+            if !matches!(view.kind, OfflineKind::Silent | OfflineKind::Unavailable) {
+                assert!(serialized.get("reason").is_none(), "{view:?}");
+            }
+            if serialized["reason"] != "actionType" {
+                assert!(serialized.get("liveActionType").is_none(), "{view:?}");
+            }
         }
         shown.controls.into_iter().find(|control| control.control_id == id && control.layer == layer).unwrap()
     }
@@ -779,6 +832,154 @@ mod tests {
     }
 
     #[test]
+    fn preview_w5_action_type_reason_names_the_live_action() {
+        use crate::config::{ActionType, MenuActionPayload, SequenceActionPayload};
+        let text = crate::config::default_seed_config().actions.into_iter()
+            .find(|action| action.action_type == ActionType::TextSnippet).unwrap().payload;
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            for (action_type, payload, name) in [
+                (ActionType::TextSnippet, text.clone(), "textSnippet"),
+                (ActionType::Menu, ActionPayload::Menu(MenuActionPayload { items: vec![] }), "menu"),
+                (ActionType::Sequence, ActionPayload::Sequence(SequenceActionPayload { steps: vec![] }), "sequence"),
+                (ActionType::Disabled, ActionPayload::Disabled(Default::default()), "disabled"),
+            ] {
+                let (mut config, profile) = empty_profile();
+                let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+                bind(&mut config, &profile, id.as_str(), Layer::Standard, payload, None);
+                config.actions.last_mut().unwrap().action_type = action_type;
+                let view = serde_json::to_value(preview_control(&config, model, &profile, id.as_str(), Layer::Offline)).unwrap();
+                assert_eq!(view["kind"], "silent");
+                assert_eq!(view["reason"], "actionType");
+                assert_eq!(view["liveActionType"], name);
+                assert_eq!(view["actionId"], format!("test-{}-Standard", id.as_str()));
+            }
+        }
+    }
+
+    #[test]
+    fn preview_w5_gesture_reason_comes_from_binding_selection() {
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            for mode in [TriggerMode::LongPress, TriggerMode::DoublePress, TriggerMode::TriplePress, TriggerMode::Chord] {
+                for layer in [Layer::Standard, Layer::Offline] {
+                    let (mut config, profile) = empty_profile();
+                    let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+                    bind(&mut config, &profile, id.as_str(), layer, shortcut("A", false, false, false), Some(mode));
+                    let view = serde_json::to_value(preview_control(&config, model, &profile, id.as_str(), Layer::Offline)).unwrap();
+                    assert_eq!(view["kind"], "silent");
+                    assert_eq!(view["reason"], "gesture", "{model:?} {mode:?} {layer:?}");
+                    assert!(view.get("liveActionType").is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preview_w5_key_reason_covers_unparsable_unstorable_and_empty_keys() {
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            for key in ["VK_175", "VK_107", "not-a-key", ""] {
+                let (mut config, profile) = empty_profile();
+                let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+                bind(&mut config, &profile, id.as_str(), Layer::Offline, shortcut(key, false, false, false), None);
+                let view = serde_json::to_value(preview_control(&config, model, &profile, id.as_str(), Layer::Offline)).unwrap();
+                assert_eq!(view["kind"], "silent");
+                assert_eq!(view["reason"], "key", "{key}");
+                assert!(view.get("liveActionType").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn preview_w5_mouse_reason_covers_each_modifier_and_unsupported_actions() {
+        for model in [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO] {
+            for (action, ctrl, shift, alt, win) in [
+                (MouseActionKind::LeftClick, true, false, false, false),
+                (MouseActionKind::LeftClick, false, true, false, false),
+                (MouseActionKind::LeftClick, false, false, true, false),
+                (MouseActionKind::LeftClick, false, false, false, true),
+                (MouseActionKind::DpiUp, false, false, false, false),
+            ] {
+                let (mut config, profile) = empty_profile();
+                let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
+                bind(&mut config, &profile, id.as_str(), Layer::Offline,
+                    ActionPayload::MouseAction(MouseActionPayload { action, ctrl, shift, alt, win }), None);
+                let view = serde_json::to_value(preview_control(&config, model, &profile, id.as_str(), Layer::Offline)).unwrap();
+                assert_eq!(view["kind"], "silent");
+                assert_eq!(view["reason"], "mouseModifiers");
+                assert!(view.get("liveActionType").is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn preview_w5_unavailable_layer_replaces_binding_reason_with_no_trigger() {
+        for trigger in ["none", "mouse_right"] {
+            let (mut config, profile) = empty_profile();
+            config.settings.hypershift_trigger = trigger.into();
+            if trigger == "none" {
+                bind(&mut config, &profile, "thumb_01", Layer::OfflineHypershift, ActionPayload::Disabled(Default::default()), None);
+            }
+            let view = serde_json::to_value(preview_control(&config, &NAGA_V2_HYPERSPEED, &profile, "thumb_01", Layer::OfflineHypershift)).unwrap();
+            assert_eq!(view["kind"], "unavailable");
+            assert_eq!(view["reason"], "noTrigger");
+            assert!(view.get("liveActionType").is_none());
+        }
+    }
+
+    #[test]
+    fn preview_w5_v2_not_written_names_the_exit_profile() {
+        let (mut config, profile) = empty_profile();
+        let other = config.profiles[1].id.clone();
+        for setting in [None, Some(other.clone()), Some("missing-profile".into())] {
+            config.settings.offline_profile_id = setting.clone();
+            config.settings.fallback_profile_id = if setting.is_none() { other.clone() } else { profile.clone() };
+            let target = serde_json::to_value(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target).unwrap();
+            if setting.as_deref() == Some("missing-profile") {
+                assert_eq!(target, serde_json::json!({"state": "written"}));
+            } else {
+                assert_eq!(target, serde_json::json!({"state": "notWritten", "writtenProfileId": other}));
+            }
+        }
+    }
+
+    #[test]
+    fn preview_w5_v3_banks_are_the_exit_plan_for_written_and_unwritten_profiles() {
+        use crate::mouse_memory::live_overlay::Banks;
+        let (mut config, profile) = empty_profile();
+        let other = config.profiles[1].id.clone();
+        config.settings.offline_profile_id = Some(profile.clone());
+        config.profiles[0].device_slots = Some([("razer-naga-v3".into(), 3)].into());
+        config.profiles[1].device_slots = Some([("razer-naga-v3".into(), 2)].into());
+        let inventory = Banks { active: 1, assigned: vec![1, 2, 3] };
+        for (requested, state, bank) in [(&profile, "written", Some(3)), (&other, "written", Some(2)), (&"unlinked".into(), "notWritten", None)] {
+            let target = serde_json::to_value(preview(&config, &NAGA_V3_PRO, requested, Some(&inventory)).target).unwrap();
+            assert_eq!(target["state"], state);
+            assert_eq!(target["bank"], serde_json::json!(bank));
+            assert_eq!(target["banks"], serde_json::json!([{"bank": 3, "profileId": profile}, {"bank": 2, "profileId": other}]));
+            assert!(target.get("writtenProfileId").is_none());
+        }
+        config.profiles[0].device_slots = Some([("razer-naga-v3".into(), 5)].into());
+        config.profiles[1].device_slots = None;
+        let target = serde_json::to_value(preview(&config, &NAGA_V3_PRO, &other, Some(&inventory)).target).unwrap();
+        assert_eq!(target, serde_json::json!({"state": "notWritten", "banks": []}));
+        let one = Banks { active: 2, assigned: vec![2] };
+        let target = serde_json::to_value(preview(&config, &NAGA_V3_PRO, &other, Some(&one)).target).unwrap();
+        assert_eq!(target, serde_json::json!({"state": "notWritten", "banks": [{"bank": 2, "profileId": profile}]}));
+    }
+
+    #[test]
+    fn preview_w5_dynamic_and_unknown_targets_omit_unresolved_fields() {
+        use crate::mouse_memory::live_overlay::Banks;
+        let (mut config, profile) = empty_profile();
+        config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
+        let one = Banks { active: 1, assigned: vec![1] };
+        for (model, banks, state) in [(&NAGA_V2_HYPERSPEED, None, "followsWindow"),
+            (&NAGA_V3_PRO, Some(&one), "followsWindow"), (&NAGA_V3_PRO, None, "unknown")] {
+            let target = serde_json::to_value(preview(&config, model, &profile, banks).target).unwrap();
+            assert_eq!(target, serde_json::json!({"state": state}));
+        }
+    }
+
+    #[test]
     fn own_silence_without_standard_mapping_is_stored_and_previewed() {
         for payload in [ActionPayload::Disabled(Default::default()), shortcut("VK_175", false, false, false)] {
             let (mut config, profile) = empty_profile();
@@ -845,7 +1046,7 @@ mod tests {
             bind(&mut config, &profile, id.as_str(), Layer::Offline, shortcut("F4", false, false, true), Some(TriggerMode::Press));
             let records = plan(&config, model, &profile).records();
             let button = model.button_id_for("thumb_01").unwrap();
-            assert_eq!(record(&records, button, 0), onboard_action(model, &shortcut("F4", false, false, true)));
+            assert_eq!(record(&records, button, 0), onboard_action(model, &shortcut("F4", false, false, true)).ok());
             assert_eq!(record(&records, button, 1), record(&before, button, 1), "layer 1 keeps its live fallback");
             config.bindings.last_mut().unwrap().enabled = false;
             assert_eq!(plan(&config, model, &profile).records(), before, "a disabled own binding falls back");

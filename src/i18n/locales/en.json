@@ -209,6 +209,8 @@
     "hypershift": "Hypershift",
     "hypershift2": "HyperShift 2",
     "hypershiftBoth": "HS + HS2",
+    "offline": "Without Sidearm",
+    "offlineHypershift": "Without Sidearm · HyperShift",
     "neutral": "Layer {{n}}",
     "standardDesc": "Primary layer for assignments and signals.",
     "hypershiftDesc": "Secondary layer with separate bindings and validation."

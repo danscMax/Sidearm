@@ -11,6 +11,15 @@ const bind = (id: string, controlId: string, actionId: string, extra: Partial<Bi
   ({ id, profileId: "p1", layer: "standard", controlId, label: id, actionId, enabled: true, ...extra });
 
 describe("checkProfile", () => {
+  it.each(["offline", "offlineHypershift"] as const)("ignores conflicts, duplicates and broken references in %s", (layer) => {
+    const config = makeConfig({
+      actions: [key("copy", "C", { ctrl: true })],
+      bindings: [bind("a", "thumb_01", "copy", { layer }), bind("b", "mouse_4", "copy", { layer }), bind("missing", "thumb_02", "missing", { layer })],
+    });
+    expect(findShortcutConflicts(config)).toEqual([]);
+    expect(checkProfile(config, "p1")).toEqual([]);
+  });
+
   it("finds broken references in assignments and menus", () => {
     const config = makeConfig({
       actions: [

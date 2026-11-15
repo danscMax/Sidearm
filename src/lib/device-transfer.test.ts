@@ -22,6 +22,18 @@ function twoMice(bindings: Binding[]): AppConfig {
 }
 
 describe("copying assignments between mice", () => {
+  it.each(["offline", "offlineHypershift"] as const)("carries %s between mice in both directions and retargets imported assignments", (layer) => {
+    const config = twoMice([binding("own", "thumb_01", { layer })]);
+    const plan = planDeviceTransfer(config, RAZER_NAGA_DEVICE_ID, NAGA_V3_DEVICE_ID, ["p1"], "keep");
+    const next = applyDeviceTransfer(config, RAZER_NAGA_DEVICE_ID, NAGA_V3_DEVICE_ID, plan);
+    const copy = next.bindings.find((item) => item.controlId === "v3_thumb_01")!;
+    expect(copy).toMatchObject({ layer, enabled: true });
+    expect(copy.actionId).not.toBe("a1");
+    expect(planDeviceTransfer(next, NAGA_V3_DEVICE_ID, RAZER_NAGA_DEVICE_ID, ["p1"], "replace")[0]).toMatchObject({ target: "thumb_01", outcome: "replace" });
+    const imported = { ...next, bindings: [copy], physicalControls: next.physicalControls.filter((control) => control.deviceId !== NAGA_V3_DEVICE_ID) };
+    expect(retargetImportedBindings(imported, new Set([copy.id]), RAZER_NAGA_DEVICE_ID).config.bindings.find((item) => item.id === copy.id)).toMatchObject({ layer, controlId: "thumb_01" });
+  });
+
   it("copies to the same place, translates the side button to the tilt, and clones actions", () => {
     const config = twoMice([binding("b1", "thumb_01"), binding("b2", "mouse_4"), binding("b3", "thumb_01", { profileId: "p2" })]);
     const plan = planDeviceTransfer(config, RAZER_NAGA_DEVICE_ID, NAGA_V3_DEVICE_ID, ["p1"], "keep");

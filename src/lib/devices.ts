@@ -186,7 +186,7 @@ export function setHypershift2Trigger(config: AppConfig, profileId: string, cont
   };
 }
 
-/** Layers a device shows for a profile: the HyperShift 2 ones only while
+/** Live layers only: the HyperShift 2 ones only while
  *  that profile holds a HyperShift 2 trigger on it (or one is selected). */
 export function deviceLayers(config: AppConfig, profileId: string | null | undefined, deviceId: string | null | undefined, selected: Layer): Layer[] {
   const extra = hypershift2ControlId(config, profileId, deviceId) !== null || selected === "hypershift2" || selected === "hypershiftBoth";

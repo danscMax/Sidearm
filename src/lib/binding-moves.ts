@@ -3,6 +3,7 @@
 // take them all together, so a hidden long or double press never stays behind.
 
 import type { AppConfig, Binding, ControlId, Layer } from "./config";
+import { isOfflineLayer } from "./config";
 import { copyBindingBetweenProfiles, gestureOf, makeBindingId, nextUniqueId, removeBinding } from "./config-editing";
 import { sharedPlace } from "./device-transfer";
 
@@ -134,9 +135,14 @@ export function copyAssignments(
   to: { profileId: string; layer: Layer | "same" },
   replace: boolean,
 ): { config: AppConfig; copied: number; kept: number; menus: number } {
+  if ((to.layer !== "same" && isOfflineLayer(to.layer)) || (from.layer !== "all" && isOfflineLayer(from.layer))) {
+    return { config, copied: 0, kept: 0, menus: 0 };
+  }
   const slots = new Map<string, Slot>();
   for (const binding of config.bindings) {
     if (binding.profileId !== from.profileId || (from.layer !== "all" && binding.layer !== from.layer)) continue;
+    // Only a whole-profile copy carries firmware layers, preserving their identities.
+    if (isOfflineLayer(binding.layer) && !(from.layer === "all" && to.layer === "same")) continue;
     slots.set(`${binding.layer}\u0000${binding.controlId}`, { profileId: binding.profileId, layer: binding.layer, controlId: binding.controlId });
   }
   let next = config;

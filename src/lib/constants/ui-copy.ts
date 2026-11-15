@@ -44,7 +44,7 @@ export const verificationScopeCopy: Array<{
   },
 ];
 
-/** Layer pills. `label` is an i18n KEY; resolve with `t(layer.label)`. */
+/** Live layer pills only. `label` is an i18n KEY; resolve with `t(layer.label)`. */
 export const layerCopy: Array<{ value: Layer; label: string }> = [
   { value: "standard", label: "layer.standard" },
   { value: "hypershift", label: "layer.hypershift" },
@@ -59,6 +59,9 @@ export const FALLBACK_LAYERS: Record<Layer, readonly Layer[]> = {
   // The HyperShift 2 layers stand alone: empty there means nothing.
   hypershift2: [],
   hypershiftBoth: [],
+  // Firmware inheritance is resolved by offlineAssignment, never by the live UI.
+  offline: [],
+  offlineHypershift: [],
 };
 
 /** Single source of truth for action-type i18n KEYS. Both `editableActionTypes`

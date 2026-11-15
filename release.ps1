@@ -53,6 +53,8 @@ chcp 65001 | Out-Null
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $ErrorActionPreference = "Stop"
 . (Join-Path $PSScriptRoot 'ScriptKit.ps1')
+# The machine's heavy-run slot for the whole release (verify and the build inside reuse it).
+. (Join-Path $PSScriptRoot 'tools\heavy-run.ps1')
 
 $root = $PSScriptRoot
 $portable = Join-Path (Split-Path $root -Parent) 'portable'

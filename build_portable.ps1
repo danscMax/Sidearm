@@ -43,6 +43,8 @@ $ErrorActionPreference = "Stop"
 $kit = Join-Path $PSScriptRoot 'ScriptKit.ps1'
 if (Test-Path $kit) { . $kit }
 . (Join-Path $PSScriptRoot 'tools\locked-exe.ps1')
+# The machine's heavy-run slot (a release build inside release.ps1 reuses its slot).
+. (Join-Path $PSScriptRoot 'tools\heavy-run.ps1')
 
 # Wall-clock start for the whole run (build + assemble + verify), shown in the
 # final summary alongside the per-phase Rust timing.

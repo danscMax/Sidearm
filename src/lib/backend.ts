@@ -181,6 +181,16 @@ export async function backToSidearmBank(): Promise<void> {
   return invoke<void>("back_to_sidearm_bank");
 }
 
+/** The slot Sidearm keeps in a device's mouse (1–5), or null. */
+export async function getSidearmBank(deviceId: string): Promise<number | null> {
+  return invoke<number | null>("get_sidearm_bank", { deviceId });
+}
+
+/** Gives Sidearm's slot back (until the next start); whether there was one. */
+export async function releaseSidearmBank(deviceId: string): Promise<boolean> {
+  return invoke<boolean>("release_sidearm_bank", { deviceId });
+}
+
 /** The onboard banks (stored profiles) of a device's mouse. */
 export async function getOnboardBanks(deviceId: string): Promise<OnboardBanks> {
   return invoke<OnboardBanks>("get_onboard_banks", { deviceId });

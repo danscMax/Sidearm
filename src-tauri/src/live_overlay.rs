@@ -48,6 +48,7 @@ const CMD_BANK_INVENTORY: u8 = 0x81;
 const CMD_ACTIVE_BANK: u8 = 0x84;
 const CMD_SELECT_BANK: u8 = 0x04;
 const CMD_CREATE_BANK: u8 = 0x02;
+const CMD_DELETE_BANK: u8 = 0x03;
 pub const MAX_BANKS: u8 = 5;
 
 static ACTIVE: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
@@ -70,6 +71,33 @@ pub fn back_to_sidearm_bank() -> Result<(), String> {
         log::info!("[naga-live] {} put back on the Sidearm bank {bank}", model.name);
     }
     Ok(())
+}
+
+/// Mice whose Sidearm bank the user gave back this run: no session claims one
+/// again until the next start.
+static RELEASED: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
+
+/// No session of `model` claims Sidearm's bank again in this run (the start
+/// after the next capture restart writes the live map).
+pub fn keep_off_sidearm_bank(model: &NativeModel) {
+    RELEASED[model.catalog_index()].store(true, Ordering::Release);
+}
+
+/// Sidearm's bank of the connected mouse of `model`, if it has one.
+pub fn sidearm_bank_of(model: &'static NativeModel) -> Result<Option<u8>, String> {
+    Ok(user_banks(&VendorDevice::open_model(model)?)?.1)
+}
+
+/// Gives Sidearm's bank back: the mouse leaves it and the slot is unassigned.
+/// Returns whether there was one.
+pub fn release_sidearm_bank(model: &'static NativeModel, config_dir: &Path) -> Result<bool, String> {
+    keep_off_sidearm_bank(model);
+    let device = VendorDevice::open_model(model)?;
+    let Some(bank) = user_banks(&device)?.1 else { return Ok(false) };
+    leave_sidearm_bank(&device, None, config_dir)?;
+    delete_bank(&device, bank)?;
+    log::info!("[naga-live] {} gave the Sidearm bank {bank} back (slot free)", model.name);
+    Ok(true)
 }
 
 fn set_offline(model: &'static NativeModel, bank: u8) {
@@ -504,6 +532,19 @@ fn create_bank(device: &VendorDevice, bank: u8) -> Result<(), String> {
     device.command(CLASS_BANKS, CMD_CREATE_BANK, &[bank])?;
     if !read_banks(device)?.assigned.contains(&bank) {
         return Err(format!("Could not confirm new bank {bank}"));
+    }
+    Ok(())
+}
+
+/// `05:03`: unassigns a bank that is not playing; a select of it is refused
+/// afterwards (measured 2026-11-15).
+fn delete_bank(device: &VendorDevice, bank: u8) -> Result<(), String> {
+    if read_banks(device)?.active == bank {
+        return Err(format!("Bank {bank} plays now"));
+    }
+    device.command(CLASS_BANKS, CMD_DELETE_BANK, &[bank])?;
+    if read_banks(device)?.assigned.contains(&bank) {
+        return Err(format!("Could not confirm bank {bank} unassigned"));
     }
     Ok(())
 }
@@ -1271,6 +1312,7 @@ impl Session {
                 // Sidearm's own bank needs its consumer signals on every key
                 // button: that is how it is found again (`sidearm_bank`).
                 let bank_path = has_banks
+                    && !RELEASED[index].load(Ordering::Acquire)
                     && model.key_buttons.iter().all(|&(_, button)| {
                         worker_targets.iter().any(|&(b, l, action)| (b, l) == (button, 0) && is_own_signal(model, b, 0, block(action)))
                     });
@@ -2199,6 +2241,23 @@ pub(crate) mod tests {
             crate::config::MouseOverrides { mouse_dpi: Some(2400), ..Default::default() },
         )].into());
         assert_ne!(key, store_key(&faster, &NAGA_V3_PRO, &banks, &profile));
+    }
+
+    #[test]
+    fn giving_the_bank_back_leaves_it_and_frees_the_slot() {
+        use crate::mouse_memory::fake;
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        fake::set_present_models(vec![&NAGA_V3_PRO]);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap();
+        select_bank(&device, 3).unwrap();
+        drop(device);
+        assert!(release_sidearm_bank(&NAGA_V3_PRO, dir.path()).unwrap());
+        fake::with(|mouse| assert_eq!((mouse.banks.clone(), mouse.active_bank), (vec![1, 2], 1)));
+        // Nothing left to give back.
+        assert!(!release_sidearm_bank(&NAGA_V3_PRO, dir.path()).unwrap());
     }
 
     #[test]

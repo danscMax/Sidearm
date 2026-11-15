@@ -8,6 +8,8 @@ import {
   getMouseSettings,
   getNativeModel,
   getOnboardBanks,
+  getSidearmBank,
+  releaseSidearmBank,
   listenMouseBattery,
   listenNativeMiceChanged,
   normalizeCommandError,
@@ -91,6 +93,11 @@ export function MouseWorkspace({
   const target = deviceId;
   const targetRef = useRef(target);
   const [banks, setBanks] = useState<OnboardBanks | null>(null);
+  /** The slot Sidearm keeps in the mouse; "Return slot" asks once more before it goes. */
+  const [sidearmBank, setSidearmBank] = useState<number | null>(null);
+  const [releaseStep, setReleaseStep] = useState<"idle" | "confirm" | "busy">("idle");
+  const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [banksVersion, setBanksVersion] = useState(0);
 
   async function run(request: (deviceId?: string) => Promise<MouseSettingsState>, writing = false) {
     const state = lifecycle.current;
@@ -183,11 +190,23 @@ export function MouseWorkspace({
 
   useEffect(() => {
     setBanks(null);
+    setSidearmBank(null);
     if (!model?.banks || !model.connected) return;
     let current = true;
     void getOnboardBanks(model.deviceId).then((next) => { if (current) setBanks(next); }, () => {});
+    void getSidearmBank(model.deviceId).then((next) => { if (current) setSidearmBank(next); }, () => {});
     return () => { current = false; };
-  }, [model?.deviceId, model?.banks, model?.connected]);
+  }, [model?.deviceId, model?.banks, model?.connected, banksVersion]);
+
+  function releaseSlot(deviceId: string) {
+    if (releaseStep === "idle") { setReleaseStep("confirm"); return; }
+    setReleaseStep("busy");
+    setReleaseError(null);
+    void releaseSidearmBank(deviceId).then(
+      () => { setReleaseStep("idle"); setBanksVersion((v) => v + 1); },
+      (e: unknown) => { setReleaseStep("idle"); setReleaseError(normalizeCommandError(e).message); },
+    );
+  }
 
   // The profile's own settings for the mouse shown.
   const mouseId = target;
@@ -318,6 +337,15 @@ export function MouseWorkspace({
               </SettingRow>
             );
           })}
+          {sidearmBank !== null ? (
+            <SettingRow sub title={t("mouse.sidearmSlotRow", { n: sidearmBank })} hint={t("mouse.sidearmSlotHelp")}>
+              <button type="button" className="action-button action-button--secondary action-button--small" disabled={releaseStep === "busy"}
+                onClick={() => releaseSlot(model.deviceId)}>
+                {releaseStep === "confirm" ? t("mouse.sidearmSlotConfirm") : t("mouse.sidearmSlotRelease")}
+              </button>
+            </SettingRow>
+          ) : null}
+          {releaseError ? <p className="panel__muted help-sm">{releaseError}</p> : null}
         </section>
       ) : null}
 

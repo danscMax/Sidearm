@@ -87,6 +87,8 @@
     "allow-list-native-mice",
     "allow-get-onboard-banks",
     "allow-back-to-sidearm-bank",
+    "allow-get-sidearm-bank",
+    "allow-release-sidearm-bank",
     "allow-get-offline-preview",
     "allow-get-device-report",
     "allow-open-device-report-issue",

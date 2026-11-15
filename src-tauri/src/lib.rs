@@ -3773,6 +3773,54 @@ async fn back_to_sidearm_bank() -> Result<(), CommandError> {
     .map_err(|e| CommandError::internal(format!("back to the Sidearm bank task failed: {e}")))?
 }
 
+/// The connected mouse of a bank device and its bank model.
+#[cfg(target_os = "windows")]
+fn bank_model(device_id: &str) -> Result<&'static device_catalog::NativeModel, CommandError> {
+    device_catalog::CATALOG
+        .iter()
+        .copied()
+        .find(|model| model.device_id == device_id && model.live.as_ref().is_some_and(|live| live.banks))
+        .ok_or_else(|| CommandError::internal(format!("{device_id} has no onboard banks")))
+}
+
+#[cfg(target_os = "windows")]
+fn mouse_access_error(msg: &str) -> CommandError {
+    let mut error = CommandError::from_ui("onboard_device_unavailable",
+        crate::ui_text!("mouseRead.accessFailed", "Could not access the mouse."));
+    error.details = Some(vec![mouse_settings::public_read_error(msg)]);
+    error
+}
+
+/// The slot Sidearm keeps in a device's mouse, if any.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn get_sidearm_bank(device_id: String) -> Result<Option<u8>, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        mouse_memory::live_overlay::sidearm_bank_of(bank_model(&device_id)?).map_err(|msg| mouse_access_error(&msg))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("Sidearm bank task failed: {e}")))?
+}
+
+/// Gives the slot Sidearm keeps in a device's mouse back. The capture restarts
+/// first, so the session leaves the bank and runs on the live map; the next
+/// start claims a slot again. Returns whether there was one.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn release_sidearm_bank(app: AppHandle, device_id: String) -> Result<bool, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = bank_model(&device_id)?;
+        mouse_memory::live_overlay::keep_off_sidearm_bank(model);
+        if let Err(error) = restart_capture_with(&app, || true, false) {
+            log::warn!("[system] capture restart before giving the Sidearm bank back failed: {error}");
+        }
+        let config_dir = resolve_config_dir(&app)?;
+        mouse_memory::live_overlay::release_sidearm_bank(model, &config_dir).map_err(|msg| mouse_access_error(&msg))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("release Sidearm bank task failed: {e}")))?
+}
+
 /// The profile button took a mouse off Sidearm's bank (offline mode), or it is
 /// back: the Mouse tab's state, the tray's way back and, going offline, an OSD
 /// bubble saying where that way back is.
@@ -4850,6 +4898,8 @@ pub fn run() {
             list_native_mice,
             get_onboard_banks,
             back_to_sidearm_bank,
+            get_sidearm_bank,
+            release_sidearm_bank,
             get_offline_preview,
             get_device_report,
             open_device_report_issue,

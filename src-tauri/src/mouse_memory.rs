@@ -1405,6 +1405,9 @@ pub(crate) mod fake {
         /// Every record write, in order.
         #[serde(skip)]
         pub writes: Vec<(u8, u8, u8)>,
+        /// Record writes into the stored bank playing at that moment.
+        #[serde(skip)]
+        pub playing_writes: usize,
         /// A block one next read of that address returns instead (a firmware
         /// transition), then the stored one again.
         #[serde(skip)]
@@ -1544,6 +1547,7 @@ pub(crate) mod fake {
                 // real V3, measured 2026-11-15).
                 if key.0 != 0 && key.0 == mouse.active_bank && !mouse.banks.is_empty() {
                     mouse.records.insert((0, key.1, key.2), block);
+                    mouse.playing_writes += 1;
                 }
                 mouse.writes.push(key);
             }

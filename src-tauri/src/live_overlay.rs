@@ -825,6 +825,8 @@ fn store_banks(
     let plan = bank_plan(config, model, &banks, offline_profile);
     let key = store_key(config, model, &banks, offline_profile);
     let mut asleep = None;
+    // Whether a write had Sidearm's bank play instead of the bank it wrote.
+    let mut moved = false;
     // The bank reselect below sets the DPI (no linked bank: no reselect); the
     // poll rate stays what the last profile switch left. A store while
     // Sidearm runs leaves the live speed alone.
@@ -835,18 +837,40 @@ fn store_banks(
     if exiting && STORED[model.catalog_index()].load(Ordering::Acquire) == key {
         log::info!("[mouse-offline] {} banks already stored in the background", model.name);
     } else {
-        store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep)?;
+        moved = store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep)?;
         if asleep.is_none() {
             STORED[model.catalog_index()].store(key, Ordering::Release);
         }
     }
     // The records are stored either way; playing them at once is a
     // convenience. Never while Sidearm runs: it plays its own bank.
-    if exiting && !plan.is_empty() && let Err(error) = select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
+    // Sidearm's own bank played for a write: the bank that played before
+    // comes back (an exit's own bank wins below).
+    let exit_select = exiting && !plan.is_empty();
+    if moved && !exit_select && let Err(error) = select_bank(device, banks.active) {
+        log::warn!("[mouse-offline] {} bank {} not reselected after storing: {error}", model.name, banks.active);
+        note_asleep(&mut asleep, error);
+    }
+    if exit_select && let Err(error) = select_bank(device, exit_bank(&plan, &banks, offline_profile)) {
         log::warn!("[mouse-offline] {} bank not reselected after storing: {error}", model.name);
         note_asleep(&mut asleep, error);
     }
     asleep.map_or(Ok(()), Err)
+}
+
+/// Before `bank` is written: when it plays and the mouse has Sidearm's own bank,
+/// that one plays meanwhile. Writing the playing bank changes the live map at
+/// once, and a record rewritten under a held button strands its key (a stuck
+/// Ctrl). Returns whether it switched.
+fn off_the_playing_bank(device: &VendorDevice, bank: u8) -> Result<bool, String> {
+    let banks = read_banks(device)?;
+    if banks.active != bank {
+        return Ok(false);
+    }
+    let Some(sidearm) = sidearm_bank(device, &banks)? else { return Ok(false) };
+    select_bank(device, sidearm)?;
+    log::info!("[mouse-offline] {} Sidearm bank {sidearm} plays while bank {bank} is written", device.model().name);
+    Ok(true)
 }
 
 /// The writes of [`store_banks`]: unlinked banks get their records back, each
@@ -859,19 +883,23 @@ fn store_planned_banks(
     plan: &[(u8, &str)],
     config_dir: &Path,
     asleep: &mut Option<String>,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    let mut moved = false;
     // A bank no profile is linked to any more gets its own records back: what
     // Sidearm stored there earlier (an old turbo record included) would play on.
     for &bank in banks.assigned.iter().filter(|&&bank| !plan.iter().any(|&(planned, _)| planned == bank)) {
         let backup = bank_backup(config_dir, model, bank);
-        if backup.exists() && let Err(error) = restore_bank(device, bank, &backup) {
+        if backup.exists() && let Err(error) = off_the_playing_bank(device, bank).and_then(|switched| {
+            moved |= switched;
+            restore_bank(device, bank, &backup)
+        }) {
             log::warn!("[mouse-offline] {} unlinked bank {bank} not restored: {error}", model.name);
             note_asleep(asleep, error);
         }
     }
     if plan.is_empty() {
         log::info!("[mouse-offline] {} keeps its {} onboard profiles: none is linked", model.name, banks.assigned.len());
-        return Ok(());
+        return Ok(moved);
     }
     for &(bank, profile_id) in plan {
         let backup = bank_backup(config_dir, model, bank);
@@ -884,6 +912,7 @@ fn store_planned_banks(
                 && verify_bank(device, bank, &snapshot.records).is_ok()
         });
         if !already_stored {
+            moved |= off_the_playing_bank(device, bank)?;
             apply_bank(device, bank, &backup, &targets)?;
         }
         log::info!("[mouse-offline] {} profile `{profile_id}` verified in bank {bank}: {} records", model.name, targets.len());
@@ -899,7 +928,7 @@ fn store_planned_banks(
             }
         }
     }
-    Ok(())
+    Ok(moved)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -2332,6 +2361,43 @@ pub(crate) mod tests {
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         assert!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).is_err());
         fake::with(|mouse| assert_eq!(mouse.banks, vec![1, 2], "no half-filled slot is left taken"));
+    }
+
+    #[test]
+    fn an_exit_writes_the_playing_bank_only_while_sidearms_bank_plays() {
+        use crate::mouse_memory::fake;
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let mut config = config_with_v3();
+        let profile = config.settings.fallback_profile_id.clone();
+        config.profiles.iter_mut().find(|p| p.id == profile).unwrap().device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
+        // A DPI no other test uses: its own store fingerprint (STORED is shared).
+        config.profiles.iter_mut().find(|p| p.id == profile).unwrap().device_mouse = Some([(
+            NAGA_V3_PRO.device_id.to_owned(),
+            crate::config::MouseOverrides { mouse_dpi: Some(1234), ..Default::default() },
+        )].into());
+        STORED[NAGA_V3_PRO.catalog_index()].store(0, Ordering::Release);
+        // A shortcut on thumb 3, so the offline profile has a record to write.
+        let shortcut = config.actions.iter().find(|action| action.action_type == ActionType::Shortcut).unwrap().id.clone();
+        config.bindings.push(crate::config::Binding {
+            id: "v3-shortcut".into(),
+            profile_id: profile.clone(),
+            control_id: control_id(&NAGA_V3_PRO, "thumb_03"),
+            layer: Layer::Standard,
+            action_id: shortcut,
+            ..config.bindings.last().unwrap().clone()
+        });
+        claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap();
+        // The session already left Sidearm's bank: bank 1 plays and gets the profile.
+        fake::with(|mouse| { mouse.active_bank = 1; mouse.playing_writes = 0; mouse.writes.clear(); });
+        store_banks(&device, &config, &NAGA_V3_PRO, &profile, dir.path(), true).unwrap();
+        fake::with(|mouse| {
+            assert!(mouse.writes.iter().any(|&(bank, _, _)| bank == 1), "bank 1 is written");
+            assert_eq!(mouse.playing_writes, 0, "never while it plays");
+            assert_eq!(mouse.active_bank, 1, "and it plays again afterwards");
+        });
     }
 
     #[test]

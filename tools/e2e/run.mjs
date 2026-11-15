@@ -46,6 +46,9 @@ function check(name, ok, detail = "") {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 function build() {
+  // The whole run below normal (cargo, rustc and the apps inherit it on Windows),
+  // so a run beside other sessions' work leaves the desktop responsive.
+  os.setPriority(os.constants.priority.PRIORITY_BELOW_NORMAL);
   if (process.argv.includes("--no-build") && fs.existsSync(EXE)) return;
   console.log("Building the fake-mice app (debug)…");
   const built = spawnSync("cargo", ["tauri", "build", "--debug", "--no-bundle", "--features", "fake-mice"], {
@@ -62,7 +65,8 @@ class World {
     this.mice = path.join(this.root, "mice");
     fs.mkdirSync(this.data);
     fs.mkdirSync(this.mice);
-    this.env = { ...process.env, SIDEARM_DATA_DIR: this.data, SIDEARM_FAKE_MICE: this.mice, ...(POPUPS ? { SIDEARM_FAKE_POPUPS: "1" } : {}) };
+    // SIDEARM_E2E_OWNER: every app process ends with this run (`end_with_test_runner`).
+    this.env = { ...process.env, SIDEARM_DATA_DIR: this.data, SIDEARM_FAKE_MICE: this.mice, SIDEARM_E2E_OWNER: String(process.pid), ...(POPUPS ? { SIDEARM_FAKE_POPUPS: "1" } : {}) };
     this.pipes = {};
     this.app = null;
   }

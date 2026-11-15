@@ -354,6 +354,21 @@ pub fn mark_clean_exit(config_dir: &Path) {
     set_run_once(config_dir, false);
 }
 
+/// A fake-mice process (app, capture helper, watchdog, restorer) ends with the
+/// test run that started it (`SIDEARM_E2E_OWNER` = its pid): a run killed
+/// mid-scenario (a closed terminal, a stopped task) never runs its cleanup,
+/// and its apps kept running for hours (measured 2026-11-15).
+pub fn end_with_test_runner() {
+    let Some(pid) = std::env::var("SIDEARM_E2E_OWNER").ok().and_then(|v| v.parse::<u32>().ok()) else { return };
+    if !crate::fake_mode() {
+        return;
+    }
+    std::thread::spawn(move || {
+        wait_for_exit(pid);
+        std::process::exit(0);
+    });
+}
+
 /// The restore processes' entry (`main.rs`, before Tauri starts). Returns
 /// whether `args` were for one of them.
 pub fn restore_entry(args: &[String]) -> bool {

@@ -30,7 +30,7 @@ mod mouse_restore;
 #[cfg(target_os = "windows")]
 mod mouse_speed;
 #[cfg(target_os = "windows")]
-pub use mouse_restore::restore_entry;
+pub use mouse_restore::{end_with_test_runner, restore_entry};
 #[cfg(target_os = "windows")]
 pub(crate) use mouse_restore::{live_map_restore_running, spawn_live_map_restore};
 #[cfg(target_os = "windows")]
@@ -873,6 +873,10 @@ fn toggle_main_window(app: &AppHandle) {
 /// another app) leaves the previous hotkey live. Never fatal — failures are
 /// surfaced via `record_startup_runtime_error` (Diagnostics + runtime_error event).
 fn apply_global_shortcut(app: &AppHandle, desired: &str) {
+    // A test run beside the user's Sidearm must not take its hotkey and show its hidden window.
+    if fake_mode() {
+        return;
+    }
     let runtime_store = app.state::<Arc<Mutex<RuntimeStore>>>();
     let current_state = app.state::<CurrentGlobalShortcut>();
 
@@ -4263,6 +4267,10 @@ pub fn run() {
                 log::warn!("Duplicate launch ignored — focused the existing window");
                 let _ = app.emit(EVENT_SINGLE_INSTANCE_BLOCKED, ());
             }))
+            // The popups place themselves at the cursor or a corner; only the main
+            // window is remembered. Not in a test run: the state file is the user's
+            // (`%APPDATA%\<identifier>`), and its saved `visible` showed the hidden window.
+            .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["osd", menu_popup::WINDOW_LABEL]).build())
     };
     builder
         .plugin(
@@ -4292,8 +4300,6 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_dialog::init())
-        // The popups place themselves at the cursor or a corner; only the main window is remembered.
-        .plugin(tauri_plugin_window_state::Builder::new().with_denylist(&["osd", menu_popup::WINDOW_LABEL]).build())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,

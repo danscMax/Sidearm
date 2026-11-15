@@ -2,6 +2,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    sidearm_lib::end_with_test_runner();
+
     // If launched as the capture helper subprocess, run the LL keyboard hook
     // loop instead of the full Tauri application.
     if std::env::args().any(|arg| arg == "--capture-helper") {

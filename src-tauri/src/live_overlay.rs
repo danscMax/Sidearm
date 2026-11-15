@@ -1537,6 +1537,100 @@ pub(crate) mod tests {
         println!("records put back");
     }
 
+    /// Hardware, interactive — **close every Sidearm first** (a running one
+    /// repairs the live map). Needs two banks on the V3. Thumb 12 only; its
+    /// record in the live map and in both banks is saved and put back, also on
+    /// a panic. Answers the questions a "Sidearm bank" depends on:
+    /// 1. does writing the playing bank also change the live map;
+    /// 2. does a consumer record play from a stored bank (volume up);
+    /// 3. does a bank switch under a held button strand its key.
+    ///
+    /// Run: `cargo test v3_bank_probes -- --ignored --nocapture --test-threads=1`.
+    #[test]
+    #[ignore]
+    fn v3_bank_probes() {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_F24};
+        const THUMB_12: u8 = 0x4b;
+        const VOLUME_UP: u16 = 0x00e9;
+        let f24_down = || unsafe { GetAsyncKeyState(i32::from(VK_F24)) } as u16 & 0x8000 != 0;
+        let enter = |what: &str| {
+            println!("\n>>> {what}\n    then press Enter here");
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+            line.trim().to_lowercase()
+        };
+        let watch_f24 = |seconds: u64| {
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+            let mut seen = false;
+            while std::time::Instant::now() < until {
+                seen |= f24_down();
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            seen
+        };
+        let device = VendorDevice::open_model(&NAGA_V3_PRO).expect("turn the V3 on");
+        let banks = read_banks(&device).expect("banks");
+        let (a, b) = (banks.active, *banks.assigned.iter().find(|&&bank| bank != banks.active).expect("the V3 needs a second bank"));
+        println!("playing bank {a}, other bank {b}, assigned {:?}", banks.assigned);
+        let saved = [LIVE_BANK, a, b].map(|bank| (bank, device.read_block(bank, THUMB_12, 0).unwrap()));
+        println!("saved thumb 12: {saved:02x?}");
+
+        /// Puts thumb 12 back and bank `a` playing, whatever happened.
+        struct Restore(VendorDevice, [(u8, [u8; 7]); 3], u8);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let Restore(device, saved, a) = self;
+                for &(bank, record) in &saved[1..] {
+                    if let Err(error) = device.set_block(bank, THUMB_12, 0, &record) {
+                        println!("!! bank {bank} not put back: {error}");
+                    }
+                }
+                if let Err(error) = select_bank(device, *a) {
+                    println!("!! bank {a} not reselected: {error}");
+                }
+                if let Err(error) = device.set_block(LIVE_BANK, THUMB_12, 0, &saved[0].1) {
+                    println!("!! live record not put back: {error}");
+                }
+                println!("thumb 12 put back: live {:02x?}, bank {a} {:02x?}", device.read_block(LIVE_BANK, THUMB_12, 0), device.read_block(*a, THUMB_12, 0));
+            }
+        }
+        let guard = Restore(device, saved, a);
+        let device = &guard.0;
+
+        // 1. The playing bank's record written: does the live map follow?
+        let f24 = OnboardAction::Key { modifier: 0, usage: 0x73 };
+        write_bank(device, a, THUMB_12, 0, bank_block(a, f24)).unwrap();
+        let live = device.read_block(LIVE_BANK, THUMB_12, 0).unwrap();
+        println!("1. live record after writing bank {a}: {live:02x?} (changed: {})", live != saved[0].1);
+        enter("1. Press thumb 12 a few times within 8 s after Enter");
+        println!("1. F24 played (the live map follows the playing bank's flash): {}", watch_f24(8));
+
+        // 2. A consumer record stored in bank b, played after switching to it.
+        write_bank(device, b, THUMB_12, 0, block(OnboardAction::Consumer(VOLUME_UP))).unwrap();
+        select_bank(device, b).unwrap();
+        println!("2. live record after selecting bank {b}: {:02x?}", device.read_block(LIVE_BANK, THUMB_12, 0).unwrap());
+        let answer = enter("2. Press thumb 12 twice: does the volume go up? Type y or n");
+        println!("2. consumer record plays from a stored bank: {answer}");
+
+        // 3. Back on bank a (thumb 12 = F24 there): switch to b while it is held.
+        select_bank(device, a).unwrap();
+        enter("3. HOLD thumb 12 down and keep holding; with the other hand");
+        let held = f24_down();
+        select_bank(device, b).unwrap();
+        enter("3. Now RELEASE thumb 12, wait a second");
+        let stranded = f24_down();
+        println!("3. F24 down while held: {held}; still down after the release (stranded): {stranded}");
+        if stranded {
+            // Windows' own key state: the firmware sent the new record's release.
+            use windows_sys::Win32::UI::Input::KeyboardAndMouse::{INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, SendInput};
+            let up = INPUT { r#type: INPUT_KEYBOARD, Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_F24, wScan: 0, dwFlags: KEYEVENTF_KEYUP, time: 0, dwExtraInfo: 0 } } };
+            // SAFETY: one initialised INPUT of the size passed.
+            unsafe { SendInput(1, &up, std::mem::size_of::<INPUT>() as i32) };
+            println!("3. F24 released by hand");
+        }
+        drop(guard);
+    }
+
     const V3_PATH: &str = r"\\?\hid#vid_1532&pid_00e8&mi_00#x";
 
     #[test]

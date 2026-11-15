@@ -618,7 +618,11 @@ pub fn stop_sessions(mut sessions: Vec<Session>) {
 /// Returns whether nothing is left to restore.
 pub fn restore_orphaned(config_dir: &Path) -> bool {
     let mut done = true;
-    for model in CATALOG.iter().filter(|model| model.live.is_some()) {
+    // The onboard mice (V2) go last: a sleeping one takes ~5 s to not answer,
+    // and a bank mouse (V3) must not stay silent behind it.
+    let mut models: Vec<_> = CATALOG.iter().filter(|model| model.live.is_some()).collect();
+    models.sort_by_key(|model| model.transport == Transport::Onboard);
+    for model in models {
         let backup = live_backup(config_dir, model);
         if !backup.exists() {
             continue;

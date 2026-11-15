@@ -73,6 +73,24 @@ function makeDrag(data?: string) {
 }
 
 describe("useControlInteractions — getInteractionProps", () => {
+  it("opens offline assignments on a single click and blocks binding drags and drops", () => {
+    const entry = { ...assignedEntry(), offline: { kind: "own" as const } };
+    const params = makeParams({ entries: [entry] });
+    const { result } = renderHook(() => useControlInteractions(params));
+    result.current.getInteractionProps(ASSIGNED).onClick(makeMouse().event);
+    expect(params.onSelectControl).toHaveBeenCalledWith(ASSIGNED);
+    expect(params.onOpenActionPicker).toHaveBeenCalledWith(ASSIGNED, entry.binding);
+    const drag = makeDrag(buildBindingDragData(SLOT));
+    act(() => {
+      result.current.getInteractionProps(ASSIGNED).onDragStart(drag.event);
+      result.current.getInteractionProps(ASSIGNED).onDragEnter(drag.event);
+      result.current.getInteractionProps(ASSIGNED).onDragOver(drag.event);
+      result.current.getInteractionProps(ASSIGNED).onDrop(drag.event);
+    });
+    expect(drag.setData).not.toHaveBeenCalled();
+    expect(params.onDropBinding).not.toHaveBeenCalled();
+    expect(result.current.dragOverId).toBeNull();
+  });
   it("onClick selects, and ctrl/meta toggles multi-select", () => {
     const params = makeParams();
     const { result } = renderHook(() => useControlInteractions(params));

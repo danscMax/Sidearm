@@ -5,12 +5,44 @@
 // forked copies.
 
 import i18n from "../i18n";
-import type { Action, Binding, ControlId, Layer, TriggerMode } from "./config";
+import { isOfflineLayer, type Action, type AppConfig, type Binding, type ControlId, type Layer, type TriggerMode } from "./config";
+import { isBuiltinControl, offlineAssignment } from "./onboard-mapping";
 import type { Slot } from "./binding-moves";
 import type { ControlSurfaceEntry } from "./constants";
 import type { ExecutionRecord } from "./runtime";
 import { ACTION_CATEGORIES } from "./constants";
-import { controlAssignmentLabel, displayNameForControl, fallbackLabel } from "./labels";
+import { controlAssignmentLabel, displayNameForControl, fallbackLabel, offlineDetailLabel } from "./labels";
+
+/** Use the same firmware result for the legend and the mouse hotspots. */
+export function withOfflineAssignment(config: AppConfig, profileId: string, layer: Layer, entry: ControlSurfaceEntry): ControlSurfaceEntry {
+  if (!isBuiltinControl(config, entry.control.id)) return entry;
+  if (!isOfflineLayer(layer)) {
+    if (!entry.sidearmOnly) return entry;
+    const offline = offlineAssignment(config, profileId, entry.control.id, layer === "hypershift" ? "offlineHypershift" : "offline");
+    return { ...entry, offlineActionLabel: offline.action?.displayName };
+  }
+  const result = offlineAssignment(config, profileId, entry.control.id, layer);
+  let liveAction = result.liveAction;
+  if (result.kind === "silent" && result.binding) {
+    const ownId = result.binding.id;
+    const inherited = offlineAssignment({ ...config, bindings: config.bindings.filter((binding) => binding.id !== ownId) }, profileId, entry.control.id, layer);
+    liveAction = inherited.action ?? inherited.liveAction;
+  }
+  return {
+    ...entry,
+    binding: result.binding ?? null,
+    action: result.action ?? null,
+    offline: { kind: result.kind, liveAction },
+    mapping: null,
+    fallback: null,
+    isHypershiftTrigger: false,
+    isHypershift2Trigger: false,
+    extras: undefined,
+    sidearmOnly: false,
+    syncedWith: undefined,
+    sameAs: undefined,
+  };
+}
 
 export type ViewTab = "top" | "side" | "combined" | "bottom";
 
@@ -85,6 +117,7 @@ export function actionLabel(
   entry: ControlSurfaceEntry,
   opts: { triggerLabels?: TriggerBadgeLabels } = {},
 ): string {
+  if (entry.offline) return controlAssignmentLabel(entry);
   if (entry.isHypershiftTrigger) return controlAssignmentLabel(entry);
   if (entry.action && entry.action.type !== "disabled" && entry.binding?.enabled) {
     const base = entry.action.displayName;
@@ -112,13 +145,14 @@ export const HEAT_TINT = "rgba(159, 202, 105, 0.07)";
 /** Two-line tooltip text: control name + assignment (or the unassigned label). */
 export function tooltipText(entry: ControlSurfaceEntry, unassignedLabel: string): string {
   const name = displayNameForControl(entry.control);
+  if (entry.offline) return [name, controlAssignmentLabel(entry), offlineDetailLabel(entry)].filter(Boolean).join("\n");
   if (entry.isHypershiftTrigger) return `${name}\n${controlAssignmentLabel(entry)}`;
   if (!entry.action || entry.action.type === "disabled" || !entry.binding?.enabled) {
     return `${name}\n${fallbackLabel(entry) ?? unassignedLabel}`;
   }
   const cat = ACTION_CATEGORIES.find((c) => c.actionType === entry.action!.type);
   const catLabel = cat ? i18n.t(cat.label) : "";
-  const live = entry.sidearmOnly ? `\n${i18n.t("mouseVisual.sidearmOnly")}` : "";
+  const live = entry.sidearmOnly ? `\n${i18n.t("offline.tooltip", { action: entry.offlineActionLabel ?? i18n.t("offline.silentAction") })}` : "";
   const synced = entry.syncedWith?.length ? `\n${i18n.t("mouseVisual.syncedWith", { mice: entry.syncedWith.join(", ") })}` : "";
   const same = entry.sameAs?.length ? `\n${i18n.t("mouseVisual.sameAs", { buttons: entry.sameAs.join(", ") })}` : "";
   return `${name}\n${catLabel}: ${entry.action.displayName}${extrasText(entry)}${live}${synced}${same}`;

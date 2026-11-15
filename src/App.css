@@ -2312,6 +2312,10 @@ input[type="radio"] {
 .btn-legend__gesture .gesture-icon { flex: none; color: var(--layer-accent, var(--c-accent)); }
 .btn-legend__gesture-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .btn-legend__gesture:hover { background: rgba(var(--layer-rgb, 159, 202, 105), 0.2); color: var(--c-text-bright); }
+.btn-legend__offline-detail { display: flex; min-width: 0; }
+.btn-legend__offline-live { color: var(--c-text-muted); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.btn-legend__cell--silent .btn-legend__label { color: var(--c-text-muted); }
+.profiles__offline-target { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); color: var(--c-text-muted); font-size: var(--fs-caption); }
 /* Quiet marks beside the label: works only while Sidearm runs; kept alike on the other mouse; the same on another button. */
 .btn-legend__live, .btn-legend__synced, .btn-legend__same { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
 .btn-legend__live:hover, .btn-legend__synced:hover, .btn-legend__same:hover { opacity: 1; color: var(--c-text-bright); }
@@ -2342,6 +2346,7 @@ input[type="radio"] {
   line-height: 1.4;
   animation: tab-fade-in 120ms ease-out;
 }
+.profiles-workspace:has(.context-menu) .btn-legend__cell[data-tooltip]:hover::after { display: none; }
 
 /* A chip's own bubble: what that press pattern does; the cell's bubble hides meanwhile. */
 .btn-legend__cell:has([data-tip]:hover)[data-tooltip]:hover::after { display: none; }
@@ -2453,9 +2458,13 @@ input[type="radio"] {
 
 .mouse-visual-tabs__footer {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-sm);
   justify-content: center;
   padding: 4px 0 2px;
 }
+.pill-track--offline-mode .pill-track__pill { font-size: var(--fs-micro); padding: 4px 10px; }
 
 /* ── Device switcher + generic-device view ─────────────────────────── */
 

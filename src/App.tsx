@@ -71,6 +71,8 @@ import { nativeTexts } from "./lib/ui-text";
 import { exportProfileToFile } from "./lib/profile-transfer";
 import { isBuiltinControl, offlineProfileId, playsWithoutSidearm } from "./lib/onboard-mapping";
 import { syncedWith } from "./lib/device-transfer";
+import { withOfflineAssignment } from "./lib/mouse-visual";
+import { isOfflineLayer } from "./lib/config";
 import { checkProfile, duplicatesOnDevice, sameAsByControl } from "./lib/config-check";
 import { describeConfigChange } from "./lib/config-diff";
 import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypershiftControlId } from "./lib/devices";
@@ -1201,6 +1203,7 @@ function App() {
 
   function handleSelectDevice(id: string) {
     setActiveDeviceId(id);
+    if (isOfflineLayer(selectedLayer) && !activeConfig?.devices.find((device) => device.id === id)?.builtin) setSelectedLayer("standard");
     setSelectedControlId(null);
     setMultiSelectedControlIds(new Set());
   }
@@ -1227,7 +1230,7 @@ function App() {
             )
             .map((control) => {
               const binding = bindingByControlId.get(control.id) ?? null;
-              return {
+              return withOfflineAssignment(activeConfig, effectiveProfileId ?? "", selectedLayer, {
                 control,
                 binding,
                 action: binding ? actionById.get(binding.actionId) ?? null : null,
@@ -1247,10 +1250,10 @@ function App() {
                   && binding.enabled && !playsWithoutSidearm(binding, actionById.get(binding.actionId)),
                 syncedWith: binding ? syncedWith(activeConfig, binding.id) : undefined,
                 sameAs: sameAsByControlId.get(control.id),
-              };
+              });
             }) ?? [],
       })),
-    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, extrasByControlId, offlineHere, sameAsByControlId],
+    [activeConfig, bindingByControlId, actionById, encoderByControlId, selectedControlId, effectiveDeviceId, effectiveProfileId, selectedLayer, extrasByControlId, offlineHere, sameAsByControlId],
   );
 
   const isProfilesMode = workspaceMode === "profiles";

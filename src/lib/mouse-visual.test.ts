@@ -101,6 +101,22 @@ describe("offline surface entries", () => {
     }
   });
 
+  it.each(["en", "ru"])('shows short reasons and complete tooltip sentences in %s', async (language) => {
+    const previous = i18n.language;
+    await i18n.changeLanguage(language);
+    try {
+      for (const reason of ["actionType", "gesture", "key", "mouseModifiers", "noTrigger"] as const) {
+        const entry = withOfflineAssignment(config, "p1", "offline", base, preview("offline", {
+          kind: reason === "noTrigger" ? "unavailable" : "silent", reason, liveActionType: "textSnippet",
+        }));
+        const options = { type: i18n.t("action.type.textSnippet") };
+        expect(actionLabel(entry)).toContain(i18n.t(`offline.reason.${reason}`, options));
+        expect(tooltipText(entry, "")).toContain(i18n.t(`offline.reason.${reason}Full`, options));
+        expect(buildHotspotTooltip(entry, "offline", undefined, 0)).toContain(i18n.t(`offline.reason.${reason}Full`, options));
+      }
+    } finally { await i18n.changeLanguage(previous); }
+  });
+
   it("does not describe a disabled live binding as an action in Sidearm", () => {
     const disabled = { ...config, bindings: [{ ...live, enabled: false }] };
     const entry = withOfflineAssignment(disabled, "p1", "offline", base, preview("offline", { kind: "silent" }));

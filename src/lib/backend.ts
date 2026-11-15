@@ -3,6 +3,8 @@ import { uiText } from "./ui-text";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 
+export type { OfflineControl, OfflinePreview } from "./onboard-mapping";
+
 import type {
   Action,
   AppConfig,

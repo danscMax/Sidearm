@@ -2139,7 +2139,7 @@
     "banner_other": "This profile has {{count}} problems to look at:"
   },
   "offline": {
-    "unknown": "Cannot determine whether this profile will be written to mouse memory",
+    "unknown": "The mouse did not respond, so its bank assignments are unknown. It will be written on exit if it wakes up.",
     "unknownAction": "Unknown",
     "preserved": "as stored in mouse memory",
     "unavailable": "no HyperShift trigger",
@@ -2155,12 +2155,30 @@
     "liveAction": "(in Sidearm: {{action}})",
     "tooltip": "Without Sidearm: {{action}}",
     "written": "This profile is written to mouse memory on exit",
-    "notWritten": "This profile is not written to mouse memory on exit",
-    "followsWindow": "The profile written on exit follows the foreground window",
+    "notWritten": "On exit, mouse memory receives “{{name}}” instead of this profile. This is a setting, not a mouse limitation — change it in Mouse memory.",
+    "notWrittenBanks": "“{{name}}” is not linked to a V3 memory bank. Banks: {{banks}}. Link it in Mouse memory.",
+    "writtenBank": "Written to bank {{bank}} on exit.",
+    "bankPlan": "Banks: {{banks}}.",
+    "followsWindow": "On exit, the profile of the window active at that moment is written.",
     "bank": "bank {{bank}}",
     "inherit": "Same as Sidearm",
     "mute": "Silent",
-    "edit": "Edit…"
+    "edit": "Edit…",
+    "setOwn": "Set my own…",
+    "loading": "Reading the Without Sidearm preview…",
+    "plainPressOnly": "Without Sidearm, only a plain press works",
+    "reason": {
+      "actionType": "mouse cannot store {{type}}",
+      "actionTypeFull": "The mouse cannot store this action type ({{type}}); it needs Sidearm.",
+      "gesture": "only a plain press without Sidearm",
+      "gestureFull": "Without Sidearm, only a plain press works; holds, double/triple presses and chords need Sidearm.",
+      "key": "mouse cannot store this key",
+      "keyFull": "The mouse cannot store this key in its own memory.",
+      "mouseModifiers": "mouse cannot store this click with modifiers",
+      "mouseModifiersFull": "The mouse cannot store this mouse action or a click with Ctrl, Shift, Alt or Win.",
+      "noTrigger": "no HyperShift trigger",
+      "noTriggerFull": "This layer is unavailable without Sidearm because the mouse has no firmware HyperShift trigger."
+    }
   },
   "mouseVisual": {
     "sidearmOnly": "Works only while Sidearm runs: the mouse cannot store it for use without Sidearm.",

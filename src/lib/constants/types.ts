@@ -36,7 +36,7 @@ export type ControlSurfaceEntry = {
    *  there (text, macro, menu…), so without Sidearm the button does not do it. */
   sidearmOnly?: boolean;
   /** Effective firmware assignment, only in the Without Sidearm view. */
-  offline?: { kind: OfflineControl["kind"] | "unknown"; native?: string; role?: OfflineControl["role"]; editable: boolean; liveAction?: Action };
+  offline?: Omit<OfflineControl, "controlId" | "layer" | "kind"> & { kind: OfflineControl["kind"] | "unknown"; liveAction?: Action };
   /** Precise firmware result for the live layer's S mark. */
   offlineActionLabel?: string;
   /** The other mice whose same button this one is kept alike with (synced,

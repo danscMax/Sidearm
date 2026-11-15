@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { startTransition, useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import i18n from "../i18n";
@@ -8,6 +8,7 @@ import type { OfflinePreview } from "../lib/onboard-mapping";
 import { withOfflineAssignment, type MouseVisualizationProps } from "../lib/mouse-visual";
 import { NAGA_V3_DEVICE_ID } from "../lib/devices";
 import { resolveInitialControlId } from "../lib/helpers";
+import { offlineTargetLabel } from "../lib/labels";
 import { makeAction, makeConfig } from "../lib/test-fixtures";
 import { ProfilesWorkspace, type ProfilesWorkspaceProps } from "./ProfilesWorkspace";
 
@@ -112,9 +113,29 @@ it.each([
 ] satisfies [OfflinePreview["target"], string][])("uses the planner target %j in a canonical notice", (target, variant) => {
   const config = makeConfig();
   show(config, { ...offlineProps(config), offlinePreview: { target, controls: [] } });
-  const notice = screen.getByText(new RegExp(i18n.t(`offline.${target.state}`))).closest(".notice")!;
+  const notice = screen.getByText(offlineTargetLabel(target, config, "p1")).closest(".notice")!;
   expect(notice.classList.contains(`notice--${variant}`)).toBe(true);
-  if ("bank" in target) expect(notice.textContent).toContain(i18n.t("offline.bank", { bank: 3 }));
+  if ("bank" in target) expect(notice.textContent).toContain(i18n.t("offline.writtenBank", { bank: 3 }));
+});
+
+it.each(["en", "ru"])('explains the actual exit target and fix in %s', async (language) => {
+  await i18n.changeLanguage(language);
+  const config = makeConfig();
+  const targets: [OfflinePreview["target"], string[]][] = [
+    [{ state: "notWritten", writtenProfileId: "p2" }, [i18n.t("offline.notWritten", { name: "Gaming" })]],
+    [{ state: "notWritten", banks: [{ bank: 1, profileId: "p2" }] }, [i18n.t("offline.notWrittenBanks", { name: "Default", banks: "1 — Gaming" })]],
+    [{ state: "written", bank: 2, banks: [{ bank: 1, profileId: "p2" }, { bank: 2, profileId: "p1" }] },
+      [i18n.t("offline.writtenBank", { bank: 2 }), i18n.t("offline.bankPlan", { banks: "1 — Gaming, 2 — Default" })]],
+    [{ state: "followsWindow" }, [i18n.t("offline.followsWindow")]],
+    [{ state: "unknown" }, [i18n.t("offline.unknown")]],
+  ];
+  for (const [target, texts] of targets) {
+    const view = render(<ProfilesWorkspace {...workspaceProps(config, { ...offlineProps(config), offlinePreview: { target, controls: [] } })} />);
+    const notice = view.container.querySelector(".notice")!;
+    for (const text of texts) expect(notice.textContent).toContain(text);
+    expect(within(notice as HTMLElement).getByRole("button", { name: i18n.t("device.tabMemory") })).toBeTruthy();
+    view.unmount();
+  }
 });
 
 it.each(["role", "unavailable"] as const)("refuses edits/mute for %s but allows removing an ineffective own binding", (kind) => {

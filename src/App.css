@@ -2314,8 +2314,9 @@ input[type="radio"] {
 .btn-legend__gesture:hover { background: rgba(var(--layer-rgb, 159, 202, 105), 0.2); color: var(--c-text-bright); }
 .btn-legend__offline-detail { display: flex; min-width: 0; }
 .btn-legend__offline-live { color: var(--c-text-muted); font-size: var(--fs-micro); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.btn-legend__cell--silent .btn-legend__label { color: var(--c-text-muted); }
+.btn-legend__cell--silent .btn-legend__label { color: var(--c-text-muted); white-space: normal; }
 .profiles__offline-target { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); color: var(--c-text-muted); font-size: var(--fs-caption); }
+.profiles__offline-target > .action-button { flex-shrink: 0; }
 /* Quiet marks beside the label: works only while Sidearm runs; kept alike on the other mouse; the same on another button. */
 .btn-legend__live, .btn-legend__synced, .btn-legend__same { position: relative; display: inline-flex; flex: none; color: var(--c-text-muted); opacity: 0.75; }
 .btn-legend__live:hover, .btn-legend__synced:hover, .btn-legend__same:hover { opacity: 1; color: var(--c-text-bright); }
@@ -4017,6 +4018,12 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.action-picker__offline { flex-shrink: 0; }
+.action-picker__offline > summary { cursor: pointer; }
+.action-picker__offline > summary .chevron { flex-shrink: 0; color: var(--c-text-muted); }
+.action-picker__offline[open] > summary .chevron { transform: rotate(90deg); }
+.action-picker__offline .action-picker__preview-text { white-space: normal; overflow-wrap: anywhere; }
+.action-picker__offline-actions { display: flex; flex-wrap: wrap; gap: var(--space-sm); padding: 0 20px var(--space-sm); }
 /* Where else the same action runs (other buttons, menu items). */
 .action-picker__uses {
   margin: -6px 0 0;

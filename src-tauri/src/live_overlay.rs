@@ -13,7 +13,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
         mpsc,
     },
     thread,
@@ -52,6 +52,31 @@ pub const MAX_BANKS: u8 = 5;
 
 static ACTIVE: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
 static READY: [AtomicBool; CATALOG_LEN] = [const { AtomicBool::new(false) }; CATALOG_LEN];
+/// Sidearm's bank of each mouse its profile button took off it (offline
+/// mode), else 0.
+static OFFLINE: [AtomicU8; CATALOG_LEN] = [const { AtomicU8::new(0) }; CATALOG_LEN];
+
+/// The mice in offline mode: the profile button left Sidearm's bank.
+pub fn offline_models() -> Vec<&'static NativeModel> {
+    CATALOG.iter().copied().filter(|model| OFFLINE[model.catalog_index()].load(Ordering::Acquire) != 0).collect()
+}
+
+/// Puts every mouse in offline mode back on Sidearm's bank (its session sees
+/// it play and is online again).
+pub fn back_to_sidearm_bank() -> Result<(), String> {
+    for model in offline_models() {
+        let bank = OFFLINE[model.catalog_index()].load(Ordering::Acquire);
+        select_bank(&VendorDevice::open_model(model)?, bank)?;
+        log::info!("[naga-live] {} put back on the Sidearm bank {bank}", model.name);
+    }
+    Ok(())
+}
+
+fn set_offline(model: &'static NativeModel, bank: u8) {
+    if OFFLINE[model.catalog_index()].swap(bank, Ordering::AcqRel) != bank {
+        crate::mouse_offline_mode_changed(model, bank != 0);
+    }
+}
 /// Presses of each mouse dropped while its live map was being written
 /// ([`events_allowed`]), logged as one line once it is ready.
 static DROPPED: [AtomicU32; CATALOG_LEN] = [const { AtomicU32::new(0) }; CATALOG_LEN];
@@ -1191,6 +1216,7 @@ impl Session {
                             }
                             None if !no_free_bank_said.replace(true) => {
                                 log::warn!("[naga-live] {} has no free bank slot for Sidearm: writing the live map instead (a free slot makes start and exit faster)", model.name);
+                                crate::no_free_bank_slot();
                             }
                             None => {}
                         }
@@ -1257,10 +1283,12 @@ impl Session {
                                 Ok(playing) if playing != bank && !away => {
                                     log::warn!("[naga-live] {} plays bank {playing} (profile button): offline until the Sidearm bank {bank} plays again", model.name);
                                     away = true;
+                                    set_offline(model, bank);
                                 }
                                 Ok(playing) if playing == bank && away => {
                                     log::info!("[naga-live] {} plays the Sidearm bank {bank} again", model.name);
                                     away = false;
+                                    set_offline(model, 0);
                                 }
                                 _ => {}
                             }
@@ -1293,6 +1321,7 @@ impl Session {
                 }
                 READY[index].store(false, Ordering::Release);
                 log_dropped(model, started, "stopped before it was ready");
+                set_offline(model, 0);
                 if sidearm.is_some()
                     && let Err(error) = open().and_then(|device| leave_sidearm_bank(&device, Some(&session_config), &config_dir))
                 {

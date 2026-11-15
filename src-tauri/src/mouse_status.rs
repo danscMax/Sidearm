@@ -28,6 +28,11 @@ pub enum StatusKind {
     /// State: no watchdog outlives this Sidearm (it did not come up, or it is
     /// in a job that ends with Sidearm): a kill leaves the mice unrestored.
     WatchdogOff,
+    /// State: the profile button took a mouse off Sidearm's own bank (offline mode).
+    MouseOffline,
+    /// Notice: every bank slot of the mouse holds a profile, so Sidearm writes
+    /// its live map instead of using a bank of its own (slower start and exit).
+    NoFreeBankSlot,
     /// Notice: the mouse slept at the last exit, its offline profile was not stored.
     OfflineNotStored,
     /// Notice: the side buttons were switched to the configured signal kind.

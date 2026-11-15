@@ -52,6 +52,7 @@ import {
   listenMouseBattery,
   listenMouseStatus,
   getMouseStatus,
+  backToSidearmBank,
   getNativeModel,
   listenNativeMiceChanged,
   reloadRuntime,
@@ -352,6 +353,10 @@ function App() {
             showToast(t("mouse.noticeOfflineNotStored"), "warning");
             continue;
           }
+          if (kind === "noFreeBankSlot") {
+            showToast(t("mouse.noticeNoFreeBankSlot"), "warning");
+            continue;
+          }
           void getNativeModel().then(({ consumerSignals }) => {
             if (disposed) return;
             if (!consumerSignals) {
@@ -392,6 +397,14 @@ function App() {
       }
       // Raised once per run, seconds after the start: the Mouse tab keeps it too.
       if (kind === "watchdogOff" && active) showToast(t("mouse.statusWatchdogOff"), "warning");
+      if (kind === "mouseOffline" && active) {
+        showToast(t("mouse.statusMouseOffline"), "warning", {
+          label: t("mouse.backToSidearm"),
+          onClick: () => {
+            void backToSidearmBank().catch((e: unknown) => showToast(normalizeCommandError(e).message, "warning"));
+          },
+        });
+      }
     }).then((fn) => {
       if (disposed) { fn(); return; }
       unlisten = fn;

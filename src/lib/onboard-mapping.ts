@@ -167,6 +167,8 @@ export type MouseStatusKind =
   | "buttonsUnreadable"
   | "mouseUnreachable"
   | "watchdogOff"
+  | "mouseOffline"
+  | "noFreeBankSlot"
   | "offlineNotStored"
   | "signalsSwitched";
 
@@ -177,7 +179,7 @@ export interface MouseStatusEvent {
 }
 
 /** Kinds shown once as a toast; the rest are states held until cleared. */
-export const MOUSE_STATUS_NOTICES: readonly MouseStatusKind[] = ["offlineNotStored", "signalsSwitched"];
+export const MOUSE_STATUS_NOTICES: readonly MouseStatusKind[] = ["offlineNotStored", "signalsSwitched", "noFreeBankSlot"];
 
 /**
  * What the backend's takeover guard had to take back from Razer's engine: the

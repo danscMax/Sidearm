@@ -176,6 +176,11 @@ export async function listNativeMice(): Promise<NativeModelInfo[]> {
   return invoke<NativeModelInfo[]>("list_native_mice");
 }
 
+/** Puts every mouse the profile button took offline back on Sidearm's bank. */
+export async function backToSidearmBank(): Promise<void> {
+  return invoke<void>("back_to_sidearm_bank");
+}
+
 /** The onboard banks (stored profiles) of a device's mouse. */
 export async function getOnboardBanks(deviceId: string): Promise<OnboardBanks> {
   return invoke<OnboardBanks>("get_onboard_banks", { deviceId });

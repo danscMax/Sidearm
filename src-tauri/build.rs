@@ -86,6 +86,7 @@ const APP_COMMANDS: &[&str] = &[
     "get_native_model",
     "list_native_mice",
     "get_onboard_banks",
+    "back_to_sidearm_bank",
     "get_offline_preview",
     "get_device_report",
     "open_device_report_issue",

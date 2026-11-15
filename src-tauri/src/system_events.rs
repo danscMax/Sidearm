@@ -32,6 +32,11 @@ const SETTLE: Duration = Duration::from_millis(700);
 static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
 static CHANGED: std::sync::OnceLock<mpsc::Sender<()>> = std::sync::OnceLock::new();
 
+/// The app, once the event window runs (for workers that have no handle).
+pub fn app() -> Option<&'static AppHandle> {
+    APP.get()
+}
+
 pub fn spawn(app: AppHandle) {
     if APP.set(app.clone()).is_err() {
         return;

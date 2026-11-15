@@ -482,6 +482,23 @@ fn build_tray_menu(
         .unwrap_or("—");
 
     let menu = Menu::new(app)?;
+    // The profile button took a mouse offline: the way back comes first.
+    #[cfg(target_os = "windows")]
+    {
+        let offline = mouse_memory::live_overlay::offline_models();
+        for model in &offline {
+            menu.append(&MenuItem::with_id(
+                app,
+                "back_to_sidearm",
+                crate::ui_text::native(&crate::ui_text!("runtime.trayBackToSidearm", "⚠ {model} offline — back to Sidearm", model = model.short_name)),
+                true,
+                None::<&str>,
+            )?)?;
+        }
+        if !offline.is_empty() {
+            menu.append(&PredefinedMenuItem::separator(app)?)?;
+        }
+    }
     menu.append(&MenuItem::with_id(
         app,
         "active_profile",
@@ -683,7 +700,12 @@ fn rebuild_tray_menu_from_config(app: &AppHandle, config: &config::AppConfig) {
             crate::ui_text::native(&crate::ui_text!("runtime.trayBattery", "{model} {percent}%", model = model.short_name, percent = percent))
         })
         .collect();
-    let battery_line = if batteries.is_empty() { String::new() } else { format!("\n{}", batteries.join(" · ")) };
+    let mut battery_line = if batteries.is_empty() { String::new() } else { format!("\n{}", batteries.join(" · ")) };
+    #[cfg(target_os = "windows")]
+    for model in mouse_memory::live_overlay::offline_models() {
+        battery_line.push('\n');
+        battery_line.push_str(&crate::ui_text::native(&crate::ui_text!("runtime.trayOfflineLine", "⚠ {model} offline", model = model.short_name)));
+    }
     #[cfg(not(target_os = "windows"))]
     let battery_line = String::new();
     let tooltip = crate::ui_text!(
@@ -3728,6 +3750,46 @@ fn list_native_mice() -> Vec<device_catalog::NativeModelInfo> {
     mouse_memory::present_models().into_iter().map(|model| model.info(true, consumer)).collect()
 }
 
+/// Puts every mouse the profile button took off Sidearm's bank back on it.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn back_to_sidearm_bank() -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        mouse_memory::live_overlay::back_to_sidearm_bank().map_err(|msg| {
+            let mut error = CommandError::from_ui("onboard_device_unavailable",
+                crate::ui_text!("mouseRead.accessFailed", "Could not access the mouse."));
+            error.details = Some(vec![mouse_settings::public_read_error(&msg)]);
+            error
+        })
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("back to the Sidearm bank task failed: {e}")))?
+}
+
+/// The profile button took a mouse off Sidearm's bank (offline mode), or it is
+/// back: the Mouse tab's state, the tray's way back and, going offline, an OSD
+/// bubble saying where that way back is.
+#[cfg(target_os = "windows")]
+pub(crate) fn mouse_offline_mode_changed(model: &'static device_catalog::NativeModel, offline: bool) {
+    let Some(app) = system_events::app() else { return };
+    let any = !mouse_memory::live_overlay::offline_models().is_empty();
+    mouse_status::set_state(Some(app), mouse_status::StatusKind::MouseOffline, any);
+    rebuild_tray_menu(app);
+    if offline && let Ok(load) = load_or_initialize_config(&resolve_app_paths(app).config_dir) {
+        let text = crate::ui_text!("runtime.mouseOfflineOsd", "{model} offline (profile button) — back to Sidearm in the tray menu", model = model.short_name);
+        show_osd(app, "", &crate::ui_text::native(&text), &load.config.settings);
+    }
+}
+
+/// Every bank slot of the mouse holds a profile: said once, Sidearm writes the
+/// live map instead of using a bank of its own.
+#[cfg(target_os = "windows")]
+pub(crate) fn no_free_bank_slot() {
+    if let Some(app) = system_events::app() {
+        mouse_status::notice(Some(app), mouse_status::StatusKind::NoFreeBankSlot);
+    }
+}
+
 /// The onboard banks of a device's mouse (`live_overlay::Banks`).
 #[cfg(target_os = "windows")]
 #[tauri::command]
@@ -4589,6 +4651,14 @@ pub fn run() {
                         executor::cancel_live_sequences();
                         log::info!("[tray] macros stopped");
                     }
+                    #[cfg(target_os = "windows")]
+                    "back_to_sidearm" => {
+                        tauri::async_runtime::spawn_blocking(|| {
+                            if let Err(error) = mouse_memory::live_overlay::back_to_sidearm_bank() {
+                                log::warn!("[tray] back to the Sidearm bank failed: {error}");
+                            }
+                        });
+                    }
                     "relaunch_as_admin" => {
                         let app = app.clone();
                         tauri::async_runtime::spawn(async move {
@@ -4772,6 +4842,7 @@ pub fn run() {
             get_native_model,
             list_native_mice,
             get_onboard_banks,
+            back_to_sidearm_bank,
             get_offline_preview,
             get_device_report,
             open_device_report_issue,

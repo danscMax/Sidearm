@@ -47,6 +47,7 @@ const STATE_MESSAGE: Partial<Record<MouseStatusKind, string>> = {
   buttonsUnreadable: "mouse.statusButtonsUnreadable",
   mouseUnreachable: "mouse.statusMouseUnreachable",
   watchdogOff: "mouse.statusWatchdogOff",
+  mouseOffline: "mouse.statusMouseOffline",
 };
 
 /** One mouse's tabs beside its buttons: "performance" (live readings, the

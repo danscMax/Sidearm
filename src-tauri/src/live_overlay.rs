@@ -220,12 +220,34 @@ pub fn live_models(present: &[&'static NativeModel]) -> Vec<&'static NativeModel
 }
 
 /// Whether the mouse hook's software Hypershift is needed: some connected
-/// mouse uses the onboard path, or nothing is connected yet.
-pub fn software_hypershift(present: &[&'static NativeModel], live: &[&'static NativeModel]) -> bool {
+/// mouse uses the onboard path, nothing is connected yet, or a live mouse
+/// takes its layer from the software trigger (`software_layer`).
+pub fn software_hypershift(present: &[&'static NativeModel], live: &[&'static NativeModel], config: &AppConfig) -> bool {
     present.is_empty()
         || present
             .iter()
             .any(|model| model.transport == Transport::Onboard && !live.iter().any(|item| item.is(model)))
+        || live.iter().any(|model| software_layer(config, model))
+}
+
+/// Whether `model`'s live map leaves its trigger a plain mouse button and
+/// takes the layer from the mouse hook: only with `hypershiftTap` (a quick
+/// press clicks — the firmware's Hypershift swallows the button), only for a
+/// model without a firmware Hypershift button whose settings trigger is one
+/// of its native buttons. Raw input tells its trigger from another mouse's.
+pub fn software_layer(config: &AppConfig, model: &NativeModel) -> bool {
+    config.settings.hypershift_tap && settings_trigger(config, model).is_some()
+}
+
+/// The settings trigger as `model`'s native button `(id, button, value)`, when
+/// the model has no firmware Hypershift button of its own.
+fn settings_trigger(config: &AppConfig, model: &NativeModel) -> Option<(&'static str, u8, u8)> {
+    let live = model.live.as_ref()?;
+    if live.firmware_trigger.is_some() {
+        return None;
+    }
+    let trigger = config.settings.hypershift_trigger.trim();
+    model.native_buttons.iter().find(|(id, _, _)| *id == trigger).copied()
 }
 
 /// Every control of `model` in usage order: key buttons, extras, then the
@@ -368,10 +390,22 @@ pub fn overlay(config: &AppConfig, model: &NativeModel, consumer: bool, checking
     let Some(live) = &model.live else { return Ok(Overlay::default()) };
     let trigger = live.firmware_trigger.is_none().then(|| config.settings.hypershift_trigger.trim());
     let mut overlay = Overlay::default();
+    // The hook holds the layer: the trigger stays a plain button (written, as
+    // the base bank may hold Hypershift there) and layer 1 never plays.
+    let software = software_layer(config, model);
     for (index, (control, button)) in controls(model).into_iter().enumerate() {
         let id = control_id(model, control);
         let key_button = index < model.key_buttons.len();
         for (layer, logical) in [(0u8, Layer::Standard), (1, Layer::Hypershift)] {
+            if software && layer == 1 {
+                continue;
+            }
+            if software && trigger == Some(control) {
+                if let Some((_, _, value)) = settings_trigger(config, model) {
+                    overlay.targets.push((button, layer, OnboardAction::Mouse(value)));
+                }
+                continue;
+            }
             if trigger == Some(control) {
                 overlay.targets.push((button, layer, OnboardAction::Hypershift));
                 continue;
@@ -1675,13 +1709,36 @@ pub(crate) mod tests {
 
     #[test]
     fn software_hypershift_serves_only_onboard_mice() {
-        assert!(software_hypershift(&[], &[]));
-        assert!(software_hypershift(&[&NAGA_V2_HYPERSPEED], &[]));
-        assert!(!software_hypershift(&[&NAGA_V3_PRO], &[&NAGA_V3_PRO]));
+        let mut config = config_with_v3();
+        config.settings.hypershift_tap = false;
+        assert!(software_hypershift(&[], &[], &config));
+        assert!(software_hypershift(&[&NAGA_V2_HYPERSPEED], &[], &config));
+        assert!(!software_hypershift(&[&NAGA_V3_PRO], &[&NAGA_V3_PRO], &config));
         let both = [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO];
-        assert!(!software_hypershift(&both, &live_models(&both)));
+        assert!(!software_hypershift(&both, &live_models(&both), &config));
         let pro = [&NAGA_PRO, &NAGA_V3_PRO];
-        assert!(software_hypershift(&pro, &live_models(&pro)));
+        assert!(software_hypershift(&pro, &live_models(&pro), &config));
+        // A clicking trigger: the V2's live map leaves the layer to the hook.
+        config.settings.hypershift_tap = true;
+        assert!(software_hypershift(&both, &live_models(&both), &config));
+        assert!(!software_hypershift(&[&NAGA_V3_PRO], &[&NAGA_V3_PRO], &config));
+    }
+
+    #[test]
+    fn a_clicking_trigger_keeps_the_v2s_right_button_a_plain_button() {
+        let mut config = config_with_v3();
+        config.settings.hypershift_tap = true;
+        assert!(software_layer(&config, &NAGA_V2_HYPERSPEED));
+        assert!(!software_layer(&config, &NAGA_V3_PRO));
+        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, true, false).unwrap();
+        assert!(v2.targets.contains(&(0x02, 0, OnboardAction::Mouse(2))));
+        assert!(!v2.targets.iter().any(|&(_, _, action)| action == OnboardAction::Hypershift));
+        assert!(!v2.targets.iter().any(|&(_, layer, _)| layer == 1));
+        assert!(!v2.signals.iter().any(|signal| signal.hypershift));
+        assert_eq!(v2.signals.iter().filter(|signal| signal.encoded_key == "F13").count(), 1);
+        // The V3 keeps its firmware HyperShift button.
+        let v3 = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        assert!(v3.targets.iter().any(|&(_, _, action)| action == OnboardAction::Hypershift));
     }
 
     #[test]

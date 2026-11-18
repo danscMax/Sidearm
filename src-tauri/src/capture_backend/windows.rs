@@ -1097,7 +1097,9 @@ impl CaptureBackendHandle {
             .map(|(model, overlay)| ReaderInit {
                 model: model.catalog_index(),
                 signals: overlay.signals.clone(),
-                software_layer: false,
+                // A live map that leaves its trigger a plain button gets the
+                // layer from the software trigger, like the onboard path.
+                software_layer: live_overlay::software_layer(&config, model),
             })
             .collect();
         if !onboard_signals.is_empty() {
@@ -1107,7 +1109,7 @@ impl CaptureBackendHandle {
                 software_layer: true,
             });
         }
-        let firmware_hypershift = !live_overlay::software_hypershift(&present, &live);
+        let firmware_hypershift = !live_overlay::software_hypershift(&present, &live, &config);
         // Keep a live map whose records did not change; restore the others
         // before their replacement writes over the same records.
         let mut kept = Vec::new();
@@ -1911,10 +1913,21 @@ fn note_raw_mouse(l_param: isize) {
 }
 
 /// A held-back trigger press, now known: the HyperShift 2 mouse's starts the
-/// hold; another device's is played back (its release passes as usual).
+/// hold; another device's holds the software trigger when the button is that
+/// one; any other is played back (its release passes as usual).
 fn settle_pending_trigger2(button: u8, ours: bool) {
-    if ours {
+    let hypershift2 = button == HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed)
+        || button == HELPER_HYPER2_HELD.load(Ordering::Relaxed);
+    let software = button == HELPER_HYPER_TRIGGER.load(Ordering::Relaxed);
+    if ours && hypershift2 {
         apply_trigger2(button, true);
+    } else if !ours && software {
+        if HELPER_HYPER2_HELD.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF {
+            HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
+        }
+        // Same as `SetTriggerHeld(true)`; its release takes the usual path.
+        HELPER_HYPER_USED.store(false, Ordering::Relaxed);
+        HELPER_HYPER_ACTIVE.store(true, Ordering::Relaxed);
     } else {
         if HELPER_HYPER2_HELD.load(Ordering::Relaxed) != HYPER_TRIGGER_OFF {
             HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
@@ -1989,6 +2002,10 @@ struct Trigger2State {
     pending: Option<u8>,
     /// A press of this button passed as another device's (its release passes too).
     passed: Option<u8>,
+    /// The software trigger (`HYPER_TRIGGER_OFF` = none) while raw input tells
+    /// mice apart: another device's press of it is the software trigger's,
+    /// the HyperShift 2 mouse's own press of it is a plain click.
+    software: u8,
 }
 
 /// What the mouse hook does with one button event against HyperShift 2.
@@ -2029,27 +2046,35 @@ fn trigger2_decision(state: Trigger2State, who: Option<Option<bool>>, button: u8
             Trigger2::Other
         };
     }
-    if button == HYPER_TRIGGER_OFF || (button != state.trigger && button != state.held) {
+    let hypershift2 = button == state.trigger || button == state.held;
+    let software = who.is_some() && button == state.software;
+    if button == HYPER_TRIGGER_OFF || !(hypershift2 || software) {
         return Trigger2::Other;
     }
     match who {
-        None | Some(Some(true)) => Trigger2::Hold,
+        None | Some(Some(true)) if hypershift2 => Trigger2::Hold,
+        // The HyperShift 2 mouse's own press of the software trigger's
+        // button (a profile without HyperShift 2): a plain click.
+        Some(Some(true)) => Trigger2::PassPress,
+        // Another device's press of the software trigger: its usual handling.
+        Some(Some(false)) if software => Trigger2::Other,
         Some(Some(false)) => Trigger2::PassPress,
         Some(None) => Trigger2::HoldBack,
+        None => Trigger2::Other,
     }
 }
 
-/// A press while the layer is held uses it (no click on the trigger's
-/// release); a HyperShift 2 press uses a held software trigger too.
+/// A press while a layer is held uses it (no click on its trigger's release):
+/// any press the software trigger's own handling never sees, and any press
+/// but the HyperShift 2 trigger's own for a held HyperShift 2.
 fn note_press_for_triggers(decision: Trigger2, held: u8, is_down: bool) {
     if !is_down {
         return;
     }
-    if decision == Trigger2::Hold {
-        if HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
-            HELPER_HYPER_USED.store(true, Ordering::Relaxed);
-        }
-    } else if held != HYPER_TRIGGER_OFF {
+    if decision != Trigger2::Other && HELPER_HYPER_ACTIVE.load(Ordering::Relaxed) {
+        HELPER_HYPER_USED.store(true, Ordering::Relaxed);
+    }
+    if decision != Trigger2::Hold && held != HYPER_TRIGGER_OFF {
         HELPER_HYPER2_USED.store(true, Ordering::Relaxed);
     }
 }
@@ -2111,8 +2136,9 @@ fn hyper2_stamp(lines: &[String]) -> bool {
 
 /// Each profile's HyperShift 2 trigger on `model` as a mouse-hook button code:
 /// a button the mouse still reports natively (not in its live map), never
-/// the left one or the software HyperShift trigger.
-fn hypershift2_codes(config: &AppConfig, model: &crate::device_catalog::NativeModel, software_trigger: u8) -> Vec<(String, u8)> {
+/// the left one. It may be the software trigger's button too: raw input tells
+/// this mouse's press from another device's.
+fn hypershift2_codes(config: &AppConfig, model: &crate::device_catalog::NativeModel) -> Vec<(String, u8)> {
     config
         .profiles
         .iter()
@@ -2121,7 +2147,7 @@ fn hypershift2_codes(config: &AppConfig, model: &crate::device_catalog::NativeMo
                 let name = id.strip_prefix(model.control_prefix)?;
                 let code = hypershift_trigger_code(name);
                 let native = !model.native_buttons.iter().any(|(button, _, _)| *button == name);
-                (native && HYPER2_CODES.contains(&code) && code != software_trigger).then_some(code)
+                (native && HYPER2_CODES.contains(&code)).then_some(code)
             })?;
             Some((profile.id.clone(), code))
         })
@@ -2562,8 +2588,9 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
         } else {
             trigger
         };
-        // HyperShift 2 first: its trigger is never the software trigger, and
-        // under RDP it is off too (the buttons are the client's).
+        // HyperShift 2 first: it may share its button with the software
+        // trigger (raw input says whose press it is), and under RDP it is off
+        // too (the buttons are the client's).
         let held2 = if remote {
             HELPER_HYPER2_HELD.store(HYPER_TRIGGER_OFF, Ordering::Relaxed);
             HYPER_TRIGGER_OFF
@@ -2576,10 +2603,13 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
                 held: held2,
                 pending: PENDING_TRIGGER2.get().map(|(pending, _)| pending),
                 passed: PASSED_TRIGGER2.get(),
+                software: trigger,
             };
             // Which device pressed a trigger button, from raw input.
             let who = HELPER_RAW_INPUT.load(Ordering::Relaxed).then(|| {
-                let candidate = is_down && button != HYPER_TRIGGER_OFF && (button == state.trigger || button == state.held);
+                let candidate = is_down
+                    && button != HYPER_TRIGGER_OFF
+                    && (button == state.trigger || button == state.held || button == state.software);
                 let raw = if candidate { RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)].take()) } else { None };
                 trigger2_source(raw, std::time::Instant::now())
             });
@@ -2945,11 +2975,34 @@ mod mouse_hook_tests {
         assert_eq!(trigger2_source(None, now), None);
     }
 
+    /// The V2's software trigger and the V3's HyperShift 2 on one button:
+    /// raw input gives each press to its own mouse's trigger.
+    #[test]
+    fn a_shared_button_goes_to_the_trigger_of_the_mouse_that_pressed_it() {
+        use super::{HYPER_TRIGGER_OFF, Trigger2, Trigger2State, trigger2_decision};
+        let r = HYPER_TRIGGER_RIGHT;
+        let shared = Trigger2State { trigger: r, software: r, ..Trigger2State::default() };
+        assert_eq!(trigger2_decision(shared, Some(Some(true)), r, true), Trigger2::Hold, "the V3's: HyperShift 2");
+        assert_eq!(trigger2_decision(shared, Some(Some(false)), r, true), Trigger2::Other, "the V2's: software trigger");
+        assert_eq!(trigger2_decision(shared, Some(None), r, true), Trigger2::HoldBack);
+        // The software trigger's release takes its own path.
+        assert_eq!(trigger2_decision(shared, Some(None), r, false), Trigger2::Other);
+        // A profile without HyperShift 2: the V3's right button stays a click.
+        let software_only = Trigger2State { trigger: HYPER_TRIGGER_OFF, software: r, ..Trigger2State::default() };
+        assert_eq!(trigger2_decision(software_only, Some(Some(true)), r, true), Trigger2::PassPress);
+        assert_eq!(trigger2_decision(software_only, Some(Some(false)), r, true), Trigger2::Other);
+        assert_eq!(trigger2_decision(software_only, Some(None), r, true), Trigger2::HoldBack);
+        let passed = Trigger2State { passed: Some(r), ..software_only };
+        assert_eq!(trigger2_decision(passed, Some(None), r, false), Trigger2::PassRelease);
+        // Without raw input the software trigger keeps its own handling.
+        assert_eq!(trigger2_decision(software_only, None, r, true), Trigger2::Other);
+    }
+
     /// Per profile, only a button the mouse reports natively, never the left
-    /// one or the software trigger, and only for the mouse it names.
+    /// one, and only for the mouse it names.
     #[test]
     fn hypershift2_codes_take_each_profiles_native_trigger() {
-        use super::{HYPER_TRIGGER_OFF, hypershift2_codes};
+        use super::hypershift2_codes;
         use crate::device_catalog::{NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
         let mut config = crate::config::default_seed_config();
         let mut work = config.profiles[0].clone();
@@ -2962,10 +3015,9 @@ mod mouse_hook_tests {
         odd.id = "odd".into();
         odd.hypershift2_triggers = vec!["v3_mouse_left".into(), "mouse_right".into()];
         config.profiles = vec![work, game, odd];
-        assert_eq!(hypershift2_codes(&config, &NAGA_V3_PRO, HYPER_TRIGGER_OFF), vec![("work".to_owned(), HYPER_TRIGGER_RIGHT)]);
-        assert!(hypershift2_codes(&config, &NAGA_V3_PRO, HYPER_TRIGGER_RIGHT).is_empty());
+        assert_eq!(hypershift2_codes(&config, &NAGA_V3_PRO), vec![("work".to_owned(), HYPER_TRIGGER_RIGHT)]);
         // The V2's right button is in its live map (firmware HyperShift).
-        assert!(hypershift2_codes(&config, &NAGA_V2_HYPERSPEED, HYPER_TRIGGER_OFF).is_empty());
+        assert!(hypershift2_codes(&config, &NAGA_V2_HYPERSPEED).is_empty());
     }
 
     /// The trigger button is a pure modifier: swallowed, never clicked.
@@ -4580,19 +4632,20 @@ fn spawn_capture_helper(
     // The mouse whose native button is some profile's HyperShift 2 trigger.
     // shortcut: one such mouse at a time (raw input attributes a press to it);
     // a second would need a trigger per raw input device.
-    let hypershift2 = {
-        readers.iter().filter(|reader| !reader.software_layer).find_map(|reader| {
+    let firmware_layer_readers = || readers.iter().filter(|reader| !reader.software_layer);
+    let hypershift2 = firmware_layer_readers()
+        .find_map(|reader| {
             let model = crate::device_catalog::CATALOG.get(reader.model)?;
-            let codes = hypershift2_codes(config, model, software_trigger);
-            if hypershift2_codes(config, model, HYPER_TRIGGER_OFF).len() != codes.len() {
-                log::warn!(
-                    "[capture] {}: a HyperShift 2 trigger on the HyperShift button (another mouse holds HyperShift in Sidearm) is ignored",
-                    model.name
-                );
-            }
+            let codes = hypershift2_codes(config, model);
             (!codes.is_empty()).then_some((reader.model, codes))
         })
-    };
+        // No HyperShift 2 anywhere, but the software trigger serves a live
+        // mouse beside one with a firmware layer: raw input still has to keep
+        // that mouse's own button press off the software trigger.
+        .or_else(|| {
+            let shared = software_trigger != HYPER_TRIGGER_OFF && readers.iter().any(|reader| reader.software_layer);
+            firmware_layer_readers().next().filter(|_| shared).map(|reader| (reader.model, Vec::new()))
+        });
     let init = HelperInit {
         registrations: &helper_regs,
         modifier_stale_gc_ms: config.settings.modifier_stale_gc_ms,

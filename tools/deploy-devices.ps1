@@ -30,7 +30,15 @@ foreach ($name in $devices.Keys) {
     $d = $devices[$name]
     Write-Info "$name -> $($d.Portable)"
     try {
-        if ($d.Stage) {
+        # Syncthing often brought the exe already (the portable folder syncs): nothing to copy then.
+        $there = if ($d.Stage) {
+            $probe = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes("(Get-FileHash '$($d.Portable)\Sidearm.exe' -ErrorAction SilentlyContinue).Hash"))
+            "$(& ssh @ssh $name "powershell -NoProfile -EncodedCommand $probe" 2>$null)".Trim().ToLower()
+        }
+        if ($d.Stage -and $there -eq $hash) {
+            Write-Info "$name already has this exe (synced): restart only"
+            $stage = "'$($d.Portable)'"
+        } elseif ($d.Stage) {
             & ssh @ssh $name "cmd /c if not exist %USERPROFILE%\$($d.Stage) mkdir %USERPROFILE%\$($d.Stage)" | Out-Null
             & scp @ssh $exe "${name}:$($d.Stage)/Sidearm.exe"
             if ($LASTEXITCODE -ne 0) { throw "scp failed ($LASTEXITCODE)" }

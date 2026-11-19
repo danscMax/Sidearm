@@ -10,6 +10,8 @@ mod device_catalog;
 #[cfg(target_os = "windows")]
 mod exe_icon;
 mod executor;
+#[cfg(target_os = "windows")]
+mod hang_recovery;
 mod hotkeys;
 mod input_synthesis;
 mod log_cleanup;
@@ -187,10 +189,15 @@ fn is_foreground_fullscreen() -> bool {
 
 /// Logs when the main thread stops answering (a deadlock or a long block
 /// there freezes the window, the tray and every popup) and when it is back:
-/// a hang is otherwise invisible, the process stays alive.
+/// a hang is otherwise invisible, the process stays alive. Still frozen after
+/// [`RECOVER_AFTER`], Sidearm restarts itself (`hang_recovery`).
 #[cfg(target_os = "windows")]
 fn spawn_main_thread_watch(app: AppHandle) {
     const LIMIT: std::time::Duration = std::time::Duration::from_secs(10);
+    /// The longest a busy main thread blocked was the exit work (3-36 s), now
+    /// off it (`request_exit`); a frozen one this long is not coming back.
+    const RECOVER_AFTER: std::time::Duration = std::time::Duration::from_secs(45);
+    let log_dir = resolve_log_dir(&app);
     let _ = std::thread::Builder::new().name("main-thread-watch".into()).spawn(move || loop {
         let (answered, answer) = std::sync::mpsc::channel::<()>();
         let asked = std::time::Instant::now();
@@ -201,8 +208,18 @@ fn spawn_main_thread_watch(app: AppHandle) {
             Ok(()) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 log::error!("[system] the main thread has not answered for {LIMIT:?}: the window, tray and popups are frozen");
-                if answer.recv().is_err() {
-                    return;
+                match answer.recv_timeout(RECOVER_AFTER - LIMIT) {
+                    Ok(()) => {}
+                    // A fresh ask first: time asleep (sleep, hibernation) is no hang.
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) if !main_thread_answers(&app, LIMIT) => {
+                        hang_recovery::recover(&log_dir);
+                        // Kept (a debugger holds it): wait for it like before.
+                        if answer.recv().is_err() {
+                            return;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
                 }
                 log::warn!("[system] the main thread answered again after {:?}", asked.elapsed());
             }
@@ -210,6 +227,17 @@ fn spawn_main_thread_watch(app: AppHandle) {
         }
         std::thread::sleep(std::time::Duration::from_secs(5));
     });
+}
+
+/// Whether the main thread runs a task asked of it now within `limit` (an
+/// event loop already gone counts as answering: Sidearm is ending).
+#[cfg(target_os = "windows")]
+fn main_thread_answers(app: &AppHandle, limit: std::time::Duration) -> bool {
+    let (answered, answer) = std::sync::mpsc::channel::<()>();
+    match app.run_on_main_thread(move || { let _ = answered.send(()); }) {
+        Ok(()) => !matches!(answer.recv_timeout(limit), Err(std::sync::mpsc::RecvTimeoutError::Timeout)),
+        Err(_) => true,
+    }
 }
 
 /// The OSD page listens for `osd-show` (it said so through `osd_ready`).

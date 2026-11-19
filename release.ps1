@@ -23,6 +23,8 @@
 #      (tools\hw-check.ps1 -> plans\release\hw-check-vX.Y.Z.json), asks to type
 #      the version, then tags, pushes the branch and the tag, creates the GitHub
 #      release with the zip, deletes plans\release\out
+#   9. -Publish only: puts that exe on the owner's devices and restarts Sidearm
+#      there (tools\deploy-devices.ps1: Main + notebook; -NoDeploy skips)
 #
 # Usage:
 #   .\release.ps1 -Version 0.11.0              - Checks, build, zip, notes (no publish)
@@ -46,7 +48,9 @@ param(
     [switch]$SkipVerify,
     # The publish confirmation, given up front (a run without a console: Read-Host
     # cannot read piped input). Must equal -Version, like the typed answer.
-    [string]$ConfirmVersion
+    [string]$ConfirmVersion,
+    # Publish without putting the build on the owner's devices (tools\deploy-devices.ps1).
+    [switch]$NoDeploy
 )
 
 chcp 65001 | Out-Null
@@ -249,3 +253,9 @@ try {
 } finally { Pop-Location }
 Remove-Item -LiteralPath $outDir -Recurse -Force
 Write-Ok "published $tag"
+
+# 9. The published exe on the owner's devices (a device that fails is reported, the release stands).
+if (-not $NoDeploy) {
+    & pwsh -NoProfile -File (Join-Path $root 'tools\deploy-devices.ps1')
+    if ($LASTEXITCODE -ne 0) { Write-Warn "Some devices were not updated: rerun tools\deploy-devices.ps1 -Device <name>." }
+}

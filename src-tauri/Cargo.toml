@@ -71,6 +71,8 @@ windows-sys = { version = "0.61", features = [
   "Win32_System_SystemInformation",
   "Win32_System_Shutdown",
   "Win32_Storage_FileSystem",
+  "Win32_System_Diagnostics_Debug",
+  "Win32_System_Kernel",
   "Win32_System_Diagnostics_ToolHelp",
   "Win32_UI_Accessibility",
   "Win32_UI_Shell",
@@ -124,4 +126,7 @@ debug = "line-tables-only"
 [profile.release]
 lto = true
 codegen-units = 1
-strip = "symbols"
+# Function names and lines go to sidearm.pdb only (the exe keeps none): a hang
+# dump (`hang_recovery`) reads with it; build_portable.ps1 keeps it per build.
+debug = "line-tables-only"
+strip = "none"

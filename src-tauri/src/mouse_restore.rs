@@ -159,6 +159,11 @@ fn spawn_detached(args: &[&std::ffi::OsStr]) -> std::io::Result<bool> {
         })
 }
 
+/// A new Sidearm replacing this one ([`RELAUNCHED_ARG`]: it waits for this one to end).
+pub fn spawn_relaunch() -> std::io::Result<()> {
+    spawn_detached(&[RELAUNCHED_ARG.as_ref()]).map(|_| ())
+}
+
 /// [`spawn_detached`] as a child of the shell (Explorer): a process gets the job
 /// of the parent it is created under (`PROC_THREAD_ATTRIBUTE_PARENT_PROCESS`),
 /// so it leaves Sidearm's job. Its token is the shell's too (not elevated:

@@ -469,6 +469,22 @@ New-Item -ItemType Directory -Path $PORTABLE_DIR -Force | Out-Null
 Copy-Item -LiteralPath $TAURI_EXE -Destination (Join-Path $PORTABLE_DIR $EXE_NAME)
 Write-Ok "$EXE_NAME"
 
+# --- Symbols of this build, off the package: a hang dump of it (data\logs\hang-*.dmp)
+# reads with them (cdb -z <dmp> -y <folder>). Signing later keeps them valid.
+$pdb = Join-Path $TAURI_TARGET_DIR 'release\sidearm.pdb'
+if (Test-Path -LiteralPath $pdb) {
+    $symbolsRoot = Join-Path $PROJECT_ROOT '..\symbols'
+    $symDir = Join-Path $symbolsRoot ("$APP_VERSION-" + (Get-Date -Format 'yyyyMMdd-HHmm'))
+    New-Item -ItemType Directory -Path $symDir -Force | Out-Null
+    Copy-Item -LiteralPath $TAURI_EXE -Destination (Join-Path $symDir $EXE_NAME)
+    Copy-Item -LiteralPath $pdb -Destination $symDir
+    Get-ChildItem -LiteralPath $symbolsRoot -Directory | Sort-Object LastWriteTime -Descending |
+        Select-Object -Skip 5 | Remove-Item -Recurse -Force
+    Write-Ok "symbols: $symDir"
+} else {
+    Write-Warn "no sidearm.pdb next to the build: a hang dump of it will show no function names"
+}
+
 # Runtime licenses are regenerated after package cleanup; missing texts fail assembly.
 & node (Join-Path $PROJECT_ROOT 'tools/licenses.mjs') (Join-Path $PORTABLE_DIR 'THIRD-PARTY-NOTICES.txt')
 if ($LASTEXITCODE -ne 0) { throw 'Runtime license notice generation failed.' }

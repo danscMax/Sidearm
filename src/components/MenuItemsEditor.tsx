@@ -119,6 +119,11 @@ function ActionList({ actions, value, onChange, disabled }: { actions: Action[];
  * right the selected item — a phrase (its text, Enter), keys (recorded here),
  * or another action; its block and order.
  */
+/** The action items of a menu, its lists included. */
+function countActionItems(items: MenuItem[]): number {
+  return items.reduce((sum, item) => sum + (item.kind === "action" ? 1 : item.kind === "submenu" ? countActionItems(item.items) : 0), 0);
+}
+
 /** The labels from the menu's top level down to item `id`. */
 function pathTo(items: MenuItem[], id: string, path: string[] = []): string[] {
   for (const item of items) {
@@ -131,9 +136,44 @@ function pathTo(items: MenuItem[], id: string, path: string[] = []): string[] {
   return [];
 }
 
-export function MenuItemsEditor({
-  items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled, name, namePlaceholder, onNameChange, sharedUses,
-}: MenuItemsEditorProps) {
+/** The editor; an item that opens another menu leads into that menu (edited
+ *  in the same edits, saved with this one) and "Back" returns. */
+export function MenuItemsEditor(props: MenuItemsEditorProps) {
+  const { t } = useTranslation();
+  // The linked menus walked into, outermost first.
+  const [trail, setTrail] = useState<string[]>([]);
+  const actions = editedActions(props.config, props.edits);
+  const menuOf = (id: string) => {
+    const action = actions.find((candidate) => candidate.id === id);
+    return action?.type === "menu" ? action : undefined;
+  };
+  const linkedId = trail.at(-1);
+  const linked = linkedId ? menuOf(linkedId) : undefined;
+  const open = (id: string) => setTrail((current) => [...current, id]);
+  if (!linked) return <MenuEditorPane {...props} onOpenMenu={open} />;
+  const outer = trail.length > 1 ? menuOf(trail[trail.length - 2])?.displayName : props.name || props.namePlaceholder;
+  const put = (next: typeof linked) => props.onEditsChange({ ...props.edits, actions: { ...props.edits.actions, [next.id]: next } });
+  return (
+    <MenuEditorPane
+      key={linked.id}
+      items={linked.payload.items}
+      onChange={(items) => put({ ...linked, payload: { ...linked.payload, items } })}
+      config={props.config}
+      edits={props.edits}
+      onEditsChange={props.onEditsChange}
+      menuActionId={linked.id}
+      disabled={props.disabled}
+      name={linked.displayName}
+      onNameChange={(displayName) => put({ ...linked, displayName })}
+      onOpenMenu={open}
+      back={{ label: t("inspector.menuLinkedBack", { name: outer ?? "" }), onBack: () => setTrail((current) => current.slice(0, -1)) }}
+    />
+  );
+}
+
+function MenuEditorPane({
+  items, initialSelectedId, onChange, config, edits, onEditsChange, menuActionId, disabled, name, namePlaceholder, onNameChange, sharedUses, onOpenMenu, back,
+}: MenuItemsEditorProps & { onOpenMenu: (menuId: string) => void; back?: { label: string; onBack: () => void } }) {
   const { t } = useTranslation();
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId ?? (items.find((item) => !isMenuMark(item)) ?? items[0])?.id ?? null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -919,6 +959,14 @@ export function MenuItemsEditor({
             setIsCapturing={setCapturing}
           />
         ) : null}
+        {action?.type === "menu" ? (
+          <div className="menu-ed__chips">
+            <span className="menu-ed__note">{t("inspector.menuLinkedInfo", { name: action.displayName, count: countActionItems(action.payload.items) })}</span>
+            <button type="button" className="action-button action-button--accent action-button--small" onClick={() => onOpenMenu(action.id)}>
+              {t("inspector.menuLinkedEdit", { name: action.displayName })}
+            </button>
+          </div>
+        ) : null}
         {kind === "other" ? (
           <ActionList
             actions={otherActions.filter((other) => kindOf(other, library) === "other")}
@@ -979,6 +1027,9 @@ export function MenuItemsEditor({
     <div className="menu-ed-root">
       {/* The menu's own line: its name, search, filter, add — and the how-to in "?". */}
       <div className="menu-ed__top">
+        {back ? (
+          <button type="button" className="action-button action-button--ghost action-button--small" onClick={back.onBack}>{back.label}</button>
+        ) : null}
         {onNameChange ? (
           <input className="input menu-ed__menu-name" type="text" value={name ?? ""} placeholder={namePlaceholder}
             aria-label={t("inspector.menuName")} title={t("inspector.menuName")} onChange={(event) => onNameChange(event.target.value)} />

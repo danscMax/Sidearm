@@ -34,6 +34,25 @@ describe("MenuItemsEditor", () => {
     expect(phraseOf(onEditsChange.mock.calls[0][0].actions.a1, [])).toEqual({ text: "hi {clipboard}", enter: false });
   });
 
+  it("an item opening another menu leads into it: its edits go to that menu, Back returns", () => {
+    const max: Action = { id: "m2", displayName: "Max", type: "menu", payload: { items: [{ kind: "action", id: "x1", label: "Hi", actionId: "a1", enabled: true }] } };
+    const cfg = { ...config, actions: [phrase, max] } as AppConfig;
+    function Host() {
+      const [edits, setEdits] = useState(NO_MENU_EDITS);
+      return <MenuItemsEditor items={[{ kind: "action", id: "i1", label: "Max", actionId: "m2", enabled: true }]} onChange={vi.fn()}
+        config={cfg} edits={edits} onEditsChange={(next) => { setEdits(next); onEdits(next); }} name="Root" onNameChange={vi.fn()} />;
+    }
+    const onEdits = vi.fn();
+    render(<Host />);
+    expect(screen.getByText(i18n.t("inspector.menuLinkedInfo", { name: "Max", count: 1 }))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("inspector.menuLinkedEdit", { name: "Max" }) }));
+    fireEvent.change(screen.getByRole("textbox", { name: i18n.t("inspector.menuName") }), { target: { value: "Max 2" } });
+    expect(onEdits.mock.lastCall?.[0].actions.m2.displayName).toBe("Max 2");
+    expect(screen.getByRole("button", { name: /1\s*Hi/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("inspector.menuLinkedBack", { name: "Root" }) }));
+    expect((screen.getByRole("textbox", { name: i18n.t("inspector.menuName") }) as HTMLInputElement).value).toBe("Root");
+  });
+
   it("numbers block items on through the blocks and marks the selected row", () => {
     const blocks: MenuItem[] = [
       { kind: "submenu", id: "b1", label: "Start", enabled: true, items: [{ kind: "action", id: "x1", label: "One", actionId: "a1", enabled: true }] },

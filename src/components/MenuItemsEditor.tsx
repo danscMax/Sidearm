@@ -927,6 +927,12 @@ export function MenuItemsEditor({
             onChange={(actionId) => onChange(updateMenuItem(items, item.id, (current) => (current.kind === "action" ? { ...current, actionId } : current)))}
           />
         ) : null}
+        {/* What it does, in the owner's words: the popup shows it on hover (the action's `notes`). */}
+        {action ? (
+          <input className="input" type="text" value={action.notes ?? ""} disabled={disabled}
+            aria-label={t("inspector.menuItemNote")} placeholder={t("inspector.menuItemNotePlaceholder")}
+            onChange={(event) => onEditsChange(putAction({ ...action, notes: event.target.value || undefined }))} />
+        ) : null}
         {/* Where else it lives, and its block: one line of chips under the content. */}
         <div className="menu-ed__chips">
           {libraryName != null ? (

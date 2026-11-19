@@ -23,6 +23,8 @@
   // After a moment on one phrase the tip shows its whole text (same width,
   // scrollable): the window must not change size, or it moves under the pointer.
   var FULL_AFTER_MS = 600;
+  /** The widest a submenu's list in the tip gets (272 px each). */
+  var MAX_TIP_COLUMNS = 5;
   var fullTimer = null;
 
   function invoke(cmd, args) {
@@ -192,7 +194,54 @@
     highlight = -1;
   }
 
+  /** A submenu's list taller than the menu: as many columns side by side as
+   *  it takes to show every name (the side widens; the window follows through
+   *  the ResizeObserver → `layout`). Any other tip: one column. */
+  function splitIntoColumns(room) {
+    var side = tip.parentNode;
+    side.style.width = "";
+    tip.style.columnCount = "";
+    tip.style.height = "";
+    tip.classList.remove("tip--cols");
+    if (!tip.classList.contains("tip--list") || tip.scrollHeight <= room + 1) return;
+    var columnWidth = side.clientWidth;
+    tip.classList.add("tip--cols");
+    tip.style.height = room + "px";
+    for (var columns = 2; columns <= MAX_TIP_COLUMNS; columns++) {
+      tip.style.columnCount = columns;
+      side.style.width = columns * columnWidth + "px";
+      // Columns that still do not fit overflow sideways.
+      if (tip.scrollWidth <= tip.clientWidth + 1) break;
+    }
+    // Balanced columns need no more height than their tallest one.
+    tip.style.height = "";
+  }
+
+  var noteBox = null;
+
+  function hideNote() {
+    if (noteBox) noteBox.remove();
+    noteBox = null;
+  }
+
+  /** A name's description in the tip: a box under the name (over it when there
+   *  is no room below), kept inside the window. */
+  function showNote(entry, text) {
+    hideNote();
+    noteBox = el("div", "note", text);
+    root.appendChild(noteBox);
+    var box = root.getBoundingClientRect();
+    var at = entry.getBoundingClientRect();
+    noteBox.style.width = Math.max(at.width, 220) + "px";
+    var left = Math.min(at.left - box.left, box.width - noteBox.offsetWidth - 4);
+    var top = at.bottom - box.top + 2;
+    if (top + noteBox.offsetHeight > box.height - 4) top = at.top - box.top - noteBox.offsetHeight - 2;
+    noteBox.style.left = Math.max(4, left) + "px";
+    noteBox.style.top = Math.max(4, top) + "px";
+  }
+
   function showTip(index) {
+    hideNote();
     var item = view.items[index];
     var row = items[index];
     clearTimeout(fullTimer);
@@ -204,27 +253,49 @@
     if (item.children && item.children.length) {
       // A submenu: what it holds, one name per line.
       // Each name is a button: it takes that item without opening the submenu first.
+      var tipGroup = null;
+      var block = tip;
       item.children.forEach(function (name, child) {
+        // A link to another menu: that menu's blocks, each a heading over its
+        // names, kept whole in one column.
+        var childGroup = (item.childGroups && item.childGroups[child]) || null;
+        if (childGroup !== tipGroup) {
+          tipGroup = childGroup;
+          block = tip;
+          if (tipGroup) {
+            block = tip.appendChild(el("div", "tip__block"));
+            block.appendChild(el("div", "group", tipGroup));
+          }
+        }
         // A line between the submenu's items (the only nameless entry).
-        if (name === "") { tip.appendChild(el("div", "line")); return; }
+        if (name === "") { block.appendChild(el("div", "line")); return; }
         var entry = el("button", "tip__item", name);
         entry.type = "button";
+        // What it does (its description), in a box beside the name while the pointer is on it.
+        var note = item.childNotes && item.childNotes[child];
+        if (note) {
+          entry.addEventListener("mouseenter", function () { showNote(entry, note); });
+          entry.addEventListener("mouseleave", hideNote);
+        }
         entry.addEventListener("click", function () { invoke("menu_pick_child", { index: index, child: child }); });
         // The same right-click choices as on a row of the list.
         entry.addEventListener("contextmenu", function (event) {
           event.preventDefault();
           showModes(index, event, !(item.textChildren && item.textChildren[child]), child);
         });
-        tip.appendChild(entry);
+        block.appendChild(entry);
       });
     } else {
-      tip.textContent = item.detail || item.label;
+      // A phrase: what it does (its description) over what it sends.
+      if (item.note) tip.appendChild(el("div", "tip__note", item.note));
+      tip.appendChild(document.createTextNode(item.detail || item.label));
     }
     tip.classList.remove("tip--fresh");
     void tip.offsetWidth;
     tip.classList.add("tip--fresh");
     var room = tip.parentNode.clientHeight;
     tip.style.maxHeight = room + "px";
+    splitIntoColumns(room);
     var rowTop = row.getBoundingClientRect().top - tip.parentNode.getBoundingClientRect().top;
     tip.style.top = Math.max(0, Math.min(rowTop - 4, room - tip.offsetHeight)) + "px";
     tip.classList.toggle("tip--clipped", tip.scrollHeight > tip.clientHeight + 1);

@@ -824,6 +824,8 @@
     "menuNewPhrase": "Новая фраза",
     "menuPhraseText": "Что напечатает",
     "menuPhrasePlaceholder": "Что должно оказаться в окне…",
+    "menuItemNote": "Описание",
+    "menuItemNotePlaceholder": "Что делает — видно при наведении (необязательно)",
     "menuPhraseEnter": "Сразу отправить (Enter)",
     "menuPhraseLibrary": "Текст из библиотеки «{{name}}»: правка изменит его везде, где он используется. С Enter фраза станет отдельной копией.",
     "menuPhraseShared": "Эта же фраза есть и на: {{places}}. Правка изменит её и там.",

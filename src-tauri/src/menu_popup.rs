@@ -26,7 +26,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
-    config::{Action, ActionPayload, AppConfig, MenuActionPayload, MenuItem, SequenceStep, TextSnippetPayload},
+    config::{Action, ActionPayload, ActionType, AppConfig, MenuActionPayload, MenuItem, SequenceStep, TextSnippetPayload},
     resolver::ResolvedInputPreview,
     runtime::RuntimeStore,
 };
@@ -80,6 +80,8 @@ pub(crate) struct Model {
     details: HashMap<String, String>,
     /// Actions with text that Copy and Enter can use (a shortcut also has a detail).
     text_actions: HashSet<String>,
+    /// What each action does, in the owner's words (its optional `notes`), by action id.
+    notes: HashMap<String, String>,
     /// The other menus (action id, name, items): a search also looks there.
     others: Vec<(String, String, Vec<MenuItem>)>,
     /// Ids of menu actions: a link to another menu is no search result there.
@@ -89,6 +91,9 @@ pub(crate) struct Model {
     /// A cheat sheet ([`Model::sheet`]): the cells' other press patterns. Its
     /// cells stay in place while typing: the ones that do not match are dimmed.
     grid: Option<Vec<Vec<String>>>,
+    /// Links to other menus shown as submenus ([`Model::expand_links`]): the
+    /// submenu's id → the linked menu's action id.
+    links: HashMap<String, String>,
 }
 
 /// Cells per row of a cheat sheet's grid (the mouse's side buttons, 3 across).
@@ -130,10 +135,19 @@ pub(crate) struct ViewItem {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
     pub text: bool,
+    /// What it does (the action's `notes`), shown on hover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
     /// For a submenu: the names of what it holds, drawn as a list in the tip.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<String>,
     pub text_children: Vec<bool>,
+    /// For a link to another menu: each child's block heading (empty when none has one).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub child_groups: Vec<Option<String>>,
+    /// For a submenu: each child's note (empty when none has one).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub child_notes: Vec<Option<String>>,
     /// The block heading it sits under.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
@@ -220,10 +234,12 @@ impl Model {
             query: String::new(),
             details,
             text_actions: HashSet::new(),
+            notes: HashMap::new(),
             others: Vec::new(),
             menu_ids: HashSet::new(),
             only_this: false,
             grid: None,
+            links: HashMap::new(),
         };
         model.only_this = model.search_box().is_some_and(|(_, all, _)| !all);
         model.highlight = model.first_enabled().unwrap_or(0);
@@ -290,6 +306,77 @@ impl Model {
         self
     }
 
+    /// Every item that opens another menu (`menus`: action id → items) becomes
+    /// a submenu holding that menu's items (its search box left out), so it
+    /// shows them in the tip and opens them in place, with the linked menu's
+    /// blocks as headings. One list, many menus: the link always shows the
+    /// current contents. `own` and any menu already on the way are not
+    /// expanded again (no cycles); such a link keeps opening its menu.
+    pub(crate) fn expand_links(mut self, own: Option<&str>, menus: &HashMap<String, Vec<MenuItem>>) -> Self {
+        fn expand(items: &mut [MenuItem], menus: &HashMap<String, Vec<MenuItem>>, seen: &mut Vec<String>, links: &mut HashMap<String, String>) {
+            for item in items.iter_mut() {
+                let link = match item {
+                    MenuItem::Submenu { items, .. } => {
+                        expand(items, menus, seen, links);
+                        None
+                    }
+                    MenuItem::Action { id, label, action_id, enabled, .. } if !seen.contains(action_id) => menus
+                        .get(action_id)
+                        .map(|target| (id.clone(), label.clone(), action_id.clone(), *enabled, target)),
+                    _ => None,
+                };
+                let Some((id, label, action_id, enabled, target)) = link else { continue };
+                let mut inner: Vec<MenuItem> = target.iter().filter(|inner| !matches!(inner, MenuItem::Search { .. })).cloned().collect();
+                seen.push(action_id.clone());
+                expand(&mut inner, menus, seen, links);
+                seen.pop();
+                links.insert(id.clone(), action_id);
+                *item = MenuItem::Submenu { id, label, items: inner, enabled };
+            }
+        }
+        let mut seen: Vec<String> = own.map(str::to_owned).into_iter().collect();
+        expand(&mut self.root, menus, &mut seen, &mut self.links);
+        self.highlight = self.first_enabled().unwrap_or(0);
+        self
+    }
+
+    fn is_link(&self, item: &MenuItem) -> bool {
+        matches!(item, MenuItem::Submenu { id, .. } if self.links.contains_key(id))
+    }
+
+    /// The rows of a level drawn as blocks: each enabled submenu (not a link)
+    /// is a heading over its items; pinned items and a box turned off left out.
+    fn blocks<'a>(&'a self, items: &'a [MenuItem], menu: Option<&'a str>) -> Vec<Entry<'a>> {
+        let mut level = Vec::new();
+        for item in items {
+            match item {
+                MenuItem::Submenu { label, items, enabled, .. } if !self.is_link(item) => {
+                    if *enabled {
+                        level.extend(
+                            items
+                                .iter()
+                                .filter(|inner| !item_pinned(inner))
+                                .map(|inner| Entry { item: inner, group: Some(label.as_str()), menu }),
+                        );
+                    }
+                }
+                _ if item_pinned(item) => {}
+                MenuItem::Search { enabled: false, .. } => {}
+                _ => level.push(Entry { item, group: None, menu }),
+            }
+        }
+        level
+    }
+
+    /// The rows a submenu opens to: a link's as blocks, under its menu's id.
+    fn level_of<'a>(&'a self, submenu: &'a MenuItem, menu: Option<&'a str>) -> Vec<Entry<'a>> {
+        let MenuItem::Submenu { id, items, .. } = submenu else { return Vec::new() };
+        match self.links.get(id) {
+            Some(target) => self.blocks(items, Some(target.as_str())),
+            None => items.iter().filter(|item| !item_pinned(item)).map(|item| Entry { item, group: None, menu }).collect(),
+        }
+    }
+
     /// A row's menu item id and, for a result from another menu, that menu's id.
     pub(crate) fn item_at(&self, index: usize) -> Option<(String, Option<String>)> {
         let (level, _) = self.walk();
@@ -346,7 +433,9 @@ impl Model {
 
     fn matches(&self, item: &MenuItem, needle: &str) -> bool {
         let MenuItem::Action { label, action_id, .. } = item else { return false };
-        text_hits(label, needle) || self.details.get(action_id).is_some_and(|text| text_hits(text, needle))
+        text_hits(label, needle)
+            || self.details.get(action_id).is_some_and(|text| text_hits(text, needle))
+            || self.notes.get(action_id).is_some_and(|text| text_hits(text, needle))
     }
 
     /// The rows shown and the labels of the submenus opened to get there.
@@ -369,6 +458,8 @@ impl Model {
             ) {
                 for item in items.iter().filter(|item| item_enabled(item)) {
                     match item {
+                        // A linked menu is searched as itself, under its own name.
+                        MenuItem::Submenu { .. } if state.model.is_link(item) => {}
                         MenuItem::Submenu { label, items, .. } => {
                             search(state, items, menu.map(|(_, name)| name).or(Some(label)), menu)
                         }
@@ -404,40 +495,25 @@ impl Model {
         }
         // Pinned items first, in their own block, and only there.
         let mut level: Vec<Entry<'_>> = Vec::new();
-        fn pinned<'a>(items: &'a [MenuItem], level: &mut Vec<Entry<'a>>) {
+        fn pinned<'a>(model: &Model, items: &'a [MenuItem], level: &mut Vec<Entry<'a>>) {
             for item in items.iter().filter(|item| item_enabled(item)) {
                 match item {
-                    MenuItem::Submenu { items, .. } => pinned(items, level),
+                    // A linked menu's pinned items belong to its own ★ block.
+                    MenuItem::Submenu { .. } if model.is_link(item) => {}
+                    MenuItem::Submenu { items, .. } => pinned(model, items, level),
                     _ if item_pinned(item) => level.push(Entry { item, group: Some(PINNED), menu: None }),
                     _ => {}
                 }
             }
         }
-        pinned(&self.root, &mut level);
-        for item in &self.root {
-            match item {
-                MenuItem::Submenu { label, items, enabled, .. } => {
-                    if *enabled {
-                        level.extend(
-                            items
-                                .iter()
-                                .filter(|inner| !item_pinned(inner))
-                                .map(|inner| Entry { item: inner, group: Some(label.as_str()), menu: None }),
-                        );
-                    }
-                }
-                _ if item_pinned(item) => {}
-                // A box turned off has no place in the list.
-                MenuItem::Search { enabled: false, .. } => {}
-                _ => level.push(Entry { item, group: None, menu: None }),
-            }
-        }
+        pinned(self, &self.root, &mut level);
+        level.extend(self.blocks(&self.root, None));
         let mut labels = Vec::new();
         for &index in &self.path {
-            match level.get(index).map(|entry| entry.item) {
-                Some(MenuItem::Submenu { label, items, .. }) => {
+            match level.get(index) {
+                Some(&Entry { item: submenu @ MenuItem::Submenu { label, .. }, menu, .. }) => {
                     labels.push(label.as_str());
-                    level = items.iter().filter(|item| !item_pinned(item)).map(|item| Entry { item, group: None, menu: None }).collect();
+                    level = self.level_of(submenu, menu);
                 }
                 _ => return (Vec::new(), labels),
             }
@@ -591,6 +667,11 @@ impl Model {
         self.walk().0.iter().enumerate().filter(|(_, entry)| is_numbered(entry.item)).nth(number).map(|(index, _)| index)
     }
 
+    fn note_of(&self, item: &MenuItem) -> Option<String> {
+        let MenuItem::Action { action_id, .. } = item else { return None };
+        self.notes.get(action_id).map(|text| clip(text))
+    }
+
     pub(crate) fn view(&self, title: &str, generation: u64) -> View {
         let (level, labels) = self.walk();
         let mut numbered = 0;
@@ -620,18 +701,19 @@ impl Model {
                         MenuItem::Submenu { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => None,
                     },
                     text: matches!(entry.item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id)),
+                    note: self.note_of(entry.item),
                     // The rows its level shows (pinned ones live in the ★ block).
-                    children: match entry.item {
-                        MenuItem::Submenu { items, .. } => {
-                            items.iter().filter(|item| !item_pinned(item)).map(|item| item_label(item).to_owned()).collect()
-                        }
-                        MenuItem::Action { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => Vec::new(),
+                    children: self.level_of(entry.item, entry.menu).iter().map(|child| item_label(child.item).to_owned()).collect(),
+                    text_children: self.level_of(entry.item, entry.menu).iter().map(|child| {
+                        matches!(child.item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id))
+                    }).collect(),
+                    child_groups: {
+                        let groups: Vec<Option<String>> = self.level_of(entry.item, entry.menu).iter().map(|child| child.group.map(str::to_owned)).collect();
+                        if groups.iter().any(Option::is_some) { groups } else { Vec::new() }
                     },
-                    text_children: match entry.item {
-                        MenuItem::Submenu { items, .. } => items.iter().filter(|item| !item_pinned(item)).map(|item| {
-                            matches!(item, MenuItem::Action { action_id, .. } if self.text_actions.contains(action_id))
-                        }).collect(),
-                        MenuItem::Action { .. } | MenuItem::Separator { .. } | MenuItem::Search { .. } => Vec::new(),
+                    child_notes: {
+                        let notes: Vec<Option<String>> = self.level_of(entry.item, entry.menu).iter().map(|child| self.note_of(child.item)).collect();
+                        if notes.iter().any(Option::is_some) { notes } else { Vec::new() }
                     },
                     group: entry.group.map(str::to_owned),
                     extras: self.grid.as_ref().and_then(|extras| extras.get(index).cloned()).unwrap_or_default(),
@@ -796,8 +878,12 @@ pub(crate) fn open(
     let mut all_items = payload.items.clone();
     all_items.extend(others.iter().flat_map(|(_, _, items)| items.iter().cloned()));
     let menu_ids = menus.iter().map(|(action, _)| action.id.clone()).collect();
-    let mut model = Model::new(payload.items.clone(), menu_details(config, &all_items)).with_others(others, menu_ids);
+    let linked: HashMap<String, Vec<MenuItem>> = menus.iter().map(|(action, menu)| (action.id.clone(), menu.items.clone())).collect();
+    let mut model = Model::new(payload.items.clone(), menu_details(config, &all_items))
+        .with_others(others, menu_ids)
+        .expand_links(preview.action_id.as_deref(), &linked);
     model.text_actions = config.actions.iter().filter(|action| full_text(config, &action.id).is_some()).map(|action| action.id.clone()).collect();
+    model.notes = action_notes(config);
     open_model(app, runtime_store, config, preview, title, model, is_fg_elevated, None);
 }
 
@@ -896,6 +982,19 @@ fn view_of(menu: &OpenMenu) -> View {
         crate::ui_text::native(&crate::ui_text!("menu.pickEdit", "Edit in Sidearm")),
     ];
     view
+}
+
+/// Every action's non-empty `notes` (a placeholder's says nothing about a menu item).
+fn action_notes(config: &AppConfig) -> HashMap<String, String> {
+    config
+        .actions
+        .iter()
+        .filter(|action| action.action_type != ActionType::Disabled)
+        .filter_map(|action| {
+            let note = action.notes.as_deref()?.trim();
+            (!note.is_empty()).then(|| (action.id.clone(), note.to_owned()))
+        })
+        .collect()
 }
 
 /// [`action_detail`] of every action the menu (and its submenus) can run.
@@ -1952,5 +2051,58 @@ mod tests {
         let view = model.view("Menu", 1);
         assert_eq!(view.items.len(), 3);
         assert!(view.items.iter().all(|item| item.detail.as_ref().is_some_and(|text| text.chars().count() == DETAIL_CHARS + 1)));
+    }
+
+    #[test]
+    fn a_link_to_another_menu_shows_that_menus_blocks_as_a_submenu() {
+        let max = vec![
+            MenuItem::Search { id: "menu-search".into(), enabled: true, all_menus: true },
+            submenu("check", "Check", vec![action("v", "Validate")]),
+            submenu("plan", "Plan", vec![action("n", "Next")]),
+        ];
+        // The other menu links back: not expanded again (no cycle).
+        let back = MenuItem::Action { id: "back".into(), label: "Home".into(), action_id: "menu-home".into(), enabled: true, pinned: false };
+        let max = [max, vec![back]].concat();
+        let link = MenuItem::Action { id: "link".into(), label: "Max".into(), action_id: "menu-max".into(), enabled: true, pinned: false };
+        let menus = HashMap::from([("menu-max".to_owned(), max), ("menu-home".to_owned(), Vec::new())]);
+        let mut model = Model::new(vec![submenu("top", "Top", vec![action("a", "Ask"), link])], HashMap::new())
+            .expand_links(Some("menu-home"), &menus);
+
+        let view = model.view("Home", 1);
+        let row = &view.items[1];
+        assert!(row.submenu, "the link opens like a submenu");
+        assert_eq!(row.children, ["Validate", "Next", "Home"], "the search box left out, the link back kept as a row");
+        assert_eq!(row.child_groups, [Some("Check".to_owned()), Some("Plan".to_owned()), None]);
+        assert_eq!(model.child_item_at(1, 1), Some(("n".into(), Some("menu-max".into()))), "an edit goes to the linked menu");
+        assert_eq!(model.pick_child(1, 0), Step::Run("act-v".into()));
+
+        let mut model = Model::new(vec![MenuItem::Action { id: "link".into(), label: "Max".into(), action_id: "menu-max".into(), enabled: true, pinned: false }], HashMap::new())
+            .expand_links(Some("menu-home"), &menus);
+        assert!(model.view("Home", 1).items[0].submenu, "a top-level link is a row, not an inline block");
+        model.apply(Input::Pick(0));
+        let view = model.view("Home", 1);
+        assert_eq!(view.items.iter().map(|item| item.group.as_deref()).collect::<Vec<_>>(), [Some("Check"), Some("Plan"), None]);
+        assert!(!view.items[2].submenu, "the link back to the opening menu is not expanded");
+    }
+
+    #[test]
+    fn notes_show_on_the_row_and_on_a_submenus_names_and_are_searched() {
+        let items = vec![
+            MenuItem::Search { id: "menu-search".into(), enabled: true, all_menus: true },
+            submenu("top", "Top", vec![action("a", "Ask"), submenu("more", "More", vec![action("v", "Validate"), action("n", "Next")])]),
+        ];
+        let mut model = Model::new(items, HashMap::new());
+        model.notes = HashMap::from([("act-a".to_owned(), "asks a question".to_owned()), ("act-v".to_owned(), "checks every claim".to_owned())]);
+
+        let view = model.view("Home", 1);
+        let ask = view.items.iter().find(|item| item.label == "Ask").unwrap();
+        assert_eq!(ask.note.as_deref(), Some("asks a question"));
+        let more = view.items.iter().find(|item| item.label == "More").unwrap();
+        assert_eq!(more.note, None);
+        assert_eq!(more.child_notes, [Some("checks every claim".to_owned()), None]);
+
+        model.set_query("every claim");
+        let found: Vec<String> = model.view("Home", 2).items.iter().filter(|item| !item.search).map(|item| item.label.clone()).collect();
+        assert_eq!(found, ["Validate"], "a description is searched like the name");
     }
 }

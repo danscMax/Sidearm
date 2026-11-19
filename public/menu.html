@@ -259,6 +259,9 @@
     mask-image: linear-gradient(to bottom, #000 82%, transparent);
   }
   .tip--list { padding: 6px 4px; white-space: normal; }
+  /* A list taller than the menu: filled column by column, a heading kept with its first name. */
+  .tip--cols { column-fill: balance; column-gap: 4px; }
+  .tip--cols .tip__block, .tip--cols .tip__item { break-inside: avoid; }
   .tip--full { overflow-y: auto; transition: none; }
   .tip__item {
     display: block;
@@ -307,6 +310,23 @@
     background: var(--tip);
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
     font-size: 12.5px;
+  }
+  /* What an item does (its description): above what it sends in the tip, and a
+     box under a name of the tip's list while the pointer is on that name. */
+  .tip__note { margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); color: var(--accent); white-space: normal; }
+  .note {
+    position: absolute;
+    z-index: 3;
+    padding: 6px 9px;
+    border-radius: 6px;
+    border: 1px solid var(--line);
+    background: #232a1e;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.5);
+    color: var(--tip-text);
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: normal;
+    pointer-events: none;
   }
   .tip--fresh { animation: reveal 140ms ease-out; }
   @keyframes reveal {

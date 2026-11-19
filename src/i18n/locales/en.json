@@ -814,6 +814,8 @@
     "menuNewPhrase": "New phrase",
     "menuPhraseText": "Text it types",
     "menuPhrasePlaceholder": "What should land in the window…",
+    "menuItemNote": "Description",
+    "menuItemNotePlaceholder": "What it does — shown when the pointer is on it (optional)",
     "menuPhraseEnter": "Send right away (Enter)",
     "menuPhraseLibrary": "From the library snippet “{{name}}”: editing changes it everywhere it is used. With Enter on, the phrase becomes its own copy.",
     "menuPhraseShared": "The same phrase also runs on: {{places}}. Editing changes it there too.",

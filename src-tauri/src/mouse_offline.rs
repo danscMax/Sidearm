@@ -82,7 +82,9 @@ impl OfflinePlan {
 
 #[derive(Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum TargetState { Written, NotWritten, FollowsWindow, Unknown }
+/// `Pending`: the onboard mouse's profile 1 should hold this profile, but
+/// this run has not stored it yet (the mouse slept, or the change is not saved).
+pub enum TargetState { Written, NotWritten, FollowsWindow, Unknown, Pending }
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -139,7 +141,9 @@ pub fn preview(config: &AppConfig, model: &NativeModel, profile_id: &str, banks:
     } else if model.verified {
         // Profile 1 keeps `@active` as the fallback: it is stored while Sidearm runs.
         let kept = onboard_offline_profile(config);
-        target.state = if kept == profile_id { TargetState::Written } else { TargetState::NotWritten };
+        target.state = if kept != profile_id { TargetState::NotWritten }
+            else if crate::mouse_memory::live_overlay::onboard_offline_stored(config, model) { TargetState::Written }
+            else { TargetState::Pending };
         if target.state == TargetState::NotWritten {
             target.written_profile_id = Some(kept);
         }
@@ -795,6 +799,7 @@ mod tests {
 
     #[test]
     fn preview_f8_bank_target_uses_actual_inventory_and_shared_bank_plan() {
+        let _one = crate::mouse_memory::live_overlay::tests::V2_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use crate::mouse_memory::live_overlay::Banks;
         let (mut config, profile) = empty_profile();
         config.settings.offline_profile_id = Some(profile.clone());
@@ -811,7 +816,8 @@ mod tests {
         assert_eq!(target(&config, vec![1]).state, TargetState::FollowsWindow);
         // The V2 keeps the fallback for `@active` (stored while Sidearm runs).
         let v2 = preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target.state;
-        assert_eq!(v2, if config.settings.fallback_profile_id == profile { TargetState::Written } else { TargetState::NotWritten });
+        // Not stored by this run (no session here): pending, not written.
+        assert_eq!(v2, if config.settings.fallback_profile_id == profile { TargetState::Pending } else { TargetState::NotWritten });
         config.settings.offline_profile_id = Some(config.profiles[1].id.clone());
         assert_eq!(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target.state, TargetState::NotWritten);
     }
@@ -928,8 +934,25 @@ mod tests {
         }
     }
 
+    /// "Written" only once this run stored that very profile in the V2.
+    #[test]
+    fn the_v2_preview_says_written_only_after_the_store() {
+        let _one = crate::mouse_memory::live_overlay::tests::V2_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut config, profile) = empty_profile();
+        config.settings.fallback_profile_id = profile.clone();
+        let state = |config: &AppConfig| preview(config, &NAGA_V2_HYPERSPEED, &profile, None).target.state;
+        let (device, _fake) = fake_v2();
+        assert_eq!(state(&config), TargetState::Pending);
+        let _ = crate::mouse_memory::live_overlay::tests::store_v2_offline(&device, &config);
+        assert_eq!(state(&config), TargetState::Written);
+        bind(&mut config, &profile, "thumb_01", Layer::Offline, shortcut("U", true, false, false), None);
+        assert_eq!(state(&config), TargetState::Pending, "an unsaved change is not in the mouse");
+        crate::mouse_memory::live_overlay::tests::forget_v2_store();
+    }
+
     #[test]
     fn preview_w5_v2_not_written_names_the_exit_profile() {
+        let _one = crate::mouse_memory::live_overlay::tests::V2_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mut config, profile) = empty_profile();
         let other = config.profiles[1].id.clone();
         for setting in [None, Some(other.clone()), Some("missing-profile".into())] {
@@ -937,7 +960,7 @@ mod tests {
             config.settings.fallback_profile_id = if setting.is_none() { other.clone() } else { profile.clone() };
             let target = serde_json::to_value(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target).unwrap();
             if setting.as_deref() == Some("missing-profile") {
-                assert_eq!(target, serde_json::json!({"state": "written"}));
+                assert_eq!(target, serde_json::json!({"state": "pending"}), "kept, not stored by this run yet");
             } else {
                 assert_eq!(target, serde_json::json!({"state": "notWritten", "writtenProfileId": other}));
             }
@@ -973,6 +996,7 @@ mod tests {
 
     #[test]
     fn preview_w5_dynamic_and_unknown_targets_omit_unresolved_fields() {
+        let _one = crate::mouse_memory::live_overlay::tests::V2_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         use crate::mouse_memory::live_overlay::Banks;
         let (mut config, profile) = empty_profile();
         config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
@@ -985,7 +1009,7 @@ mod tests {
         let v2 = serde_json::to_value(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target).unwrap();
         let fallback = config.settings.fallback_profile_id.clone();
         if fallback == profile {
-            assert_eq!(v2, serde_json::json!({"state": "written"}));
+            assert_eq!(v2, serde_json::json!({"state": "pending"}));
         } else {
             assert_eq!(v2, serde_json::json!({"state": "notWritten", "writtenProfileId": fallback}));
         }

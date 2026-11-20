@@ -2150,6 +2150,7 @@
     "banner_other": "This profile has {{count}} problems to look at:"
   },
   "offline": {
+    "pending": "Not stored in the mouse yet: Sidearm stores it once the mouse answers (press any of its buttons) and the change is saved.",
     "playsThis": "After Sidearm closes the mouse plays this bank.",
     "playsOther": "After Sidearm closes the mouse plays bank {{bank}} ({{name}}); this profile plays after switching banks with the mouse's profile button.",
     "unknown": "The mouse did not respond, so its bank assignments are unknown. Sidearm will store the profile once it wakes up.",

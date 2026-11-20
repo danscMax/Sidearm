@@ -47,7 +47,7 @@ export interface OfflineControl {
 
 export interface OfflinePreview {
   target: {
-    state: "written" | "notWritten" | "followsWindow" | "unknown";
+    state: "written" | "notWritten" | "followsWindow" | "unknown" | "pending";
     bank?: number;
     writtenProfileId?: string;
     banks?: { bank: number; profileId: string }[];

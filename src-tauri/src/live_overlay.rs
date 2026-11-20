@@ -787,6 +787,11 @@ const STORE_PAUSE: Duration = Duration::from_secs(5);
 /// the session, which owns the live map a profile-1 write replaces.
 static ONBOARD_STORE: Mutex<Option<AppConfig>> = Mutex::new(None);
 
+/// Whether this run stored `config`'s offline profile in `model`'s profile 1.
+pub(crate) fn onboard_offline_stored(config: &AppConfig, model: &NativeModel) -> bool {
+    STORED[model.catalog_index()].load(Ordering::Acquire) == crate::mouse_offline::onboard_offline_key(config, model)
+}
+
 fn take_onboard_store() -> Option<AppConfig> {
     ONBOARD_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
 }
@@ -889,7 +894,9 @@ fn store_banks(
         log::warn!("[mouse-offline] {} poll rate not put back: {error}", model.name);
         note_asleep(&mut asleep, error);
     }
-    if exiting && STORED[model.catalog_index()].load(Ordering::Acquire) == key {
+    // A save that left this mouse's banks as they were (another mouse's, a
+    // setting) stores nothing: every bank was read back record by record.
+    if STORED[model.catalog_index()].load(Ordering::Acquire) == key {
         log::info!("[mouse-offline] {} banks already stored in the background", model.name);
     } else {
         moved = store_planned_banks(device, config, model, &banks, &plan, config_dir, &mut asleep)?;
@@ -1620,6 +1627,18 @@ pub(crate) mod tests {
     use super::*;
     use crate::device_catalog::{NAGA_PRO, NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
 
+    /// Tests that store into the V2 share its `STORED` entry: one at a time.
+    pub(crate) static V2_STORE: Mutex<()> = Mutex::new(());
+
+    /// Stores `config`'s offline profile in a (fake) V2 as its session does.
+    pub(crate) fn store_v2_offline(device: &VendorDevice, config: &AppConfig) -> Result<bool, String> {
+        store_onboard_offline(device, config)
+    }
+
+    pub(crate) fn forget_v2_store() {
+        STORED[NAGA_V2_HYPERSPEED.catalog_index()].store(0, Ordering::Release);
+    }
+
     /// Both mice connected: the V2's trigger follows `hypershiftTap`.
     const BOTH: &[&NativeModel] = &[&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO];
 
@@ -1715,6 +1734,7 @@ pub(crate) mod tests {
     #[test]
     fn the_v2_offline_profile_is_stored_once_per_change() {
         use crate::mouse_memory::fake::{self, FakeMouse};
+        let _one = V2_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let _fake = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
         let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
         let mut config = crate::config::default_seed_config();

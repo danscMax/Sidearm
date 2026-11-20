@@ -2040,6 +2040,127 @@ mod tests {
         assert!(opened.is_some(), "no consumer collection opens: {paths:?}");
     }
 
+    /// Hardware, interactive — **close every Sidearm first**, the V2 HyperSpeed
+    /// awake. Answers what stage 2 (`plans/v2-ram-signals/plan.md`, П0 1, 2, 5)
+    /// depends on: the live map (profile 0, RAM) holding Sidearm's signals while
+    /// profile 1 (flash) keeps the offline profile.
+    /// 1. does writing profile 0 leave profile 1 alone, and profile 1 profile 0;
+    /// 2. which events load profile 1 into the live map: a SET Normal mode
+    ///    command, sleep, power off/on, the receiver re-plugged (a killed Sidearm
+    ///    touches nothing, so what it leaves is whatever these say).
+    ///
+    /// Only thumb 12, layer 0 of both profiles: saved first, put back and read
+    /// back on any end, a panic included. Thumb 12 plays volume up from RAM and
+    /// F24 from flash, so each answer is one press.
+    /// Run: `cargo test v2_flash_vs_ram_probes -- --ignored --nocapture --test-threads=1`.
+    #[test]
+    #[ignore]
+    fn v2_flash_vs_ram_probes() {
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_F24};
+        const THUMB_12: u8 = 0x4b;
+        const VOLUME_UP: u16 = 0x00e9;
+        let record = |action: OnboardAction| {
+            let mut block = [0u8; 7];
+            let bytes = action.bytes();
+            block[..bytes.len()].copy_from_slice(&bytes);
+            block
+        };
+        let (ram, flash) = (record(OnboardAction::Consumer(VOLUME_UP)), record(OnboardAction::Key { modifier: 0, usage: 0x73 }));
+        let open = || VendorDevice::open_model(&NAGA_V2_HYPERSPEED).expect("the V2 must be connected and awake");
+        let enter = |what: &str| {
+            println!("\n>>> {what}\n    then press Enter here");
+            let mut line = String::new();
+            std::io::stdin().read_line(&mut line).unwrap();
+            line.trim().to_lowercase()
+        };
+        // What thumb 12 plays now: F24 = profile 1 (flash), else ask about the volume.
+        let plays = |label: &str| {
+            enter(&format!("{label}: press thumb 12 two or three times within 8 s after Enter"));
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(8);
+            let mut f24 = false;
+            while std::time::Instant::now() < until {
+                f24 |= unsafe { GetAsyncKeyState(i32::from(VK_F24)) } as u16 & 0x8000 != 0;
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let what = if f24 { "F24 (flash, profile 1)".to_string() } else {
+                match enter("No F24. Did the volume go up? Type y or n").as_str() {
+                    "y" => "volume up (RAM, profile 0)".to_string(),
+                    other => format!("nothing seen ({other})"),
+                }
+            };
+            println!("=== {label}: {what}");
+            what
+        };
+
+        let device = open();
+        let saved = [0u8, 1].map(|profile| (profile, device.read_block(profile, THUMB_12, 0).expect("thumb 12 readable")));
+        drop(device);
+        println!("saved thumb 12 (profile, record): {saved:02x?}");
+
+        /// Puts thumb 12 of both profiles back (flash first), whatever happened.
+        struct Restore([(u8, [u8; 7]); 2]);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let Ok(device) = VendorDevice::open_model(&NAGA_V2_HYPERSPEED) else {
+                    println!("!! the V2 does not answer: put thumb 12 back by hand: {:02x?}", self.0);
+                    return;
+                };
+                for &(profile, record) in self.0.iter().rev() {
+                    let back = device.set_block(profile, THUMB_12, 0, &record).and_then(|_| device.read_block(profile, THUMB_12, 0));
+                    match back {
+                        Ok(read) if read == record => println!("profile {profile} thumb 12 put back"),
+                        other => println!("!! profile {profile} thumb 12 NOT put back ({other:02x?}), wanted {record:02x?}"),
+                    }
+                }
+            }
+        }
+        let _restore = Restore(saved);
+
+        // 1. Each profile written alone: does the other one change?
+        let device = open();
+        device.set_block(0, THUMB_12, 0, &ram).unwrap();
+        println!("1a. after writing RAM: profile 0 {:02x?}, profile 1 {:02x?} (was {:02x?})",
+            device.read_block(0, THUMB_12, 0), device.read_block(1, THUMB_12, 0), saved[1].1);
+        drop(device);
+        plays("1a. RAM = volume up, flash untouched");
+        let device = open();
+        device.set_block(1, THUMB_12, 0, &flash).unwrap();
+        println!("1b. after writing flash: profile 1 {:02x?}, profile 0 {:02x?} (RAM changed: {})",
+            device.read_block(1, THUMB_12, 0), device.read_block(0, THUMB_12, 0),
+            device.read_block(0, THUMB_12, 0).ok() != Some(ram));
+        drop(device);
+        plays("1b. flash = F24 written, RAM was volume up");
+
+        // 2. RAM = volume up, flash = F24, then each event: which one plays after it?
+        let events: [(&str, Option<&str>); 4] = [
+            ("SET Normal mode command", None),
+            ("sleep", Some("leave the mouse untouched until it sleeps (its light goes off), then wake it with a click")),
+            ("power off/on", Some("switch the V2 off with its switch, wait 5 s, switch it on")),
+            ("receiver re-plugged", Some("pull the V2's USB receiver out, wait 5 s, plug it back in, wait for the mouse")),
+        ];
+        let mut results = Vec::new();
+        for (name, ask) in events {
+            let device = open();
+            device.set_block(0, THUMB_12, 0, &ram).unwrap();
+            if ask.is_none() {
+                device.command(CLASS_CONTROL, CMD_SET_MODE, &[MODE_NORMAL, 0x00]).unwrap();
+            }
+            println!("2. before `{name}`: profile 0 {:02x?}", device.read_block(0, THUMB_12, 0));
+            drop(device);
+            if let Some(ask) = ask
+                && enter(&format!("2. `{name}`: {ask}. Type s to skip")) == "s"
+            {
+                results.push((name, "skipped".to_string()));
+                continue;
+            }
+            if let Ok(device) = VendorDevice::open_model(&NAGA_V2_HYPERSPEED) {
+                println!("2. after `{name}`: profile 0 {:02x?}", device.read_block(0, THUMB_12, 0));
+            }
+            results.push((name, plays(&format!("2. after `{name}`"))));
+        }
+        println!("\n=== summary: flash records leave RAM alone / reloads: {results:#?}");
+    }
+
     /// Every key button of `model` with Sidearm's own `F13`.. signal: thumbs
     /// bare, the rest (top buttons) with Alt, as the config seeds them.
     fn key_bindings(model: &NativeModel) -> Vec<OnboardBinding> {

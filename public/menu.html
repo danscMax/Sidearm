@@ -254,6 +254,14 @@
     border-left: 0;
     border-right-color: var(--line);
   }
+  /* No room right of the list: the tip opens on its left (Rust's `Placement`). */
+  .menu--side-left { flex-direction: row-reverse; }
+  .menu--side-left .tip::before {
+    left: auto;
+    right: -7px;
+    border-right: 0;
+    border-left: 6px solid var(--line);
+  }
   .tip--clipped {
     -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
     mask-image: linear-gradient(to bottom, #000 82%, transparent);

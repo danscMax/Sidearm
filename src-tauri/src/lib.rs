@@ -2454,10 +2454,20 @@ fn menu_ready(app: AppHandle) {
     menu_popup::page_ready(&app);
 }
 
-/// The menu popup measured itself (physical pixels) for the menu `generation`.
+/// The menu popup measured itself (physical pixels) for the menu `generation`:
+/// the page, its tip beside the list (`side`, at most `side_max`) and the tip's
+/// side. Answers where the tip belongs (`None`: not placed).
 #[tauri::command]
-fn menu_layout(app: AppHandle, generation: u64, width: f64, height: f64) {
-    menu_popup::page_layout(&app, generation, width, height);
+fn menu_layout(
+    app: AppHandle,
+    generation: u64,
+    width: f64,
+    height: f64,
+    side: f64,
+    side_max: f64,
+    side_left: bool,
+) -> Option<menu_popup::Placement> {
+    menu_popup::page_layout(&app, generation, menu_popup::PageSize { width, height, side, side_max, side_left })
 }
 
 /// The menu popup's search box changed.

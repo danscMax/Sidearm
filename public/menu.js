@@ -26,6 +26,12 @@
   /** The widest a submenu's list in the tip gets (272 px each). */
   var MAX_TIP_COLUMNS = 5;
   var fullTimer = null;
+  // Where Rust put the tip (`menu_layout`'s answer): left of the list when the
+  // right has no room, and how wide it may get there (CSS px). Fixed per menu,
+  // so hovering a long submenu never moves the list.
+  var sideLeft = false;
+  var sideRoom = Infinity;
+  var tipColumn = 0;
 
   function invoke(cmd, args) {
     return tauri.invoke(cmd, args || {}).catch(function () {});
@@ -203,11 +209,15 @@
     tip.style.columnCount = "";
     tip.style.height = "";
     tip.classList.remove("tip--cols");
-    if (!tip.classList.contains("tip--list") || tip.scrollHeight <= room + 1) return;
     var columnWidth = side.clientWidth;
+    tipColumn = columnWidth;
+    if (!tip.classList.contains("tip--list") || tip.scrollHeight <= room + 1) return;
+    // No more columns than the room beside the list holds (the gap to the list included).
+    var most = Math.min(MAX_TIP_COLUMNS, Math.floor((sideRoom - 8) / columnWidth));
+    if (most < 2) return;
     tip.classList.add("tip--cols");
     tip.style.height = room + "px";
-    for (var columns = 2; columns <= MAX_TIP_COLUMNS; columns++) {
+    for (var columns = 2; columns <= most; columns++) {
       tip.style.columnCount = columns;
       side.style.width = columns * columnWidth + "px";
       // Columns that still do not fit overflow sideways.
@@ -374,11 +384,28 @@
       showTip(highlight);
     }
     var box = root.getBoundingClientRect();
-    var size = { generation: view.generation, width: Math.ceil(box.width * dpr), height: Math.ceil(box.height * dpr) };
+    var sideWidth = tip ? tip.parentNode.getBoundingClientRect().width : 0;
+    var size = {
+      generation: view.generation,
+      width: Math.ceil(box.width * dpr),
+      height: Math.ceil(box.height * dpr),
+      side: Math.ceil(sideWidth * dpr),
+      sideMax: Math.ceil((tipColumn || sideWidth) * MAX_TIP_COLUMNS * dpr),
+      sideLeft: sideLeft,
+    };
     var key = JSON.stringify(size);
     if (key !== lastLayout) {
       lastLayout = key;
-      invoke("menu_layout", size);
+      var generation = view.generation;
+      invoke("menu_layout", size).then(function (placement) {
+        if (!placement || !view || view.generation !== generation) return;
+        var room = placement.room / dpr;
+        if (placement.sideLeft === sideLeft && room === sideRoom) return;
+        sideLeft = placement.sideLeft;
+        sideRoom = room;
+        root.classList.toggle("menu--side-left", sideLeft);
+        layout();
+      });
     }
   }
 
@@ -386,6 +413,10 @@
     var fresh = !view || next.generation !== view.generation;
     view = next;
     if (fresh) {
+      // A new menu is placed anew.
+      sideLeft = false;
+      sideRoom = Infinity;
+      root.classList.remove("menu--side-left");
       buildFrame();
       search.placeholder = view.placeholder;
     }

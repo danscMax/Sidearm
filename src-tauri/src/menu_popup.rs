@@ -817,6 +817,8 @@ struct OpenMenu {
     /// The popup's physical anchor (the cursor at open).
     anchor: (i32, i32),
     max_height: u32,
+    /// Where the list stays and which side the tip takes, fixed by the first layout.
+    placement: Option<Placement>,
     /// A cheat sheet ([`open_sheet`]): the profile and layer shown.
     sheet: Option<(String, crate::config::Layer)>,
 }
@@ -949,6 +951,7 @@ fn open_model(
         target_window: platform::foreground_window(),
         anchor,
         max_height,
+        placement: None,
         sheet,
     };
     let view = view_of(&menu);
@@ -1360,17 +1363,71 @@ pub(crate) fn page_ready(app: &AppHandle) {
     }
 }
 
+/// What the page measured, in physical pixels: the whole page, its tip
+/// (`side`, the part beside the list), the tip's widest (`side_max`) and which
+/// side of the list it is drawn on.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct PageSize {
+    pub width: f64,
+    pub height: f64,
+    pub side: f64,
+    pub side_max: f64,
+    pub side_left: bool,
+}
+
+/// Where the list stays while the menu is open and which side the tip opens
+/// on. Like a native submenu: the parent stays put and the child opens where
+/// it fits, so a tip widening (a long submenu in columns) never moves the list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Placement {
+    #[serde(skip)]
+    menu_x: i32,
+    #[serde(skip)]
+    work: (i32, i32, i32, i32),
+    side_left: bool,
+    /// Physical width the tip has on its side, up to the work area's edge.
+    room: i32,
+}
+
+impl Placement {
+    /// The tip goes right of the list unless its widest does not fit there and
+    /// the left has more room.
+    fn pin(menu_x: i32, menu_w: i32, work: (i32, i32, i32, i32), side_max: i32) -> Self {
+        let right = work.2 - (menu_x + menu_w);
+        let left = menu_x - work.0;
+        let side_left = right < side_max && left > right;
+        Self { menu_x, work, side_left, room: if side_left { left } else { right }.max(0) }
+    }
+
+    /// The window's x for a page `width` wide whose tip is `side` wide; kept
+    /// inside the work area (a tip wider than its room would leave it).
+    fn window_x(&self, width: i32, side: i32) -> i32 {
+        let x = if self.side_left { self.menu_x - side } else { self.menu_x };
+        x.min(self.work.2 - width).max(self.work.0)
+    }
+}
+
 /// The page measured itself in physical pixels: size it and put it at the cursor.
-/// Once per level: the page keeps its size while the highlight moves.
-pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: f64) {
-    let (anchor, max_height) = {
+/// The list's place and the tip's side are fixed by the first layout; later
+/// ones (the tip widening or narrowing) only resize around them. Returns the
+/// placement for the page to draw the tip on its side (`None`: not placed).
+pub(crate) fn page_layout(app: &AppHandle, generation: u64, size: PageSize) -> Option<Placement> {
+    page_layout_as(app, generation, size, false)
+}
+
+/// `settle`: show with what the page sent even when its tip is on the wrong
+/// side (the page did not measure again in time).
+fn page_layout_as(app: &AppHandle, generation: u64, size: PageSize, settle: bool) -> Option<Placement> {
+    let PageSize { width, height, .. } = size;
+    let (anchor, max_height, pinned) = {
         let guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
         match guard.as_ref() {
-            Some(menu) if menu.generation == generation => (menu.anchor, menu.max_height),
-            _ => return, // A late layout of a menu already closed.
+            Some(menu) if menu.generation == generation => (menu.anchor, menu.max_height, menu.placement),
+            _ => return None, // A late layout of a menu already closed.
         }
     };
-    let Some(window) = app.get_webview_window(WINDOW_LABEL) else { return };
+    let window = app.get_webview_window(WINDOW_LABEL)?;
     // The page sends its size in physical pixels (its own devicePixelRatio):
     // a fresh window still sitting on another monitor renders at that
     // monitor's scale, and multiplying by the target's scale cut the menu off.
@@ -1394,14 +1451,39 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
                 // On the main thread like every other layout: a close queues its hide
                 // behind it there, so a menu closed meanwhile never comes back.
                 let handle = app.clone();
-                let _ = app.run_on_main_thread(move || page_layout(&handle, generation, width / now * scale, height / now * scale));
+                let ratio = scale / now;
+                let rescaled = PageSize { width: width * ratio, height: height * ratio, side: size.side * ratio, side_max: size.side_max * ratio, ..size };
+                let _ = app.run_on_main_thread(move || {
+                    page_layout_as(&handle, generation, rescaled, true);
+                });
             }
         });
-        return;
+        return None;
+    }
+    let (w, h) = (width.ceil() as i32, layout_height(height, max_height) as i32);
+    let side = (size.side.ceil() as i32).clamp(0, w);
+    let gap = (6.0 * scale).round() as i32;
+    let placement = match pinned {
+        Some(placement) => placement,
+        None => {
+            // The list alone at the cursor, as the whole popup was before.
+            let (menu_x, _) = platform::position_near(anchor, w - side, h, gap);
+            let placement = Placement::pin(menu_x, w - side, platform::work_area_at(anchor), size.side_max.ceil() as i32);
+            let mut guard = OPEN.lock().unwrap_or_else(|poison| poison.into_inner());
+            match guard.as_mut() {
+                Some(menu) if menu.generation == generation => menu.placement = Some(placement),
+                _ => return None,
+            }
+            placement
+        }
+    };
+    // Still hidden and the tip drawn on the other side: the page moves it and
+    // measures again before the menu shows, so it never appears mirrored.
+    if placement.side_left != size.side_left && !settle && SHOWN.load(Ordering::Acquire) != generation {
+        return Some(placement);
     }
     SHOWN.store(generation, Ordering::Release);
-    let (w, h) = (width.ceil() as i32, layout_height(height, max_height) as i32);
-    let (x, y) = platform::position_near(anchor, w, h, (6.0 * scale).round() as i32);
+    let (x, y) = (placement.window_x(w, side), platform::position_near(anchor, w, h, gap).1);
     // Position first so a cross-monitor DPI change settles before sizing (see `show_osd`).
     let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize { width: w as u32, height: h as u32 }));
@@ -1410,6 +1492,7 @@ pub(crate) fn page_layout(app: &AppHandle, generation: u64, width: f64, height: 
     // (the keys then went to the app under the popup — measured 2026-11-12).
     platform::show_focused(&window);
     log::info!("[menu] shown ({w}x{h})");
+    Some(placement)
 }
 
 /// Whether the open menu (if any) is `generation`.
@@ -1440,7 +1523,7 @@ pub(crate) mod platform {
         },
     };
 
-    pub(crate) use crate::platform::display::{cursor_position, dpi_scale_at, position_near};
+    pub(crate) use crate::platform::display::{cursor_position, dpi_scale_at, position_near, work_area_at};
 
     pub(crate) fn foreground_window() -> isize {
         unsafe { GetForegroundWindow() as isize }
@@ -1586,6 +1669,9 @@ pub(crate) mod platform {
     }
     pub(crate) fn position_near(point: (i32, i32), _: i32, _: i32, gap: i32) -> (i32, i32) {
         (point.0 + gap, point.1 + gap)
+    }
+    pub(crate) fn work_area_at(_: (i32, i32)) -> (i32, i32, i32, i32) {
+        (0, 0, 1920, 1080)
     }
     pub(crate) fn restore_foreground(_: isize) {}
     pub(crate) fn show_focused(window: &tauri::WebviewWindow) {
@@ -2104,5 +2190,32 @@ mod tests {
         model.set_query("every claim");
         let found: Vec<String> = model.view("Home", 2).items.iter().filter(|item| !item.search).map(|item| item.label.clone()).collect();
         assert_eq!(found, ["Validate"], "a description is searched like the name");
+    }
+
+    #[test]
+    fn the_list_stays_put_while_its_tip_widens_and_the_tip_opens_where_it_fits() {
+        let work = (0, 0, 1920, 1080);
+        // Room on the right for the widest tip: right, and the list never moves.
+        let right = Placement::pin(100, 250, work, 1360);
+        assert!(!right.side_left);
+        assert_eq!(right.room, 1570);
+        assert_eq!(right.window_x(250 + 272, 272), 100);
+        assert_eq!(right.window_x(250 + 816, 816), 100, "three columns: the list stays at 100");
+        // Near the right edge: the tip opens left of the list, which still stays.
+        let left = Placement::pin(1400, 250, work, 1360);
+        assert!(left.side_left);
+        assert_eq!(left.room, 1400);
+        assert_eq!(left.window_x(250 + 272, 272), 1128);
+        assert_eq!(left.window_x(250 + 816, 816), 584);
+        assert_eq!(left.window_x(250 + 816, 816) + 816, 1400, "the list's left edge is where it was");
+        // The widest does not fit either way: the side with more room.
+        assert!(!Placement::pin(700, 250, work, 1360).side_left, "970 px right, 700 left");
+        assert!(Placement::pin(900, 250, work, 1360).side_left, "770 px right, 900 left");
+        // A monitor left of the primary.
+        let other = Placement::pin(-300, 250, (-1920, 0, 0, 1080), 1360);
+        assert!(other.side_left);
+        assert_eq!(other.room, 1620);
+        // A tip wider than its room is kept inside the work area.
+        assert_eq!(Placement::pin(1700, 200, work, 1360).window_x(200 + 1800, 1800), 0);
     }
 }

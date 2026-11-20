@@ -94,13 +94,18 @@ pub(crate) fn cursor_position() -> (i32, i32) {
 /// Physical top-left for a popup of `width`×`height` at `point` (offset by
 /// `gap`), flipped/clamped so it stays inside that monitor's work area.
 pub(crate) fn position_near(point: (i32, i32), width: i32, height: i32, gap: i32) -> (i32, i32) {
+    popup_origin(point, (width, height), gap, work_area_at(point))
+}
+
+/// The work area (left, top, right, bottom; physical) of the monitor holding `point`.
+pub(crate) fn work_area_at(point: (i32, i32)) -> (i32, i32, i32, i32) {
     unsafe {
         let hmon = MonitorFromPoint(windows_sys::Win32::Foundation::POINT { x: point.0, y: point.1 }, MONITOR_DEFAULTTONEAREST);
         let mut mi: MONITORINFO = std::mem::zeroed();
         mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
         GetMonitorInfoW(hmon, &mut mi);
         let wa = mi.rcWork;
-        popup_origin(point, (width, height), gap, (wa.left, wa.top, wa.right, wa.bottom))
+        (wa.left, wa.top, wa.right, wa.bottom)
     }
 }
 

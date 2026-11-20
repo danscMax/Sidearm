@@ -573,6 +573,20 @@ fn write_clipboard_snapshot(saved: &[(u32, Vec<u8>)]) {
 /// CF_DIBV5), files (CF_HDROP), HTML / RTF and other registered formats — what
 /// a screenshot, a copied file or a copied web page puts there. Restored after
 /// 150 ms, kept out of Win+V history (it is already there).
+/// A remote desktop client is the window in front (`mstsc.exe`, the Windows
+/// App / Remote Desktop client's `msrdc.exe`, Hyper-V's `vmconnect.exe`).
+#[cfg(target_os = "windows")]
+fn remote_desktop_in_front() -> bool {
+    crate::window_capture::capture_foreground_window().is_ok_and(|window| is_remote_desktop_exe(&window.exe))
+}
+
+/// `exe`: a path or a file name, any case.
+#[cfg(target_os = "windows")]
+fn is_remote_desktop_exe(exe: &str) -> bool {
+    let name = std::path::Path::new(exe).file_name().and_then(|name| name.to_str()).unwrap_or(exe);
+    ["mstsc.exe", "msrdc.exe", "vmconnect.exe"].iter().any(|known| name.eq_ignore_ascii_case(known))
+}
+
 #[cfg(target_os = "windows")]
 fn paste_via_clipboard(text: &str) -> Result<(), String> {
     use std::{ptr, thread, time::Duration};
@@ -589,6 +603,10 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
     };
 
     const RESTORE_DELAY: Duration = Duration::from_millis(150);
+    // A remote desktop client fetches the text over the network only when the
+    // remote app asks for it, after the Ctrl+V got there.
+    const REMOTE_RESTORE_DELAY: Duration = Duration::from_millis(1500);
+    let remote = remote_desktop_in_front();
 
     // Each paste has its own identity even when another app copies identical text.
     static NEXT_STAGE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
@@ -665,10 +683,14 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
             }
         };
         // 0 = exclude from clipboard history and cloud sync; the third format
-        // tells every clipboard monitor to skip this entry entirely.
+        // tells every clipboard monitor to skip this entry entirely — the
+        // remote desktop client's clipboard redirection is one, and with it the
+        // remote session pasted its old clipboard (2026-11-20), so not there.
         set_dword_format("CanIncludeInClipboardHistory", 0);
         set_dword_format("CanUploadToCloudClipboard", 0);
-        set_dword_format("ExcludeClipboardContentFromMonitorProcessing", 0);
+        if !remote {
+            set_dword_format("ExcludeClipboardContentFromMonitorProcessing", 0);
+        }
     };
 
     // --- helper: best-effort restore (not a new Win+V entry: it is already there) ---
@@ -701,7 +723,7 @@ fn paste_via_clipboard(text: &str) -> Result<(), String> {
         || {
             send_hotkey_string("Ctrl+V", &ALL_MODIFIERS)
                 .map_err(|e| format!("Failed to inject Ctrl+V: {e:?}"))?;
-            thread::sleep(RESTORE_DELAY);
+            thread::sleep(if remote { REMOTE_RESTORE_DELAY } else { RESTORE_DELAY });
             Ok(())
         },
         |seq, saved| restore(seq, saved),
@@ -3171,6 +3193,17 @@ fn send_mouse_event(_action: crate::config::MouseActionKind) -> Result<(), Strin
 
 #[cfg(test)]
 mod tests {
+    /// The remote desktop clients whose clipboard redirection must see a paste.
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn remote_desktop_clients_are_told_by_their_exe() {
+        assert!(super::is_remote_desktop_exe(r"C:\Windows\System32\mstsc.exe"));
+        assert!(super::is_remote_desktop_exe("MSRDC.EXE"));
+        assert!(super::is_remote_desktop_exe("vmconnect.exe"));
+        assert!(!super::is_remote_desktop_exe(r"C:\Program Files\WindowsApps\WindowsTerminal.exe"));
+        assert!(!super::is_remote_desktop_exe("mstsc"));
+    }
+
     /// Live check (owner-approved, Windows, run by hand): a long phrase goes
     /// through the clipboard into the terminal in front and the clipboard is
     /// put back. Needs a terminal window titled `SidearmClipTest` in front and

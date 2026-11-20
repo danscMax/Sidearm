@@ -1207,7 +1207,7 @@ mod tests {
         store(&device, &config, &profile).unwrap();
         let button = NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap();
         assert_eq!(fake::with(|mouse| mouse.records[&(1, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x18]);
-        assert!(fake::with(|mouse| !mouse.records.keys().any(|&(profile, _, _)| profile == 0)), "the live map is the session's");
+        assert_eq!(fake::with(|mouse| mouse.records[&(0, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x18], "the write plays at once (the live map is rewritten after it)");
     }
 
     #[test]

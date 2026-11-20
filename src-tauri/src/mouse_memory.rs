@@ -1221,6 +1221,11 @@ pub(crate) mod fake {
                     mouse.records.insert((0, key.1, key.2), block);
                     mouse.playing_writes += 1;
                 }
+                // So does a profile-1 write of a mouse without banks (the real
+                // V2, measured 2026-11-20: `tests::v2_flash_vs_ram_probes`).
+                if key.0 == 1 && mouse.banks.is_empty() {
+                    mouse.records.insert((0, key.1, key.2), block);
+                }
                 mouse.writes.push(key);
             }
             (CLASS_DPI, CMD_GET_DPI) => {

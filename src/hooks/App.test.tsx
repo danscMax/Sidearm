@@ -14,7 +14,6 @@ vi.mock("../lib/backend", async (importOriginal) => {
     getAdminAutostartStatus: vi.fn().mockResolvedValue({ enabled: false }),
     getOfflinePreview: vi.fn().mockResolvedValue({ target: { state: "written" }, controls: [] }),
     getMouseStatus: vi.fn().mockResolvedValue([]),
-    getNativeModel: vi.fn().mockResolvedValue({ consumerSignals: true }),
     getDebugLog: vi.fn().mockResolvedValue([]),
     startRuntime: vi.fn().mockResolvedValue({ status: "idle" }),
     listBundledPresets: vi.fn().mockResolvedValue([]),
@@ -109,8 +108,9 @@ describe("App orchestration", () => {
     vi.mocked(backend.getMouseStatus).mockImplementationOnce(() => new Promise((resolve) => { resolveStatus = resolve; }));
     await renderReady();
     cleanup();
-    await act(async () => { resolveStatus([{ kind: "signalsSwitched", active: true }]); });
-    expect(backend.getNativeModel).not.toHaveBeenCalled();
+    const translate = vi.spyOn(i18n, "t");
+    await act(async () => { resolveStatus([{ kind: "noFreeBankSlot", active: true }]); });
+    expect(translate.mock.calls.map(([key]) => key)).not.toContain("mouse.noticeNoFreeBankSlot");
   });
 
   it.each([{ key: "Delete" }, { key: "Backspace" }, { key: "z", ctrlKey: true }])(

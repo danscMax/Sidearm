@@ -3437,70 +3437,24 @@ fn onboard_open_error(message: String) -> CommandError {
     CommandError::new(code, message, None)
 }
 
-/// Writes the thumb-button mapping into the mouse's onboard memory, so the
-/// mouse emits those key codes itself and no vendor remapper has to run.
-/// `bindings` come from the config's `encoder_mappings`; each write is verified
-/// against the mouse's own reply.
+/// Puts the mouse back under Sidearm's control: `Normal` mode, in which its
+/// live map plays (the live session writes and repairs that map; profile 1
+/// keeps the offline profile). The takeover notification and the setup wizard
+/// offer this so the user can take the buttons back without restarting anything.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn apply_onboard_mapping(
-    bindings: Vec<mouse_memory::OnboardBinding>,
-) -> Result<(), CommandError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
-        device
-            .apply_bindings(&bindings)
-            .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("apply_onboard_mapping task failed: {e}")))?
-}
-
-/// Asks the mouse which of the given bindings it actually holds. The vendor
-/// collection answers only with what the previous write stored, so the mouse
-/// cannot be read — each binding is written and confirmed by its echo.
-#[cfg(target_os = "windows")]
-#[tauri::command]
-async fn verify_onboard_mapping(
-    bindings: Vec<mouse_memory::OnboardBinding>,
-) -> Result<mouse_memory::OnboardReport, CommandError> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
-        device
-            .verify(&bindings)
-            .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("verify_onboard_mapping task failed: {e}")))?
-}
-
-/// Puts the mouse back under Sidearm's control: `Normal` mode plus the onboard
-/// mapping the config asks for. The takeover notification offers this so the user
-/// can take the buttons back without restarting anything.
-#[cfg(target_os = "windows")]
-#[tauri::command]
-async fn restore_onboard_control(app: AppHandle) -> Result<(), CommandError> {
-    let config_dir = resolve_config_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let config = config::read_and_migrate_config_file(&config_dir.join("config.json"))
-            .map_err(CommandError::from)?;
-        restore_and_verify_onboard(&config)
-    })
-    .await
-    .map_err(|e| CommandError::internal(format!("restore_onboard_control task failed: {e}")))?
+async fn restore_onboard_control() -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(restore_onboard_mode)
+        .await
+        .map_err(|e| CommandError::internal(format!("restore_onboard_control task failed: {e}")))?
 }
 
 #[cfg(target_os = "windows")]
-fn restore_and_verify_onboard(config: &AppConfig) -> Result<(), CommandError> {
+fn restore_onboard_mode() -> Result<(), CommandError> {
     let device = mouse_memory::VendorDevice::open_onboard().map_err(onboard_open_error)?;
     device.ensure_normal_mode()
         .map_err(|msg| CommandError::from_ui("onboard_mode_stuck", crate::ui_text!("error.onboardModeStuck", "The mouse did not return to its normal mode: {reason}", reason = msg)))?;
-    mouse_offline::write_signals(&device, config)
-        .map_err(|msg| CommandError::from_ui("onboard_write_unconfirmed", crate::ui_text!("error.onboardUnconfirmed", "The mouse did not confirm the write: {reason}", reason = msg)))?;
-    let bindings = mouse_memory::onboard_bindings(config);
-    if device.mode().map_err(CommandError::internal)? != mouse_memory::MODE_NORMAL
-        || !device.drifted_bindings(&bindings).map_err(CommandError::internal)?.is_empty()
-        || !device.drifted_native_buttons().map_err(CommandError::internal)?.is_empty() {
+    if device.mode().map_err(CommandError::internal)? != mouse_memory::MODE_NORMAL {
         return Err(CommandError::internal("Mouse settings could not be confirmed. Wake the mouse and retry."));
     }
     Ok(())
@@ -3546,7 +3500,6 @@ async fn recover_from_synapse(app: AppHandle, disable_startup: bool, close_synap
         if !app.state::<Arc<Mutex<RuntimeStore>>>().lock().recover_poison().is_running() {
             return Err(CommandError::from_ui("runtime_stopped", crate::ui_text!("synapse.runtimeStopped", "Start Sidearm capture and retry.")));
         }
-        let config = config::read_and_migrate_config_file(&dir.join("config.json")).map_err(CommandError::from)?;
         let present = mouse_memory::present_models();
         if present.is_empty() {
             return Err(synapse_command_error(mouse_memory::NOT_CONNECTED));
@@ -3562,7 +3515,7 @@ async fn recover_from_synapse(app: AppHandle, disable_startup: bool, close_synap
             return Err(CommandError::from_ui("synapse_restarted", crate::ui_text!("synapse.restarted", "Synapse started again. Use the close-Synapse action to continue.")));
         }
         if onboard {
-            restore_and_verify_onboard(&config).map_err(|e| synapse_command_error(e.message))?;
+            restore_onboard_mode().map_err(|e| synapse_command_error(e.message))?;
         }
         if !restart_capture(&app, || true).map_err(synapse_command_error)? {
             return Err(CommandError::from_ui("runtime_stopped", crate::ui_text!("synapse.runtimeStopped", "Start Sidearm capture and retry.")));
@@ -4019,30 +3972,9 @@ fn switch_key_signals(app: &AppHandle, consumer: bool) -> Result<(), CommandErro
         std::fs::write(&file, b"")
     };
     result.map_err(|e| CommandError::internal(format!("{}: {e}", file.display())))?;
-    // Before the flag flips: a guard tick in between must already know the
-    // rewrite it is about to make is the user's own.
-    onboard_guard::USER_SWITCHED_SIGNALS.store(true, std::sync::atomic::Ordering::SeqCst);
     mouse_memory::set_consumer_signals(consumer);
     log::info!("[onboard] key buttons now send {}", if consumer { "consumer signals" } else { "F13..F24" });
-    let config_dir = resolve_config_dir(app)?;
-    let rewritten = load_or_initialize_config(&config_dir)
-        .map_err(|error| error.to_string())
-        .and_then(|loaded| {
-            let device = match mouse_memory::VendorDevice::open_onboard() {
-                Ok(device) => device,
-                // Live maps follow from the capture restart below.
-                Err(message) if message == mouse_memory::NOT_CONNECTED => return Ok(()),
-                Err(message) => return Err(message),
-            };
-            if mouse_memory::live_overlay::is_active(device.model()) {
-                return Ok(()); // The capture restart below rewrites its live map.
-            }
-            device.apply_bindings(&mouse_memory::onboard_bindings(&loaded.config))
-        });
-    if let Err(message) = rewritten {
-        log::info!("[onboard] signal switch left to the guard: {message}");
-        onboard_guard::request_check();
-    }
+    // The live maps carry the signals: the capture restart rewrites them.
     restart_capture(app, || true).map_err(|message| CommandError::from_ui("runtime_reload_failed", crate::ui_text!("error.runtimeReload", "Could not restart capture: {reason}", reason = message)))?;
     Ok(())
 }
@@ -4970,8 +4902,6 @@ pub fn run() {
             start_macro_recording,
             record_keystroke,
             stop_macro_recording,
-            apply_onboard_mapping,
-            verify_onboard_mapping,
             restore_onboard_control,
             get_synapse_status,
             recover_from_synapse,

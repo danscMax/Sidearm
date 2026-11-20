@@ -204,19 +204,11 @@ fn log_dropped(model: &NativeModel, since: std::time::Instant, outcome: &str) {
 }
 
 /// The models that need a live-map session, given the ones plugged in: every
-/// live-only model, and an onboard model with a live path while another
-/// native mouse is connected (one shared software trigger cannot tell which
-/// mouse's right button is held).
+/// verified model with a live path. An onboard model's (the V2's) signals live
+/// only there: its profile 1 keeps the offline profile ([`store_onboard_offline`]).
 pub fn live_models(present: &[&'static NativeModel]) -> Vec<&'static NativeModel> {
     // Only mice Sidearm writes count: an unverified one keeps its own buttons.
-    let several = present.iter().filter(|model| model.verified).count() > 1;
-    present
-        .iter()
-        .copied()
-        .filter(|model| {
-            model.live.is_some() && model.verified && (model.transport == Transport::LiveOverlay || several)
-        })
-        .collect()
+    present.iter().copied().filter(|model| model.live.is_some() && model.verified).collect()
 }
 
 /// Whether the mouse hook's software Hypershift is needed: some connected
@@ -227,16 +219,20 @@ pub fn software_hypershift(present: &[&'static NativeModel], live: &[&'static Na
         || present
             .iter()
             .any(|model| model.transport == Transport::Onboard && !live.iter().any(|item| item.is(model)))
-        || live.iter().any(|model| software_layer(config, model))
+        || live.iter().any(|model| software_layer(config, model, present))
 }
 
 /// Whether `model`'s live map leaves its trigger a plain mouse button and
-/// takes the layer from the mouse hook: only with `hypershiftTap` (a quick
-/// press clicks — the firmware's Hypershift swallows the button), only for a
-/// model without a firmware Hypershift button whose settings trigger is one
-/// of its native buttons. Raw input tells its trigger from another mouse's.
-pub fn software_layer(config: &AppConfig, model: &NativeModel) -> bool {
-    config.settings.hypershift_tap && settings_trigger(config, model).is_some()
+/// takes the layer from the mouse hook: with `hypershiftTap` (a quick press
+/// clicks — the firmware's Hypershift swallows the button), and always for an
+/// onboard model that is the only mouse connected (the V2 alone keeps the
+/// software trigger it had on the onboard path); only for a model without a
+/// firmware Hypershift button whose settings trigger is one of its native
+/// buttons. Raw input tells its trigger from another mouse's.
+pub fn software_layer(config: &AppConfig, model: &NativeModel, present: &[&'static NativeModel]) -> bool {
+    let alone = present.iter().filter(|other| other.verified && !other.is(model)).count() == 0;
+    settings_trigger(config, model).is_some()
+        && (config.settings.hypershift_tap || (model.transport == Transport::Onboard && alone))
 }
 
 /// The settings trigger as `model`'s native button `(id, button, value)`, when
@@ -386,13 +382,13 @@ fn has_action(config: &AppConfig, control: &ControlId, layer: Layer) -> bool {
 /// only where an enabled action needs them (or during the setup check), so the
 /// rest keep their native behaviour. `consumer` picks reserved consumer usages
 /// over the `F13`..`F24` keyboard fallback.
-pub fn overlay(config: &AppConfig, model: &NativeModel, consumer: bool, checking_extras: bool) -> Result<Overlay, String> {
+pub fn overlay(config: &AppConfig, model: &NativeModel, present: &[&'static NativeModel], consumer: bool, checking_extras: bool) -> Result<Overlay, String> {
     let Some(live) = &model.live else { return Ok(Overlay::default()) };
     let trigger = live.firmware_trigger.is_none().then(|| config.settings.hypershift_trigger.trim());
     let mut overlay = Overlay::default();
     // The hook holds the layer: the trigger stays a plain button (written, as
     // the base bank may hold Hypershift there) and layer 1 never plays.
-    let software = software_layer(config, model);
+    let software = software_layer(config, model, present);
     for (index, (control, button)) in controls(model).into_iter().enumerate() {
         let id = control_id(model, control);
         let key_button = index < model.key_buttons.len();
@@ -779,12 +775,36 @@ pub(crate) fn write_offline(
 }
 
 /// What the last background store wrote into each mouse's banks
-/// ([`store_key`]), 0 for nothing: an exit that would write the same skips it.
+/// ([`store_key`]; an onboard mouse's profile 1, `onboard_offline_key`), 0 for
+/// nothing: an exit or a session that would write the same skips it.
 static STORED: [std::sync::atomic::AtomicU64; CATALOG_LEN] = [const { std::sync::atomic::AtomicU64::new(0) }; CATALOG_LEN];
 /// Bumped by every config change: a background store that waited past a newer one does nothing.
 static STORE_GENERATION: AtomicU32 = AtomicU32::new(0);
 /// A burst of saves (typing in a field) is one store.
 const STORE_PAUSE: Duration = Duration::from_secs(5);
+/// The config whose offline profile the onboard mouse's live session stores
+/// next ([`store_onboard_offline`]): set by [`schedule_bank_store`], taken by
+/// the session, which owns the live map a profile-1 write replaces.
+static ONBOARD_STORE: Mutex<Option<AppConfig>> = Mutex::new(None);
+
+fn take_onboard_store() -> Option<AppConfig> {
+    ONBOARD_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+}
+
+/// Stores the offline profile in `device`'s profile 1 (an onboard mouse) unless
+/// it holds what this run stored last, waiting for no button to be held: the
+/// write plays at once. The live map must be rewritten after a `true`.
+fn store_onboard_offline(device: &VendorDevice, config: &AppConfig) -> Result<bool, String> {
+    let model = device.model();
+    let key = crate::mouse_offline::onboard_offline_key(config, model);
+    if STORED[model.catalog_index()].load(Ordering::Acquire) == key {
+        return Ok(false);
+    }
+    wait_released(model);
+    crate::mouse_offline::store_onboard_offline(device, config)?;
+    STORED[model.catalog_index()].store(key, Ordering::Release);
+    Ok(true)
+}
 
 /// The DPI a bank gets with `profile_id`: the profile's own for this mouse.
 fn bank_dpi(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Option<u16> {
@@ -816,6 +836,7 @@ pub fn schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
         if STORE_GENERATION.load(Ordering::Acquire) != generation || crate::is_shutting_down() {
             return;
         }
+        *ONBOARD_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.clone());
         let offline = crate::mouse_offline::offline_profile_id(&config, None);
         for model in CATALOG.iter().copied().filter(|model| model.live.as_ref().is_some_and(|live| live.banks) && configured(&config, model)) {
             let stored = VendorDevice::open_model(model).and_then(|device| {
@@ -1032,10 +1053,6 @@ pub fn restore_orphaned(config_dir: &Path) -> bool {
             continue;
         }
         match VendorDevice::open_model(model).and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
-            // Same as a session's end: the onboard path's signals come back at the next start.
-            Ok(()) if model.transport == Transport::Onboard => {
-                crate::mouse_offline::write_marker(&config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map");
-            }
             Ok(()) => {}
             Err(error) => {
                 log::warn!("[naga-live] {} live map left by a stopped Sidearm not restored: {error}", model.name);
@@ -1044,14 +1061,6 @@ pub fn restore_orphaned(config_dir: &Path) -> bool {
         }
     }
     done
-}
-
-/// A rollback file of `model`'s live map that no session restored (the mouse
-/// slept until the session ended, or Sidearm was killed): the mouse may still
-/// play that live map instead of its onboard signals.
-pub fn unrestored_map(config_dir: &Path, model: &NativeModel) -> Option<PathBuf> {
-    let backup = live_backup(config_dir, model);
-    (!is_active(model) && backup.exists()).then_some(backup)
 }
 
 fn live_backup(config_dir: &Path, model: &NativeModel) -> PathBuf {
@@ -1362,9 +1371,9 @@ impl Session {
         self.model.is(model) && self.targets.as_ref() == targets
     }
 
-    /// Starts the worker; `None` when there is nothing to write. A model with
-    /// onboard records first puts back the offline profile the last exit left
-    /// in it (`config` is the one that profile came from).
+    /// Starts the worker; `None` when there is nothing to write. An onboard
+    /// model first stores the offline profile in its profile 1 (`config`'s,
+    /// or a newer one a config change queued).
     pub fn start(
         model: &'static NativeModel,
         config_dir: PathBuf,
@@ -1377,7 +1386,7 @@ impl Session {
         let targets: Arc<[(u8, u8, OnboardAction)]> = Arc::from(targets);
         let worker_targets = Arc::clone(&targets);
         let backup = live_backup(&config_dir, model);
-        let onboard = (model.transport == Transport::Onboard).then(|| config.clone());
+        let onboard = model.transport == Transport::Onboard;
         let session_config = config.clone();
         let index = model.catalog_index();
         // A free mouse is claimed at once, so it reads as active as soon as
@@ -1460,16 +1469,14 @@ impl Session {
                     if let Some(snapshot) = active {
                         return repair(&open()?, &backup, snapshot);
                     }
-                    if let Some(config) = &onboard
-                        && config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists()
-                    {
-                        restore_bank(&open()?, LIVE_BANK, &backup)?;
-                        if !crate::mouse_offline::restore_after_offline(config, &config_dir) {
-                            return Err("Offline assignments are still pending".into());
-                        }
+                    // Profile 1 keeps the offline profile; written before the live
+                    // map, whose originals it then is (the write plays at once).
+                    if onboard {
+                        let config = take_onboard_store().unwrap_or_else(|| session_config.clone());
+                        store_onboard_offline(&open()?, &config)?;
                     }
-                    // Stopped while the signals went back (an exit): leave the
-                    // mouse as it is rather than write a map only to undo it.
+                    // Stopped meanwhile (an exit): leave the mouse as it is
+                    // rather than write a map only to undo it.
                     if stopped.try_recv() != Err(mpsc::TryRecvError::Empty) {
                         return Err(STOPPING.to_owned());
                     }
@@ -1538,6 +1545,18 @@ impl Session {
                             log::warn!("[naga-live] {} switched to bank {bank}; repairing the live map", model.name);
                             break;
                         }
+                        // A changed offline profile: stored, then the repair below
+                        // rewrites the live map the write replaced.
+                        if onboard && let Some(config) = take_onboard_store() {
+                            match open().and_then(|device| store_onboard_offline(&device, &config)) {
+                                Ok(true) => break,
+                                Ok(false) => {}
+                                Err(error) => {
+                                    log::warn!("[naga-live] {} offline profile not stored yet: {error}", model.name);
+                                    ONBOARD_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner).get_or_insert(config);
+                                }
+                            }
+                        }
                         let drift = open().and_then(|device| {
                             confirmed_drift(record.target, || device.read_block(LIVE_BANK, record.button, record.layer))
                         });
@@ -1557,14 +1576,9 @@ impl Session {
                     log::warn!("[naga-live] {} still on the Sidearm bank (the exit or a restorer selects another): {error}", model.name);
                 }
                 if active.is_some() {
+                    // The restored map plays profile 1: the offline profile.
                     if let Err(error) = open().and_then(|device| restore_bank(&device, LIVE_BANK, &backup)) {
                         log::warn!("[naga-live] {} recovery pending until next start: {error}", model.name);
-                    }
-                    // The restored map plays what the mouse had stored (often the
-                    // offline profile), not Sidearm's onboard signals: mark it so
-                    // the guard, or the next live session, writes them back.
-                    if onboard.is_some() {
-                        crate::mouse_offline::write_marker(&config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE), "live map");
                     }
                 }
             })
@@ -1598,10 +1612,6 @@ impl Drop for Session {
         if self.claimed.load(Ordering::Acquire) {
             ACTIVE[self.model.catalog_index()].store(false, Ordering::Release);
         }
-        // Back on the onboard path: the guard restores its signals at once.
-        if self.model.transport == Transport::Onboard {
-            crate::onboard_guard::request_check();
-        }
     }
 }
 
@@ -1609,6 +1619,9 @@ impl Drop for Session {
 pub(crate) mod tests {
     use super::*;
     use crate::device_catalog::{NAGA_PRO, NAGA_V2_HYPERSPEED, NAGA_V3_PRO};
+
+    /// Both mice connected: the V2's trigger follows `hypershiftTap`.
+    const BOTH: &[&NativeModel] = &[&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO];
 
     pub(crate) fn config_with_v3() -> AppConfig {
         let mut config = crate::config::default_seed_config();
@@ -1685,26 +1698,37 @@ pub(crate) mod tests {
     #[test]
     fn live_sessions_follow_the_connected_mice() {
         let names = |models: Vec<&NativeModel>| models.iter().map(|model| model.name).collect::<Vec<_>>();
-        assert_eq!(names(live_models(&[&NAGA_V2_HYPERSPEED])), Vec::<&str>::new());
+        // The V2 alone too: its signals live only in its live map (stage 2).
+        assert_eq!(names(live_models(&[&NAGA_V2_HYPERSPEED])), ["Razer Naga V2 HyperSpeed"]);
         assert_eq!(names(live_models(&[&NAGA_V3_PRO])), ["Razer Naga V3 Pro"]);
         assert_eq!(
             names(live_models(&[&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO])),
             ["Razer Naga V2 HyperSpeed", "Razer Naga V3 Pro"]
         );
-        // A model with no live path keeps the onboard path even with two mice,
-        // and an unverified one does not make a second mouse.
+        // An unverified model keeps its own buttons.
         assert_eq!(names(live_models(&[&NAGA_PRO, &NAGA_V3_PRO])), ["Razer Naga V3 Pro"]);
-        assert_eq!(names(live_models(&[&NAGA_V2_HYPERSPEED, &NAGA_PRO])), Vec::<&str>::new());
+        assert_eq!(names(live_models(&[&NAGA_V2_HYPERSPEED, &NAGA_PRO])), ["Razer Naga V2 HyperSpeed"]);
     }
 
+    /// The V2's profile 1 is written once per offline profile, not on every
+    /// start or save: a store that holds it already reads only.
     #[test]
-    fn a_rollback_file_nobody_restored_is_found_by_model() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(unrestored_map(dir.path(), &NAGA_V2_HYPERSPEED), None);
-        std::fs::write(dir.path().join("naga-v2-live.json"), "{}").unwrap();
-        let found = unrestored_map(dir.path(), &NAGA_V2_HYPERSPEED).expect("an rc-era file counts too");
-        assert!(found.ends_with("razer-naga-live.json"));
-        assert_eq!(unrestored_map(dir.path(), &NAGA_V3_PRO), None, "another model's file is not this one's");
+    fn the_v2_offline_profile_is_stored_once_per_change() {
+        use crate::mouse_memory::fake::{self, FakeMouse};
+        let _fake = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
+        let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+        let mut config = crate::config::default_seed_config();
+        STORED[NAGA_V2_HYPERSPEED.catalog_index()].store(0, Ordering::Release);
+        assert_eq!(store_onboard_offline(&device, &config), Ok(true));
+        let writes = fake::with(|mouse| mouse.writes.len());
+        assert!(writes > 0);
+        assert_eq!(store_onboard_offline(&device, &config), Ok(false), "the same profile again");
+        assert_eq!(fake::with(|mouse| mouse.writes.len()), writes);
+        config.settings.fallback_profile_id = config.profiles.last().unwrap().id.clone();
+        if config.profiles.len() > 1 {
+            assert_eq!(store_onboard_offline(&device, &config), Ok(true), "another offline profile");
+        }
+        STORED[NAGA_V2_HYPERSPEED.catalog_index()].store(0, Ordering::Release);
     }
 
     #[test]
@@ -1713,6 +1737,11 @@ pub(crate) mod tests {
         config.settings.hypershift_tap = false;
         assert!(software_hypershift(&[], &[], &config));
         assert!(software_hypershift(&[&NAGA_V2_HYPERSPEED], &[], &config));
+        // The V2 alone on its live map keeps the software trigger.
+        let v2 = [&NAGA_V2_HYPERSPEED];
+        assert!(software_hypershift(&v2, &live_models(&v2), &config));
+        let v2_pro = [&NAGA_V2_HYPERSPEED, &NAGA_PRO];
+        assert!(software_hypershift(&v2_pro, &live_models(&v2_pro), &config), "an unverified mouse does not count");
         assert!(!software_hypershift(&[&NAGA_V3_PRO], &[&NAGA_V3_PRO], &config));
         let both = [&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO];
         assert!(!software_hypershift(&both, &live_models(&both), &config));
@@ -1725,27 +1754,40 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_v2_alone_keeps_its_right_button_a_plain_button_without_hypershift_tap() {
+        let mut config = config_with_v3();
+        config.settings.hypershift_tap = false;
+        let alone: &[&NativeModel] = &[&NAGA_V2_HYPERSPEED];
+        assert!(software_layer(&config, &NAGA_V2_HYPERSPEED, alone));
+        assert!(!software_layer(&config, &NAGA_V2_HYPERSPEED, BOTH), "beside the V3 its firmware holds the layer");
+        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, alone, true, false).unwrap();
+        assert!(v2.targets.contains(&(0x02, 0, OnboardAction::Mouse(2))));
+        assert!(!v2.targets.iter().any(|&(_, layer, _)| layer == 1));
+        assert!(!v2.targets.iter().any(|&(_, _, action)| action == OnboardAction::Hypershift));
+    }
+
+    #[test]
     fn a_clicking_trigger_keeps_the_v2s_right_button_a_plain_button() {
         let mut config = config_with_v3();
         config.settings.hypershift_tap = true;
-        assert!(software_layer(&config, &NAGA_V2_HYPERSPEED));
-        assert!(!software_layer(&config, &NAGA_V3_PRO));
-        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, true, false).unwrap();
+        assert!(software_layer(&config, &NAGA_V2_HYPERSPEED, BOTH));
+        assert!(!software_layer(&config, &NAGA_V3_PRO, BOTH));
+        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, BOTH, true, false).unwrap();
         assert!(v2.targets.contains(&(0x02, 0, OnboardAction::Mouse(2))));
         assert!(!v2.targets.iter().any(|&(_, _, action)| action == OnboardAction::Hypershift));
         assert!(!v2.targets.iter().any(|&(_, layer, _)| layer == 1));
         assert!(!v2.signals.iter().any(|signal| signal.hypershift));
         assert_eq!(v2.signals.iter().filter(|signal| signal.encoded_key == "F13").count(), 1);
         // The V3 keeps its firmware HyperShift button.
-        let v3 = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        let v3 = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap();
         assert!(v3.targets.iter().any(|&(_, _, action)| action == OnboardAction::Hypershift));
     }
 
     #[test]
     fn v3_setup_maps_unassigned_extra_controls_only_in_live_standard_layer() {
         let config = config_with_v3();
-        let normal = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
-        let setup = overlay(&config, &NAGA_V3_PRO, true, true).unwrap();
+        let normal = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap();
+        let setup = overlay(&config, &NAGA_V3_PRO, BOTH, true, true).unwrap();
         let extras = NAGA_V3_PRO.live.as_ref().unwrap().extras;
         assert_eq!(setup.targets.len() - normal.targets.len(), extras.len());
         for &(control, button) in extras {
@@ -1762,7 +1804,7 @@ pub(crate) mod tests {
     #[test]
     fn offline_only_assignments_do_not_capture_extra_controls_live() {
         let mut config = config_with_v3();
-        let before = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        let before = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap();
         let template = config.bindings[0].clone();
         for layer in [Layer::Offline, Layer::OfflineHypershift] {
             config.bindings.push(crate::config::Binding {
@@ -1772,7 +1814,7 @@ pub(crate) mod tests {
                 ..template.clone()
             });
         }
-        assert_eq!(overlay(&config, &NAGA_V3_PRO, true, false).unwrap(), before);
+        assert_eq!(overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap(), before);
         for layer in [Layer::Standard, Layer::Hypershift] {
             assert!(!has_action(&config, &control_id(&NAGA_V3_PRO, "wheel_down"), layer));
         }
@@ -1800,8 +1842,8 @@ pub(crate) mod tests {
     #[test]
     fn v2_overlay_keeps_left_click_and_uses_its_own_trigger_and_aliases() {
         let config = config_with_v3();
-        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, true, false).unwrap();
-        let v3 = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, BOTH, true, false).unwrap();
+        let v3 = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap();
         assert!(v2.targets.contains(&(0x02, 0, OnboardAction::Hypershift)));
         assert!(v2.targets.contains(&(0x01, 1, OnboardAction::Mouse(2))));
         assert!(!v2.targets.iter().any(|&(button, layer, _)| button == 0x01 && layer == 0));
@@ -1812,7 +1854,7 @@ pub(crate) mod tests {
     #[test]
     fn v2_overlay_follows_the_keyboard_fallback() {
         let config = config_with_v3();
-        let keys = overlay(&config, &NAGA_V2_HYPERSPEED, false, false).unwrap();
+        let keys = overlay(&config, &NAGA_V2_HYPERSPEED, BOTH, false, false).unwrap();
         assert!(keys.signals.is_empty());
         assert!(keys.targets.contains(&(0x40, 0, OnboardAction::Key { modifier: 0, usage: 0x68 })));
         assert!(keys.targets.contains(&(0x02, 0, OnboardAction::Hypershift)));
@@ -1821,21 +1863,21 @@ pub(crate) mod tests {
     #[test]
     fn editing_an_action_keeps_both_maps_but_moving_v2_hypershift_changes_only_v2() {
         let mut config = config_with_v3();
-        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, true, false).unwrap();
-        let v3 = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
+        let v2 = overlay(&config, &NAGA_V2_HYPERSPEED, BOTH, true, false).unwrap();
+        let v3 = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap();
         config.actions[0].display_name = "Renamed shortcut".into();
-        assert_eq!(overlay(&config, &NAGA_V2_HYPERSPEED, true, false).unwrap(), v2);
-        assert_eq!(overlay(&config, &NAGA_V3_PRO, true, false).unwrap(), v3);
+        assert_eq!(overlay(&config, &NAGA_V2_HYPERSPEED, BOTH, true, false).unwrap(), v2);
+        assert_eq!(overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap(), v3);
         config.settings.hypershift_trigger = "mouse_4".into();
-        assert_ne!(overlay(&config, &NAGA_V2_HYPERSPEED, true, false).unwrap(), v2);
-        assert_eq!(overlay(&config, &NAGA_V3_PRO, true, false).unwrap(), v3);
+        assert_ne!(overlay(&config, &NAGA_V2_HYPERSPEED, BOTH, true, false).unwrap(), v2);
+        assert_eq!(overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap(), v3);
     }
 
     #[test]
     fn all_thumb_layers_have_distinct_hid_usages_and_keyboard_fallback() {
         let config = config_with_v3();
-        let hid = overlay(&config, &NAGA_V3_PRO, true, false).unwrap();
-        let keys = overlay(&config, &NAGA_V3_PRO, false, false).unwrap();
+        let hid = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap();
+        let keys = overlay(&config, &NAGA_V3_PRO, BOTH, false, false).unwrap();
         let mut seen = HashSet::new();
         for index in 0..12 {
             for layer in 0..2 {
@@ -2223,7 +2265,7 @@ pub(crate) mod tests {
             mouse.records.insert((1, button, layer), block(OnboardAction::Key { modifier: 0, usage: 0x04 + index as u8 }));
         }
         mouse.dpi.insert(1, 1100);
-        (mouse, overlay(&config_with_v3(), &NAGA_V3_PRO, true, false).unwrap().targets)
+        (mouse, overlay(&config_with_v3(), &NAGA_V3_PRO, BOTH, true, false).unwrap().targets)
     }
 
     #[test]
@@ -2498,7 +2540,7 @@ pub(crate) mod tests {
             let _fake = fake::install(FakeMouse { banks: vec![1, 2], active_bank: 2, ..Default::default() });
             let dir = tempfile::tempdir().unwrap();
             let config = config_with_v3();
-            let live = overlay(&config, &NAGA_V3_PRO, true, false).unwrap().targets;
+            let live = overlay(&config, &NAGA_V3_PRO, BOTH, true, false).unwrap().targets;
             assert!(!live.iter().any(|&(button, _, _)| button == 0x0a));
             let native = block(OnboardAction::Mouse(10));
             fake::with(|mouse| {
@@ -2584,7 +2626,7 @@ pub(crate) mod tests {
         let _fake = fake::install(FakeMouse { banks: vec![1, 2], active_bank: 2, ..Default::default() });
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
-        let live = overlay(&config_with_v3(), &NAGA_V3_PRO, true, false).unwrap().targets;
+        let live = overlay(&config_with_v3(), &NAGA_V3_PRO, BOTH, true, false).unwrap().targets;
         let offline = OnboardAction::Key { modifier: 1, usage: 6 };
         for (bank, button, native) in [(1, 0x0a, 10), (2, 0x09, 9)] {
             fake::with(|mouse| { mouse.records.insert((bank, button, 0), block(OnboardAction::Mouse(native))); });
@@ -2647,7 +2689,7 @@ pub(crate) mod tests {
     #[test]
     fn a_live_map_left_with_sidearms_signals_takes_the_playing_banks_records_as_originals() {
         use crate::mouse_memory::fake::{self, FakeMouse};
-        let live = overlay(&config_with_v3(), &NAGA_V3_PRO, true, false).unwrap().targets;
+        let live = overlay(&config_with_v3(), &NAGA_V3_PRO, BOTH, true, false).unwrap().targets;
         let _fake = fake::install(FakeMouse::default());
         let mut mouse = FakeMouse { banks: vec![1, 2], active_bank: 2, poll_code: 1, ..Default::default() };
         for (index, &(button, layer, action)) in live.iter().enumerate() {

@@ -1062,7 +1062,7 @@ impl CaptureBackendHandle {
             if model.transport == Transport::LiveOverlay && !live_overlay::configured(&config, model) {
                 continue;
             }
-            match live_overlay::overlay(&config, model, consumer, checking_extras) {
+            match live_overlay::overlay(&config, model, &present, consumer, checking_extras) {
                 Ok(overlay) => plans.push((model, overlay)),
                 Err(error) => {
                     log::warn!("[capture] {} live map not written: {error}", model.name);
@@ -1099,7 +1099,7 @@ impl CaptureBackendHandle {
                 signals: overlay.signals.clone(),
                 // A live map that leaves its trigger a plain button gets the
                 // layer from the software trigger, like the onboard path.
-                software_layer: live_overlay::software_layer(&config, model),
+                software_layer: live_overlay::software_layer(&config, model, &present),
             })
             .collect();
         if !onboard_signals.is_empty() {

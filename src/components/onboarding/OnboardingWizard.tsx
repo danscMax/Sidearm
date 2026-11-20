@@ -45,8 +45,7 @@ interface OnboardingWizardProps {
   onClose: (deviceId: string | null) => void;
 }
 
-/** The steps for a mouse: writing onboard memory only on the onboard path,
- *  the checks only for a verified model. */
+/** Verified models get button checks. Models without a firmware trigger also get the preparation step. */
 export function wizardSteps(mouse: NativeModelInfo | null, layout: DeviceLayout | undefined): StepKey[] {
   const steps: StepKey[] = ["welcome"];
   if (mouse?.verified && layout) {
@@ -112,8 +111,8 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
   const [activeBtn, setActiveBtn] = useState<number | null>(null);
   const activeTimer = useRef<number | null>(null);
 
-  const [mouseWritten, setMouseWritten] = useState(false);
-  const [mouseWriteError, setMouseWriteError] = useState<string | null>(null);
+  const [mousePrepared, setMousePrepared] = useState(false);
+  const [mousePrepareError, setMousePrepareError] = useState<string | null>(null);
 
   const [admin, setAdmin] = useState<AdminAutostartStatus | null>(null);
   const [adminBusy, setAdminBusy] = useState(false);
@@ -297,14 +296,14 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
     setMissedHold(null);
   }, [deviceId]);
 
-  async function writeMouse() {
-    setMouseWriteError(null);
-    setMouseWritten(false);
+  async function prepareMouse() {
+    setMousePrepareError(null);
+    setMousePrepared(false);
     try {
       await restoreOnboardControl();
-      setMouseWritten(true);
+      setMousePrepared(true);
     } catch (err) {
-      setMouseWriteError(normalizeCommandError(err).message);
+      setMousePrepareError(normalizeCommandError(err).message);
     }
   }
 
@@ -460,15 +459,15 @@ export function OnboardingWizard({ config, applyConfig, onClose }: OnboardingWiz
               <h2 className="onb-step__title">{t("onboarding.mouse.title")}</h2>
               <p className="onb-step__lead">{t("onboarding.mouse.lead")}</p>
               <div className="onb-actions">
-                <button type="button" className="onb-btn primary" onClick={() => void writeMouse()}>
+                <button type="button" className="onb-btn primary" onClick={() => void prepareMouse()}>
                   {t("onboarding.mouse.write")}
                 </button>
               </div>
-              {mouseWritten && <div className="onb-result"><span className="onb-check__dot ok" /> {t("onboarding.mouse.written")}</div>}
-              {mouseWriteError && (
+              {mousePrepared && <div className="onb-result"><span className="onb-check__dot ok" /> {t("onboarding.mouse.written")}</div>}
+              {mousePrepareError && (
                 <div className="onb-result" role="alert">
                   <span className="onb-check__dot bad" /> {t("onboarding.mouse.failed")}
-                  <span className="panel__muted">{mouseWriteError}</span>
+                  <span className="panel__muted">{mousePrepareError}</span>
                 </div>
               )}
             </>

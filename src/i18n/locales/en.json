@@ -1312,7 +1312,6 @@
     "redone": "Change redone",
     "saveFailedRollback": "Change reverted: {{reason}}",
     "backupFailed": "Couldn't write a config backup — check the config folder's disk space and permissions. Your settings still saved.",
-    "onboardWriteFailed": "The mouse did not take the new button signals ({{reason}}) — it may be asleep. Your settings are saved; Sidearm will retry on its own.",
     "undoAction": "Redo",
     "openConfig": "Open folder",
     "configChangedOutside": "The settings file was changed outside Sidearm: loaded, the buttons already use it.",
@@ -1618,11 +1617,11 @@
       "close": "Close Razer Synapse"
     },
     "mouse": {
-      "title": "Assignments in the mouse's memory",
-      "lead": "Sidearm writes its button signals into the mouse's own memory and checks that the mouse accepted them. Razer Synapse is not needed for this.",
-      "write": "Write to mouse",
-      "written": "Done: the mouse accepted Sidearm's assignments.",
-      "failed": "The mouse did not accept the assignments. Move it to wake it up and try again."
+      "title": "Mouse ready for Sidearm",
+      "lead": "Sidearm switches the mouse to its normal mode and sets its side buttons up in the mouse's working memory. What the mouse keeps for use without Sidearm stays as it is.",
+      "write": "Prepare mouse",
+      "written": "Done: the mouse is ready.",
+      "failed": "Could not prepare the mouse. Move it to wake it up and try again."
     },
     "check": {
       "title": "Check the side buttons",
@@ -1670,7 +1669,7 @@
     "batteryHeader": "Mouse battery",
     "batteryInTray": "On the tray icon",
     "offlineHeader": "Without Sidearm",
-    "offlineHelp": "Which profile is written into the mouse memory when Sidearm exits. The mouse plays keys, shortcuts and mouse buttons on its own; text, macros and launches do not work without Sidearm.",
+    "offlineHelp": "Which profile the mouse keeps in its memory for use without Sidearm. The mouse plays keys, shortcuts and mouse buttons on its own; text, macros and launches do not work without Sidearm.",
     "offlineActive": "Active at exit",
     "offlineFallback": "{{name}} (fallback)",
     "batteryHelp": "Below 10% Sidearm warns you — at most once a day.",
@@ -1689,8 +1688,6 @@
     "signalsRevert": "Back to F13–F24",
     "signalsSwitching": "Switching — Sidearm is rewriting the mouse buttons (a few seconds)…",
     "signalsDone": "Done — the mouse buttons are rewritten.",
-    "noticeSignalsConsumer": "The side buttons no longer send F13–F24: Sidearm reads them directly, other programs do not see them.",
-    "noticeSignalsKeys": "The side buttons send F13–F24 again.",
     "noticeOfflineNotStored": "{{model}} did not answer at the last exit (it was asleep): its \"without Sidearm\" profile was not stored, so its side buttons did nothing without Sidearm. Press a button on that mouse before you exit.",
     "someMouse": "A mouse",
     "statusHelperLost": "Button capture stopped and did not restart — the mouse buttons do nothing right now.",
@@ -1900,11 +1897,8 @@
     },
     "guard": {
       "batteryLow": "{{model}} battery: {{percent}}%",
-      "mappingsNotRestored": "Button assignments were overwritten ({{controls}}), could not restore them.",
-      "mappingsRestored": "Razer overwrote the button assignments ({{controls}}) — restored them.",
       "modeNotRestored": "Razer holds the mouse in driver mode — could not return control to Sidearm.",
       "modeRestored": "Razer took the mouse over (driver mode) — control returned to Sidearm.",
-      "mouseClean": "Mouse check: Normal mode, all {{buttons}} buttons match the Sidearm assignments.",
       "razerStarted": "Razer Synapse started — it will overwrite the buttons; Sidearm checks the mouse every 3 s."
     },
     "resolution": {
@@ -2158,7 +2152,7 @@
   "offline": {
     "playsThis": "After Sidearm closes the mouse plays this bank.",
     "playsOther": "After Sidearm closes the mouse plays bank {{bank}} ({{name}}); this profile plays after switching banks with the mouse's profile button.",
-    "unknown": "The mouse did not respond, so its bank assignments are unknown. It will be written on exit if it wakes up.",
+    "unknown": "The mouse did not respond, so its bank assignments are unknown. Sidearm will store the profile once it wakes up.",
     "unknownAction": "Unknown",
     "preserved": "as stored in mouse memory",
     "unavailable": "no HyperShift trigger",
@@ -2173,12 +2167,12 @@
     "silentAction": "silent",
     "liveAction": "(in Sidearm: {{action}})",
     "tooltip": "Without Sidearm: {{action}}",
-    "written": "This profile is written to mouse memory on exit",
-    "notWritten": "On exit, mouse memory receives “{{name}}” instead of this profile. This is a setting, not a mouse limitation — change it in Mouse memory.",
+    "written": "The mouse keeps this profile in its memory for use without Sidearm",
+    "notWritten": "The mouse keeps “{{name}}” in its memory for use without Sidearm. You can choose a different profile in Mouse memory.",
     "notWrittenBanks": "“{{name}}” is not linked to a V3 memory bank. Banks: {{banks}}. Link it in Mouse memory.",
-    "writtenBank": "Written to bank {{bank}} on exit.",
+    "writtenBank": "Kept in bank {{bank}} of the mouse.",
     "bankPlan": "Banks: {{banks}}.",
-    "followsWindow": "On exit, the profile of the window active at that moment is written.",
+    "followsWindow": "After Sidearm closes, the mouse uses the profile of the last active window.",
     "bank": "bank {{bank}}",
     "inherit": "Same as Sidearm",
     "mute": "Silent",

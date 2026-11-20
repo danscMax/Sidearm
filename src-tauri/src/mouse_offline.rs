@@ -17,13 +17,8 @@ use std::path::Path;
 
 use crate::config::{ActionPayload, AppConfig, Layer, MouseActionKind, TriggerMode};
 use crate::device_catalog::{NativeModel, Transport};
-use crate::mouse_memory::{
-    OnboardAction, VendorDevice, binding_target, hid_usage_for_vk, left_modifier_bits, modifier_bits,
-    onboard_bindings,
-};
+use crate::mouse_memory::{OnboardAction, VendorDevice, hid_usage_for_vk, left_modifier_bits, modifier_bits};
 
-/// Present in the config folder while the mouse holds the offline profile.
-pub const OFFLINE_MARKER_FILE: &str = "mouse-offline-written";
 /// Left by an exit that could not finish storing the offline profile:
 /// the next start tells the user why the buttons did nothing without Sidearm.
 pub const OFFLINE_FAILED_FILE: &str = "mouse-offline-failed";
@@ -142,9 +137,11 @@ pub fn preview(config: &AppConfig, model: &NativeModel, profile_id: &str, banks:
             target.state = TargetState::Unknown;
         }
     } else if model.verified {
-        target.state = if follows { TargetState::FollowsWindow } else if offline == profile_id { TargetState::Written } else { TargetState::NotWritten };
+        // Profile 1 keeps `@active` as the fallback: it is stored while Sidearm runs.
+        let kept = onboard_offline_profile(config);
+        target.state = if kept == profile_id { TargetState::Written } else { TargetState::NotWritten };
         if target.state == TargetState::NotWritten {
-            target.written_profile_id = Some(offline);
+            target.written_profile_id = Some(kept);
         }
     }
     OfflinePreview { target, controls: plan(config, model, profile_id).0.into_iter().map(|control| control.preview).collect() }
@@ -173,7 +170,7 @@ fn native_action(value: u8) -> Option<&'static str> {
 ///   is playable or an own offline-hypershift binding exists; the profile button
 ///   keeps switching banks.
 pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> OfflinePlan {
-    use crate::mouse_memory::live_overlay::{USAGES, control_id, controls};
+    use crate::mouse_memory::live_overlay::{control_id, controls};
     let own_profile = model.transport == Transport::Onboard;
     let live = model.live.as_ref();
     let firmware_trigger = live.and_then(|live| live.firmware_trigger);
@@ -187,30 +184,22 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
             .map(|&(_, button, _)| button)
     });
     let right_trigger = firmware_trigger.is_none() && settings_trigger == "mouse_right";
-    let signals = onboard_bindings(config);
-    let inert = |index: usize, control: &str, layer: u8, own_binding: bool| -> Option<OnboardAction> {
-        // A bank's silent record is consumer usage 0 (nothing), never one of
-        // Sidearm's signals: those made a bank of silent buttons look like
-        // Sidearm's own bank, and in offline mode woke Sidearm's live actions.
-        if !own_profile {
-            return Some(OnboardAction::Consumer(BANK_SILENT_USAGE));
-        }
-        // An explicit silent assignment must silence native buttons too; the
-        // derived fallback keeps their existing native behaviour.
-        if own_binding && (model.native_buttons.iter().any(|(id, _, _)| *id == control)
-            || !signals.iter().any(|binding| binding.control_id == control)) {
-            return USAGES.get(2 * index + usize::from(layer)).map(|&usage| OnboardAction::Consumer(usage));
-        }
-        if let Some(&(_, _, value)) = model.native_buttons.iter().find(|(id, _, _)| *id == control) {
+    let inert = |control: &str, own_binding: bool| -> Option<OnboardAction> {
+        // A derived fallback keeps a native button's own behaviour; an explicit
+        // silent assignment silences it too.
+        if own_profile && !own_binding && let Some(&(_, _, value)) = model.native_buttons.iter().find(|(id, _, _)| *id == control) {
             return Some(OnboardAction::Mouse(value));
         }
-        let binding = signals.iter().find(|binding| binding.control_id == control)?;
-        binding_target(model, binding).ok().map(|(_, action)| action)
+        // Silent is consumer usage 0 (nothing), never one of Sidearm's signals:
+        // those made a bank of silent buttons look like Sidearm's own bank, and
+        // a profile the mouse plays (offline, or a V2 power cycle before its live
+        // map is back) woke Sidearm's live actions.
+        Some(OnboardAction::Consumer(BANK_SILENT_USAGE))
     };
 
     let mut planned = Vec::new();
     let mut uses_hypershift = false;
-    for (index, (control, button)) in controls(model).into_iter().enumerate() {
+    for (control, button) in controls(model) {
         let id = control_id(model, control);
         let action = |layer| binding_action(config, model, profile_id, id.as_str(), layer);
         let standard = action(Layer::Standard);
@@ -228,8 +217,8 @@ pub fn plan(config: &AppConfig, model: &NativeModel, profile_id: &str) -> Offlin
             let translated = layer == 1 && own.is_none() && control == "mouse_left" && right_trigger;
             let action = if translated { Some(OnboardAction::Mouse(2)) } else {
                 match chosen {
-                    Some(binding) => binding.action.ok().or_else(|| inert(index, control, layer, own.is_some())),
-                    None if layer == 1 && own_profile => inert(index, control, layer, false),
+                    Some(binding) => binding.action.ok().or_else(|| inert(control, own.is_some())),
+                    None if layer == 1 && own_profile => inert(control, false),
                     None => None,
                 }
             };
@@ -434,7 +423,8 @@ pub fn write_offline_profile(config: &AppConfig, profile_id: &str, config_dir: &
 
 fn write_offline_bounded(config: &AppConfig, config_dir: &Path, profile_id: &str, timeout: std::time::Duration, work: impl FnOnce(Vec<String>) + Send + 'static) -> bool {
     let targets: Vec<_> = crate::mouse_memory::present_models().into_iter()
-        .filter(|model| model.verified && (model.transport == Transport::Onboard || crate::mouse_memory::live_overlay::configured(config, model)))
+        // An onboard mouse's profile 1 already holds the offline profile (`store_onboard_offline`).
+        .filter(|model| model.verified && model.transport == Transport::LiveOverlay && crate::mouse_memory::live_overlay::configured(config, model))
         .map(|model| model.device_id.to_owned())
         .collect();
     // Queue before touching HID: neither a held device lock nor a driver call
@@ -474,6 +464,11 @@ pub fn retry_offline_profile(config: &AppConfig, config_dir: &Path) -> bool {
 fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, only: Option<&[String]>) {
     use crate::device_catalog::CATALOG;
     use crate::mouse_memory::live_overlay;
+    // An onboard mouse is never written here (an older marker may still name it).
+    let only: Option<Vec<String>> = only.map(|ids| {
+        ids.iter().filter(|id| CATALOG.iter().any(|model| model.device_id == id.as_str() && model.transport == Transport::LiveOverlay)).cloned().collect()
+    });
+    let only = only.as_deref();
     let wanted = |device_id: &str| only.is_none_or(|ids| ids.iter().any(|id| id == device_id));
     let present = crate::mouse_memory::present_models();
     // One writer per mouse; each returns the device id of a mouse that slept.
@@ -488,8 +483,8 @@ fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, onl
             crate::mouse_memory::is_no_response(&error).then(|| model.device_id.to_owned())
         }));
     }
-    if CATALOG.iter().any(|model| model.transport == Transport::Onboard && wanted(model.device_id)) {
-        writers.push(Box::new(|| write_onboard_offline(config, profile_id, config_dir)));
+    if only.is_none() {
+        writers.push(Box::new(|| restore_onboard_speed(config)));
     }
     // Each model has its own device lock (`DEVICE_LOCKS`): two mice are written
     // side by side, so a sleeping one does not hold up the other.
@@ -517,125 +512,76 @@ fn write_offline_to(config: &AppConfig, profile_id: &str, config_dir: &Path, onl
     }
 }
 
-/// The onboard path's part of [`write_offline_profile`]. Returns the device id
-/// of a mouse that slept through any of it (a record or the DPI): the whole
-/// profile is retried once it answers. A record it refused otherwise is only
-/// logged.
-fn write_onboard_offline(config: &AppConfig, profile_id: &str, config_dir: &Path) -> Option<String> {
-    let device = match VendorDevice::open_onboard() {
-        Ok(device) => device,
-        Err(message) => {
-            // No mouse at all (or one that does not open) is not a sleeping
-            // mouse: nothing to tell the user next time.
-            log::info!("[mouse-offline] no onboard mouse reachable, onboard profile not written: {message}");
-            return None;
-        }
-    };
-    if !device.model().verified {
-        log::info!("[mouse-offline] {} is not verified: offline profile not written", device.model().name);
-        return None;
+/// An exit gives the onboard mouse back the live speed the per-app profiles
+/// changed (RAM only: its profile 1 already holds the offline profile). Best
+/// effort; never queued for a retry.
+fn restore_onboard_speed(config: &AppConfig) -> Option<String> {
+    let Ok(device) = VendorDevice::open_onboard() else { return None };
+    if device.model().verified
+        && let Err(message) = restore_live_speed(&device, config, &offline_profile_id(config, None), true)
+    {
+        log::warn!("[mouse-offline] {} live DPI / poll rate not put back: {message}", device.model().name);
     }
-    write_onboard_offline_on(&device, config, profile_id, config_dir)
+    None
 }
 
-/// [`write_onboard_offline`] into an open, verified `device`.
-fn write_onboard_offline_on(device: &VendorDevice, config: &AppConfig, profile_id: &str, config_dir: &Path) -> Option<String> {
-    let records = plan(config, device.model(), profile_id).records();
-    let mut asleep = false;
+/// The profile an onboard mouse keeps in profile 1: the offline profile, with
+/// `@active` taken as the fallback (owner's call 2026-11-19 — it is stored
+/// while Sidearm runs, not at the exit that knows the window in front).
+fn onboard_offline_profile(config: &AppConfig) -> String {
+    offline_profile_id(config, None)
+}
+
+fn onboard_offline_dpi(config: &AppConfig, model: &crate::device_catalog::NativeModel, profile_id: &str) -> Option<u16> {
+    config.profiles.iter().find(|p| p.id == profile_id)
+        .and_then(|p| p.mouse_for(model.device_id))
+        .and_then(|own| own.mouse_dpi)
+        .map(|dpi| dpi.clamp(model.dpi_min, model.dpi_max))
+}
+
+/// A fingerprint of what [`store_onboard_offline`] writes into `model`.
+pub(crate) fn onboard_offline_key(config: &AppConfig, model: &crate::device_catalog::NativeModel) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let profile_id = onboard_offline_profile(config);
+    let what = (plan(config, model, &profile_id).records(), onboard_offline_dpi(config, model, &profile_id));
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    format!("{what:?}").hash(&mut hasher);
+    hasher.finish().max(1)
+}
+
+/// Stores the offline profile in an onboard mouse's profile 1 (the V2's), where
+/// it stays: its records (`write_record` skips one that already holds it) and
+/// its own DPI. Run by the mouse's live session while Sidearm runs, never at an
+/// exit, so an exit, a kill or a sleeping mouse leaves its buttons working
+/// without Sidearm. A profile-1 write plays at once (measured 2026-11-20): the
+/// caller rewrites its live map after it. `Err`: the mouse did not answer;
+/// a record it refused otherwise is logged.
+pub(crate) fn store_onboard_offline(device: &VendorDevice, config: &AppConfig) -> Result<(), String> {
+    let model = device.model();
+    let profile_id = onboard_offline_profile(config);
+    let records = plan(config, model, &profile_id).records();
     let mut failed = 0;
-    for (at, record) in records.iter().enumerate() {
+    for record in &records {
         if let Err(error) = device.write_record(record.button_id, record.layer, record.action) {
+            if crate::mouse_memory::is_no_response(&error) {
+                return Err(error);
+            }
             log::warn!("[mouse-offline] {error}");
             failed += 1;
-            // A mouse that did not answer answers none of the rest: each would
-            // wait for its silence (an exit took a minute). The whole profile
-            // is retried once it is awake (`mouse-offline-failed`).
-            if crate::mouse_memory::is_no_response(&error) {
-                log::warn!("[mouse-offline] {} did not answer: the offline profile waits until it is awake", device.model().name);
-                // Records it took before it slept: the next start must put Sidearm's signals back.
-                if at + 1 > failed {
-                    write_marker(&config_dir.join(OFFLINE_MARKER_FILE), profile_id);
-                }
-                return Some(device.model().device_id.to_owned());
-            }
         }
     }
-    // Profile switches set the DPI live only: store the offline profile's own
-    // DPI; a profile without one leaves the mouse's stored DPI alone.
-    if let Some(dpi) = config.profiles.iter().find(|p| p.id == profile_id)
-        .and_then(|p| p.mouse_for(device.model().device_id))
-        .and_then(|own| own.mouse_dpi)
-        .map(|dpi| dpi.clamp(device.model().dpi_min, device.model().dpi_max))
+    // Profile switches set the DPI live only: store the offline profile's own;
+    // a profile without one leaves the mouse's stored DPI alone.
+    if let Some(dpi) = onboard_offline_dpi(config, model, &profile_id)
         && let Err(message) = device.set_dpi(dpi, true)
     {
+        if crate::mouse_memory::is_no_response(&message) {
+            return Err(message);
+        }
         log::warn!("[mouse-offline] DPI not stored: {message}");
-        asleep |= crate::mouse_memory::is_no_response(&message);
     }
-    if let Err(message) = restore_live_speed(device, config, profile_id, true) {
-        log::warn!("[mouse-offline] live DPI / poll rate not put back: {message}");
-        asleep |= crate::mouse_memory::is_no_response(&message);
-    }
-    if failed == records.len() && !records.is_empty() {
-        log::warn!("[mouse-offline] the mouse took none of {} records: offline profile not written", records.len());
-        return asleep.then(|| device.model().device_id.to_owned());
-    }
-    write_marker(&config_dir.join(OFFLINE_MARKER_FILE), profile_id);
-    log::info!(
-        "[mouse-offline] profile `{profile_id}` written for use without Sidearm: {} records, {failed} failed",
-        records.len()
-    );
-    asleep.then(|| device.model().device_id.to_owned())
-}
-
-/// Writes Sidearm's own signals into the onboard-path mouse: its key buttons
-/// and its plain mouse buttons (no firmware Hypershift). Used after the
-/// offline profile and when a mouse leaves the live map for the onboard path —
-/// its live map then plays whatever the mouse stored, not Sidearm's signals.
-pub fn restore_signals(config: &AppConfig) -> Result<(), String> {
-    let device = VendorDevice::open_onboard()?;
-    if !device.model().verified {
-        return Err(format!("{} is not verified", device.model().name));
-    }
-    write_signals(&device, config)
-}
-
-/// Sidearm's own signals into `device`: its key buttons, then its plain mouse
-/// buttons (no firmware Hypershift).
-pub fn write_signals(device: &VendorDevice, config: &AppConfig) -> Result<(), String> {
-    device.apply_bindings(&onboard_bindings(config))?;
-    let natives: Vec<&str> = device.model().native_buttons.iter().map(|(id, _, _)| *id).collect();
-    device.restore_native_buttons(&natives)
-}
-
-/// Puts Sidearm's own signals back when the mouse still holds the offline
-/// profile. Returns `true` when it restored (the marker was there).
-pub fn restore_after_offline(config: &AppConfig, config_dir: &Path) -> bool {
-    let marker = config_dir.join(OFFLINE_MARKER_FILE);
-    if !marker.exists() {
-        return false;
-    }
-    // An unverified mouse is not the one the profile was written into; the
-    // marker stays for it.
-    // Retried every couple of seconds while the mouse sleeps: say each new
-    // failure once.
-    static LAST_FAILURE: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    let result = restore_signals(config);
-    let mut last = LAST_FAILURE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    match result {
-        Ok(()) => {
-            *last = None;
-            let _ = std::fs::remove_file(&marker);
-            log::info!("[mouse-offline] Sidearm signals restored after the offline profile");
-            true
-        }
-        Err(message) => {
-            if last.as_ref() != Some(&message) {
-                log::warn!("[mouse-offline] restore after the offline profile failed: {message}");
-                *last = Some(message);
-            }
-            false
-        }
-    }
+    log::info!("[mouse-offline] {} keeps profile `{profile_id}` for use without Sidearm: {} records, {failed} failed", model.name, records.len());
+    Ok(())
 }
 
 #[cfg(test)]
@@ -863,7 +809,9 @@ mod tests {
         config.profiles[0].device_slots = None;
         config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
         assert_eq!(target(&config, vec![1]).state, TargetState::FollowsWindow);
-        assert_eq!(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target.state, TargetState::FollowsWindow);
+        // The V2 keeps the fallback for `@active` (stored while Sidearm runs).
+        let v2 = preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target.state;
+        assert_eq!(v2, if config.settings.fallback_profile_id == profile { TargetState::Written } else { TargetState::NotWritten });
         config.settings.offline_profile_id = Some(config.profiles[1].id.clone());
         assert_eq!(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target.state, TargetState::NotWritten);
     }
@@ -1029,10 +977,17 @@ mod tests {
         let (mut config, profile) = empty_profile();
         config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
         let one = Banks { active: 1, assigned: vec![1] };
-        for (model, banks, state) in [(&NAGA_V2_HYPERSPEED, None, "followsWindow"),
-            (&NAGA_V3_PRO, Some(&one), "followsWindow"), (&NAGA_V3_PRO, None, "unknown")] {
+        for (model, banks, state) in [(&NAGA_V3_PRO, Some(&one), "followsWindow"), (&NAGA_V3_PRO, None, "unknown")] {
             let target = serde_json::to_value(preview(&config, model, &profile, banks).target).unwrap();
             assert_eq!(target, serde_json::json!({"state": state}));
+        }
+        // The V2 keeps the fallback for `@active` (stored while Sidearm runs).
+        let v2 = serde_json::to_value(preview(&config, &NAGA_V2_HYPERSPEED, &profile, None).target).unwrap();
+        let fallback = config.settings.fallback_profile_id.clone();
+        if fallback == profile {
+            assert_eq!(v2, serde_json::json!({"state": "written"}));
+        } else {
+            assert_eq!(v2, serde_json::json!({"state": "notWritten", "writtenProfileId": fallback}));
         }
     }
 
@@ -1046,20 +1001,18 @@ mod tests {
                 let view = preview_control(&config, &NAGA_V2_HYPERSPEED, &profile, "thumb_01", layer);
                 assert_eq!(view.kind, OfflineKind::Silent);
             }
-            let dir = tempfile::tempdir().unwrap();
             let (device, _fake) = fake_v2();
             fake::with(|mouse| { mouse.records.insert((1, 0x40, 0), [2, 2, 1, 6, 0, 0, 0]); });
-            assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
+            store(&device, &config, &profile).unwrap();
+            // Silent is consumer usage 0, never one of Sidearm's live signals.
             for layer in [0, 1] {
-                let usage = crate::mouse_memory::live_overlay::USAGES[usize::from(layer)];
-                let [hi, lo] = usage.to_be_bytes();
-                assert_eq!(device.read_block(1, 0x40, layer).unwrap(), [0x0a, 2, hi, lo, 0, 0, 0]);
+                assert_eq!(device.read_block(1, 0x40, layer).unwrap(), [0x0a, 2, 0, 0, 0, 0, 0]);
             }
         }
     }
 
     #[test]
-    fn v2_exit_matches_preview_roles_native_fallback_translation_and_preservation() {
+    fn v2_store_matches_preview_roles_native_fallback_translation_and_preservation() {
         let (mut config, profile) = empty_profile();
         bind(&mut config, &profile, "thumb_01", Layer::Offline, shortcut("A", false, false, false), None);
         bind(&mut config, &profile, "thumb_02", Layer::Hypershift, shortcut("C", true, false, false), None);
@@ -1070,11 +1023,10 @@ mod tests {
             ("wheel_click", Layer::Offline), ("thumb_03", Layer::Offline)] {
             preview_control(&config, &NAGA_V2_HYPERSPEED, &profile, id, layer);
         }
-        let dir = tempfile::tempdir().unwrap();
         let (device, _fake) = fake_v2();
         let digit = [2, 2, 0, 0x1e, 0, 0, 0];
         fake::with(|mouse| { mouse.records.insert((1, 0x42, 0), digit); });
-        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
+        store(&device, &config, &profile).unwrap();
         for (button, layer, raw) in [(0x40, 0, [2, 2, 0, 4, 0, 0, 0]), (0x41, 1, [2, 2, 1, 6, 0, 0, 0]),
             (2, 0, [0x0c, 1, 1, 0, 0, 0, 0]), (2, 1, [0x0c, 1, 1, 0, 0, 0, 0]),
             (1, 1, [1, 1, 2, 0, 0, 0, 0]), (3, 0, [1, 1, 3, 0, 0, 0, 0]), (0x42, 0, digit)] {
@@ -1085,11 +1037,8 @@ mod tests {
         assert_eq!(trigger, &serde_json::json!({"controlId":"mouse_right", "layer":"offline", "kind":"role", "role":"hypershift", "editable":false}));
     }
 
-    /// The V2's own signal of a key button: its inert offline record.
-    fn v2_signal(config: &AppConfig, control: &str) -> OnboardAction {
-        let binding = onboard_bindings(config).into_iter().find(|binding| binding.control_id == control).unwrap();
-        binding_target(&NAGA_V2_HYPERSPEED, &binding).unwrap().1
-    }
+    /// The inert offline record of every model: consumer usage 0 (nothing).
+    const SILENT: OnboardAction = OnboardAction::Consumer(BANK_SILENT_USAGE);
 
     #[test]
     fn an_own_offline_press_overrides_only_layer_zero() {
@@ -1121,9 +1070,7 @@ mod tests {
                 let id = crate::mouse_memory::live_overlay::control_id(model, "thumb_01");
                 bind(&mut config, &profile, id.as_str(), Layer::Standard, shortcut("T", true, false, false), None);
                 bind(&mut config, &profile, id.as_str(), Layer::Offline, payload, None);
-                let inert = if model.transport == Transport::Onboard { v2_signal(&config, "thumb_01") }
-                    else { OnboardAction::Consumer(BANK_SILENT_USAGE) };
-                assert_eq!(record(&plan(&config, model, &profile).records(), model.button_id_for("thumb_01").unwrap(), 0), Some(inert));
+                assert_eq!(record(&plan(&config, model, &profile).records(), model.button_id_for("thumb_01").unwrap(), 0), Some(SILENT));
             }
         }
     }
@@ -1156,7 +1103,7 @@ mod tests {
         bind(&mut config, &profile, "thumb_01", Layer::OfflineHypershift, ActionPayload::Disabled(Default::default()), None);
         let records = plan(&config, &NAGA_V2_HYPERSPEED, &profile).records();
         assert_eq!(record(&records, 0x02, 0), Some(OnboardAction::Hypershift));
-        assert_eq!(record(&records, NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap(), 1), Some(v2_signal(&config, "thumb_01")));
+        assert_eq!(record(&records, NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap(), 1), Some(SILENT));
     }
 
     #[test]
@@ -1193,8 +1140,8 @@ mod tests {
         bind(&mut config, &profile, "thumb_03", Layer::Standard, shortcut("F4", false, false, true), Some(TriggerMode::Hold));
         let records = plan(&config, &NAGA_V2_HYPERSPEED, &profile).records();
         let button = |control| NAGA_V2_HYPERSPEED.button_id_for(control).unwrap();
-        assert_eq!(record(&records, button("thumb_01"), 0), Some(v2_signal(&config, "thumb_01")));
-        assert_eq!(record(&records, button("thumb_02"), 0), Some(v2_signal(&config, "thumb_02")));
+        assert_eq!(record(&records, button("thumb_01"), 0), Some(SILENT));
+        assert_eq!(record(&records, button("thumb_02"), 0), Some(SILENT));
         assert_eq!(record(&records, button("thumb_03"), 0), Some(OnboardAction::KeyTap { modifier: 0x04, usage: 0x3d }));
         assert_eq!(record(&records, button("thumb_04"), 0), None, "an unbound button keeps the session's signal");
         assert!(records.iter().all(|record| record.layer == 0), "no hypershift binding: layer 1 stays untouched");
@@ -1222,7 +1169,7 @@ mod tests {
         assert_eq!(record(&records, 0x02, 1), Some(OnboardAction::Hypershift));
         assert_eq!(record(&records, 0x01, 1), Some(OnboardAction::Mouse(2)));
         assert_eq!(record(&records, button("thumb_01"), 1), Some(OnboardAction::Key { modifier: 0x01, usage: 0x17 }));
-        assert_eq!(record(&records, button("thumb_02"), 1), Some(v2_signal(&config, "thumb_02")));
+        assert_eq!(record(&records, button("thumb_02"), 1), Some(SILENT));
     }
 
     #[test]
@@ -1239,29 +1186,28 @@ mod tests {
 
     use crate::mouse_memory::fake::{self, FakeMouse};
 
+    /// Stores `profile` in the fake V2's profile 1, as its live session does.
+    fn store(device: &VendorDevice, config: &AppConfig, profile: &str) -> Result<(), String> {
+        let mut config = config.clone();
+        config.settings.offline_profile_id = Some(profile.to_owned());
+        store_onboard_offline(device, &config)
+    }
+
     fn fake_v2() -> (VendorDevice, fake::Installed) {
         let installed = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
         (VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, ""), installed)
     }
 
     #[test]
-    fn an_own_offline_record_is_written_and_its_marker_restores_live_signals() {
+    fn an_own_offline_record_is_stored_in_profile_1() {
         let (mut config, profile) = empty_profile();
         bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
         bind(&mut config, &profile, "thumb_01", Layer::Offline, shortcut("U", true, false, false), None);
-        let dir = tempfile::tempdir().unwrap();
-        let (device, installed) = fake_v2();
-        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
+        let (device, _fake) = fake_v2();
+        store(&device, &config, &profile).unwrap();
         let button = NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap();
         assert_eq!(fake::with(|mouse| mouse.records[&(1, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x18]);
-        drop(device);
-        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
-        assert!(restore_after_offline(&config, dir.path()));
-        assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
-        let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
-        assert_eq!(device.drifted_bindings(&onboard_bindings(&config)), Ok(Vec::new()));
-        assert_eq!(device.drifted_native_buttons(), Ok(Vec::new()));
-        drop((device, installed));
+        assert!(fake::with(|mouse| !mouse.records.keys().any(|&(profile, _, _)| profile == 0)), "the live map is the session's");
     }
 
     #[test]
@@ -1283,32 +1229,39 @@ mod tests {
         assert_eq!(fake::with(|mouse| mouse.writes.len()), 2);
     }
 
-    /// The V2's offline profile lands in the mouse as planned; a mouse that
-    /// slept through part of it is retried, one that refused it is not.
+    /// The V2's offline profile lands in the mouse as planned; only a mouse
+    /// that slept through part of it is an error (its session tries again).
     #[test]
-    fn the_v2_offline_write_retries_only_a_sleeping_mouse() {
+    fn the_v2_store_fails_only_for_a_sleeping_mouse() {
         use crate::config::MouseOverrides;
-        let dir = tempfile::tempdir().unwrap();
         let (mut config, profile) = empty_profile();
         bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
         let own = config.profiles.iter_mut().find(|p| p.id == profile).unwrap();
         own.device_mouse = Some([("razer-naga".to_owned(), MouseOverrides { mouse_dpi: Some(1600), mouse_poll_rate_hz: None, mouse_dpi_stages: None })].into());
 
         let (device, _fake) = fake_v2();
-        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None);
+        store(&device, &config, &profile).unwrap();
         let button = NAGA_V2_HYPERSPEED.button_id_for("thumb_01").unwrap();
         assert_eq!(fake::with(|mouse| mouse.records[&(1, button, 0)][..4].to_vec()), vec![0x02, 0x02, 0x01, 0x17]);
-        assert!(dir.path().join(OFFLINE_MARKER_FILE).exists());
         drop((device, _fake));
 
         let (device, _fake) = fake_v2();
         fake::with(|mouse| mouse.asleep_for.push((0x04, 0x85)));
-        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"), "the DPI slept");
+        assert!(store(&device, &config, &profile).is_err(), "the DPI slept");
         drop((device, _fake));
 
         let (device, _fake) = fake_v2();
         fake::with(|mouse| mouse.refused.push((0x04, 0x85)));
-        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()), None, "a refusal is not retried");
+        assert_eq!(store(&device, &config, &profile), Ok(()), "a refusal is not retried");
+    }
+
+    /// `@active` is the fallback in the V2's profile 1: it is stored while
+    /// Sidearm runs, not at the exit that knows the window in front.
+    #[test]
+    fn the_v2_keeps_the_fallback_for_the_profile_active_at_exit() {
+        let (mut config, _) = empty_profile();
+        config.settings.offline_profile_id = Some(crate::config::OFFLINE_PROFILE_ACTIVE.into());
+        assert_eq!(onboard_offline_profile(&config), config.settings.fallback_profile_id);
     }
 
     /// The exit puts back the speed a per-app profile changed.
@@ -1335,58 +1288,42 @@ mod tests {
             for control in controls {
                 bind(&mut config, &profile, control, Layer::Standard, shortcut("T", true, false, false), None);
             }
-            let dir = tempfile::tempdir().unwrap();
             let (device, _fake) = fake_v2();
             fake::with(|mouse| mouse.asleep = true);
-            assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"));
+            assert!(store(&device, &config, &profile).is_err());
             fake::with(|mouse| mouse.asked)
         };
         assert_eq!(asked(&["thumb_01", "thumb_02", "thumb_03", "thumb_04"]), asked(&["thumb_01"]));
     }
 
-    /// A mouse that took records before it slept holds part of the profile:
-    /// the marker is left, so the next start puts Sidearm's signals back.
     #[test]
-    fn a_mouse_asleep_midway_keeps_the_marker() {
-        let (mut config, profile) = empty_profile();
-        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
-        // How many commands one record takes: the mouse sleeps right after the first.
-        let one_record = {
-            let (device, _fake) = fake_v2();
-            let first = plan(&config, device.model(), &profile).records()[0];
-            device.write_record(first.button_id, first.layer, first.action).unwrap();
-            fake::with(|mouse| mouse.asked)
-        };
-        bind(&mut config, &profile, "thumb_02", Layer::Standard, shortcut("U", true, false, false), None);
-        let dir = tempfile::tempdir().unwrap();
-        let (device, _fake) = fake_v2();
-        fake::with(|mouse| mouse.asleep_after = Some(one_record));
-        assert_eq!(write_onboard_offline_on(&device, &config, &profile, dir.path()).as_deref(), Some("razer-naga"));
-        assert!(dir.path().join(OFFLINE_MARKER_FILE).exists(), "a record went in before the mouse slept");
-    }
-
-    #[test]
-    fn r07_04_all_record_refusals_are_not_queued_as_sleep() {
+    fn r07_04_only_sleep_fails_a_store() {
         let (mut config, profile) = empty_profile();
         bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
         for command in [0x8c, 0x0c] {
             for asleep in [false, true] {
-                let dir = tempfile::tempdir().unwrap();
                 let (device, _fake) = fake_v2();
                 fake::with(|mouse| {
                     if asleep { mouse.asleep_for.push((0x02, command)); }
                     else { mouse.refused.push((0x02, command)); }
                 });
-                let pending = write_onboard_offline_on(&device, &config, &profile, dir.path());
-                assert_eq!(pending.as_deref(), asleep.then_some("razer-naga"), "command {command:#04x}, asleep {asleep}");
-                assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
-                drop(device);
-                fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
-                write_marker(&dir.path().join(OFFLINE_FAILED_FILE), &format!("{profile}\nrazer-naga"));
-                assert_eq!(retry_offline_profile(&config, dir.path()), !asleep);
-                assert_eq!(dir.path().join(OFFLINE_FAILED_FILE).exists(), asleep, "only sleep keeps queued work");
+                assert_eq!(store(&device, &config, &profile).is_err(), asleep, "command {command:#04x}, asleep {asleep}");
             }
         }
+    }
+
+    /// An exit never writes the V2 (its profile 1 holds the offline profile):
+    /// an older queue naming it is dropped, not waited on for good.
+    #[test]
+    fn an_exit_queue_naming_the_v2_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (config, profile) = empty_profile();
+        let _fake = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
+        fake::set_present_models(vec![]);
+        write_marker(&dir.path().join(OFFLINE_FAILED_FILE), &format!("{profile}\nrazer-naga"));
+        assert!(retry_offline_profile(&config, dir.path()));
+        assert!(!dir.path().join(OFFLINE_FAILED_FILE).exists());
+        assert!(fake::with(|mouse| mouse.writes.is_empty()));
     }
 
     #[test]
@@ -1409,16 +1346,16 @@ mod tests {
         use std::sync::mpsc::channel;
         use std::time::Duration;
         let dir = tempfile::tempdir().unwrap();
-        let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, "");
         let (done_tx, done_rx) = channel();
         let (written_tx, written_rx) = channel();
         let path = dir.path().to_owned();
         let caller = std::thread::spawn(move || {
             let _discovery = fake::install(FakeMouse::default());
-            fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
-            let finished = write_offline_bounded(&empty_profile().0, &path, "offline-profile", Duration::from_millis(30), move |_| {
+            fake::set_present_models(vec![&NAGA_V3_PRO]);
+            let finished = write_offline_bounded(&crate::mouse_memory::live_overlay::tests::config_with_v3(), &path, "offline-profile", Duration::from_millis(30), move |_| {
                 let _fake = fake::install(FakeMouse::default());
-                let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+                let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, "");
                 device.battery_percent().unwrap();
                 written_tx.send(()).unwrap();
             });
@@ -1430,7 +1367,7 @@ mod tests {
         caller.join().unwrap();
         written_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(result, Ok(false), "the exit must return before the device lock is released");
-        assert_eq!(pending.unwrap(), "offline-profile\nrazer-naga");
+        assert_eq!(pending.unwrap(), "offline-profile\nrazer-naga-v3");
     }
 
     #[test]
@@ -1445,10 +1382,10 @@ mod tests {
         let (done_tx, done_rx) = channel();
         let caller = std::thread::spawn(move || {
             let _discovery = fake::install(FakeMouse::default());
-            fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
-            let finished = write_offline_bounded(&empty_profile().0, &path, "offline-profile", Duration::from_millis(30), move |_| {
+            fake::set_present_models(vec![&NAGA_V3_PRO]);
+            let finished = write_offline_bounded(&crate::mouse_memory::live_overlay::tests::config_with_v3(), &path, "offline-profile", Duration::from_millis(30), move |_| {
                 let _fake = fake::install(FakeMouse::default());
-                let device = VendorDevice::test_handle(&NAGA_V2_HYPERSPEED, 0x00b4, "");
+                let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, "");
                 started_tx.send(()).unwrap();
                 // A feature call that does not return until the driver recovers.
                 release_rx.recv().unwrap();
@@ -1464,48 +1401,14 @@ mod tests {
         caller.join().unwrap();
         written_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         assert_eq!(result, Ok(false));
-        assert_eq!(pending.unwrap(), "offline-profile\nrazer-naga");
-    }
-
-    #[test]
-    fn r07_01_timeout_retry_keeps_an_absent_receiver_until_the_profile_is_stored() {
-        use std::sync::mpsc::channel;
-        use std::time::Duration;
-        let dir = tempfile::tempdir().unwrap();
-        let (mut config, profile) = empty_profile();
-        bind(&mut config, &profile, "thumb_01", Layer::Standard, shortcut("T", true, false, false), None);
-        let _fake = fake::install(FakeMouse { poll_code: 0x01, ..Default::default() });
-        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
-        let (release_tx, release_rx) = channel();
-        let (ended_tx, ended_rx) = channel();
-        let finished = write_offline_bounded(&config, dir.path(), &profile, Duration::from_millis(30), move |_| {
-            // Model a worker stopped with its process before it could write.
-            release_rx.recv().unwrap();
-            ended_tx.send(()).unwrap();
-        });
-        release_tx.send(()).unwrap();
-        ended_rx.recv_timeout(Duration::from_secs(1)).unwrap();
-        assert!(!finished, "the exit handed unfinished work to the restorer");
-        assert!(dir.path().join(OFFLINE_FAILED_FILE).exists());
-
-        fake::set_present_models(vec![]);
-        assert!(!retry_offline_profile(&config, dir.path()), "an absent receiver must remain pending");
-        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE)).unwrap(), format!("{profile}\nrazer-naga"));
-        assert!(fake::with(|mouse| mouse.writes.is_empty()));
-        assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
-
-        fake::set_present_models(vec![&NAGA_V2_HYPERSPEED]);
-        assert!(retry_offline_profile(&config, dir.path()));
-        assert_eq!(fake::with(|mouse| mouse.records[&(1, 0x40, 0)]), [0x02, 0x02, 0x01, 0x17, 0, 0, 0]);
-        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_MARKER_FILE)).unwrap(), profile);
-        assert!(!dir.path().join(OFFLINE_FAILED_FILE).exists());
+        assert_eq!(pending.unwrap(), "offline-profile\nrazer-naga-v3");
     }
 
     #[test]
     fn r07_01_worker_keeps_the_exit_targets_if_discovery_changes() {
         let dir = tempfile::tempdir().unwrap();
-        let (mut config, profile) = empty_profile();
-        config.devices.retain(|device| device.id != "razer-naga-v3");
+        let config = crate::mouse_memory::live_overlay::tests::config_with_v3();
+        let profile = config.profiles[0].id.clone();
         let _fake = fake::install(FakeMouse::default());
         fake::set_present_models(vec![&NAGA_V2_HYPERSPEED, &NAGA_V3_PRO, &crate::device_catalog::NAGA_X]);
         let (worker_config, worker_profile, path) = (config.clone(), profile.clone(), dir.path().to_owned());
@@ -1514,7 +1417,6 @@ mod tests {
             fake::set_present_models(vec![]);
             write_offline_to(&worker_config, &worker_profile, &path, Some(&targets));
         }));
-        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE)).unwrap(), format!("{profile}\nrazer-naga"));
-        assert!(!dir.path().join(OFFLINE_MARKER_FILE).exists());
+        assert_eq!(std::fs::read_to_string(dir.path().join(OFFLINE_FAILED_FILE)).unwrap(), format!("{profile}\nrazer-naga-v3"));
     }
 }

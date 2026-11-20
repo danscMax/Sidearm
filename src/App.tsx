@@ -53,10 +53,8 @@ import {
   listenMouseStatus,
   getMouseStatus,
   backToSidearmBank,
-  getNativeModel,
   listenNativeMiceChanged,
   reloadRuntime,
-  setKeySignals,
   setNativeTexts,
   listenSingleInstanceBlocked,
   listenTrayProfileChanged,
@@ -160,17 +158,9 @@ function App() {
     [showToast, t],
   );
 
-  const handleOnboardWriteFailed = useCallback(
-    (reason: string) => {
-      showToast(t("toast.onboardWriteFailed", { reason }), "warning");
-    },
-    [showToast, t],
-  );
-
   const persistence = useAppPersistence(undefined, handleAutoSaveFailed, () =>
-  showToast(t("toast.backupFailed"), "warning"),
-  handleOnboardWriteFailed,
-);
+    showToast(t("toast.backupFailed"), "warning"),
+  );
   const {
     viewState,
     workingConfig,
@@ -348,28 +338,11 @@ function App() {
       void getMouseStatus().then((events) => {
         if (disposed) return;
         for (const { kind, model } of events) {
-          if (!MOUSE_STATUS_NOTICES.includes(kind)) continue;
           if (kind === "offlineNotStored") {
             showToast(t("mouse.noticeOfflineNotStored", { model: model ?? t("mouse.someMouse") }), "warning");
-            continue;
-          }
-          if (kind === "noFreeBankSlot") {
+          } else if (kind === "noFreeBankSlot") {
             showToast(t("mouse.noticeNoFreeBankSlot"), "warning");
-            continue;
           }
-          void getNativeModel().then(({ consumerSignals }) => {
-            if (disposed) return;
-            if (!consumerSignals) {
-              showToast(t("mouse.noticeSignalsKeys"), "success");
-              return;
-            }
-            showToast(t("mouse.noticeSignalsConsumer"), "warning", {
-              label: t("mouse.signalsRevert"),
-              onClick: () => {
-                void setKeySignals(false).catch((e: unknown) => showToast(normalizeCommandError(e).message, "warning"));
-              },
-            });
-          });
         }
         // Later snapshots only take notices: the events keep the states current.
         if (initial) {

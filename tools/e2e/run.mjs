@@ -373,6 +373,14 @@ async function main() {
     const v3Started = world.mouse(V3);
     check("…a bank of its own, playing", v3Started.banks.includes(4) && v3Started.activeBank === 4, JSON.stringify({ banks: v3Started.banks, active: v3Started.activeBank }));
     check("V2 live map written", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 30000, mark));
+    // Stage 2: the V2's profile 1 keeps the offline profile, stored by its
+    // session while Sidearm runs; Sidearm's signals live only in its live map.
+    check("V2 offline profile kept in profile 1 at start", /Razer Naga V2 HyperSpeed keeps profile `[^`]+` for use without Sidearm: \d+ records, 0 failed/.test(world.log().slice(mark)));
+    // Sidearm's signals: a reserved consumer usage (0x10..0x4e) or a bare F13..F24.
+    const sidearmSignal = (record) => (record[0] === 0x0a && record[2] === 0x00 && record[3] >= 0x10 && record[3] <= 0x4e)
+      || (record[0] === 0x02 && record[2] === 0x00 && record[3] >= 0x68 && record[3] <= 0x73);
+    check("…profile 1 holds no Sidearm signal", !bankRecords(world.mouse(V2), 1).some(([, , , record]) => sidearmSignal(record)),
+      JSON.stringify(bankRecords(world.mouse(V2), 1)));
     check("V3 file holds the live map", liveRecords(world.mouse(V3)).length > 0);
     const wheelClick = liveRecords(world.mouse(V3)).find(([, button, layer]) => button === 0x03 && layer === 0);
     check("a HyperShift 2-only button gets a signal", wheelClick?.[3]?.[0] === 0x0a, JSON.stringify(wheelClick));
@@ -403,11 +411,16 @@ async function main() {
 
     // 6. Quit: offline profiles in both mice, live maps restored, clean exit.
     mark = world.log().length;
+    const v2Flash = JSON.stringify(bankRecords(world.mouse(V2), 1));
     check("quit ends the app", await world.quit());
     const exitLog = world.log().slice(mark);
     // By the exit itself, or already in the background after the start.
     check("V3 banks stored", /Razer Naga V3 Pro (profile `[^`]+` verified in bank \d|banks already stored in the background)/.test(exitLog), exitLog.slice(-800));
-    check("V2 offline profile stored", /profile `[^`]+` written for use without Sidearm: \d+ records, 0 failed/.test(exitLog));
+    check("the exit leaves the V2's profile 1 alone", JSON.stringify(bankRecords(world.mouse(V2), 1)) === v2Flash && !/V2 HyperSpeed keeps profile/.test(exitLog));
+    check("V2 live map back to profile 1's records", liveRecords(world.mouse(V2)).every(([, button, layer, record]) => {
+      const flash = bankRecords(world.mouse(V2), 1).find(([, b, l]) => b === button && l === layer)?.[3];
+      return flash === undefined || JSON.stringify(flash) === JSON.stringify(record);
+    }));
     check("V3 bank 1 holds records", bankRecords(world.mouse(V3), 1).length > 0);
     // Bank 1 plays after exit, its records in the live map (a bank switch reloads it).
     const v3After = world.mouse(V3);
@@ -437,15 +450,17 @@ async function main() {
     // A restorer still holding the mice would make the next start wait for it.
     check("the kill's restore processes end", await world.waitFor(() => world.restoreLog(), restorersDone, 30000, mark));
 
-    // 8. Asleep at exit: queued, written once the mouse wakes.
+    // 8. Asleep at exit: queued, written once the mouse wakes. The V3 (a bank
+    // select is due); a sleeping V2 needs nothing (its profile 1 holds it).
     appMark = world.log().length;
     world.start();
     await world.startedFully(appMark);
-    await world.edit(V2, (state) => { state.asleep = true; });
+    await world.edit(V3, (state) => { state.asleep = true; });
     mark = world.restoreLog().length;
     await world.quit();
     check("asleep mouse queued", fs.existsSync(path.join(world.data, "mouse-offline-failed")));
-    await world.edit(V2, (state) => { state.asleep = false; });
+    check("…the V3 only", !/\nrazer-naga\b(?!-)/.test(fs.readFileSync(path.join(world.data, "mouse-offline-failed"), "utf8")));
+    await world.edit(V3, (state) => { state.asleep = false; });
     check("queued profile written after waking", await world.waitFor(() => (fs.existsSync(path.join(world.data, "mouse-offline-failed")) ? "" : "gone"), /gone/, 30000));
     check("…and its restore process ends", await world.waitFor(() => world.restoreLog(), restorersDone, 30000, mark));
 

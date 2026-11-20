@@ -58,9 +58,6 @@ pub struct NativeModel {
     pub transaction_id: u8,
     /// Controls whose onboard record emits a key, as `(control id, button id)`.
     pub key_buttons: &'static [(&'static str, u8)],
-    /// Key buttons written through a vendor slot instead of the per-button
-    /// command, as `(button id, slot)`. Empty for models without the slot path.
-    pub slots: &'static [(u8, u8)],
     /// Buttons that must stay plain mouse buttons, as `(control id, button id,
     /// mouse-button value)`.
     pub native_buttons: &'static [(&'static str, u8, u8)],
@@ -135,11 +132,6 @@ impl NativeModel {
         self.key_buttons.iter().find(|(id, _)| *id == control_id).map(|(_, button)| *button)
     }
 
-    /// Vendor slot of a key button, when this model writes it through one.
-    pub fn slot_for(&self, button_id: u8) -> Option<u8> {
-        self.slots.iter().find(|(button, _)| *button == button_id).map(|(_, slot)| *slot)
-    }
-
     /// Wire code of a poll rate the model supports.
     pub fn poll_code_for_hz(&self, hz: u16) -> Option<u8> {
         self.poll_rates.iter().find(|(rate, _)| *rate == hz).map(|(_, code)| *code)
@@ -203,20 +195,13 @@ pub const NAGA_V2_HYPERSPEED: NativeModel = NativeModel {
     interface: 0,
     // Same value the captured Synapse traffic uses for control commands.
     transaction_id: 0x1f,
-    // Thumbs `0x40..=0x4b` emit bare `F13`..`F24`; the two top buttons hold a
-    // key record too but have no vendor slot (measured: `top_aux_01` read back
-    // `Alt+F23` after one per-button write).
+    // The two top buttons can also hold key records (measured: `top_aux_01`
+    // read back `Alt+F23` after one per-button write).
     key_buttons: &[
         ("thumb_01", 0x40), ("thumb_02", 0x41), ("thumb_03", 0x42), ("thumb_04", 0x43),
         ("thumb_05", 0x44), ("thumb_06", 0x45), ("thumb_07", 0x46), ("thumb_08", 0x47),
         ("thumb_09", 0x48), ("thumb_10", 0x49), ("thumb_11", 0x4a), ("thumb_12", 0x4b),
         ("top_aux_01", 0x0b), ("top_aux_02", 0x0c),
-    ],
-    // Not arithmetic: the allocation the captured vendor traffic shows; slot
-    // 0x1b is a spare duplicate of button 0x4b that is never written.
-    slots: &[
-        (0x40, 0x07), (0x41, 0x1c), (0x42, 0x1d), (0x43, 0x1e), (0x44, 0x00), (0x45, 0x01),
-        (0x46, 0x02), (0x47, 0x03), (0x48, 0x08), (0x49, 0x04), (0x4a, 0x05), (0x4b, 0x06),
     ],
     // Measured by scanning every id with `GET_BUTTON`: these answered category
     // `0x01`; every other id but the key buttons answered status `0x03`.
@@ -310,7 +295,6 @@ pub static NAGA_V3_PRO: NativeModel = NativeModel {
     interface: 3,
     transaction_id: 0x1f,
     key_buttons: &THUMBS,
-    slots: &[],
     native_buttons: &[],
     dpi_min: 100,
     dpi_max: 50_000,
@@ -346,7 +330,6 @@ pub const NAGA_V2_PRO: NativeModel = NativeModel {
         THUMBS[6], THUMBS[7], THUMBS[8], THUMBS[9], THUMBS[10], THUMBS[11],
         ("top_aux_02", 0x0c),
     ],
-    slots: &[],
     native_buttons: &[
         ("mouse_left", 0x01, 1),
         ("mouse_right", 0x02, 2),
@@ -382,7 +365,6 @@ pub const NAGA_PRO: NativeModel = NativeModel {
         THUMBS[6], THUMBS[7], THUMBS[8], THUMBS[9], THUMBS[10], THUMBS[11],
         ("top_aux_01", 0x0b), ("top_aux_02", 0x0c),
     ],
-    slots: &[],
     native_buttons: &[
         ("mouse_left", 0x01, 1),
         ("mouse_right", 0x02, 2),
@@ -413,7 +395,6 @@ pub const NAGA_X: NativeModel = NativeModel {
     interface: 3,
     transaction_id: 0x1f,
     key_buttons: &THUMBS,
-    slots: &[],
     native_buttons: &[
         ("mouse_left", 0x01, 1),
         ("mouse_right", 0x02, 2),
@@ -487,9 +468,6 @@ mod tests {
         assert_eq!(m.button_id_for("top_aux_01"), Some(0x0b));
         assert_eq!(m.button_id_for("top_aux_02"), Some(0x0c));
         assert_eq!(m.button_id_for("mouse_left"), None);
-        let slots: Vec<u8> = (0x40..=0x4b).map(|b| m.slot_for(b).unwrap()).collect();
-        assert_eq!(slots, [0x07, 0x1c, 0x1d, 0x1e, 0x00, 0x01, 0x02, 0x03, 0x08, 0x04, 0x05, 0x06]);
-        assert_eq!(m.slot_for(0x0b), None);
         assert_eq!(m.native_buttons.len(), 7);
         assert!(m.native_buttons.contains(&("mouse_4", 0x34, 4)));
         assert_eq!((m.dpi_min, m.dpi_max), (100, 30_000));
@@ -557,9 +535,6 @@ mod tests {
             ids.sort_unstable();
             ids.dedup();
             assert_eq!(ids.len(), count, "{}: a button id is used twice", m.name);
-            for (button, _) in m.slots {
-                assert!(m.key_buttons.iter().any(|(_, b)| b == button), "{}: slot for unknown button", m.name);
-            }
             assert!(m.dpi_min >= 100 && m.dpi_min < m.dpi_max, "{}: DPI range", m.name);
         }
     }

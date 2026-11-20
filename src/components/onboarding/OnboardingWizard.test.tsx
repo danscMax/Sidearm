@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("setup steps follow the mouse", () => {
-  it("writes onboard memory only on the onboard path and checks only verified models", () => {
+  it("offers mouse preparation only on the onboard path and checks only verified models", () => {
     expect(wizardSteps(V2, deviceLayout("razer-naga"))).toEqual(["welcome", "mouse", "live", "admin", "tryit"]);
     expect(wizardSteps(V3, deviceLayout(NAGA_V3_DEVICE_ID))).toEqual(["welcome", "live", "extras", "admin", "tryit"]);
     expect(wizardSteps(mouse("razer-naga", "Razer Naga X", false), deviceLayout("razer-naga"))).toEqual(["welcome", "admin", "tryit"]);
@@ -82,6 +82,22 @@ describe("setup steps follow the mouse", () => {
 });
 
 describe("the setup wizard", () => {
+  it("prepares the V2 in normal mode and lets the user retry if it is asleep", async () => {
+    vi.mocked(backend.listNativeMice).mockResolvedValue([V2]);
+    vi.mocked(backend.restoreOnboardControl).mockRejectedValueOnce(new Error("Mouse asleep"));
+    render(<OnboardingWizard config={makeConfig()} applyConfig={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Next" }).hasAttribute("disabled")).toBe(false));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    const prepare = screen.getByRole("button", { name: "Prepare mouse" });
+    fireEvent.click(prepare);
+    expect((await screen.findByRole("alert")).textContent).toContain("Mouse asleep");
+    fireEvent.click(prepare);
+    await screen.findByText("Done: the mouse is ready.");
+    expect(backend.restoreOnboardControl).toHaveBeenCalledTimes(2);
+    expect(backend.restoreOnboardControl).toHaveBeenLastCalledWith();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("asks which mouse to set up when two are connected", async () => {
     vi.mocked(backend.listNativeMice).mockResolvedValue([V2, V3]);
     render(<OnboardingWizard config={configWithV3()} applyConfig={vi.fn()} onClose={vi.fn()} />);

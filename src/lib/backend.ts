@@ -24,8 +24,6 @@ import type {
   MouseStatusEvent,
   NativeModelInfo,
   OnboardBanks,
-  OnboardBinding,
-  OnboardReport,
   OnboardTakeoverEvent,
   OfflinePreview,
 } from "./onboard-mapping";
@@ -121,24 +119,7 @@ export async function saveConfig(config: AppConfig): Promise<SaveConfigResponse>
   return invoke<SaveConfigResponse>("save_config", { config });
 }
 
-/**
- * Writes the given thumb bindings into the mouse's onboard memory and asks the
- * mouse to confirm each one. The mouse cannot be read — it answers only with
- * what the previous write stored — so a confirmation is the assignment the
- * hardware is currently producing. Fails when the mouse is not connected;
- * callers treat that as a warning, not a config failure.
- */
-export async function verifyOnboardMapping(
-  bindings: OnboardBinding[],
-): Promise<OnboardReport> {
-  return invoke<OnboardReport>("verify_onboard_mapping", { bindings });
-}
-
-/**
- * Takes the mouse back from Razer's engine: sets the device to `Normal` mode
- * (the firmware emits the onboard records) and rewrites the config's thumb
- * mapping. Offered as the action on the takeover notification.
- */
+/** Returns the mouse to its normal firmware mode. */
 export async function restoreOnboardControl(): Promise<void> {
   return invoke<void>("restore_onboard_control");
 }
@@ -588,9 +569,7 @@ export async function listenMouseDefaultsSuspected(
   return listenEvent("mouse_defaults_suspected", onSuspected);
 }
 
-/** Fires when the backend guard caught Razer's engine holding the mouse (driver
- *  mode or rewritten onboard slots). The guard has already taken the device back;
- *  the event tells the UI so the user sees why and can force a re-apply. */
+/** Fires when Razer starts or the guard detects the mouse in driver mode. */
 export async function listenOnboardTakeover(
   onPayload: (payload: OnboardTakeoverEvent) => void,
 ): Promise<UnlistenFn> {

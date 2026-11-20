@@ -31,15 +31,15 @@ async function showConflict() {
 }
 
 describe("Synapse recovery card", () => {
-  it("merges driver and mapping events, keeps startup opt-in, and never closes Razer automatically", async () => {
+  it("merges process and driver-mode events, keeps startup opt-in, and never closes Razer automatically", async () => {
     await showConflict();
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
     act(() => {
-      api.listener?.({ kind: "mode", restored: false, controls: [] });
-      api.listener?.({ kind: "mappings", restored: true, controls: ["mouse_right"] });
+      api.listener?.({ kind: "razerStarted", restored: false, controls: [] });
+      api.listener?.({ kind: "mode", restored: true, controls: [] });
     });
     expect(screen.getAllByRole("status")).toHaveLength(1);
-    expect(screen.getByText("Razer также изменил назначения кнопок.")).toBeTruthy();
+    expect(screen.getByText("Razer также переключил мышь в режим драйвера.")).toBeTruthy();
     expect(api.recoverFromSynapse).not.toHaveBeenCalled();
   });
 
@@ -108,11 +108,11 @@ describe("Synapse recovery card", () => {
     expect(api.recoverFromSynapse).not.toHaveBeenCalled();
   });
 
-  it("does not grant process-close permission for a mapping-only repair", async () => {
+  it("does not grant process-close permission for a mode repair when Synapse is not running", async () => {
     api.getSynapseStatus.mockResolvedValue({ running: false, startupRestoreAvailable: false });
     render(<SynapseNotice enabled />);
     await act(async () => {});
-    act(() => api.listener?.({ kind: "mappings", restored: false, controls: ["mouse_right"] }));
+    act(() => api.listener?.({ kind: "mode", restored: false, controls: [] }));
     fireEvent.click(screen.getByRole("button", { name: "Вернуть управление" }));
     await screen.findByText(/Назначения записаны/);
     expect(api.recoverFromSynapse).toHaveBeenCalledExactlyOnceWith(false, false);

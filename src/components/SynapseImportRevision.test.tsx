@@ -11,7 +11,6 @@ vi.mock("../lib/backend", async (importOriginal) => ({
   ...await importOriginal<typeof import("../lib/backend")>(),
   loadConfig: vi.fn(),
   saveConfig: vi.fn(),
-  verifyOnboardMapping: vi.fn(),
   importSynapseIntoConfig: vi.fn(),
 }));
 

@@ -78,8 +78,6 @@ const APP_COMMANDS: &[&str] = &[
     "start_macro_recording",
     "record_keystroke",
     "stop_macro_recording",
-    "apply_onboard_mapping",
-    "verify_onboard_mapping",
     "restore_onboard_control",
     "get_synapse_status",
     "recover_from_synapse",

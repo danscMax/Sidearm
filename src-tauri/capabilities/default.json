@@ -77,8 +77,6 @@
     "allow-start-macro-recording",
     "allow-record-keystroke",
     "allow-stop-macro-recording",
-    "allow-apply-onboard-mapping",
-    "allow-verify-onboard-mapping",
     "allow-restore-onboard-control",
     "allow-get-synapse-status",
     "allow-recover-from-synapse",

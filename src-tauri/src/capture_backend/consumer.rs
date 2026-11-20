@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn naga_v3_reports_translate_all_thumb_presses_and_releases_on_both_layers() {
         let config = crate::mouse_memory::live_overlay::tests::config_with_v3();
-        let signals = crate::mouse_memory::live_overlay::overlay(&config, &crate::device_catalog::NAGA_V3_PRO, true, false)
+        let signals = crate::mouse_memory::live_overlay::overlay(&config, &crate::device_catalog::NAGA_V3_PRO, &[&crate::device_catalog::NAGA_V3_PRO], true, false)
             .unwrap()
             .signals;
         let mut reader = Translator::new(signals.clone(), Duration::from_millis(500), Duration::from_millis(100));

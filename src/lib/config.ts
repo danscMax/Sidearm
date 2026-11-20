@@ -101,8 +101,8 @@ export interface Settings {
   hs2CheatSheet?: boolean;
   /** Shortcut conflicts kept on purpose (`conflictKey`): shown as a note instead. */
   acceptedConflicts?: string[];
-  /** Profile written into the mouse on exit; absent = the fallback profile,
-   *  `OFFLINE_PROFILE_ACTIVE` = the one in effect then. */
+  /** Profile kept in mouse memory for use without Sidearm. Defaults to the fallback profile.
+   *  With `OFFLINE_PROFILE_ACTIVE`, the V2 keeps the fallback and the V3 uses the active profile at exit. */
   offlineProfileId?: string;
 }
 

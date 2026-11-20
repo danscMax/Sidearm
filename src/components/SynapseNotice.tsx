@@ -125,8 +125,8 @@ export function SynapseNotice({ enabled, hypershiftTrigger = "mouse_right" }: { 
     <Toast toast={{ id: 0, message, kind: phase === "test" || phase === "confirmed" ? "info" : "warning" }} onDismiss={() => {}}>
       <p className="toast__message">{message}</p>
       {status.running && phase === "idle" && <p className="panel__muted">{t("synapse.closeImpact")}</p>}
-      {takeover && phase === "idle" && status.running && takeover.kind !== "razerStarted" && (
-        <p className="panel__muted">{t(takeover.kind === "mode" ? "synapse.driverDetail" : "synapse.mappingDetail")}</p>
+      {phase === "idle" && status.running && takeover?.kind === "mode" && (
+        <p className="panel__muted">{t("synapse.driverDetail")}</p>
       )}
       {error && <p className="toast__error" role="alert">{t("synapse.failed", { reason: error })}</p>}
       {statusError && <p className="toast__error" role="alert">{t("synapse.statusUnknown", { reason: statusError })}</p>}

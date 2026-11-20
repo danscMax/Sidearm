@@ -35,8 +35,6 @@ pub enum StatusKind {
     NoFreeBankSlot,
     /// Notice: the mouse slept at the last exit, its offline profile was not stored.
     OfflineNotStored,
-    /// Notice: the side buttons were switched to the configured signal kind.
-    SignalsSwitched,
 }
 
 /// Payload of [`EVENT_MOUSE_STATUS`].

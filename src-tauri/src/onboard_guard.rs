@@ -18,14 +18,13 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::device_catalog::NativeModel;
-use crate::mouse_memory::{OnboardBinding, VendorDevice, MODE_NORMAL};
+use crate::mouse_memory::{VendorDevice, MODE_NORMAL};
 use crate::runtime::RuntimeStore;
 
 /// Regular poll period. The queries are read-only and answered in milliseconds.
@@ -120,8 +119,6 @@ pub struct BatteryEvent {
 pub enum TakeoverKind {
     /// The device was in driver mode, so the firmware ignored onboard memory.
     Mode,
-    /// Onboard records held someone else's mapping.
-    Mappings,
     /// Razer's engine started; it will take the mouse over while it runs.
     RazerStarted,
 }
@@ -149,8 +146,6 @@ enum Verdict {
     Asleep,
     /// Light tick: the mode is `Normal`, the records were not read.
     ModeOnly,
-    /// Mode and every guarded record matched; `usize` = guarded buttons.
-    Clean(usize),
     /// Something was taken back (already reported).
     TookBack,
     /// An unverified model: read for its battery only, never guarded.
@@ -186,9 +181,6 @@ pub fn wait_tick() {
         std::thread::sleep(Duration::from_millis(20));
     }
 }
-
-/// Set by the Mouse tab's signal switch: the rewrite it causes is not news.
-pub static USER_SWITCHED_SIGNALS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Asks the guard for a check now instead of at its next tick.
 pub fn request_check() {
@@ -234,12 +226,10 @@ fn run(
     );
     let mut last_notified = Vec::new();
     let mut razer_was_running = false;
-    let mut last_clean: Option<usize> = None;
     // The first check runs right away instead of after a whole period, and scans
     // everything.
     let mut wait = Duration::ZERO;
     let mut last_full: Option<Instant> = None;
-    let mut last_battery_scan: Option<Instant> = None;
     let mut suspect = true;
     let mut unreadable_since: Option<Instant> = None;
     loop {
@@ -287,43 +277,6 @@ fn run(
             wait = POLL_INTERVAL;
             continue;
         }
-        // The mouse may still hold the offline profile written at the last exit,
-        // what it had stored under a live map that just ended, or a live map no
-        // session restored: put Sidearm's signals back quietly before the check
-        // would call it drift.
-        let model = crate::mouse_memory::config_model();
-        let marker = config_dir.join(crate::mouse_offline::OFFLINE_MARKER_FILE).exists();
-        let stale_map = crate::mouse_memory::live_overlay::unrestored_map(config_dir, model);
-        if !crate::mouse_memory::live_overlay::is_active(model)
-            && (marker || stale_map.is_some())
-            && let Some(config) = read_config(config_dir)
-        {
-            let restored = if marker {
-                crate::mouse_offline::restore_after_offline(&config, config_dir)
-            } else {
-                crate::mouse_offline::restore_signals(&config)
-                    .inspect_err(|error| log::warn!("[onboard-guard] signals not restored over a stale live map: {error}"))
-                    .is_ok()
-            };
-            if !restored {
-                // The mouse holding the offline profile may sleep for hours; the
-                // other mice's batteries (tray badge, tooltip) must not wait for it.
-                let due = last_battery_scan.is_none_or(|at| at.elapsed() >= FULL_SCAN_EVERY);
-                poll_batteries(app, config_dir, !due);
-                if due {
-                    last_battery_scan = Some(Instant::now());
-                }
-                wait = FAST_POLL;
-                continue;
-            }
-            // The mouse plays Sidearm's signals again: that rollback is moot.
-            if let Some(path) = stale_map
-                && let Err(error) = std::fs::remove_file(&path)
-            {
-                log::warn!("[onboard-guard] {} not removed: {error}", path.display());
-            }
-        }
-
         // Only Razer's engine rewrites the records, so a full scan is worth its
         // bus traffic on request, while Razer runs, after anything but a clean
         // check (a wake-up included), and every FULL_SCAN_EVERY as a backstop.
@@ -331,27 +284,13 @@ fn run(
             || razer_running
             || suspect
             || last_full.is_none_or(|at| at.elapsed() >= FULL_SCAN_EVERY);
-        let verdict = check_once(
-            app,
-            runtime_store,
-            config_dir,
-            &mut last_notified,
-            full,
-        );
+        let verdict = check_once(app, runtime_store, &mut last_notified);
         if full {
             last_full = Some(Instant::now());
         }
         poll_batteries(app, config_dir, !full);
-        if full {
-            last_battery_scan = last_full;
-        }
         // `Absent` stays suspect: a mouse plugged back in gets a full scan.
-        suspect = !matches!(verdict, Verdict::Clean(_) | Verdict::ModeOnly | Verdict::ReadOnly);
-        if full {
-            // A full check consumed the user's switch, or found nothing to
-            // switch: either way the flag must not swallow a later notice.
-            USER_SWITCHED_SIGNALS.store(false, Ordering::SeqCst);
-        }
+        suspect = !matches!(verdict, Verdict::ModeOnly | Verdict::ReadOnly);
         if verdict == Verdict::Unreadable {
             let since = *unreadable_since.get_or_insert_with(Instant::now);
             if since.elapsed() >= UNREACHABLE_AFTER {
@@ -360,14 +299,6 @@ fn run(
         } else {
             unreadable_since = None;
             crate::mouse_status::set_state(Some(app), crate::mouse_status::StatusKind::MouseUnreachable, false);
-        }
-        match verdict {
-            Verdict::Clean(buttons) if last_clean != Some(buttons) => {
-                record_clean(runtime_store, buttons);
-                last_clean = Some(buttons);
-            }
-            Verdict::TookBack => last_clean = None,
-            _ => {}
         }
         wait = match verdict {
             Verdict::Asleep | Verdict::Absent => POLL_INTERVAL,
@@ -381,9 +312,7 @@ fn run(
 fn check_once(
     app: &AppHandle,
     runtime_store: &Arc<Mutex<RuntimeStore>>,
-    config_dir: &Path,
     last_notified: &mut Vec<(TakeoverKind, bool, Instant)>,
-    full: bool,
 ) -> Verdict {
     let device = match VendorDevice::open_onboard() {
         Ok(device) => device,
@@ -397,7 +326,8 @@ fn check_once(
         // Its collection is not openable right now.
         Err(_) => return Verdict::Unreadable,
     };
-    if !device.model().verified || crate::mouse_memory::live_overlay::is_active(device.model()) {
+    // Its live map needs firmware mode too: Razer's driver mode silences it.
+    if !device.model().verified {
         return Verdict::ReadOnly;
     }
 
@@ -441,70 +371,10 @@ fn check_once(
             took_back = true;
         }
     }
-    if !full && !took_back {
-        return Verdict::ModeOnly;
-    }
-
-    let Some(config) = read_config(config_dir) else {
-        return Verdict::Unreadable;
-    };
-    let bindings = crate::mouse_memory::onboard_bindings(&config);
-    match drifted_controls(&device, &bindings) {
-        Ok((drifted_keys, drifted_native)) => {
-            if drifted_keys.is_empty() && drifted_native.is_empty() {
-                return if took_back {
-                    Verdict::TookBack
-                } else {
-                    Verdict::Clean(bindings.len() + device.model().native_buttons.len())
-                };
-            }
-            // A button still holding Sidearm's signal of the other kind (the
-            // F13..F24 of an older version, or the rollback switch flipped) is a
-            // signal switch, not a takeover: rewritten below, not reported.
-            // Read before the rewrite, which erases the evidence. Read twice like
-            // the drift check, and an unreadable record counts as a switch: a
-            // transient misread must not report Razer taking the mouse over.
-            let switched = |control: &String| {
-                (0..2).any(|_| device.holds_other_signal(&bindings, control).unwrap_or(true))
-            };
-            let foreign_keys: Vec<String> = drifted_keys.iter().filter(|c| !switched(c)).cloned().collect();
-            let mut restored = true;
-            if !drifted_keys.is_empty() {
-                restored &= device.apply_bindings(&bindings).is_ok();
-            }
-            if !drifted_native.is_empty() {
-                restored &= device.restore_native_buttons(&drifted_native).is_ok();
-            }
-            if restored && foreign_keys.is_empty() && drifted_native.is_empty() {
-                log::info!("[onboard-guard] button signals switched to the configured kind: {drifted_keys:?}");
-                // The user's own switch in the Mouse tab needs no announcement.
-                if !USER_SWITCHED_SIGNALS.swap(false, Ordering::SeqCst) {
-                    crate::mouse_status::notice(Some(app), crate::mouse_status::StatusKind::SignalsSwitched);
-                }
-                return Verdict::TookBack;
-            }
-            let reported = if restored { foreign_keys } else { drifted_keys };
-            let controls = reported
-                .into_iter()
-                .chain(drifted_native.iter().map(|id| id.to_string()))
-                .collect();
-            notify(
-                app,
-                runtime_store,
-                last_notified,
-                TakeoverEvent {
-                    kind: TakeoverKind::Mappings,
-                    restored,
-                    controls,
-                },
-            );
-            Verdict::TookBack
-        }
-        Err(message) => {
-            log::debug!("[onboard-guard] drift check failed: {message}");
-            Verdict::Unreadable
-        }
-    }
+    // Stage 2: the onboard mouse's profile 1 holds the offline profile for
+    // good and Sidearm's signals live in its live map (`live_overlay`, which
+    // repairs it): no stored record is the guard's to put back.
+    if took_back { Verdict::TookBack } else { Verdict::ModeOnly }
 }
 
 /// Reads the battery of every connected mouse, not just the one the guard
@@ -613,15 +483,6 @@ fn should_warn_low(percent: u8, last_warned: Option<u64>, now: u64) -> bool {
         && last_warned.is_none_or(|last| now.saturating_sub(last) >= LOW_BATTERY_WARN_EVERY.as_secs())
 }
 
-/// Key controls whose record drifted, and native buttons that stopped being
-/// their plain mouse button.
-fn drifted_controls(
-    device: &VendorDevice,
-    bindings: &[OnboardBinding],
-) -> Result<(Vec<String>, Vec<&'static str>), String> {
-    Ok((device.drifted_bindings(bindings)?, device.drifted_native_buttons()?))
-}
-
 fn razer_engine_running() -> bool {
     crate::platform::shell::list_running_processes()
         .iter()
@@ -642,20 +503,6 @@ fn read_config(config_dir: &Path) -> Option<crate::config::AppConfig> {
             log::debug!("[onboard-guard] config unreadable: {error}");
             None
         }
-    }
-}
-
-/// Puts a clean verdict into the runtime log (the Diagnostics panel) — once per
-/// change, not every tick.
-fn record_clean(runtime_store: &Arc<Mutex<RuntimeStore>>, buttons: usize) {
-    let message = crate::ui_text!(
-        "guard.mouseClean",
-        "Mouse check: Normal mode, all {buttons} buttons match the Sidearm assignments.",
-        buttons = buttons
-    );
-    log::info!("[onboard-guard] {message}");
-    if let Ok(mut store) = runtime_store.lock() {
-        store.record_info("capture", message);
     }
 }
 
@@ -716,16 +563,6 @@ fn takeover_message(event: &TakeoverEvent) -> crate::ui_text::UiText {
             "guard.modeNotRestored",
             "Razer holds the mouse in driver mode — could not return control to Sidearm."
         ),
-        (TakeoverKind::Mappings, true) => crate::ui_text!(
-            "guard.mappingsRestored",
-            "Razer overwrote the button assignments ({controls}) — restored them.",
-            controls = event.controls.join(", ")
-        ),
-        (TakeoverKind::Mappings, false) => crate::ui_text!(
-            "guard.mappingsNotRestored",
-            "Button assignments were overwritten ({controls}), could not restore them.",
-            controls = event.controls.join(", ")
-        ),
         (TakeoverKind::RazerStarted, _) => crate::ui_text!(
             "guard.razerStarted",
             "Razer Synapse started — it will overwrite the buttons; Sidearm checks the mouse every 3 s."
@@ -781,7 +618,7 @@ mod tests {
         let now = Instant::now();
         let mut history = Vec::new();
         assert!(notification_allowed(&mut history, TakeoverKind::Mode, false, now));
-        assert!(notification_allowed(&mut history, TakeoverKind::Mappings, false, now));
+        assert!(notification_allowed(&mut history, TakeoverKind::RazerStarted, false, now));
         assert!(!notification_allowed(&mut history, TakeoverKind::Mode, false, now + Duration::from_secs(1)));
     }
 

@@ -1,7 +1,6 @@
 import { startTransition, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { loadConfig, normalizeCommandError, saveConfig, verifyOnboardMapping } from "../lib/backend";
-import { onboardBindings } from "../lib/onboard-mapping";
+import { loadConfig, normalizeCommandError, saveConfig } from "../lib/backend";
 import i18n from "../i18n";
 import type {
   AppConfig,
@@ -66,7 +65,6 @@ export function useAppPersistence(
   onAutoSaved?: () => void,
   onAutoSaveFailed?: (reason: string) => void,
   onBackupFailed?: () => void,
-  onOnboardWriteFailed?: (reason: string) => void,
 ): AppPersistence {
   const [viewState, setViewState] = useState<ViewState>("idle");
   const [snapshot, setSnapshot] = useState<LoadConfigResponse | null>(null);
@@ -83,16 +81,12 @@ export function useAppPersistence(
   const isSavingRef = useRef(false);
   const saveRequestRef = useRef<Promise<SaveConfigResponse> | null>(null);
   const disposedRef = useRef(false);
-  /** The key-button signals last sent to the mouse (`null` = none this session). */
-  const onboardSentRef = useRef<string | null>(null);
   const onAutoSavedRef = useRef(onAutoSaved);
   onAutoSavedRef.current = onAutoSaved;
   const onAutoSaveFailedRef = useRef(onAutoSaveFailed);
   onAutoSaveFailedRef.current = onAutoSaveFailed;
   const onBackupFailedRef = useRef(onBackupFailed);
   onBackupFailedRef.current = onBackupFailed;
-  const onOnboardWriteFailedRef = useRef(onOnboardWriteFailed);
-  onOnboardWriteFailedRef.current = onOnboardWriteFailed;
   // Warn only once per session that best-effort backups can't be written.
   const backupWarnedRef = useRef(false);
   // Mirror of the last successfully-persisted config. Used to roll back the
@@ -160,33 +154,6 @@ export function useAppPersistence(
     }
   }
 
-  // The mouse keeps its own button signals, so a config whose signals changed
-  // has to reach the mouse too; this writes each binding and lets the mouse
-  // confirm it. Only a change is written: the signals rarely change (never for
-  // the built-in Naga, whose codes the UI hides), and rewriting all of them on
-  // every save failed whenever the mouse slept. The first save of a session only
-  // records them — the backend guard put the mouse in line at start, and it
-  // also retries a write that failed here. A failure is not a config failure,
-  // so it is a warning instead of rolling the just-saved config back.
-  async function writeOnboardMapping(config: AppConfig) {
-    const bindings = onboardBindings(config);
-    const signature = JSON.stringify(bindings);
-    const previous = onboardSentRef.current;
-    onboardSentRef.current = signature;
-    if (bindings.length === 0 || previous === null || previous === signature) return;
-    try {
-      const report = await verifyOnboardMapping(bindings);
-      if (report.failed.length > 0) {
-        onOnboardWriteFailedRef.current?.(report.failed.join(", "));
-      }
-    } catch (unknownError) {
-      const error = normalizeCommandError(unknownError);
-      // No onboard-path mouse plugged in: the guard writes it when one appears.
-      if (error.code === "onboard_not_connected") return;
-      onOnboardWriteFailedRef.current?.(error.message);
-    }
-  }
-
   async function flushSave() {
     const config = saveQueueRef.current;
     if (!config || isSavingRef.current) return;
@@ -210,7 +177,6 @@ export function useAppPersistence(
         setError(null);
         setViewState("ready");
       });
-      await writeOnboardMapping(result.config);
       onAutoSavedRef.current?.();
       if (result.backupFailed && !backupWarnedRef.current) {
         backupWarnedRef.current = true;
@@ -322,7 +288,6 @@ export function useAppPersistence(
         setError(null);
         setViewState("ready");
       });
-      await writeOnboardMapping(result.config);
       return true;
     } catch (unknownError) {
       if (superseded()) return false;

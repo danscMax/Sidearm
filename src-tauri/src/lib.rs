@@ -4499,11 +4499,18 @@ pub fn run() {
                         log::info!("[onboard] `{}` present: key buttons send F13..F24", mouse_memory::KEY_SIGNALS_FILE);
                     }
                     // The marker names the profile, then the mice that slept: the notice names the first.
+                    // Only a bank mouse is ever written there (the V2's profile 1 holds it already), and a
+                    // queue naming no mouse is a restorer's after a kill that this start took over
+                    // (it stores the banks itself): no mouse slept, so no notice.
                     let failed = config_dir.join(mouse_offline::OFFLINE_FAILED_FILE);
                     let slept = std::fs::read_to_string(&failed).ok().and_then(|text| {
-                        text.lines().skip(1).find_map(|id| device_catalog::CATALOG.iter().find(|model| model.device_id == id.trim()).map(|model| model.short_name))
+                        text.lines().skip(1).find_map(|id| {
+                            device_catalog::CATALOG.iter()
+                                .find(|model| model.device_id == id.trim() && model.transport == device_catalog::Transport::LiveOverlay)
+                                .map(|model| model.short_name)
+                        })
                     });
-                    if std::fs::remove_file(&failed).is_ok() {
+                    if std::fs::remove_file(&failed).is_ok() && slept.is_some() {
                         mouse_status::notice_about(None, mouse_status::StatusKind::OfflineNotStored, slept);
                     }
                     onboard_guard::spawn(

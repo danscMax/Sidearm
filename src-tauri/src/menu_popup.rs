@@ -1364,8 +1364,9 @@ pub(crate) fn page_ready(app: &AppHandle) {
 }
 
 /// What the page measured, in physical pixels: the whole page, its tip
-/// (`side`, the part beside the list), the tip's widest (`side_max`) and which
-/// side of the list it is drawn on.
+/// (`side`, the part beside the list), the width that keeps the tip right of
+/// the list when it fits there (`side_max`, 3 columns) and which side of the
+/// list it is drawn on.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PageSize {
     pub width: f64,
@@ -1391,7 +1392,7 @@ pub(crate) struct Placement {
 }
 
 impl Placement {
-    /// The tip goes right of the list unless its widest does not fit there and
+    /// The tip goes right of the list unless `side_max` does not fit there and
     /// the left has more room.
     fn pin(menu_x: i32, menu_w: i32, work: (i32, i32, i32, i32), side_max: i32) -> Self {
         let right = work.2 - (menu_x + menu_w);

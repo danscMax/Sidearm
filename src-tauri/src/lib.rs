@@ -2455,8 +2455,9 @@ fn menu_ready(app: AppHandle) {
 }
 
 /// The menu popup measured itself (physical pixels) for the menu `generation`:
-/// the page, its tip beside the list (`side`, at most `side_max`) and the tip's
-/// side. Answers where the tip belongs (`None`: not placed).
+/// the page, its tip beside the list (`side`), the width that keeps the tip on
+/// the right (`side_max`) and the tip's side. Answers where the tip belongs
+/// (`None`: not placed).
 #[tauri::command]
 fn menu_layout(
     app: AppHandle,

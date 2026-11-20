@@ -25,6 +25,8 @@
   var FULL_AFTER_MS = 600;
   /** The widest a submenu's list in the tip gets (272 px each). */
   var MAX_TIP_COLUMNS = 5;
+  /** The tip stays right of the list while this many columns fit there (owner's call). */
+  var RIGHT_TIP_COLUMNS = 3;
   var fullTimer = null;
   // Where Rust put the tip (`menu_layout`'s answer): left of the list when the
   // right has no room, and how wide it may get there (CSS px). Fixed per menu,
@@ -390,7 +392,7 @@
       width: Math.ceil(box.width * dpr),
       height: Math.ceil(box.height * dpr),
       side: Math.ceil(sideWidth * dpr),
-      sideMax: Math.ceil((tipColumn || sideWidth) * MAX_TIP_COLUMNS * dpr),
+      sideMax: Math.ceil((tipColumn || sideWidth) * RIGHT_TIP_COLUMNS * dpr),
       sideLeft: sideLeft,
     };
     var key = JSON.stringify(size);

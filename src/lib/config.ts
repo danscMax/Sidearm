@@ -144,6 +144,10 @@ export interface Device {
   builtin?: boolean;
   image?: string;
   hotspots?: DeviceHotspot[];
+  /** Stable USB/HID identity (`VID_xxxx&PID_xxxx`) captured via Windows Raw Input. */
+  rawDeviceId?: string;
+  /** Human-readable hardware label (e.g. `Logitech (VID_046D&PID_C548)`). */
+  rawDeviceLabel?: string;
 }
 
 interface DeviceHotspot {

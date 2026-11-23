@@ -31,7 +31,8 @@
         11,
         12,
         13,
-        14
+        14,
+        15
       ]
     },
     "settings": {
@@ -1486,6 +1487,12 @@
           "items": {
             "$ref": "#/$defs/deviceHotspot"
           }
+        },
+        "rawDeviceId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "rawDeviceLabel": {
+          "$ref": "#/$defs/nonEmptyString"
         }
       }
     },

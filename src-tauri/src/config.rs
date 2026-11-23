@@ -17,7 +17,7 @@ pub(crate) const CONFIG_FILE_NAME: &str = "config.json";
 /// then sees a newer config and leaves it alone instead of quarantining it as
 /// corrupt (measured 2026-11-11: v0.11.8 replaced a config holding `longPress`
 /// with the default one).
-const SCHEMA_VERSION: i32 = 14;
+const SCHEMA_VERSION: i32 = 15;
 pub const MAX_SEQUENCE_STEPS: usize = 200;
 pub(crate) const DEFAULT_GLOBAL_SHORTCUT: &str = "ctrl+alt+n";
 const CONFIG_SCHEMA_JSON: &str = include_str!(concat!(
@@ -497,6 +497,14 @@ pub struct Device {
     pub image: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hotspots: Vec<DeviceHotspot>,
+    /// Optional USB hardware identity (`VID_xxxx&PID_xxxx`, uppercase) learned via
+    /// Windows Raw Input so this device's buttons only intercept presses from that
+    /// exact physical device (leaving the main keyboard and other mice untouched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_device_id: Option<String>,
+    /// Friendly label of the learned hardware device (e.g. `Logitech (VID_046D&PID_C548)`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_device_label: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -1146,6 +1154,8 @@ pub fn builtin_naga_device() -> Device {
         builtin: true,
         image: None,
         hotspots: Vec::new(),
+        raw_device_id: None,
+        raw_device_label: None,
     }
 }
 
@@ -1156,7 +1166,7 @@ fn migrate_devices(config: &mut AppConfig) {
     if config.devices.is_empty() {
         config.devices.push(builtin_naga_device());
     }
-    if matches!(config.version, 2..=13) {
+    if matches!(config.version, 2..=14) {
         config.version = SCHEMA_VERSION;
     }
 }
@@ -1957,7 +1967,17 @@ pub(crate) fn validate_config(config: &AppConfig) -> Result<Vec<ValidationWarnin
             }
         };
 
-        if !encoded_inputs.insert(canonical_encoded_key.clone()) {
+        let device_scope: Option<&str> = config
+            .physical_controls
+            .iter()
+            .find(|c| c.id == mapping.control_id)
+            .and_then(|c| config.devices.iter().find(|d| d.id == c.device_id))
+            .and_then(|d| d.raw_device_id.as_deref());
+        let uniqueness_key = match device_scope {
+            Some(hw) => format!("{hw}::{canonical_encoded_key}"),
+            None => canonical_encoded_key.clone(),
+        };
+        if !encoded_inputs.insert(uniqueness_key) {
             errors.push(format!(
                 "Duplicate encoderMappings encodedKey detected for canonical hotkey `{canonical_encoded_key}`."
             ));
@@ -3698,8 +3718,8 @@ mod tests {
     #[test]
     fn a_pre_v5_profile_dpi_becomes_every_built_in_mouses_own() {
         let mut config = default_seed_config();
-        config.devices.push(Device { id: "razer-naga-v3".into(), name: "V3".into(), builtin: true, image: None, hotspots: Vec::new() });
-        config.devices.push(Device { id: "pad".into(), name: "Pad".into(), builtin: false, image: None, hotspots: Vec::new() });
+        config.devices.push(Device { id: "razer-naga-v3".into(), name: "V3".into(), builtin: true, image: None, hotspots: Vec::new(), raw_device_id: None, raw_device_label: None });
+        config.devices.push(Device { id: "pad".into(), name: "Pad".into(), builtin: false, image: None, hotspots: Vec::new(), raw_device_id: None, raw_device_label: None });
         config.profiles[0].mouse_dpi = Some(1600);
         config.profiles[0].mouse_dpi_stages = Some(vec![800, 1600]);
         migrate_mouse_settings(&mut config);
@@ -3964,6 +3984,8 @@ mod tests {
                 x: 25.0,
                 y: 75.5,
             }],
+            raw_device_id: None,
+            raw_device_label: None,
         }];
         config.physical_controls = vec![PhysicalControl {
             id: ControlId::new("pad_01"),
@@ -4262,7 +4284,7 @@ mod tests {
         // FNV-1a over the schema text (CR stripped: git may check it out with CRLF).
         // Changed the schema? Bump SCHEMA_VERSION, add it to the schema's
         // `version` enum, then put the new fingerprint here.
-        const SCHEMA_FINGERPRINT: (i32, u64) = (14, 0x9862_769f_7051_126e);
+        const SCHEMA_FINGERPRINT: (i32, u64) = (15, 0x63b4_728d_d07f_0215);
         let hash = CONFIG_SCHEMA_JSON
             .bytes()
             .filter(|&byte| byte != b'\r')
@@ -4272,6 +4294,69 @@ mod tests {
             SCHEMA_FINGERPRINT,
             "the config schema changed: bump SCHEMA_VERSION (an older Sidearm then leaves a newer config alone) and record the new fingerprint {hash:#x}"
         );
+    }
+
+    #[test]
+    fn raw_device_scoping_allows_same_key_on_distinct_usb_devices() {
+        let mut config = default_seed_config();
+        config.devices.push(Device {
+            id: "pad-a".into(),
+            name: "Pad A".into(),
+            builtin: false,
+            image: None,
+            hotspots: Vec::new(),
+            raw_device_id: Some("VID_FEED&PID_1234".into()),
+            raw_device_label: Some("Macropad (VID_FEED&PID_1234)".into()),
+        });
+        config.devices.push(Device {
+            id: "mouse-b".into(),
+            name: "Mouse B".into(),
+            builtin: false,
+            image: None,
+            hotspots: Vec::new(),
+            raw_device_id: Some("VID_046D&PID_C548".into()),
+            raw_device_label: Some("Logitech (VID_046D&PID_C548)".into()),
+        });
+        for (cid, did) in [("pad-a-b1", "pad-a"), ("mouse-b-b1", "mouse-b")] {
+            config.physical_controls.push(PhysicalControl {
+                id: ControlId::new(cid),
+                device_id: did.into(),
+                family: ControlFamily::ThumbGrid,
+                default_name: cid.into(),
+                synapse_name: None,
+                remappable: true,
+                capability_status: CapabilityStatus::Verified,
+                notes: None,
+            });
+            config.encoder_mappings.push(EncoderMapping {
+                control_id: ControlId::new(cid),
+                layer: Layer::Standard,
+                encoded_key: "1".into(),
+                source: MappingSource::Detected,
+                verified: true,
+            });
+        }
+        assert!(validate_config(&config).is_ok(), "distinct USB devices may map the same raw key");
+
+        // Same USB device mapping the same raw key twice must still be rejected.
+        config.physical_controls.push(PhysicalControl {
+            id: ControlId::new("pad-a-b2"),
+            device_id: "pad-a".into(),
+            family: ControlFamily::ThumbGrid,
+            default_name: "pad-a-b2".into(),
+            synapse_name: None,
+            remappable: true,
+            capability_status: CapabilityStatus::Verified,
+            notes: None,
+        });
+        config.encoder_mappings.push(EncoderMapping {
+            control_id: ControlId::new("pad-a-b2"),
+            layer: Layer::Standard,
+            encoded_key: "1".into(),
+            source: MappingSource::Detected,
+            verified: true,
+        });
+        assert!(validate_config(&config).is_err(), "same USB device must reject duplicate raw key");
     }
 
     #[test]

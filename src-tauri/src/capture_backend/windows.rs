@@ -221,6 +221,10 @@ const HELPER_ALERT_FACTORY_DEFAULTS: &str = "ALERT:factory-defaults";
 /// it and marks the event as hypershift-layer.
 const HS_PREFIX: &str = "HS:";
 
+/// Prefix the helper puts on a device-scoped key or mouse button captured via
+/// Windows Raw Input (`DEV=VID_046D&PID_C548|1`, `DEV=VID_046D&PID_C548|UP:1`).
+const DEV_PREFIX: &str = "DEV=";
+
 /// Hook events the parent logs at `info` because they have no action dispatch
 /// to be inferred from. A translated Hypershift click is the case: the user
 /// sees a right click, and only this line says whether Sidearm produced it.
@@ -229,6 +233,21 @@ const NOTE_PREFIX: &str = "NOTE:";
 /// The helper's line when the HyperShift 2 trigger goes down (`1`) or up (`0`):
 /// the parent shows the cheat sheet after a while (`cheatsheet.rs`).
 const TRIGGER2_PREFIX: &str = "H2HOLD:";
+
+/// Timestamped Raw Input hardware identity (`VID_xxxx&PID_xxxx`) for a press.
+type RawDeviceStamp = (std::time::Instant, Option<String>);
+
+/// A scoped key-down held briefly while waiting for its matching `WM_INPUT`
+/// device identity. Always fails open (replays via SendInput) on timeout.
+#[derive(Clone, Debug)]
+struct PendingScopedKey {
+    vk: u32,
+    scan: u32,
+    extended: bool,
+    modifiers: HelperModifierState,
+    hyper_prefix: &'static str,
+    at: std::time::Instant,
+}
 
 thread_local! {
     static HELPER_REGISTRATIONS: std::cell::RefCell<Vec<HelperRegistration>> =
@@ -244,10 +263,31 @@ thread_local! {
     static HELPER_MATCHES: std::cell::RefCell<Vec<String>> =
         const { std::cell::RefCell::new(Vec::new()) };
     static HELPER_THREAD_ID: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
-    /// Match line emitted for a held side button (index 0 = X1, 1 = X2), so its
-    /// release emits the matching key-up even if the trigger changed meanwhile.
-    static HELPER_SIDE_BUTTON_DOWN: std::cell::RefCell<[Option<String>; 2]> =
-        const { std::cell::RefCell::new([None, None]) };
+    /// Match line emitted for a held mouse button (indexed by `HYPER_TRIGGER_*`),
+    /// so its release emits the matching key-up even if the trigger changed meanwhile.
+    static HELPER_SIDE_BUTTON_DOWN: std::cell::RefCell<[Option<String>; 6]> =
+        const { std::cell::RefCell::new([None, None, None, None, None, None]) };
+    /// Raw input device handle → canonical `VID_xxxx&PID_xxxx` device id.
+    static RAW_DEVICE_IDS: std::cell::RefCell<std::collections::HashMap<usize, Option<String>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Most recent Raw Input keyboard key-down per VK: `(timestamp, canonical_device_id)`.
+    static RAW_KEY_DEVICE: std::cell::RefCell<std::collections::HashMap<u32, RawDeviceStamp>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Most recent Raw Input mouse button-down per `HYPER_TRIGGER_*`: `(timestamp, canonical_device_id)`.
+    static RAW_MOUSE_DEVICE: std::cell::RefCell<[Option<RawDeviceStamp>; 6]> =
+        const { std::cell::RefCell::new([None, None, None, None, None, None]) };
+    /// Scoped key-downs briefly buffered while waiting for `WM_INPUT` to identify the source USB device.
+    static PENDING_SCOPED_KEY: std::cell::RefCell<Vec<PendingScopedKey>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+    /// Keys currently held on a non-matching keyboard (e.g. main keyboard): repeats pass straight through.
+    static PASSED_SCOPED_KEYS: std::cell::RefCell<std::collections::HashSet<u32>> =
+        std::cell::RefCell::new(std::collections::HashSet::new());
+    /// A scoped mouse-button press buffered briefly while waiting for `WM_INPUT`: `(button, trigger_held, at)`.
+    static PENDING_SCOPED_MOUSE: std::cell::Cell<Option<(u8, bool, std::time::Instant)>> =
+        const { std::cell::Cell::new(None) };
+    /// Mouse buttons passed as belonging to another device: their release passes straight through.
+    static PASSED_SCOPED_MOUSE: std::cell::RefCell<[bool; 6]> =
+        const { std::cell::RefCell::new([false; 6]) };
     /// Factory-defaults signature tracker (see FactoryDefaultsDetector above).
     static HELPER_DEFAULTS_DETECTOR: std::cell::RefCell<FactoryDefaultsDetector> =
         std::cell::RefCell::new(FactoryDefaultsDetector::default());
@@ -346,21 +386,23 @@ struct RegisteredHotkey {
     primary_vk: u32,
     /// Set on the hypershift-layer scroll-wheel encodings.
     wheel: Option<WheelAxis>,
-    /// Set on a side button (mouse 4/5) bound on this layer: see [`ButtonCapture`].
+    /// Set on a side button (mouse 4/5) or custom mouse button bound on this layer: see [`ButtonCapture`].
     button: Option<ButtonCapture>,
+    /// Stable USB/HID device identity (`VID_xxxx&PID_xxxx`) when this control
+    /// belongs to a custom device scoped to specific hardware via Raw Input.
+    raw_device_id: Option<String>,
 }
 
-/// A native side button (XBUTTON1/2) the mouse hook turns into `encoded_key`.
+/// A native mouse button the mouse hook turns into `encoded_key`.
 ///
-/// The mouse reports mouse 4/5 as plain X buttons (its onboard records are
-/// native, so it still works without Sidearm), which no keyboard registration
-/// can match — so bindings on them never fired. The hook emits the encoder
-/// mapping instead, for the layer in effect, and only when that layer has an
-/// enabled binding: an unbound button keeps its native back/forward.
+/// Built-in mice report mouse 4/5 as plain X buttons, and custom USB mice can
+/// bind Mouse4/Mouse5/MouseMiddle/MouseRight directly without vendor software.
+/// The hook emits the encoder mapping instead, for the layer in effect, and
+/// only when that layer has an enabled binding: an unbound button stays native.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ButtonCapture {
-    /// `HYPER_TRIGGER_X1` / `HYPER_TRIGGER_X2`.
+    /// `HYPER_TRIGGER_RIGHT` / `MIDDLE` / `X1` / `X2`.
     code: u8,
     /// The registration is the hypershift-layer encoding.
     hypershift: bool,
@@ -376,9 +418,13 @@ struct HelperRegistration {
     /// is captured while the trigger is held and emitted as `encoded_key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     wheel: Option<WheelAxis>,
-    /// Set on a bound side button: emitted by the mouse hook (see [`ButtonCapture`]).
+    /// Set on a bound mouse button: emitted by the mouse hook (see [`ButtonCapture`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     button: Option<ButtonCapture>,
+    /// Stable USB/HID device identity (`VID_xxxx&PID_xxxx`) for per-device
+    /// Raw Input scoping (leaves the user's main keyboard/other mice untouched).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    raw_device_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1484,12 +1530,22 @@ fn build_hotkey_registrations(
 ) -> Result<Vec<RegisteredHotkey>, String> {
     let mut registrations = Vec::with_capacity(config.encoder_mappings.len());
     for mapping in config.encoder_mappings.iter().filter(|mapping| mapping.layer.is_live()) {
-        let device = config.physical_controls.iter()
+        let device_id = config.physical_controls.iter()
             .find(|control| control.id == mapping.control_id)
             .map(|control| control.device_id.as_str());
-        if device.is_some_and(|device| skips_keyboard(device, live, consumer)) {
+        if device_id.is_some_and(|device| skips_keyboard(device, live, consumer)) {
             continue;
         }
+        let raw_device_id = device_id.and_then(|id| {
+            config
+                .devices
+                .iter()
+                .find(|d| d.id == id)
+                .and_then(|d| d.raw_device_id.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_owned)
+        });
         let hotkey = hotkeys::parse_hotkey(&mapping.encoded_key).map_err(|message| {
             format!(
                 "Failed to register encodedKey `{}` for `{}::{}`: {}",
@@ -1500,6 +1556,12 @@ fn build_hotkey_registrations(
             )
         })?;
 
+        let has_enabled_binding = config.bindings.iter().any(|binding| {
+            binding.enabled
+                && binding.layer == mapping.layer
+                && binding.control_id == mapping.control_id
+        });
+
         // A scroll wheel has no encoded key on the wire: the firmware only
         // emits `F13`..`F24` for buttons. Its hypershift-layer binding is still
         // stored as an encoder mapping (the legacy Synapse model, where Razer's
@@ -1509,28 +1571,26 @@ fn build_hotkey_registrations(
         let wheel = (mapping.layer == crate::config::Layer::Hypershift)
             .then(|| wheel_axis_for_control(mapping.control_id.as_str()))
             .flatten()
-            .filter(|_| {
-                config.bindings.iter().any(|binding| {
-                    binding.enabled
-                        && binding.layer == crate::config::Layer::Hypershift
-                        && binding.control_id == mapping.control_id
-                })
-            });
+            .filter(|_| has_enabled_binding);
 
-        // Side buttons are native X buttons on the wire (see `ButtonCapture`):
-        // tag the mapping when its layer has an enabled binding to fire.
+        // Native mouse buttons (built-in mouse_4/mouse_5 or custom controls
+        // learned directly as MouseRight/MouseMiddle/Mouse4/Mouse5): capture
+        // via WH_MOUSE_LL, and ONLY when this layer has an enabled binding so
+        // unbound buttons stay native.
+        let direct_mouse_code = mouse_vk_to_button_code(hotkey.key.code);
         let button = side_button_code(mapping.control_id.as_str())
-            .filter(|_| {
-                config.bindings.iter().any(|binding| {
-                    binding.enabled
-                        && binding.layer == mapping.layer
-                        && binding.control_id == mapping.control_id
-                })
-            })
+            .or(direct_mouse_code)
+            .filter(|_| has_enabled_binding)
             .map(|code| ButtonCapture {
                 code,
                 hypershift: mapping.layer == crate::config::Layer::Hypershift,
             });
+
+        // Safety guard: never intercept raw mouse buttons or USB-device-scoped
+        // keys until the user actually assigns an enabled binding to them.
+        if (direct_mouse_code.is_some() || raw_device_id.is_some()) && !has_enabled_binding {
+            continue;
+        }
 
         registrations.push(RegisteredHotkey {
             id: (registrations.len() + 1) as i32,
@@ -1539,6 +1599,7 @@ fn build_hotkey_registrations(
             primary_vk: u32::from(hotkey.key.code),
             wheel,
             button,
+            raw_device_id,
         });
     }
 
@@ -1583,12 +1644,12 @@ fn process_helper_key_event(
                 return (false, true, false);
             }
 
-            // Collect all matching registrations for this VK, then pick
+            // Collect all matching UNSCOPED registrations for this VK, then pick
             // the most specific one (highest modifier bit count wins).
-            // This prevents ambiguity when e.g. both F13 (mask=0) and
-            // Shift+Ctrl+Alt+F13 (mask=0x0007) are registered.
+            // Device-scoped registrations (`raw_device_id.is_some()`) are handled
+            // by the Raw Input correlation path in `handle_scoped_keyboard_event`.
             let mut best: Option<&HelperRegistration> = None;
-            for reg in regs.iter() {
+            for reg in regs.iter().filter(|r| r.raw_device_id.is_none()) {
                 if reg.primary_vk == vk && modifiers.matches_mask(reg.modifiers_mask) {
                     let dominated = best
                         .map(|b| reg.modifiers_mask.count_ones() > b.modifiers_mask.count_ones())
@@ -1604,7 +1665,11 @@ fn process_helper_key_event(
                 if log::log_enabled!(log::Level::Debug) {
                     let total_matches = regs
                         .iter()
-                        .filter(|r| r.primary_vk == vk && modifiers.matches_mask(r.modifiers_mask))
+                        .filter(|r| {
+                            r.raw_device_id.is_none()
+                                && r.primary_vk == vk
+                                && modifiers.matches_mask(r.modifiers_mask)
+                        })
                         .count();
                     if total_matches > 1 {
                         log::debug!(
@@ -1646,8 +1711,8 @@ fn process_helper_key_event(
             if modifiers.apply_vk_event(vk, false) {
                 // Modifier-up — diagnostic logging is done by caller.
                 (false, true, false)
-            } else if let Some(encoded_key) = suppressions.remove(&vk) {
-                matches.push(format!("{hyper_prefix}UP:{encoded_key}"));
+            } else if let Some(stored) = suppressions.remove(&vk) {
+                matches.push(format_suppressed_line(&stored, hyper_prefix, "UP:"));
                 (true, true, false)
             } else {
                 (false, false, false)
@@ -1754,19 +1819,139 @@ fn side_button_code(control_id: &str) -> Option<u8> {
     }
 }
 
-/// The match line a side-button press becomes, or `None` to leave it native.
+/// Maps a mouse virtual key code (`VK_RBUTTON`, `VK_MBUTTON`, `VK_XBUTTON1`,
+/// `VK_XBUTTON2`) onto its `HYPER_TRIGGER_*` wire code.
+fn mouse_vk_to_button_code(vk: u16) -> Option<u8> {
+    match vk {
+        crate::vk::VK_RBUTTON => Some(HYPER_TRIGGER_RIGHT),
+        crate::vk::VK_MBUTTON => Some(HYPER_TRIGGER_MIDDLE),
+        crate::vk::VK_XBUTTON1 => Some(HYPER_TRIGGER_X1),
+        crate::vk::VK_XBUTTON2 => Some(HYPER_TRIGGER_X2),
+        _ => None,
+    }
+}
+
+/// Formats a stored suppression token (`<key>` or `DEV=<id>|<key>`) with the
+/// active hypershift prefix and tag (`""`, `"REPEAT:"`, `"UP:"`).
+fn format_suppressed_line(stored: &str, hyper_prefix: &str, tag: &str) -> String {
+    if let Some(rest) = stored.strip_prefix(DEV_PREFIX)
+        && let Some((dev, key)) = rest.split_once('|')
+    {
+        return format!("{DEV_PREFIX}{dev}|{hyper_prefix}{tag}{key}");
+    }
+    format!("{hyper_prefix}{tag}{stored}")
+}
+
+/// Encodes a matched key for `HELPER_SUPPRESSIONS` (carrying `DEV=<id>|` when scoped).
+fn encode_suppressed_key(raw_device_id: Option<&str>, encoded_key: &str) -> String {
+    match raw_device_id {
+        Some(dev) => format!("{DEV_PREFIX}{dev}|{encoded_key}"),
+        None => encoded_key.to_owned(),
+    }
+}
+
+/// Formats a captured mouse button's down wire line (`[DEV=<id>|][HS:]<key>`)
+/// into its matching key-up wire line (`[DEV=<id>|][HS:]UP:<key>`).
+fn format_button_up_line(down_line: &str) -> String {
+    let (dev_prefix, rest) = if let Some(after) = down_line.strip_prefix(DEV_PREFIX)
+        && let Some((dev, tail)) = after.split_once('|')
+    {
+        (Some(dev), tail)
+    } else {
+        (None, down_line)
+    };
+    let body = match rest.strip_prefix(HS_PREFIX) {
+        Some(key) => format!("{HS_PREFIX}UP:{key}"),
+        None => format!("UP:{rest}"),
+    };
+    match dev_prefix {
+        Some(dev) => format!("{DEV_PREFIX}{dev}|{body}"),
+        None => body,
+    }
+}
+
+/// The match line an UNSCOPED mouse-button press becomes, or `None` to leave it native.
 /// With the trigger held the hypershift encoding wins (stamped `HS:`); without
 /// a hypershift binding the standard one still fires, stamped, so the resolver
 /// falls back to the standard binding exactly as it does for the thumbs.
 fn side_button_capture(regs: &[HelperRegistration], code: u8, trigger_held: bool) -> Option<String> {
     let find = |hypershift: bool| {
         regs.iter()
-            .find(|reg| reg.button == Some(ButtonCapture { code, hypershift }))
+            .find(|reg| reg.raw_device_id.is_none() && reg.button == Some(ButtonCapture { code, hypershift }))
             .map(|reg| reg.encoded_key.as_str())
     };
     let key = if trigger_held { find(true).or_else(|| find(false)) } else { find(false) }?;
     let prefix = if trigger_held { HS_PREFIX } else { "" };
     Some(format!("{prefix}{key}"))
+}
+
+/// The match line a DEVICE-SCOPED mouse-button press becomes for `raw_device_id`.
+fn scoped_button_capture(
+    regs: &[HelperRegistration],
+    code: u8,
+    trigger_held: bool,
+    raw_device_id: Option<&str>,
+) -> Option<String> {
+    let dev = raw_device_id?;
+    let find = |hypershift: bool| {
+        regs.iter()
+            .find(|reg| {
+                reg.button == Some(ButtonCapture { code, hypershift })
+                    && reg.raw_device_id.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(dev))
+            })
+            .map(|reg| (reg.raw_device_id.as_deref().unwrap_or(dev), reg.encoded_key.as_str()))
+    };
+    let (canonical_dev, key) = if trigger_held { find(true).or_else(|| find(false)) } else { find(false) }?;
+    let prefix = if trigger_held { HS_PREFIX } else { "" };
+    Some(format!("{DEV_PREFIX}{canonical_dev}|{prefix}{key}"))
+}
+
+/// Picks the most specific device-scoped keyboard registration matching `(vk, modifiers, raw_device_id)`.
+fn best_scoped_key_reg<'a>(
+    regs: &'a [HelperRegistration],
+    modifiers: &HelperModifierState,
+    vk: u32,
+    raw_device_id: Option<&str>,
+) -> Option<&'a HelperRegistration> {
+    let dev = raw_device_id?;
+    let mut best: Option<&HelperRegistration> = None;
+    for reg in regs.iter() {
+        if reg.button.is_some() || reg.wheel.is_some() {
+            continue;
+        }
+        let Some(reg_dev) = reg.raw_device_id.as_deref() else {
+            continue;
+        };
+        if !reg_dev.eq_ignore_ascii_case(dev) {
+            continue;
+        }
+        if reg.primary_vk == vk && modifiers.matches_mask(reg.modifiers_mask) {
+            let dominated = best
+                .map(|b| reg.modifiers_mask.count_ones() > b.modifiers_mask.count_ones())
+                .unwrap_or(true);
+            if dominated {
+                best = Some(reg);
+            }
+        }
+    }
+    best
+}
+
+/// True when any device-scoped keyboard registration could match `(vk, modifiers)`.
+fn has_scoped_key_candidate(regs: &[HelperRegistration], modifiers: &HelperModifierState, vk: u32) -> bool {
+    regs.iter().any(|reg| {
+        reg.raw_device_id.is_some()
+            && reg.button.is_none()
+            && reg.wheel.is_none()
+            && reg.primary_vk == vk
+            && modifiers.matches_mask(reg.modifiers_mask)
+    })
+}
+
+/// True when any device-scoped mouse-button registration exists for `code`.
+fn has_scoped_button_candidate(regs: &[HelperRegistration], code: u8) -> bool {
+    regs.iter()
+        .any(|reg| reg.raw_device_id.is_some() && reg.button.is_some_and(|b| b.code == code))
 }
 
 /// Maps a scroll-wheel control id onto the axis the mouse hook captures.
@@ -1842,11 +2027,16 @@ static HELPER_HYPER2_MODEL: AtomicUsize = AtomicUsize::new(usize::MAX);
 /// without a device). False when it could not be registered: every press
 /// then counts as the HyperShift 2 mouse's, as before.
 static HELPER_RAW_INPUT: AtomicBool = AtomicBool::new(false);
+/// True when keyboard Raw Input (`0x01/0x06`) is registered for per-device
+/// USB keyboard/macropad scoping. False fails open (never hijacks main keyboard).
+static HELPER_RAW_KEYBOARD: AtomicBool = AtomicBool::new(false);
 /// How old a raw press may be to belong to the press the hook sees now.
 const RAW_PRESS_MATCH: std::time::Duration = std::time::Duration::from_millis(50);
 /// How long a swallowed trigger press waits for raw input before it counts as
 /// another device's and is played back.
 const RAW_PRESS_WAIT: std::time::Duration = std::time::Duration::from_millis(60);
+/// How long a scoped key/button waits for its matching `WM_INPUT` before failing open.
+const SCOPED_RAW_WAIT: std::time::Duration = std::time::Duration::from_millis(25);
 
 thread_local! {
     /// The last raw press of each button code (`HYPER_TRIGGER_*`): when, and
@@ -1868,46 +2058,221 @@ fn trigger2_source(raw: Option<(std::time::Instant, bool)>, now: std::time::Inst
     raw.filter(|(at, _)| now.saturating_duration_since(*at) <= RAW_PRESS_MATCH).map(|(_, ours)| ours)
 }
 
-/// Raw input of the helper's mouse-input window: remembers who pressed each
-/// button and settles a trigger press the hook is holding back.
-fn note_raw_mouse(l_param: isize) {
-    use windows_sys::Win32::UI::Input::{GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTHEADER, RID_INPUT, RIM_TYPEMOUSE};
+/// Cached canonical `VID_xxxx&PID_xxxx` device id for a Raw Input handle.
+fn raw_device_canonical_id(device: windows_sys::Win32::Foundation::HANDLE) -> Option<String> {
+    if device.is_null() {
+        return None;
+    }
+    RAW_DEVICE_IDS.with_borrow_mut(|cache| {
+        cache
+            .entry(device as usize)
+            .or_insert_with(|| {
+                raw_device_name(device)
+                    .and_then(|name| crate::raw_device::canonical_raw_device_id(&name))
+            })
+            .clone()
+    })
+}
+
+/// Replay a held-back scoped key via `SendInput` carrying
+/// `INTERNAL_SENDINPUT_EXTRA_INFO` so our own keyboard hook passes it straight through.
+unsafe fn replay_scoped_key(vk: u32, scan: u32, extended: bool, tap: bool) {
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP};
+    let ext = if extended { KEYEVENTF_EXTENDEDKEY } else { 0 };
+    let down = make_key_input(
+        vk as u16,
+        scan as u16,
+        ext,
+        crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+    );
+    if tap {
+        let up = make_key_input(
+            vk as u16,
+            scan as u16,
+            ext | KEYEVENTF_KEYUP,
+            crate::input_synthesis::INTERNAL_SENDINPUT_EXTRA_INFO,
+        );
+        send_inputs(&[down, up]);
+    } else {
+        send_inputs(&[down]);
+    }
+}
+
+/// Resolves a held-back scoped keyboard press once `WM_INPUT` identifies its device (or times out).
+fn settle_pending_scoped_key(pending: PendingScopedKey, raw_device_id: Option<&str>) {
+    let matched = HELPER_REGISTRATIONS.with(|cell| {
+        let regs = cell.borrow();
+        best_scoped_key_reg(&regs, &pending.modifiers, pending.vk, raw_device_id).map(|winner| {
+            let stored = encode_suppressed_key(winner.raw_device_id.as_deref(), &winner.encoded_key);
+            let line = format_suppressed_line(&stored, pending.hyper_prefix, "");
+            (stored, line)
+        })
+    });
+    if let Some((stored, line)) = matched {
+        HELPER_SUPPRESSIONS.with(|cell| {
+            cell.borrow_mut().insert(pending.vk, stored);
+        });
+        HELPER_MATCHES.with(|cell| cell.borrow_mut().push(line));
+        wake_helper_loop();
+    } else {
+        PASSED_SCOPED_KEYS.with(|cell| {
+            cell.borrow_mut().insert(pending.vk);
+        });
+        unsafe { replay_scoped_key(pending.vk, pending.scan, pending.extended, false) };
+    }
+}
+
+/// Resolves a held-back scoped mouse button once `WM_INPUT` identifies its device (or times out).
+fn settle_pending_scoped_mouse(button: u8, trigger_held: bool, raw_device_id: Option<&str>) {
+    let line = HELPER_REGISTRATIONS.with(|cell| {
+        let regs = cell.borrow();
+        scoped_button_capture(&regs, button, trigger_held, raw_device_id)
+            .or_else(|| side_button_capture(&regs, button, trigger_held))
+    });
+    if let Some(line) = line {
+        HELPER_SIDE_BUTTON_DOWN.with(|cell| {
+            if let Some(slot) = cell.borrow_mut().get_mut(usize::from(button)) {
+                *slot = Some(line.clone());
+            }
+        });
+        HELPER_MATCHES.with(|cell| cell.borrow_mut().push(line));
+        wake_helper_loop();
+    } else {
+        PASSED_SCOPED_MOUSE.with(|cell| {
+            if let Some(slot) = cell.borrow_mut().get_mut(usize::from(button)) {
+                *slot = true;
+            }
+        });
+        queue_hyper_injection(button, true);
+    }
+}
+
+/// Fail-open expiry for scoped keyboard/mouse presses whose `WM_INPUT` never arrived.
+fn expire_pending_scoped_inputs() {
+    let expired_keys: Vec<PendingScopedKey> = PENDING_SCOPED_KEY.with(|cell| {
+        let mut pending = cell.borrow_mut();
+        let mut expired = Vec::new();
+        let mut i = 0;
+        while i < pending.len() {
+            if pending[i].at.elapsed() >= SCOPED_RAW_WAIT {
+                expired.push(pending.remove(i));
+            } else {
+                i += 1;
+            }
+        }
+        expired
+    });
+    for key in expired_keys {
+        settle_pending_scoped_key(key, None);
+    }
+    if let Some((button, trigger_held, at)) = PENDING_SCOPED_MOUSE.get()
+        && at.elapsed() >= SCOPED_RAW_WAIT
+    {
+        PENDING_SCOPED_MOUSE.set(None);
+        settle_pending_scoped_mouse(button, trigger_held, None);
+    }
+}
+
+/// Raw input of the helper's hidden window: remembers which device sent each
+/// mouse button or key and settles any held-back trigger or scoped press.
+fn note_raw_input(l_param: isize) {
+    use windows_sys::Win32::UI::Input::{
+        GetRawInputData, HRAWINPUT, RAWINPUT, RAWINPUTHEADER, RID_INPUT, RIM_TYPEKEYBOARD,
+        RIM_TYPEMOUSE,
+    };
     let mut input: RAWINPUT = unsafe { std::mem::zeroed() };
     let mut size = size_of::<RAWINPUT>() as u32;
-    // SAFETY: `l_param` is this WM_INPUT's HRAWINPUT; a mouse report fits a RAWINPUT.
-    let read = unsafe { GetRawInputData(l_param as HRAWINPUT, RID_INPUT, (&raw mut input).cast(), &mut size, size_of::<RAWINPUTHEADER>() as u32) };
-    if read == u32::MAX || input.header.dwType != RIM_TYPEMOUSE {
+    // SAFETY: `l_param` is this WM_INPUT's HRAWINPUT; mouse/keyboard reports fit a RAWINPUT.
+    let read = unsafe {
+        GetRawInputData(
+            l_param as HRAWINPUT,
+            RID_INPUT,
+            (&raw mut input).cast(),
+            &mut size,
+            size_of::<RAWINPUTHEADER>() as u32,
+        )
+    };
+    if read == u32::MAX {
         return;
     }
-    // SAFETY: the header says this report is a mouse one.
-    let flags = unsafe { input.data.mouse.Anonymous.Anonymous.usButtonFlags };
-    // RI_MOUSE_*_DOWN of right, middle, X1, X2.
-    let pressed: Vec<u8> = [(0x0004, HYPER_TRIGGER_RIGHT), (0x0010, HYPER_TRIGGER_MIDDLE), (0x0040, HYPER_TRIGGER_X1), (0x0100, HYPER_TRIGGER_X2)]
+    let device = input.header.hDevice;
+    let now = std::time::Instant::now();
+
+    if input.header.dwType == RIM_TYPEMOUSE {
+        // SAFETY: the header says this report is a mouse one.
+        let flags = unsafe { input.data.mouse.Anonymous.Anonymous.usButtonFlags };
+        // RI_MOUSE_*_DOWN of right, middle, X1, X2.
+        let pressed: Vec<u8> = [
+            (0x0004, HYPER_TRIGGER_RIGHT),
+            (0x0010, HYPER_TRIGGER_MIDDLE),
+            (0x0040, HYPER_TRIGGER_X1),
+            (0x0100, HYPER_TRIGGER_X2),
+        ]
         .into_iter()
         .filter(|(bit, _)| flags & bit != 0)
         .map(|(_, code)| code)
         .collect();
-    if pressed.is_empty() {
+        if pressed.is_empty() {
+            return;
+        }
+        // HyperShift 2 device match (catalog model).
+        let ours = !device.is_null()
+            && RAW_DEVICES.with_borrow_mut(|devices| {
+                *devices.entry(device as usize).or_insert_with(|| {
+                    let model = crate::device_catalog::CATALOG
+                        .get(HELPER_HYPER2_MODEL.load(Ordering::Relaxed));
+                    raw_device_name(device)
+                        .and_then(|name| crate::device_catalog::model_for_path(&name))
+                        .zip(model)
+                        .is_some_and(|(found, wanted)| found.is(wanted))
+                })
+            });
+        // Canonical VID/PID for custom-device scoping.
+        let raw_id = raw_device_canonical_id(device);
+        for button in pressed {
+            if let Some((pending, _)) = PENDING_TRIGGER2.get()
+                && pending == button
+            {
+                PENDING_TRIGGER2.set(None);
+                settle_pending_trigger2(button, ours);
+            } else {
+                RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)] = Some((now, ours)));
+            }
+            if let Some((pending_btn, trigger_held, _)) = PENDING_SCOPED_MOUSE.get()
+                && pending_btn == button
+            {
+                PENDING_SCOPED_MOUSE.set(None);
+                settle_pending_scoped_mouse(button, trigger_held, raw_id.as_deref());
+            } else {
+                RAW_MOUSE_DEVICE.with_borrow_mut(|slots| {
+                    if let Some(slot) = slots.get_mut(usize::from(button)) {
+                        *slot = Some((now, raw_id.clone()));
+                    }
+                });
+            }
+        }
         return;
     }
-    let device = input.header.hDevice;
-    // No device: injected, or a precision touchpad's click.
-    let ours = !device.is_null()
-        && RAW_DEVICES.with_borrow_mut(|devices| {
-            *devices.entry(device as usize).or_insert_with(|| {
-                let model = crate::device_catalog::CATALOG.get(HELPER_HYPER2_MODEL.load(Ordering::Relaxed));
-                raw_device_name(device).and_then(|name| crate::device_catalog::model_for_path(&name)).zip(model).is_some_and(|(found, wanted)| found.is(wanted))
-            })
+
+    if input.header.dwType == RIM_TYPEKEYBOARD {
+        // SAFETY: the header says this report is a keyboard one.
+        let kb = unsafe { input.data.keyboard };
+        // RI_KEY_BREAK = 0x01; ignore releases and sentinel 0xFF.
+        if (kb.Flags & 0x01) != 0 || kb.VKey == 0 || kb.VKey == 0xFF {
+            return;
+        }
+        let vk = u32::from(kb.VKey);
+        let raw_id = raw_device_canonical_id(device);
+        let pending = PENDING_SCOPED_KEY.with(|cell| {
+            let mut list = cell.borrow_mut();
+            list.iter().position(|entry| entry.vk == vk).map(|idx| list.remove(idx))
         });
-    let now = std::time::Instant::now();
-    for button in pressed {
-        if let Some((pending, _)) = PENDING_TRIGGER2.get()
-            && pending == button
-        {
-            PENDING_TRIGGER2.set(None);
-            settle_pending_trigger2(button, ours);
+        if let Some(entry) = pending {
+            settle_pending_scoped_key(entry, raw_id.as_deref());
         } else {
-            RAW_PRESSES.with_borrow_mut(|presses| presses[usize::from(button)] = Some((now, ours)));
+            RAW_KEY_DEVICE.with_borrow_mut(|map| {
+                map.insert(vk, (now, raw_id));
+            });
         }
     }
 }
@@ -1963,17 +2328,21 @@ unsafe extern "system" fn raw_input_proc(hwnd: windows_sys::Win32::Foundation::H
     use windows_sys::Win32::UI::WindowsAndMessaging::{DefWindowProcW, WM_INPUT};
     if message == WM_INPUT {
         // A panic must not unwind across this callback.
-        let _ = std::panic::catch_unwind(|| note_raw_mouse(l_param));
+        let _ = std::panic::catch_unwind(|| note_raw_input(l_param));
     }
     unsafe { DefWindowProcW(hwnd, message, w_param, l_param) }
 }
 
-/// A hidden window on the helper's thread receiving every mouse's raw input
-/// (`RIDEV_INPUTSINK`), so HyperShift 2 knows which device pressed its button.
-fn register_raw_mouse_input() -> bool {
+/// A hidden window on the helper's thread receiving raw mouse and/or keyboard
+/// input (`RIDEV_INPUTSINK`), so HyperShift 2 and per-device USB bindings know
+/// which hardware device sent each press. Returns `(mouse_ok, keyboard_ok)`.
+fn register_raw_input(need_mouse: bool, need_keyboard: bool) -> (bool, bool) {
     use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows_sys::Win32::UI::Input::{RAWINPUTDEVICE, RIDEV_INPUTSINK, RegisterRawInputDevices};
     use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, RegisterClassW, WNDCLASSW, WS_OVERLAPPED};
+    if !need_mouse && !need_keyboard {
+        return (false, false);
+    }
     let class: Vec<u16> = "SidearmHelperRawInput\0".encode_utf16().collect();
     // SAFETY: NUL-terminated class name; the window lives as long as the helper.
     unsafe {
@@ -1982,10 +2351,21 @@ fn register_raw_mouse_input() -> bool {
         RegisterClassW(&wc);
         let hwnd = CreateWindowExW(0, class.as_ptr(), class.as_ptr(), WS_OVERLAPPED, 0, 0, 0, 0, std::ptr::null_mut(), std::ptr::null_mut(), instance, std::ptr::null());
         if hwnd.is_null() {
-            return false;
+            return (false, false);
         }
-        let device = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
-        RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) != 0
+        let mouse_ok = if need_mouse {
+            let device = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
+            RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) != 0
+        } else {
+            false
+        };
+        let keyboard_ok = if need_keyboard {
+            let device = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x06, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
+            RegisterRawInputDevices(&device, 1, size_of::<RAWINPUTDEVICE>() as u32) != 0
+        } else {
+            false
+        };
+        (mouse_ok, keyboard_ok)
     }
 }
 /// Buttons that may be a HyperShift 2 trigger (never the left one).
@@ -2298,11 +2678,13 @@ enum HyperMouseAction {
     /// Swallow a scroll tick and emit the hypershift-layer encoding of that
     /// wheel direction (the firmware can never produce it itself).
     CaptureWheel(String),
-    /// Swallow a side-button press and emit this match line (see
-    /// [`side_button_capture`]); the release must be swallowed too.
+    /// Swallow a mouse-button press and emit this match line (see
+    /// [`side_button_capture`] / [`scoped_button_capture`]); the release must be swallowed too.
     CaptureButtonDown(u8, String),
-    /// Swallow the release of a captured side button and emit its key-up.
+    /// Swallow the release of a captured mouse button and emit its key-up.
     CaptureButtonUp(u8, String),
+    /// Hold back a mouse-button press briefly until Raw Input identifies the USB device.
+    HoldBackScopedMouse,
 }
 
 /// Maps a button message onto `(trigger code, is_down)`. `None` for every
@@ -2648,22 +3030,71 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             HELPER_HYPER_USED.store(true, Ordering::Relaxed);
         }
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData)
-            && (button == HYPER_TRIGGER_X1 || button == HYPER_TRIGGER_X2)
+            && matches!(
+                button,
+                HYPER_TRIGGER_RIGHT | HYPER_TRIGGER_MIDDLE | HYPER_TRIGGER_X1 | HYPER_TRIGGER_X2
+            )
             && button != trigger
         {
-            let slot = usize::from(button - HYPER_TRIGGER_X1);
+            let slot = usize::from(button);
             if is_down {
+                let has_scoped = HELPER_REGISTRATIONS
+                    .with(|cell| has_scoped_button_candidate(&cell.borrow(), button));
+                if has_scoped && HELPER_RAW_INPUT.load(Ordering::Relaxed) {
+                    let raw = RAW_MOUSE_DEVICE.with_borrow_mut(|slots| {
+                        slots.get_mut(slot).and_then(Option::take)
+                    });
+                    if let Some((at, raw_id)) = raw
+                        && at.elapsed() <= RAW_PRESS_MATCH
+                    {
+                        let scoped_line = HELPER_REGISTRATIONS.with(|cell| {
+                            scoped_button_capture(&cell.borrow(), button, trigger_held, raw_id.as_deref())
+                        });
+                        if let Some(line) = scoped_line {
+                            return HyperMouseAction::CaptureButtonDown(button, line);
+                        }
+                        // Another mouse pressed this button: fall through to any unscoped
+                        // binding (e.g. built-in Naga X1/X2) or pass through natively.
+                        let unscoped = HELPER_REGISTRATIONS
+                            .with(|cell| side_button_capture(&cell.borrow(), button, trigger_held));
+                        return match unscoped {
+                            Some(line) => HyperMouseAction::CaptureButtonDown(button, line),
+                            None => {
+                                PASSED_SCOPED_MOUSE.with_borrow_mut(|flags| flags[slot] = true);
+                                HyperMouseAction::Pass
+                            }
+                        };
+                    }
+                    // Raw input not received yet (~1-3ms): hold briefly and settle on WM_INPUT / timeout.
+                    PENDING_SCOPED_MOUSE.set(Some((button, trigger_held, std::time::Instant::now())));
+                    return HyperMouseAction::HoldBackScopedMouse;
+                }
                 let line = HELPER_REGISTRATIONS
                     .with(|cell| side_button_capture(&cell.borrow(), button, trigger_held));
-                return line.map_or(HyperMouseAction::Pass, |line| {
-                    HyperMouseAction::CaptureButtonDown(button, line)
+                if let Some(line) = line {
+                    return HyperMouseAction::CaptureButtonDown(button, line);
+                }
+            } else {
+                if let Some((pending_btn, _, _)) = PENDING_SCOPED_MOUSE.get()
+                    && pending_btn == button
+                {
+                    // Fast click released before WM_INPUT arrived: fail open and replay click.
+                    PENDING_SCOPED_MOUSE.set(None);
+                    return HyperMouseAction::ReplayClick(button);
+                }
+                let was_passed = PASSED_SCOPED_MOUSE.with_borrow_mut(|flags| {
+                    let prev = flags[slot];
+                    flags[slot] = false;
+                    prev
                 });
+                if was_passed {
+                    return HyperMouseAction::Pass;
+                }
+                let captured = HELPER_SIDE_BUTTON_DOWN.with(|cell| cell.borrow_mut()[slot].take());
+                if let Some(line) = captured {
+                    return HyperMouseAction::CaptureButtonUp(button, line);
+                }
             }
-            return HELPER_SIDE_BUTTON_DOWN
-                .with(|cell| cell.borrow_mut()[slot].take())
-                .map_or(HyperMouseAction::Pass, |line| {
-                    HyperMouseAction::CaptureButtonUp(button, line)
-                });
         }
         if trigger == HYPER_TRIGGER_OFF {
             return HyperMouseAction::Pass;
@@ -2729,21 +3160,21 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             1
         }
         HyperMouseAction::CaptureButtonDown(button, line) => {
-            HELPER_SIDE_BUTTON_DOWN
-                .with(|cell| cell.borrow_mut()[usize::from(button - HYPER_TRIGGER_X1)] = Some(line.clone()));
+            HELPER_SIDE_BUTTON_DOWN.with(|cell| {
+                if let Some(slot) = cell.borrow_mut().get_mut(usize::from(button)) {
+                    *slot = Some(line.clone());
+                }
+            });
             HELPER_MATCHES.with(|cell| cell.borrow_mut().push(line));
             wake_helper_loop();
             1
         }
         HyperMouseAction::CaptureButtonUp(_, line) => {
-            let up = match line.strip_prefix(HS_PREFIX) {
-                Some(key) => format!("{HS_PREFIX}UP:{key}"),
-                None => format!("UP:{line}"),
-            };
-            HELPER_MATCHES.with(|cell| cell.borrow_mut().push(up));
+            HELPER_MATCHES.with(|cell| cell.borrow_mut().push(format_button_up_line(&line)));
             wake_helper_loop();
             1
         }
+        HyperMouseAction::HoldBackScopedMouse => 1,
         HyperMouseAction::CaptureWheel(encoded_key) => {
             HELPER_MATCHES.with(|cell| {
                 let mut matches = cell.borrow_mut();
@@ -2887,6 +3318,10 @@ fn reset_mouse_capture_state(mut inject: impl FnMut(u8, bool)) {
     PENDING_TRIGGER2.set(None);
     PASSED_TRIGGER2.set(None);
     RAW_PRESSES.with_borrow_mut(|presses| presses.fill(None));
+    PENDING_SCOPED_MOUSE.set(None);
+    PASSED_SCOPED_MOUSE.with_borrow_mut(|flags| flags.fill(false));
+    RAW_MOUSE_DEVICE.with_borrow_mut(|slots| slots.fill(None));
+    HELPER_SIDE_BUTTON_DOWN.with_borrow_mut(|slots| slots.fill(None));
     if held != HYPER_TRIGGER_OFF {
         HELPER_MATCHES.with_borrow_mut(|lines| lines.push(format!("{TRIGGER2_PREFIX}0")));
     }
@@ -2918,6 +3353,7 @@ mod mouse_hook_tests {
             primary_vk: 0,
             wheel: Some(axis),
             button: None,
+            raw_device_id: None,
         }
     }
 
@@ -3252,6 +3688,7 @@ mod mouse_hook_tests {
             primary_vk: 0,
             wheel: None,
             button: Some(ButtonCapture { code, hypershift }),
+            raw_device_id: None,
         }
     }
 
@@ -3275,6 +3712,64 @@ mod mouse_hook_tests {
         assert_eq!(side_button_code("mouse_4"), Some(HYPER_TRIGGER_X1));
         assert_eq!(side_button_code("mouse_5"), Some(HYPER_TRIGGER_X2));
         assert_eq!(side_button_code("thumb_01"), None);
+    }
+
+    #[test]
+    fn scoped_raw_input_matches_only_bound_device_and_formats_wire_lines() {
+        let mut scoped_btn = side_reg("Mouse4", HYPER_TRIGGER_X1, false);
+        scoped_btn.raw_device_id = Some("VID_046D&PID_C548".into());
+        let mut scoped_key = HelperRegistration {
+            encoded_key: "1".into(),
+            modifiers_mask: 0,
+            primary_vk: 0x31,
+            wheel: None,
+            button: None,
+            raw_device_id: Some("VID_FEED&PID_1234".into()),
+        };
+        let regs = vec![scoped_btn, scoped_key.clone()];
+
+        // Scoped button matches only its VID/PID (case-insensitive) and ignores other mice.
+        assert_eq!(
+            super::scoped_button_capture(&regs, HYPER_TRIGGER_X1, false, Some("vid_046d&pid_c548")).as_deref(),
+            Some("DEV=VID_046D&PID_C548|Mouse4")
+        );
+        assert_eq!(
+            super::scoped_button_capture(&regs, HYPER_TRIGGER_X1, true, Some("VID_046D&PID_C548")).as_deref(),
+            Some("DEV=VID_046D&PID_C548|HS:Mouse4")
+        );
+        assert_eq!(
+            super::scoped_button_capture(&regs, HYPER_TRIGGER_X1, false, Some("VID_1532&PID_00A7")),
+            None
+        );
+        assert_eq!(side_button_capture(&regs, HYPER_TRIGGER_X1, false), None);
+
+        // Scoped keyboard key matches only its macropad VID/PID; main keyboard passes through.
+        let mods = super::HelperModifierState::default();
+        assert_eq!(
+            super::best_scoped_key_reg(&regs, &mods, 0x31, Some("VID_FEED&PID_1234"))
+                .map(|r| r.encoded_key.as_str()),
+            Some("1")
+        );
+        assert!(super::best_scoped_key_reg(&regs, &mods, 0x31, Some("VID_0000&PID_9999")).is_none());
+        assert!(super::best_scoped_key_reg(&regs, &mods, 0x31, None).is_none());
+
+        // Wire formatting for button-up and suppressed key-up preserves DEV= prefix outermost.
+        assert_eq!(
+            super::format_button_up_line("DEV=VID_046D&PID_C548|Mouse4"),
+            "DEV=VID_046D&PID_C548|UP:Mouse4"
+        );
+        assert_eq!(
+            super::format_button_up_line("DEV=VID_046D&PID_C548|HS:Mouse4"),
+            "DEV=VID_046D&PID_C548|HS:UP:Mouse4"
+        );
+        assert_eq!(super::format_button_up_line("HS:Alt+F13"), "HS:UP:Alt+F13");
+        let stored = super::encode_suppressed_key(scoped_key.raw_device_id.take().as_deref(), "1");
+        assert_eq!(super::format_suppressed_line(&stored, "", "UP:"), "DEV=VID_FEED&PID_1234|UP:1");
+        assert_eq!(super::format_suppressed_line(&stored, "HS:", "REPEAT:"), "DEV=VID_FEED&PID_1234|HS:REPEAT:1");
+        assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_RBUTTON), Some(HYPER_TRIGGER_RIGHT));
+        assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_MBUTTON), Some(HYPER_TRIGGER_MIDDLE));
+        assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_XBUTTON1), Some(HYPER_TRIGGER_X1));
+        assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_XBUTTON2), Some(HYPER_TRIGGER_X2));
     }
 
     #[test]
@@ -3321,6 +3816,116 @@ mod mouse_capture_reset_tests {
         assert!(HELPER_MATCHES.with_borrow(|lines| lines.iter().any(|line| line == "H2HOLD:0")));
         assert!(injected.is_empty(), "recovery must never synthesize a quick tap");
     }
+}
+
+/// Handles device-scoped keyboard registrations via Windows Raw Input.
+/// Returns `(suppress, wake)`. Fails open if keyboard Raw Input is inactive.
+fn handle_scoped_keyboard_event(vk: u32, scan: u32, extended: bool, is_keydown: bool) -> (bool, bool) {
+    if !is_keydown {
+        PASSED_SCOPED_KEYS.with(|cell| {
+            cell.borrow_mut().remove(&vk);
+        });
+        let pending = PENDING_SCOPED_KEY.with(|cell| {
+            let mut list = cell.borrow_mut();
+            list.iter().position(|entry| entry.vk == vk).map(|idx| list.remove(idx))
+        });
+        if let Some(entry) = pending {
+            // Fast tap released before WM_INPUT arrived: check if WM_INPUT landed
+            // just now; otherwise fail open and replay a clean down+up tap.
+            let raw = RAW_KEY_DEVICE.with_borrow_mut(|map| map.remove(&vk));
+            if let Some((at, raw_id)) = raw
+                && at.elapsed() <= RAW_PRESS_MATCH
+            {
+                let matched = HELPER_REGISTRATIONS.with(|cell| {
+                    let regs = cell.borrow();
+                    best_scoped_key_reg(&regs, &entry.modifiers, vk, raw_id.as_deref()).map(|winner| {
+                        let stored = encode_suppressed_key(winner.raw_device_id.as_deref(), &winner.encoded_key);
+                        (
+                            format_suppressed_line(&stored, entry.hyper_prefix, ""),
+                            format_suppressed_line(&stored, entry.hyper_prefix, "UP:"),
+                        )
+                    })
+                });
+                if let Some((down_line, up_line)) = matched {
+                    HELPER_MATCHES.with(|cell| {
+                        let mut list = cell.borrow_mut();
+                        list.push(down_line);
+                        list.push(up_line);
+                    });
+                    return (true, true);
+                }
+            }
+            unsafe { replay_scoped_key(entry.vk, entry.scan, entry.extended, true) };
+            return (true, false);
+        }
+        return (false, false);
+    }
+
+    // Auto-repeat of an already-matched scoped key.
+    let repeat_line = HELPER_SUPPRESSIONS.with(|cell| {
+        cell.borrow().get(&vk).map(|stored| {
+            let hyper_prefix = if hyper_active_and_used() { HS_PREFIX } else { "" };
+            format_suppressed_line(stored, hyper_prefix, "REPEAT:")
+        })
+    });
+    if let Some(line) = repeat_line {
+        HELPER_MATCHES.with(|cell| cell.borrow_mut().push(line));
+        return (true, true);
+    }
+
+    // Auto-repeat of a key held on another keyboard (e.g. main keyboard).
+    if PASSED_SCOPED_KEYS.with(|cell| cell.borrow().contains(&vk)) {
+        return (false, false);
+    }
+
+    if !HELPER_RAW_KEYBOARD.load(Ordering::Relaxed) {
+        return (false, false);
+    }
+
+    let modifiers = HELPER_MODIFIERS.with(|cell| *cell.borrow());
+    let has_candidate = HELPER_REGISTRATIONS.with(|cell| has_scoped_key_candidate(&cell.borrow(), &modifiers, vk));
+    if !has_candidate {
+        return (false, false);
+    }
+
+    let hyper_prefix = if hyper_active_and_used() { HS_PREFIX } else { "" };
+    let raw = RAW_KEY_DEVICE.with_borrow_mut(|map| map.remove(&vk));
+    if let Some((at, raw_id)) = raw
+        && at.elapsed() <= RAW_PRESS_MATCH
+    {
+        let matched = HELPER_REGISTRATIONS.with(|cell| {
+            let regs = cell.borrow();
+            best_scoped_key_reg(&regs, &modifiers, vk, raw_id.as_deref()).map(|winner| {
+                let stored = encode_suppressed_key(winner.raw_device_id.as_deref(), &winner.encoded_key);
+                let line = format_suppressed_line(&stored, hyper_prefix, "");
+                (stored, line)
+            })
+        });
+        if let Some((stored, line)) = matched {
+            HELPER_SUPPRESSIONS.with(|cell| {
+                cell.borrow_mut().insert(vk, stored);
+            });
+            HELPER_MATCHES.with(|cell| cell.borrow_mut().push(line));
+            return (true, true);
+        }
+        PASSED_SCOPED_KEYS.with(|cell| {
+            cell.borrow_mut().insert(vk);
+        });
+        return (false, false);
+    }
+
+    // WM_INPUT hasn't arrived yet (~0.5-3ms): hold briefly and settle on WM_INPUT / timeout.
+    PENDING_SCOPED_KEY.with(|cell| {
+        cell.borrow_mut().push(PendingScopedKey {
+            vk,
+            scan,
+            extended,
+            modifiers,
+            hyper_prefix,
+            at: std::time::Instant::now(),
+        });
+    });
+    (true, false)
 }
 
 /// LL keyboard hook callback for the capture helper process.
@@ -3421,6 +4026,29 @@ unsafe extern "system" fn helper_ll_keyboard_proc(code: i32, w_param: usize, l_p
             })
         });
 
+        // KBDLLHOOKSTRUCT flag bit set when the event was synthesized by a
+        // SendInput call (any process).  Per Win32 docs: LLKHF_INJECTED = 0x10.
+        // Razer firmware emits real hardware events (flags=0x00), not software
+        // injects.  INTERNAL_SENDINPUT_EXTRA_INFO events are already
+        // short-circuited above before reaching this block.
+        const LLKHF_INJECTED: u32 = 0x10;
+        let externally_injected = (kb.flags & LLKHF_INJECTED) != 0;
+
+        // Per-device USB keyboard/macropad Raw Input scoping: runs only when
+        // no unscoped registration matched this key. Leaves the main keyboard
+        // completely untouched (and fails open if Raw Input is unavailable).
+        if !suppress && !is_modifier && !externally_injected && (is_keydown || is_keyup) {
+            let extended = (kb.flags & 0x01) != 0;
+            let (scoped_suppress, scoped_wake) =
+                handle_scoped_keyboard_event(vk, kb.scanCode, extended, is_keydown);
+            if scoped_suppress {
+                suppress = true;
+            }
+            if scoped_wake {
+                wake = true;
+            }
+        }
+
         // --- Modifier buffering (delayed modifier / chord detection) ---
         //
         // Razer Naga sends modifier+F-key combos as real keyboard events.
@@ -3429,13 +4057,6 @@ unsafe extern "system" fn helper_ll_keyboard_proc(code: i32, w_param: usize, l_p
         // up to 20ms; if an F-key match arrives in time we consume them,
         // otherwise we replay them via SendInput.
 
-        // KBDLLHOOKSTRUCT flag bit set when the event was synthesized by a
-        // SendInput call (any process).  Per Win32 docs: LLKHF_INJECTED = 0x10.
-        // Razer firmware emits real hardware events (flags=0x00), not software
-        // injects.  INTERNAL_SENDINPUT_EXTRA_INFO events are already
-        // short-circuited above before reaching this block.
-        const LLKHF_INJECTED: u32 = 0x10;
-        let externally_injected = (kb.flags & LLKHF_INJECTED) != 0;
         if is_modifier && (is_keydown || is_keyup) && !externally_injected {
             PHYSICAL_MODIFIERS.with_borrow_mut(|state| { state.apply_vk_event(vk, is_keydown); });
         }
@@ -3934,6 +4555,14 @@ pub fn capture_helper_main() {
     );
 
     // 2. Initialize thread-local state for the LL hook callback
+    let has_scoped_buttons = !crate::fake_mode()
+        && registrations
+            .iter()
+            .any(|reg| reg.raw_device_id.is_some() && reg.button.is_some());
+    let has_scoped_keys = !crate::fake_mode()
+        && registrations
+            .iter()
+            .any(|reg| reg.raw_device_id.is_some() && reg.button.is_none() && reg.wheel.is_none());
     HELPER_CAPTURES_SIDE_BUTTONS.store(
         !crate::fake_mode() && registrations.iter().any(|reg| reg.button.is_some()),
         Ordering::Relaxed,
@@ -3988,13 +4617,25 @@ pub fn capture_helper_main() {
     //     LowLevelHooksTimeout — see HYPER_INJECT_TX).
     start_hyper_injector();
     let mut mouse_hook = unsafe { install_mouse_hook(hmod) };
-    // HyperShift 2 tells the trigger mouse's presses from other devices' by
-    // raw input; without it every press counts as that mouse's.
-    if HELPER_HYPER2_ENABLED.load(Ordering::Relaxed) && !crate::fake_mode() {
-        let registered = register_raw_mouse_input();
-        HELPER_RAW_INPUT.store(registered, Ordering::Relaxed);
-        if !registered {
-            log::warn!("[capture-helper] raw mouse input not registered: {} — every press of the HyperShift 2 button counts as its mouse's", std::io::Error::last_os_error());
+    // HyperShift 2 and custom USB-device bindings tell devices apart via Raw Input.
+    let need_raw_mouse =
+        !crate::fake_mode() && (HELPER_HYPER2_ENABLED.load(Ordering::Relaxed) || has_scoped_buttons);
+    let need_raw_keyboard = has_scoped_keys;
+    if need_raw_mouse || need_raw_keyboard {
+        let (mouse_ok, keyboard_ok) = register_raw_input(need_raw_mouse, need_raw_keyboard);
+        HELPER_RAW_INPUT.store(mouse_ok, Ordering::Relaxed);
+        HELPER_RAW_KEYBOARD.store(keyboard_ok, Ordering::Relaxed);
+        if need_raw_mouse && !mouse_ok {
+            log::warn!(
+                "[capture-helper] raw mouse input not registered: {} — per-device mouse scoping disabled",
+                std::io::Error::last_os_error()
+            );
+        }
+        if need_raw_keyboard && !keyboard_ok {
+            log::warn!(
+                "[capture-helper] raw keyboard input not registered: {} — per-device keyboard scoping disabled (failing open)",
+                std::io::Error::last_os_error()
+            );
         }
     }
 
@@ -4076,7 +4717,10 @@ pub fn capture_helper_main() {
         // Compute wait timeout: if we have pending modifiers, wake up in
         // time to replay them (20ms buffer).  Otherwise use the normal
         // health check interval.
-        let wait_timeout = if PENDING_TRIGGER2.get().is_some() { 5 } else { PENDING_MODIFIERS.with(|cell| {
+        let has_pending_scoped = PENDING_TRIGGER2.get().is_some()
+            || PENDING_SCOPED_MOUSE.get().is_some()
+            || PENDING_SCOPED_KEY.with(|cell| !cell.borrow().is_empty());
+        let wait_timeout = if has_pending_scoped { 5 } else { PENDING_MODIFIERS.with(|cell| {
             let pending = cell.borrow();
             if pending.is_empty() {
                 HOOK_HEALTH_CHECK_INTERVAL_MS
@@ -4153,6 +4797,9 @@ pub fn capture_helper_main() {
                                 n
                             });
                             HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
+                            PENDING_SCOPED_KEY.with(|cell| cell.borrow_mut().clear());
+                            PASSED_SCOPED_KEYS.with(|cell| cell.borrow_mut().clear());
+                            RAW_KEY_DEVICE.with(|cell| cell.borrow_mut().clear());
                             HELPER_MODIFIERS
                                 .with(|cell| *cell.borrow_mut() = HelperModifierState::default());
                             PHYSICAL_MODIFIERS.with_borrow_mut(|state| *state = HelperModifierState::default());
@@ -4322,6 +4969,9 @@ pub fn capture_helper_main() {
                 PENDING_MODIFIERS.with(|cell| cell.borrow_mut().clear());
                 CONSUMED_MODIFIER_VKS.with(|cell| cell.borrow_mut().clear());
                 HELPER_SUPPRESSIONS.with(|cell| cell.borrow_mut().clear());
+                PENDING_SCOPED_KEY.with(|cell| cell.borrow_mut().clear());
+                PASSED_SCOPED_KEYS.with(|cell| cell.borrow_mut().clear());
+                RAW_KEY_DEVICE.with(|cell| cell.borrow_mut().clear());
                 HELPER_MODIFIERS.with(|cell| *cell.borrow_mut() = HelperModifierState::default());
                 PHYSICAL_MODIFIERS.with_borrow_mut(|state| *state = HelperModifierState::default());
                 let new_hook = unsafe {
@@ -4378,6 +5028,7 @@ pub fn capture_helper_main() {
         // Check for pending modifiers that have timed out and replay them.
         flush_expired_pending_modifiers();
         expire_pending_trigger2();
+        expire_pending_scoped_inputs();
 
         // Garbage-collect stale CONSUMED_MODIFIER_VKS entries.  Prevents a
         // lost Razer modifier-up (e.g. from alt-tab focus change) from
@@ -4533,6 +5184,7 @@ fn spawn_capture_helper(
             primary_vk: r.primary_vk,
             wheel: r.wheel,
             button: r.button,
+            raw_device_id: r.raw_device_id.clone(),
         })
         .collect();
 
@@ -4792,6 +5444,13 @@ fn spawn_capture_helper(
                 }
                 None => (trimmed, BACKEND_LL_HOOK.to_owned()),
             };
+            let (raw_device_id, input) = if let Some(after) = input.strip_prefix(DEV_PREFIX)
+                && let Some((dev, rest)) = after.split_once('|')
+            {
+                (Some(dev.to_owned()), rest)
+            } else {
+                (None, input)
+            };
             let (is_hypershift2, input) = match input.strip_prefix(super::consumer::H2_PREFIX) {
                 Some(rest) => (true, rest),
                 None => (false, input),
@@ -4814,7 +5473,7 @@ fn spawn_capture_helper(
             // An unstamped press with a foreign encoding means the firmware's own
             // Hypershift fired (it swallowed our trigger). Our wheel ticks carry
             // `HS:`, so they never trip this.
-            if backend == BACKEND_LL_HOOK && !is_hypershift && !is_key_up {
+            if backend == BACKEND_LL_HOOK && !is_hypershift && !is_key_up && raw_device_id.is_none() {
                 crate::onboard_guard::note_signal(&encoded_key);
             }
             // try_send instead of send: when the bounded channel is full
@@ -4828,6 +5487,7 @@ fn spawn_capture_helper(
                 is_key_up,
                 is_hypershift,
                 is_hypershift2,
+                raw_device_id,
             }) {
                 // Consumer stalled — this key press was dropped. Rate-limit the
                 // warning so a sustained stall can't re-create the v0.1.15 log
@@ -4960,8 +5620,12 @@ fn run_hotkey_message_loop(
     }
 
     // --- 1. Register all hotkeys via RegisterHotKey ---
+    // Mouse buttons and per-USB-device scoped keys require the LL hook + Raw Input helper.
     let mut registered_ids = Vec::new();
     for reg in &registrations {
+        if reg.button.is_some() || reg.raw_device_id.is_some() {
+            continue;
+        }
         let registered = unsafe {
             RegisterHotKey(
                 std::ptr::null_mut(),
@@ -5021,6 +5685,7 @@ fn run_hotkey_message_loop(
                     // observe the Hypershift trigger.
                     is_hypershift: false,
                     is_hypershift2: false,
+                    raw_device_id: None,
                 });
             } else {
                 log::warn!("[capture] Received WM_HOTKEY with unrecognized id {hotkey_id}");
@@ -5964,6 +6629,7 @@ mod helper_key_event_tests {
             primary_vk,
             wheel: None,
             button: None,
+            raw_device_id: None,
         }
     }
 
@@ -6800,6 +7466,7 @@ mod edge_proptests {
             primary_vk,
             wheel: None,
             button: None,
+            raw_device_id: None,
         }
     }
 

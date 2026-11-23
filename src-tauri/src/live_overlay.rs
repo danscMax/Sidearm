@@ -935,6 +935,8 @@ fn add_device(config: &mut AppConfig, model: &NativeModel) {
         builtin: true,
         image: None,
         hotspots: Vec::new(),
+        raw_device_id: None,
+        raw_device_label: None,
     });
     let remappable: Vec<&str> = controls(model).iter().map(|(id, _)| *id).collect();
     for mut control in crate::config::seed_physical_controls() {

@@ -742,6 +742,28 @@ export async function stopMacroRecording(): Promise<MacroRecording> {
   return invoke<MacroRecording>("stop_macro_recording");
 }
 
+/* ─────────────────────────────────────────────────────────
+   Universal Raw Input Hardware Capture IPC
+   ───────────────────────────────────────────────────────── */
+
+export interface CapturedRawInput {
+  encodedKey: string;
+  rawDeviceId: string | null;
+  rawDeviceLabel: string | null;
+  inputKind: "keyboard" | "mouse";
+}
+
+/** Wait for the next hardware button/key press via Windows Raw Input, returning
+ *  its canonical signal together with the originating USB/HID device identity. */
+export async function captureNextRawInput(timeoutMs = 15_000): Promise<CapturedRawInput | null> {
+  return invoke<CapturedRawInput | null>("capture_next_raw_input", { timeoutMs });
+}
+
+/** Cancel an active `captureNextRawInput` wait, if any. */
+export async function cancelRawInputCapture(): Promise<void> {
+  return invoke<void>("cancel_raw_input_capture");
+}
+
 export function normalizeCommandError(error: unknown): CommandError {
   if (
     typeof error === "object" &&

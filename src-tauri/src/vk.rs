@@ -10,6 +10,12 @@
 
 #![allow(dead_code)] // not every consumer uses every code; this is the shared table
 
+// --- Mouse buttons ---
+pub const VK_RBUTTON: u16 = 0x02;
+pub const VK_MBUTTON: u16 = 0x04;
+pub const VK_XBUTTON1: u16 = 0x05;
+pub const VK_XBUTTON2: u16 = 0x06;
+
 // --- Named keys ---
 pub const VK_BACK: u16 = 0x08;
 pub const VK_TAB: u16 = 0x09;
@@ -32,6 +38,32 @@ pub const VK_DELETE: u16 = 0x2E;
 pub const VK_APPS: u16 = 0x5D;
 pub const VK_NUMLOCK: u16 = 0x90;
 pub const VK_SCROLL: u16 = 0x91;
+
+// --- Numpad keys ---
+pub const VK_NUMPAD0: u16 = 0x60;
+pub const VK_NUMPAD1: u16 = 0x61;
+pub const VK_NUMPAD2: u16 = 0x62;
+pub const VK_NUMPAD3: u16 = 0x63;
+pub const VK_NUMPAD4: u16 = 0x64;
+pub const VK_NUMPAD5: u16 = 0x65;
+pub const VK_NUMPAD6: u16 = 0x66;
+pub const VK_NUMPAD7: u16 = 0x67;
+pub const VK_NUMPAD8: u16 = 0x68;
+pub const VK_NUMPAD9: u16 = 0x69;
+pub const VK_MULTIPLY: u16 = 0x6A;
+pub const VK_ADD: u16 = 0x6B;
+pub const VK_SUBTRACT: u16 = 0x6D;
+pub const VK_DECIMAL: u16 = 0x6E;
+pub const VK_DIVIDE: u16 = 0x6F;
+
+// --- Media / volume keys ---
+pub const VK_VOLUME_MUTE: u16 = 0xAD;
+pub const VK_VOLUME_DOWN: u16 = 0xAE;
+pub const VK_VOLUME_UP: u16 = 0xAF;
+pub const VK_MEDIA_NEXT_TRACK: u16 = 0xB0;
+pub const VK_MEDIA_PREV_TRACK: u16 = 0xB1;
+pub const VK_MEDIA_STOP: u16 = 0xB2;
+pub const VK_MEDIA_PLAY_PAUSE: u16 = 0xB3;
 
 // --- OEM punctuation ---
 pub const VK_OEM_1: u16 = 0xBA;

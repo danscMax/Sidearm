@@ -94,6 +94,10 @@ pub struct EncodedKeyEvent {
     /// `true` when the press arrived while its mouse's HyperShift 2 trigger
     /// was held (stamped `H2:` by the helper, as `is_hypershift` is).
     pub is_hypershift2: bool,
+    /// Stable hardware identity (`VID_xxxx&PID_xxxx`) stamped by the Windows
+    /// Raw Input path when a custom device is scoped to a specific USB device.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub raw_device_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -282,6 +286,7 @@ pub(super) enum EventOutcome {
 #[derive(Clone)]
 struct GestureContext {
     encoded_key: String,
+    raw_device_id: Option<String>,
     target: GestureTarget,
     exe: String,
     title: String,
@@ -429,9 +434,10 @@ fn fire_gestures(
         if SUPPRESS_EXECUTION.load(Ordering::Relaxed) {
             return;
         }
-        let preview = resolver::resolve_gesture_preview(
+        let preview = resolver::resolve_gesture_preview_for_device(
             config,
             &context.encoded_key,
+            context.raw_device_id.as_deref(),
             &context.exe,
             &context.title,
             context.process_path.as_deref(),
@@ -697,9 +703,10 @@ fn process_encoded_key_event(
     };
 
     let held = resolver::HeldLayers { hypershift: event.is_hypershift, hypershift2: event.is_hypershift2 };
-    let preview = resolver::resolve_gesture_preview(
+    let preview = resolver::resolve_gesture_preview_for_device(
         config,
         &event.encoded_key,
+        event.raw_device_id.as_deref(),
         exe,
         title,
         process_path,
@@ -733,6 +740,7 @@ fn process_encoded_key_event(
 
     let context = || GestureContext {
         encoded_key: event.encoded_key.clone(),
+        raw_device_id: event.raw_device_id.clone(),
         target: GestureTarget::from(&capture_result),
         exe: exe.to_owned(),
         title: title.to_owned(),

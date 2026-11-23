@@ -91,6 +91,8 @@
     "allow-get-sidearm-bank",
     "allow-release-sidearm-bank",
     "allow-move-sidearm-bank",
+    "allow-capture-next-raw-input",
+    "allow-cancel-raw-input-capture",
     "allow-get-offline-preview",
     "allow-get-device-report",
     "allow-open-device-report-issue",

@@ -312,6 +312,24 @@ pub fn resolve_gesture_preview(
     held: HeldLayers,
     gesture: Gesture,
 ) -> ResolvedInputPreview {
+    resolve_gesture_preview_for_device(config, encoded_key, None, exe, title, process_path, override_profile_id, held, gesture)
+}
+
+/// Device-scoped variant of [`resolve_gesture_preview`]: when `raw_device_id` is
+/// supplied (from Windows Raw Input), matches only encoder mappings belonging to
+/// a `Device` bound to that exact `raw_device_id`.
+#[allow(clippy::too_many_arguments)]
+pub fn resolve_gesture_preview_for_device(
+    config: &AppConfig,
+    encoded_key: &str,
+    raw_device_id: Option<&str>,
+    exe: &str,
+    title: &str,
+    process_path: Option<&str>,
+    override_profile_id: Option<&str>,
+    held: HeldLayers,
+    gesture: Gesture,
+) -> ResolvedInputPreview {
     let normalized_key = normalized_encoded_key(encoded_key);
     let profile_resolution = resolve_profile_for_app_context_with_override(
         config,
@@ -320,7 +338,15 @@ pub fn resolve_gesture_preview(
         process_path,
         override_profile_id,
     );
-    let matching_mappings: Vec<&EncoderMapping> = config
+    let device_raw_id = |control_id: &crate::config::ControlId| -> Option<&str> {
+        config
+            .physical_controls
+            .iter()
+            .find(|c| &c.id == control_id)
+            .and_then(|c| config.devices.iter().find(|d| d.id == c.device_id))
+            .and_then(|d| d.raw_device_id.as_deref())
+    };
+    let all_key_matches: Vec<&EncoderMapping> = config
         .encoder_mappings
         .iter()
         .filter(|mapping| mapping.layer.is_live())
@@ -328,6 +354,20 @@ pub fn resolve_gesture_preview(
             normalized_encoded_key(&mapping.encoded_key).eq_ignore_ascii_case(&normalized_key)
         })
         .collect();
+    let matching_mappings: Vec<&EncoderMapping> = match raw_device_id {
+        Some(hw) => all_key_matches
+            .into_iter()
+            .filter(|m| device_raw_id(&m.control_id).is_some_and(|id| id.eq_ignore_ascii_case(hw)))
+            .collect(),
+        None => {
+            let unscoped: Vec<&EncoderMapping> = all_key_matches
+                .iter()
+                .copied()
+                .filter(|m| device_raw_id(&m.control_id).is_none())
+                .collect();
+            if unscoped.is_empty() { all_key_matches } else { unscoped }
+        }
+    };
 
     if matching_mappings.is_empty() {
         return ResolvedInputPreview {

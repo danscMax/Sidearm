@@ -117,6 +117,13 @@
       mockBanks.sidearm = targetBank;
       return { banks: { assigned: [...mockBanks.assigned], active: mockBanks.active }, sidearm: targetBank, displacedFrom, displacedTo };
     },
+    capture_next_raw_input: () => {
+      if (window.__UI_CHECK_RAW_INPUT__) {
+        return window.__UI_CHECK_RAW_INPUT__;
+      }
+      throw new Error("mock_no_raw_input");
+    },
+    cancel_raw_input_capture: () => null,
   };
 
   const callbacks = new Map();

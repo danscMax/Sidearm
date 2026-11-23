@@ -6,6 +6,7 @@ import {
   removeControl,
   removeDevice,
   renameDevice,
+  setDeviceRawBinding,
 } from "./config-editing";
 import { makeConfig } from "./test-fixtures";
 import type { Action, AppConfig, Binding } from "./config";
@@ -77,6 +78,25 @@ describe("findMappingByEncodedKey", () => {
     const { config } = withLearnedDevice();
     expect(findMappingByEncodedKey(config, "f19")?.encodedKey).toBe("F19");
     expect(findMappingByEncodedKey(config, "F21")).toBeUndefined();
+  });
+
+  it("scopes duplicate detection by USB rawDeviceId so two devices can share raw keys", () => {
+    const padA = createDevice(makeConfig(), "Macropad A");
+    const padB = createDevice(padA.config, "Mouse B");
+    let cfg = setDeviceRawBinding(padB.config, padA.deviceId, "VID_FEED&PID_1234", "Macropad");
+    cfg = setDeviceRawBinding(cfg, padB.deviceId, "VID_046D&PID_C548", "Logitech");
+    cfg = addLearnedControl(cfg, padA.deviceId, "Key 1", "1").config;
+
+    // Same USB device flags duplicate; different USB device or unscoped does not.
+    expect(findMappingByEncodedKey(cfg, "1", "VID_FEED&PID_1234")?.encodedKey).toBe("1");
+    expect(findMappingByEncodedKey(cfg, "1", "VID_046D&PID_C548")).toBeUndefined();
+    expect(findMappingByEncodedKey(cfg, "1", null)).toBeUndefined();
+
+    // Clearing USB binding removes rawDeviceId and rawDeviceLabel cleanly.
+    const cleared = setDeviceRawBinding(cfg, padA.deviceId, null);
+    const devA = cleared.devices.find((d) => d.id === padA.deviceId);
+    expect(devA?.rawDeviceId).toBeUndefined();
+    expect(devA?.rawDeviceLabel).toBeUndefined();
   });
 });
 

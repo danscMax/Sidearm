@@ -15,6 +15,7 @@ interface GenericDeviceViewProps extends MouseVisualizationProps {
   onRemoveControl: (id: ControlId) => void;
   onRenameDevice: (name: string) => void;
   onDeleteDevice: () => void;
+  onClearRawDevice?: () => void;
   onPickImage: () => void;
   onPlaceHotspot: (controlId: ControlId, x: number, y: number) => void;
   /** One-shot: open the inline rename with focus (just-created device, U10). */
@@ -48,6 +49,7 @@ export function GenericDeviceView({
   onRemoveControl,
   onRenameDevice,
   onDeleteDevice,
+  onClearRawDevice,
   onPickImage,
   onPlaceHotspot,
   startRenaming,
@@ -252,6 +254,25 @@ export function GenericDeviceView({
           {t("device.delete")}
         </button>
       </div>
+
+      {device.rawDeviceId ? (
+        <div className="gdv__usb-row">
+          <span className="gdv__usb-pill" title={device.rawDeviceId}>
+            {t("device.rawDeviceBound", { label: device.rawDeviceLabel ?? device.rawDeviceId })}
+          </span>
+          {onClearRawDevice ? (
+            <button
+              type="button"
+              className="gdv__usb-clear"
+              title={t("device.unlinkRawDeviceHint", { id: device.rawDeviceId })}
+              aria-label={t("device.unlinkRawDevice")}
+              onClick={onClearRawDevice}
+            >
+              ×
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       {imageUrl ? (
         <>

@@ -51,6 +51,7 @@ mod system_events;
 mod tray_badge;
 mod paths;
 mod platform;
+mod raw_device;
 mod recorder;
 mod resolver;
 mod runtime;
@@ -3930,6 +3931,25 @@ async fn move_sidearm_bank(
     .map_err(|e| CommandError::internal(format!("move sidearm bank task failed: {e}")))?
 }
 
+/// Waits for the next hardware button/key press via Windows Raw Input and
+/// returns its canonical signal together with the originating USB/HID device id.
+#[tauri::command]
+async fn capture_next_raw_input(
+    timeout_ms: Option<u64>,
+) -> Result<Option<raw_device::CapturedRawInput>, CommandError> {
+    let clamped = timeout_ms.unwrap_or(15_000).clamp(500, 60_000);
+    tauri::async_runtime::spawn_blocking(move || raw_device::capture_next_raw_input(clamped))
+        .await
+        .map_err(|e| CommandError::internal(format!("raw input capture task failed: {e}")))?
+        .map_err(CommandError::internal)
+}
+
+/// Cancels an active `capture_next_raw_input` session, if any.
+#[tauri::command]
+fn cancel_raw_input_capture() {
+    raw_device::cancel_raw_input_capture();
+}
+
 /// The profile button took a mouse off Sidearm's bank (offline mode), or it is
 /// back: the Mouse tab's state, the tray's way back and, going offline, an OSD
 /// bubble saying where that way back is.
@@ -5066,6 +5086,8 @@ pub fn run() {
             get_sidearm_bank,
             release_sidearm_bank,
             move_sidearm_bank,
+            capture_next_raw_input,
+            cancel_raw_input_capture,
             get_offline_preview,
             get_device_report,
             open_device_report_issue,
@@ -5424,6 +5446,8 @@ mod tests {
             builtin: false,
             image: None,
             hotspots: Vec::new(),
+            raw_device_id: None,
+            raw_device_label: None,
         });
         base.physical_controls.push(config::PhysicalControl {
             id: config::ControlId::new("my-macropad-b1"),

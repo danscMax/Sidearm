@@ -112,6 +112,35 @@ pub fn parse_primary_key(raw: &str) -> Result<HotkeyKey, String> {
         "RBRACKET" | "RIGHTBRACKET" => Ok(simple_key(VK_OEM_6, false, "]")),
         "BACKSLASH" => Ok(simple_key(VK_OEM_5, false, "\\")),
         "GRAVE" | "BACKTICK" => Ok(simple_key(VK_OEM_3, false, "`")),
+        // Mouse buttons (universal devices without vendor software)
+        "MOUSERIGHT" | "RBUTTON" => Ok(simple_key(VK_RBUTTON, false, "MouseRight")),
+        "MOUSEMIDDLE" | "MBUTTON" | "MIDDLECLICK" => Ok(simple_key(VK_MBUTTON, false, "MouseMiddle")),
+        "MOUSE4" | "MOUSEX1" | "XBUTTON1" => Ok(simple_key(VK_XBUTTON1, false, "Mouse4")),
+        "MOUSE5" | "MOUSEX2" | "XBUTTON2" => Ok(simple_key(VK_XBUTTON2, false, "Mouse5")),
+        // Numpad keys (common factory output of MMO mice & USB macropads)
+        "NUMPAD0" | "NUM0" => Ok(simple_key(VK_NUMPAD0, false, "Numpad0")),
+        "NUMPAD1" | "NUM1" => Ok(simple_key(VK_NUMPAD1, false, "Numpad1")),
+        "NUMPAD2" | "NUM2" => Ok(simple_key(VK_NUMPAD2, false, "Numpad2")),
+        "NUMPAD3" | "NUM3" => Ok(simple_key(VK_NUMPAD3, false, "Numpad3")),
+        "NUMPAD4" | "NUM4" => Ok(simple_key(VK_NUMPAD4, false, "Numpad4")),
+        "NUMPAD5" | "NUM5" => Ok(simple_key(VK_NUMPAD5, false, "Numpad5")),
+        "NUMPAD6" | "NUM6" => Ok(simple_key(VK_NUMPAD6, false, "Numpad6")),
+        "NUMPAD7" | "NUM7" => Ok(simple_key(VK_NUMPAD7, false, "Numpad7")),
+        "NUMPAD8" | "NUM8" => Ok(simple_key(VK_NUMPAD8, false, "Numpad8")),
+        "NUMPAD9" | "NUM9" => Ok(simple_key(VK_NUMPAD9, false, "Numpad9")),
+        "NUMPADMULTIPLY" | "NUMMULTIPLY" => Ok(simple_key(VK_MULTIPLY, false, "NumpadMultiply")),
+        "NUMPADADD" | "NUMADD" => Ok(simple_key(VK_ADD, false, "NumpadAdd")),
+        "NUMPADSUBTRACT" | "NUMSUBTRACT" => Ok(simple_key(VK_SUBTRACT, false, "NumpadSubtract")),
+        "NUMPADDECIMAL" | "NUMDECIMAL" => Ok(simple_key(VK_DECIMAL, false, "NumpadDecimal")),
+        "NUMPADDIVIDE" | "NUMDIVIDE" => Ok(simple_key(VK_DIVIDE, true, "NumpadDivide")),
+        // Media keys
+        "VOLUMEMUTE" => Ok(simple_key(VK_VOLUME_MUTE, true, "VolumeMute")),
+        "VOLUMEDOWN" => Ok(simple_key(VK_VOLUME_DOWN, true, "VolumeDown")),
+        "VOLUMEUP" => Ok(simple_key(VK_VOLUME_UP, true, "VolumeUp")),
+        "MEDIANEXT" | "MEDIANEXTTRACK" => Ok(simple_key(VK_MEDIA_NEXT_TRACK, true, "MediaNext")),
+        "MEDIAPREV" | "MEDIAPREVIOUS" | "MEDIAPREVTRACK" => Ok(simple_key(VK_MEDIA_PREV_TRACK, true, "MediaPrev")),
+        "MEDIASTOP" => Ok(simple_key(VK_MEDIA_STOP, true, "MediaStop")),
+        "MEDIAPLAYPAUSE" => Ok(simple_key(VK_MEDIA_PLAY_PAUSE, true, "MediaPlayPause")),
         _ => {
             // Support raw VK codes: "VK_232" or "VK232" → VK code 232
             if let Some(code) = parse_vk_code(&compact) {

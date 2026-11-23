@@ -34,6 +34,7 @@ import {
   removeDevice,
   renameDevice,
   setDeviceImage,
+  setDeviceRawBinding,
   setOfflineAssignment,
   reorderAppMappingPriority,
   moveAppMappingToProfile,
@@ -61,7 +62,7 @@ import { defaultLayout, deviceLayers, deviceLayout } from "../lib/devices";
 import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
-import { AddControlModal, type EditControlTarget } from "./AddControlModal";
+import { AddControlModal, type EditControlTarget, type RawDeviceSelection } from "./AddControlModal";
 import type { DeviceTab } from "./DeviceCards";
 import { MouseWorkspace } from "./MouseWorkspace";
 import type { OfflinePayload } from "../lib/offline-suggestions";
@@ -287,11 +288,21 @@ export function ProfilesWorkspace({
     onDeviceActionHandled?.();
   }, [deviceActionSignal]);
 
-  function handleSubmitControl(name: string, encodedKey: string, andNext: boolean) {
+  function handleSubmitControl(
+    name: string,
+    encodedKey: string,
+    andNext: boolean,
+    rawDevice?: RawDeviceSelection | null,
+  ) {
     if (!activeDevice || !learnModal) return;
     if (learnModal.mode === "edit") {
       const controlId = learnModal.target.controlId;
-      updateDraft((config) => updateLearnedControl(config, controlId, name, encodedKey));
+      updateDraft((config) => {
+        const updated = updateLearnedControl(config, controlId, name, encodedKey);
+        return rawDevice
+          ? setDeviceRawBinding(updated, activeDevice.id, rawDevice.id, rawDevice.label)
+          : updated;
+      });
       setLearnModal(null);
       return;
     }
@@ -301,7 +312,10 @@ export function ProfilesWorkspace({
       name,
       encodedKey,
     );
-    updateDraft(() => nextConfig);
+    const withDevice = rawDevice
+      ? setDeviceRawBinding(nextConfig, activeDevice.id, rawDevice.id, rawDevice.label)
+      : nextConfig;
+    updateDraft(() => withDevice);
     setSelectedControlId(controlId);
     // Batch teaching: "add & next" keeps the modal open and re-arms capture.
     if (!andNext) setLearnModal(null);
@@ -1271,6 +1285,7 @@ export function ProfilesWorkspace({
             onRemoveControl={handleRemoveControl}
             onRenameDevice={(name) => updateDraft((config) => renameDevice(config, activeDevice.id, name))}
             onDeleteDevice={handleDeleteDevice}
+            onClearRawDevice={() => updateDraft((config) => setDeviceRawBinding(config, activeDevice.id, null))}
             onPickImage={() => void handlePickImage()}
             onPlaceHotspot={(controlId, x, y) =>
               updateDraft((config) => placeDeviceHotspot(config, activeDevice.id, controlId, x, y))
@@ -1307,7 +1322,7 @@ export function ProfilesWorkspace({
         {learnModal && activeDevice ? (
           <AddControlModal
             config={activeConfig}
-            deviceName={activeDevice.name}
+            device={activeDevice}
             autoName={autoControlName}
             editTarget={learnModal.mode === "edit" ? learnModal.target : undefined}
             onClose={() => setLearnModal(null)}

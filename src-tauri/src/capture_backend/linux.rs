@@ -467,6 +467,7 @@ fn run_evdev_capture_loop(stop_flag: Arc<AtomicBool>, event_tx: mpsc::SyncSender
                     // Software Hypershift is Windows-only for now.
                     is_hypershift: false,
                     is_hypershift2: false,
+                    raw_device_id: None,
                 };
 
                 // try_send: drop on full bounded channel rather than block evdev reader.

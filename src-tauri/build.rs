@@ -92,6 +92,8 @@ const APP_COMMANDS: &[&str] = &[
     "get_sidearm_bank",
     "release_sidearm_bank",
     "move_sidearm_bank",
+    "capture_next_raw_input",
+    "cancel_raw_input_capture",
     "get_offline_preview",
     "get_device_report",
     "open_device_report_issue",

@@ -1,7 +1,8 @@
-import { useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import type { AppConfig, ControlId } from "../lib/config";
+import type { AppConfig, ControlId, Device } from "../lib/config";
 import { normalizeKeyName, resolveKeyName } from "../lib/action-picker-helpers";
+import { cancelRawInputCapture, captureNextRawInput } from "../lib/backend";
 import { findMappingByEncodedKey } from "../lib/config-editing";
 import { displayNameForControl } from "../lib/labels";
 import { ModalFooter, ModalHeader, ModalShell, Notice } from "./shared";
@@ -13,37 +14,91 @@ export interface EditControlTarget {
   signal: string;
 }
 
-/** Learn mode: name a control and capture the key signal its hardware button
- * sends. Capture happens in the DOM (like the shortcut recorder) — the
- * low-level hook only intercepts already-mapped signals, so a brand-new
- * button's keystroke reaches this window as a plain keydown.
- * Doubles as the EDIT dialog for an existing control (rename + re-capture,
- * UI-review U1/U3) and supports "add & next" batch teaching (U2). */
+export interface RawDeviceSelection {
+  id: string;
+  label: string;
+}
+
+/** Learn mode: name a control and capture any mouse button or key directly via
+ * Windows Raw Input (recording both the canonical signal and the hardware
+ * USB VID/PID so Sidearm can isolate that device without touching the main
+ * keyboard). Falls back to DOM key capture in non-Windows/test environments. */
 export function AddControlModal({
   config,
-  deviceName,
+  device,
   autoName,
   editTarget,
   onClose,
   onSubmit,
 }: {
   config: AppConfig;
-  deviceName: string;
+  device: Device;
   /** Suggested name for the next control ("Button N") — placeholder + fallback. */
   autoName: string;
   /** When set, the modal edits this control instead of creating one. */
   editTarget?: EditControlTarget;
   onClose: () => void;
   /** andNext is only ever true in create mode. */
-  onSubmit: (name: string, encodedKey: string, andNext: boolean) => void;
+  onSubmit: (
+    name: string,
+    encodedKey: string,
+    andNext: boolean,
+    rawDevice?: RawDeviceSelection | null,
+  ) => void;
 }) {
   const { t } = useTranslation();
   const isEdit = !!editTarget;
   const [name, setName] = useState(editTarget?.name ?? "");
   const [signal, setSignal] = useState(editTarget?.signal ?? "");
   const [capturing, setCapturing] = useState(false);
+  const [detectedRaw, setDetectedRaw] = useState<RawDeviceSelection | null>(
+    device.rawDeviceId
+      ? { id: device.rawDeviceId, label: device.rawDeviceLabel ?? device.rawDeviceId }
+      : null,
+  );
+  const [scopeToHardware, setScopeToHardware] = useState(true);
+  // True while Rust Raw Input is actively waiting for hardware input so DOM
+  // keydown does not race ahead and discard the USB VID/PID.
+  const rawCaptureActiveRef = useRef(false);
 
-  const duplicateMapping = signal ? findMappingByEncodedKey(config, signal) : undefined;
+  useEffect(() => {
+    if (!capturing) {
+      rawCaptureActiveRef.current = false;
+      return;
+    }
+    let cancelled = false;
+    rawCaptureActiveRef.current = true;
+    captureNextRawInput(15_000)
+      .then((captured) => {
+        rawCaptureActiveRef.current = false;
+        if (cancelled) return;
+        if (captured) {
+          setSignal(captured.encodedKey);
+          if (captured.rawDeviceId) {
+            setDetectedRaw({
+              id: captured.rawDeviceId,
+              label: captured.rawDeviceLabel ?? captured.rawDeviceId,
+            });
+            setScopeToHardware(true);
+          }
+        }
+        setCapturing(false);
+      })
+      .catch(() => {
+        // Non-Tauri / browser / mock mode: fall back to DOM keyboard capture.
+        rawCaptureActiveRef.current = false;
+      });
+    return () => {
+      cancelled = true;
+      rawCaptureActiveRef.current = false;
+      void cancelRawInputCapture().catch(() => {});
+    };
+  }, [capturing]);
+
+  const effectiveRaw = scopeToHardware ? detectedRaw : null;
+  const duplicateMapping = signal
+    ? findMappingByEncodedKey(config, signal, effectiveRaw?.id ?? device.rawDeviceId ?? null)
+    : undefined;
   // Re-capturing a control's own signal is not a conflict (edit mode).
   const duplicate =
     duplicateMapping && duplicateMapping.controlId !== editTarget?.controlId
@@ -53,7 +108,7 @@ export function AddControlModal({
     ? config.physicalControls.find((control) => control.id === duplicate.controlId)
     : undefined;
   const duplicateDevice = duplicateControl
-    ? config.devices.find((device) => device.id === duplicateControl.deviceId)
+    ? config.devices.find((entry) => entry.id === duplicateControl.deviceId)
     : undefined;
   const canSubmit = signal.trim().length > 0 && !duplicate;
 
@@ -62,13 +117,15 @@ export function AddControlModal({
     event.preventDefault();
     event.stopPropagation();
     const key = resolveKeyName(event);
-    if (["Control", "Shift", "Alt", "Meta"].includes(key)) return;
-    // Sidearm's own injected hook-probe key (VK 0xE8) — see ShortcutEditor.
-    if (key === "VK_232") return;
     if (key === "Escape") {
       setCapturing(false);
       return;
     }
+    // While native Raw Input capture is active, let it deliver both signal and USB VID/PID.
+    if (rawCaptureActiveRef.current) return;
+    if (["Control", "Shift", "Alt", "Meta"].includes(key)) return;
+    // Sidearm's own injected hook-probe key (VK 0xE8) — see ShortcutEditor.
+    if (key === "VK_232") return;
     // Canonical modifier order matches the Rust hotkey normalizer (Ctrl, Alt,
     // Shift, Win) so the saved encodedKey round-trips unchanged.
     const parts = [
@@ -83,7 +140,7 @@ export function AddControlModal({
   }
 
   function submit(andNext: boolean) {
-    onSubmit(name.trim() || autoName, signal, andNext);
+    onSubmit(name.trim() || autoName, signal, andNext, effectiveRaw);
     if (andNext) {
       // Batch teaching: stay open, arm the next capture immediately (U2).
       setName("");
@@ -103,7 +160,7 @@ export function AddControlModal({
       <ModalHeader
         id="add-control-title"
         title={isEdit ? t("device.editControlTitle") : t("device.addControlTitle")}
-        subtitle={deviceName}
+        subtitle={device.name}
         onClose={onClose}
         closeLabel={t("common.close")}
       />
@@ -128,6 +185,21 @@ export function AddControlModal({
           recordLabel={t("device.record")}
         />
       </label>
+      {detectedRaw ? (
+        <div className="add-control-modal__usb">
+          <div className="add-control-modal__usb-badge">
+            {t("device.rawDeviceDetected", { label: detectedRaw.label })}
+          </div>
+          <label className="add-control-modal__usb-toggle">
+            <input
+              type="checkbox"
+              checked={scopeToHardware}
+              onChange={(e) => setScopeToHardware(e.target.checked)}
+            />
+            <span>{t("device.scopeToDevice")}</span>
+          </label>
+        </div>
+      ) : null}
       <p className="panel__muted">{t("device.captureHint")}</p>
       {duplicate ? (
         <Notice variant="warning" id="add-control-dup-warning">

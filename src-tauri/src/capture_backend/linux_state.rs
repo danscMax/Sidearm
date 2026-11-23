@@ -86,6 +86,7 @@ mod tests {
         let event = EncodedKeyEvent {
             encoded_key: "Ctrl+F13".into(), backend: "evdev".into(), received_at: 0,
             is_repeat: false, is_key_up: false, is_hypershift: false, is_hypershift2: false,
+            raw_device_id: None,
         };
         let down = session_input(CaptureEvent::Input(event), &mut held, &mut gestures, |_| Ok(())).unwrap();
         held.insert(down.encoded_key, HeldShortcutState {

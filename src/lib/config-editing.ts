@@ -1298,16 +1298,59 @@ export function updateLearnedControl(
   });
 }
 
-/** The mapping already claiming this signal, if any — a duplicate encodedKey
- * is rejected by backend validation, so the UI checks before creating one. */
+/** Bind or clear a custom device's stable USB/HID Raw Input identity so its
+ *  buttons can be intercepted without affecting the main keyboard or other mice. */
+export function setDeviceRawBinding(
+  config: AppConfig,
+  deviceId: string,
+  rawDeviceId: string | null,
+  rawDeviceLabel?: string | null,
+): AppConfig {
+  const cleanedId = rawDeviceId?.trim() || undefined;
+  const cleanedLabel = cleanedId ? rawDeviceLabel?.trim() || undefined : undefined;
+  return {
+    ...config,
+    devices: config.devices.map((device) => {
+      if (device.id !== deviceId) return device;
+      const next = { ...device };
+      if (cleanedId) {
+        next.rawDeviceId = cleanedId;
+      } else {
+        delete next.rawDeviceId;
+      }
+      if (cleanedLabel) {
+        next.rawDeviceLabel = cleanedLabel;
+      } else {
+        delete next.rawDeviceLabel;
+      }
+      return next;
+    }),
+  };
+}
+
+/** The mapping already claiming this signal on the same USB hardware scope, if any.
+ *  Two different USB devices (`rawDeviceId`) may share the same raw key (`1`, `Mouse4`). */
 export function findMappingByEncodedKey(
   config: AppConfig,
   encodedKey: string,
+  deviceRawId?: string | null,
 ): EncoderMapping | undefined {
   const needle = encodedKey.trim().toLowerCase();
-  return config.encoderMappings.find(
-    (mapping) => mapping.encodedKey.trim().toLowerCase() === needle,
-  );
+  const targetRaw = deviceRawId?.trim().toLowerCase() || null;
+  const controlDevice = new Map<string, string>();
+  for (const control of config.physicalControls) {
+    controlDevice.set(control.id, control.deviceId);
+  }
+  const deviceRaw = new Map<string, string | null>();
+  for (const device of config.devices) {
+    deviceRaw.set(device.id, device.rawDeviceId?.trim().toLowerCase() || null);
+  }
+  return config.encoderMappings.find((mapping) => {
+    if (mapping.encodedKey.trim().toLowerCase() !== needle) return false;
+    const devId = controlDevice.get(mapping.controlId);
+    const mappingRaw = devId ? (deviceRaw.get(devId) ?? null) : null;
+    return mappingRaw === targetRaw;
+  });
 }
 
 /** Learn mode: create a control on `deviceId` bound to a captured signal.

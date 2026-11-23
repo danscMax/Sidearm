@@ -2940,7 +2940,7 @@ input[type="radio"] {
   flex-wrap: wrap;
   margin-bottom: 4px;
   width: 100%;
-  max-width: 680px;
+  max-width: 760px;
 }
 
 /* Destructive action sits apart from the constructive cluster (UI-review UX4). */
@@ -2963,8 +2963,8 @@ input[type="radio"] {
 .gdv__name-input {
   font-size: var(--fs-body);
   padding: 4px 8px;
-  width: 20ch;
-  min-width: 180px;
+  width: 16ch;
+  min-width: 140px;
   max-width: 100%;
 }
 
@@ -3078,6 +3078,69 @@ input[type="radio"] {
 .gdv__grid-hint {
   margin: 0 0 4px;
   text-align: center;
+}
+
+.gdv__usb-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-alt, rgba(255, 255, 255, 0.03));
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  margin-bottom: 6px;
+}
+
+.gdv__usb-pill {
+  max-width: 340px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gdv__usb-clear {
+  border: none;
+  background: transparent;
+  color: var(--c-text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: var(--fs-body);
+  line-height: 1;
+}
+
+.gdv__usb-clear:hover {
+  color: var(--c-danger);
+}
+
+.add-control-modal__usb {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface-alt, rgba(255, 255, 255, 0.03));
+}
+
+.add-control-modal__usb-badge {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-accent);
+}
+
+.add-control-modal__usb-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--fs-caption);
+  color: var(--c-text);
+  cursor: pointer;
+}
+
+.add-control-modal__usb-toggle input {
+  margin-top: 2px;
 }
 
 /* Screen-reader-only live region (capture status announcements). */

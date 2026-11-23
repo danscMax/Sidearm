@@ -3,10 +3,8 @@ import { useTranslation } from "react-i18next";
 import type { AppMapping, Profile } from "../lib/config";
 import type { Slot } from "../lib/binding-moves";
 import { sortAppMappings } from "../lib/helpers";
-import { BINDING_DRAG_TYPE, isBindingDrag, parseBindingDragData } from "../lib/mouse-visual";
+import { BINDING_DRAG_TYPE, isBindingDrag, parseBindingDragData, PROFILE_DRAG_TYPE } from "../lib/mouse-visual";
 import { ExeIcon } from "./ExeIcon";
-
-const PROFILE_DRAG_TYPE = "application/x-sidearm-profile";
 
 /** App chips shown under the selected profile before "N more". */
 const SHOWN_APPS = 6;

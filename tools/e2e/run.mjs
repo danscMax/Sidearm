@@ -369,9 +369,9 @@ async function main() {
     // 1. Start: live maps in both mice.
     let mark = world.log().length;
     world.start();
-    check("V3 plays its Sidearm bank (free slot 4)", await world.waitFor(() => world.log(), /Razer Naga V3 Pro plays the Sidearm bank 4/, 30000, mark));
+    check("V3 plays its Sidearm bank (last free slot 5)", await world.waitFor(() => world.log(), /Razer Naga V3 Pro plays the Sidearm bank 5/, 30000, mark));
     const v3Started = world.mouse(V3);
-    check("…a bank of its own, playing", v3Started.banks.includes(4) && v3Started.activeBank === 4, JSON.stringify({ banks: v3Started.banks, active: v3Started.activeBank }));
+    check("…a bank of its own, playing", v3Started.banks.includes(5) && v3Started.activeBank === 5, JSON.stringify({ banks: v3Started.banks, active: v3Started.activeBank }));
     check("V2 live map written", await world.waitFor(() => world.log(), /Razer Naga V2 HyperSpeed verified \d+ live assignments/, 30000, mark));
     // Stage 2: the V2's profile 1 keeps the offline profile, stored by its
     // session while Sidearm runs; Sidearm's signals live only in its live map.

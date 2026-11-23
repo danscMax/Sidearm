@@ -3864,14 +3864,14 @@ fn bank_command_error(msg: &str) -> CommandError {
     }
 }
 
-/// Allocates a free onboard profile slot on a bank mouse and returns the updated
-/// user bank inventory.
+/// Allocates a free onboard profile slot on a bank mouse (or a specific free
+/// `bank` in `1..=5` when requested) and returns the updated user bank inventory.
 #[cfg(target_os = "windows")]
 #[tauri::command]
-async fn create_onboard_bank(device_id: String) -> Result<mouse_memory::live_overlay::Banks, CommandError> {
+async fn create_onboard_bank(device_id: String, bank: Option<u8>) -> Result<mouse_memory::live_overlay::Banks, CommandError> {
     tauri::async_runtime::spawn_blocking(move || {
         let model = bank_model(&device_id)?;
-        mouse_memory::live_overlay::create_user_bank(model).map_err(|msg| bank_command_error(&msg))
+        mouse_memory::live_overlay::create_user_bank(model, bank).map_err(|msg| bank_command_error(&msg))
     })
     .await
     .map_err(|e| CommandError::internal(format!("create onboard bank task failed: {e}")))?

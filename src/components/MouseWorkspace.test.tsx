@@ -67,8 +67,10 @@ describe("independent mouse readings", () => {
     expect(backend.getOnboardBanks).toHaveBeenCalledTimes(2);
     expect(backend.getOnboardBanks).toHaveBeenLastCalledWith(NAGA_V3_DEVICE_ID);
     rerender(workspace("memory"));
-    expect(await screen.findByText(i18n.t("mouse.sidearmSlotRow", { n: 4 }))).toBeTruthy();
-    expect(screen.getByText(i18n.t("mouse.slotRow", { n: 2 }))).toBeTruthy();
+    const serviceTab = await screen.findByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 4 })}: Sidearm` });
+    expect(screen.getByRole("tab", { name: new RegExp(i18n.t("mouse.slotRow", { n: 2 })) })).toBeTruthy();
+    fireEvent.click(serviceTab);
+    expect(screen.getByText(i18n.t("mouse.sidearmSlotInspectorTitle"))).toBeTruthy();
     expect(screen.getByRole("button", { name: i18n.t("mouse.sidearmSlotRelease") })).toBeTruthy();
   });
 
@@ -236,11 +238,11 @@ describe("independent mouse readings", () => {
     expect(screen.getByText(i18n.t("offline.memorySidearmPill", { count: 1 }))).toBeTruthy();
   });
 
-  it("shows Hardware bank toggle on non-offline V3 slots, guards dedicated offline slot, and warns on conflict", async () => {
+  it("switches V3 slot mode cards, guards dedicated offline slot, and warns on conflict", async () => {
     const model = await backend.getNativeModel();
     vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true });
     vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 2], active: 1 });
-    vi.mocked(backend.getSidearmBank).mockResolvedValue(3);
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(5);
 
     const base = makeConfig();
     const config: AppConfig = {
@@ -264,18 +266,22 @@ describe("independent mouse readings", () => {
       />,
     );
 
-    // Dedicated offline slot (p1) shows its role calmly without a greyed-out toggle; non-offline slot (p2) gets the Direct keys toggle.
-    expect(screen.queryByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[0].name }) })).toBeNull();
-    const p2Toggle = await screen.findByRole("checkbox", { name: i18n.t("mouse.hardwareBankTitle", { name: config.profiles[1].name }) });
-    expect(p2Toggle.hasAttribute("disabled")).toBe(false);
-    expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineGuard"))).toBeTruthy();
+    // Slot 1 is selected by default (dedicated offline) -> Direct mode card is disabled with explanation.
+    await screen.findByText(i18n.t("mouse.modeOfflineDefaultBadge"));
+    const lockedDirectBtn = screen.getByRole("button", { name: (name) => name.includes(i18n.t("mouse.modeDirectTitle")) });
+    expect(lockedDirectBtn.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(i18n.t("mouse.modeDirectOfflineLocked"))).toBeTruthy();
 
-    fireEvent.click(p2Toggle);
+    // Select Slot 2 -> Direct mode card is enabled and toggles hardwareBank on click.
+    fireEvent.click(screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 2 })}: ${config.profiles[1].name}` }));
+    const directBtn = screen.getByRole("button", { name: (name) => name.includes(i18n.t("mouse.modeDirectTitle")) });
+    expect(directBtn.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(directBtn);
     expect(updates).toHaveBeenCalledTimes(1);
     const updated = updates.mock.calls[0][0](config) as AppConfig;
     expect(updated.profiles[1].deviceMouse?.[NAGA_V3_DEVICE_ID]?.hardwareBank).toBe(true);
 
-    // If a profile with hardwareBank enabled becomes the dedicated offline profile, show the conflict warning inside its slot card.
+    // If a profile with hardwareBank enabled becomes the dedicated offline profile, show the conflict warning in its inspector.
     const conflictConfig: AppConfig = {
       ...updated,
       settings: { ...updated.settings, offlineProfileId: "p2" },
@@ -295,11 +301,11 @@ describe("independent mouse readings", () => {
     expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineConflict", { name: config.profiles[1].name }))).toBeTruthy();
   });
 
-  it("adds and deletes V3 onboard slots, switches offline slot role, and writes to mouse immediately", async () => {
+  it("creates specific empty slot on pick, writes immediately, switches default offline, and deletes slot", async () => {
     const model = await backend.getNativeModel();
     vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
     vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 3], active: 1 });
-    vi.mocked(backend.getSidearmBank).mockResolvedValue(2);
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(5);
     vi.mocked(backend.createOnboardBank).mockResolvedValue({ assigned: [1, 3, 4], active: 1 });
     vi.mocked(backend.deleteOnboardBank).mockResolvedValue({ assigned: [1], active: 1 });
     vi.mocked(backend.flushOnboardBanks).mockResolvedValue(undefined);
@@ -310,6 +316,7 @@ describe("independent mouse readings", () => {
       profiles: [
         { ...base.profiles[0], deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
         { ...base.profiles[1], deviceSlots: { [NAGA_V3_DEVICE_ID]: 3 } },
+        { id: "p3", name: "Code", enabled: true, priority: 2 },
       ],
     };
     const updates = vi.fn();
@@ -326,46 +333,47 @@ describe("independent mouse readings", () => {
       />,
     );
 
-    expect(await screen.findByText(i18n.t("mouse.slotsFreeSummary", { free: 2, max: 5 }))).toBeTruthy();
-    expect(screen.getByText(i18n.t("mouse.slotRoleOfflineBadge"))).toBeTruthy();
+    await screen.findByText(i18n.t("mouse.slotRoleOfflineBadge"));
 
-    // Add slot via CTA button (activeProfile p1 is already in slot 1 -> clears stale slot 4 link if any)
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotAddNext", { n: 4 }) }));
-    await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID));
+    // Click empty Slot 4 -> pick "Code" -> creates specifically Slot 4 and binds Code immediately.
+    fireEvent.click(screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 4 })}: ${i18n.t("mouse.slotTileFree")}` }));
+    expect(screen.getByText(i18n.t("mouse.slotEmptyTitle"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Code/ }));
+    await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 4));
+    const afterPick = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
+    expect(afterPick.profiles.find((p) => p.id === "p3")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(4);
 
     // Write now
     fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotsWriteNow") }));
     await waitFor(() => expect(backend.flushOnboardBanks).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, config));
     expect(await screen.findByRole("button", { name: i18n.t("mouse.slotsWrittenNow") })).toBeTruthy();
 
-    // Make Slot 3 the default offline slot directly from its card
+    // Select Slot 3 -> make it default offline -> then delete it (2-step confirm)
+    fireEvent.click(screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 3 })}: ${config.profiles[1].name}` }));
     fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.makeOfflineSlot") }));
     const afterMakeOffline = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
     expect(afterMakeOffline.settings.offlineProfileId).toBe("p2");
 
-    // Delete slot (2-step confirm) clears profile link in config
-    const removeButtons = screen.getAllByRole("button", { name: i18n.t("mouse.slotDelete") });
-    fireEvent.click(removeButtons[1]);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotDelete") }));
     fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotDeleteConfirm") }));
     await waitFor(() => expect(backend.deleteOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 3));
     const afterDelete = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
     expect(afterDelete.profiles[1].deviceSlots?.[NAGA_V3_DEVICE_ID]).toBeUndefined();
   });
 
-  it("auto-binds the selected unlinked profile when adding a new V3 slot and overwrites any stale slot link", async () => {
+  it("supports drag-and-drop from sidebar onto an empty slot, swapping occupied slots, and external unlinked slots", async () => {
     const model = await backend.getNativeModel();
     vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
-    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1], active: 2 });
-    vi.mocked(backend.getSidearmBank).mockResolvedValue(2);
-    vi.mocked(backend.createOnboardBank).mockResolvedValue({ assigned: [1, 3], active: 2 });
+    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 2, 4], active: 1 });
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(5);
+    vi.mocked(backend.createOnboardBank).mockResolvedValue({ assigned: [1, 2, 3, 4], active: 1 });
 
     const base = makeConfig();
     const config: AppConfig = {
       ...base,
       profiles: [
         { ...base.profiles[0], id: "main", name: "Main", deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
-        // Stale link to slot 3 that did not exist on the mouse yet
-        { ...base.profiles[1], id: "game", name: "Game", deviceSlots: { [NAGA_V3_DEVICE_ID]: 3 } },
+        { ...base.profiles[1], id: "game", name: "Game", deviceSlots: { [NAGA_V3_DEVICE_ID]: 2 } },
         { id: "code", name: "Code", enabled: true, priority: 2 },
       ],
     };
@@ -383,12 +391,38 @@ describe("independent mouse readings", () => {
       />,
     );
 
-    const addBtn = await screen.findByRole("button", { name: i18n.t("mouse.slotAddProfileNext", { name: "Code", n: 3 }) });
-    fireEvent.click(addBtn);
-    await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID));
-    expect(updates).toHaveBeenCalledTimes(1);
-    const updated = updates.mock.calls[0][0](config) as AppConfig;
-    expect(updated.profiles.find((p) => p.id === "code")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(3);
-    expect(updated.profiles.find((p) => p.id === "game")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBeUndefined();
+    // Slot 4 exists in hardware without a linked Sidearm profile -> shown honestly as external, not "Leave as is".
+    const externalTab = await screen.findByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 4 })}: ${i18n.t("mouse.slotTileExternal")}` });
+    fireEvent.click(externalTab);
+    expect(screen.getByText(i18n.t("mouse.slotExternalTitle"))).toBeTruthy();
+
+    // Drag profile "code" from sidebar onto empty Slot 3 -> creates Slot 3 and binds "code".
+    const emptySlot3 = screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 3 })}: ${i18n.t("mouse.slotTileFree")}` });
+    const dropData = new Map<string, string>([["application/x-sidearm-profile", "code"]]);
+    fireEvent.drop(emptySlot3, {
+      dataTransfer: {
+        types: ["application/x-sidearm-profile"],
+        getData: (type: string) => dropData.get(type) ?? "",
+      },
+    });
+    await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 3));
+    const afterDrop = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
+    expect(afterDrop.profiles.find((p) => p.id === "code")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(3);
+
+    // Drag occupied Slot 1 ("main") onto occupied Slot 2 ("game") -> swaps both slots cleanly.
+    const slot2Tab = screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 2 })}: Game` });
+    const swapData = new Map<string, string>([
+      ["application/x-sidearm-profile", "main"],
+      ["application/x-sidearm-memory-slot", "1"],
+    ]);
+    fireEvent.drop(slot2Tab, {
+      dataTransfer: {
+        types: ["application/x-sidearm-profile", "application/x-sidearm-memory-slot"],
+        getData: (type: string) => swapData.get(type) ?? "",
+      },
+    });
+    const afterSwap = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
+    expect(afterSwap.profiles.find((p) => p.id === "main")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(2);
+    expect(afterSwap.profiles.find((p) => p.id === "game")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(1);
   });
 });

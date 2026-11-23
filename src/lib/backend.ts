@@ -177,9 +177,10 @@ export async function getOnboardBanks(deviceId: string): Promise<OnboardBanks> {
   return invoke<OnboardBanks>("get_onboard_banks", { deviceId });
 }
 
-/** Allocates a free onboard profile slot on a bank mouse and returns updated banks. */
-export async function createOnboardBank(deviceId: string): Promise<OnboardBanks> {
-  return invoke<OnboardBanks>("create_onboard_bank", { deviceId });
+/** Allocates a free onboard profile slot on a bank mouse (or a specific free
+ *  `bank` in `1..=5` when provided) and returns updated banks. */
+export async function createOnboardBank(deviceId: string, bank?: number): Promise<OnboardBanks> {
+  return invoke<OnboardBanks>("create_onboard_bank", { deviceId, bank: bank ?? null });
 }
 
 /** Removes a user onboard profile slot from a bank mouse and returns updated banks. */

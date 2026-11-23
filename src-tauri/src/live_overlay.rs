@@ -395,16 +395,31 @@ pub fn release_sidearm_bank(model: &'static NativeModel, config_dir: &Path) -> R
     Ok(true)
 }
 
-/// Allocates the first free onboard bank slot (`1..=MAX_BANKS`) on a bank model
+/// Allocates a free onboard bank slot (`1..=MAX_BANKS`) on a bank model —
+/// specifically `preferred` when supplied, or the lowest free slot otherwise —
 /// and returns the updated user bank inventory (Sidearm's own bank excluded).
-pub fn create_user_bank(model: &'static NativeModel) -> Result<Banks, String> {
+pub fn create_user_bank(model: &'static NativeModel, preferred: Option<u8>) -> Result<Banks, String> {
     if !model.live.as_ref().is_some_and(|live| live.banks) {
         return Err(format!("{} has no onboard banks", model.name));
     }
     let device = VendorDevice::open_model(model)?;
     let (banks, sidearm) = user_banks(&device)?;
-    let Some(free) = (1..=MAX_BANKS).find(|slot| !banks.assigned.contains(slot) && sidearm != Some(*slot)) else {
-        return Err(format!("All {MAX_BANKS} onboard slots are already taken"));
+    let free = match preferred {
+        Some(slot) => {
+            if !(1..=MAX_BANKS).contains(&slot) {
+                return Err(format!("Bank {slot} is out of range (1..={MAX_BANKS})"));
+            }
+            if banks.assigned.contains(&slot) || sidearm == Some(slot) {
+                return Err(format!("Bank {slot} is already in use"));
+            }
+            slot
+        }
+        None => {
+            let Some(slot) = (1..=MAX_BANKS).find(|slot| !banks.assigned.contains(slot) && sidearm != Some(*slot)) else {
+                return Err(format!("All {MAX_BANKS} onboard slots are already taken"));
+            };
+            slot
+        }
     };
     create_bank(&device, free)?;
     STORED[model.catalog_index()].store(0, Ordering::Release);
@@ -1258,16 +1273,79 @@ fn sync_sidearm_bank(device: &VendorDevice, bank: u8, base: u8, targets: &[(u8, 
     Ok(written)
 }
 
-/// Sidearm's bank, brought up to date with `targets` — claimed in the first
-/// free slot when the mouse has none yet. `None`: every slot holds a profile.
+/// Relocates a legacy Sidearm bank from `old` to the last slot (`MAX_BANKS`)
+/// when `MAX_BANKS` is free, keeping user slots `1..=4` contiguous. Rolls back
+/// cleanly on any hardware error so two Sidearm banks are never left behind.
+fn try_relocate_sidearm_bank(
+    device: &VendorDevice,
+    old: u8,
+    base: u8,
+    targets: &[(u8, u8, OnboardAction)],
+    config_dir: &Path,
+) -> Result<usize, String> {
+    let model = device.model();
+    create_bank(device, MAX_BANKS)?;
+    let written = match sync_sidearm_bank(device, MAX_BANKS, base, targets, config_dir) {
+        Ok(written) => written,
+        Err(error) => {
+            if let Err(release) = delete_bank(device, MAX_BANKS) {
+                log::warn!("[naga-live] {} half-filled slot {MAX_BANKS} not given back during relocate: {release}", model.name);
+            }
+            return Err(error);
+        }
+    };
+    let was_active = active_bank(device)? == old;
+    if was_active {
+        mark_in_sidearm_bank(config_dir, model, MAX_BANKS, base);
+        if let Err(error) = select_bank(device, MAX_BANKS) {
+            mark_in_sidearm_bank(config_dir, model, old, base);
+            let _ = delete_bank(device, MAX_BANKS);
+            return Err(error);
+        }
+    }
+    if let Err(error) = delete_bank(device, old) {
+        if was_active {
+            let _ = select_bank(device, old);
+            mark_in_sidearm_bank(config_dir, model, old, base);
+        }
+        let _ = delete_bank(device, MAX_BANKS);
+        return Err(error);
+    }
+    Ok(written)
+}
+
+/// Sidearm's bank, brought up to date with `targets` — claimed in the last
+/// free slot (`MAX_BANKS` down to `1`) so user slots stay contiguous at the
+/// front. If an older Sidearm bank sits in an earlier slot and `MAX_BANKS` is
+/// free, migrates it to `MAX_BANKS`. `None`: every slot holds a user profile.
 fn claim_sidearm_bank(device: &VendorDevice, config: &AppConfig, targets: &[(u8, u8, OnboardAction)], config_dir: &Path) -> Result<Option<(u8, u8)>, String> {
     let model = device.model();
     let (banks, sidearm) = user_banks(device)?;
     let base = base_bank(config, model, &banks, remembered_base(config_dir, model))?;
+    if let Some(old) = sidearm
+        && old != MAX_BANKS
+        && !banks.assigned.contains(&MAX_BANKS)
+    {
+        match try_relocate_sidearm_bank(device, old, base, targets, config_dir) {
+            Ok(written) => {
+                log::info!(
+                    "[naga-live] {} relocated Sidearm bank from slot {old} to last slot {MAX_BANKS} ({written} records written, base bank {base})",
+                    model.name
+                );
+                return Ok(Some((MAX_BANKS, base)));
+            }
+            Err(error) => {
+                log::warn!(
+                    "[naga-live] {} could not relocate Sidearm bank {old} to {MAX_BANKS} ({error}); keeping slot {old}",
+                    model.name
+                );
+            }
+        }
+    }
     let (bank, created) = match sidearm {
         Some(bank) => (bank, false),
         None => {
-            let Some(free) = (1..=MAX_BANKS).find(|bank| !banks.assigned.contains(bank)) else { return Ok(None) };
+            let Some(free) = (1..=MAX_BANKS).rev().find(|bank| !banks.assigned.contains(bank)) else { return Ok(None) };
             create_bank(device, free)?;
             log::info!("[naga-live] {} claimed free slot {free} as the Sidearm bank", model.name);
             (free, true)
@@ -3327,27 +3405,53 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_sidearm_bank_takes_the_first_free_slot_with_the_base_under_its_signals() {
+    fn the_sidearm_bank_takes_the_last_free_slot_with_the_base_under_its_signals() {
         use crate::mouse_memory::fake;
         let (mouse, targets) = sidearm_bank_mouse();
         let _fake = fake::install(mouse);
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
-        assert_eq!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap(), Some((3, 1)));
+        assert_eq!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap(), Some((5, 1)));
         fake::with(|mouse| {
-            assert_eq!(mouse.banks, vec![1, 2, 3]);
-            assert_eq!(mouse.dpi.get(&3), Some(&1100));
+            assert_eq!(mouse.banks, vec![1, 2, 5]);
+            assert_eq!(mouse.dpi.get(&5), Some(&1100));
             for (button, layer) in bank_addresses(&NAGA_V3_PRO) {
                 let wanted = targets.iter().find(|&&(b, l, _)| (b, l) == (button, layer))
-                    .map_or(mouse.records[&(1, button, layer)], |&(_, _, action)| bank_block(3, action));
-                assert_eq!(mouse.records.get(&(3, button, layer)), Some(&wanted), "{button:#04x}/{layer}");
+                    .map_or(mouse.records[&(1, button, layer)], |&(_, _, action)| bank_block(5, action));
+                assert_eq!(mouse.records.get(&(5, button, layer)), Some(&wanted), "{button:#04x}/{layer}");
             }
         });
-        assert_eq!(sidearm_bank(&device, &read_banks(&device).unwrap()).unwrap(), Some(3));
+        assert_eq!(sidearm_bank(&device, &read_banks(&device).unwrap()).unwrap(), Some(5));
         // A second start finds it again and writes nothing.
         fake::with(|mouse| mouse.writes.clear());
-        assert_eq!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap(), Some((3, 1)));
+        assert_eq!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap(), Some((5, 1)));
         fake::with(|mouse| assert!(mouse.writes.is_empty(), "{:?}", mouse.writes));
+    }
+
+    #[test]
+    fn claim_sidearm_bank_relocates_legacy_slot_to_last_slot_when_free() {
+        use crate::mouse_memory::fake;
+        let (mut mouse, targets) = sidearm_bank_mouse();
+        // Simulate an older version that claimed Slot 2 while Slot 5 is free, and the mouse is playing Slot 2.
+        mouse.banks = vec![1, 2, 3];
+        mouse.active_bank = 2;
+        for (button, layer) in bank_addresses(&NAGA_V3_PRO) {
+            let wanted = targets
+                .iter()
+                .find(|&&(b, l, _)| (b, l) == (button, layer))
+                .map_or(mouse.records[&(1, button, layer)], |&(_, _, action)| bank_block(2, action));
+            mouse.records.insert((2, button, layer), wanted);
+        }
+        let _fake = fake::install(mouse);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        assert_eq!(sidearm_bank(&device, &read_banks(&device).unwrap()).unwrap(), Some(2));
+        assert_eq!(claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap(), Some((5, 1)));
+        fake::with(|mouse| {
+            assert_eq!(mouse.banks, vec![1, 3, 5], "legacy slot 2 freed and relocated to slot 5");
+            assert_eq!(mouse.active_bank, 5, "mouse switched to slot 5 before deleting slot 2");
+        });
+        assert_eq!(sidearm_bank(&device, &read_banks(&device).unwrap()).unwrap(), Some(5));
     }
 
     #[test]
@@ -3359,7 +3463,7 @@ pub(crate) mod tests {
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap();
         // The user's own F13 on thumb 12 of that bank (a Synapse copy, say).
-        fake::with(|mouse| { mouse.records.insert((3, 0x4b, 0), block(OnboardAction::Key { modifier: 0, usage: 0x68 })); });
+        fake::with(|mouse| { mouse.records.insert((5, 0x4b, 0), block(OnboardAction::Key { modifier: 0, usage: 0x68 })); });
         assert_eq!(sidearm_bank(&device, &read_banks(&device).unwrap()).unwrap(), None);
     }
 
@@ -3391,7 +3495,7 @@ pub(crate) mod tests {
         apply_bank(&device, 1, &bank_backup(dir.path(), &NAGA_V3_PRO, 1), &[(0x0a, 0, wheel_down)]).unwrap();
         assert!(!targets.iter().any(|&(button, _, _)| button == 0x0a), "the seed config leaves wheel down alone live");
         claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap();
-        fake::with(|mouse| assert_eq!(mouse.records[&(3, 0x0a, 0)], native));
+        fake::with(|mouse| assert_eq!(mouse.records[&(5, 0x0a, 0)], native));
     }
 
     #[test]
@@ -3402,9 +3506,9 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap();
-        select_bank(&device, 3).unwrap();
+        select_bank(&device, 5).unwrap();
         let (banks, sidearm) = user_banks(&device).unwrap();
-        assert_eq!((banks.assigned.clone(), banks.active, sidearm), (vec![1, 2], 3, Some(3)));
+        assert_eq!((banks.assigned.clone(), banks.active, sidearm), (vec![1, 2], 5, Some(5)));
         let v3_cfg = config_with_v3();
         let offline = crate::mouse_offline::offline_profile_id(&v3_cfg, None);
         assert_eq!(exit_bank(&v3_cfg, &bank_plan(&v3_cfg, &NAGA_V3_PRO, &banks, &offline), &banks, &offline), Some(1));
@@ -3419,19 +3523,19 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap();
-        select_bank(&device, 3).unwrap();
+        select_bank(&device, 5).unwrap();
         drop(device);
         let marker = in_sidearm_bank_marker(dir.path(), &NAGA_V3_PRO);
-        std::fs::write(&marker, "3").unwrap();
+        std::fs::write(&marker, "5").unwrap();
         // The restorer of a killed Sidearm: no config next to it, so the first
         // bank of the user's.
         assert!(restore_orphaned(dir.path()));
         fake::with(|mouse| assert_eq!(mouse.active_bank, 1));
         assert!(!marker.exists());
         // Without the marker nothing is asked of the mouse.
-        fake::with(|mouse| { mouse.active_bank = 3; mouse.asked = 0; });
+        fake::with(|mouse| { mouse.active_bank = 5; mouse.asked = 0; });
         assert!(restore_orphaned(dir.path()));
-        fake::with(|mouse| assert_eq!((mouse.active_bank, mouse.asked), (3, 0)));
+        fake::with(|mouse| assert_eq!((mouse.active_bank, mouse.asked), (5, 0)));
     }
 
     #[test]
@@ -3445,11 +3549,11 @@ pub(crate) mod tests {
         let profile = config.settings.fallback_profile_id.clone();
         config.profiles.iter_mut().find(|p| p.id == profile).unwrap().device_slots = Some([(NAGA_V3_PRO.device_id.to_owned(), 1)].into());
         claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap();
-        select_bank(&device, 3).unwrap();
+        select_bank(&device, 5).unwrap();
         fake::with(|mouse| { mouse.poll_code = 2; mouse.writes.clear(); });
         store_banks(&device, &config, &NAGA_V3_PRO, &profile, dir.path(), false).unwrap();
         fake::with(|mouse| {
-            assert_eq!(mouse.active_bank, 3, "Sidearm's bank keeps playing");
+            assert_eq!(mouse.active_bank, 5, "Sidearm's bank keeps playing");
             assert_eq!(mouse.poll_code, 2, "the live speed is left alone");
             assert!(mouse.writes.iter().all(|&(bank, _, _)| bank == 1), "only bank 1 is written: {:?}", mouse.writes);
         });
@@ -3484,7 +3588,7 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap();
-        select_bank(&device, 3).unwrap();
+        select_bank(&device, 5).unwrap();
         drop(device);
         assert!(release_sidearm_bank(&NAGA_V3_PRO, dir.path()).unwrap());
         fake::with(|mouse| assert_eq!((mouse.banks.clone(), mouse.active_bank), (vec![1, 2], 1)));
@@ -3502,7 +3606,7 @@ pub(crate) mod tests {
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         // No profile is linked to a bank: only the marker knows bank 2 played.
         let (bank, base) = claim_sidearm_bank(&device, &config_with_v3(), &targets, dir.path()).unwrap().unwrap();
-        assert_eq!((bank, base), (3, 2));
+        assert_eq!((bank, base), (5, 2));
         mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, bank, base);
         select_bank(&device, bank).unwrap();
         leave_sidearm_bank(&device, None, dir.path()).unwrap();
@@ -4079,7 +4183,7 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         let (sidearm, base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
-        assert_eq!(sidearm, 3);
+        assert_eq!(sidearm, 5);
         mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, sidearm, base);
         select_bank(&device, sidearm).unwrap();
 
@@ -4097,7 +4201,7 @@ pub(crate) mod tests {
         // Unverified hybrid bank MUST stay on Sidearm bank until verified stored!
         *DESIRED_PROFILE.lock().unwrap() = Some(DesiredProfile { revision: next_profile_revision(), profile: Some(game.clone()), config: config.clone() });
         assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
-        fake::with(|m| assert_eq!(m.active_bank, 3, "unverified hybrid slot must not be selected"));
+        fake::with(|m| assert_eq!(m.active_bank, 5, "unverified hybrid slot must not be selected"));
 
         // Store banks -> verifies bank 2 and immediately reconciles desired hybrid profile + live DPI!
         let offline = crate::mouse_offline::offline_profile_id(&config, None);
@@ -4115,7 +4219,7 @@ pub(crate) mod tests {
         // Input test mode forces Sidearm bank so native flash keys cannot fire while testing.
         INPUT_TEST_MODE.store(true, Ordering::Release);
         assert!(reconcile_on_device(&device, Some(dir.path()), None).unwrap());
-        fake::with(|m| assert_eq!(m.active_bank, 3));
+        fake::with(|m| assert_eq!(m.active_bank, 5));
         INPUT_TEST_MODE.store(false, Ordering::Release);
         assert!(reconcile_on_device(&device, Some(dir.path()), None).unwrap());
         fake::with(|m| assert_eq!(m.active_bank, 2));
@@ -4131,22 +4235,22 @@ pub(crate) mod tests {
         select_bank(&device, 2).unwrap();
         ACTIVE_LIVE_BANK[index].store(2, Ordering::Release);
 
-        // Switching back to normal profile returns to Sidearm bank 3.
+        // Switching back to normal profile returns to Sidearm bank 5.
         assert!(reconcile_on_device(&device, Some(dir.path()), None).unwrap());
-        fake::with(|m| assert_eq!(m.active_bank, 3));
-        assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), 3);
+        fake::with(|m| assert_eq!(m.active_bank, 5));
+        assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), 5);
 
         // Manual offline mode pauses switching.
         *DESIRED_PROFILE.lock().unwrap() = Some(DesiredProfile { revision: next_profile_revision(), profile: Some(game.clone()), config: config.clone() });
         OFFLINE[index].store(sidearm, Ordering::Release);
         assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
-        fake::with(|m| assert_eq!(m.active_bank, 3));
+        fake::with(|m| assert_eq!(m.active_bank, 5));
         OFFLINE[index].store(0, Ordering::Release);
 
         // "Return slot" (RELEASED) pauses switching.
         RELEASED[index].store(true, Ordering::Release);
         assert!(!reconcile_on_device(&device, Some(dir.path()), None).unwrap());
-        fake::with(|m| assert_eq!(m.active_bank, 3));
+        fake::with(|m| assert_eq!(m.active_bank, 5));
         RELEASED[index].store(false, Ordering::Release);
 
         // Cleanup global test state
@@ -4199,24 +4303,26 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
         let (sidearm, _base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
-        assert_eq!(sidearm, 2, "Sidearm claims free slot 2");
+        assert_eq!(sidearm, 5, "Sidearm claims last free slot 5");
         drop(device);
 
         // Cannot delete the last remaining user bank or Sidearm's own bank.
         assert!(delete_user_bank(&NAGA_V3_PRO, 1, dir.path()).is_err(), "cannot delete last user bank");
         assert!(delete_user_bank(&NAGA_V3_PRO, sidearm, dir.path()).is_err(), "cannot delete Sidearm bank");
 
-        // Creating user banks skips Sidearm's slot 2 and stops at MAX_BANKS (5).
-        let after_add = create_user_bank(&NAGA_V3_PRO).unwrap();
-        assert_eq!(after_add.assigned, vec![1, 3]);
-        assert_eq!(create_user_bank(&NAGA_V3_PRO).unwrap().assigned, vec![1, 3, 4]);
-        assert_eq!(create_user_bank(&NAGA_V3_PRO).unwrap().assigned, vec![1, 3, 4, 5]);
-        assert!(create_user_bank(&NAGA_V3_PRO).is_err(), "all 5 slots full");
+        // Creating specific slots and lowest-free slots works and respects Sidearm's slot 5.
+        assert!(create_user_bank(&NAGA_V3_PRO, Some(5)).is_err(), "cannot take Sidearm slot");
+        assert!(create_user_bank(&NAGA_V3_PRO, Some(1)).is_err(), "cannot take existing slot");
+        let after_specific = create_user_bank(&NAGA_V3_PRO, Some(4)).unwrap();
+        assert_eq!(after_specific.assigned, vec![1, 4]);
+        assert_eq!(create_user_bank(&NAGA_V3_PRO, None).unwrap().assigned, vec![1, 2, 4]);
+        assert_eq!(create_user_bank(&NAGA_V3_PRO, Some(3)).unwrap().assigned, vec![1, 2, 3, 4]);
+        assert!(create_user_bank(&NAGA_V3_PRO, None).is_err(), "all 5 slots full");
 
         // Deleting the currently active user bank switches safely to another bank first.
         fake::with(|m| m.active_bank = 3);
         let after_del = delete_user_bank(&NAGA_V3_PRO, 3, dir.path()).unwrap();
-        assert_eq!(after_del.assigned, vec![1, 4, 5]);
+        assert_eq!(after_del.assigned, vec![1, 2, 4]);
         assert_ne!(after_del.active, 3, "active bank switched before deletion");
 
         // Deleting a non-assigned slot fails cleanly.
@@ -4290,16 +4396,16 @@ pub(crate) mod tests {
         assert!(delete_user_bank(&NAGA_V3_PRO, 1, dir.path()).is_err(), "must not delete last clean offline bank");
 
         // Deleting a clean bank while in manual offline mode never overwrites ACTIVE_LIVE_BANK and updates marker.base!
-        let _ = create_user_bank(&NAGA_V3_PRO).unwrap(); // creates clean bank 4
+        let _ = create_user_bank(&NAGA_V3_PRO, None).unwrap(); // creates clean bank 3
         SIDEARM_BANK[index].store(sidearm, Ordering::Release);
         ACTIVE_LIVE_BANK[index].store(sidearm, Ordering::Release);
         OFFLINE[index].store(sidearm, Ordering::Release);
         RELEASED[index].store(false, Ordering::Release);
         fake::with(|m| m.active_bank = 1);
         let after = delete_user_bank(&NAGA_V3_PRO, 1, dir.path()).unwrap();
-        assert_eq!(after.active, 4, "offline active bank switches to remaining clean bank 4");
+        assert_eq!(after.active, 3, "offline active bank switches to remaining clean bank 3");
         assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), sidearm, "manual offline mode preserves ACTIVE_LIVE_BANK");
-        assert_eq!(read_sidearm_bank_marker(dir.path(), &NAGA_V3_PRO).base, Some(4), "marker.base updated to clean bank 4");
+        assert_eq!(read_sidearm_bank_marker(dir.path(), &NAGA_V3_PRO).base, Some(3), "marker.base updated to clean bank 3");
 
         // flush_bank_store_now refuses during manual offline mode.
         assert!(flush_bank_store_now(&NAGA_V3_PRO, &config, dir.path()).is_err());
@@ -4308,8 +4414,8 @@ pub(crate) mod tests {
         OFFLINE[index].store(0, Ordering::Release);
         SIDEARM_BANK[index].store(0, Ordering::Release);
         ACTIVE[index].store(true, Ordering::Release);
-        fake::with(|m| m.active_bank = 4);
-        std::fs::write(bank_backup(dir.path(), &NAGA_V3_PRO, 4), "{}").unwrap();
+        fake::with(|m| m.active_bank = 3);
+        std::fs::write(bank_backup(dir.path(), &NAGA_V3_PRO, 3), "{}").unwrap();
         assert!(flush_bank_store_now(&NAGA_V3_PRO, &config, dir.path()).is_err(), "unlinked active bank backup guarded");
 
         // Cleanup global state.

@@ -8,6 +8,7 @@
   let config = window.__UI_CONFIG__ ? clone(window.__UI_CONFIG__) : null;
   const path = "C:\\ui-check\\data\\config.json";
   const runtime = { status: "running", startedAt: 1, lastReloadAt: null, captureBackend: "windows", activeConfigVersion: 12, warningCount: 0 };
+  const mockBanks = { assigned: [1, 2], active: 1, sidearm: 5 };
   const answers = {
     load_config: () => {
       if (!config) throw { code: "ui_check", message: "No window.__UI_CONFIG__: run tools/ui-check/make-config.mjs first" };
@@ -77,12 +78,28 @@
       name: "Razer Naga", deviceId: (args && args.deviceId) || "razer-naga", dpiMin: 100, dpiMax: 30000,
       pollRates: [125, 500, 1000], verified: true, connected: false, banks: false, consumerSignals: null,
     }),
-    get_onboard_banks: () => ({ assigned: [1, 2], active: 1 }),
-    create_onboard_bank: () => ({ assigned: [1, 2, 3], active: 1 }),
-    delete_onboard_bank: ({ bank }) => ({ assigned: [1, 2, 3].filter((b) => b !== bank), active: 1 }),
+    get_onboard_banks: () => ({ assigned: [...mockBanks.assigned], active: mockBanks.active }),
+    create_onboard_bank: ({ bank }) => {
+      const target = typeof bank === "number"
+        ? bank
+        : [1, 2, 3, 4, 5].find((slot) => !mockBanks.assigned.includes(slot) && slot !== mockBanks.sidearm);
+      if (target && !mockBanks.assigned.includes(target) && target !== mockBanks.sidearm) {
+        mockBanks.assigned = [...mockBanks.assigned, target].sort((a, b) => a - b);
+      }
+      return { assigned: [...mockBanks.assigned], active: mockBanks.active };
+    },
+    delete_onboard_bank: ({ bank }) => {
+      mockBanks.assigned = mockBanks.assigned.filter((b) => b !== bank);
+      if (mockBanks.active === bank) mockBanks.active = mockBanks.assigned[0] ?? 1;
+      return { assigned: [...mockBanks.assigned], active: mockBanks.active };
+    },
     flush_onboard_banks: () => null,
-    get_sidearm_bank: () => 4,
-    release_sidearm_bank: () => true,
+    get_sidearm_bank: () => mockBanks.sidearm,
+    release_sidearm_bank: () => {
+      const had = mockBanks.sidearm !== null;
+      mockBanks.sidearm = null;
+      return had;
+    },
   };
 
   const callbacks = new Map();

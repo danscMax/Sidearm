@@ -189,6 +189,12 @@ export function legendCellClass(flags: {
  *  layer pills and the sidebar profiles that a button is being dragged. */
 export const BINDING_DRAG_TYPE = "application/x-sidearm-binding";
 
+/** The `dataTransfer` type of a dragged profile (from the sidebar or a memory slot). */
+export const PROFILE_DRAG_TYPE = "application/x-sidearm-profile";
+
+/** The `dataTransfer` type of a dragged onboard memory slot number (1..5). */
+export const MEMORY_SLOT_DRAG_TYPE = "application/x-sidearm-memory-slot";
+
 export function isBindingDrag(e: { dataTransfer: DataTransfer | null }): boolean {
   return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes(BINDING_DRAG_TYPE);
 }

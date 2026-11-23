@@ -395,6 +395,153 @@ pub fn release_sidearm_bank(model: &'static NativeModel, config_dir: &Path) -> R
     Ok(true)
 }
 
+/// Allocates the first free onboard bank slot (`1..=MAX_BANKS`) on a bank model
+/// and returns the updated user bank inventory (Sidearm's own bank excluded).
+pub fn create_user_bank(model: &'static NativeModel) -> Result<Banks, String> {
+    if !model.live.as_ref().is_some_and(|live| live.banks) {
+        return Err(format!("{} has no onboard banks", model.name));
+    }
+    let device = VendorDevice::open_model(model)?;
+    let (banks, sidearm) = user_banks(&device)?;
+    let Some(free) = (1..=MAX_BANKS).find(|slot| !banks.assigned.contains(slot) && sidearm != Some(*slot)) else {
+        return Err(format!("All {MAX_BANKS} onboard slots are already taken"));
+    };
+    create_bank(&device, free)?;
+    STORED[model.catalog_index()].store(0, Ordering::Release);
+    log::info!("[naga-live] {} created user onboard bank {free}", model.name);
+    Ok(user_banks(&device)?.0)
+}
+
+/// Deletes an assigned user onboard bank (`1..=MAX_BANKS`), refusing to delete
+/// Sidearm's own bank, the last remaining user bank, or the last clean offline
+/// bank while another slot holds hybrid Sidearm signals. Switches off `bank`
+/// first if it is currently playing, removes its stale backup, updates recovery
+/// markers, and returns the updated user bank inventory.
+pub fn delete_user_bank(model: &'static NativeModel, bank: u8, config_dir: &Path) -> Result<Banks, String> {
+    if !model.live.as_ref().is_some_and(|live| live.banks) {
+        return Err(format!("{} has no onboard banks", model.name));
+    }
+    if !(1..=MAX_BANKS).contains(&bank) {
+        return Err(format!("Bank {bank} is out of range (1..={MAX_BANKS})"));
+    }
+    let device = VendorDevice::open_model(model)?;
+    let (banks, sidearm) = user_banks(&device)?;
+    if sidearm == Some(bank) {
+        return Err(format!("Bank {bank} is Sidearm's own slot"));
+    }
+    if !banks.assigned.contains(&bank) {
+        return Err(format!("Bank {bank} holds no profile on the mouse"));
+    }
+    if banks.assigned.len() <= 1 {
+        return Err("Cannot remove the last user profile slot on the mouse".into());
+    }
+    // Single-clean-bank invariant: deleting `bank` must leave at least one clean
+    // (non-hybrid) user bank in flash so exit/crash restoration always succeeds.
+    let mut clean_remaining = None;
+    for &candidate in &banks.assigned {
+        if candidate == bank {
+            continue;
+        }
+        if !bank_holds_sidearm_signal(&device, candidate)? {
+            clean_remaining = Some(candidate);
+            break;
+        }
+    }
+    let Some(clean_fallback) = clean_remaining else {
+        return Err("Cannot remove the last clean offline slot while other slots use Hardware bank".into());
+    };
+    let index = model.catalog_index();
+    let sidearm_owned = SIDEARM_BANK[index].load(Ordering::Acquire);
+    let staying_online = sidearm_owned != 0
+        && sidearm == Some(sidearm_owned)
+        && OFFLINE[index].load(Ordering::Acquire) == 0
+        && !RELEASED[index].load(Ordering::Acquire);
+    if banks.active == bank {
+        wait_released(model);
+        let dest = if staying_online { sidearm_owned } else { clean_fallback };
+        select_bank(&device, dest)?;
+        if staying_online {
+            ACTIVE_LIVE_BANK[index].store(dest, Ordering::Release);
+        }
+    }
+    delete_bank(&device, bank)?;
+    STORED[index].store(0, Ordering::Release);
+    if banks.assigned.len() <= 2 {
+        // At most one user bank remains: hybrid mode is no longer allowed.
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+    } else {
+        VERIFIED_HYBRID_BANKS[index].fetch_and(!(1u8 << bank), Ordering::AcqRel);
+    }
+    let _ = std::fs::remove_file(bank_backup(config_dir, model, bank));
+    let mut marker = read_sidearm_bank_marker(config_dir, model);
+    let base_changed = marker.base == Some(bank);
+    let hybrids_changed = marker.hybrids.contains(&bank);
+    if (base_changed || hybrids_changed)
+        && let Some(sb) = marker.sidearm
+    {
+        marker.hybrids.retain(|&b| b != bank);
+        let next_base = if base_changed { clean_fallback } else { marker.base.unwrap_or(clean_fallback) };
+        write_sidearm_bank_marker(config_dir, model, sb, next_base, &marker.hybrids);
+    }
+    log::info!("[naga-live] {} deleted user onboard bank {bank}", model.name);
+    Ok(user_banks(&device)?.0)
+}
+
+/// Immediately writes and verifies all planned onboard banks for `model`,
+/// cancelling only this model's pending delayed background store and reconciling
+/// any waiting hybrid profile once verified.
+pub fn flush_bank_store_now(model: &'static NativeModel, config: &AppConfig, config_dir: &Path) -> Result<(), String> {
+    if !model.live.as_ref().is_some_and(|live| live.banks) {
+        return Err(format!("{} has no onboard banks", model.name));
+    }
+    if crate::is_shutting_down() {
+        return Err("Sidearm is shutting down".into());
+    }
+    let index = model.catalog_index();
+    if OFFLINE[index].load(Ordering::Acquire) != 0 {
+        return Err("Mouse is in manual offline mode; return to Sidearm before writing slots".into());
+    }
+    *SESSION_CONFIG_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config_dir.to_path_buf());
+    // Refresh the desired profile's config snapshot so post-store reconcile sees
+    // the exact config being flushed rather than a stale debounced snapshot.
+    {
+        let mut guard = DESIRED_PROFILE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some(desired) = guard.as_mut() {
+            desired.profile = desired
+                .profile
+                .as_ref()
+                .and_then(|p| config.profiles.iter().find(|c| c.id == p.id && c.enabled).cloned());
+            desired.config = config.clone();
+            desired.revision = next_profile_revision();
+        }
+    }
+    let generation = STORE_GENERATION[index].fetch_add(1, Ordering::AcqRel) + 1;
+    let device = VendorDevice::open_model(model)?;
+    // Re-check generation, shutdown, and manual offline after acquiring the device lock.
+    if crate::is_shutting_down() {
+        return Err("Sidearm is shutting down".into());
+    }
+    if OFFLINE[index].load(Ordering::Acquire) != 0 {
+        return Err("Mouse is in manual offline mode; return to Sidearm before writing slots".into());
+    }
+    if STORE_GENERATION[index].load(Ordering::Acquire) != generation {
+        return Ok(());
+    }
+    let offline = crate::mouse_offline::offline_profile_id(config, None);
+    // On the live-map path (capture running without Sidearm's own bank), writing
+    // or restoring the currently playing bank would clobber the active live map.
+    if ACTIVE[index].load(Ordering::Acquire) && SIDEARM_BANK[index].load(Ordering::Acquire) == 0 {
+        let (banks, _) = user_banks(&device)?;
+        let plan = bank_plan(config, model, &banks, &offline);
+        let touches_active = plan.iter().any(|entry| entry.bank == banks.active)
+            || bank_backup(config_dir, model, banks.active).exists();
+        if touches_active {
+            return Err("Cannot write the active bank while capture runs without Sidearm's own slot".into());
+        }
+    }
+    store_banks(&device, config, model, &offline, config_dir, false)
+}
+
 fn set_offline(model: &'static NativeModel, bank: u8) {
     if OFFLINE[model.catalog_index()].swap(bank, Ordering::AcqRel) != bank {
         crate::mouse_offline_mode_changed(model, bank != 0);
@@ -1382,8 +1529,9 @@ pub(crate) fn write_offline(
 /// ([`store_key`]; an onboard mouse's profile 1, `onboard_offline_key`), 0 for
 /// nothing: an exit or a session that would write the same skips it.
 static STORED: [std::sync::atomic::AtomicU64; CATALOG_LEN] = [const { std::sync::atomic::AtomicU64::new(0) }; CATALOG_LEN];
-/// Bumped by every config change: a background store that waited past a newer one does nothing.
-static STORE_GENERATION: AtomicU32 = AtomicU32::new(0);
+/// Bumped per model by config changes or explicit flushes: a background store
+/// that waited past a newer generation for that model does nothing.
+static STORE_GENERATION: [AtomicU32; CATALOG_LEN] = [const { AtomicU32::new(0) }; CATALOG_LEN];
 /// A burst of saves (typing in a field) is one store.
 const STORE_PAUSE: Duration = Duration::from_secs(5);
 /// The config whose offline profile the onboard mouse's live session stores
@@ -1450,21 +1598,27 @@ fn verified_hybrid_mask(plan: &[PlannedBank<'_>]) -> u8 {
 /// is the user's, and writing it would replace the live map.
 pub fn schedule_bank_store(config: AppConfig, config_dir: PathBuf) {
     *SESSION_CONFIG_DIR.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config_dir.clone());
-    let generation = STORE_GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    let mut generations = [0u32; CATALOG_LEN];
+    for (index, slot) in STORE_GENERATION.iter().enumerate() {
+        generations[index] = slot.fetch_add(1, Ordering::AcqRel) + 1;
+    }
     let spawned = thread::Builder::new().name("bank-store".into()).spawn(move || {
         thread::sleep(STORE_PAUSE);
-        if STORE_GENERATION.load(Ordering::Acquire) != generation || crate::is_shutting_down() {
+        if crate::is_shutting_down() {
             return;
         }
         *ONBOARD_STORE.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(config.clone());
         let offline = crate::mouse_offline::offline_profile_id(&config, None);
         for model in CATALOG.iter().copied().filter(|model| model.live.as_ref().is_some_and(|live| live.banks) && configured(&config, model)) {
+            let index = model.catalog_index();
+            if STORE_GENERATION[index].load(Ordering::Acquire) != generations[index] {
+                continue;
+            }
             let stored = VendorDevice::open_model(model).and_then(|device| {
                 // Re-check generation, shutdown, and session ownership AFTER
                 // acquiring the device lock so a superseded or relinquished
                 // store never writes flash.
-                let index = model.catalog_index();
-                if STORE_GENERATION.load(Ordering::Acquire) != generation
+                if STORE_GENERATION[index].load(Ordering::Acquire) != generations[index]
                     || crate::is_shutting_down()
                     || RELEASED[index].load(Ordering::Acquire)
                     || OFFLINE[index].load(Ordering::Acquire) != 0
@@ -1540,7 +1694,10 @@ fn store_banks(
                 // Reconcile ACTIVE_LIVE_BANK to actual hardware bank before
                 // returning so the Session monitor never mistakes our move to
                 // SIDEARM_BANK for a manual profile-button press.
-                if moved && SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+                if moved
+                    && SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+                    && OFFLINE[index].load(Ordering::Acquire) == 0
+                    && !RELEASED[index].load(Ordering::Acquire)
                     && let Ok(current) = active_bank(device)
                 {
                     ACTIVE_LIVE_BANK[index].store(current, Ordering::Release);
@@ -1554,16 +1711,19 @@ fn store_banks(
     // Sidearm's own bank played for a write: the bank that played before
     // comes back (an exit's own bank wins below).
     let exit_select = exiting && !plan.is_empty();
+    let online_bank_managed = SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+        && OFFLINE[index].load(Ordering::Acquire) == 0
+        && !RELEASED[index].load(Ordering::Acquire);
     if moved && !exit_select {
         match select_bank(device, banks.active) {
             Ok(()) => {
-                if SIDEARM_BANK[index].load(Ordering::Acquire) != 0 {
+                if online_bank_managed {
                     ACTIVE_LIVE_BANK[index].store(banks.active, Ordering::Release);
                 }
             }
             Err(error) => {
                 log::warn!("[mouse-offline] {} bank {} not reselected after storing: {error}", model.name, banks.active);
-                if SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+                if online_bank_managed
                     && let Ok(current) = active_bank(device)
                 {
                     ACTIVE_LIVE_BANK[index].store(current, Ordering::Release);
@@ -1603,7 +1763,10 @@ fn off_the_playing_bank(device: &VendorDevice, bank: u8) -> Result<bool, String>
     wait_released(model);
     select_bank(device, sidearm)?;
     let index = model.catalog_index();
-    if SIDEARM_BANK[index].load(Ordering::Acquire) != 0 {
+    if SIDEARM_BANK[index].load(Ordering::Acquire) != 0
+        && OFFLINE[index].load(Ordering::Acquire) == 0
+        && !RELEASED[index].load(Ordering::Acquire)
+    {
         ACTIVE_LIVE_BANK[index].store(sidearm, Ordering::Release);
     }
     log::info!("[mouse-offline] {} Sidearm bank {sidearm} plays while bank {bank} is written", model.name);
@@ -2332,6 +2495,10 @@ pub(crate) mod tests {
 
     /// Tests that store into the V2 share its `STORED` entry: one at a time.
     pub(crate) static V2_STORE: Mutex<()> = Mutex::new(());
+    /// Tests that mutate V3 global bank/reconcile statics (`SIDEARM_BANK`,
+    /// `ACTIVE_LIVE_BANK`, `VERIFIED_HYBRID_BANKS`, `STORED`, `RELEASED`,
+    /// `OFFLINE`, `INPUT_TEST_MODE`, `DESIRED_PROFILE`) serialize on this lock.
+    static V3_GLOBAL_STATE: Mutex<()> = Mutex::new(());
 
     /// Stores `config`'s offline profile in a (fake) V2 as its session does.
     pub(crate) fn store_v2_offline(device: &VendorDevice, config: &AppConfig) -> Result<bool, String> {
@@ -3310,6 +3477,7 @@ pub(crate) mod tests {
     #[test]
     fn giving_the_bank_back_leaves_it_and_frees_the_slot() {
         use crate::mouse_memory::fake;
+        let _v3 = V3_GLOBAL_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mouse, targets) = sidearm_bank_mouse();
         let _fake = fake::install(mouse);
         fake::set_present_models(vec![&NAGA_V3_PRO]);
@@ -3901,6 +4069,7 @@ pub(crate) mod tests {
     #[test]
     fn apply_profile_bank_switches_to_hybrid_and_back_and_respects_offline_and_released() {
         use crate::mouse_memory::fake;
+        let _v3 = V3_GLOBAL_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (mut config, default_id, game_id) = hybrid_test_config();
         // Give the hybrid profile a distinct live DPI to verify bank-then-DPI ordering.
         config.profiles.iter_mut().find(|p| p.id == game_id).unwrap()
@@ -4014,5 +4183,140 @@ pub(crate) mod tests {
         assert!(restore_orphaned(dir.path()));
         fake::with(|m| assert_eq!(m.active_bank, 1, "crash recovery from hybrid bank restores clean bank 1 without config.json"));
         assert!(!in_sidearm_bank_marker(dir.path(), &NAGA_V3_PRO).exists());
+    }
+
+    #[test]
+    fn create_and_delete_user_bank_enforce_safety_guards() {
+        use crate::mouse_memory::fake;
+        let _v3 = V3_GLOBAL_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (config, _default_id, _game_id) = hybrid_test_config();
+        let (mut mouse, targets) = sidearm_bank_mouse();
+        // Start with only user bank 1 so we can test adding, deleting, and guards.
+        mouse.banks = vec![1];
+        mouse.active_bank = 1;
+        let _fake = fake::install(mouse);
+        fake::set_present_models(vec![&NAGA_V3_PRO]);
+        let dir = tempfile::tempdir().unwrap();
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let (sidearm, _base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
+        assert_eq!(sidearm, 2, "Sidearm claims free slot 2");
+        drop(device);
+
+        // Cannot delete the last remaining user bank or Sidearm's own bank.
+        assert!(delete_user_bank(&NAGA_V3_PRO, 1, dir.path()).is_err(), "cannot delete last user bank");
+        assert!(delete_user_bank(&NAGA_V3_PRO, sidearm, dir.path()).is_err(), "cannot delete Sidearm bank");
+
+        // Creating user banks skips Sidearm's slot 2 and stops at MAX_BANKS (5).
+        let after_add = create_user_bank(&NAGA_V3_PRO).unwrap();
+        assert_eq!(after_add.assigned, vec![1, 3]);
+        assert_eq!(create_user_bank(&NAGA_V3_PRO).unwrap().assigned, vec![1, 3, 4]);
+        assert_eq!(create_user_bank(&NAGA_V3_PRO).unwrap().assigned, vec![1, 3, 4, 5]);
+        assert!(create_user_bank(&NAGA_V3_PRO).is_err(), "all 5 slots full");
+
+        // Deleting the currently active user bank switches safely to another bank first.
+        fake::with(|m| m.active_bank = 3);
+        let after_del = delete_user_bank(&NAGA_V3_PRO, 3, dir.path()).unwrap();
+        assert_eq!(after_del.assigned, vec![1, 4, 5]);
+        assert_ne!(after_del.active, 3, "active bank switched before deletion");
+
+        // Deleting a non-assigned slot fails cleanly.
+        assert!(delete_user_bank(&NAGA_V3_PRO, 3, dir.path()).is_err());
+    }
+
+    #[test]
+    fn flush_bank_store_now_verifies_hybrid_banks_and_reconciles() {
+        use crate::mouse_memory::fake;
+        let _v3 = V3_GLOBAL_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (config, _default_id, game_id) = hybrid_test_config();
+        let game = config.profiles.iter().find(|p| p.id == game_id).unwrap().clone();
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        fake::set_present_models(vec![&NAGA_V3_PRO]);
+        let dir = tempfile::tempdir().unwrap();
+        let index = NAGA_V3_PRO.catalog_index();
+
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let (sidearm, _base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
+        select_bank(&device, sidearm).unwrap();
+        drop(device);
+
+        SIDEARM_BANK[index].store(sidearm, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(sidearm, Ordering::Release);
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+        STORED[index].store(0, Ordering::Release);
+        OFFLINE[index].store(0, Ordering::Release);
+        RELEASED[index].store(false, Ordering::Release);
+        INPUT_TEST_MODE.store(false, Ordering::Release);
+        ACTIVE[index].store(false, Ordering::Release);
+        *DESIRED_PROFILE.lock().unwrap() = Some(DesiredProfile {
+            revision: next_profile_revision(),
+            profile: Some(game),
+            config: config.clone(),
+        });
+
+        flush_bank_store_now(&NAGA_V3_PRO, &config, dir.path()).unwrap();
+        assert_ne!(VERIFIED_HYBRID_BANKS[index].load(Ordering::Acquire) & (1u8 << 2), 0, "hybrid bank 2 verified");
+        assert_ne!(STORED[index].load(Ordering::Acquire), 0, "stored fingerprint recorded");
+        fake::with(|m| assert_eq!(m.active_bank, 2, "desired hybrid profile reconciled immediately"));
+
+        // Cleanup global state.
+        *DESIRED_PROFILE.lock().unwrap() = None;
+        SIDEARM_BANK[index].store(0, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(0, Ordering::Release);
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+        STORED[index].store(0, Ordering::Release);
+    }
+
+    #[test]
+    fn delete_and_flush_protect_clean_offline_bank_manual_offline_and_unlinked_backup() {
+        use crate::mouse_memory::fake;
+        let _v3 = V3_GLOBAL_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (config, _default_id, _game_id) = hybrid_test_config();
+        let (mouse, targets) = sidearm_bank_mouse();
+        let _fake = fake::install(mouse);
+        fake::set_present_models(vec![&NAGA_V3_PRO]);
+        let dir = tempfile::tempdir().unwrap();
+        let index = NAGA_V3_PRO.catalog_index();
+
+        let device = VendorDevice::test_handle(&NAGA_V3_PRO, 0x00e8, V3_PATH);
+        let (sidearm, base) = claim_sidearm_bank(&device, &config, &targets, dir.path()).unwrap().unwrap();
+        mark_in_sidearm_bank(dir.path(), &NAGA_V3_PRO, sidearm, base);
+        let offline = crate::mouse_offline::offline_profile_id(&config, None);
+        STORED[index].store(0, Ordering::Release);
+        store_banks(&device, &config, &NAGA_V3_PRO, &offline, dir.path(), false).unwrap();
+        drop(device);
+
+        // Bank 1 is the ONLY clean offline bank while bank 2 holds hybrid Sidearm signals -> MUST refuse deleting bank 1!
+        assert!(delete_user_bank(&NAGA_V3_PRO, 1, dir.path()).is_err(), "must not delete last clean offline bank");
+
+        // Deleting a clean bank while in manual offline mode never overwrites ACTIVE_LIVE_BANK and updates marker.base!
+        let _ = create_user_bank(&NAGA_V3_PRO).unwrap(); // creates clean bank 4
+        SIDEARM_BANK[index].store(sidearm, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(sidearm, Ordering::Release);
+        OFFLINE[index].store(sidearm, Ordering::Release);
+        RELEASED[index].store(false, Ordering::Release);
+        fake::with(|m| m.active_bank = 1);
+        let after = delete_user_bank(&NAGA_V3_PRO, 1, dir.path()).unwrap();
+        assert_eq!(after.active, 4, "offline active bank switches to remaining clean bank 4");
+        assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), sidearm, "manual offline mode preserves ACTIVE_LIVE_BANK");
+        assert_eq!(read_sidearm_bank_marker(dir.path(), &NAGA_V3_PRO).base, Some(4), "marker.base updated to clean bank 4");
+
+        // flush_bank_store_now refuses during manual offline mode.
+        assert!(flush_bank_store_now(&NAGA_V3_PRO, &config, dir.path()).is_err());
+
+        // On live-map path (ACTIVE=true, SIDEARM_BANK=0), flush refuses when active unlinked bank still has a rollback backup.
+        OFFLINE[index].store(0, Ordering::Release);
+        SIDEARM_BANK[index].store(0, Ordering::Release);
+        ACTIVE[index].store(true, Ordering::Release);
+        fake::with(|m| m.active_bank = 4);
+        std::fs::write(bank_backup(dir.path(), &NAGA_V3_PRO, 4), "{}").unwrap();
+        assert!(flush_bank_store_now(&NAGA_V3_PRO, &config, dir.path()).is_err(), "unlinked active bank backup guarded");
+
+        // Cleanup global state.
+        ACTIVE[index].store(false, Ordering::Release);
+        SIDEARM_BANK[index].store(0, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(0, Ordering::Release);
+        VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+        STORED[index].store(0, Ordering::Release);
     }
 }

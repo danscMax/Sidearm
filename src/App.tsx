@@ -17,6 +17,7 @@ import { useOfflinePreview } from "./hooks/useOfflinePreview";
 import { error as logError } from "@tauri-apps/plugin-log";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./App.css";
+import type { OfflinePayload } from "./lib/offline-suggestions";
 import { ActionPickerModal } from "./components/ActionPickerModal";
 import { CommandPalette, type RecentPaletteItem } from "./components/CommandPalette";
 import { ShortcutHelp } from "./components/ShortcutHelp";
@@ -620,6 +621,7 @@ function App() {
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");
   const [actionPickerOpen, setActionPickerOpen] = useState(false);
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
+  const [actionPickerSuggestion, setActionPickerSuggestion] = useState<OfflinePayload | null>(null);
   // Which press pattern of the control the picker edits; each has its own binding.
   const [actionPickerGesture, setActionPickerGesture] = useState<Gesture>("press");
   // The menu item the picker's menu editor opens on (popup: right click → Edit).
@@ -1372,6 +1374,7 @@ function App() {
                 setMultiSelectedControlIds={setMultiSelectedControlIds}
                 setActionPickerBindingId={setActionPickerBindingId}
                 setActionPickerOpen={setActionPickerOpen}
+                setActionPickerSuggestion={setActionPickerSuggestion}
                 executionCounts={runtime.executionCounts}
                 executionHistory={runtime.executionHistory}
                 throttledControlIds={runtime.throttledControlIds}
@@ -1461,6 +1464,7 @@ function App() {
           key={`${effectiveProfileId}:${selectedLayer}:${selectedControlId}:${actionPickerBindingId ?? ""}:${menuFocusItemId ?? ""}`}
           offlineControl={offlinePreview?.controls.find((control) => control.controlId === selectedControlId
             && control.layer === (isOfflineLayer(selectedLayer) ? selectedLayer : selectedLayer === "hypershift" ? "offlineHypershift" : "offline"))}
+          initialOfflineSuggestion={actionPickerSuggestion}
           focusMenuItemId={menuFocusItemId}
           config={activeConfig}
           bindingId={
@@ -1486,6 +1490,7 @@ function App() {
             startTransition(() => {
               setActionPickerOpen(false);
               setActionPickerBindingId(null);
+              setActionPickerSuggestion(null);
               setActionPickerGesture("press");
               setMenuFocusItemId(undefined);
             });
@@ -1493,6 +1498,7 @@ function App() {
           onCancel={() => {
             setActionPickerOpen(false);
             setActionPickerBindingId(null);
+            setActionPickerSuggestion(null);
             setActionPickerGesture("press");
             setMenuFocusItemId(undefined);
           }}

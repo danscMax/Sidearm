@@ -65,6 +65,7 @@ import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
 import { DeviceCards } from "./DeviceCards";
 import { MouseWorkspace } from "./MouseWorkspace";
+import type { OfflinePayload } from "../lib/offline-suggestions";
 import { OfflineFixPanel } from "./OfflineFixPanel";
 import { PressStats } from "./PressStats";
 import { PillTrack } from "./PillTrack";
@@ -100,7 +101,7 @@ export interface ProfilesWorkspaceProps {
   lastCapture: WindowCaptureResult | null;
   captureDelayMs: number;
   viewState: ViewState;
-  updateDraft: (updateConfig: (config: AppConfig) => AppConfig) => void;
+  updateDraft: (updateConfig: (config: AppConfig) => AppConfig, options?: { immediate?: boolean }) => void;
   setCaptureDelayMs: (ms: number) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   handleCaptureActiveWindow: () => Promise<void>;
@@ -117,6 +118,7 @@ export interface ProfilesWorkspaceProps {
   setMultiSelectedControlIds: (ids: Set<ControlId> | ((prev: Set<ControlId>) => Set<ControlId>)) => void;
   setActionPickerBindingId: (id: string | null) => void;
   setActionPickerOpen: (open: boolean) => void;
+  setActionPickerSuggestion?: (payload: OfflinePayload | null) => void;
   executionCounts?: Map<string, number>;
   executionHistory?: Map<string, ExecutionRecord[]>;
   throttledControlIds?: Set<string>;
@@ -174,6 +176,7 @@ export function ProfilesWorkspace({
   setMultiSelectedControlIds,
   setActionPickerBindingId,
   setActionPickerOpen,
+  setActionPickerSuggestion,
   executionCounts,
   executionHistory,
   throttledControlIds,
@@ -219,6 +222,7 @@ export function ProfilesWorkspace({
     setSelectedControlId,
     setActionPickerBindingId,
     setActionPickerOpen,
+    setActionPickerSuggestion,
   });
 
   // Binding count per profile for the rule cards — a per-card
@@ -427,6 +431,10 @@ export function ProfilesWorkspace({
   >(null);
   const [bindingSearch, setBindingSearch] = useState("");
   const [searchAllProfiles, setSearchAllProfiles] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "inMouse" | "sidearmOnly" | "own" | "silent">("all");
+  useEffect(() => {
+    setStatusFilter("all");
+  }, [offlineView, activeDevice?.id]);
   // "Swap with…": the button whose assignments trade places with the next one clicked.
   const [swapFrom, setSwapFrom] = useState<Slot | null>(null);
   // "Copy assignments…": the layer it starts from, null = closed.
@@ -521,18 +529,24 @@ export function ProfilesWorkspace({
   const handleAcceptConflict = (key: string) => updateDraft((c) => acceptConflict(c, key));
 
   const searchQuery = bindingSearch.trim();
+  const hasStatusFilter = statusFilter !== "all" && Boolean(activeDevice?.builtin);
   const matchedControlIds = useMemo(() => {
-    if (!searchQuery) return null;
+    if (!searchQuery && !hasStatusFilter) return null;
     const ids = new Set<ControlId>();
     for (const section of familySections) {
       for (const entry of section.entries) {
-        if (bindingMatchesQuery(entry.binding, entry.action, searchQuery)) {
-          ids.add(entry.control.id);
+        if (searchQuery && !bindingMatchesQuery(entry.binding, entry.action, searchQuery)) continue;
+        if (hasStatusFilter) {
+          if (statusFilter === "inMouse" && !entry.inMouse) continue;
+          if (statusFilter === "sidearmOnly" && !entry.sidearmOnly) continue;
+          if (statusFilter === "own" && entry.offline?.kind !== "own") continue;
+          if (statusFilter === "silent" && entry.offline?.kind !== "silent") continue;
         }
+        ids.add(entry.control.id);
       }
     }
     return ids;
-  }, [familySections, searchQuery]);
+  }, [familySections, searchQuery, hasStatusFilter, statusFilter]);
 
   // Cross-profile search: scan every binding in the config (bindingMatchesQuery
   // is profile-agnostic) so the user can find a shortcut wherever it's bound.
@@ -1009,6 +1023,32 @@ export function ProfilesWorkspace({
         >
           {t("profile.searchAllProfiles")}
         </button>
+        {activeDevice?.builtin && !searchAllProfiles ? (
+          <div className="profiles-workspace__filter-chips" role="group" aria-label={t("profile.filterLabel")}>
+            {(offlineView
+              ? [
+                  { key: "all", label: t("profile.filterAll") },
+                  { key: "own", label: t("profile.filterOwn") },
+                  { key: "silent", label: t("profile.filterSilent") },
+                ]
+              : [
+                  { key: "all", label: t("profile.filterAll") },
+                  { key: "inMouse", label: t("profile.filterInMouse") },
+                  { key: "sidearmOnly", label: t("profile.filterSidearmOnly") },
+                ]
+            ).map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                className={`action-button action-button--small${statusFilter === chip.key ? " action-button--active" : ""}`}
+                aria-pressed={statusFilter === chip.key}
+                onClick={() => setStatusFilter(chip.key as typeof statusFilter)}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {writeTarget ? (
@@ -1048,10 +1088,10 @@ export function ProfilesWorkspace({
             )
           }
           onApplyConfig={updateDraft}
-          onEditControl={(controlId, layer) => {
+          onEditControl={(controlId, layer, initialSuggestion) => {
             if (selectedLayer !== layer) onSelectLayer(layer);
             const existing = findBinding(activeConfig, effectiveProfileId, layer, controlId) ?? null;
-            handleOpenActionPicker(controlId, existing, layer);
+            handleOpenActionPicker(controlId, existing, layer, initialSuggestion ?? null);
           }}
           onToast={showToast}
         />

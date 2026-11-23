@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import i18n from "../i18n";
 import { makeConfig } from "./test-fixtures";
-import { applyAllOfflineSuggestions, applyOfflineSuggestion, buildOfflineFixPlan } from "./offline-suggestions";
+import {
+  applyAllOfflineSuggestions,
+  applyOfflineSuggestion,
+  buildOfflineFixPlan,
+  copyOfflineLayerFromFallback,
+  resetAllOfflineOverrides,
+} from "./offline-suggestions";
 import type { OfflinePreview } from "./onboard-mapping";
 import { findBinding } from "./config-editing";
 
@@ -105,9 +111,19 @@ describe("offline-suggestions", () => {
 
     const plan = buildOfflineFixPlan(config, "p2", "razer-naga", preview, t);
     expect(plan.items).toHaveLength(1);
+    // Standard fallback ("Delete") is suppressed when better suggestions (Main + hold) already exist.
     expect(plan.items[0].suggestions.map((s) => s.payload)).toEqual([
       { key: "L", ctrl: true, shift: false, alt: false, win: false },
       { key: "V", ctrl: true, shift: false, alt: false, win: false },
+    ]);
+
+    // When neither Main nor hold offers a replacement, Standard fallback IS still offered.
+    const stdOnlyConfig = {
+      ...config,
+      bindings: config.bindings.filter((b) => b.id === "b_p2_std" || b.id === "b_p2_hs"),
+    };
+    const stdOnlyPlan = buildOfflineFixPlan(stdOnlyConfig, "p2", "razer-naga", preview, t);
+    expect(stdOnlyPlan.items[0].suggestions.map((s) => s.payload)).toEqual([
       { key: "Delete", ctrl: false, shift: false, alt: false, win: false },
     ]);
 
@@ -181,5 +197,49 @@ describe("offline-suggestions", () => {
     expect(plan.items[0].controlId).toBe("mouse_right");
     expect(plan.items[0].suggestions.map((s) => s.autoApply)).toEqual([false, false]);
     expect(applyAllOfflineSuggestions(config, "p1", plan.items).applied).toBe(0);
+  });
+
+  it("copies playable offline replacements from fallback profile and resets own overrides", () => {
+    const config = makeConfig({
+      actions: [
+        { id: "a_main", type: "shortcut", displayName: "Ctrl+K", payload: { key: "K", ctrl: true, shift: false, alt: false, win: false } },
+        { id: "a_phrase", type: "textSnippet", displayName: "Hello", payload: { source: "inline", text: "Hello world", pasteMode: "sendText", tags: [] } },
+      ],
+      bindings: [
+        { id: "b_main", profileId: "p1", layer: "hypershift", controlId: "thumb_01", actionId: "a_main", label: "Ctrl+K", enabled: true },
+        { id: "b_p2", profileId: "p2", layer: "hypershift", controlId: "thumb_01", actionId: "a_phrase", label: "Hello", enabled: true },
+      ],
+    });
+    const preview: OfflinePreview = {
+      target: { state: "written" },
+      controls: [
+        { controlId: "thumb_01", layer: "offlineHypershift", kind: "silent", actionId: "a_phrase", reason: "actionType", editable: true },
+      ],
+    };
+    const plan = buildOfflineFixPlan(config, "p2", "razer-naga", preview, t);
+    const { config: copiedCfg, copied } = copyOfflineLayerFromFallback(config, "p2", plan.items);
+    expect(copied).toBe(1);
+    expect(findBinding(copiedCfg, "p2", "offlineHypershift", "thumb_01")).toBeTruthy();
+
+    const { config: resetCfg, removed } = resetAllOfflineOverrides(copiedCfg, "p2", "razer-naga");
+    expect(removed).toBe(1);
+    expect(findBinding(resetCfg, "p2", "offlineHypershift", "thumb_01")).toBeNull();
+
+    // Disabled offline override in fallback profile falls through to live Standard layer on offlineHypershift.
+    const disabledOfflineInMain = makeConfig({
+      actions: [
+        { id: "a_std", type: "shortcut", displayName: "Ctrl+S", payload: { key: "S", ctrl: true, shift: false, alt: false, win: false } },
+        { id: "a_phrase", type: "textSnippet", displayName: "Hello", payload: { source: "inline", text: "Hello world", pasteMode: "sendText", tags: [] } },
+      ],
+      bindings: [
+        { id: "b_main_off_dis", profileId: "p1", layer: "offlineHypershift", controlId: "thumb_01", actionId: "a_std", label: "Off", enabled: false },
+        { id: "b_main_std", profileId: "p1", layer: "standard", controlId: "thumb_01", actionId: "a_std", label: "Ctrl+S", enabled: true },
+        { id: "b_p2_hs", profileId: "p2", layer: "hypershift", controlId: "thumb_01", actionId: "a_phrase", label: "Hello", enabled: true },
+      ],
+    });
+    const fallPlan = buildOfflineFixPlan(disabledOfflineInMain, "p2", "razer-naga", preview, t);
+    const fallCopy = copyOfflineLayerFromFallback(disabledOfflineInMain, "p2", fallPlan.items);
+    expect(fallCopy.copied).toBe(1);
+    expect(findBinding(fallCopy.config, "p2", "offlineHypershift", "thumb_01")).toBeTruthy();
   });
 });

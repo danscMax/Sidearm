@@ -4,6 +4,9 @@ import { OFFLINE_PROFILE_ACTIVE, type AppConfig, type MouseOverrides, type Profi
 import { uiText } from "../lib/ui-text";
 import { setProfileDeviceSlot, setProfileMouse } from "../lib/config-editing";
 import {
+  createOnboardBank,
+  deleteOnboardBank,
+  flushOnboardBanks,
   getDeviceReport,
   getMouseSettings,
   getNativeModel,
@@ -18,7 +21,14 @@ import {
   setMouseDpi,
   setMousePollRate,
 } from "../lib/backend";
-import { summarizeProfileHardwarePlayability, type MouseSettings as MouseSettingsState, type MouseStatusKind, type NativeModelInfo, type OnboardBanks } from "../lib/onboard-mapping";
+import {
+  evaluateHybridBankStatus,
+  summarizeProfileHardwarePlayability,
+  type MouseSettings as MouseSettingsState,
+  type MouseStatusKind,
+  type NativeModelInfo,
+  type OnboardBanks,
+} from "../lib/onboard-mapping";
 import { PillTrack } from "./PillTrack";
 import { dpiStageChoices, dpiStagesForValue } from "../lib/dpi-stages";
 import { listenActionExecutionEvent } from "../lib/backend";
@@ -39,7 +49,7 @@ export interface MouseWorkspaceProps {
   activeProfile: Profile | null;
   /** The profile the runtime applies now: its edits reach the mouse at once. */
   runtimeProfileId: string | null;
-  updateDraft: (updater: (config: AppConfig) => AppConfig) => void;
+  updateDraft: (updater: (config: AppConfig) => AppConfig, options?: { immediate?: boolean }) => void;
   /** Active mouse-path states (`mouse_status`), shown as warnings on top. */
   mouseStates: MouseStatusKind[];
 }
@@ -93,10 +103,13 @@ export function MouseWorkspace({
   const target = deviceId;
   const targetRef = useRef(target);
   const [banks, setBanks] = useState<OnboardBanks | null>(null);
-  /** The slot Sidearm keeps in the mouse; "Return slot" asks once more before it goes. */
+  /** The slot Sidearm keeps in the mouse; "Free slot" asks once more before it goes. */
   const [sidearmBank, setSidearmBank] = useState<number | null>(null);
   const [releaseStep, setReleaseStep] = useState<"idle" | "confirm" | "busy">("idle");
   const [releaseError, setReleaseError] = useState<string | null>(null);
+  const [slotActionBusy, setSlotActionBusy] = useState(false);
+  const [confirmDeleteBank, setConfirmDeleteBank] = useState<number | null>(null);
+  const [flushState, setFlushState] = useState<"idle" | "busy" | "done">("idle");
   const [banksVersion, setBanksVersion] = useState(0);
 
   async function run(request: (deviceId?: string) => Promise<MouseSettingsState>, writing = false) {
@@ -189,9 +202,15 @@ export function MouseWorkspace({
     refresh();
   }, [target]);
 
+  // Clear cached bank inventory only when switching device or disconnecting;
+  // background refreshes keep the last known slots to avoid flashing "Connect the mouse".
   useEffect(() => {
     setBanks(null);
     setSidearmBank(null);
+    setFlushState("idle");
+  }, [model?.deviceId, model?.banks, model?.connected]);
+
+  useEffect(() => {
     if (!model?.banks || !model.connected) return;
     let current = true;
     void getOnboardBanks(model.deviceId).then((next) => { if (current) setBanks(next); }, () => {});
@@ -199,13 +218,102 @@ export function MouseWorkspace({
     return () => { current = false; };
   }, [model?.deviceId, model?.banks, model?.connected, banksVersion]);
 
+  function notifyBanksChanged() {
+    window.dispatchEvent(new Event("sidearm:banks-changed"));
+  }
+
   function releaseSlot(deviceId: string) {
+    if (flushState === "busy" || slotActionBusy) return;
     if (releaseStep === "idle") { setReleaseStep("confirm"); return; }
     setReleaseStep("busy");
     setReleaseError(null);
     void releaseSidearmBank(deviceId).then(
-      () => { setReleaseStep("idle"); setBanksVersion((v) => v + 1); },
-      (e: unknown) => { setReleaseStep("idle"); setReleaseError(normalizeCommandError(e).message); },
+      () => {
+        if (!lifecycle.current.alive) return;
+        setReleaseStep("idle");
+        setFlushState("idle");
+        setBanksVersion((v) => v + 1);
+        notifyBanksChanged();
+        onWritten?.();
+      },
+      (e: unknown) => {
+        if (!lifecycle.current.alive) return;
+        setReleaseStep("idle");
+        setReleaseError(normalizeCommandError(e).message);
+      },
+    );
+  }
+
+  function handleCreateSlot(deviceId: string) {
+    if (slotActionBusy || flushState === "busy") return;
+    setSlotActionBusy(true);
+    setConfirmDeleteBank(null);
+    setReleaseError(null);
+    void createOnboardBank(deviceId).then(
+      (next) => {
+        if (!lifecycle.current.alive) return;
+        setBanks(next);
+        setFlushState("idle");
+        setSlotActionBusy(false);
+        setBanksVersion((v) => v + 1);
+        notifyBanksChanged();
+        onWritten?.();
+      },
+      (e: unknown) => {
+        if (!lifecycle.current.alive) return;
+        setSlotActionBusy(false);
+        setReleaseError(normalizeCommandError(e).message);
+      },
+    );
+  }
+
+  function handleDeleteSlot(deviceId: string, bank: number, holderId?: string) {
+    if (slotActionBusy || flushState === "busy") return;
+    if (confirmDeleteBank !== bank) {
+      setConfirmDeleteBank(bank);
+      return;
+    }
+    setConfirmDeleteBank(null);
+    setSlotActionBusy(true);
+    setReleaseError(null);
+    void deleteOnboardBank(deviceId, bank).then(
+      (next) => {
+        if (!lifecycle.current.alive) return;
+        if (holderId) {
+          updateDraft((config) => setProfileDeviceSlot(config, holderId, deviceId, undefined), { immediate: true });
+        }
+        setBanks(next);
+        setFlushState("idle");
+        setSlotActionBusy(false);
+        setBanksVersion((v) => v + 1);
+        notifyBanksChanged();
+        onWritten?.();
+      },
+      (e: unknown) => {
+        if (!lifecycle.current.alive) return;
+        setSlotActionBusy(false);
+        setReleaseError(normalizeCommandError(e).message);
+      },
+    );
+  }
+
+  function handleFlushBanks(deviceId: string) {
+    if (flushState === "busy" || slotActionBusy || releaseStep === "busy") return;
+    setFlushState("busy");
+    setReleaseError(null);
+    void flushOnboardBanks(deviceId, activeConfig).then(
+      () => {
+        if (!lifecycle.current.alive) return;
+        setFlushState("done");
+        setBanksVersion((v) => v + 1);
+        notifyBanksChanged();
+        onWritten?.();
+      },
+      (e: unknown) => {
+        if (!lifecycle.current.alive) return;
+        setFlushState("idle");
+        setReleaseError(normalizeCommandError(e).message);
+      },
     );
   }
 
@@ -333,47 +441,174 @@ export function MouseWorkspace({
       && dedicatedOfflineProfile.deviceSlots?.[model.deviceId] !== undefined
       && dedicatedOfflineProfile.deviceMouse?.[model.deviceId]?.hardwareBank,
     );
+    const MAX_SLOTS = 5;
+    const usedSlotsCount = banks ? banks.assigned.length + (sidearmBank !== null ? 1 : 0) : 0;
+    const canAddSlot = banks !== null && usedSlotsCount < MAX_SLOTS;
+    const canDeleteSlot = banks !== null && banks.assigned.length > 1;
+    const linkedHybridCount = banks && model
+      ? banks.assigned.filter((bank) => {
+          const holder = profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === bank);
+          return Boolean(holder?.enabled && holder.id !== dedicatedOfflineId && holder.deviceMouse?.[model.deviceId]?.hardwareBank);
+        }).length
+      : 0;
+    const allUserBanksHybrid = banks !== null && banks.assigned.length > 0 && linkedHybridCount >= banks.assigned.length;
+
     return (
       <div className="settings-shell__content">
       {activeProfile && memoryCounts ? (
         <section className="settings-section" aria-label={t("offline.memorySummaryTitle", { name: activeProfile.name })}>
-          <SettingRow
-            title={t("offline.memorySummaryTitle", { name: activeProfile.name })}
-            hint={t("offline.memorySummary", memoryCounts)}
-          />
+          <SettingRow title={t("offline.memorySummaryTitle", { name: activeProfile.name })}>
+            <div className="memory-summary__pills">
+              <span className="offline-fix__meta-pill offline-fix__meta-pill--accent">
+                {t("offline.memoryInMousePill", { count: memoryCounts.inMouse })}
+              </span>
+              <span className="offline-fix__meta-pill">
+                {t("offline.memorySidearmPill", { count: memoryCounts.sidearmOnly })}
+              </span>
+            </div>
+          </SettingRow>
         </section>
       ) : null}
       {model?.banks && model.connected ? (
         <section className="settings-section" aria-label={t("mouse.slotsHeader")}>
           <SettingRow title={t("mouse.slotsHeader")} hint={t("mouse.slotsHelp", { model: model.name })} />
+          {banks !== null ? (
+            <div className="memory-slots__toolbar">
+              <span className="memory-slots__count">
+                {t("mouse.slotsUsedCount", { used: usedSlotsCount, max: MAX_SLOTS })}
+              </span>
+              <div className="memory-slots__actions">
+                <button
+                  type="button"
+                  className="action-button action-button--secondary action-button--small"
+                  disabled={!canAddSlot || slotActionBusy || flushState === "busy"}
+                  title={!canAddSlot ? t("mouse.slotsFullHint", { max: MAX_SLOTS }) : undefined}
+                  onClick={() => handleCreateSlot(model.deviceId)}
+                >
+                  {t("mouse.slotAdd")}
+                </button>
+                <button
+                  type="button"
+                  className="action-button action-button--small"
+                  disabled={flushState === "busy" || slotActionBusy}
+                  onClick={() => handleFlushBanks(model.deviceId)}
+                >
+                  {flushState === "busy"
+                    ? t("mouse.slotsWriting")
+                    : flushState === "done"
+                    ? t("mouse.slotsWrittenNow")
+                    : t("mouse.slotsWriteNow")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           {banks === null ? <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p> : banks.assigned.map((bank) => {
             const holder = profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === bank);
             const isDedicatedOffline = holder?.id === dedicatedOfflineId;
             const hardwareBankOn = Boolean(holder && !isDedicatedOffline && holder.deviceMouse?.[model.deviceId]?.hardwareBank);
+            const hybridStatus = holder
+              ? evaluateHybridBankStatus(activeConfig, holder.id, model.deviceId, {
+                  isDedicatedOffline,
+                  userBankCount: banks.assigned.length,
+                  consumerSignals: model.consumerSignals,
+                  allUserBanksHybrid,
+                })
+              : null;
+            const hybridStatusText = (() => {
+              if (!hybridStatus) return null;
+              if (isDedicatedOffline) return null;
+              if (hardwareBankOn) {
+                if (hybridStatus.blocker === "singleUserBank") return { variant: "warn" as const, text: t("mouse.hardwareBankNeedSecondSlot") };
+                if (hybridStatus.blocker === "keySignalsMode") return { variant: "warn" as const, text: t("mouse.hardwareBankNeedConsumer") };
+                if (hybridStatus.blocker === "hs2Trigger") return { variant: "warn" as const, text: t("mouse.hardwareBankHs2Blocker") };
+                if (hybridStatus.blocker === "noNativeKeys") return { variant: "muted" as const, text: t("mouse.hardwareBankZeroNative") };
+                return {
+                  variant: "ok" as const,
+                  text: t("mouse.hardwareBankActiveSummary", {
+                    native: hybridStatus.nativeCount,
+                    sidearm: hybridStatus.sidearmCount,
+                  }),
+                };
+              }
+              if (hybridStatus.blocker === "hs2Trigger") {
+                return { variant: "muted" as const, text: t("mouse.hardwareBankHs2Blocker") };
+              }
+              if (hybridStatus.blocker === "singleUserBank") {
+                return { variant: "muted" as const, text: t("mouse.hardwareBankNeedSecondSlot") };
+              }
+              if (hybridStatus.nativeCount > 0) {
+                return {
+                  variant: "muted" as const,
+                  text: t("mouse.hardwareBankReadySummary", { count: hybridStatus.nativeCount }),
+                };
+              }
+              return null;
+            })();
+            const isActiveBank = banks.active === bank;
+            const confirmingDelete = confirmDeleteBank === bank;
             return (
               <Fragment key={bank}>
-                <SettingRow sub title={t("mouse.slotRow", { n: bank })}
-                  hint={banks.active === bank ? t("mouse.slotSelected") : undefined}>
-                  <PillTrack
-                    items={[{ key: "", label: t("mouse.slotKeep") },
-                      ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
-                    active={holder?.id ?? ""}
-                    onSelect={(profileId) => updateDraft((config) => profileId
-                      ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
-                      : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config)}
-                  />
+                <SettingRow
+                  sub
+                  title={
+                    <span className="memory-slot__title">
+                      <span className="memory-slot__title-main">
+                        <span>{t("mouse.slotRow", { n: bank })}</span>
+                        {isActiveBank ? (
+                          <span className="memory-slot__active-badge">{t("mouse.slotActiveBadge")}</span>
+                        ) : null}
+                      </span>
+                      {canDeleteSlot ? (
+                        <button
+                          type="button"
+                          className={`action-button action-button--small${confirmingDelete ? " action-button--danger" : " action-button--secondary"}`}
+                          disabled={slotActionBusy || flushState === "busy"}
+                          onClick={() => handleDeleteSlot(model.deviceId, bank, holder?.id)}
+                          onBlur={() => { if (confirmDeleteBank === bank) setConfirmDeleteBank(null); }}
+                        >
+                          {confirmingDelete ? t("mouse.slotDeleteConfirm") : t("mouse.slotDelete")}
+                        </button>
+                      ) : null}
+                    </span>
+                  }
+                >
+                  <div className="memory-slot__controls">
+                    <PillTrack
+                      items={[{ key: "", label: t("mouse.slotKeep") },
+                        ...profiles.map((profile) => ({ key: profile.id, label: profile.name }))]}
+                      active={holder?.id ?? ""}
+                      onSelect={(profileId) => {
+                        setFlushState("idle");
+                        updateDraft((config) => profileId
+                          ? setProfileDeviceSlot(config, profileId, model.deviceId, bank)
+                          : holder ? setProfileDeviceSlot(config, holder.id, model.deviceId, undefined) : config, { immediate: true });
+                      }}
+                    />
+                  </div>
                 </SettingRow>
                 {holder ? (
                   <SettingRow
                     sub
                     title={t("mouse.hardwareBankTitle", { name: holder.name })}
-                    hint={isDedicatedOffline ? t("mouse.hardwareBankOfflineGuard") : t("mouse.hardwareBankHint")}
+                    hint={
+                      <span className="memory-hybrid__hint">
+                        <span>{isDedicatedOffline ? t("mouse.hardwareBankOfflineGuard") : t("mouse.hardwareBankHint")}</span>
+                        {hybridStatusText ? (
+                          <span className={`memory-hybrid__status memory-hybrid__status--${hybridStatusText.variant}`}>
+                            {hybridStatusText.text}
+                          </span>
+                        ) : null}
+                      </span>
+                    }
                   >
                     <Toggle
                       checked={hardwareBankOn}
                       disabled={isDedicatedOffline}
                       ariaLabel={t("mouse.hardwareBankTitle", { name: holder.name })}
-                      onChange={(checked) => updateDraft((config) => setProfileMouse(config, holder.id, model.deviceId, { hardwareBank: checked }))}
+                      onChange={(checked) => {
+                        setFlushState("idle");
+                        updateDraft((config) => setProfileMouse(config, holder.id, model.deviceId, { hardwareBank: checked }), { immediate: true });
+                      }}
                     />
                   </SettingRow>
                 ) : null}
@@ -381,9 +616,25 @@ export function MouseWorkspace({
             );
           })}
           {sidearmBank !== null ? (
-            <SettingRow sub title={t("mouse.sidearmSlotRow", { n: sidearmBank })} hint={t("mouse.sidearmSlotHelp")}>
-              <button type="button" className="action-button action-button--secondary action-button--small" disabled={releaseStep === "busy"}
-                onClick={() => releaseSlot(model.deviceId)}>
+            <SettingRow
+              sub
+              title={
+                <span className="memory-slot__title">
+                  <span>{t("mouse.sidearmSlotRow", { n: sidearmBank })}</span>
+                  {banks?.active === sidearmBank ? (
+                    <span className="memory-slot__active-badge">{t("mouse.slotActiveBadge")}</span>
+                  ) : null}
+                </span>
+              }
+              hint={t("mouse.sidearmSlotHelp")}
+            >
+              <button
+                type="button"
+                className="action-button action-button--secondary action-button--small"
+                disabled={releaseStep === "busy" || slotActionBusy || flushState === "busy"}
+                onClick={() => releaseSlot(model.deviceId)}
+                onBlur={() => { if (releaseStep === "confirm") setReleaseStep("idle"); }}
+              >
                 {releaseStep === "confirm" ? t("mouse.sidearmSlotConfirm") : t("mouse.sidearmSlotRelease")}
               </button>
             </SettingRow>
@@ -408,12 +659,13 @@ export function MouseWorkspace({
                 .map((profile) => ({ key: profile.id, label: profile.name })),
             ]}
             active={activeConfig.settings.offlineProfileId ?? ""}
-            onSelect={(id) =>
+            onSelect={(id) => {
+              setFlushState("idle");
               updateDraft((config) => ({
                 ...config,
                 settings: { ...config.settings, offlineProfileId: id || undefined },
-              }))
-            }
+              }), { immediate: true });
+            }}
           />
         </SettingRow>
         {offlineHardwareBankConflict && dedicatedOfflineProfile && model ? (

@@ -25,8 +25,9 @@ import {
   actionCategoryIcon,
   surfacePrimaryLabel,
   offlineAssignmentLabel,
+  offlineTargetLabel,
 } from "./labels";
-import { makeAction } from "./test-fixtures";
+import { makeAction, makeConfig } from "./test-fixtures";
 
 it.each(["own", "inherited"] as const)("labels a known native %s offline assignment without an action", (kind) => {
   expect(offlineAssignmentLabel({ kind, native: "rightClick", editable: true }, null))
@@ -346,5 +347,39 @@ describe("actionCategoryIcon", () => {
 
   it("returns dash fallback for unknown type", () => {
     expect(actionCategoryIcon("nonexistent" as never)).toBe("—");
+  });
+});
+
+describe("offlineTargetLabel", () => {
+  it("does not claim an unbound profile plays after switching banks when state is notWritten", () => {
+    const config = makeConfig();
+    const label = offlineTargetLabel(
+      {
+        state: "notWritten",
+        banks: [{ bank: 1, profileId: "p1" }],
+        playingBank: 1,
+      },
+      config,
+      "p2",
+    );
+    expect(label).toContain(config.profiles[1].name);
+    expect(label).not.toContain(i18n.t("offline.playsOther", { bank: 1, name: config.profiles[0].name }));
+    expect(label).toContain(i18n.t("offline.playsUnbound", { bank: 1, name: config.profiles[0].name }));
+  });
+
+  it("handles empty banks array and unlinked playingBank cleanly without empty slots or Unknown", () => {
+    const config = makeConfig();
+    const label = offlineTargetLabel(
+      {
+        state: "notWritten",
+        banks: [],
+        playingBank: 1,
+      },
+      config,
+      "p2",
+    );
+    expect(label).toContain(i18n.t("offline.notWrittenNoBanks", { name: config.profiles[1].name }));
+    expect(label).toContain(i18n.t("offline.playsUnboundBankOnly", { bank: 1 }));
+    expect(label).not.toContain(i18n.t("offline.unknownAction"));
   });
 });

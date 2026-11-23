@@ -10,6 +10,7 @@ import * as backend from "../lib/backend";
 
 vi.mock("../lib/backend", () => ({
   getMouseSettings: vi.fn(), getNativeModel: vi.fn(), getDeviceReport: vi.fn(), getOnboardBanks: vi.fn(),
+  createOnboardBank: vi.fn(), deleteOnboardBank: vi.fn(), flushOnboardBanks: vi.fn(),
   getSidearmBank: vi.fn(), releaseSidearmBank: vi.fn(),
   listNativeMice: vi.fn(async () => []), listenNativeMiceChanged: vi.fn(async () => () => {}),
   listenMouseBattery: vi.fn(), listenActionExecutionEvent: vi.fn(),
@@ -231,7 +232,8 @@ describe("independent mouse readings", () => {
         mouseStates={[]}
       />,
     );
-    expect(screen.getByText(i18n.t("offline.memorySummary", { inMouse: 1, sidearmOnly: 1 }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("offline.memoryInMousePill", { count: 1 }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("offline.memorySidearmPill", { count: 1 }))).toBeTruthy();
   });
 
   it("shows Hardware bank toggle on non-offline V3 slots, guards dedicated offline slot, and warns on conflict", async () => {
@@ -291,5 +293,58 @@ describe("independent mouse readings", () => {
       />,
     );
     expect(screen.getByText(i18n.t("mouse.hardwareBankOfflineConflict", { name: config.profiles[1].name }))).toBeTruthy();
+  });
+
+  it("adds and deletes V3 onboard slots and writes to mouse immediately", async () => {
+    const model = await backend.getNativeModel();
+    vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
+    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 3], active: 1 });
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(2);
+    vi.mocked(backend.createOnboardBank).mockResolvedValue({ assigned: [1, 3, 4], active: 1 });
+    vi.mocked(backend.deleteOnboardBank).mockResolvedValue({ assigned: [1], active: 1 });
+    vi.mocked(backend.flushOnboardBanks).mockResolvedValue(undefined);
+
+    const base = makeConfig();
+    const config: AppConfig = {
+      ...base,
+      profiles: [
+        { ...base.profiles[0], deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
+        { ...base.profiles[1], deviceSlots: { [NAGA_V3_DEVICE_ID]: 3 } },
+      ],
+    };
+    const updates = vi.fn();
+    render(
+      <MouseWorkspace
+        activeConfig={config}
+        deviceId={NAGA_V3_DEVICE_ID}
+        section="memory"
+        profiles={config.profiles}
+        activeProfile={config.profiles[0]}
+        runtimeProfileId="p1"
+        updateDraft={updates}
+        mouseStates={[]}
+      />,
+    );
+
+    expect(await screen.findByText(i18n.t("mouse.slotsUsedCount", { used: 3, max: 5 }))).toBeTruthy();
+    expect(screen.getByText(i18n.t("mouse.slotActiveBadge"))).toBeTruthy();
+
+    // Add slot
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotAdd") }));
+    await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID));
+
+    // Write now
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotsWriteNow") }));
+    await waitFor(() => expect(backend.flushOnboardBanks).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, config));
+    expect(await screen.findByRole("button", { name: i18n.t("mouse.slotsWrittenNow") })).toBeTruthy();
+
+    // Delete slot (2-step confirm) clears profile link in config
+    const removeButtons = screen.getAllByRole("button", { name: i18n.t("mouse.slotDelete") });
+    fireEvent.click(removeButtons[1]);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotDeleteConfirm") }));
+    await waitFor(() => expect(backend.deleteOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 3));
+    expect(updates).toHaveBeenCalled();
+    const afterDelete = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
+    expect(afterDelete.profiles[1].deviceSlots?.[NAGA_V3_DEVICE_ID]).toBeUndefined();
   });
 });

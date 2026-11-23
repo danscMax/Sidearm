@@ -177,6 +177,21 @@ export async function getOnboardBanks(deviceId: string): Promise<OnboardBanks> {
   return invoke<OnboardBanks>("get_onboard_banks", { deviceId });
 }
 
+/** Allocates a free onboard profile slot on a bank mouse and returns updated banks. */
+export async function createOnboardBank(deviceId: string): Promise<OnboardBanks> {
+  return invoke<OnboardBanks>("create_onboard_bank", { deviceId });
+}
+
+/** Removes a user onboard profile slot from a bank mouse and returns updated banks. */
+export async function deleteOnboardBank(deviceId: string, bank: number): Promise<OnboardBanks> {
+  return invoke<OnboardBanks>("delete_onboard_bank", { deviceId, bank });
+}
+
+/** Writes and verifies all planned onboard banks for a bank mouse immediately. */
+export async function flushOnboardBanks(deviceId: string, config: AppConfig): Promise<void> {
+  return invoke<void>("flush_onboard_banks", { deviceId, config });
+}
+
 /** Read-only text dump of a connected mouse for a "help verify" issue (~20 s). */
 export async function getDeviceReport(detail?: "summary" | "full", deviceId?: string): Promise<string> {
   return invoke<string>("get_device_report", { detail: detail ?? null, deviceId: deviceId ?? null });

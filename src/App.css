@@ -1668,7 +1668,9 @@ input[type="radio"] {
 }
 
 .setting-row__control {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   padding-top: 2px;
   display: flex;
   align-items: center;
@@ -7744,6 +7746,11 @@ body:has(.modal-backdrop) .toast-stack {
 .offline-fix__chip--custom {
   color: var(--c-text-muted);
   border-style: dashed;
+  align-items: center;
+}
+.offline-fix__edit-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
 }
 .offline-fix__chip-label {
   font-weight: 600;
@@ -7751,4 +7758,188 @@ body:has(.modal-backdrop) .toast-stack {
 .offline-fix__chip-src {
   color: var(--c-text-muted);
   font-size: 10px;
+}
+.offline-fix__meta-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.offline-fix__meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-pill);
+  background: var(--c-surface);
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  line-height: 1.4;
+}
+.offline-fix__meta-pill--accent {
+  border-color: var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-text-bright);
+}
+.offline-fix__btn-trigger {
+  cursor: help;
+  text-decoration: underline dotted var(--c-border-hover);
+  text-underline-offset: 3px;
+  border-radius: 3px;
+}
+.offline-fix__btn-trigger:hover,
+.offline-fix__btn-trigger:focus-visible {
+  color: var(--c-accent);
+  text-decoration-color: var(--c-accent);
+  outline: none;
+}
+
+/* ── Floating mouse-model button preview tooltip ── */
+.control-preview-popover {
+  position: fixed;
+  left: var(--popover-x, 12px);
+  top: var(--popover-y, 12px);
+  z-index: 1200;
+  width: 196px;
+  padding: 10px;
+  border: 1px solid var(--c-border-active);
+  border-radius: var(--radius-md);
+  background: var(--c-surface-elevated, var(--c-surface));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.control-preview-popover__stage {
+  position: relative;
+  width: 172px;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-sm);
+  background: var(--c-bg);
+  overflow: hidden;
+}
+.control-preview-popover__stage--bottom {
+  aspect-ratio: 300 / 420;
+  width: 132px;
+}
+.control-preview-popover__img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.control-preview-popover__marker {
+  position: absolute;
+  left: var(--dot-x, 50%);
+  top: var(--dot-y, 50%);
+  width: 16px;
+  height: 16px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: var(--c-accent);
+  border: 2px solid var(--c-bg);
+  box-shadow: 0 0 0 4px var(--c-accent-dim), 0 0 12px var(--c-accent);
+}
+.control-preview-popover__caption {
+  font-size: var(--fs-caption);
+  font-weight: 600;
+  color: var(--c-text-bright);
+  text-align: center;
+}
+
+/* ── ProfilesWorkspace quick filter chips ── */
+.profiles-workspace__filter-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+/* ── Mouse memory slot management & hybrid status ── */
+.memory-summary__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.memory-slots__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 0 4px;
+}
+.memory-slots__count {
+  font-size: var(--fs-caption);
+  color: var(--c-text-muted);
+  font-weight: 500;
+}
+.memory-slots__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.memory-slot__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+.memory-slot__title-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.memory-slot__active-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-text-bright);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+}
+.memory-slot__controls {
+  display: flex;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.memory-slot__controls .pill-track {
+  min-width: 0;
+  max-width: 100%;
+}
+.memory-hybrid__hint {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.memory-hybrid__status {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+}
+.memory-hybrid__status--ok {
+  border: 1px solid var(--c-accent);
+  background: var(--c-accent-dim);
+  color: var(--c-text-bright);
+}
+.memory-hybrid__status--warn {
+  border: 1px solid var(--c-warn, #d99b26);
+  background: rgba(217, 155, 38, 0.14);
+  color: var(--c-text-bright);
+}
+.memory-hybrid__status--muted {
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text-muted);
 }

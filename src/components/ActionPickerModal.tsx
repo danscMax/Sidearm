@@ -49,6 +49,7 @@ import {
   enterPhraseOf,
 } from "../lib/action-picker-helpers";
 import type { TriggerMode } from "../lib/config";
+import type { OfflinePayload } from "../lib/offline-suggestions";
 import { SequenceStepEditor } from "./action-picker/SequenceStepEditor";
 import { ShortcutEditor } from "./action-picker/ShortcutEditor";
 import { MouseActionEditor } from "./action-picker/MouseActionEditor";
@@ -114,6 +115,8 @@ interface PickerSnapshot {
 
 interface ActionPickerProps {
   offlineControl?: OfflineControl;
+  /** Optional suggested offline payload prefilled when opening from OfflineFixPanel. */
+  initialOfflineSuggestion?: OfflinePayload | null;
   config: AppConfig;
   bindingId: string | null;
   profileId?: string;
@@ -161,6 +164,7 @@ function ActionPicker(props: ActionPickerProps) {
 
 function PickerTab({
   offlineControl,
+  initialOfflineSuggestion,
   config,
   bindingId,
   profileId,
@@ -318,11 +322,18 @@ function PickerTab({
   const syncKey = otherMice.length > 0 && profileId && selectedLayer && controlId ? slotKey(profileId, selectedLayer, gesture, controlId) : null;
   const [pristine] = useState((): PickerSnapshot => {
     const initial = createInitialDrafts(existingAction, binding, config.profiles, config.snippetLibrary);
-    const offlineNative = offline && !existingAction && offlineControl?.native
+    const suggestion = offline && !existingAction && initialOfflineSuggestion ? initialOfflineSuggestion : null;
+    const suggestedShortcut = suggestion && "key" in suggestion ? suggestion : null;
+    const suggestedMouse = suggestion && "action" in suggestion ? suggestion : null;
+    const offlineNative = offline && !existingAction && !suggestion && offlineControl?.native
       ? (offlineControl.native as MouseActionKind)
       : null;
     const offlineCategory = existingAction?.type
-      ?? (offlineNative ? "mouseAction" : offlineControl?.kind === "preserved" ? "shortcut" : "disabled");
+      ?? (suggestedShortcut ? "shortcut"
+        : suggestedMouse ? "mouseAction"
+        : offlineNative ? "mouseAction"
+        : offlineControl?.kind === "preserved" ? "shortcut"
+        : "disabled");
     return {
       gesture,
       layer: selectedLayer,
@@ -339,8 +350,24 @@ function PickerTab({
         : !existingAction ? "native"
         : enterPhraseOf(existingAction, config.snippetLibrary) !== null ? "textSnippet"
         : ACTION_CATEGORIES.find((c) => c.actionType === existingAction.type)?.id ?? "shortcut",
-      shortcutDraft: initial.shortcut,
-      mouseDraft: offlineNative
+      shortcutDraft: suggestedShortcut
+        ? {
+            key: suggestedShortcut.key,
+            ctrl: Boolean(suggestedShortcut.ctrl),
+            shift: Boolean(suggestedShortcut.shift),
+            alt: Boolean(suggestedShortcut.alt),
+            win: Boolean(suggestedShortcut.win),
+          }
+        : initial.shortcut,
+      mouseDraft: suggestedMouse
+        ? {
+            action: suggestedMouse.action,
+            ctrl: Boolean(suggestedMouse.ctrl),
+            shift: Boolean(suggestedMouse.shift),
+            alt: Boolean(suggestedMouse.alt),
+            win: Boolean(suggestedMouse.win),
+          }
+        : offlineNative
         ? { action: offlineNative, ctrl: false, shift: false, alt: false, win: false }
         : initial.mouse,
       textDraft: initial.text,
@@ -453,6 +480,7 @@ function PickerTab({
     if (selectedLayer && isOfflineLayer(selectedLayer)) {
       if (!profileId || !controlId) return null;
       const untouchedOfflineNative = !binding
+        && !initialOfflineSuggestion
         && Boolean(offlineControl?.native)
         && effectiveCategory === "mouseAction"
         && mouseDraft.action === offlineControl?.native
@@ -680,6 +708,7 @@ function PickerTab({
           actionId: draftAction.id,
           enabled: true,
           triggerMode: gesture === "press" ? triggerModeDraft : gesture,
+          throttleMs: throttleDraft > 0 ? throttleDraft : undefined,
         };
         return classifyHardwarePlayability(config, profileId, selectedLayer, controlId, draftBinding, draftAction, {
           checkHs2: Boolean(layout?.hypershift2Triggers?.length),

@@ -57,9 +57,21 @@ describe("OfflineFixPanel", () => {
       key: "/", ctrl: false, shift: true, alt: false, win: false,
     });
 
-    // Clicking Custom opens the picker for that exact button and offline layer
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("offlineFix.chooseCustom") }));
-    expect(onEdit).toHaveBeenCalledWith("thumb_01", "offlineHypershift");
+    // Clicking Edit opens the picker for that exact button and offline layer with top suggestion prefilled
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("offlineFix.edit") }));
+    expect(onEdit).toHaveBeenCalledWith("thumb_01", "offlineHypershift", {
+      key: "/", ctrl: false, shift: true, alt: false, win: false,
+    });
+
+    // Hovering the button name previews the mouse model with highlighted marker, and Escape dismisses it
+    const trigger = document.querySelector(".offline-fix__btn-trigger") as HTMLElement;
+    expect(trigger).toBeTruthy();
+    fireEvent.mouseEnter(trigger);
+    expect(document.querySelector(".control-preview-popover")).toBeTruthy();
+    expect(document.querySelector(".control-preview-popover__marker")).toBeTruthy();
+    expect(trigger.getAttribute("aria-describedby")).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.querySelector(".control-preview-popover")).toBeNull();
   });
 
   it("shows clean status when every button already plays without Sidearm", () => {

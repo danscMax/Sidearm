@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Action, Binding } from "./config";
 import {
   classifyHardwarePlayability,
+  evaluateHybridBankStatus,
   isBuiltinControl,
   playsWithoutSidearm,
   summarizeProfileHardwarePlayability,
@@ -127,5 +128,33 @@ describe("classifyHardwarePlayability", () => {
       bindings: [bind({ id: "b_lp", layer: "standard", controlId: "thumb_01", triggerMode: "longPress", actionId: shortcut.id })],
     });
     expect(summarizeProfileHardwarePlayability(gestureOnly, "p1", "razer-naga")).toEqual({ inMouse: 0, sidearmOnly: 1 });
+  });
+
+  it("evaluates hybrid bank status and surfaces blockers honestly", () => {
+    const config = makeConfig({
+      actions: [shortcut, text],
+      bindings: [
+        bind({ id: "b1", layer: "standard", controlId: "thumb_01", actionId: shortcut.id }),
+        bind({ id: "b2", layer: "hypershift", controlId: "thumb_01", actionId: text.id }),
+      ],
+    });
+    expect(evaluateHybridBankStatus(config, "p1", "razer-naga", { isDedicatedOffline: true, userBankCount: 2, consumerSignals: true }))
+      .toEqual({ willActivate: false, nativeCount: 1, sidearmCount: 1, blocker: "dedicatedOffline" });
+    expect(evaluateHybridBankStatus(config, "p1", "razer-naga", { isDedicatedOffline: false, userBankCount: 1, consumerSignals: true }))
+      .toEqual({ willActivate: false, nativeCount: 1, sidearmCount: 1, blocker: "singleUserBank" });
+    expect(evaluateHybridBankStatus(config, "p1", "razer-naga", { isDedicatedOffline: false, userBankCount: 2, consumerSignals: false }))
+      .toEqual({ willActivate: false, nativeCount: 1, sidearmCount: 1, blocker: "keySignalsMode" });
+    expect(evaluateHybridBankStatus(config, "p1", "razer-naga", { isDedicatedOffline: false, userBankCount: 2, consumerSignals: true }))
+      .toEqual({ willActivate: true, nativeCount: 1, sidearmCount: 1 });
+
+    // Profile-level HyperShift 2 trigger suppresses hybrid mode (mirrors Rust hybrid_native_action).
+    const hs2Config = {
+      ...config,
+      profiles: config.profiles.map((p) => p.id === "p1" ? { ...p, hypershift2Triggers: ["mouse_4" as const] } : p),
+    };
+    expect(evaluateHybridBankStatus(hs2Config, "p1", "razer-naga", { isDedicatedOffline: false, userBankCount: 2, consumerSignals: true }))
+      .toEqual({ willActivate: false, nativeCount: 0, sidearmCount: 2, blocker: "hs2Trigger" });
+    expect(evaluateHybridBankStatus(makeConfig(), "p1", "razer-naga", { isDedicatedOffline: false, userBankCount: 2, consumerSignals: true }))
+      .toEqual({ willActivate: false, nativeCount: 0, sidearmCount: 0, blocker: "noNativeKeys" });
   });
 });

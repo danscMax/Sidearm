@@ -3849,6 +3849,69 @@ async fn release_sidearm_bank(app: AppHandle, device_id: String) -> Result<bool,
     .map_err(|e| CommandError::internal(format!("release Sidearm bank task failed: {e}")))?
 }
 
+#[cfg(target_os = "windows")]
+fn bank_command_error(msg: &str) -> CommandError {
+    if mouse_memory::is_no_response(msg)
+        || msg.contains(mouse_memory::NOT_CONNECTED)
+        || msg.contains("HID")
+    {
+        mouse_access_error(msg)
+    } else {
+        CommandError::from_ui(
+            "onboard_bank_error",
+            crate::ui_text!("mouseRead.bankError", "{reason}", reason = msg),
+        )
+    }
+}
+
+/// Allocates a free onboard profile slot on a bank mouse and returns the updated
+/// user bank inventory.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn create_onboard_bank(device_id: String) -> Result<mouse_memory::live_overlay::Banks, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = bank_model(&device_id)?;
+        mouse_memory::live_overlay::create_user_bank(model).map_err(|msg| bank_command_error(&msg))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("create onboard bank task failed: {e}")))?
+}
+
+/// Removes a user onboard profile slot from a bank mouse (never Sidearm's own or
+/// the last user slot) and returns the updated user bank inventory.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn delete_onboard_bank(app: AppHandle, device_id: String, bank: u8) -> Result<mouse_memory::live_overlay::Banks, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = bank_model(&device_id)?;
+        let config_dir = resolve_config_dir(&app)?;
+        mouse_memory::live_overlay::delete_user_bank(model, bank, &config_dir).map_err(|msg| bank_command_error(&msg))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("delete onboard bank task failed: {e}")))?
+}
+
+/// Immediately writes and verifies all planned onboard banks for a bank mouse,
+/// bypassing the 5-second background debounce.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn flush_onboard_banks(app: AppHandle, device_id: String, config: AppConfig) -> Result<(), CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = bank_model(&device_id)?;
+        if let Err(error) = config::validate_config(&config) {
+            return Err(CommandError::from_ui(
+                "config_invalid",
+                crate::ui_text!("mouseRead.bankError", "{reason}", reason = error.to_string()),
+            ));
+        }
+        let config_dir = resolve_config_dir(&app)?;
+        mouse_memory::live_overlay::flush_bank_store_now(model, &config, &config_dir)
+            .map_err(|msg| bank_command_error(&msg))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("flush onboard banks task failed: {e}")))?
+}
+
 /// The profile button took a mouse off Sidearm's bank (offline mode), or it is
 /// back: the Mouse tab's state, the tray's way back and, going offline, an OSD
 /// bubble saying where that way back is.
@@ -4978,6 +5041,9 @@ pub fn run() {
             get_native_model,
             list_native_mice,
             get_onboard_banks,
+            create_onboard_bank,
+            delete_onboard_bank,
+            flush_onboard_banks,
             back_to_sidearm_bank,
             get_sidearm_bank,
             release_sidearm_bank,

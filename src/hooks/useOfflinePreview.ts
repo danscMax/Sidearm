@@ -17,11 +17,16 @@ export function useOfflinePreview(config: AppConfig | null, profileId: string | 
       listenMouseBattery(refresh),
       listenNativeMiceChanged(refresh),
     ];
+    window.addEventListener("sidearm:banks-changed", refresh);
     for (const subscription of subscriptions) {
       void subscription.then((dispose) => { if (alive) disposers.push(dispose); else dispose(); },
         () => { if (alive) setSnapshot(null); });
     }
-    return () => { alive = false; disposers.forEach((dispose) => dispose()); };
+    return () => {
+      alive = false;
+      window.removeEventListener("sidearm:banks-changed", refresh);
+      disposers.forEach((dispose) => dispose());
+    };
   }, []);
   useEffect(() => {
     if (!config || !profileId || !deviceId) return;

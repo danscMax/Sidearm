@@ -1,5 +1,6 @@
 import type { Action, ActionType, AppConfig, Binding, ControlId, Layer, OfflineLayer } from "./config";
 import { gestureOf } from "./config-editing";
+import { deviceLayout } from "./devices";
 import { primaryKeyCode } from "./key-names";
 
 /** Mouse actions the firmware plays itself (Rust `mouse_offline::onboard_action`). */
@@ -160,6 +161,70 @@ export function summarizeProfileHardwarePlayability(
     if (!pressSlots.has(slotKey)) sidearmOnly += 1;
   }
   return { inMouse, sidearmOnly };
+}
+
+type HybridBankBlocker =
+  | "dedicatedOffline"
+  | "singleUserBank"
+  | "keySignalsMode"
+  | "hs2Trigger"
+  | "noNativeKeys";
+
+interface HybridBankStatus {
+  /** Whether hybrid mode will actually activate for this profile/slot. */
+  willActivate: boolean;
+  /** Number of Standard/HyperShift assignments that execute natively from mouse flash. */
+  nativeCount: number;
+  /** Number of Standard/HyperShift assignments that still run through Sidearm. */
+  sidearmCount: number;
+  /** Primary reason why hybrid mode will not activate. */
+  blocker?: HybridBankBlocker;
+}
+
+/** Evaluates whether Hybrid Hardware Bank mode will activate for `profileId`
+ *  on a bank mouse (`deviceId`) and returns transparent counts and blockers
+ *  matching Rust `mouse_offline::hybrid_native_action` and `live_overlay::profile_uses_hardware_bank`. */
+export function evaluateHybridBankStatus(
+  config: AppConfig,
+  profileId: string,
+  deviceId: string,
+  ctx: {
+    isDedicatedOffline: boolean;
+    userBankCount: number;
+    consumerSignals: boolean | null;
+    allUserBanksHybrid?: boolean;
+  },
+): HybridBankStatus {
+  const profile = config.profiles.find((p) => p.id === profileId);
+  const deviceControls = new Set(
+    config.physicalControls.filter((c) => c.deviceId === deviceId).map((c) => c.id),
+  );
+  const prefix = deviceLayout(deviceId)?.controlPrefix ?? "";
+  const hasProfileHs2Trigger = Boolean(
+    profile?.hypershift2Triggers?.some(
+      (trigger) => deviceControls.has(trigger) || (prefix !== "" && trigger.startsWith(prefix)),
+    ),
+  );
+  const rawCounts = summarizeProfileHardwarePlayability(config, profileId, deviceId, { checkHs2: true });
+  const counts = hasProfileHs2Trigger
+    ? { inMouse: 0, sidearmOnly: rawCounts.inMouse + rawCounts.sidearmOnly }
+    : rawCounts;
+  if (ctx.isDedicatedOffline) {
+    return { willActivate: false, nativeCount: counts.inMouse, sidearmCount: counts.sidearmOnly, blocker: "dedicatedOffline" };
+  }
+  if (ctx.userBankCount <= 1 || ctx.allUserBanksHybrid) {
+    return { willActivate: false, nativeCount: counts.inMouse, sidearmCount: counts.sidearmOnly, blocker: "singleUserBank" };
+  }
+  if (ctx.consumerSignals === false) {
+    return { willActivate: false, nativeCount: counts.inMouse, sidearmCount: counts.sidearmOnly, blocker: "keySignalsMode" };
+  }
+  if (hasProfileHs2Trigger) {
+    return { willActivate: false, nativeCount: 0, sidearmCount: counts.sidearmOnly, blocker: "hs2Trigger" };
+  }
+  if (counts.inMouse === 0) {
+    return { willActivate: false, nativeCount: 0, sidearmCount: counts.sidearmOnly, blocker: "noNativeKeys" };
+  }
+  return { willActivate: true, nativeCount: counts.inMouse, sidearmCount: counts.sidearmOnly };
 }
 
 /** Rust's firmware planner preview; the UI never derives these decisions. */

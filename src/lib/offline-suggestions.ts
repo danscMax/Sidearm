@@ -439,7 +439,11 @@ export function buildOfflineFixPlan(
 
     push(fallbackProfileSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
     push(gesturePromotionSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
-    push(standardLayerSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
+    // Only suggest copying from the same profile's Standard layer when no better
+    // replacement (from text/mouse, fallback profile, or gesture) was found.
+    if (suggestions.length === 0) {
+      push(standardLayerSuggestion(config, actionsById, profileId, entry.controlId, entry.layer, t));
+    }
 
     const controlLabel = physical
       ? displayNameForControl(physical, "i18n")
@@ -488,4 +492,60 @@ export function applyAllOfflineSuggestions(
     applied += 1;
   }
   return { config: next, applied };
+}
+
+/** Copy firmware-playable offline replacements from the fallback profile for
+ *  every control/layer in `items` that does not yet have an explicit offline override. */
+export function copyOfflineLayerFromFallback(
+  config: AppConfig,
+  profileId: string,
+  items: readonly OfflineFixItem[],
+): { config: AppConfig; copied: number } {
+  const fallbackId = config.settings.fallbackProfileId;
+  if (!fallbackId || fallbackId === profileId) {
+    return { config, copied: 0 };
+  }
+  const actionsById = new Map(config.actions.map((action) => [action.id, action]));
+  let next = config;
+  let copied = 0;
+  for (const item of items) {
+    const explicit = findBinding(next, profileId, item.layer, item.controlId);
+    if (explicit?.enabled) continue;
+    const ownOffline = findBinding(next, fallbackId, item.layer, item.controlId);
+    const liveCandidate = liveBindingAndAction(next, actionsById, fallbackId, item.controlId, item.layer);
+    const chosen = ownOffline?.enabled
+      ? { binding: ownOffline, action: actionsById.get(ownOffline.actionId) }
+      : liveCandidate;
+    if (!chosen?.action || !playsWithoutSidearm(chosen.binding, chosen.action)) continue;
+    if (chosen.action.type !== "shortcut" && chosen.action.type !== "mouseAction") continue;
+    const payload = chosen.action.payload as OfflinePayload;
+    if (!isOfflinePayloadPlayable(payload)) continue;
+    next = setOfflineAssignment(next, profileId, item.controlId, item.layer, payload);
+    copied += 1;
+  }
+  return { config: next, copied };
+}
+
+/** Remove all explicit offline (`offline` and `offlineHypershift`) overrides
+ *  for `profileId` on `deviceId`. */
+export function resetAllOfflineOverrides(
+  config: AppConfig,
+  profileId: string,
+  deviceId: string,
+): { config: AppConfig; removed: number } {
+  const deviceControls = new Set(
+    config.physicalControls.filter((c) => c.deviceId === deviceId).map((c) => c.id),
+  );
+  const targets = config.bindings.filter(
+    (b) =>
+      b.profileId === profileId
+      && (b.layer === "offline" || b.layer === "offlineHypershift")
+      && deviceControls.has(b.controlId),
+  );
+  if (targets.length === 0) return { config, removed: 0 };
+  let next = config;
+  for (const binding of targets) {
+    next = setOfflineAssignment(next, profileId, binding.controlId, binding.layer as OfflineLayer, null);
+  }
+  return { config: next, removed: targets.length };
 }

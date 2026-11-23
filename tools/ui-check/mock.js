@@ -77,6 +77,12 @@
       name: "Razer Naga", deviceId: (args && args.deviceId) || "razer-naga", dpiMin: 100, dpiMax: 30000,
       pollRates: [125, 500, 1000], verified: true, connected: false, banks: false, consumerSignals: null,
     }),
+    get_onboard_banks: () => ({ assigned: [1, 2], active: 1 }),
+    create_onboard_bank: () => ({ assigned: [1, 2, 3], active: 1 }),
+    delete_onboard_bank: ({ bank }) => ({ assigned: [1, 2, 3].filter((b) => b !== bank), active: 1 }),
+    flush_onboard_banks: () => null,
+    get_sidearm_bank: () => 4,
+    release_sidearm_bank: () => true,
   };
 
   const callbacks = new Map();

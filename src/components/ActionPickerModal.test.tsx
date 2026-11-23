@@ -816,4 +816,36 @@ describe("offline native fallback seeding", () => {
     expect(screen.getByText("?")).toBeTruthy();
     expect(screen.getByText(i18n.t("picker.offlineLiveUnsupported"))).toBeTruthy();
   });
+
+  it("prefills initialOfflineSuggestion and saves immediately when opened from OfflineFixPanel", () => {
+    const config = makeConfig();
+    const onSave = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <ActionPickerModal
+        config={config}
+        bindingId={null}
+        profileId="p1"
+        controlId="thumb_01"
+        selectedLayer="offlineHypershift"
+        offlineControl={{ controlId: "thumb_01", layer: "offlineHypershift", kind: "silent", editable: true }}
+        initialOfflineSuggestion={{ key: "L", ctrl: true, shift: false, alt: false, win: false }}
+        onSave={onSave}
+        onCancel={onCancel}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Клавиатура/ }).getAttribute("aria-current")).toBe("true");
+    // Cancel closes immediately without discard prompt if untouched
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+
+    // Save writes the suggested shortcut immediately
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    expect(onSave).toHaveBeenCalledOnce();
+    const saved = onSave.mock.calls[0][0] as AppConfig;
+    const written = findBinding(saved, "p1", "offlineHypershift", "thumb_01");
+    expect(saved.actions.find((a) => a.id === written?.actionId)?.payload).toEqual({
+      key: "L", ctrl: true, shift: false, alt: false, win: false,
+    });
+  });
 });

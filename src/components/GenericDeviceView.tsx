@@ -90,7 +90,7 @@ export function GenericDeviceView({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(device.name);
   const [radarOpen, setRadarOpen] = useState(isEmpty);
-  const [radarArmed, setRadarArmed] = useState(isEmpty);
+  const [radarArmed, setRadarArmed] = useState(false);
   const [scopeToUsb, setScopeToUsb] = useState(true);
   const [radarNote, setRadarNote] = useState<string | null>(null);
   const [showGraphics, setShowGraphics] = useState(false);
@@ -140,7 +140,7 @@ export function GenericDeviceView({
     setOverflowMenu(null);
     const emptyNow = entries.length === 0;
     setRadarOpen(emptyNow);
-    setRadarArmed(emptyNow);
+    setRadarArmed(false);
     setShowGraphics(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on device switch
   }, [device.id]);
@@ -209,6 +209,22 @@ export function GenericDeviceView({
     cur.onQuickLearnControl?.(autoLabel, encodedKey, effectiveRaw, initialHotspot);
     setRadarNote(t("device.radarCaught", { name: autoLabel, signal: encodedKey }));
   }
+
+  // Automatically pause the learning radar whenever the Sidearm window loses
+  // focus or is hidden, so `SUPPRESS_EXECUTION` never stays on while using other apps.
+  useEffect(() => {
+    if (!radarArmed) return;
+    const pause = () => setRadarArmed(false);
+    const onVisibility = () => {
+      if (document.visibilityState !== "visible") setRadarArmed(false);
+    };
+    window.addEventListener("blur", pause);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("blur", pause);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [radarArmed]);
 
   // Continuous Windows Raw Input learning loop while the radar is armed.
   useEffect(() => {

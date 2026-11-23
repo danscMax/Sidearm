@@ -15,6 +15,51 @@ pub const PORTABLE_MARKER: &str = "sidearm.portable";
 /// Data folder of a debug build, when set (see [`AppPaths::resolve`]).
 #[cfg(debug_assertions)]
 const DEV_DATA_DIR_ENV: &str = "SIDEARM_DATA_DIR";
+/// CLI flag passed across UAC `relaunch_as_admin` in debug builds because
+/// `ShellExecuteW("runas")` drops process environment variables.
+#[cfg(debug_assertions)]
+pub const DEV_DATA_DIR_ARG: &str = "--data-dir";
+
+/// Extracts `--data-dir <path>` from an argument iterator.
+#[cfg(any(debug_assertions, test))]
+fn parse_data_dir_arg<I, S>(args: I) -> Option<PathBuf>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<std::ffi::OsStr>,
+{
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        let s = arg.as_ref().to_string_lossy();
+        if s == "--data-dir" {
+            return iter.next().map(|next| PathBuf::from(next.as_ref()));
+        }
+        if let Some(rest) = s.strip_prefix("--data-dir=")
+            && !rest.is_empty()
+        {
+            return Some(PathBuf::from(rest));
+        }
+    }
+    None
+}
+
+/// For debug binaries located inside `<umbrella>/app/src-tauri/target/<profile>`,
+/// auto-discovers `<umbrella>/portable/data` when it exists, so launching or
+/// UAC-relaunching the dev exe never silently falls back to a stale roaming config.
+#[cfg(any(debug_assertions, test))]
+fn dev_portable_data_dir_from_exe(exe_dir: &Path) -> Option<PathBuf> {
+    for ancestor in exe_dir.ancestors() {
+        if ancestor.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.eq_ignore_ascii_case("src-tauri"))
+            && let Some(app_dir) = ancestor.parent()
+            && let Some(umbrella) = app_dir.parent()
+        {
+            let candidate = umbrella.join("portable").join(DATA_DIR_NAME);
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
 const DATA_DIR_NAME: &str = "data";
 const LOG_DIR_NAME: &str = "logs";
 const SNAPSHOTS_DIR_NAME: &str = "snapshots";
@@ -48,12 +93,14 @@ impl AppPaths {
     /// Resolve paths at startup. Never panics — always returns usable paths.
     pub fn resolve() -> Self {
         let exe_dir = current_exe_dir();
-        // Debug builds only: `dev.ps1` points the dev app at the portable
-        // data, so a test run drives the mice with the same config the
-        // portable app writes into them (a stale roaming config once left
-        // both mice with old assignments).
+        // Debug builds only: resolve the portable data folder from:
+        // 1) `--data-dir <path>` (preserved across UAC `relaunch_as_admin`),
+        // 2) `SIDEARM_DATA_DIR` env var (set by `dev.ps1`),
+        // 3) sibling `<umbrella>/portable/data` next to `app/src-tauri/target`.
         #[cfg(debug_assertions)]
-        if let Some(data_dir) = std::env::var_os(DEV_DATA_DIR_ENV).map(PathBuf::from)
+        if let Some(data_dir) = parse_data_dir_arg(std::env::args_os())
+            .or_else(|| std::env::var_os(DEV_DATA_DIR_ENV).map(PathBuf::from))
+            .or_else(|| exe_dir.as_deref().and_then(dev_portable_data_dir_from_exe))
             && ensure_writable(&data_dir).is_ok()
         {
             return Self {
@@ -330,5 +377,25 @@ mod tests {
             fallback_reason: None,
         };
         assert!(!paths.needs_portable_migration_prompt());
+    }
+
+    #[test]
+    fn parses_dev_data_dir_cli_arg_and_discovers_sibling_portable_data() {
+        assert_eq!(
+            parse_data_dir_arg(["sidearm.exe", "--relaunched", "--data-dir", r"E:\Scripts\Sidearm\portable\data"]),
+            Some(PathBuf::from(r"E:\Scripts\Sidearm\portable\data"))
+        );
+        assert_eq!(
+            parse_data_dir_arg(["sidearm.exe", r"--data-dir=C:\Scripts\Sidearm\portable\data"]),
+            Some(PathBuf::from(r"C:\Scripts\Sidearm\portable\data"))
+        );
+        assert_eq!(parse_data_dir_arg(["sidearm.exe", "--relaunched"]), None);
+
+        let umbrella = tempfile::tempdir().unwrap();
+        let exe_dir = umbrella.path().join("app").join("src-tauri").join("target").join("debug");
+        let portable_data = umbrella.path().join("portable").join("data");
+        fs::create_dir_all(&exe_dir).unwrap();
+        fs::create_dir_all(&portable_data).unwrap();
+        assert_eq!(dev_portable_data_dir_from_exe(&exe_dir), Some(portable_data));
     }
 }

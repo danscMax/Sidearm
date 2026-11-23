@@ -2549,20 +2549,34 @@ input[type="radio"] {
   content: attr(data-tip);
   position: absolute;
   bottom: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+  /* Anchor leftward from the icon (extending toward the center of the canvas)
+     so bubbles on the left legend column never clip against the sidebar edge. */
+  left: 0;
   padding: 6px 10px;
   border-radius: var(--radius-xs);
   background: rgba(0, 0, 0, 0.88);
   color: var(--c-text-bright);
   font-size: var(--fs-caption);
   white-space: pre-line;
+  overflow-wrap: anywhere;
   pointer-events: none;
   z-index: 11;
   width: max-content;
   max-width: 240px;
   line-height: 1.4;
   animation: tab-fade-in 120ms ease-out;
+}
+
+/* On the right legend column, extend bubbles leftward toward the mouse visual
+   so neither cell tooltips nor icon tooltips clip against the right window edge. */
+.mouse-top-labels--right .btn-legend__cell[data-tooltip]:hover::after,
+.mouse-top-labels--right .btn-legend__gesture[data-tip]:hover::after,
+.mouse-top-labels--right .btn-legend__memory[data-tip]:hover::after,
+.mouse-top-labels--right .btn-legend__live[data-tip]:hover::after,
+.mouse-top-labels--right .btn-legend__synced[data-tip]:hover::after,
+.mouse-top-labels--right .btn-legend__same[data-tip]:hover::after {
+  left: auto;
+  right: 0;
 }
 
 /* The first rows sit at the very top of the card — an above-the-cell bubble

@@ -2787,7 +2787,26 @@ async fn relaunch_as_admin(app: AppHandle) -> Result<(), CommandError> {
             .chain(std::iter::once(0))
             .collect();
         let verb_w: Vec<u16> = "runas\0".encode_utf16().collect();
-        let params_w: Vec<u16> = mouse_restore::RELAUNCHED_ARG.encode_utf16().chain(std::iter::once(0)).collect();
+        // `ShellExecuteW("runas")` drops process environment variables (including
+        // `SIDEARM_DATA_DIR` in debug builds). Pass the active portable data dir
+        // explicitly so the elevated instance stays on the same config folder.
+        #[cfg(debug_assertions)]
+        let params_str = {
+            let paths = resolve_app_paths(&app);
+            if paths.mode == paths::PathMode::Portable {
+                format!(
+                    "{} {} \"{}\"",
+                    mouse_restore::RELAUNCHED_ARG,
+                    paths::DEV_DATA_DIR_ARG,
+                    paths.config_dir.display()
+                )
+            } else {
+                mouse_restore::RELAUNCHED_ARG.to_owned()
+            }
+        };
+        #[cfg(not(debug_assertions))]
+        let params_str = mouse_restore::RELAUNCHED_ARG.to_owned();
+        let params_w: Vec<u16> = params_str.encode_utf16().chain(std::iter::once(0)).collect();
 
         // ShellExecuteW returns an HINSTANCE; values <= 32 indicate failure.
         // SE_ERR_ACCESSDENIED (5) is the code we get when the user cancels UAC.

@@ -288,6 +288,8 @@ thread_local! {
     /// Mouse buttons passed as belonging to another device: their release passes straight through.
     static PASSED_SCOPED_MOUSE: std::cell::RefCell<[bool; 6]> =
         const { std::cell::RefCell::new([false; 6]) };
+    /// Right-click pressed over the Windows taskbar or system tray: its release passes straight through.
+    static PASSED_TASKBAR_RIGHT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Factory-defaults signature tracker (see FactoryDefaultsDetector above).
     static HELPER_DEFAULTS_DETECTOR: std::cell::RefCell<FactoryDefaultsDetector> =
         std::cell::RefCell::new(FactoryDefaultsDetector::default());
@@ -2819,6 +2821,47 @@ fn wheel_capture_action(
         .map(|reg| reg.encoded_key.clone())
 }
 
+/// True for Windows taskbar and system-tray overflow window classes.
+/// Passing right-clicks straight through here ensures tray context menus (including
+/// Sidearm's own tray menu) always open cleanly even when right-click is the
+/// HyperShift trigger and a non-elevated Sidearm would have `SendInput` blocked by UIPI.
+fn is_taskbar_window_class(class_name: &str) -> bool {
+    matches!(
+        class_name,
+        "Shell_TrayWnd"
+            | "Shell_SecondaryTrayWnd"
+            | "NotifyIconOverflowWindow"
+            | "TopLevelWindowForOverflowXamlIsland"
+    )
+}
+
+/// Checks whether screen point `pt` lies over the Windows taskbar or system tray.
+/// Called only on right-button-down (never on mouse moves); ~15 us Win32 lookup.
+fn point_is_on_taskbar(pt: windows_sys::Win32::Foundation::POINT) -> bool {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GA_ROOT, GetAncestor, GetClassNameW, WindowFromPoint,
+    };
+    let class_of = |hwnd: windows_sys::Win32::Foundation::HWND| -> Option<String> {
+        if hwnd.is_null() {
+            return None;
+        }
+        let mut buf = [0u16; 96];
+        // SAFETY: `buf` is stack-allocated with exact length `buf.len()`.
+        let len = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+        (len > 0).then(|| String::from_utf16_lossy(&buf[..len as usize]))
+    };
+    // SAFETY: `WindowFromPoint` and `GetAncestor` are read-only user32 queries.
+    let hwnd = unsafe { WindowFromPoint(pt) };
+    if hwnd.is_null() {
+        return false;
+    }
+    if class_of(hwnd).as_deref().is_some_and(is_taskbar_window_class) {
+        return true;
+    }
+    let root = unsafe { GetAncestor(hwnd, GA_ROOT) };
+    !root.is_null() && class_of(root).as_deref().is_some_and(is_taskbar_window_class)
+}
+
 /// True while this session is displayed through Remote Desktop. Re-read per
 /// button event (a cheap user32 read, never on mouse moves) because a console
 /// session can be taken over by RDP — and handed back — while the helper runs.
@@ -2980,6 +3023,18 @@ unsafe extern "system" fn helper_ll_mouse_proc(code: i32, w_param: usize, l_para
             HELPER_HYPER2_HELD.load(Ordering::Relaxed)
         };
         if let Some((button, is_down)) = mouse_button_code(msg, ms.mouseData) {
+            // Never swallow a right-click over the Windows taskbar or system tray:
+            // replaying it via SendInput fails under UIPI when an elevated window
+            // has focus, which prevented right-clicking the Sidearm tray icon.
+            if button == HYPER_TRIGGER_RIGHT {
+                if is_down && point_is_on_taskbar(ms.pt) {
+                    PASSED_TASKBAR_RIGHT.set(true);
+                    return HyperMouseAction::Pass;
+                }
+                if !is_down && PASSED_TASKBAR_RIGHT.replace(false) {
+                    return HyperMouseAction::Pass;
+                }
+            }
             let state = Trigger2State {
                 trigger: if remote { HYPER_TRIGGER_OFF } else { HELPER_HYPER2_TRIGGER.load(Ordering::Relaxed) },
                 held: held2,
@@ -3320,6 +3375,7 @@ fn reset_mouse_capture_state(mut inject: impl FnMut(u8, bool)) {
     RAW_PRESSES.with_borrow_mut(|presses| presses.fill(None));
     PENDING_SCOPED_MOUSE.set(None);
     PASSED_SCOPED_MOUSE.with_borrow_mut(|flags| flags.fill(false));
+    PASSED_TASKBAR_RIGHT.set(false);
     RAW_MOUSE_DEVICE.with_borrow_mut(|slots| slots.fill(None));
     HELPER_SIDE_BUTTON_DOWN.with_borrow_mut(|slots| slots.fill(None));
     if held != HYPER_TRIGGER_OFF {
@@ -3770,6 +3826,10 @@ mod mouse_hook_tests {
         assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_MBUTTON), Some(HYPER_TRIGGER_MIDDLE));
         assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_XBUTTON1), Some(HYPER_TRIGGER_X1));
         assert_eq!(super::mouse_vk_to_button_code(crate::vk::VK_XBUTTON2), Some(HYPER_TRIGGER_X2));
+        assert!(super::is_taskbar_window_class("Shell_TrayWnd"));
+        assert!(super::is_taskbar_window_class("NotifyIconOverflowWindow"));
+        assert!(super::is_taskbar_window_class("TopLevelWindowForOverflowXamlIsland"));
+        assert!(!super::is_taskbar_window_class("Chrome_WidgetWin_1"));
     }
 
     #[test]

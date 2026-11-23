@@ -1,4 +1,4 @@
-# Sidearm Dev Server (auto-restart on crash)
+﻿# Sidearm Dev Server (auto-restart on crash)
 # Usage: .\dev.ps1 [-Clean] [-NoWatch] or double-click dev.bat (it passes the same switches)
 #   -NoWatch  no restart on each saved file (cargo tauri dev --no-watch): a restart kills
 #             the app mid-run and can leave the mice with Sidearm's signals
@@ -108,14 +108,63 @@ Write-Banner "Sidearm  Dev   v$APP_VERSION" "cargo tauri dev -- auto-restarts on
 
 $restartNum = 0
 
+function Get-RunningDevSidearm {
+    $target = Join-Path $TAURI_DIR 'target'
+    return @(Get-CimInstance Win32_Process -Filter "Name = 'sidearm.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target, [StringComparison]::OrdinalIgnoreCase) } |
+        Where-Object { $_.CommandLine -notmatch '--restore-live-maps' -and $_.CommandLine -notmatch '--capture-helper' })
+}
+
+function Hold-ViteForElevatedSidearm {
+    param([int[]]$ElevatedPids)
+    Write-Host ""
+    Write-Info "Elevated Sidearm Dev (PID $($ElevatedPids -join ', ')) is running."
+    Write-Info "Keeping Vite alive on :$VITE_PORT until it exits (avoids blanking the window)..."
+    Set-Location $PROJECT_DIR
+    $viteProc = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $PROJECT_DIR -NoNewWindow -PassThru
+    try {
+        while ($true) {
+            Start-Sleep -Seconds 1
+            $alive = @($ElevatedPids | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+            if ($alive.Count -eq 0) {
+                break
+            }
+            if ($viteProc.HasExited) {
+                Write-Warn "Vite exited while elevated Sidearm is running; restarting Vite..."
+                $viteProc = Start-Process -FilePath 'npm.cmd' -ArgumentList @('run', 'dev') -WorkingDirectory $PROJECT_DIR -NoNewWindow -PassThru
+            }
+        }
+    } finally {
+        if ($viteProc -and -not $viteProc.HasExited) {
+            & taskkill /PID $viteProc.Id /T /F 2>$null | Out-Null
+        }
+    }
+    Write-Info "Elevated Sidearm Dev exited."
+}
+
 while ($true) {
     $restartNum++
     $stamp = Get-Date -Format 'HH:mm:ss'
     Write-Banner "Restart #$restartNum   $stamp" -Width 40
     Write-Host ""
 
+    # If an elevated dev Sidearm is already running (e.g. after "Restart as administrator"),
+    # a non-elevated dev.ps1 cannot stop it and restarting `cargo tauri dev` would loop
+    # every ~20s killing Vite and blanking the window. Keep Vite steady until it closes.
+    $stillRunning = @(Get-RunningDevSidearm | ForEach-Object { [int]$_.ProcessId })
+    if ($stillRunning.Count -gt 0 -and $restartNum -gt 1) {
+        Hold-ViteForElevatedSidearm -ElevatedPids $stillRunning
+        continue
+    }
+
     Write-Info "Stopping stale processes..."
     Stop-StaleProcesses
+
+    $unstoppable = @(Get-RunningDevSidearm | ForEach-Object { [int]$_.ProcessId })
+    if ($unstoppable.Count -gt 0) {
+        Hold-ViteForElevatedSidearm -ElevatedPids $unstoppable
+        continue
+    }
 
     # Touch lib.rs to force cargo to re-check dependencies.
     # Prevents stale cache after external file edits or killed builds.

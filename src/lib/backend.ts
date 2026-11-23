@@ -172,6 +172,18 @@ export async function releaseSidearmBank(deviceId: string): Promise<boolean> {
   return invoke<boolean>("release_sidearm_bank", { deviceId });
 }
 
+export interface MoveSidearmBankResult {
+  banks: OnboardBanks;
+  sidearm: number;
+  displacedFrom: number | null;
+  displacedTo: number | null;
+}
+
+/** Relocates Sidearm's service slot to `targetBank` (1..5) immediately. */
+export async function moveSidearmBank(deviceId: string, targetBank: number): Promise<MoveSidearmBankResult> {
+  return invoke<MoveSidearmBankResult>("move_sidearm_bank", { deviceId, targetBank });
+}
+
 /** The onboard banks (stored profiles) of a device's mouse. */
 export async function getOnboardBanks(deviceId: string): Promise<OnboardBanks> {
   return invoke<OnboardBanks>("get_onboard_banks", { deviceId });

@@ -80,6 +80,7 @@ import { deviceControlId, deviceLayout, hasDevice, hypershift2ControlId, hypersh
 import type { ErrorActionKind } from "./lib/errors";
 import type { ImportWarning, ParsedSynapseProfiles } from "./lib/synapse-import";
 import {
+  createDevice,
   createProfile,
   clearControl,
   duplicateProfile,
@@ -88,6 +89,7 @@ import {
   GESTURES,
   gestureOf,
 } from "./lib/config-editing";
+import type { DeviceTab } from "./components/DeviceCards";
 import type {
   Action,
   AppConfig,
@@ -619,6 +621,12 @@ function App() {
 
 
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>("profiles");
+  const [deviceTab, setDeviceTab] = useState<DeviceTab>("buttons");
+  const [deviceRefreshToken, setDeviceRefreshToken] = useState(0);
+  const [deviceActionSignal, setDeviceActionSignal] = useState<{
+    seq: number;
+    action: "rename" | "photo" | "delete" | "transfer";
+  } | null>(null);
   const [actionPickerOpen, setActionPickerOpen] = useState(false);
   const [actionPickerBindingId, setActionPickerBindingId] = useState<string | null>(null);
   const [actionPickerSuggestion, setActionPickerSuggestion] = useState<OfflinePayload | null>(null);
@@ -1198,9 +1206,25 @@ function App() {
 
   function handleSelectDevice(id: string) {
     setActiveDeviceId(id);
-    if (isOfflineLayer(selectedLayer) && !activeConfig?.devices.find((device) => device.id === id)?.builtin) setSelectedLayer("standard");
+    const picked = activeConfig?.devices.find((device) => device.id === id);
+    const native = Boolean(picked?.builtin && deviceLayout(id));
+    if (isOfflineLayer(selectedLayer) && !picked?.builtin) setSelectedLayer("standard");
+    if (!native && (deviceTab === "memory" || deviceTab === "performance")) {
+      setDeviceTab("buttons");
+    }
     setSelectedControlId(null);
     setMultiSelectedControlIds(new Set());
+  }
+
+  function handleAddDevice() {
+    if (!activeConfig) return;
+    const { config: nextConfig, deviceId } = createDevice(activeConfig, t("device.defaultName"));
+    updateDraft(() => nextConfig);
+    setActiveDeviceId(deviceId);
+    switchWorkspaceMode("profiles");
+    setDeviceTab("buttons");
+    setDeviceActionSignal({ seq: Date.now(), action: "rename" });
+    showToast(t("device.created"), "success");
   }
 
   // The profile written into the mice at exit, on a layer the mouse keeps.
@@ -1264,7 +1288,17 @@ function App() {
   );
 
   const isProfilesMode = workspaceMode === "profiles";
-  const activeModeHeading = t(`workspace.${workspaceMode}.heading`);
+  const activeModeHeading = isProfilesMode
+    ? deviceTab === "memory"
+      ? t("device.tabMemory")
+      : deviceTab === "performance"
+      ? t("device.tabPerformance")
+      : deviceTab === "stats"
+      ? t("device.tabStats")
+      : activeProfile
+      ? t("workspace.profiles.buttonsHeading", { name: activeProfile.name })
+      : t("workspace.profiles.heading")
+    : t(`workspace.${workspaceMode}.heading`);
   const isDebugMode = workspaceMode === "debug";
   const workspaceClass = isDebugMode
     ? "workspace workspace--expert"
@@ -1278,11 +1312,27 @@ function App() {
         showToast={showToast}
         workspaceMode={workspaceMode}
         onSwitchMode={switchWorkspaceMode}
+        devices={devices}
+        activeDeviceId={effectiveDeviceId}
+        activeDeviceTab={deviceTab}
+        deviceRefreshToken={deviceRefreshToken}
+        onSelectDevice={handleSelectDevice}
+        onSelectDeviceTab={(tab) => {
+          switchWorkspaceMode("profiles");
+          setDeviceTab(tab);
+        }}
+        onAddDevice={handleAddDevice}
+        onDeviceMenuAction={(action) => {
+          switchWorkspaceMode("profiles");
+          setDeviceActionSignal({ seq: Date.now(), action });
+        }}
         profiles={profiles}
         effectiveProfileId={effectiveProfileId}
         runtimeResolvedProfileName={runtimeProfileName}
         onSelectProfile={(id) => {
           setSelectedProfileId(id);
+          switchWorkspaceMode("profiles");
+          setDeviceTab("buttons");
           updateDraft((c) => ({
             ...c,
             settings: { ...c.settings, lastSelectedProfileId: id },
@@ -1294,10 +1344,10 @@ function App() {
         setSelectedProfileId={setSelectedProfileId}
         setConfirmModal={setConfirmModal}
         activeConfig={activeConfig}
-        selectedDeviceName={activeDevice?.name}
         allRules={allRulesView}
         onEditRule={(mappingId) => {
           switchWorkspaceMode("profiles");
+          setDeviceTab("buttons");
           setRuleSignal({ mappingId });
         }}
         recognized={runtimeSummary.status === "running" && runtime.lastRecognized
@@ -1310,16 +1360,19 @@ function App() {
           : null}
         onRuleMenu={(mappingId, x, y) => {
           switchWorkspaceMode("profiles");
+          setDeviceTab("buttons");
           setRuleSignal({ mappingId, at: { x, y } });
         }}
         onAddRule={() => {
           switchWorkspaceMode("profiles");
+          setDeviceTab("buttons");
           setAddRuleSignal(true);
         }}
         onToggleAllRules={() => {
           // From another screen the button opens the rules rather than hiding them.
-          setAllRulesView((v) => workspaceMode !== "profiles" || !v);
+          setAllRulesView((v) => workspaceMode !== "profiles" || deviceTab !== "buttons" || !v);
           switchWorkspaceMode("profiles");
+          setDeviceTab("buttons");
         }}
       />
 
@@ -1366,6 +1419,11 @@ function App() {
                 devices={devices}
                 activeDeviceId={effectiveDeviceId}
                 onSelectDevice={handleSelectDevice}
+                deviceTab={deviceTab}
+                onSelectDeviceTab={setDeviceTab}
+                onDeviceWritten={() => setDeviceRefreshToken((n) => n + 1)}
+                deviceActionSignal={deviceActionSignal}
+                onDeviceActionHandled={() => setDeviceActionSignal(null)}
                 selectedLayer={selectedLayer}
                 multiSelectedControlIds={multiSelectedControlIds}
                 onSelectLayer={(layer) => setSelectedLayer(layer)}

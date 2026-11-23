@@ -11,7 +11,7 @@ import * as backend from "../lib/backend";
 vi.mock("../lib/backend", () => ({
   getMouseSettings: vi.fn(), getNativeModel: vi.fn(), getDeviceReport: vi.fn(), getOnboardBanks: vi.fn(),
   createOnboardBank: vi.fn(), deleteOnboardBank: vi.fn(), flushOnboardBanks: vi.fn(),
-  getSidearmBank: vi.fn(), releaseSidearmBank: vi.fn(),
+  getSidearmBank: vi.fn(), releaseSidearmBank: vi.fn(), moveSidearmBank: vi.fn(),
   listNativeMice: vi.fn(async () => []), listenNativeMiceChanged: vi.fn(async () => () => {}),
   listenMouseBattery: vi.fn(), listenActionExecutionEvent: vi.fn(),
   setMouseDpi: vi.fn(), setMousePollRate: vi.fn(), setKeySignals: vi.fn(), openDeviceReportIssue: vi.fn(),
@@ -424,5 +424,56 @@ describe("independent mouse readings", () => {
     const afterSwap = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
     expect(afterSwap.profiles.find((p) => p.id === "main")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(2);
     expect(afterSwap.profiles.find((p) => p.id === "game")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(1);
+  });
+
+  it("relocates Sidearm service slot to slot 5 on demand (remapping displaced profile) and opens right-click context menu on slots", async () => {
+    const model = await backend.getNativeModel();
+    vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
+    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1, 4, 5], active: 2 });
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(2);
+    vi.mocked(backend.moveSidearmBank).mockResolvedValue({
+      banks: { assigned: [1, 3, 4], active: 5 },
+      sidearm: 5,
+      displacedFrom: 5,
+      displacedTo: 3,
+    });
+
+    const base = makeConfig();
+    const config: AppConfig = {
+      ...base,
+      profiles: [
+        { ...base.profiles[0], id: "main", name: "Main", deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
+        { ...base.profiles[1], id: "code", name: "Code", deviceSlots: { [NAGA_V3_DEVICE_ID]: 5 } },
+      ],
+    };
+    const updates = vi.fn();
+    const onOpenButtons = vi.fn();
+    render(
+      <MouseWorkspace
+        activeConfig={config}
+        deviceId={NAGA_V3_DEVICE_ID}
+        section="memory"
+        profiles={config.profiles}
+        activeProfile={config.profiles[0]}
+        runtimeProfileId="main"
+        updateDraft={updates}
+        onOpenProfileButtons={onOpenButtons}
+        mouseStates={[]}
+      />,
+    );
+
+    // Right-click on Slot 2 (Sidearm) -> "Move to slot 5 now" -> moves Sidearm to 5 and remaps Code from 5 -> 3!
+    const serviceTab = await screen.findByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 2 })}: Sidearm` });
+    fireEvent.contextMenu(serviceTab, { clientX: 100, clientY: 100 });
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("mouse.sidearmMoveTo5Now") }));
+    await waitFor(() => expect(backend.moveSidearmBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 5));
+    const remapped = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
+    expect(remapped.profiles.find((p) => p.id === "code")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(3);
+
+    // Right-click on Slot 1 (Main) -> "Open buttons for Main" jumps to Main's buttons.
+    const slot1Tab = screen.getByRole("tab", { name: `${i18n.t("mouse.slotRow", { n: 1 })}: Main` });
+    fireEvent.contextMenu(slot1Tab, { clientX: 80, clientY: 80 });
+    fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("mouse.slotCtxOpenButtons", { name: "Main" }) }));
+    expect(onOpenButtons).toHaveBeenCalledWith("main");
   });
 });

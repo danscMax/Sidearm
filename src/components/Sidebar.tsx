@@ -1,30 +1,25 @@
 import { startTransition, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceMode } from "../lib/constants";
-import { workspaceModeCopy } from "../lib/constants";
-import type { AppConfig, Profile } from "../lib/config";
+import type { AppConfig, Device, Profile } from "../lib/config";
 import { placeSlot, reorderProfiles, slotHasMenu } from "../lib/binding-moves";
 import { deleteProfile, duplicateProfile } from "../lib/config-editing";
+import { deviceLayout } from "../lib/devices";
 import { ContextMenu } from "./ContextMenu";
+import { SidebarDeviceSection, type DeviceTab } from "./DeviceCards";
 import { SidebarProfiles, type RecognizedApp } from "./SidebarProfiles";
 import type { ConfirmModalRequest } from "./ConfirmModal";
 
-const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
-  profiles: (
-    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <rect x="2" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="9" y="2" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="2" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="9" y="9" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  ),
+const FOOTER_MODES: readonly Extract<WorkspaceMode, "debug" | "settings">[] = ["debug", "settings"];
+
+const NAV_ICONS: Record<Extract<WorkspaceMode, "debug" | "settings">, ReactNode> = {
   debug: (
-    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <svg className="nav-item__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <path d="M1 8h3l2-5 3 10 2-5h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
   settings: (
-    <svg className="nav-item__icon" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+    <svg className="nav-item__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
       <line x1="2" y1="5" x2="14" y2="5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       <line x1="2" y1="11" x2="14" y2="11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       <circle cx="6" cy="5" r="2.1" fill="var(--c-bg)" stroke="currentColor" strokeWidth="1.4" />
@@ -36,6 +31,14 @@ const NAV_ICONS: Record<WorkspaceMode, ReactNode> = {
 export function Sidebar({
   workspaceMode,
   onSwitchMode,
+  devices,
+  activeDeviceId,
+  activeDeviceTab,
+  deviceRefreshToken,
+  onSelectDevice,
+  onSelectDeviceTab,
+  onAddDevice,
+  onDeviceMenuAction,
   profiles,
   effectiveProfileId,
   runtimeResolvedProfileName,
@@ -46,7 +49,6 @@ export function Sidebar({
   setSelectedProfileId,
   setConfirmModal,
   activeConfig,
-  selectedDeviceName,
   allRules,
   onEditRule,
   onRuleMenu,
@@ -58,6 +60,14 @@ export function Sidebar({
   showToast: (message: string, kind?: "info" | "success" | "warning") => void;
   workspaceMode: WorkspaceMode;
   onSwitchMode: (mode: WorkspaceMode) => void;
+  devices: Device[];
+  activeDeviceId: string | null;
+  activeDeviceTab: DeviceTab;
+  deviceRefreshToken: number;
+  onSelectDevice: (id: string) => void;
+  onSelectDeviceTab: (tab: DeviceTab) => void;
+  onAddDevice: () => void;
+  onDeviceMenuAction: (action: "rename" | "photo" | "delete" | "transfer") => void;
   profiles: Profile[];
   effectiveProfileId: string | null;
   runtimeResolvedProfileName: string | null;
@@ -68,7 +78,6 @@ export function Sidebar({
   setSelectedProfileId: (id: string | null) => void;
   setConfirmModal: (modal: ConfirmModalRequest | null) => void;
   activeConfig?: AppConfig | null;
-  selectedDeviceName?: string;
   /** The all-rules view of the assignments screen. */
   allRules: boolean;
   onEditRule: (mappingId: string) => void;
@@ -80,6 +89,11 @@ export function Sidebar({
 }) {
   const { t } = useTranslation();
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; profileId: string } | null>(null);
+  const [deviceCtxMenu, setDeviceCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const activeProfile = profiles.find((p) => p.id === effectiveProfileId) ?? null;
+  const activeDevice = devices.find((d) => d.id === activeDeviceId) ?? devices[0] ?? null;
+  const builtinMiceCount = devices.filter((d) => d.builtin && deviceLayout(d.id)).length;
+
   return (
     <aside className="sidebar">
       <div className="sidebar__brand">
@@ -88,36 +102,37 @@ export function Sidebar({
           src="/assets/icon.png"
           alt=""
           aria-hidden="true"
-          width={28}
-          height={28}
+          width={24}
+          height={24}
           onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
         />
         <div className="sidebar__brand-text">
           <span>
             {t("app.name")} <span className="sidebar__version">v{__APP_VERSION__}</span>
           </span>
-          <strong>{selectedDeviceName ?? t("app.deviceFallback")}</strong>
         </div>
       </div>
-      {workspaceModeCopy.map((mode) => (
-        <button
-          key={mode.value}
-          type="button"
-          aria-current={workspaceMode === mode.value ? "page" : undefined}
-          className={`nav-item${workspaceMode === mode.value ? " nav-item--active" : ""}`}
-          onClick={() => { onSwitchMode(mode.value); }}
-          title={t(`workspace.${mode.value}.label`)}
-        >
-          {NAV_ICONS[mode.value]}
-          <span className="nav-item__label">{t(`workspace.${mode.value}.label`)}</span>
-        </button>
-      ))}
-      {workspaceMode !== "settings" ? (
-      <>
+
+      {activeConfig ? (
+        <SidebarDeviceSection
+          config={activeConfig}
+          devices={devices}
+          activeDeviceId={activeDeviceId}
+          profile={activeProfile}
+          refreshToken={deviceRefreshToken}
+          workspaceMode={workspaceMode}
+          activeDeviceTab={activeDeviceTab}
+          onSelectDevice={onSelectDevice}
+          onSelectDeviceTab={onSelectDeviceTab}
+          onAddDevice={onAddDevice}
+          onDeviceContextMenu={(x, y) => setDeviceCtxMenu({ x, y })}
+        />
+      ) : null}
+
       <div className="sidebar__sep" />
-      <div className="sidebar__section">
+      <div className="sidebar__section sidebar__section--profiles">
         <div className="sidebar__section-header">
-          <span className="sidebar__section-label">{t("sidebar.profileHeader")}</span>
+          <span className="sidebar__section-label">{t("sidebar.profilesHeader")}</span>
           <div className="sidebar__section-actions">
             <button
               type="button"
@@ -143,6 +158,7 @@ export function Sidebar({
           profiles={profiles}
           appMappings={activeConfig?.appMappings ?? []}
           effectiveProfileId={effectiveProfileId}
+          highlightSelected={workspaceMode === "profiles" && activeDeviceTab === "buttons"}
           runtimeProfileName={runtimeStatus === "running" ? runtimeResolvedProfileName : null}
           allRules={allRules}
           onSelect={onSelectProfile}
@@ -171,8 +187,24 @@ export function Sidebar({
           </p>
         ) : null}
       </div>
-      </>
-      ) : null}
+
+      <div className="sidebar__footer">
+        <div className="sidebar__sep" />
+        {FOOTER_MODES.map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            aria-current={workspaceMode === mode ? "page" : undefined}
+            className={`nav-item nav-item--compact${workspaceMode === mode ? " nav-item--active" : ""}`}
+            onClick={() => onSwitchMode(mode)}
+            title={t(`workspace.${mode}.label`)}
+          >
+            {NAV_ICONS[mode]}
+            <span className="nav-item__label">{t(`workspace.${mode}.label`)}</span>
+          </button>
+        ))}
+      </div>
+
       {ctxMenu ? (
         <ContextMenu
           x={ctxMenu.x}
@@ -183,8 +215,15 @@ export function Sidebar({
             if (!targetProfile) return [];
             return [
               {
+                label: t("sidebar.openButtons"),
+                onClick: () => {
+                  onSelectProfile(targetProfile.id);
+                },
+              },
+              {
                 label: t("workspace.settings.label"),
                 onClick: () => {
+                  setSelectedProfileId(targetProfile.id);
                   onSwitchMode("settings");
                 },
               },
@@ -224,6 +263,28 @@ export function Sidebar({
                 : []),
             ];
           })()}
+        />
+      ) : null}
+
+      {deviceCtxMenu && activeDevice ? (
+        <ContextMenu
+          x={deviceCtxMenu.x}
+          y={deviceCtxMenu.y}
+          onClose={() => setDeviceCtxMenu(null)}
+          items={activeDevice.builtin && deviceLayout(activeDevice.id)
+            ? [
+                { label: t("device.tabButtons"), disabled: workspaceMode === "profiles" && activeDeviceTab === "buttons", onClick: () => onSelectDeviceTab("buttons") },
+                { label: t("device.tabMemory"), disabled: workspaceMode === "profiles" && activeDeviceTab === "memory", onClick: () => onSelectDeviceTab("memory") },
+                { label: t("device.tabPerformance"), disabled: workspaceMode === "profiles" && activeDeviceTab === "performance", onClick: () => onSelectDeviceTab("performance") },
+                { label: t("device.tabStats"), disabled: workspaceMode === "profiles" && activeDeviceTab === "stats", onClick: () => onSelectDeviceTab("stats") },
+                ...(builtinMiceCount > 1 ? [null, { label: t("transfer.open"), onClick: () => onDeviceMenuAction("transfer") }] : []),
+              ]
+            : [
+                { label: t("device.rename"), onClick: () => onDeviceMenuAction("rename") },
+                { label: activeDevice.image ? t("device.replacePhoto") : t("device.addPhoto"), onClick: () => onDeviceMenuAction("photo") },
+                null,
+                { label: t("device.delete"), danger: true, disabled: devices.length <= 1, onClick: () => onDeviceMenuAction("delete") },
+              ]}
         />
       ) : null}
     </aside>

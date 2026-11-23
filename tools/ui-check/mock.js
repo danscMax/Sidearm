@@ -100,6 +100,23 @@
       mockBanks.sidearm = null;
       return had;
     },
+    move_sidearm_bank: ({ targetBank }) => {
+      const old = mockBanks.sidearm;
+      if (old === null || old === targetBank) {
+        return { banks: { assigned: [...mockBanks.assigned], active: mockBanks.active }, sidearm: old ?? targetBank, displacedFrom: null, displacedTo: null };
+      }
+      let displacedFrom = null;
+      let displacedTo = null;
+      if (mockBanks.assigned.includes(targetBank)) {
+        const free = [1, 2, 3, 4, 5].find((s) => !mockBanks.assigned.includes(s) && s !== old);
+        const dest = free ?? old;
+        mockBanks.assigned = mockBanks.assigned.filter((s) => s !== targetBank).concat(dest).sort((a, b) => a - b);
+        displacedFrom = targetBank;
+        displacedTo = dest;
+      }
+      mockBanks.sidearm = targetBank;
+      return { banks: { assigned: [...mockBanks.assigned], active: mockBanks.active }, sidearm: targetBank, displacedFrom, displacedTo };
+    },
   };
 
   const callbacks = new Map();

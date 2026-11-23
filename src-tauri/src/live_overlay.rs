@@ -383,6 +383,178 @@ pub fn sidearm_bank_of(model: &'static NativeModel) -> Result<Option<u8>, String
     Ok(user_banks(&VendorDevice::open_model(model)?)?.1)
 }
 
+/// Result of relocating Sidearm's service bank to another slot (`1..=MAX_BANKS`).
+/// When `target` was occupied by a user profile, `displaced_from` / `displaced_to`
+/// tell the caller which slot number received that displaced user bank.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MoveSidearmBankResult {
+    pub banks: Banks,
+    pub sidearm: u8,
+    pub displaced_from: Option<u8>,
+    pub displaced_to: Option<u8>,
+}
+
+/// Writes previously captured Sidearm bank records and DPI into `bank`.
+fn write_saved_sidearm_bank(
+    device: &VendorDevice,
+    bank: u8,
+    records: &[(u8, u8, [u8; 7])],
+    dpi: Option<u16>,
+) -> Result<(), String> {
+    for &(button, layer, wanted) in records {
+        if device.read_block(bank, button, layer)? != wanted {
+            write_bank(device, bank, button, layer, wanted)?;
+        }
+    }
+    if let Some(dpi) = dpi
+        && let Err(error) = device.set_dpi_in(bank, dpi)
+    {
+        log::warn!("[naga-live] {} moved Sidearm bank {bank} DPI not set: {error}", device.model().name);
+    }
+    Ok(())
+}
+
+/// Relocates Sidearm's service bank to `target` (`1..=MAX_BANKS`) immediately,
+/// even when `target` currently holds a user profile: a free slot receives the
+/// displaced user bank (or the vacated old Sidearm slot when all 5 slots are full).
+pub fn move_sidearm_bank(model: &'static NativeModel, target: u8, config_dir: &Path) -> Result<MoveSidearmBankResult, String> {
+    if !model.live.as_ref().is_some_and(|live| live.banks) {
+        return Err(format!("{} has no onboard banks", model.name));
+    }
+    if !(1..=MAX_BANKS).contains(&target) {
+        return Err(format!("Bank {target} is out of range (1..={MAX_BANKS})"));
+    }
+    let device = VendorDevice::open_model(model)?;
+    let (banks, sidearm) = user_banks(&device)?;
+    let Some(old) = sidearm else {
+        return Err("No Sidearm service slot found on the mouse".into());
+    };
+    if old == target {
+        return Ok(MoveSidearmBankResult {
+            banks,
+            sidearm: old,
+            displaced_from: None,
+            displaced_to: None,
+        });
+    }
+    let addresses = bank_addresses(model);
+    let mut saved_records = Vec::with_capacity(addresses.len());
+    for (button, layer) in addresses {
+        saved_records.push((button, layer, device.read_block(old, button, layer)?));
+    }
+    let saved_dpi = device.dpi_in(old).ok();
+    let was_active = active_bank(&device)? == old;
+    let marker = read_sidearm_bank_marker(config_dir, model);
+    let safe_base = marker
+        .base
+        .filter(|b| *b != target && banks.assigned.contains(b))
+        .or_else(|| banks.assigned.iter().copied().find(|&b| b != target))
+        .unwrap_or(1);
+
+    let (displaced_from, displaced_to) = if !banks.assigned.contains(&target) {
+        create_bank(&device, target)?;
+        if let Err(error) = write_saved_sidearm_bank(&device, target, &saved_records, saved_dpi) {
+            let _ = delete_bank(&device, target);
+            return Err(error);
+        }
+        if was_active {
+            write_sidearm_bank_marker(config_dir, model, target, safe_base, &marker.hybrids);
+            if let Err(error) = select_bank(&device, target) {
+                write_sidearm_bank_marker(config_dir, model, old, safe_base, &marker.hybrids);
+                let _ = delete_bank(&device, target);
+                return Err(error);
+            }
+        }
+        if let Err(error) = delete_bank(&device, old) {
+            if was_active {
+                let _ = select_bank(&device, old);
+                write_sidearm_bank_marker(config_dir, model, old, safe_base, &marker.hybrids);
+            }
+            let _ = delete_bank(&device, target);
+            return Err(error);
+        }
+        (None, None)
+    } else if let Some(free) = (1..=MAX_BANKS).find(|slot| !banks.assigned.contains(slot) && *slot != old) {
+        create_bank(&device, free)?;
+        if active_bank(&device)? == target {
+            select_bank(&device, free)?;
+        }
+        delete_bank(&device, target)?;
+        let _ = std::fs::remove_file(bank_backup(config_dir, model, target));
+        create_bank(&device, target)?;
+        if let Err(error) = write_saved_sidearm_bank(&device, target, &saved_records, saved_dpi) {
+            let _ = delete_bank(&device, target);
+            return Err(error);
+        }
+        let next_base = if marker.base == Some(target) { free } else { safe_base };
+        if was_active {
+            write_sidearm_bank_marker(config_dir, model, target, next_base, &[]);
+            select_bank(&device, target)?;
+        }
+        delete_bank(&device, old)?;
+        (Some(target), Some(free))
+    } else {
+        // All 5 slots are taken: park safely on another user bank, recycle `old`
+        // for the displaced profile, then write Sidearm into `target`.
+        let parking = banks
+            .assigned
+            .iter()
+            .copied()
+            .find(|&b| b != target)
+            .ok_or_else(|| "No spare user slot available".to_owned())?;
+        let current = active_bank(&device)?;
+        if current == old || current == target {
+            select_bank(&device, parking)?;
+        }
+        delete_bank(&device, old)?;
+        create_bank(&device, old)?;
+        delete_bank(&device, target)?;
+        let _ = std::fs::remove_file(bank_backup(config_dir, model, target));
+        create_bank(&device, target)?;
+        write_saved_sidearm_bank(&device, target, &saved_records, saved_dpi)?;
+        let next_base = if marker.base == Some(target) { old } else { safe_base };
+        if was_active {
+            write_sidearm_bank_marker(config_dir, model, target, next_base, &[]);
+            select_bank(&device, target)?;
+        }
+        (Some(target), Some(old))
+    };
+
+    let index = model.catalog_index();
+    if SIDEARM_BANK[index].load(Ordering::Acquire) == old {
+        SIDEARM_BANK[index].store(target, Ordering::Release);
+    }
+    if ACTIVE_LIVE_BANK[index].load(Ordering::Acquire) == old {
+        ACTIVE_LIVE_BANK[index].store(target, Ordering::Release);
+    }
+    if OFFLINE[index].load(Ordering::Acquire) == old {
+        OFFLINE[index].store(target, Ordering::Release);
+    }
+    STORED[index].store(0, Ordering::Release);
+    VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
+    if marker.sidearm == Some(old) && !was_active {
+        let next_base = if marker.base == Some(target) {
+            displaced_to.unwrap_or(safe_base)
+        } else {
+            safe_base
+        };
+        write_sidearm_bank_marker(config_dir, model, target, next_base, &[]);
+    }
+    log::info!(
+        "[naga-live] {} moved Sidearm bank {old} -> {target} (displaced: {:?} -> {:?})",
+        model.name,
+        displaced_from,
+        displaced_to
+    );
+    Ok(MoveSidearmBankResult {
+        banks: user_banks(&device)?.0,
+        sidearm: target,
+        displaced_from,
+        displaced_to,
+    })
+}
+
 /// Gives Sidearm's bank back: the mouse leaves it and the slot is unassigned.
 /// Returns whether there was one.
 pub fn release_sidearm_bank(model: &'static NativeModel, config_dir: &Path) -> Result<bool, String> {
@@ -4424,5 +4596,58 @@ pub(crate) mod tests {
         ACTIVE_LIVE_BANK[index].store(0, Ordering::Release);
         VERIFIED_HYBRID_BANKS[index].store(0, Ordering::Release);
         STORED[index].store(0, Ordering::Release);
+    }
+
+    #[test]
+    fn move_sidearm_bank_relocates_onto_free_and_occupied_slots_including_full_5_slots() {
+        use crate::mouse_memory::fake;
+        let _v3 = V3_GLOBAL_STATE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let (mut mouse, targets) = sidearm_bank_mouse();
+        // Realistic scenario matching user's V3 Pro: slots 1, 4, 5 are user banks, slot 2 is Sidearm (playing), slot 3 is free!
+        mouse.banks = vec![1, 2, 4, 5];
+        mouse.active_bank = 2;
+        for (button, layer) in bank_addresses(&NAGA_V3_PRO) {
+            let wanted = targets
+                .iter()
+                .find(|&&(b, l, _)| (b, l) == (button, layer))
+                .map_or(mouse.records[&(1, button, layer)], |&(_, _, action)| bank_block(2, action));
+            mouse.records.insert((2, button, layer), wanted);
+        }
+        mouse.dpi.insert(2, 1100);
+        let _fake = fake::install(mouse);
+        fake::set_present_models(vec![&NAGA_V3_PRO]);
+        let dir = tempfile::tempdir().unwrap();
+        let index = NAGA_V3_PRO.catalog_index();
+        SIDEARM_BANK[index].store(2, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(2, Ordering::Release);
+
+        // Move Sidearm from slot 2 -> occupied slot 5: slot 5's user profile moves to free slot 3!
+        let res = move_sidearm_bank(&NAGA_V3_PRO, 5, dir.path()).unwrap();
+        assert_eq!(res.sidearm, 5);
+        assert_eq!(res.displaced_from, Some(5));
+        assert_eq!(res.displaced_to, Some(3));
+        assert_eq!(res.banks.assigned, vec![1, 3, 4]);
+        assert_eq!(SIDEARM_BANK[index].load(Ordering::Acquire), 5);
+        assert_eq!(ACTIVE_LIVE_BANK[index].load(Ordering::Acquire), 5);
+        fake::with(|m| assert_eq!(m.active_bank, 5, "mouse stays on playing Sidearm bank after move"));
+
+        // Move Sidearm from slot 5 -> free slot 2 cleanly (no displacement).
+        let res2 = move_sidearm_bank(&NAGA_V3_PRO, 2, dir.path()).unwrap();
+        assert_eq!(res2.sidearm, 2);
+        assert_eq!(res2.displaced_from, None);
+        assert_eq!(res2.displaced_to, None);
+        assert_eq!(res2.banks.assigned, vec![1, 3, 4]);
+
+        // Fill all 5 slots (add user slot 5), then move Sidearm from slot 2 -> slot 5 (displaces 5 -> 2)!
+        let _ = create_user_bank(&NAGA_V3_PRO, Some(5)).unwrap();
+        let res3 = move_sidearm_bank(&NAGA_V3_PRO, 5, dir.path()).unwrap();
+        assert_eq!(res3.sidearm, 5);
+        assert_eq!(res3.displaced_from, Some(5));
+        assert_eq!(res3.displaced_to, Some(2));
+        assert_eq!(res3.banks.assigned, vec![1, 2, 3, 4]);
+        fake::with(|m| assert_eq!(m.active_bank, 5));
+
+        SIDEARM_BANK[index].store(0, Ordering::Release);
+        ACTIVE_LIVE_BANK[index].store(0, Ordering::Release);
     }
 }

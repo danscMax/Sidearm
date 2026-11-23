@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { AppConfig, Device, Profile } from "../lib/config";
+import type { WorkspaceMode } from "../lib/constants";
 import {
   getMouseSettings,
   listenActionExecutionEvent,
@@ -9,11 +10,14 @@ import {
   listNativeMice,
 } from "../lib/backend";
 import { deviceLayout } from "../lib/devices";
+import { useDismissable } from "../hooks/useDismissable";
 import type { MouseSettings, NativeModelInfo } from "../lib/onboard-mapping";
 
+export type DeviceTab = "buttons" | "performance" | "memory" | "stats";
+
 /** Live state of each connected built-in mouse, read on mount, on mouse
- *  events and when `refreshToken` changes (a write from the Performance tab) —
- *  never on a timer, so the mice are not polled for a picture. */
+ *  events and when `refreshToken` changes (a write from the Performance or
+ *  Memory views) — never on a timer, so the mice are not polled for a picture. */
 function useMiceState(refreshToken: number): {
   /** null until the first list arrives. */
   mice: NativeModelInfo[] | null;
@@ -55,119 +59,241 @@ function useMiceState(refreshToken: number): {
   return { mice, readings };
 }
 
-/** One card per device: the built-in mice with their battery, DPI, poll rate
- *  and the edited profile's slot; user devices with their button count. A
- *  built-in mouse that is not connected (another PC's, or the seed's when the
- *  user has another mouse) folds into one "+N not connected" button. */
-export function DeviceCards({
+/** Universal sidebar device selector and device-scope navigation (`#2A`).
+ *  Works for any input device (native mice with onboard memory/sensor telemetry
+ *  as well as custom mice, macropads, keyboards, and other controllers). */
+export function SidebarDeviceSection({
   config,
   devices,
   activeDeviceId,
   profile,
   refreshToken,
-  onSelect,
-  onAdd,
-  onContextMenu,
+  workspaceMode,
+  activeDeviceTab,
+  onSelectDevice,
+  onSelectDeviceTab,
+  onAddDevice,
+  onDeviceContextMenu,
 }: {
   config: AppConfig;
   devices: Device[];
   activeDeviceId: string | null;
-  /** The edited profile: its slot on each mouse is shown. */
   profile: Profile | null;
   refreshToken: number;
-  onSelect: (id: string) => void;
-  onAdd: () => void;
-  /** Right click on a card: it is selected first, then its menu opens here. */
-  onContextMenu?: (x: number, y: number) => void;
+  workspaceMode: WorkspaceMode;
+  activeDeviceTab: DeviceTab;
+  onSelectDevice: (id: string) => void;
+  onSelectDeviceTab: (tab: DeviceTab) => void;
+  onAddDevice: () => void;
+  onDeviceContextMenu?: (x: number, y: number) => void;
 }) {
   const { t } = useTranslation();
-  // Selecting a card reads that mouse again (it may have woken up since).
   const [selectToken, setSelectToken] = useState(0);
-  const { mice, readings } = useMiceState(refreshToken + selectToken);
-  const [showOffline, setShowOffline] = useState(false);
-  const isBuiltin = (device: Device) => device.builtin && deviceLayout(device.id) !== undefined;
-  const isConnected = (device: Device) => mice?.some((mouse) => mouse.deviceId === device.id) ?? false;
-  // Until the first list arrives every card shows, so nothing jumps away.
-  const folded = (device: Device) => mice !== null && isBuiltin(device) && !isConnected(device);
-  const offline = devices.filter(folded);
-  const visible = devices.filter((device) => !folded(device) || showOffline || device.id === activeDeviceId);
-  const hiddenCount = devices.length - visible.length;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  useDismissable(pickerRef, () => setMenuOpen(false));
 
-  // The first list: an unplugged mouse picked only by default gives way to a
-  // connected one.
+  const { mice, readings } = useMiceState(refreshToken + selectToken);
+  const isBuiltinNative = (device: Device) => Boolean(device.builtin && deviceLayout(device.id));
+  const isConnected = (device: Device) => mice?.some((mouse) => mouse.deviceId === device.id) ?? false;
+  const isFolded = (device: Device) => mice !== null && isBuiltinNative(device) && !isConnected(device);
+
+  // On initial hardware list: move a default pick off an unplugged built-in mouse
+  // to a connected one so the user lands directly on their active device.
   const placed = useRef(false);
   useEffect(() => {
     if (mice === null || placed.current) return;
     placed.current = true;
     const active = devices.find((device) => device.id === activeDeviceId);
-    const connected = devices.find((device) => isBuiltin(device) && isConnected(device));
-    if (active && folded(active) && connected) onSelect(connected.id);
+    const connected = devices.find((device) => isBuiltinNative(device) && isConnected(device));
+    if (active && isFolded(active) && connected) onSelectDevice(connected.id);
   }, [mice]);
 
+  const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0] ?? null;
+  const activeBuiltin = activeDevice ? isBuiltinNative(activeDevice) : false;
+  const activeConnected = activeDevice ? isConnected(activeDevice) : false;
+  const activeReading = activeDevice ? readings.get(activeDevice.id) : undefined;
+  const activeNativeInfo = activeDevice ? mice?.find((m) => m.deviceId === activeDevice.id) ?? null : null;
+
+  const primaryDevices = devices.filter((device) => !isFolded(device));
+  const offlineDevices = devices.filter((device) => isFolded(device));
+
+  const deviceMetaText = (device: Device): string => {
+    if (isBuiltinNative(device)) {
+      if (!isConnected(device)) return t("device.notConnected");
+      const reading = readings.get(device.id);
+      const parts = [
+        reading?.batteryPercent != null ? t("device.chipBattery", { percent: reading.batteryPercent }) : null,
+        reading?.dpi != null ? t("device.chipDpi", { dpi: reading.dpi }) : null,
+        reading?.pollRateHz != null ? t("device.chipPoll", { hz: reading.pollRateHz }) : null,
+      ].filter((part): part is string => part !== null);
+      if (parts.length > 0) return parts.join(" / ");
+      return reading === undefined ? t("device.reading") : t("device.noAnswer");
+    }
+    const controls = config.physicalControls.filter((control) => control.deviceId === device.id).length;
+    return t("device.chipControls", { count: controls });
+  };
+
+  const selectDevice = (device: Device) => {
+    onSelectDevice(device.id);
+    if (isBuiltinNative(device) && isConnected(device)) {
+      setSelectToken((n) => n + 1);
+    }
+    setMenuOpen(false);
+  };
+
+  const isDeviceTabActive = (tab: DeviceTab) => workspaceMode === "profiles" && activeDeviceTab === tab;
+  const activeSlot = activeDevice && activeBuiltin ? profile?.deviceSlots?.[activeDevice.id] : undefined;
+
   return (
-    <div className="device-cards" role="group" aria-label={t("device.cardsLabel")}>
-      {visible.map((device) => {
-        const builtin = isBuiltin(device);
-        const connected = isConnected(device);
-        const reading = readings.get(device.id);
-        const slot = profile?.deviceSlots?.[device.id];
-        const controls = config.physicalControls.filter((control) => control.deviceId === device.id).length;
-        const values = builtin && connected
-          ? [
-              reading?.batteryPercent != null ? t("device.chipBattery", { percent: reading.batteryPercent }) : null,
-              reading?.dpi != null ? t("device.chipDpi", { dpi: reading.dpi }) : null,
-              reading?.pollRateHz != null ? t("device.chipPoll", { hz: reading.pollRateHz }) : null,
-            ].filter((chip): chip is string => chip !== null)
-          : [];
-        const chips = builtin
-          ? connected
-            ? [
-                ...(values.length > 0 ? values : [reading === undefined ? t("device.reading") : t("device.noAnswer")]),
-                slot !== undefined ? t("device.chipSlot", { n: slot }) : null,
-              ].filter((chip): chip is string => chip !== null)
-            : [t("device.notConnected")]
-          : [t("device.chipControls", { count: controls })];
-        const active = device.id === activeDeviceId;
-        const select = () => {
-          onSelect(device.id);
-          if (builtin && connected) setSelectToken((n) => n + 1);
-        };
-        return (
-          <button
-            key={device.id}
-            type="button"
-            aria-pressed={active}
-            className={`device-card${active ? " device-card--active" : ""}${builtin && !connected ? " device-card--offline" : ""}`}
-            onClick={select}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              // Only a card not selected yet is selected (and its mouse re-read).
-              if (!active) select();
-              onContextMenu?.(e.clientX, e.clientY);
-            }}
-            title={device.name}
-          >
-            <span className="device-card__name">{device.name}</span>
-            <span className="device-card__chips">
-              {chips.map((chip) => <span key={chip} className="device-card__chip">{chip}</span>)}
-            </span>
-          </button>
-        );
-      })}
-      {hiddenCount > 0 ? (
+    <div className="sidebar-device-zone">
+      <div className="sidebar-device" ref={pickerRef}>
         <button
           type="button"
-          className="device-card device-card--more"
-          onClick={() => setShowOffline(true)}
-          title={`${t("device.showOfflineHint")}: ${offline.map((device) => device.name).join(", ")}`}
+          className={`sidebar-device__btn${menuOpen ? " sidebar-device__btn--open" : ""}`}
+          aria-expanded={menuOpen}
+          aria-haspopup="listbox"
+          aria-label={t("sidebar.selectDevice")}
+          onClick={() => setMenuOpen((open) => !open)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            if (activeDevice) {
+              if (activeBuiltin && activeConnected) setSelectToken((n) => n + 1);
+              onDeviceContextMenu?.(e.clientX, e.clientY);
+            }
+          }}
         >
-          <span className="device-card__name">{t("device.showOffline", { count: hiddenCount })}</span>
+          <span className="sidebar-device__top">
+            <span className="sidebar-device__name">
+              {activeDevice ? activeDevice.name : t("app.deviceFallback")}
+            </span>
+            <span className="sidebar-device__chev" aria-hidden="true">▾</span>
+          </span>
+          <span className="sidebar-device__meta">
+            {activeDevice ? deviceMetaText(activeDevice) : t("device.noneConnected")}
+            {activeSlot !== undefined ? ` (${t("device.chipSlot", { n: activeSlot })})` : ""}
+          </span>
         </button>
+
+        {menuOpen ? (
+          <div className="sidebar-device__menu" role="listbox" aria-label={t("device.cardsLabel")}>
+            {primaryDevices.map((device) => {
+              const selected = device.id === activeDevice?.id;
+              return (
+                <button
+                  key={device.id}
+                  type="button"
+                  role="option"
+                  aria-selected={selected}
+                  className={`sidebar-device__option${selected ? " sidebar-device__option--active" : ""}`}
+                  onClick={() => selectDevice(device)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (!selected) selectDevice(device);
+                    else setMenuOpen(false);
+                    onDeviceContextMenu?.(e.clientX, e.clientY);
+                  }}
+                >
+                  <span className="sidebar-device__option-name">{device.name}</span>
+                  <span className="sidebar-device__option-meta">{deviceMetaText(device)}</span>
+                </button>
+              );
+            })}
+
+            {offlineDevices.length > 0 ? (
+              <>
+                {primaryDevices.length > 0 ? <div className="sidebar-device__sep" role="separator" /> : null}
+                <div className="sidebar-device__group-label">{t("device.offlineGroup")}</div>
+                {offlineDevices.map((device) => {
+                  const selected = device.id === activeDevice?.id;
+                  return (
+                    <button
+                      key={device.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selected}
+                      className={`sidebar-device__option sidebar-device__option--offline${selected ? " sidebar-device__option--active" : ""}`}
+                      onClick={() => selectDevice(device)}
+                    >
+                      <span className="sidebar-device__option-name">{device.name}</span>
+                      <span className="sidebar-device__option-meta">{t("device.notConnected")}</span>
+                    </button>
+                  );
+                })}
+              </>
+            ) : null}
+
+            <div className="sidebar-device__sep" role="separator" />
+            <button
+              type="button"
+              className="sidebar-device__option sidebar-device__option--add"
+              onClick={() => {
+                setMenuOpen(false);
+                onAddDevice();
+              }}
+            >
+              <span className="sidebar-device__option-name">{t("device.addDevice")}</span>
+              {primaryDevices.length === 0 ? (
+                <span className="sidebar-device__option-meta">{t("device.noneConnected")}</span>
+              ) : null}
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      {activeDevice ? (
+        <div className="sidebar__section sidebar__section--device">
+          <div className="sidebar__section-header">
+            <span className="sidebar__section-label">{t("sidebar.deviceHeader")}</span>
+          </div>
+          <nav className="sidebar-device__nav" aria-label={t("sidebar.deviceHeader")}>
+            {activeBuiltin ? (
+              <>
+                <button
+                  type="button"
+                  aria-current={isDeviceTabActive("memory") ? "page" : undefined}
+                  className={`nav-item nav-item--compact${isDeviceTabActive("memory") ? " nav-item--active" : ""}`}
+                  onClick={() => onSelectDeviceTab("memory")}
+                >
+                  <svg className="nav-item__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <rect x="2.5" y="3" width="11" height="10" rx="1.8" stroke="currentColor" strokeWidth="1.4" />
+                    <path d="M5.5 3v3.5h5V3M5.5 13V9.5h5V13" stroke="currentColor" strokeWidth="1.3" />
+                  </svg>
+                  <span className="nav-item__label">{t("device.tabMemory")}</span>
+                  {activeNativeInfo?.banks ? (
+                    <span className="sidebar-device__badge">{t("sidebar.slotsBadge", { max: 5 })}</span>
+                  ) : null}
+                </button>
+                <button
+                  type="button"
+                  aria-current={isDeviceTabActive("performance") ? "page" : undefined}
+                  className={`nav-item nav-item--compact${isDeviceTabActive("performance") ? " nav-item--active" : ""}`}
+                  onClick={() => onSelectDeviceTab("performance")}
+                >
+                  <svg className="nav-item__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                    <path d="M8.8 1.8L3.5 9h4.2l-.5 5.2L12.5 7H8.3l.5-5.2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+                  </svg>
+                  <span className="nav-item__label">{t("device.tabPerformance")}</span>
+                  {activeConnected && activeReading?.dpi != null ? (
+                    <span className="sidebar-device__badge">{activeReading.dpi}</span>
+                  ) : null}
+                </button>
+              </>
+            ) : null}
+            <button
+              type="button"
+              aria-current={isDeviceTabActive("stats") ? "page" : undefined}
+              className={`nav-item nav-item--compact${isDeviceTabActive("stats") ? " nav-item--active" : ""}`}
+              onClick={() => onSelectDeviceTab("stats")}
+            >
+              <svg className="nav-item__icon" width="15" height="15" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M3 13V8.5M8 13V4M13 13V6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+              </svg>
+              <span className="nav-item__label">{t("device.tabStats")}</span>
+            </button>
+          </nav>
+        </div>
       ) : null}
-      <button type="button" className="device-card device-card--add" onClick={onAdd} title={t("device.addDeviceHint")}>
-        <span className="device-card__name">{t("device.addDevice")}</span>
-        {visible.length === 0 ? <span className="device-card__chips">{t("device.noneConnected")}</span> : null}
-      </button>
     </div>
   );
 }

@@ -16,7 +16,6 @@ import {
   addLearnedControl,
   applyBindingImport,
   copyBindingBetweenProfiles,
-  createDevice,
   acceptConflict,
   keepBindingDisableOthers,
   copyBindingFromLayer,
@@ -63,12 +62,11 @@ import { retargetImportedBindings } from "../lib/device-transfer";
 import { DeviceTransferModal } from "./DeviceTransferModal";
 import { ContextMenu } from "./ContextMenu";
 import { AddControlModal, type EditControlTarget } from "./AddControlModal";
-import { DeviceCards } from "./DeviceCards";
+import type { DeviceTab } from "./DeviceCards";
 import { MouseWorkspace } from "./MouseWorkspace";
 import type { OfflinePayload } from "../lib/offline-suggestions";
 import { OfflineFixPanel } from "./OfflineFixPanel";
 import { PressStats } from "./PressStats";
-import { PillTrack } from "./PillTrack";
 import { GenericDeviceView } from "./GenericDeviceView";
 import { MouseVisualization } from "./MouseVisualization";
 import { Notice, Toggle } from "./shared";
@@ -110,6 +108,14 @@ export interface ProfilesWorkspaceProps {
   devices: Device[];
   activeDeviceId: string | null;
   onSelectDevice: (id: string) => void;
+  /** Controlled section for the active device (buttons / memory / performance / stats). */
+  deviceTab?: DeviceTab;
+  onSelectDeviceTab?: (tab: DeviceTab) => void;
+  /** Called after a hardware write so the sidebar's device telemetry refreshes. */
+  onDeviceWritten?: () => void;
+  /** One-shot signal from the sidebar's device menu (rename, photo, delete, transfer). */
+  deviceActionSignal?: { seq: number; action: "rename" | "photo" | "delete" | "transfer" } | null;
+  onDeviceActionHandled?: () => void;
   selectedLayer: Layer;
   multiSelectedControlIds: Set<ControlId>;
   onSelectLayer: (layer: Layer) => void;
@@ -132,15 +138,6 @@ export interface ProfilesWorkspaceProps {
 /* ────────────────────────────────────────────────────────────
    Profiles Workspace
    ──────────────────────────────────────────────────────────── */
-
-/** A built-in mouse's tabs, in the panel header and the card's menu. */
-const DEVICE_TABS = ["buttons", "performance", "memory", "stats"] as const;
-const DEVICE_TAB_LABEL = {
-  buttons: "device.tabButtons",
-  performance: "device.tabPerformance",
-  memory: "device.tabMemory",
-  stats: "device.tabStats",
-} as const;
 
 export function ProfilesWorkspace({
   offlinePreview,
@@ -168,6 +165,11 @@ export function ProfilesWorkspace({
   devices,
   activeDeviceId,
   onSelectDevice,
+  deviceTab: controlledDeviceTab,
+  onSelectDeviceTab,
+  onDeviceWritten,
+  deviceActionSignal,
+  onDeviceActionHandled,
   selectedLayer,
   multiSelectedControlIds,
   onSelectLayer,
@@ -246,12 +248,20 @@ export function ProfilesWorkspace({
   const [renameFreshDevice, setRenameFreshDevice] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferAll, setTransferAll] = useState(false);
-  // A built-in mouse has four tabs: buttons, performance, memory, statistics.
-  const [deviceTab, setDeviceTab] = useState<(typeof DEVICE_TABS)[number]>("buttons");
-  // Bumped after a write from the Performance tab so the mouse cards re-read.
-  const [cardsToken, setCardsToken] = useState(0);
-  const mouseTab = activeDevice?.builtin && deviceLayout(activeDevice.id) ? deviceTab : "buttons";
+  const [localDeviceTab, setLocalDeviceTab] = useState<DeviceTab>("buttons");
+  const effectiveDeviceTab = controlledDeviceTab ?? localDeviceTab;
+  const setDeviceTab = (tab: DeviceTab) => {
+    setLocalDeviceTab(tab);
+    onSelectDeviceTab?.(tab);
+  };
+  const isBuiltinNative = Boolean(activeDevice?.builtin && deviceLayout(activeDevice.id));
   const builtinMice = activeConfig.devices.filter((device) => device.builtin && deviceLayout(device.id)).length;
+  // Stats works for every input device; performance/memory apply to built-in native mice.
+  const mouseTab: DeviceTab = effectiveDeviceTab === "stats"
+    ? "stats"
+    : isBuiltinNative
+    ? effectiveDeviceTab
+    : "buttons";
   const writeTarget = offlineView && effectiveProfileId && activeDevice?.builtin
     ? offlinePreview?.target ?? { state: "unknown" as const }
     : null;
@@ -261,13 +271,21 @@ export function ProfilesWorkspace({
     : 0;
   const autoControlName = t("device.autoName", { n: deviceControlCount + 1 });
 
-  function handleAddDevice() {
-    const { config: nextConfig, deviceId } = createDevice(activeConfig, t("device.defaultName"));
-    updateDraft(() => nextConfig);
-    onSelectDevice(deviceId);
-    setRenameFreshDevice(true);
-    showToast(t("device.created"), "success");
-  }
+  useEffect(() => {
+    if (!deviceActionSignal) return;
+    if (deviceActionSignal.action === "rename") {
+      setDeviceTab("buttons");
+      setRenameFreshDevice(true);
+    } else if (deviceActionSignal.action === "photo") {
+      setDeviceTab("buttons");
+      void handlePickImage();
+    } else if (deviceActionSignal.action === "delete") {
+      handleDeleteDevice();
+    } else if (deviceActionSignal.action === "transfer") {
+      setShowTransfer(true);
+    }
+    onDeviceActionHandled?.();
+  }, [deviceActionSignal]);
 
   function handleSubmitControl(name: string, encodedKey: string, andNext: boolean) {
     if (!activeDevice || !learnModal) return;
@@ -439,7 +457,6 @@ export function ProfilesWorkspace({
   const [swapFrom, setSwapFrom] = useState<Slot | null>(null);
   // "Copy assignments…": the layer it starts from, null = closed.
   const [copyDialog, setCopyDialog] = useState<Layer | null>(null);
-  const [deviceCtxMenu, setDeviceCtxMenu] = useState<{ x: number; y: number } | null>(null);
   // A layer pill's menu opens "Copy assignments…" from that layer.
   const copyLayer = activeProfile ? (layer: Layer) => setCopyDialog(layer) : undefined;
   const [compareOpen, setCompareOpen] = useState(false);
@@ -919,28 +936,6 @@ export function ProfilesWorkspace({
       </>
       ) : null}
 
-      <DeviceCards
-        config={activeConfig}
-        devices={devices}
-        activeDeviceId={activeDevice?.id ?? null}
-        profile={activeProfile}
-        refreshToken={cardsToken}
-        onSelect={onSelectDevice}
-        onAdd={handleAddDevice}
-        onContextMenu={(x, y) => setDeviceCtxMenu({ x, y })}
-      />
-      {activeDevice?.builtin && deviceLayout(activeDevice.id) ? (
-        <div className="device-panel__header">
-          <h3 className="device-panel__title">{activeDevice.name}</h3>
-        <PillTrack
-          className="device-tabs"
-          items={DEVICE_TABS.map((tab) => ({ key: tab, label: t(DEVICE_TAB_LABEL[tab]) }))}
-          active={mouseTab}
-          onSelect={setDeviceTab}
-        />
-        </div>
-      ) : null}
-
       {mouseTab === "stats" && activeDevice ? (
         <PressStats
           key={activeDevice.id}
@@ -960,7 +955,11 @@ export function ProfilesWorkspace({
           activeConfig={activeConfig}
           deviceId={activeDevice.id}
           section={mouseTab}
-          onWritten={() => setCardsToken((n) => n + 1)}
+          onWritten={onDeviceWritten}
+          onOpenProfileButtons={(profileId) => {
+            setSelectedProfileId(profileId);
+            setDeviceTab("buttons");
+          }}
           profiles={activeConfig.profiles}
           activeProfile={activeProfile}
           runtimeProfileId={runtimeProfileId}
@@ -1717,31 +1716,6 @@ export function ProfilesWorkspace({
           />
         );
       })() : null}
-      {/* ── Device card menu (the right-clicked card is the selected one) ── */}
-      {deviceCtxMenu && activeDevice ? (
-        <ContextMenu
-          x={deviceCtxMenu.x}
-          y={deviceCtxMenu.y}
-          onClose={() => setDeviceCtxMenu(null)}
-          items={activeDevice.builtin
-            ? [
-                ...(deviceLayout(activeDevice.id)
-                  ? DEVICE_TABS.map((tab) => ({
-                      label: t(DEVICE_TAB_LABEL[tab]),
-                      disabled: mouseTab === tab,
-                      onClick: () => setDeviceTab(tab),
-                    }))
-                  : []),
-                ...(builtinMice > 1 ? [...(deviceLayout(activeDevice.id) ? [null] : []), { label: t("transfer.open"), onClick: () => setShowTransfer(true) }] : []),
-              ]
-            : [
-                { label: t("device.rename"), onClick: () => setRenameFreshDevice(true) },
-                { label: activeDevice.image ? t("device.replacePhoto") : t("device.addPhoto"), onClick: () => void handlePickImage() },
-                null,
-                { label: t("device.delete"), danger: true, disabled: devices.length <= 1, onClick: handleDeleteDevice },
-              ]}
-        />
-      ) : null}
     </div>
   );
 }

@@ -90,6 +90,7 @@
     "allow-back-to-sidearm-bank",
     "allow-get-sidearm-bank",
     "allow-release-sidearm-bank",
+    "allow-move-sidearm-bank",
     "allow-get-offline-preview",
     "allow-get-device-report",
     "allow-open-device-report-issue",

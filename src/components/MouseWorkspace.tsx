@@ -12,6 +12,7 @@ import {
   getNativeModel,
   getOnboardBanks,
   getSidearmBank,
+  moveSidearmBank,
   releaseSidearmBank,
   listenMouseBattery,
   listenNativeMiceChanged,
@@ -29,6 +30,7 @@ import {
   type NativeModelInfo,
   type OnboardBanks,
 } from "../lib/onboard-mapping";
+import { ContextMenu } from "./ContextMenu";
 import { PillTrack } from "./PillTrack";
 import { dpiStageChoices, dpiStagesForValue } from "../lib/dpi-stages";
 import { listenActionExecutionEvent } from "../lib/backend";
@@ -44,6 +46,8 @@ export interface MouseWorkspaceProps {
   section: "performance" | "memory";
   /** Called after a confirmed write to the mouse (the cards re-read it). */
   onWritten?: () => void;
+  /** Opens the Buttons view for a given profile (from a memory slot context menu). */
+  onOpenProfileButtons?: (profileId: string) => void;
   /** Profiles in the sidebar's order. */
   profiles: Profile[];
   /** The profile being edited — the same selection as the sidebar. */
@@ -71,6 +75,7 @@ export function MouseWorkspace({
   deviceId,
   section,
   onWritten,
+  onOpenProfileButtons,
   profiles,
   activeProfile,
   runtimeProfileId,
@@ -114,6 +119,7 @@ export function MouseWorkspace({
   const [banksVersion, setBanksVersion] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<number>(1);
   const [dragOverSlot, setDragOverSlot] = useState<number | null>(null);
+  const [slotCtxMenu, setSlotCtxMenu] = useState<{ x: number; y: number; slot: number } | null>(null);
   const slotInitDeviceRef = useRef<string | null>(null);
 
   async function run(request: (deviceId?: string) => Promise<MouseSettingsState>, writing = false) {
@@ -264,6 +270,43 @@ export function MouseWorkspace({
     );
   }
 
+  /** Moves Sidearm's service bank to `targetBank` (typically slot 5) immediately,
+   *  automatically remapping any displaced user profile's slot link in config. */
+  function handleMoveSidearmBank(deviceId: string, targetBank: number) {
+    if (slotActionBusy || flushState === "busy" || releaseStep === "busy") return;
+    if (sidearmBank === null || sidearmBank === targetBank) return;
+    setSlotActionBusy(true);
+    setConfirmDeleteBank(null);
+    setReleaseStep("idle");
+    setReleaseError(null);
+    void moveSidearmBank(deviceId, targetBank).then(
+      (res) => {
+        if (!lifecycle.current.alive) return;
+        if (res.displacedFrom !== null && res.displacedTo !== null) {
+          const fromSlot = res.displacedFrom;
+          const toSlot = res.displacedTo;
+          updateDraft((config) => {
+            const displaced = config.profiles.find((p) => p.deviceSlots?.[deviceId] === fromSlot);
+            return displaced ? setProfileDeviceSlot(config, displaced.id, deviceId, toSlot) : config;
+          }, { immediate: true });
+        }
+        setSidearmBank(res.sidearm);
+        setBanks(res.banks);
+        setSelectedSlot(res.sidearm);
+        setFlushState("idle");
+        setSlotActionBusy(false);
+        setBanksVersion((v) => v + 1);
+        notifyBanksChanged();
+        onWritten?.();
+      },
+      (e: unknown) => {
+        if (!lifecycle.current.alive) return;
+        setSlotActionBusy(false);
+        setReleaseError(normalizeCommandError(e).message);
+      },
+    );
+  }
+
   /** Assigns a Sidearm profile to a specific hardware slot (1..5), creating that
    *  exact slot on the mouse first when it is currently empty. When moving from
    *  another slot, swaps occupied slots or cleans up the vacated source slot. */
@@ -321,9 +364,9 @@ export function MouseWorkspace({
     );
   }
 
-  function handleDeleteSlot(deviceId: string, bank: number, holderId?: string) {
+  function handleDeleteSlot(deviceId: string, bank: number, holderId?: string, skipConfirm = false) {
     if (slotActionBusy || flushState === "busy") return;
-    if (confirmDeleteBank !== bank) {
+    if (!skipConfirm && confirmDeleteBank !== bank) {
       setConfirmDeleteBank(bank);
       return;
     }
@@ -593,6 +636,131 @@ export function MouseWorkspace({
         </div>
       );
 
+      const renderSlotTile = (slot: 1 | 2 | 3 | 4 | 5) => {
+        const isSelected = activeSelectedSlot === slot;
+        const isService = slot === sidearmBank;
+        const isAssigned = !isService && assignedSet.has(slot);
+        const holder = isAssigned
+          ? profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === slot) ?? null
+          : null;
+        const isOfflineSlot = holder?.id === dedicatedOfflineId;
+        const isDirect = Boolean(holder && !isOfflineSlot && holder.deviceMouse?.[model.deviceId]?.hardwareBank);
+        const isExternal = isAssigned && !holder;
+        const isFree = !isService && !isAssigned;
+        const isDropTarget = dragOverSlot === slot;
+
+        const tileClass = [
+          "memory-slot-tile",
+          isService
+            ? "memory-slot-tile--service"
+            : isFree
+            ? "memory-slot-tile--free"
+            : isExternal
+            ? "memory-slot-tile--external"
+            : isOfflineSlot
+            ? "memory-slot-tile--offline"
+            : isDirect
+            ? "memory-slot-tile--direct"
+            : "memory-slot-tile--user",
+          isSelected ? "memory-slot-tile--selected" : "",
+          isDropTarget ? "memory-slot-tile--drop" : "",
+        ].filter(Boolean).join(" ");
+
+        const tileName = isService
+          ? "Sidearm"
+          : isFree
+          ? t("mouse.slotTileFree")
+          : isExternal
+          ? t("mouse.slotTileExternal")
+          : holder!.name;
+
+        const tileSub = isDropTarget
+          ? t("mouse.slotDropHere")
+          : isService
+          ? (slot !== 5 ? t("mouse.slotTileServiceMove") : t("mouse.slotTileService"))
+          : isFree
+          ? t("mouse.slotTileDropHint")
+          : isExternal
+          ? t("mouse.slotTileExternalSub")
+          : isOfflineSlot
+          ? t("mouse.slotTileOffline")
+          : isDirect
+          ? t("mouse.slotTileDirect")
+          : t("mouse.slotTileStandard");
+
+        return (
+          <button
+            key={slot}
+            type="button"
+            role="tab"
+            aria-selected={isSelected}
+            aria-label={`${t("mouse.slotRow", { n: slot })}: ${tileName}`}
+            className={tileClass}
+            draggable={Boolean(holder) || isService}
+            onClick={() => {
+              setSelectedSlot(slot);
+              setConfirmDeleteBank(null);
+              setReleaseStep("idle");
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setSelectedSlot(slot);
+              setSlotCtxMenu({ x: e.clientX, y: e.clientY, slot });
+            }}
+            onDragStart={(e) => {
+              if (!holder && !isService) { e.preventDefault(); return; }
+              e.dataTransfer.effectAllowed = "move";
+              if (holder) e.dataTransfer.setData(PROFILE_DRAG_TYPE, holder.id);
+              e.dataTransfer.setData(MEMORY_SLOT_DRAG_TYPE, String(slot));
+            }}
+            onDragOver={(e) => {
+              if (slotActionBusy || flushState === "busy" || !isProfileOrSlotDrag(e)) return;
+              // Sidebar profiles cannot drop directly onto Sidearm's service slot;
+              // only another slot (or Sidearm itself) can swap/relocate with it.
+              const types = Array.from(e.dataTransfer.types);
+              if (isService && !types.includes(MEMORY_SLOT_DRAG_TYPE)) return;
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (dragOverSlot !== slot) setDragOverSlot(slot);
+            }}
+            onDragLeave={(e) => {
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              if (dragOverSlot === slot) setDragOverSlot(null);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOverSlot(null);
+              if (slotActionBusy || flushState === "busy") return;
+              const fromRaw = e.dataTransfer.getData(MEMORY_SLOT_DRAG_TYPE);
+              const fromSlot = fromRaw ? Number(fromRaw) : undefined;
+              if (fromSlot === slot) {
+                setSelectedSlot(slot);
+                return;
+              }
+              if (sidearmBank !== null && fromSlot === sidearmBank) {
+                handleMoveSidearmBank(model.deviceId, slot);
+                return;
+              }
+              if (isService && fromSlot !== undefined && Number.isInteger(fromSlot)) {
+                handleMoveSidearmBank(model.deviceId, fromSlot);
+                return;
+              }
+              if (isService) return;
+              const profileId = e.dataTransfer.getData(PROFILE_DRAG_TYPE);
+              if (!profileId || !profiles.some((p) => p.id === profileId)) return;
+              assignProfileToSlot(model.deviceId, slot, profileId, Number.isInteger(fromSlot) ? fromSlot : undefined);
+            }}
+          >
+            <span className="memory-slot-tile__top">
+              <span className="memory-slot-tile__num">{slot}</span>
+              {holder || isService ? <span className="memory-slot-tile__grip" aria-hidden="true">⋮⋮</span> : null}
+            </span>
+            <span className="memory-slot-tile__name">{tileName}</span>
+            <span className="memory-slot-tile__sub">{tileSub}</span>
+          </button>
+        );
+      };
+
       return (
         <div className="settings-shell__content">
           <section className="settings-section memory-board" aria-label={t("mouse.memoryTitle", { model: model.name })}>
@@ -602,18 +770,30 @@ export function MouseWorkspace({
                 <p className="panel__muted help-sm">{t("mouse.memoryBoardLead")}</p>
               </div>
               {model.connected && banks !== null ? (
-                <button
-                  type="button"
-                  className="action-button action-button--small"
-                  disabled={flushState === "busy" || slotActionBusy || releaseStep === "busy"}
-                  onClick={() => handleFlushBanks(model.deviceId)}
-                >
-                  {flushState === "busy"
-                    ? t("mouse.slotsWriting")
-                    : flushState === "done"
-                    ? t("mouse.slotsWrittenNow")
-                    : t("mouse.slotsWriteNow")}
-                </button>
+                <div className="memory-board__header-actions">
+                  {sidearmBank !== null && sidearmBank !== 5 ? (
+                    <button
+                      type="button"
+                      className="action-button action-button--secondary action-button--small"
+                      disabled={slotActionBusy || flushState === "busy" || releaseStep === "busy"}
+                      onClick={() => handleMoveSidearmBank(model.deviceId, 5)}
+                    >
+                      {t("mouse.sidearmMoveTo5Short")}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="action-button action-button--small"
+                    disabled={flushState === "busy" || slotActionBusy || releaseStep === "busy"}
+                    onClick={() => handleFlushBanks(model.deviceId)}
+                  >
+                    {flushState === "busy"
+                      ? t("mouse.slotsWriting")
+                      : flushState === "done"
+                      ? t("mouse.slotsWrittenNow")
+                      : t("mouse.slotsWriteNow")}
+                  </button>
+                </div>
               ) : null}
             </div>
 
@@ -621,113 +801,10 @@ export function MouseWorkspace({
               <p className="panel__muted help-sm">{t("mouse.slotNeedsMouse")}</p>
             ) : (
               <>
-                <div className="memory-slot-strip" role="tablist" aria-label={t("mouse.slotMapLabel")}>
-                  {allSlots.map((slot) => {
-                    const isSelected = activeSelectedSlot === slot;
-                    const isService = slot === sidearmBank;
-                    const isAssigned = !isService && assignedSet.has(slot);
-                    const holder = isAssigned
-                      ? profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === slot) ?? null
-                      : null;
-                    const isOfflineSlot = holder?.id === dedicatedOfflineId;
-                    const isDirect = Boolean(holder && !isOfflineSlot && holder.deviceMouse?.[model.deviceId]?.hardwareBank);
-                    const isExternal = isAssigned && !holder;
-                    const isFree = !isService && !isAssigned;
-                    const isDropTarget = dragOverSlot === slot && !isService;
-
-                    const tileClass = [
-                      "memory-slot-tile",
-                      isService
-                        ? "memory-slot-tile--service"
-                        : isFree
-                        ? "memory-slot-tile--free"
-                        : isExternal
-                        ? "memory-slot-tile--external"
-                        : isOfflineSlot
-                        ? "memory-slot-tile--offline"
-                        : isDirect
-                        ? "memory-slot-tile--direct"
-                        : "memory-slot-tile--user",
-                      isSelected ? "memory-slot-tile--selected" : "",
-                      isDropTarget ? "memory-slot-tile--drop" : "",
-                    ].filter(Boolean).join(" ");
-
-                    const tileName = isService
-                      ? "Sidearm"
-                      : isFree
-                      ? t("mouse.slotTileFree")
-                      : isExternal
-                      ? t("mouse.slotTileExternal")
-                      : holder!.name;
-
-                    const tileSub = isDropTarget
-                      ? t("mouse.slotDropHere")
-                      : isService
-                      ? t("mouse.slotTileService")
-                      : isFree
-                      ? t("mouse.slotTileDropHint")
-                      : isExternal
-                      ? t("mouse.slotTileExternalSub")
-                      : isOfflineSlot
-                      ? t("mouse.slotTileOffline")
-                      : isDirect
-                      ? t("mouse.slotTileDirect")
-                      : t("mouse.slotTileStandard");
-
-                    return (
-                      <button
-                        key={slot}
-                        type="button"
-                        role="tab"
-                        aria-selected={isSelected}
-                        aria-label={`${t("mouse.slotRow", { n: slot })}: ${tileName}`}
-                        className={tileClass}
-                        draggable={Boolean(holder)}
-                        onClick={() => {
-                          setSelectedSlot(slot);
-                          setConfirmDeleteBank(null);
-                          setReleaseStep("idle");
-                        }}
-                        onDragStart={(e) => {
-                          if (!holder) { e.preventDefault(); return; }
-                          e.dataTransfer.effectAllowed = "move";
-                          e.dataTransfer.setData(PROFILE_DRAG_TYPE, holder.id);
-                          e.dataTransfer.setData(MEMORY_SLOT_DRAG_TYPE, String(slot));
-                        }}
-                        onDragOver={(e) => {
-                          if (isService || slotActionBusy || flushState === "busy" || !isProfileOrSlotDrag(e)) return;
-                          e.preventDefault();
-                          e.dataTransfer.dropEffect = "move";
-                          if (dragOverSlot !== slot) setDragOverSlot(slot);
-                        }}
-                        onDragLeave={(e) => {
-                          if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-                          if (dragOverSlot === slot) setDragOverSlot(null);
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          setDragOverSlot(null);
-                          if (isService || slotActionBusy || flushState === "busy") return;
-                          const profileId = e.dataTransfer.getData(PROFILE_DRAG_TYPE);
-                          if (!profileId || !profiles.some((p) => p.id === profileId)) return;
-                          const fromRaw = e.dataTransfer.getData(MEMORY_SLOT_DRAG_TYPE);
-                          const fromSlot = fromRaw ? Number(fromRaw) : undefined;
-                          if (fromSlot === slot) {
-                            setSelectedSlot(slot);
-                            return;
-                          }
-                          assignProfileToSlot(model.deviceId, slot, profileId, Number.isInteger(fromSlot) ? fromSlot : undefined);
-                        }}
-                      >
-                        <span className="memory-slot-tile__top">
-                          <span className="memory-slot-tile__num">{slot}</span>
-                          {holder ? <span className="memory-slot-tile__grip" aria-hidden="true">⋮⋮</span> : null}
-                        </span>
-                        <span className="memory-slot-tile__name">{tileName}</span>
-                        <span className="memory-slot-tile__sub">{tileSub}</span>
-                      </button>
-                    );
-                  })}
+                <div className="memory-slot-strip memory-slot-strip--split" role="tablist" aria-label={t("mouse.slotMapLabel")}>
+                  {([1, 2, 3, 4] as const).map(renderSlotTile)}
+                  <div className="memory-slot-strip__sep" aria-hidden="true" />
+                  {renderSlotTile(5)}
                 </div>
 
                 <div className="memory-inspector" role="tabpanel" aria-label={t("mouse.slotRow", { n: activeSelectedSlot })}>
@@ -739,15 +816,27 @@ export function MouseWorkspace({
                           <strong className="memory-inspector__title">{t("mouse.sidearmSlotInspectorTitle")}</strong>
                           <span className="memory-inspector__tag">{t("mouse.slotTileService")}</span>
                         </div>
-                        <button
-                          type="button"
-                          className={`action-button action-button--small${releaseStep === "confirm" ? " action-button--danger" : " action-button--secondary"}`}
-                          disabled={releaseStep === "busy" || slotActionBusy || flushState === "busy"}
-                          onClick={() => releaseSlot(model.deviceId)}
-                          onBlur={() => { if (releaseStep === "confirm") setReleaseStep("idle"); }}
-                        >
-                          {releaseStep === "confirm" ? t("mouse.sidearmSlotConfirm") : t("mouse.sidearmSlotRelease")}
-                        </button>
+                        <div className="memory-inspector__actions">
+                          {sidearmBank !== 5 ? (
+                            <button
+                              type="button"
+                              className="action-button action-button--small"
+                              disabled={releaseStep === "busy" || slotActionBusy || flushState === "busy"}
+                              onClick={() => handleMoveSidearmBank(model.deviceId, 5)}
+                            >
+                              {t("mouse.sidearmMoveTo5Now")}
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className={`action-button action-button--small${releaseStep === "confirm" ? " action-button--danger" : " action-button--secondary"}`}
+                            disabled={releaseStep === "busy" || slotActionBusy || flushState === "busy"}
+                            onClick={() => releaseSlot(model.deviceId)}
+                            onBlur={() => { if (releaseStep === "confirm") setReleaseStep("idle"); }}
+                          >
+                            {releaseStep === "confirm" ? t("mouse.sidearmSlotConfirm") : t("mouse.sidearmSlotRelease")}
+                          </button>
+                        </div>
                       </div>
                       <p className="memory-inspector__desc">{t("mouse.sidearmSlotWhy")}</p>
                       {sidearmBank !== 5 ? (
@@ -777,12 +866,11 @@ export function MouseWorkspace({
                         {canDeleteSlot ? (
                           <button
                             type="button"
-                            className={`action-button action-button--small${confirmDeleteBank === activeSelectedSlot ? " action-button--danger" : " action-button--secondary"}`}
+                            className="action-button action-button--small action-button--secondary"
                             disabled={slotActionBusy || flushState === "busy"}
-                            onClick={() => handleDeleteSlot(model.deviceId, activeSelectedSlot)}
-                            onBlur={() => { if (confirmDeleteBank === activeSelectedSlot) setConfirmDeleteBank(null); }}
+                            onClick={() => handleDeleteSlot(model.deviceId, activeSelectedSlot, undefined, true)}
                           >
-                            {confirmDeleteBank === activeSelectedSlot ? t("mouse.slotDeleteConfirm") : t("mouse.slotDelete")}
+                            {t("mouse.slotClearUnlinked")}
                           </button>
                         ) : null}
                       </div>
@@ -966,6 +1054,104 @@ export function MouseWorkspace({
                     <p>{releaseError}</p>
                   </Notice>
                 ) : null}
+
+                {slotCtxMenu ? (() => {
+                  const slot = slotCtxMenu.slot;
+                  const isService = slot === sidearmBank;
+                  const isAssigned = !isService && assignedSet.has(slot);
+                  const holder = isAssigned
+                    ? profiles.find((profile) => profile.deviceSlots?.[model.deviceId] === slot) ?? null
+                    : null;
+                  const isDedicated = holder?.id === dedicatedOfflineId;
+                  const directOn = Boolean(holder && !isDedicated && holder.deviceMouse?.[model.deviceId]?.hardwareBank);
+                  const items = isService
+                    ? [
+                        ...(slot !== 5
+                          ? [{
+                              label: t("mouse.sidearmMoveTo5Now"),
+                              disabled: slotActionBusy || flushState === "busy" || releaseStep === "busy",
+                              onClick: () => handleMoveSidearmBank(model.deviceId, 5),
+                            }]
+                          : []),
+                        {
+                          label: t("mouse.sidearmSlotRelease"),
+                          danger: true,
+                          disabled: slotActionBusy || flushState === "busy" || releaseStep === "busy",
+                          onClick: () => {
+                            setReleaseStep("confirm");
+                            releaseSlot(model.deviceId);
+                          },
+                        },
+                      ]
+                    : [
+                        ...profiles.map((profile) => ({
+                          label: holder?.id === profile.id
+                            ? t("mouse.slotCtxAssigned", { name: profile.name })
+                            : t("mouse.slotCtxAssign", { name: profile.name }),
+                          disabled: holder?.id === profile.id || slotActionBusy || flushState === "busy",
+                          onClick: () => assignProfileToSlot(model.deviceId, slot, profile.id),
+                        })),
+                        ...(holder
+                          ? [
+                              null,
+                              ...(!isDedicated
+                                ? [
+                                    {
+                                      label: t("mouse.makeOfflineSlot"),
+                                      onClick: () => {
+                                        setFlushState("idle");
+                                        updateDraft((config) => {
+                                          const cleared = holder.deviceMouse?.[model.deviceId]?.hardwareBank
+                                            ? setProfileMouse(config, holder.id, model.deviceId, { hardwareBank: false })
+                                            : config;
+                                          return {
+                                            ...cleared,
+                                            settings: {
+                                              ...cleared.settings,
+                                              offlineProfileId: holder.id === cleared.settings.fallbackProfileId ? undefined : holder.id,
+                                            },
+                                          };
+                                        }, { immediate: true });
+                                      },
+                                    },
+                                    {
+                                      label: directOn ? t("mouse.slotCtxDirectOff") : t("mouse.slotCtxDirectOn"),
+                                      onClick: () => {
+                                        setFlushState("idle");
+                                        updateDraft((config) => setProfileMouse(config, holder.id, model.deviceId, { hardwareBank: !directOn }), { immediate: true });
+                                      },
+                                    },
+                                  ]
+                                : []),
+                              ...(onOpenProfileButtons
+                                ? [{
+                                    label: t("mouse.slotCtxOpenButtons", { name: holder.name }),
+                                    onClick: () => onOpenProfileButtons(holder.id),
+                                  }]
+                                : []),
+                            ]
+                          : []),
+                        ...(isAssigned && canDeleteSlot
+                          ? [
+                              null,
+                              {
+                                label: holder ? t("mouse.slotDelete") : t("mouse.slotClearUnlinked"),
+                                danger: true,
+                                disabled: slotActionBusy || flushState === "busy",
+                                onClick: () => handleDeleteSlot(model.deviceId, slot, holder?.id, true),
+                              },
+                            ]
+                          : []),
+                      ];
+                  return (
+                    <ContextMenu
+                      x={slotCtxMenu.x}
+                      y={slotCtxMenu.y}
+                      onClose={() => setSlotCtxMenu(null)}
+                      items={items}
+                    />
+                  );
+                })() : null}
               </>
             )}
           </section>

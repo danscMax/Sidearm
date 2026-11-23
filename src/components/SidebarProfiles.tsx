@@ -28,6 +28,7 @@ export function SidebarProfiles({
   profiles,
   appMappings,
   effectiveProfileId,
+  highlightSelected = true,
   runtimeProfileName,
   recognized,
   allRules,
@@ -48,6 +49,8 @@ export function SidebarProfiles({
   profiles: Profile[];
   appMappings: AppMapping[];
   effectiveProfileId: string | null;
+  /** True when the buttons view for the selected profile is currently shown. */
+  highlightSelected?: boolean;
   /** The profile the runtime applies now (null while stopped). */
   runtimeProfileName: string | null;
   /** Null while the runtime is stopped or nothing was recognized yet. */
@@ -87,12 +90,12 @@ export function SidebarProfiles({
           return (
             <li
               key={profile.id}
-              className={`sidebar-profiles__item${selected ? " sidebar-profiles__item--selected" : ""}${selected && apps.length > 0 ? " sidebar-profiles__item--foldable" : ""}`}
+              className={`sidebar-profiles__item${selected && highlightSelected ? " sidebar-profiles__item--selected" : selected ? " sidebar-profiles__item--context" : ""}${selected && apps.length > 0 ? " sidebar-profiles__item--foldable" : ""}`}
             >
               <button
                 type="button"
                 className={`sidebar-profiles__row${dropId === profile.id ? " sidebar-profiles__row--drop" : ""}`}
-                aria-current={selected ? "true" : undefined}
+                aria-current={selected && highlightSelected ? "true" : undefined}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.effectAllowed = "move";

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import i18n from "../i18n";
-import { DeviceCards } from "./DeviceCards";
+import { SidebarDeviceSection, type DeviceTab } from "./DeviceCards";
 import { makeConfig } from "../lib/test-fixtures";
 import type { NativeModelInfo } from "../lib/onboard-mapping";
 import * as backend from "../lib/backend";
@@ -17,7 +17,8 @@ vi.mock("../lib/backend", () => ({
 const config = makeConfig();
 const v2 = config.devices[0];
 const v3 = { ...v2, id: "razer-naga-v3", name: "Razer Naga V3 Pro" };
-const mouse = (deviceId: string) => ({ deviceId }) as NativeModelInfo;
+const pad = { id: "pad-1", name: "Macro Pad", builtin: false };
+const mouse = (deviceId: string) => ({ deviceId, banks: deviceId === "razer-naga-v3" }) as NativeModelInfo;
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -25,40 +26,72 @@ beforeEach(async () => {
 });
 afterEach(cleanup);
 
-function show(connected: string[], activeDeviceId: string, onContextMenu = vi.fn()) {
+function show(
+  connected: string[],
+  activeDeviceId: string,
+  opts: { devices?: typeof config.devices; onContextMenu?: (x: number, y: number) => void; onSelectTab?: (tab: DeviceTab) => void } = {},
+) {
   vi.mocked(backend.listNativeMice).mockResolvedValue(connected.map(mouse));
   const onSelect = vi.fn();
-  render(<DeviceCards config={config} devices={[v2, v3]} activeDeviceId={activeDeviceId} profile={null}
-    refreshToken={0} onSelect={onSelect} onAdd={vi.fn()} onContextMenu={onContextMenu} />);
-  return onSelect;
+  const onSelectTab = opts.onSelectTab ?? vi.fn<(tab: DeviceTab) => void>();
+  const onAdd = vi.fn();
+  const onContextMenu = opts.onContextMenu ?? vi.fn<(x: number, y: number) => void>();
+  render(
+    <SidebarDeviceSection
+      config={config}
+      devices={opts.devices ?? [v2, v3]}
+      activeDeviceId={activeDeviceId}
+      profile={null}
+      refreshToken={0}
+      workspaceMode="profiles"
+      activeDeviceTab="buttons"
+      onSelectDevice={onSelect}
+      onSelectDeviceTab={onSelectTab}
+      onAddDevice={onAdd}
+      onDeviceContextMenu={onContextMenu}
+    />,
+  );
+  return { onSelect, onSelectTab, onAdd, onContextMenu };
 }
 
-describe("device cards", () => {
-  it("folds a mouse that is not connected and shows it on request", async () => {
-    show([v2.id], v2.id);
-    const more = await screen.findByRole("button", { name: "+1 not connected" });
-    expect(screen.queryByTitle(v3.name)).toBeNull();
-    fireEvent.click(more);
-    expect(screen.getByTitle(v3.name)).toBeTruthy();
+describe("sidebar universal device section (#2A)", () => {
+  it("lists connected and disconnected devices inside the dropdown and supports switching", async () => {
+    const { onSelect } = show([v2.id], v2.id);
+    const picker = await screen.findByRole("button", { name: i18n.t("sidebar.selectDevice") });
+    fireEvent.click(picker);
+    expect(screen.getByText(i18n.t("device.offlineGroup"))).toBeTruthy();
+    fireEvent.click(screen.getByRole("option", { name: new RegExp(v3.name) }));
+    expect(onSelect).toHaveBeenCalledWith(v3.id);
   });
 
-  it("moves a default pick off an unplugged mouse to the connected one", async () => {
-    const onSelect = show([v3.id], v2.id);
+  it("moves a default pick off an unplugged built-in mouse to a connected one", async () => {
+    const { onSelect } = show([v3.id], v2.id);
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith(v3.id));
   });
 
-  it("a right click selects the card, then opens its menu at the pointer", async () => {
+  it("right-clicking the device picker opens its context menu at the pointer", async () => {
     const onContextMenu = vi.fn();
-    const onSelect = show([v2.id, v3.id], v2.id, onContextMenu);
-    fireEvent.contextMenu(await screen.findByTitle(v3.name), { clientX: 30, clientY: 40 });
-    expect(onSelect).toHaveBeenCalledWith(v3.id);
+    show([v2.id, v3.id], v3.id, { onContextMenu });
+    const picker = await screen.findByRole("button", { name: i18n.t("sidebar.selectDevice") });
+    fireEvent.contextMenu(picker, { clientX: 30, clientY: 40 });
     expect(onContextMenu).toHaveBeenCalledWith(30, 40);
-    expect(vi.mocked(onSelect).mock.invocationCallOrder[0]).toBeLessThan(onContextMenu.mock.invocationCallOrder[0]);
   });
 
-  it("offers adding a device when no supported mouse is connected", async () => {
-    show([], "custom");
-    expect(await screen.findByText("No supported mouse found")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "+2 not connected" })).toBeTruthy();
+  it("shows universal device sections cleanly: Statistics for any custom device, plus Memory & Sensor for native mice", async () => {
+    const onSelectTab = vi.fn();
+    show([v3.id], pad.id, { devices: [v3, pad], onSelectTab });
+    // Custom device (Macro Pad): shows Statistics, hides mouse-only Memory and Sensor tabs.
+    expect(await screen.findByRole("button", { name: i18n.t("device.tabStats") })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: i18n.t("device.tabMemory") })).toBeNull();
+    expect(screen.queryByRole("button", { name: i18n.t("device.tabPerformance") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("device.tabStats") }));
+    expect(onSelectTab).toHaveBeenCalledWith("stats");
+    cleanup();
+
+    // Native mouse (V3 Pro): shows Onboard memory, Sensor & DPI, and Statistics.
+    show([v3.id], v3.id, { devices: [v3, pad], onSelectTab });
+    expect(await screen.findByRole("button", { name: new RegExp(i18n.t("device.tabMemory")) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: new RegExp(i18n.t("device.tabPerformance")) })).toBeTruthy();
+    expect(screen.getByRole("button", { name: i18n.t("device.tabStats") })).toBeTruthy();
   });
 });

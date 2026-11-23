@@ -3912,6 +3912,24 @@ async fn flush_onboard_banks(app: AppHandle, device_id: String, config: AppConfi
     .map_err(|e| CommandError::internal(format!("flush onboard banks task failed: {e}")))?
 }
 
+/// Relocates Sidearm's service bank to `target_bank` (`1..=5`) immediately.
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn move_sidearm_bank(
+    app: AppHandle,
+    device_id: String,
+    target_bank: u8,
+) -> Result<mouse_memory::live_overlay::MoveSidearmBankResult, CommandError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let model = bank_model(&device_id)?;
+        let config_dir = resolve_config_dir(&app)?;
+        mouse_memory::live_overlay::move_sidearm_bank(model, target_bank, &config_dir)
+            .map_err(|msg| bank_command_error(&msg))
+    })
+    .await
+    .map_err(|e| CommandError::internal(format!("move sidearm bank task failed: {e}")))?
+}
+
 /// The profile button took a mouse off Sidearm's bank (offline mode), or it is
 /// back: the Mouse tab's state, the tray's way back and, going offline, an OSD
 /// bubble saying where that way back is.
@@ -5047,6 +5065,7 @@ pub fn run() {
             back_to_sidearm_bank,
             get_sidearm_bank,
             release_sidearm_bank,
+            move_sidearm_bank,
             get_offline_preview,
             get_device_report,
             open_device_report_issue,

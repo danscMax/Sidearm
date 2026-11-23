@@ -12,9 +12,8 @@ import { offlineTargetLabel } from "../lib/labels";
 import { makeAction, makeConfig } from "../lib/test-fixtures";
 import { ProfilesWorkspace, type ProfilesWorkspaceProps } from "./ProfilesWorkspace";
 
-vi.mock("./DeviceCards", () => ({
-  DeviceCards: ({ onContextMenu }: { onContextMenu?: (x: number, y: number) => void }) =>
-    <button type="button" onClick={() => onContextMenu?.(0, 0)}>device card menu</button>,
+vi.mock("./MouseWorkspace", () => ({
+  MouseWorkspace: ({ section }: { section: string }) => <div data-testid={`mouse-workspace-${section}`}>{section}</div>,
 }));
 vi.mock("./MouseVisualization", () => ({
   MouseVisualization: ({ entries, onContextMenu }: MouseVisualizationProps) => <>{entries.map((entry) => (
@@ -98,11 +97,12 @@ it("opens the offline cell's existing picker path without selecting an inherited
 
 it("shows the exit target and a Mouse memory link, and hides heatmap tools", () => {
   const config = makeConfig();
-  show(config, offlineProps(config));
+  const onSelectDeviceTab = vi.fn();
+  show(config, { ...offlineProps(config), onSelectDeviceTab });
   expect(screen.getByText(i18n.t("offline.written"))).toBeTruthy();
   expect(screen.queryByRole("button", { name: i18n.t("profile.heatmapOff") })).toBeNull();
-  fireEvent.click(screen.getAllByRole("button", { name: i18n.t("device.tabMemory") }).at(-1)!);
-  expect(screen.getByRole("button", { name: i18n.t("device.tabMemory"), pressed: true })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: i18n.t("device.tabMemory") }));
+  expect(onSelectDeviceTab).toHaveBeenCalledWith("memory");
 });
 
 it.each([
@@ -299,22 +299,18 @@ function withUserDevice() {
   return config;
 }
 
-it("offers a user device's rename, photo and delete in its card menu, a built-in mouse its tabs", () => {
+it("handles sidebar device menu signals for custom devices (delete) and renders stats for any device", () => {
   const config = withUserDevice();
-  const props = show(config, { activeDeviceId: "pad" });
-  fireEvent.click(screen.getByRole("button", { name: "device card menu" }));
-  expect(screen.getByRole("menuitem", { name: i18n.t("device.rename") })).toBeTruthy();
-  expect(screen.getByRole("menuitem", { name: i18n.t("device.addPhoto") })).toBeTruthy();
-  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("device.delete") }));
+  const props = show(config, {
+    activeDeviceId: "pad",
+    deviceActionSignal: { seq: 1, action: "delete" },
+  });
   expect(props.setConfirmModal).toHaveBeenCalledWith(expect.objectContaining({ title: i18n.t("device.deleteTitle") }));
   cleanup();
 
-  show(config);
-  fireEvent.click(screen.getByRole("button", { name: "device card menu" }));
-  expect((screen.getByRole("menuitem", { name: i18n.t("device.tabButtons") }) as HTMLButtonElement).disabled).toBe(true);
-  fireEvent.click(screen.getByRole("menuitem", { name: i18n.t("device.tabStats") }));
-  expect(screen.queryByRole("menu")).toBeNull();
-  expect(screen.getByRole("button", { name: i18n.t("device.tabStats"), pressed: true })).toBeTruthy();
+  // Statistics view works for universal / custom input devices as well as built-in mice.
+  show(config, { activeDeviceId: "pad", deviceTab: "stats" });
+  expect(screen.getByText(i18n.t("stats.loading"))).toBeTruthy();
 });
 
 it("a user device's button menu also edits and deletes the button itself", () => {

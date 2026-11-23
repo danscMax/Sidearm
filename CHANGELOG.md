@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-11-23
+
+### Added
+- **Without Sidearm layers** (config schema v13) and **Offline Replacement Assistant**: edit own per-button assignments for firmware layers 0 and 1, inspect why a button is silent or falls back to a native click without Sidearm, and apply 1-click firmware-compatible replacements (including EN/RU keyboard equivalents for single-character text snippets, modifier-free clicks/scrolls, fallback-profile equivalents, hold promotion, and bulk apply for unambiguous replacements).
+- **Hardware playability indicators**: monochrome memory icon on grid cells stored in mouse memory, live "In mouse" / "Sidearm only" compatibility badge with exact blocking reason in "Assign action", and per-profile memory counts in Mouse memory.
+- **Opt-in Hybrid Hardware Bank for Razer Naga V3 Pro** (config schema v14): bind a non-offline profile to a V3 bank and enable "Hardware bank" to play compatible shortcuts and mouse buttons directly from mouse flash while Sidearm-only actions, gestures, chords, throttled bindings, conditions, and HS2 continue via silent consumer signals; automatically restores a verified clean offline bank on exit, crash, or RunOnce.
+- **Sidearm's own bank on V3 Pro & V2 flash-offline mode**: V3 Pro claims a free onboard slot so start, exit, and crash recovery are a single bank switch with a "Return slot" option and manual offline mode via the mouse profile button; V2 HyperSpeed keeps the offline profile in onboard profile 1 while Sidearm's signals stay in RAM only.
+- **Menu popups & stability**: linked menus shown as submenus with multi-column tips and item descriptions, "Edit in Sidearm" directly from a linked menu item, automatic hang detection and restart with minidumps, and symbol archiving per portable build.
+
+### Fixed
+- Opening "Assign action" on an inherited native mouse click in "Without Sidearm" now opens on Mouse with that click selected (instead of Silent) and preserves inheritance if saved unchanged.
+- Long phrases pasted into Remote Desktop (`mstsc.exe`, `msrdc.exe`, `vmconnect.exe`) now reach the remote session reliably.
+- Killing Sidearm mid-shortcut no longer leaves Ctrl or other modifiers stuck down.
+- Quick right-button press clicks normally on V2 HyperSpeed while V3 Pro is connected.
+
 ## [0.13.0] — 2026-11-15
 
 ### Added

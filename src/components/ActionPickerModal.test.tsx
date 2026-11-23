@@ -215,7 +215,7 @@ describe("offline assignment picker", () => {
     expect(screen.getByRole<HTMLButtonElement>("button", { name: i18n.t("common.save") }).disabled).toBe(true);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter", ctrlKey: true });
     expect(onSave).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineReset") }));
     save();
     expect(onSave.mock.calls[0][0].bindings).toEqual([]);
   });
@@ -256,14 +256,15 @@ describe("offline assignment picker", () => {
     const rail = screen.getByRole("navigation");
     expect(within(rail).getAllByRole("button").map((button) => button.textContent?.trim())).toEqual([
       expect.stringContaining(i18n.t("action.type.shortcut")), expect.stringContaining(i18n.t("action.type.mouseAction")),
-      expect.stringContaining(i18n.t("picker.offlineSilent")), i18n.t("picker.offlineInherit"),
+      expect.stringContaining(i18n.t("picker.offlineSilent")),
     ]);
     expect(screen.getByText(i18n.t("picker.offlineHint"))).toBeTruthy();
     expect(screen.queryByText(i18n.t("picker.gestureHelp"))).toBeNull();
     for (const key of ["gestureLongPress", "gestureDoublePress", "gestureTriplePress", "test", "advancedTitle", "signalLabel", "nameLabel"]) {
       expect(screen.queryByText(i18n.t(`picker.${key}`))).toBeNull();
     }
-    expect((screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: i18n.t("picker.offlineInherit") })).toBeNull();
+    expect(screen.queryByRole("button", { name: i18n.t("picker.offlineReset") })).toBeNull();
     fireEvent.click(category("mouseAction"));
     for (const option of MOUSE_ACTION_OPTIONS) {
       expect(screen.queryByRole("button", { name: i18n.t(option.label) }) !== null)
@@ -272,6 +273,33 @@ describe("offline assignment picker", () => {
     expect(screen.queryByRole("checkbox", { name: "Ctrl" })).toBeNull();
     fireEvent.change(screen.getByRole("textbox", { name: i18n.t("picker.searchPlaceholder") }), { target: { value: "dpiUp" } });
     expect(screen.queryByRole("button", { name: i18n.t("action.type.mouseAction") })).toBeNull();
+  });
+
+  it("labels offline override removal honestly when the Sidearm action cannot run without Sidearm", () => {
+    const textAction: Action = {
+      id: "act_q",
+      type: "textSnippet",
+      displayName: "?",
+      payload: { source: "inline", text: "?", pasteMode: "sendText", tags: [] },
+    };
+    const base = makeConfig({
+      actions: [textAction],
+      bindings: [{ id: "b_live", profileId: "p1", layer: "hypershift", controlId: "thumb_01", actionId: "act_q", label: "?", enabled: true }],
+    });
+    // Without an own offline override: neither "Same as in Sidearm" nor "Reset override" appears.
+    showOffline(base, "offlineHypershift");
+    expect(screen.queryByRole("button", { name: i18n.t("picker.offlineInherit") })).toBeNull();
+    expect(screen.queryByRole("button", { name: i18n.t("picker.offlineReset") })).toBeNull();
+    expect(screen.getByText(i18n.t("picker.offlineLiveUnsupported"))).toBeTruthy();
+    cleanup();
+
+    // With an own offline override: shows "Reset override", never misleading "Same as in Sidearm".
+    const withOverride = editing.setOfflineAssignment(base, "p1", "thumb_01", "offlineHypershift", shortcut);
+    const { onSave } = showOffline(withOverride, "offlineHypershift");
+    expect(screen.queryByRole("button", { name: i18n.t("picker.offlineInherit") })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineReset") }));
+    save();
+    expect(findBinding(onSave.mock.calls[0][0], "p1", "offlineHypershift", "thumb_01")).toBeNull();
   });
 
   it("blocks an unsupported recorded key and explains why, then allows a storable chord", () => {
@@ -332,7 +360,7 @@ describe("offline assignment picker", () => {
     const config = assigned(layer);
     const write = vi.spyOn(editing, "setOfflineAssignment");
     const { onSave, onCancel } = showOffline(config, layer);
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineReset") }));
     expect(write).not.toHaveBeenCalled();
     expect(onSave).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.undo") }));
@@ -379,7 +407,7 @@ describe("offline assignment picker", () => {
     const original = structuredClone(config);
     const { onSave, onCancel } = showOffline(config);
     expect(screen.getByRole("button", { name: i18n.t("picker.offlineSilent") }).getAttribute("aria-current")).toBe("true");
-    expect((screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: i18n.t("picker.offlineReset") }) as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(screen.getByRole("button", { name: i18n.t("common.cancel") }));
     expect(onCancel).toHaveBeenCalledOnce();
     expect(onSave).not.toHaveBeenCalled();
@@ -398,7 +426,7 @@ describe("offline assignment picker", () => {
     expect(findBinding(next, "p1", layer, "v3_thumb_01")).toMatchObject({ actionId: findBinding(next, "p1", layer, "thumb_01")!.actionId });
     cleanup();
     const removed = showOffline(next, layer);
-    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineInherit") }));
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("picker.offlineReset") }));
     save();
     const inherited = mirrorMouseEdit(next, removed.onSave.mock.calls[0][0]);
     expect(inherited.bindings).toEqual([]);
@@ -784,6 +812,8 @@ describe("offline native fallback seeding", () => {
     );
     expect(screen.getByRole("button", { name: /Мышь/ }).getAttribute("aria-current")).toBe("true");
     expect(screen.getByRole("button", { name: /Молчит/ }).getAttribute("aria-current")).toBeNull();
-    expect(screen.getByText(/В Sidearm на этой кнопке: \?/)).toBeTruthy();
+    expect(screen.getByText(i18n.t("picker.offlineLiveLabel"))).toBeTruthy();
+    expect(screen.getByText("?")).toBeTruthy();
+    expect(screen.getByText(i18n.t("picker.offlineLiveUnsupported"))).toBeTruthy();
   });
 });

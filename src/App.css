@@ -3736,10 +3736,104 @@ code {
 
 .action-picker__header {
   display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.action-picker__header-main {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.action-picker__title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+}
+
+.action-picker__context {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-picker__chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--c-border);
+  background: var(--c-card-bg);
+  color: var(--c-text-muted);
+  font-size: var(--fs-caption);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.action-picker__chip--control {
+  color: var(--c-text);
+  border-color: color-mix(in srgb, var(--c-text-muted) 28%, var(--c-border));
+}
+
+.action-picker__chip--offline {
+  background: var(--c-accent-dim);
+  border-color: color-mix(in srgb, var(--c-accent) 35%, transparent);
+  color: var(--c-accent);
+  font-weight: 600;
+}
+
+.action-picker__offline-banner {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid var(--c-border);
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 7px 10px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--c-border);
+  background: var(--c-card-bg);
+  font-size: var(--fs-caption);
+}
+
+.action-picker__offline-desc {
+  color: var(--c-text-muted);
+}
+
+.action-picker__offline-live {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.action-picker__offline-live-k {
+  color: var(--c-text-muted);
+}
+
+.action-picker__offline-live-v {
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--c-border);
+  background: var(--c-surface);
+  color: var(--c-text);
+  font-weight: 600;
+}
+
+.action-picker__offline-live-tag {
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--c-warning) 14%, transparent);
+  color: var(--c-warning);
+  font-size: var(--fs-micro);
+  font-weight: 500;
 }
 
 .action-picker__gestures {

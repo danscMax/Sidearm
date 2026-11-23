@@ -4,7 +4,7 @@ import type { AppConfig, ControlId, Layer, MouseActionKind } from "../lib/config
 import { isOfflineLayer, MAX_SEQUENCE_STEPS, NATIVE_HYPERSHIFT_TRIGGERS, type HypershiftTrigger } from "../lib/config";
 import { displayNameForControlId, labelForLayer, offlineAssignmentLabel } from "../lib/labels";
 import { ACTION_CATEGORIES, MOUSE_ACTION_OPTIONS } from "../lib/constants";
-import { classifyHardwarePlayability, isBuiltinControl, isKeyButton, type OfflineControl } from "../lib/onboard-mapping";
+import { classifyHardwarePlayability, isBuiltinControl, isKeyButton, playsWithoutSidearm, type OfflineControl } from "../lib/onboard-mapping";
 import { canBeHypershift2Trigger, controlLayout, hypershift2ControlId, layoutControlId, setHypershift2Trigger } from "../lib/devices";
 import { getNativeModel, listNativeMice, liveTestAction, listenEncodedKeyEvent, normalizeCommandError } from "../lib/backend";
 import { uiText } from "../lib/ui-text";
@@ -258,8 +258,27 @@ function PickerTab({
   }, [canBeTrigger2]);
   const hypershift2Conflict = canBeTrigger2 && softwareTriggerMouse && !!controlId
     && (config.settings.hypershiftTrigger ?? "mouse_right") === layoutControlId(controlId);
+  const liveContextForOffline = offline && profileId && controlId && selectedLayer
+    ? (() => {
+        const liveLayer = selectedLayer === "offlineHypershift" ? "hypershift" : "standard";
+        const liveBinding = findBinding(config, profileId, liveLayer, controlId)
+          ?? (liveLayer === "hypershift" ? findBinding(config, profileId, "standard", controlId) : undefined);
+        const liveAction = liveBinding?.enabled ? config.actions.find((a) => a.id === liveBinding.actionId) : undefined;
+        if (!liveBinding || !liveAction || isPlaceholderAction(liveAction)) return null;
+        return {
+          binding: liveBinding,
+          action: liveAction,
+          playable: playsWithoutSidearm(liveBinding, liveAction),
+        };
+      })()
+    : null;
+  const offlineLiveLabel = liveContextForOffline
+    ? liveContextForOffline.action.displayName || t(`action.type.${liveContextForOffline.action.type}`)
+    : null;
   // A global modifier role is not an executable, profile-specific ActionType.
-  const inheritCategory = { id: "native", icon: "↺", label: "picker.offlineInherit", actionType: "native" };
+  const inheritLabelKey = liveContextForOffline?.playable ? "picker.offlineInherit" : "picker.offlineReset";
+  const inheritHintKey = liveContextForOffline?.playable ? "picker.offlineInheritHint" : "picker.offlineResetHint";
+  const inheritCategory = { id: "native", icon: "↺", label: inheritLabelKey, actionType: "native" };
   const categories = offline ? ACTION_CATEGORIES.filter((category) =>
     category.id === "shortcut" || category.id === "mouseAction" || category.id === "disabled")
     .map((category) => category.id === "disabled" ? { ...category, label: "picker.offlineSilent" } : category) : [
@@ -644,7 +663,7 @@ function PickerTab({
     activeConditionsCount > 0 ? t("picker.advancedConditionsTag", { count: activeConditionsCount }) : null,
   ].filter(Boolean);
   const advancedSummary = advancedTags.length > 0 ? advancedTags.join(" · ") : t("picker.advancedDefaults");
-  const previewText = offline && effectiveCategory === "native" ? t("picker.offlineInherit")
+  const previewText = offline && effectiveCategory === "native" ? t(inheritLabelKey)
     : offline && effectiveCategory === "disabled" ? t("picker.offlineSilentHint") : roleCategory
     ? t(effectiveCategory === "hypershift" ? "picker.hypershiftPreview"
       : effectiveCategory === "hypershift2" ? "picker.hypershift2Preview" : "picker.nativePreview")
@@ -677,7 +696,7 @@ function PickerTab({
     : offlineAssignmentLabel(offlineControl ?? { kind: "unknown", editable: false },
       config.actions.find((action) => action.id === offlineControl?.actionId) ?? null);
   const activeCat = offline && effectiveCategory === "native" ? inheritCategory : categories.find((c) => c.id === effectiveCategory);
-  const categoryDescription = offline && effectiveCategory === "native" ? "picker.offlineInheritHint"
+  const categoryDescription = offline && effectiveCategory === "native" ? inheritHintKey
     : offline && effectiveCategory === "disabled" ? "picker.offlineSilentHint"
     : offline && effectiveCategory === "mouseAction" ? "picker.offlineMouseHint" : `picker.categoryDesc.${effectiveCategory}`;
 
@@ -734,19 +753,6 @@ function PickerTab({
     if (edited) setAskDiscard(true); else onCancel();
   }
 
-  const liveActionForOffline = offline && profileId && controlId && selectedLayer
-    ? (() => {
-        const liveLayer = selectedLayer === "offlineHypershift" ? "hypershift" : "standard";
-        const liveBinding = findBinding(config, profileId, liveLayer, controlId)
-          ?? (liveLayer === "hypershift" ? findBinding(config, profileId, "standard", controlId) : undefined);
-        const liveAction = liveBinding?.enabled ? config.actions.find((a) => a.id === liveBinding.actionId) : undefined;
-        return liveAction && !isPlaceholderAction(liveAction) ? liveAction : null;
-      })()
-    : null;
-  const offlineLiveLabel = liveActionForOffline
-    ? liveActionForOffline.displayName || t(`action.type.${liveActionForOffline.type}`)
-    : null;
-
   return (
     <>
     <ModalShell
@@ -771,14 +777,40 @@ function PickerTab({
       }}
     >
         <div className="action-picker__header">
-          <div>
-            <h2 id="action-picker-title">{t("picker.title")}</h2>
-            {controlLabel ? (
-              <p className="action-picker__subtitle">{controlLabel}{layerLabel ? ` · ${layerLabel}` : ""}</p>
-            ) : null}
-            {offline ? <p className="action-picker__subtitle">{t("picker.offlineHint")}</p> : null}
-            {offline && offlineLiveLabel ? (
-              <p className="action-picker__subtitle">{t("picker.offlineLiveAction", { label: offlineLiveLabel })}</p>
+          <div className="action-picker__header-main">
+            <div className="action-picker__title-row">
+              <h2 id="action-picker-title">{t("picker.title")}</h2>
+              {(controlLabel || layerLabel || offline) ? (
+                <div className="action-picker__context">
+                  {controlLabel ? (
+                    <span className="action-picker__chip action-picker__chip--control">{controlLabel}</span>
+                  ) : null}
+                  {offline ? (
+                    <>
+                      <span className="action-picker__chip action-picker__chip--offline">{t("offline.view")}</span>
+                      <span className="action-picker__chip">
+                        {t(selectedLayer === "offlineHypershift" ? "layer.hypershift" : "layer.standard")}
+                      </span>
+                    </>
+                  ) : layerLabel ? (
+                    <span className="action-picker__chip">{layerLabel}</span>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+            {offline ? (
+              <div className="action-picker__offline-banner">
+                <span className="action-picker__offline-desc">{t("picker.offlineHint")}</span>
+                {offlineLiveLabel ? (
+                  <span className="action-picker__offline-live">
+                    <span className="action-picker__offline-live-k">{t("picker.offlineLiveLabel")}</span>
+                    <span className="action-picker__offline-live-v">{offlineLiveLabel}</span>
+                    {!liveContextForOffline?.playable ? (
+                      <span className="action-picker__offline-live-tag">{t("picker.offlineLiveUnsupported")}</span>
+                    ) : null}
+                  </span>
+                ) : null}
+              </div>
             ) : null}
           </div>
           <CloseButton onClick={requestClose} ariaLabel={t("common.close")} className="action-picker__close" />
@@ -835,12 +867,12 @@ function PickerTab({
                 <span className="action-picker__cat-label">{t(cat.label)}</span>
               </button>
             ))}
-            {offline ? <button type="button"
+            {offline && binding ? <button type="button"
               className={`action-picker__cat-btn${effectiveCategory === "native" ? " action-picker__cat-btn--active" : ""}`}
-              disabled={!binding} aria-current={effectiveCategory === "native" ? "true" : undefined}
+              aria-current={effectiveCategory === "native" ? "true" : undefined}
               onClick={() => { setSearchQuery(""); setActiveCategoryWithMemory("native"); }}>
               <span className="action-picker__cat-icon"><CategoryIcon id="native" fallback={inheritCategory.icon} /></span>
-              <span className="action-picker__cat-label">{t("picker.offlineInherit")}</span>
+              <span className="action-picker__cat-label">{t(inheritLabelKey)}</span>
             </button> : null}
             {filteredCategories.length === 0 ? (
               <p className="action-picker__no-results">{t("picker.noResults")}</p>
@@ -951,7 +983,7 @@ function PickerTab({
 
             {effectiveCategory === "disabled" ? (
               <div className="editor-grid">
-                <Notice variant="info">{t(offline ? "picker.offlineSilentHint" : "picker.disabledHint")}</Notice>
+                <Notice variant="info">{t(offline ? "picker.offlineSilentNotice" : "picker.disabledHint")}</Notice>
               </div>
             ) : null}
 
@@ -1066,7 +1098,7 @@ function PickerTab({
               <GestureIcon mark={hardwareStatus.location === "mouse" ? "memory" : "live"} />
               <span>
                 {t(hardwareStatus.location === "mouse" ? "offline.badgeInMouse" : "offline.badgeSidearmOnly")}
-                {hardwareReason ? ` · ${hardwareReason}` : ""}
+                {hardwareReason ? `: ${hardwareReason}` : ""}
               </span>
             </span>
           ) : null}

@@ -246,12 +246,30 @@ export function MouseWorkspace({
 
   function handleCreateSlot(deviceId: string) {
     if (slotActionBusy || flushState === "busy") return;
+    const prevAssigned = new Set(banks?.assigned ?? []);
+    const autoBindProfileId =
+      activeProfile
+      && (activeProfile.deviceSlots?.[deviceId] === undefined || !prevAssigned.has(activeProfile.deviceSlots[deviceId]))
+        ? activeProfile.id
+        : null;
     setSlotActionBusy(true);
     setConfirmDeleteBank(null);
     setReleaseError(null);
     void createOnboardBank(deviceId).then(
       (next) => {
         if (!lifecycle.current.alive) return;
+        const createdBank = next.assigned.find((slot) => !prevAssigned.has(slot));
+        if (createdBank !== undefined) {
+          if (autoBindProfileId) {
+            updateDraft((config) => setProfileDeviceSlot(config, autoBindProfileId, deviceId, createdBank), { immediate: true });
+          } else {
+            // Clear any stale profile link that previously pointed to this slot number.
+            updateDraft((config) => {
+              const staleHolder = config.profiles.find((p) => p.deviceSlots?.[deviceId] === createdBank);
+              return staleHolder ? setProfileDeviceSlot(config, staleHolder.id, deviceId, undefined) : config;
+            }, { immediate: true });
+          }
+        }
         setBanks(next);
         setFlushState("idle");
         setSlotActionBusy(false);
@@ -442,6 +460,10 @@ export function MouseWorkspace({
       const nextFreeSlot = banks
         ? allSlots.find((slot) => !assignedSet.has(slot) && slot !== sidearmBank) ?? null
         : null;
+      const activeProfileUnlinked = Boolean(
+        activeProfile
+        && (activeProfile.deviceSlots?.[model.deviceId] === undefined || !assignedSet.has(activeProfile.deviceSlots[model.deviceId])),
+      );
       const canAddSlot = banks !== null && nextFreeSlot !== null;
       const canDeleteSlot = banks !== null && banks.assigned.length > 1;
       const linkedHybridCount = banks
@@ -514,9 +536,11 @@ export function MouseWorkspace({
                           className={`memory-slot-tile memory-slot-tile--user${isOfflineSlot ? " memory-slot-tile--offline" : isDirect ? " memory-slot-tile--direct" : ""}`}
                         >
                           <span className="memory-slot-tile__num">{slot}</span>
-                          <span className="memory-slot-tile__name">{holder ? holder.name : t("mouse.slotKeep")}</span>
+                          <span className="memory-slot-tile__name">{holder ? holder.name : t("mouse.slotTileUnassigned")}</span>
                           <span className="memory-slot-tile__sub">
-                            {isOfflineSlot
+                            {!holder
+                              ? t("mouse.slotKeep")
+                              : isOfflineSlot
                               ? t("mouse.slotTileOffline")
                               : isDirect
                               ? t("mouse.slotTileDirect")
@@ -717,7 +741,9 @@ export function MouseWorkspace({
                         disabled={slotActionBusy || flushState === "busy"}
                         onClick={() => handleCreateSlot(model.deviceId)}
                       >
-                        {t("mouse.slotAddNext", { n: nextFreeSlot })}
+                        {activeProfileUnlinked && activeProfile
+                          ? t("mouse.slotAddProfileNext", { name: activeProfile.name, n: nextFreeSlot })
+                          : t("mouse.slotAddNext", { n: nextFreeSlot })}
                       </button>
                     </div>
                   ) : null}

@@ -329,7 +329,7 @@ describe("independent mouse readings", () => {
     expect(await screen.findByText(i18n.t("mouse.slotsFreeSummary", { free: 2, max: 5 }))).toBeTruthy();
     expect(screen.getByText(i18n.t("mouse.slotRoleOfflineBadge"))).toBeTruthy();
 
-    // Add slot via CTA button
+    // Add slot via CTA button (activeProfile p1 is already in slot 1 -> clears stale slot 4 link if any)
     fireEvent.click(screen.getByRole("button", { name: i18n.t("mouse.slotAddNext", { n: 4 }) }));
     await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID));
 
@@ -350,5 +350,45 @@ describe("independent mouse readings", () => {
     await waitFor(() => expect(backend.deleteOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID, 3));
     const afterDelete = updates.mock.calls.at(-1)?.[0](config) as AppConfig;
     expect(afterDelete.profiles[1].deviceSlots?.[NAGA_V3_DEVICE_ID]).toBeUndefined();
+  });
+
+  it("auto-binds the selected unlinked profile when adding a new V3 slot and overwrites any stale slot link", async () => {
+    const model = await backend.getNativeModel();
+    vi.mocked(backend.getNativeModel).mockResolvedValue({ ...model, deviceId: NAGA_V3_DEVICE_ID, banks: true, consumerSignals: true });
+    vi.mocked(backend.getOnboardBanks).mockResolvedValue({ assigned: [1], active: 2 });
+    vi.mocked(backend.getSidearmBank).mockResolvedValue(2);
+    vi.mocked(backend.createOnboardBank).mockResolvedValue({ assigned: [1, 3], active: 2 });
+
+    const base = makeConfig();
+    const config: AppConfig = {
+      ...base,
+      profiles: [
+        { ...base.profiles[0], id: "main", name: "Main", deviceSlots: { [NAGA_V3_DEVICE_ID]: 1 } },
+        // Stale link to slot 3 that did not exist on the mouse yet
+        { ...base.profiles[1], id: "game", name: "Game", deviceSlots: { [NAGA_V3_DEVICE_ID]: 3 } },
+        { id: "code", name: "Code", enabled: true, priority: 2 },
+      ],
+    };
+    const updates = vi.fn();
+    render(
+      <MouseWorkspace
+        activeConfig={config}
+        deviceId={NAGA_V3_DEVICE_ID}
+        section="memory"
+        profiles={config.profiles}
+        activeProfile={config.profiles[2]}
+        runtimeProfileId="main"
+        updateDraft={updates}
+        mouseStates={[]}
+      />,
+    );
+
+    const addBtn = await screen.findByRole("button", { name: i18n.t("mouse.slotAddProfileNext", { name: "Code", n: 3 }) });
+    fireEvent.click(addBtn);
+    await waitFor(() => expect(backend.createOnboardBank).toHaveBeenCalledWith(NAGA_V3_DEVICE_ID));
+    expect(updates).toHaveBeenCalledTimes(1);
+    const updated = updates.mock.calls[0][0](config) as AppConfig;
+    expect(updated.profiles.find((p) => p.id === "code")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBe(3);
+    expect(updated.profiles.find((p) => p.id === "game")?.deviceSlots?.[NAGA_V3_DEVICE_ID]).toBeUndefined();
   });
 });
